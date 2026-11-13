@@ -21,7 +21,7 @@ function webhook(token: string | undefined): Request {
   });
 }
 
-describe("vendored Rocket.Chat adapter", () => {
+describe("in-repo Rocket.Chat adapter", () => {
   test("loads from the repo with no chat-adapter-rocketchat npm package", async () => {
     expect(() => Bun.resolveSync("chat-adapter-rocketchat", import.meta.dir)).toThrow();
     const pkg = await Bun.file(new URL("../../package.json", import.meta.url)).json();

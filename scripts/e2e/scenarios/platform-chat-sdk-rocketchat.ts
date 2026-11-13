@@ -9,7 +9,7 @@ import {
   reloadConfig,
 } from "./platform-helpers";
 
-// Rocket.Chat through the vendored Chat SDK adapter: config validation, the Outgoing WebHook
+// Rocket.Chat through the in-repo Chat SDK adapter: config validation, the Outgoing WebHook
 // token check, a mention becoming a chat task, the unmapped sender queue, and a REST reply
 // to a loopback instance bound at the deployment's CHAT_SDK_API_URL_OVERRIDES.rocketchat.
 
@@ -125,7 +125,7 @@ export const platformChatSdkRocketchat: Scenario = {
               ?.health === "ok"
           );
         }, 15_000),
-        "The vendored Rocket.Chat adapter starts against the loopback instance",
+        "The in-repo Rocket.Chat adapter starts against the loopback instance",
       );
 
       for (const wrong of ["not-the-token", webhookToken.slice(1), ""]) {
