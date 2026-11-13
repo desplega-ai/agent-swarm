@@ -33,6 +33,7 @@ src/commands/push-delivery.ts  # worker runtime helper imported by the runner
 src/commands/rate-limit-outcome.ts  # worker runtime helper imported by the runner
 src/commands/seat-mismatch-report.ts  # worker runtime helper imported by the runner
 src/commands/templates.ts  # runner trigger prompt templates, worker runtime
+src/commands/worktree-reaper.ts  # worker runtime helper imported by the runner
 src/providers/  # harness adapters, worker runtime
 src/hooks/  # harness hooks, worker runtime
 src/prompts/  # prompt-template registry, worker runtime

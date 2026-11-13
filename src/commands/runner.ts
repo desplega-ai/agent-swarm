@@ -178,6 +178,7 @@ import {
 } from "./resume-session.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
+import { type ActiveTaskRef, resolveWorktreeReaperConfig, WorktreeReaper } from "./worktree-reaper";
 
 export { buildAttachmentsSection } from "./attachments-section.ts";
 export { reportKeyRateLimitWindows } from "./credential-outcome-report.ts";
@@ -1293,6 +1294,11 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // Non-secret pool-slot count; `checkCodexCredentials` reads it from
   // process.env at boot and during the credential wait.
   CODEX_OAUTH_POOL_SLOTS_ENV,
+  // The worktree reaper reads these on every call (resolveWorktreeReaperConfig).
+  "WORKTREE_REAPER_MODE",
+  "WORKTREE_TTL_HOURS",
+  "WORKTREE_SWEEP_INTERVAL_MINUTES",
+  "WORKTREE_REAPER_EXTRA_ROOTS",
 ]);
 
 /**
@@ -2936,6 +2942,16 @@ export interface RunnerState {
    * Unset against an API that never drains.
    */
   apiDraining?: boolean;
+  /** Removes worktrees agents leave behind; unset in callers that never reap. */
+  worktreeReaper?: WorktreeReaper;
+}
+
+/** The active tasks as the worktree reaper sees them: id plus working dir. */
+export function activeTaskRefs(state: RunnerState): ActiveTaskRef[] {
+  return [...state.activeTasks.values()].map((t) => ({
+    taskId: t.taskId,
+    workingDir: t.workingDir,
+  }));
 }
 
 /** Buffer for session logs */
@@ -6102,6 +6118,10 @@ export async function checkCompletedProcesses(
             if (triggerType === "task_assigned" || triggerType === "task_resumed") {
               state.tasksProcessed += 1;
             }
+            // Fire-and-forget: a large removal must never hold the loop or shutdown.
+            state.worktreeReaper
+              ?.onTaskEnded(taskId, activeTaskRefs(state))
+              .catch((err) => console.warn(`[${role}] Worktree reaper failed: ${err}`));
           }
         }
       },
@@ -6530,6 +6550,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     codexCreditsExhaustedCooldownMs: bootCooldownMs,
     modelWindowBlocks: new Map(),
   };
+  // Agents create worktrees under /workspace/personal; without it (local dev) the reaper stays off.
+  const reaperHasWorkspace = existsSync("/workspace/personal");
+  state.worktreeReaper = new WorktreeReaper({
+    ledgerPath: "/workspace/personal/.swarm/worktree-ledger.json",
+    scanRoots: ["/workspace/personal"],
+    getConfig: () =>
+      resolveWorktreeReaperConfig(
+        process.env,
+        reaperHasWorkspace && adapter.traits.hasLocalEnvironment,
+      ),
+    statusOf: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
+  });
+  const reaperFailed = (err: unknown) => console.warn(`[${role}] Worktree reaper failed: ${err}`);
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
   const cancelledSignaled = new Set<string>();
@@ -7471,7 +7504,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           continue;
         }
 
+        runningTask.workingDir = resumeCwd;
         state.activeTasks.set(task.id, runningTask);
+        state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
         console.log(
           `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
         );
@@ -7486,6 +7521,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // Continue to normal polling even if resume fails
   }
   // ========== END: Resume paused tasks ==========
+
+  // Boot sweep: finishes interrupted removals and reaps what ended while we were down.
+  state.worktreeReaper?.sweep(activeTaskRefs(state)).catch(reaperFailed);
+  let lastWorktreeSweepAt = Date.now();
+  let lastWorktreeObserveAt = 0;
 
   // ========== Lead startup self-check ==========
   if (isLead) {
@@ -7586,6 +7626,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
     // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
     const now = Date.now();
+    if (state.activeTasks.size > 0 && now - lastWorktreeObserveAt >= VCS_CHECK_INTERVAL) {
+      lastWorktreeObserveAt = now;
+      state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
+    }
+    if (now - lastWorktreeSweepAt >= resolveWorktreeReaperConfig().sweepIntervalMinutes * 60_000) {
+      lastWorktreeSweepAt = now;
+      state.worktreeReaper?.sweep(activeTaskRefs(state)).catch(reaperFailed);
+    }
     for (const [taskId, task] of state.activeTasks) {
       if (vcsDetectedTasks.has(taskId)) continue;
       const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
@@ -8136,6 +8184,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         state.activeTasks.set(runningTask.taskId, runningTask);
+        state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
 
         // Pool triggers have no task id before the spawn; their session is
         // keyed on the synthetic id `spawnProviderProcess` minted.
