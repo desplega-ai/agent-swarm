@@ -259,6 +259,7 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
             override?.model,
             latest?.model,
             override?.effort ?? latest?.reasoningEffort,
+            latest?.source,
           );
           return (
             <li key={agent.id} className="flex items-center gap-2.5 px-3 py-2">

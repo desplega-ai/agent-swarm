@@ -839,6 +839,25 @@ export async function reportAcpStatus(
   }
 }
 
+/**
+ * The model the task itself selected (a pin, a tier or a task profile), for
+ * `buildLatestModelReport({ taskModel })`. Claim resolution also returns the
+ * agent's own default profile (`profile:agent-default`); that model comes from the
+ * agent's settings, not the task, so it must not report as task-selected.
+ */
+export function taskSelectedModelForReport(opts: {
+  /** Server claim-time resolution (`task.resolvedModel`). */
+  resolvedModel?: string;
+  modelSource?: string;
+  /** Local resolution from the task's own pin/tier. */
+  localModel?: string;
+}): string | undefined {
+  if (opts.resolvedModel) {
+    return opts.modelSource === "profile:agent-default" ? undefined : opts.resolvedModel;
+  }
+  return opts.localModel || undefined;
+}
+
 export function buildLatestModelReport(opts: {
   model: string;
   taskModel?: string;
