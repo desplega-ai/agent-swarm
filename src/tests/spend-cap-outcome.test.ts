@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { classifyProviderErrorOf } from "../commands/provider-error-class";
 import { classifyRateLimitOutcome, parseSpendCapMessage } from "../commands/rate-limit-outcome";
-import { MAX_SPEND_CAP_HOLD_MS } from "../utils/error-tracker";
 
 const NOW = Date.parse("2026-11-12T21:14:00Z");
+/** The 31-day spend-cap horizon; spelled out so the test imports only worker-runtime code. */
+const MAX_SPEND_CAP_HOLD_MS = 31 * 24 * 60 * 60 * 1000;
 
 /** The body from the report, as the task failure carried it. */
 const REPORTED =
