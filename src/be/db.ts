@@ -4481,6 +4481,7 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
  */
 export async function claimMentions(
   agentId: string,
+  opts?: { dryRun?: boolean },
 ): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const client = getDbClient();
@@ -4515,6 +4516,15 @@ export async function claimMentions(
     );
 
     if (mentionCountRow && mentionCountRow.count > 0) {
+      // dryRun: report what a claim would take, without the write (idle-poll probe).
+      if (opts?.dryRun) {
+        claimedChannels.push({
+          channelId: channel.id,
+          lastReadAt,
+          mentionsCount: mentionCountRow.count,
+        });
+        continue;
+      }
       // Atomically claim mentions for this channel
       const result = await client.run(
         `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)

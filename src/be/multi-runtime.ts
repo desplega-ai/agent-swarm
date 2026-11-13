@@ -343,6 +343,23 @@ export async function touchRuntimeInstance(id: string, agentId: string): Promise
   return result.changes > 0;
 }
 
+/**
+ * Read-only twin of `touchRuntimeInstance` for the idle poll: true when the
+ * runtime is live and was touched within a tenth of the stale threshold
+ * (30 s at the 5 min default). Every liveness reader compares against the
+ * full threshold, so skipping the touch then changes nothing they see.
+ */
+export async function isRuntimeInstanceFresh(id: string, agentId: string): Promise<boolean> {
+  const freshCutoff = new Date(Date.now() - runtimeStaleThresholdMinutes() * 6_000).toISOString();
+  const row = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM runtime_instances
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND ${WORKSPACE_CONFIRMED_SQL}`,
+    [id, agentId, freshCutoff],
+  );
+  return row !== null;
+}
+
 /** Mark one runtime instance offline (scoped to its agent, like touch). */
 export async function markRuntimeInstanceOffline(
   id: string,
