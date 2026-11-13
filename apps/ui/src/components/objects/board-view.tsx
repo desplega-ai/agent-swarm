@@ -18,6 +18,14 @@ import {
   objectCall,
 } from "./use-object";
 
+// Excalidraw's fonts are self-hosted next to the page embed bundle
+// (`vite.embed.config.ts`), on the origin that served this chunk. The dev
+// server has no copy, so it keeps Excalidraw's esm.sh default.
+const excalidrawWindow = window as Window & { EXCALIDRAW_ASSET_PATH?: string | string[] };
+if (import.meta.env.PROD && excalidrawWindow.EXCALIDRAW_ASSET_PATH === undefined) {
+  excalidrawWindow.EXCALIDRAW_ASSET_PATH = `${new URL(import.meta.url).origin}/embed/v1/`;
+}
+
 /** Save this long after the last edit. */
 export const AUTOSAVE_MS = 1500;
 

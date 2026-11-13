@@ -44,6 +44,7 @@ import {
   extractAndVerifyCookie,
   isLocalDevPageRequest,
   LEGACY_PAGE_SESSION_COOKIE,
+  type PageSessionPayload,
   pageSessionSetCookies,
   verifyPageSession,
 } from "../utils/page-session";
@@ -332,6 +333,36 @@ export function getPageFrameAncestors(): string[] {
 }
 
 /**
+ * The configured app URLs as CSP origins, each with a leading space. An entry
+ * that does not parse as an http(s) URL is dropped, so a stray value cannot add
+ * a source or a directive to the policy.
+ */
+function embedOrigins(appUrls: string[]): string {
+  const origins = new Set<string>();
+  for (const value of appUrls) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" || url.protocol === "http:") origins.add(url.origin);
+    } catch {
+      // not a URL: skip it
+    }
+  }
+  return Array.from(origins, (origin) => ` ${origin}`).join("");
+}
+
+/**
+ * Who is viewing, for `<meta name="swarm-viewer">`: `user` for a signed-in
+ * viewer, `operator` for a launch with the shared swarm key, else `guest`. The
+ * `<swarm-object>` embed reads it so a guest gets a sign-in placeholder and
+ * sends no object request. It is a UI hint only: `/@swarm/api` still decides.
+ */
+function pageViewer(payload: PageSessionPayload | null): "user" | "operator" | "guest" {
+  if (payload?.uid) return "user";
+  if (payload?.op) return "operator";
+  return "guest";
+}
+
+/**
  * Build the `Content-Security-Policy` for the served HTML. Allows inline
  * scripts (required for `BROWSER_SDK_JS`) but locks down everything else to
  * `'self'`. The SPA iframes the page in step-6 with `sandbox="allow-scripts
@@ -351,6 +382,10 @@ function buildCsp(page: Page): string {
   const devFallbacks = getLocalDevAppOrigins();
   const embedders = page.authMode === "public" ? getPageFrameAncestors() : [];
   const ancestors = Array.from(new Set([...configured, ...devFallbacks, ...embedders]));
+  // The dashboard origins also serve the `<swarm-object>` embed bundle
+  // (`/embed/v1/*`: module scripts, its shadow-root stylesheet and fonts).
+  // connect-src stays 'self': the embed talks to `/@swarm/api` only.
+  const appOrigins = embedOrigins(configured);
   // Allow Tailwind Play CDN (`cdn.tailwindcss.com`, design version 1; the
   // pinned v4 build of design version 2 comes from jsdelivr) for scripts, Google
   // Fonts (`fonts.googleapis.com` stylesheets + `fonts.gstatic.com` font
@@ -362,9 +397,9 @@ function buildCsp(page: Page): string {
   // a multi-hundred-KB bundle.
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com${appOrigins}`,
+    `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://unpkg.com${appOrigins}`,
+    `font-src 'self' https://fonts.gstatic.com data:${appOrigins}`,
     "img-src 'self' data: https:",
     "media-src 'self' data: https: blob:",
     "connect-src 'self'",
@@ -667,7 +702,7 @@ export async function handlePagesPublic(
   const feedback = isPageFeedbackRequested(queryParams);
   const html =
     injectBrowserSdk(page.body, {
-      head: pageHead(page, queryParams, wantsPrint),
+      head: `<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">${pageHead(page, queryParams, wantsPrint)}`,
       headFirst: feedback ? feedbackKeyGuardScript() : "",
       standardsMode: page.designVersion !== 1,
     }) +
