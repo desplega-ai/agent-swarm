@@ -140,7 +140,11 @@ import {
 import { expressionDirectives } from "@/lib/json-render/expressions";
 import { FocusRegistryProvider } from "@/lib/json-render/primitives";
 import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
-import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
+import {
+  getAppStoreView,
+  getAppsStoreSnapshot,
+  getPageStoreView,
+} from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 import { createFocusRegistry, createUiActionHandlers } from "@/lib/json-render/ui-actions";
 import { getThemePreset } from "@/lib/themes";
@@ -724,6 +728,12 @@ export function AppSurface({
   // prefixed with `/apps/<app.id>` by the view. The view (and the state behind
   // it) outlives this component — remounting the same app finds it warm.
   const store = useMemo(() => getAppStoreView(app.id), [app.id]);
+  // What the renderer and the handlers see: the app view with `/local/…`
+  // scoped to the active page, so two pages' `state` never share a slot.
+  const pageStore = useMemo(
+    () => getPageStoreView(app.id, activePageName),
+    [app.id, activePageName],
+  );
 
   // ── `/route` mirror ──────────────────────────────────────────────────────
   // `/route` is the ONE slot a mount owns: the URL it was mounted at is, by
@@ -758,11 +768,17 @@ export function AppSurface({
     if (storedSignature !== routeSignature) store.set("/route", routeSlotRef.current);
     routeSyncedRef.current = { store, signature: routeSignature };
   }
-  // Page-local state (`pages.<page>.state` → `/local/<name>`): seeded on first
-  // render, never clobbered, so typed values survive navigation like forms do.
-  for (const [name, initial] of Object.entries(activePage?.state ?? {})) {
-    if (store.get(`/local/${name}`) === undefined)
-      store.set(`/local/${name}`, structuredClone(initial));
+  // Page-local state (`pages.<page>.state` → `/local/<name>`, stored per page
+  // by `getPageStoreView`): never clobbered, so typed values survive navigation
+  // like forms do. Every page is seeded on the first render, before the
+  // renderer subscribes, so navigating later writes nothing mid-render.
+  for (const [page, { state }] of Object.entries(pages)) {
+    if (!state) continue;
+    const view = getPageStoreView(app.id, page);
+    for (const [name, initial] of Object.entries(state)) {
+      if (view.get(`/local/${name}`) === undefined)
+        view.set(`/local/${name}`, structuredClone(initial));
+    }
   }
   // Layout effect, not passive: a client-side navigation must land in the
   // store before paint, or the first frame of the new page renders against the
@@ -789,7 +805,7 @@ export function AppSurface({
     refetchModel,
     refetchQuery,
     refetchAll,
-    store,
+    store: pageStore,
     poll: pollRef.current,
     navigate,
     modeParam,
@@ -800,7 +816,7 @@ export function AppSurface({
     refetchModel,
     refetchQuery,
     refetchAll,
-    store,
+    store: pageStore,
     poll: pollRef.current,
     navigate,
     modeParam,
@@ -1326,7 +1342,7 @@ export function AppSurface({
       <AppScopeProvider value={app.id}>
         <JSONUIProvider
           registry={compiled.registry}
-          store={store}
+          store={pageStore}
           handlers={compiled.handlers}
           directives={expressionDirectives}
         >
@@ -1346,7 +1362,7 @@ export function AppSurface({
         <AppScopeProvider value={app.id}>
           <JSONUIProvider
             registry={compiled.registry}
-            store={store}
+            store={pageStore}
             handlers={compiled.handlers}
             directives={expressionDirectives}
           >

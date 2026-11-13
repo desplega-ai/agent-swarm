@@ -905,7 +905,7 @@ A failed step halts its chain: when `app.action`, `app.mutate`, `swarm.sdk` or `
 
 Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local state, a bindable `Input`, three `ui.*` steps, expressions, and `Svg` shapes. No custom component needed.
 
-**Page state.** `pages.<page>.state` maps names to initial JSON values. The page reads them at `{ "$state": "/local/<name>/..." }` and only this root is writable. The values are seeded on first render and survive navigation; patching `pages.<page>.state.<name>` replaces that entry. Reusable elements cannot read or write `/local`.
+**Page state.** `pages.<page>.state` maps names to initial JSON values. The page reads them at `{ "$state": "/local/<name>/..." }` and only this root is writable. Each page has its own `/local`, even when two pages declare the same name. The values are seeded on first render and survive navigation; patching `pages.<page>.state.<name>` replaces that entry. Reusable elements cannot read or write `/local`.
 
 **Input.** `value: { "$bindState": "/local/<name>/..." }` binds two-way; inside a `repeat` over a `/local` list, `{ "$bindItem": "" }` binds the item itself (`"field"` binds a field of it). `$bindState` and `$bindItem` are valid only on `Input.value`. Event chains are props, run by the Input:
 
