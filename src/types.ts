@@ -126,16 +126,18 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "fable",
   },
   "claude-managed": {
-    smol: "claude-haiku-4-5",
-    regular: "claude-sonnet-5",
-    smart: "claude-opus-4-8",
-    ultra: "claude-fable-5",
+    smol: "claude-haiku-5-5",
+    regular: "claude-sonnet-5-5",
+    smart: "claude-opus-5-5",
+    ultra: "claude-fable-5-1",
   },
+  // The newest model of each GPT family (luna, terra, sol, astra) in the
+  // catalog; apps/ui/src/lib/model-catalog-drift.test.ts fails when one ages.
   codex: {
-    smol: "gpt-5.6-luna",
-    regular: "gpt-5.6-terra",
-    smart: "gpt-5.6-sol",
-    ultra: "gpt-5.6-sol",
+    smol: "gpt-6-luna",
+    regular: "gpt-6.1-terra",
+    smart: "gpt-6.1-sol",
+    ultra: "gpt-6-astra",
   },
   pi: {
     smol: "openrouter/deepseek/deepseek-v4.1-flash",
@@ -2337,20 +2339,71 @@ export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
 // Swarm Repos Types (Centralized Repository Management)
 // ============================================================================
 
+/** Upper bound per guideline list. The repository prompt section renders every
+ * entry outside the bootstrap budget, so the cap lives at the write boundary. */
+export const REPO_GUIDELINES_MAX_ENTRIES = 50;
+
+/**
+ * One merge-policy record per repo, stored inside `swarm_repos.guidelines` (a JSON text column,
+ * so no migration). The prompt generator reads it; the swarm-config scorer and merge scripts read
+ * it through `get-repos`. An empty `baseScores`, `maxLines`, `riskyPaths` or `classes` means "use
+ * the scorer's built-in value".
+ */
+export const RepoMergePolicySchema = z
+  .object({
+    autoMerge: z
+      .object({
+        /** Kill switch: false keeps the swarm from enqueuing a PR on its own. */
+        enabled: z.boolean().default(false),
+        /** Minimum score (0-100) for a PR to qualify. */
+        threshold: z.number().int().min(0).max(100).default(80),
+        /** Base score per PR class, e.g. `{ docs: 85 }`. */
+        baseScores: z
+          .record(z.string().min(1).max(60), z.number().int().min(0).max(100))
+          .default({}),
+        /** Hard size cap per PR class, in code lines. */
+        maxLines: z
+          .record(z.string().min(1).max(60), z.number().int().min(0).max(100000))
+          .default({}),
+        /** Path globs that always keep a PR out of auto-merge. */
+        riskyPaths: z
+          .array(z.string().min(1).max(200))
+          .max(REPO_GUIDELINES_MAX_ENTRIES)
+          .default([]),
+        /** PR classes allowed to auto-merge. */
+        classes: z.array(z.string().min(1).max(60)).max(REPO_GUIDELINES_MAX_ENTRIES).default([]),
+      })
+      .optional(),
+    /** Whether an agent may merge a PR itself. Absent: reads fall back to `allowMerge`. */
+    agentsMayMerge: z.boolean().optional(),
+    notify: z
+      .object({
+        /** DM the requester when a PR will not auto-merge. */
+        dmWhenNotAutoMerging: z.boolean().default(true),
+        /** Daily digest time, `HH:MM` in `timezone`. */
+        digestAt: z
+          .string()
+          .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+          .optional(),
+        timezone: z.string().min(1).max(60).optional(),
+      })
+      .optional(),
+  })
+  .openapi("RepoMergePolicy");
+
+export type RepoMergePolicy = z.infer<typeof RepoMergePolicySchema>;
+
 export const RepoGuidelinesSchema = z
   .object({
     prChecks: z.array(z.string()),
     mergeChecks: z.array(z.string()),
     allowMerge: z.boolean().optional().default(false),
     review: z.array(z.string()),
+    mergePolicy: RepoMergePolicySchema.optional(),
   })
   .openapi("RepoGuidelines");
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
-
-/** Upper bound per guideline list. The repository prompt section renders every
- * entry outside the bootstrap budget, so the cap lives at the write boundary. */
-export const REPO_GUIDELINES_MAX_ENTRIES = 50;
 
 /** Write-side guidelines schema: same shape, bounded lists. Reads keep the
  * unbounded `RepoGuidelinesSchema` so an older row never fails a response. */
@@ -2360,8 +2413,16 @@ export const RepoGuidelinesInputSchema = z
     mergeChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
     allowMerge: z.boolean().optional().default(false),
     review: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    mergePolicy: RepoMergePolicySchema.optional(),
   })
   .openapi("RepoGuidelinesInput");
+
+/** Whether agents may merge a PR themselves: the record's `agentsMayMerge`, else today's `allowMerge`. */
+export function agentsMayMerge(
+  g: { allowMerge?: boolean; mergePolicy?: { agentsMayMerge?: boolean } | null } | null | undefined,
+): boolean {
+  return g?.mergePolicy?.agentsMayMerge ?? g?.allowMerge === true;
+}
 
 export const RepoHooksSchema = z
   .object({
@@ -2888,6 +2949,15 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
       .default("X-Hub-Signature-256")
       .describe(
         "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.",
+      ),
+  }),
+  z.object({
+    format: z.literal("hmac-sha1"),
+    header: z
+      .string()
+      .default("X-Hub-Signature")
+      .describe(
+        "Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.",
       ),
   }),
   z.object({

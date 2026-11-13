@@ -193,7 +193,7 @@ The following keys are stored in the swarm config store (via `PUT /api/config` o
 
 ### Model Selection
 
-Codex uses `gpt-5.6-terra` as its no-tier fallback only when no worker-wide `MODEL_OVERRIDE`, task-level `model`, task `modelTier`, or task/agent model profile selects a model. A task `modelTier` or task/agent model profile can resolve to a different model even when neither of the first two overrides is set. Set `MODEL_OVERRIDE` to choose a worker-wide baseline model, or set a task-level `model` to choose a concrete model for one task. `MODEL_TIER_CODEX_REGULAR` affects explicit regular-tier resolution only; it does not change the no-tier fallback.
+Codex uses `gpt-6.1-terra` as its no-tier fallback only when no worker-wide `MODEL_OVERRIDE`, task-level `model`, task `modelTier`, or task/agent model profile selects a model. A task `modelTier` or task/agent model profile can resolve to a different model even when neither of the first two overrides is set. Set `MODEL_OVERRIDE` to choose a worker-wide baseline model, or set a task-level `model` to choose a concrete model for one task. `MODEL_TIER_CODEX_REGULAR` affects explicit regular-tier resolution only; it does not change the no-tier fallback.
 
 ### Reasoning / Effort
 
@@ -448,7 +448,7 @@ Re-run with `--force` to recreate the agent + environment from scratch (rare —
 | `MANAGED_AGENT_ID` | Yes | — | Anthropic Agent ID; written by `claude-managed-setup` |
 | `MANAGED_ENVIRONMENT_ID` | Yes | — | Anthropic Environment ID; written by `claude-managed-setup` |
 | `MCP_BASE_URL` | Yes | — | Must be **HTTPS-public** so Anthropic's sandbox can reach `/mcp` |
-| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-5` | Default model on `sessions.create`; per-task `task.model` overrides |
+| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-5-5` | Default model on `sessions.create`; per-task `task.model` overrides |
 | `MANAGED_GITHUB_VAULT_ID` | No | — | Anthropic vault ID holding a GitHub PAT, for repo-bound tasks (recommended for prod) |
 | `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
 
@@ -458,7 +458,7 @@ Re-run with `--force` to recreate the agent + environment from scratch (rare —
 
 ### Model Selection
 
-Default: `claude-sonnet-5`. Override per-worker via `MANAGED_AGENT_MODEL`, or per-task via the standard `task.model` field. Cost computation lives in [`src/providers/claude-managed-models.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-models.ts) — token rates per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) plus Anthropic's $0.08/session-hour runtime fee.
+Default: `claude-sonnet-5-5`. Override per-worker via `MANAGED_AGENT_MODEL`, or per-task via the standard `task.model` field. Cost computation lives in [`src/providers/claude-managed-models.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-models.ts) — token rates per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) plus Anthropic's $0.08/session-hour runtime fee.
 
 ### claude-managed Specifics
 

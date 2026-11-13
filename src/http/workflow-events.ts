@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getWorkflowRun } from "../be/db";
+import { isReservedProviderEvent } from "../event-waits";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -39,6 +40,7 @@ const runScopedSignalRoute = route({
       }),
     },
     404: { description: "Workflow run not found" },
+    403: { description: "Event name is reserved for provider webhooks" },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
@@ -70,10 +72,13 @@ const globalSignalRoute = route({
         name: z.string(),
       }),
     },
+    403: { description: "Event name is reserved for provider webhooks" },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
 });
+
+const RESERVED_EVENT_MESSAGE = "Event name is reserved for provider webhooks";
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -88,6 +93,10 @@ export async function handleWorkflowEvents(
     const parsed = await runScopedSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    if (isReservedProviderEvent(parsed.body.name)) {
+      jsonError(res, RESERVED_EVENT_MESSAGE, 403);
+      return true;
+    }
     const run = await getWorkflowRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Workflow run not found", 404);
@@ -110,6 +119,10 @@ export async function handleWorkflowEvents(
     const parsed = await globalSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    if (isReservedProviderEvent(parsed.body.name)) {
+      jsonError(res, RESERVED_EVENT_MESSAGE, 403);
+      return true;
+    }
     workflowEventBus.emit(parsed.body.name, parsed.body.payload ?? {});
 
     globalSignalRoute.respond(res, 200, { ok: true, name: parsed.body.name });

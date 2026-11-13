@@ -25,6 +25,7 @@
     "agent-fs-co-deployment",
     "self-hosted-sso",
     "ai-operations-governance",
+    "repo-merge-policy",
     "e2b-provider-smoke-tests",
     "evals-harness",
     "personalization",

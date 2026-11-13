@@ -3,7 +3,9 @@ import type { OnboardingProviderSignal } from "../../../../api/types";
 
 // Root tests do not resolve the `@/` alias; model.ts only needs the labels.
 mock.module("@/lib/agent-runtime-models", () => ({ HARNESS_LABEL: {} }));
-const { cardRollup, firstCredentialSwitch, rejectionText } = await import("./model");
+const { CODEX_CARD_TARGETS, cardRollup, firstCredentialSwitch, rejectionText } = await import(
+  "./model"
+);
 
 function signal(over: Partial<OnboardingProviderSignal>): OnboardingProviderSignal {
   return { provider: "claude", state: "configured", workers: 1, verifiedWorkers: 0, ...over };
@@ -116,6 +118,21 @@ describe("firstCredentialSwitch", () => {
   test("an agent on one of the card's harnesses keeps the manual list", () => {
     const agents = [...onClaude, { id: "coder", harnessProvider: "opencode" }];
     expect(firstCredentialSwitch("openrouter", {}, unverified, agents)).toBeNull();
+  });
+
+  test("a ChatGPT subscription moves agents to the harness the user picked", () => {
+    expect(CODEX_CARD_TARGETS).toEqual(["codex", "pi"]);
+    expect(firstCredentialSwitch("codex_device", {}, unverified, onClaude, "pi")?.target).toBe(
+      "pi",
+    );
+    // Skipping the pick keeps codex.
+    expect(firstCredentialSwitch("codex_device", {}, unverified, onClaude)?.target).toBe("codex");
+  });
+
+  test("the codex card rolls up the harness the user picked", () => {
+    const pi = signal({ provider: "pi", state: "verified", verifiedWorkers: 1 });
+    expect(cardRollup("codex", [pi]).verified).toBe(false);
+    expect(cardRollup("codex", [pi], ["pi"]).verified).toBe(true);
   });
 
   test("no agents: nothing to switch", () => {

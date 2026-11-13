@@ -182,7 +182,7 @@ ENV CODEX_PATH_OVERRIDE=/usr/bin/codex
 # scripts/check-codex-default-model.sh).
 RUN mkdir -p /home/worker/.codex && \
     printf '%s\n' \
-      'model = "gpt-5.6-terra"' \
+      'model = "gpt-6.1-terra"' \
       'approval_policy = "never"' \
       'sandbox_mode = "danger-full-access"' \
       'skip_git_repo_check = true' \

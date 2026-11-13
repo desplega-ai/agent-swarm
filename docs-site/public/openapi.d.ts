@@ -19644,7 +19644,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge */
+                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -19797,7 +19797,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30543,6 +30543,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow run not found */
                 404: {
                     headers: {
@@ -30606,6 +30615,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30722,6 +30740,14 @@ export interface paths {
                                 /**
                                  * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                                  * @default X-Hub-Signature-256
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
                                  */
                                 header?: string;
                             } | {
@@ -30943,6 +30969,14 @@ export interface paths {
                                 /**
                                  * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                                  * @default X-Hub-Signature-256
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
                                  */
                                 header?: string;
                             } | {
@@ -33255,13 +33289,42 @@ export interface components {
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
+        RepoMergePolicy: {
+            autoMerge?: {
+                /** @default false */
+                enabled: boolean;
+                /** @default 80 */
+                threshold: number;
+                /** @default {} */
+                baseScores: {
+                    [key: string]: number;
+                };
+                /** @default {} */
+                maxLines: {
+                    [key: string]: number;
+                };
+                /** @default [] */
+                riskyPaths: string[];
+                /** @default [] */
+                classes: string[];
+            };
+            agentsMayMerge?: boolean;
+            notify?: {
+                /** @default true */
+                dmWhenNotAutoMerging: boolean;
+                digestAt?: string;
+                timezone?: string;
+            };
+        };
         RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
         RequestComposition: {
             /** Format: uuid */
@@ -33700,6 +33763,14 @@ export interface components {
                     header: string;
                 } | {
                     /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
                     format: "timestamped-hmac-sha256";
                     /** @description Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>. */
                     header: string;
@@ -33967,6 +34038,14 @@ export interface components {
                     /**
                      * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                      * @default X-Hub-Signature-256
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
                      */
                     header: string;
                 } | {

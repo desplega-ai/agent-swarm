@@ -1,4 +1,4 @@
-import { openAICompatibleKeyVars } from "@desplega/model-catalog";
+import { CHATGPT_SUBSCRIPTION_HARNESSES, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
 import type {
   AgentWithTasks,
@@ -23,11 +23,22 @@ export const CARD_HARNESSES: Record<AiCardId, readonly ProviderName[]> = {
 };
 
 /**
+ * Harnesses that can run on a ChatGPT/Codex subscription, the default first.
+ * opencode is not one: it cannot read the swarm's codex_oauth pool
+ * (`@desplega/model-catalog` chatgpt-subscription.ts says why).
+ */
+export const CODEX_CARD_TARGETS = ["codex", ...CHATGPT_SUBSCRIPTION_HARNESSES] as ProviderName[];
+
+/**
  * The harnesses of a card by their dashboard names (`HARNESS_LABEL`), so the
  * step uses one name per harness: "Codex", or "Pi-Mono, Opencode, or DeepSeek (dsh)".
  */
-export function harnessNames(card: AiCardId, conjunction: "or" | "and" = "or"): string {
-  const names = CARD_HARNESSES[card].map((h) => HARNESS_LABEL[h] ?? h);
+export function harnessNames(
+  card: AiCardId,
+  conjunction: "or" | "and" = "or",
+  harnesses: readonly ProviderName[] = CARD_HARNESSES[card],
+): string {
+  const names = harnesses.map((h) => HARNESS_LABEL[h] ?? h);
   if (names.length === 1) return names[0];
   return `${names.slice(0, -1).join(", ")}, ${conjunction} ${names[names.length - 1]}`;
 }
@@ -71,8 +82,11 @@ export interface CardRollup {
   warning: string | null;
 }
 
-export function cardRollup(card: AiCardId, providers: OnboardingProviderSignal[]): CardRollup {
-  const harnesses = CARD_HARNESSES[card];
+export function cardRollup(
+  card: AiCardId,
+  providers: OnboardingProviderSignal[],
+  harnesses: readonly ProviderName[] = CARD_HARNESSES[card],
+): CardRollup {
   const rollup: CardRollup = {
     verified: false,
     workers: 0,
@@ -116,6 +130,8 @@ export function firstCredentialSwitch(
   saved: Partial<Record<AiCardId, boolean>>,
   rollups: Record<AiCardId, Pick<CardRollup, "verified">>,
   agents: readonly Pick<AgentWithTasks, "id" | "harnessProvider">[],
+  /** The harness the user picked for the card's credential (codex: codex or pi). */
+  picked?: ProviderName,
 ): FirstCredentialSwitch | null {
   const card = METHOD_CARD[method];
   const harnesses = CARD_HARNESSES[card];
@@ -126,7 +142,7 @@ export function firstCredentialSwitch(
     (a) => a.harnessProvider != null && harnesses.includes(a.harnessProvider),
   );
   if (agents.length === 0 || otherCredential || runsHarness) return null;
-  const target = METHOD_HARNESS[method] ?? harnesses[0];
+  const target = picked ?? METHOD_HARNESS[method] ?? harnesses[0];
   return { card, target, agentIds: agents.map((a) => a.id) };
 }
 
@@ -156,6 +172,8 @@ export interface AiCardProps {
   reportSaved: (card: AiCardId, saved: boolean) => void;
   /** The harness of this card the step is switching every agent to, if any. */
   autoSwitching: ProviderName | null;
+  /** The harnesses this card's key runs on (`CARD_HARNESSES`, or the codex card's pick). */
+  harnesses: readonly ProviderName[];
 }
 
 /** Value of a non-secret global config row, for prefilling a field. */
