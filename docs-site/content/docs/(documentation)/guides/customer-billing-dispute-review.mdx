@@ -74,7 +74,11 @@ The packet also records that the usage export carries no environment tag, the re
 
 ## Sensitive data, stale records and escalation
 
-**Permitted access only.** The workflow reads what it was granted and nothing else. Least privilege applies per connection, and each access is recorded in the workflow's [AI operations governance](/docs/guides/ai-operations-governance) entry: who may read which record, and who grants it.
+**Least privilege is a setting, not a guarantee.** It depends on the connections, credentials and data handling the team decides. [Script connections](/docs/guides/script-connections) are scoped `global` (the default), `agent` or `repo`, and the team chooses. The [credential broker](/docs/guides/scripts-credential-broker) keeps raw secrets out of script source for allowlisted hosts, protecting the secret, not which records are read.
+
+**Two limits.** [RBAC](/docs/guides/ai-operations-governance) gates user-token requests, not operator-key or agent calls. [Shared memory](/docs/architecture/memory) is visible to every agent, so keep invoice, agreement and correspondence content out of it or scope it, and give this workflow narrow connections.
+
+**The team keeps the record.** Its governance entry states who may read which record and who grants access.
 
 **No records pasted into chat.** A record the swarm cannot reach is named with the owner who can grant access, never obtained by asking someone to paste it into a thread.
 
