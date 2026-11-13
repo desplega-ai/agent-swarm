@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-13
+
+### Added
+- Defer: `defer-task` can wake on an external event such as `vcs.pr.merged` from GitHub (#3087).
+- Repos: a per-repo merge policy record (`autoMerge`, `agentsMayMerge`, `notify`) in the repo guidelines (#3088).
+- Workflows: an `hmac-sha1` webhook verification format for Vercel-style signatures (#3092).
+- Hooks: native tool interception shims for claude, codex, pi and opencode (#3090).
+- Primitives: `sheet-import-xlsx` and `sheet-export-xlsx` (#3038); HTTP routes to read and save boards and sheets (#3074); `ObjectEmbed` shows an editable board or sheet inside an app (#3093); a seeded boards-and-sheets skill for `ctx.sheets` and `ctx.boards` (#3073).
+- Audit: scripts, skills, workflows and schedules record the creating and updating agent and person (#2825).
+- Sessions: star sessions, star and hide groups, and open Done Slack sessions (#3051); Sessions follow-ups and their replies mirror into the Slack thread (#3048).
+- UI: composer drafts, @ and / mentions, and smart paste (#3047); dismiss stale comments from the Files send tray (#3082).
+- People: dismiss unmapped identities and hide `[bot]` logins (#3075).
+- Check: drift and scoped E2E steps in `check:local` (#3086).
+
+### Changed
+- agent-fs pins bumped 0.18.25 -> 0.18.26.
+- Performance: memory search reads and health counts run in worker threads (#3081, #3097); idle polls run read-only and take the write lock only to claim (#3089); app row lists scan in key windows (#3079); KV sweep batch yields are isolated from DB time slicing (#3052).
+- Setup: onboarding proposes the newest catalog models and lets a ChatGPT subscription run on pi (#3085).
+- Dependencies: worker harness bumps for codex, amp, dsh, kiro-cli and node (#3059, #3080).
+- Evals: `EVALS_API_KEY` is required when serving with `NODE_ENV=production` (#3062).
+- Docs: the Software Factory playbook (#3083); guides for marketplace partner payout exceptions (#3069), marketplace moderation appeals (#3068), inventory exception handoff (#3067), service capacity planning (#3058), customer billing disputes (#3057), support to engineering escalation (#3056) and marketplace catalog discrepancies (#3055); guide corrections (#3054, #3065, #3066); TLA+ specs synced (#3071); the `update-repo` reference names `mergePolicy`.
+
+### Fixed
+- Security: Slack email linking and Work Object access fail closed on unknown teams (#3094), and senders link by profile email only on this Slack team (#3091); shared-drive invites are limited to the operator key and users (#3098); AgentMail links inbound senders only when AgentMail authenticated them (#3050); GitLab webhook senders link by email only when it is an address (#3077); param-rendered env and secret workflow input is gated (#3049).
+- Providers: pi accepts every provider key pi-ai resolves, including `FIREWORKS_API_KEY` (#3096).
+- Worker: prek pre-push installs in ad-hoc clones through `init.templateDir` (#3084).
+- Primitives: `object-reindex` takes a prefix and `dryRun`, and names the fix when a sheet lost its id (#3076).
+- Sessions: a Slack channel or DM lists as one session (#3061).
+- Files: JSON uploads go to agent-fs as octet-stream (#3060).
+- UI: UUID generation works on HTTP origins (#3031); unused template recommendation card and `Link2Icon` removed (#3072, #3070).
+- Tests: each bundled extension gets its own validation budget (#3078).
+
 ## [2.12.0] - 2026-11-12
 
 ### Added
