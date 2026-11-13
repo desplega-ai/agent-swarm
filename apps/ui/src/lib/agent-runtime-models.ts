@@ -381,7 +381,7 @@ function directModels(
 
 // Mirrors the any-of credential checks in the harness adapters:
 // `claude-adapter.ts` accepts `CLAUDE_CODE_OAUTH_TOKEN` OR `ANTHROPIC_API_KEY`;
-// `codex-adapter.ts` accepts `OPENAI_API_KEY` OR `CODEX_OAUTH`.
+// Codex also accepts a gateway URL and key together (checked below).
 const DIRECT_HARNESS_ACCEPTED_KEYS: Record<"claude" | "codex", string[]> = {
   claude: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
@@ -616,12 +616,18 @@ export function modelGroupsForHarness(
     const models = directModels(harness, liveCatalog);
     const requiredKey = models[0]?.requiredKey ?? "";
     const acceptedKeys = DIRECT_HARNESS_ACCEPTED_KEYS[harness];
+    const gatewayConfigured =
+      harness === "codex" &&
+      hasRuntimeCredential("CODEX_GATEWAY_BASE_URL", configs, envPresence) &&
+      hasRuntimeCredential("CODEX_GATEWAY_API_KEY", configs, envPresence);
     return [
       {
         provider: models[0]?.provider ?? HARNESS_LABEL[harness],
         models,
         requiredKey,
-        enabled: acceptedKeys.some((k) => hasRuntimeCredential(k, configs, envPresence)),
+        enabled:
+          gatewayConfigured ||
+          acceptedKeys.some((k) => hasRuntimeCredential(k, configs, envPresence)),
       },
     ];
   }

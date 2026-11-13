@@ -30,6 +30,42 @@ function live(sections: Record<string, Record<string, object>>): LiveModelsCatal
 
 const effort = (values: string[]) => [{ type: "effort", values }];
 
+describe("Codex picker credentials", () => {
+  test.each([
+    [{ CODEX_GATEWAY_BASE_URL: true, CODEX_GATEWAY_API_KEY: true }, true],
+    [{ CODEX_GATEWAY_BASE_URL: true }, false],
+    [{ CODEX_GATEWAY_API_KEY: true }, false],
+    [{ OPENAI_API_KEY: true }, true],
+    [{ CODEX_OAUTH: true }, true],
+    [{}, false],
+  ] as const)("presence %j enables models: %s", (presence, expected) => {
+    const [group] = modelGroupsForHarness("codex", [], presence);
+    expect(group.enabled).toBe(expected);
+    expect(group.models.some((model) => model.id === "gpt-5.6-sol")).toBe(true);
+  });
+
+  test("resolved gateway credentials also enable models with masked secrets", () => {
+    const configs = [
+      { key: "CODEX_GATEWAY_BASE_URL", value: "https://gateway.example/v1" },
+      { key: "CODEX_GATEWAY_API_KEY", value: "********" },
+    ] as SwarmConfig[];
+    expect(modelGroupsForHarness("codex", configs, {})[0].enabled).toBe(true);
+    for (const config of configs) {
+      expect(modelGroupsForHarness("codex", [config], {})[0].enabled).toBe(false);
+    }
+    expect(
+      modelGroupsForHarness("codex", [configs[0]], { CODEX_GATEWAY_API_KEY: true })[0].enabled,
+    ).toBe(true);
+  });
+
+  test("stored API keys and OAuth pool slots keep enabling models", () => {
+    for (const key of ["OPENAI_API_KEY", "CODEX_OAUTH", "codex_oauth", "codex_oauth_0"]) {
+      const configs = [{ key, value: "********" }] as SwarmConfig[];
+      expect(modelGroupsForHarness("codex", configs, {})[0].enabled).toBe(true);
+    }
+  });
+});
+
 describe("effortLevelsFor: what a harness and model accept", () => {
   test("Claude: an adaptive model has no off; a budget-token model gains it", () => {
     // Opus 5.5 lists effort levels; claude does not pass `max` through, so it drops it.
