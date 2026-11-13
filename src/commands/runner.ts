@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { chatgptSubscriptionEquivalent, isChatgptSubscriptionModel } from "@desplega/model-catalog";
+import { chatgptSubscriptionModel, chatgptSubscriptionTrait } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import { isGroupKey } from "../assets/key.ts";
@@ -2217,19 +2217,21 @@ export async function resolveCodexOAuthCredentialInfo(
 }
 
 /**
- * The model a pi session runs and its ChatGPT pool slot. An `openai-codex/<id>`
- * model always looks up a slot (none fails the session in the adapter). A bare
- * or `openai/` Codex-line GPT becomes `openai-codex/<id>` when the pool has a
- * slot and keeps its OpenAI API key when it has none.
+ * The one subscription-first resolver for every harness. When the harness's
+ * trait serves `model` on the ChatGPT subscription and the pool has a slot,
+ * the session runs that model on the slot; otherwise the model is unchanged
+ * and keeps its API key. An `openai-codex/<id>` model without a slot stays as
+ * is, so the adapter fails it instead of billing a key. `poolOnly`: only codex
+ * may fall back to a standalone `~/.codex/auth.json`.
  */
-export async function resolvePiSubscription(
+export async function resolveSubscriptionFirst(
+  harness: string,
   model: string,
-  resolvePoolSlot: () => Promise<CodexOAuthCredentialInfo | null>,
+  resolvePoolSlot: (poolOnly: boolean) => Promise<CodexOAuthCredentialInfo | null>,
 ): Promise<{ model: string; oauthInfo: CodexOAuthCredentialInfo | null }> {
-  if (isChatgptSubscriptionModel(model)) return { model, oauthInfo: await resolvePoolSlot() };
-  const subscriptionModel = chatgptSubscriptionEquivalent(model);
-  if (!subscriptionModel) return { model, oauthInfo: null };
-  const oauthInfo = await resolvePoolSlot();
+  const subscriptionModel = chatgptSubscriptionModel(harness, model);
+  if (subscriptionModel === null) return { model, oauthInfo: null };
+  const oauthInfo = await resolvePoolSlot(chatgptSubscriptionTrait(harness).kind !== "native");
   return oauthInfo ? { model: subscriptionModel, oauthInfo } : { model, oauthInfo: null };
 }
 
@@ -4731,69 +4733,39 @@ export async function spawnProviderProcess(
     throw new Error(spawnModel.reason);
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
-  let model = spawnModel.model;
-  // pi: a ChatGPT subscription slot wins over an OpenAI API key for GPT models.
-  let piOAuthInfo: CodexOAuthCredentialInfo | null = null;
-  if (adapter.name === "pi") {
-    ({ model, oauthInfo: piOAuthInfo } = await resolvePiSubscription(model, () =>
-      resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, { poolOnly: true }),
-    ));
-    if (model !== spawnModel.model) {
-      console.log(
-        `[${opts.role}] ${spawnModel.model} runs on the ChatGPT subscription as ${model}`,
+  // Subscription first (the harness's `chatgptSubscriptionTrait`): a
+  // codex_oauth pool slot serves OpenAI models before OPENAI_API_KEY does. It
+  // is resolved BEFORE ProviderSessionConfig so `codexSlot` reaches the adapter,
+  // which refreshes back to that slot key (codex_oauth_<slot>). A gateway route
+  // uses no OAuth: no slot is picked and no auth.json is materialised.
+  const subscription = deriveDefaultRoute(adapter.name, freshEnv)
+    ? { model: spawnModel.model, oauthInfo: null }
+    : await resolveSubscriptionFirst(adapter.name, spawnModel.model, (poolOnly) =>
+        resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, { poolOnly }),
       );
-    }
+  const model = subscription.model;
+  if (model !== spawnModel.model) {
+    console.log(`[${opts.role}] ${spawnModel.model} runs on the ChatGPT subscription as ${model}`);
+  }
+  const oauthSelection: CredentialSelection | undefined = subscription.oauthInfo?.selection;
+  // True only when `oauthSelection` came from an actual `codex_oauth_<n>`
+  // config-store slot — gates whether `codexSlot` is set below (see
+  // `CodexOAuthCredentialInfo`).
+  const oauthIsPoolBacked = subscription.oauthInfo?.isPoolBacked ?? false;
+  // The subscription credential suppresses OPENAI_API_KEY in the adapter.
+  // Report the same credential that authenticates the session.
+  if (oauthSelection && realTaskId) {
+    reportKeyUsage(
+      opts.apiUrl,
+      opts.apiKey,
+      oauthSelection.keyType,
+      oauthSelection,
+      realTaskId,
+    ).catch(() => {});
   }
   // Recorded on the task at session start, like the model: what the adapter
   // applies, not just what was asked for.
   const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
-
-  // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
-  // can pass codexSlot through and the adapter writes token refreshes back to
-  // the correct slot key (codex_oauth_<slot>) instead of defaulting to slot 0.
-  //
-  // Always resolve for codex (not just when credentialSelections is empty) so
-  // that if the OPENAI_API_KEY credential is rate-limited we can fail over to
-  // a CODEX_OAUTH slot — even though the keyType differs.
-  let oauthSelection: CredentialSelection | undefined;
-  // True only when `oauthSelection` came from an actual `codex_oauth_<n>`
-  // config-store slot — gates whether `codexSlot` is set below (see
-  // `CodexOAuthCredentialInfo`).
-  let oauthIsPoolBacked = false;
-  // A gateway route uses no OAuth: no pool slot is picked, so no auth.json is
-  // materialised for a session whose traffic goes to the gateway.
-  if (adapter.name === "codex" && !deriveDefaultRoute("codex", freshEnv)) {
-    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
-    oauthSelection = oauthInfo?.selection;
-    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
-    // Both pool credentials and standalone ChatGPT auth suppress OPENAI_API_KEY
-    // in the adapter. Report the same credential that authenticates the session.
-    if (oauthSelection && realTaskId) {
-      reportKeyUsage(
-        opts.apiUrl,
-        opts.apiKey,
-        oauthSelection.keyType,
-        oauthSelection,
-        realTaskId,
-      ).catch(() => {});
-    }
-  } else if (adapter.name === "pi" && piOAuthInfo) {
-    // An `openai-codex/<id>` model runs on the same pool, with the same slot
-    // pick and usage bookkeeping. The adapter revalidates `codexSlot` through
-    // the refresh lock and hands the harness the access token only
-    // (`loadChatgptSubscriptionCredential`); no slot fails the session there.
-    oauthSelection = piOAuthInfo.selection;
-    oauthIsPoolBacked = piOAuthInfo.isPoolBacked;
-    if (oauthSelection && realTaskId) {
-      reportKeyUsage(
-        opts.apiUrl,
-        opts.apiKey,
-        oauthSelection.keyType,
-        oauthSelection,
-        realTaskId,
-      ).catch(() => {});
-    }
-  }
 
   // Match harness authentication for both cost attribution and failure reports.
   // isPoolBacked controls slot revalidation, not whether ChatGPT auth wins.

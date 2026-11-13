@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  chatgptSubscriptionEquivalent,
+  chatgptSubscriptionModel,
   fxModelRoute,
   type HarnessCatalogSections,
   harnessModelIds,
@@ -311,24 +311,32 @@ describe("harnessModelMismatch on fx", () => {
   });
 });
 
-describe("chatgptSubscriptionEquivalent", () => {
-  test("a bare or openai/ Codex-line GPT maps to openai-codex", () => {
-    expect(chatgptSubscriptionEquivalent("gpt-5.6-luna")).toBe("openai-codex/gpt-5.6-luna");
-    expect(chatgptSubscriptionEquivalent(" OpenAI/gpt-6.1-sol ")).toBe("openai-codex/gpt-6.1-sol");
+describe("chatgptSubscriptionModel", () => {
+  test("pi moves a bare or openai/ Codex-line GPT onto openai-codex", () => {
+    expect(chatgptSubscriptionModel("pi", "gpt-5.6-luna")).toBe("openai-codex/gpt-5.6-luna");
+    expect(chatgptSubscriptionModel("pi", " OpenAI/gpt-6.1-sol ")).toBe("openai-codex/gpt-6.1-sol");
+    expect(chatgptSubscriptionModel("pi", "openai-codex/gpt-6.1-sol")).toBe(
+      "openai-codex/gpt-6.1-sol",
+    );
   });
 
-  test("everything else has no subscription equivalent", () => {
+  test("pi leaves every other model on its own key", () => {
     for (const model of [
       "",
       null,
       "gpt-4o",
       "gpt-5.6-luna-2026-01-01",
       "sonnet",
-      "openai-codex/gpt-5.6-luna",
       "openrouter/openai/gpt-5.6-luna",
       "openai/",
     ]) {
-      expect(chatgptSubscriptionEquivalent(model)).toBe(null);
+      expect(chatgptSubscriptionModel("pi", model)).toBe(null);
     }
+  });
+
+  test("codex serves every model as is; opencode and claude serve none", () => {
+    expect(chatgptSubscriptionModel("codex", "gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(chatgptSubscriptionModel("opencode", "openai/gpt-5.6-luna")).toBe(null);
+    expect(chatgptSubscriptionModel("claude", "gpt-5.6-luna")).toBe(null);
   });
 });

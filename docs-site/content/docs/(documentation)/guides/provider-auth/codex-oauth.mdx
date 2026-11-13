@@ -383,7 +383,7 @@ At task time the runner picks a slot the same way it does for Codex: same availa
 - **Readiness:** a pi worker whose `MODEL_OVERRIDE` is an `openai-codex/` model reports ready only when the pool has slots (`CODEX_OAUTH_POOL_SLOTS`).
 - **Harness check:** other harnesses reject an `openai-codex/` model. On Codex, use the bare id.
 - **Long sessions:** pi cannot refresh the access token. A session that outlives it fails, the same as Codex. Tasks draw tokens with at least 12 hours left.
-- **opencode is not supported yet.** opencode 2.x keeps credentials in its own SQLite store (`opencode auth import`), not in a per-session file. When a refresh fails it drops to API-key mode without an error.
+- **opencode is not supported yet.** opencode 2.2.7 has a ChatGPT login, but it is an internal plugin the embedded SDK host the swarm runs does not register, and it refreshes the token itself outside the pool's refresh lock. opencode tasks run OpenAI models on `OPENAI_API_KEY`.
 
 ## Related
 

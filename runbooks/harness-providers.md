@@ -19,6 +19,18 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 | fx | `fx` | `FxAdapter` | Vercel Labs' fx as an ACP server (`fx acp`) on the shared ACP client; `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` by model route. See [fx](#fx-fx) below |
 
+## Subscription-first credentials
+
+Each harness declares a `chatgptSubscriptionTrait` in `packages/model-catalog/src/chatgpt-subscription.ts`. The runner's one resolver, `resolveSubscriptionFirst`, reads it: a `codex_oauth` pool slot serves OpenAI models first, and `OPENAI_API_KEY` is the fallback only when the pool has no slot.
+
+| Trait | Harness | OpenAI model on a slot |
+|---|---|---|
+| `native` | codex | the bare id, unchanged (a standalone `~/.codex/auth.json` also counts) |
+| `prefixed` | pi | `openai-codex/<id>`; a bare or `openai/` Codex-line GPT id moves there |
+| `unsupported` | opencode, every other harness | never; `reason` says why |
+
+A new harness that can run the ChatGPT subscription adds its trait there, in the same PR as the adapter support.
+
 ## Worker API readiness
 
 Before any provider restores configuration, `docker-entrypoint.sh` calls the

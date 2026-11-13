@@ -16,6 +16,7 @@ import {
   CHATGPT_SUBSCRIPTION_HARNESSES,
   CHATGPT_SUBSCRIPTION_PROVIDER,
   chatgptSubscriptionModelId,
+  chatgptSubscriptionTrait,
 } from "./chatgpt-subscription.ts";
 import { isAlias, parseAlias } from "./resolve-alias.ts";
 
@@ -169,12 +170,20 @@ export function isHarnessCatalogModel(
 }
 
 /**
- * The `openai-codex/<id>` form of a bare `<id>` or `openai/<id>` model whose id
- * is a Codex-line GPT (the ids the subscription serves), else null. A pi worker
- * with a ChatGPT subscription runs these on it instead of an OpenAI API key.
+ * The model `harness` runs on the ChatGPT subscription pool for `model`, from
+ * its trait, else null (the model keeps its API key). `native` serves every
+ * model as is; `prefixed` serves an `openai-codex/<id>` model, and moves a
+ * bare or `openai/` Codex-line GPT id to `openai-codex/<id>`.
  */
-export function chatgptSubscriptionEquivalent(model: string | null | undefined): string | null {
+export function chatgptSubscriptionModel(
+  harness: string,
+  model: string | null | undefined,
+): string | null {
+  const trait = chatgptSubscriptionTrait(harness);
   const trimmed = model?.trim() ?? "";
+  if (trait.kind === "native") return trimmed;
+  if (trait.kind !== "prefixed") return null;
+  if (chatgptSubscriptionModelId(trimmed)) return trimmed;
   const id = trimmed.toLowerCase().startsWith("openai/")
     ? trimmed.slice("openai/".length)
     : trimmed;
