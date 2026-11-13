@@ -261,7 +261,7 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 ### Rocket.Chat
 
 <Callout type="warn">
-Experimental. The Rocket.Chat adapter has not run against a real server yet, and it uses the community package [`chat-adapter-rocketchat`](https://www.npmjs.com/package/chat-adapter-rocketchat) rather than an official `@chat-adapter/*` one ([#2973](https://github.com/desplega-ai/agent-swarm/issues/2973)).
+Experimental. The Rocket.Chat adapter has not run against a real server yet ([#2973](https://github.com/desplega-ai/agent-swarm/issues/2973)).
 </Callout>
 
 Rocket.Chat is self-hosted, so each deployment has its own instance URL. It is not an adapter field: a base URL in `CHAT_SDK_ADAPTERS` could send a saved token to another host, so the API rejects `baseUrl` there like every other base-URL key. Set the instance in the API's environment instead, and restart the API:
@@ -269,6 +269,8 @@ Rocket.Chat is self-hosted, so each deployment has its own instance URL. It is n
 ```bash
 CHAT_SDK_API_URL_OVERRIDES='{"rocketchat":"https://chat.example.com"}'
 ```
+
+Use the instance's final URL. The adapter does not follow HTTP redirects, so a URL that redirects (for example `http://` to `https://`) fails every REST call.
 
 Until it is set, the adapter card shows the missing variable instead of starting.
 

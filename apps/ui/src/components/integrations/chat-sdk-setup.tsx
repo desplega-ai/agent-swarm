@@ -235,8 +235,8 @@ function steps(adapter: ChatSdkAdapterName, { docsUrl, inviteUrl }: StepContext)
     case "rocketchat":
       return [
         <>
-          Experimental: this adapter has run only against fixtures, not a real server, and it is a
-          community package (<CodeChip>chat-adapter-rocketchat</CodeChip>). Report gaps on{" "}
+          Experimental: this adapter has run only against fixtures, not a real server. Report gaps
+          on{" "}
           <ExternalLink href="https://github.com/desplega-ai/agent-swarm/issues/2973">
             issue #2973
           </ExternalLink>

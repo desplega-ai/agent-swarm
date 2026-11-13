@@ -41,7 +41,7 @@ const EXPERIMENTAL_NOTE =
   "Tested only against fixtures so far, not a real workspace. Setup steps may differ. Progress: github.com/desplega-ai/agent-swarm/issues/2149";
 
 const ROCKETCHAT_EXPERIMENTAL_NOTE =
-  "Tested only against fixtures so far, not a real server. The adapter is a community package. Progress: github.com/desplega-ai/agent-swarm/issues/2973";
+  "Tested only against fixtures so far, not a real server. Progress: github.com/desplega-ai/agent-swarm/issues/2973";
 
 const USER_NAME: ChatSdkField = {
   key: "userName",

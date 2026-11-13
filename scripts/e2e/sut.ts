@@ -217,6 +217,8 @@ export async function startSut(
   const chatSdkPort = await freePort();
   // Chat SDK Slack posts to a mock bound here by the scenario (slack-http.ts).
   const chatSdkSlackPort = await freePort();
+  // Chat SDK Rocket.Chat posts to a mock bound here by platform-chat-sdk-rocketchat.
+  const chatSdkRocketchatPort = await freePort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
@@ -258,6 +260,7 @@ export async function startSut(
     CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
       telegram: `http://127.0.0.1:${chatSdkPort}`,
       slack: `http://127.0.0.1:${chatSdkSlackPort}/api/`,
+      rocketchat: `http://127.0.0.1:${chatSdkRocketchatPort}`,
     }),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,

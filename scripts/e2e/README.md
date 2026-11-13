@@ -181,6 +181,7 @@ on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
 | Chat SDK Slack | Built-in Slack off (`SLACK_DISABLE`), `CHAT_SDK_ADAPTERS.slack` in webhook mode, and the env `CHAT_SDK_API_URL_OVERRIDES.slack` port the scenario binds a second `SlackMock` to | The mock posts signed events, commands and `block_actions` to `/api/integrations/chat/slack/webhook`. `enableChatSdkSlack` flips and its `undo` restores Socket Mode. |
 | Chat SDK Telegram | `CHAT_SDK_ENABLED=true`, deployment env `CHAT_SDK_API_URL_OVERRIDES`, and adapter config with fake credentials | `platform-chat-sdk` starts a loopback Telegram API. It checks tool discovery, permissions, channel mappings, messages, and thread history. |
+| Chat SDK Rocket.Chat | `CHAT_SDK_API_URL_OVERRIDES.rocketchat` set at boot, adapter config with fake credentials | `platform-chat-sdk-rocketchat` starts a loopback Rocket.Chat REST API. It checks config validation, the webhook token, a mention becoming a chat task, the unmapped sender list, and a `chat-post` reply. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 
 `CLOUDFLARE_API_BASE_URL` is reserved for tests and cannot be stored in config.

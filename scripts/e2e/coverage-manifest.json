@@ -278,8 +278,8 @@
       "scenarios": ["core-budgets"]
     },
     "chat-sdk-tools": {
-      "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, and Telegram messages through a loopback mock.",
-      "scenarios": ["platform-chat-sdk"]
+      "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, Telegram messages through a loopback mock, and the Rocket.Chat webhook and REST round trip.",
+      "scenarios": ["platform-chat-sdk", "platform-chat-sdk-rocketchat"]
     },
     "config-roundtrip": {
       "description": "A config write is readable back and masked when secret",

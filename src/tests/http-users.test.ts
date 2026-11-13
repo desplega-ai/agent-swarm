@@ -651,26 +651,6 @@ describe("GET /api/users/unmapped", () => {
       expect.objectContaining({ kind: "kapso", externalId: "34679077777" }),
     );
   });
-
-  test("default unmapped list includes Rocket.Chat sender identities", async () => {
-    const ns = "integration:unmapped:rocketchat";
-    await upsertKv({
-      namespace: ns,
-      key: "rcUser1:meta",
-      value: { lastSeenAt: "2026-05-21T00:00:00Z", sampleEventType: "message" },
-      valueType: "json",
-    });
-    await upsertKv({ namespace: ns, key: "rcUser1:count", value: 1, valueType: "integer" });
-
-    const r = await authedFetch("/api/users/unmapped");
-    expect(r.status).toBe(200);
-    const body = (await r.json()) as {
-      unmapped: Array<{ kind: string; externalId: string }>;
-    };
-    expect(body.unmapped).toContainEqual(
-      expect.objectContaining({ kind: "rocketchat", externalId: "rcUser1" }),
-    );
-  });
 });
 
 describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {

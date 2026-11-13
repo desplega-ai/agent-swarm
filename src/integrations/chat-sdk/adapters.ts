@@ -133,7 +133,7 @@ export async function loadAdapter(
       } as Parameters<typeof createTeamsAdapter>[0]);
     }
     case "rocketchat": {
-      const { createRocketChatAdapter } = await import("chat-adapter-rocketchat");
+      const { createRocketChatAdapter } = await import("./rocketchat");
       // The adapter takes the instance as `baseUrl`, not `apiUrl`, and falls
       // back to ROCKETCHAT_URL / ROCKETCHAT_TOKEN / ROCKETCHAT_USER_ID /
       // ROCKETCHAT_WEBHOOK_TOKEN / ROCKETCHAT_BOT_USERNAME from `process.env`.
