@@ -1,10 +1,14 @@
 import { type ReactNode, useEffect } from "react";
+import { usePoolKeys } from "@/api/hooks/use-pool-keys";
 import { SetupCard } from "@/components/shared/setup-card";
 import { StatusIcon, StatusLine } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
 import { type AiCardId, type AiCardProps, harnessNames } from "./model";
 import { WaitingPanel } from "./waiting";
+
+const SPEND_CAP_LINE =
+  "Every key hit its spend cap. Agents cannot run until it resets or you raise it.";
 
 /**
  * Accordion card shared by the four providers: status icon, the card's form,
@@ -26,6 +30,7 @@ export function ProviderCard({
   reportSaved,
   autoSwitching,
   harnesses,
+  spendCapPool,
   children,
 }: Pick<
   AiCardProps,
@@ -43,8 +48,14 @@ export function ProviderCard({
   title: string;
   subtitle: string;
   saved: boolean;
+  /** A pool var whose keys can hit a provider spend cap (`OPENROUTER_API_KEY`). */
+  spendCapPool?: string;
   children: ReactNode;
 }) {
+  const pool = usePoolKeys(spendCapPool ?? "", !!spendCapPool && saved);
+  // An earlier "verified" says nothing while no key can run: every key hit its spend cap.
+  const capped =
+    !!pool.data?.keys.length && pool.data.keys.every((k) => k.status === "spend_capped");
   useEffect(() => reportSaved(card, saved), [reportSaved, card, saved]);
   const runsHarness =
     rollup.workers > 0 ||
@@ -62,7 +73,9 @@ export function ProviderCard({
 
   const noWorker = !runsHarness && agents.length > 0;
   // The header is a button: its status icon must not take focus of its own.
-  const status = rollup.verified ? (
+  const status = capped ? (
+    <StatusIcon tone="warning" focusable={false} label={SPEND_CAP_LINE} />
+  ) : rollup.verified ? (
     <StatusIcon
       tone="done"
       focusable={false}
@@ -98,7 +111,13 @@ export function ProviderCard({
     >
       {children}
       {saved || rollup.verified || rollup.error ? (
-        <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} noWorker={noWorker} />
+        capped ? (
+          <output className="block">
+            <StatusLine tone="warning">{SPEND_CAP_LINE}</StatusLine>
+          </output>
+        ) : (
+          <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} noWorker={noWorker} />
+        )
       ) : null}
       {/* A key only verifies on a worker that runs this harness. Before a key
           is saved, the agent list would only push the form down. */}

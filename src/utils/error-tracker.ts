@@ -39,6 +39,17 @@ export interface RateLimitWindowInfo {
 export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
 
 /**
+ * A key that hit its provider spend limit (OpenRouter key limit or credits).
+ * `resetsAt` is null when the provider names no reset: the key stays benched
+ * until someone edits it.
+ */
+export interface SpendCap {
+  limitUsd: number | null;
+  spendUsd: number | null;
+  resetsAt: string | null;
+}
+
+/**
  * Parses a rate_limit_event into one window entry per key of `unifiedWindows`
  * (when present) merged with the top-level entry when they share a key. The
  * top-level fields win field-by-field (it's the freshest read for its own
@@ -167,6 +178,12 @@ export function redactRateLimitEventLine(line: string): string {
  * (malformed) values.
  */
 export const MAX_RATE_LIMIT_RESET_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Longest a spend-capped key stays benched: a monthly key limit resets up to
+ * 31 days out, and a cap with no reset holds this long unless the key is edited.
+ */
+export const MAX_SPEND_CAP_HOLD_MS = 31 * 24 * 60 * 60 * 1000;
 
 /**
  * Single source of truth for "does this text look like a rate-limit signal?".

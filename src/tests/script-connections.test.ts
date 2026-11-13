@@ -724,6 +724,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "337_favorites_session_hidden_key.sql");
       // 338 alters scripts, workflows, scheduled_tasks and skills, none of which this fixture creates.
       markMigrationApplied(database, "338_audit_agent_columns.sql");
+      // 340 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "340_api_key_spend_cap.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

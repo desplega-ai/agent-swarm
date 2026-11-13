@@ -4557,7 +4557,15 @@ export interface CodexDevicePollResponse {
 // ─── Credential pool keys (`/api/config/pool-keys`) ─────────────────────────
 
 /** From the global `api_key_status` row of the key (same `keyType` and `keySuffix`). */
-export type PoolKeyStatus = "ok" | "rejected" | "rate_limited" | "unchecked";
+export type PoolKeyStatus = "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+
+/** A provider spend limit a key hit (OpenRouter key limit, out of credits). */
+export interface SpendCap {
+  limitUsd: number | null;
+  spendUsd: number | null;
+  /** Null when the provider names no reset: the key stays benched until edited. */
+  resetsAt: string | null;
+}
 
 /** One key of a stored credential pool. Only the suffix leaves the server. */
 export interface PoolKey {
@@ -4570,6 +4578,8 @@ export interface PoolKey {
   error: string | null;
   checkedAt: string | null;
   rateLimitedUntil: string | null;
+  /** Set with `spend_capped`. Absent on an older API. */
+  spendCap?: SpendCap | null;
 }
 
 export interface PoolKeysResponse {

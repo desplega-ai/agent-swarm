@@ -10,6 +10,7 @@ import {
   LIST_POOL_VARS,
   matchAiProviders,
   rollUpHealth,
+  spendCapText,
   unhealthyCredentialCount,
 } from "./ai-providers";
 
@@ -129,6 +130,35 @@ describe("status roll-up", () => {
     expect(isUnhealthyKey(status("X", "a"))).toBe(false);
     expect(isUnhealthyKey(status("X", "a", { status: "rate_limited" }))).toBe(true);
     expect(isUnhealthyKey(status("X", "a", { lastValidationFailedAt: "2026-11-04" }))).toBe(true);
+  });
+
+  test("a spend-capped key names the cap, not a rate limit", () => {
+    const resetsAt = "2026-11-16T00:00:00.000Z";
+    const [openrouter] = buildProviderRows({
+      pools: {
+        OPENROUTER_API_KEY: {
+          readOnly: false,
+          keys: [
+            poolKey(0, "830cc", {
+              status: "spend_capped",
+              rateLimitedUntil: resetsAt,
+              spendCap: { limitUsd: 1, spendUsd: 1.066227867, resetsAt },
+            }),
+          ],
+        },
+      },
+      codexAccounts: [],
+      statuses: [],
+      usageToday: [],
+      usage7d: [],
+    });
+    expect(healthLabel(openrouter!)).toBe("1 spend capped");
+    expect(openrouter?.reason).toMatch(
+      /^Key ending 830cc: Spend cap hit \(\$1\.07 of \$1\.00\), resets /,
+    );
+    expect(spendCapText({ limitUsd: null, spendUsd: null, resetsAt: null })).toBe(
+      "Spend cap hit. Raise the limit, then remove and add the key again",
+    );
   });
 
   test("rows join pools, statuses and usage, and skip providers with no keys", () => {

@@ -1,4 +1,10 @@
-import type { ApiKeyStatus, CodexAccount, PoolKey, UsageSummaryByCredentialRow } from "@/api/types";
+import type {
+  ApiKeyStatus,
+  CodexAccount,
+  PoolKey,
+  SpendCap,
+  UsageSummaryByCredentialRow,
+} from "@/api/types";
 import type { ProviderIconKey } from "./agent-runtime-models";
 import { rawPlanOf } from "./provider-quota";
 
@@ -789,6 +795,8 @@ export interface ProviderKey {
   /** Why the key is failing or limited ("HTTP 401", "Sign in again"). */
   reason: string | null;
   rateLimitedUntil: string | null;
+  /** Set when the limit is a provider spend cap. */
+  spendCap: SpendCap | null;
   lastUsedAt: string | null;
   plan: string | null;
   planSource: ApiKeyStatus["planSource"];
@@ -833,7 +841,7 @@ export function rollUpHealth(keys: { health: KeyHealth }[]): KeyHealth {
 
 function poolKeyHealth(key: PoolKey): KeyHealth {
   if (key.status === "rejected") return "failing";
-  if (key.status === "rate_limited") return "limited";
+  if (key.status === "rate_limited" || key.status === "spend_capped") return "limited";
   if (key.status === "unchecked") return "unchecked";
   return "ok";
 }
@@ -874,8 +882,22 @@ export function backAt(iso: string): string {
       });
 }
 
+const usd = (value: number) => `$${value.toFixed(2)}`;
+
+/** "Spend cap hit ($1.07 of $1.00), resets Nov 16, 01:00". */
+export function spendCapText(cap: SpendCap): string {
+  const amounts =
+    cap.spendUsd !== null && cap.limitUsd !== null
+      ? ` (${usd(cap.spendUsd)} of ${usd(cap.limitUsd)})`
+      : "";
+  return cap.resetsAt
+    ? `Spend cap hit${amounts}, resets ${backAt(cap.resetsAt)}`
+    : `Spend cap hit${amounts}. Raise the limit, then remove and add the key again`;
+}
+
 function keyReason(key: ProviderKey): string | null {
   if (key.health === "failing") return `${key.label}: ${key.reason ?? "rejected"}`;
+  if (key.health === "limited" && key.reason) return `${key.label}: ${key.reason}`;
   if (key.health === "limited") {
     return key.rateLimitedUntil
       ? `${key.label} is back at ${backAt(key.rateLimitedUntil)}`
@@ -918,6 +940,7 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
     details: {
       reason?: string | null;
       rateLimitedUntil?: string | null;
+      spendCap?: SpendCap | null;
       accountPlan?: string | null;
     },
   ): ProviderKey {
@@ -933,6 +956,7 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
       health,
       reason: details.reason ?? null,
       rateLimitedUntil: details.rateLimitedUntil ?? status?.rateLimitedUntil ?? null,
+      spendCap: details.spendCap ?? null,
       lastUsedAt: status?.lastUsedAt ?? null,
       plan: status?.plan ?? null,
       planSource: status?.planSource ?? null,
@@ -985,8 +1009,9 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
       readOnly = pool?.readOnly ?? false;
       keys = (pool?.keys ?? []).map((key) =>
         makeKey(poolVar, key.index, key.suffix, `Key ending ${key.suffix}`, poolKeyHealth(key), {
-          reason: key.error,
+          reason: key.spendCap ? spendCapText(key.spendCap) : key.error,
           rateLimitedUntil: key.rateLimitedUntil,
+          spendCap: key.spendCap,
         }),
       );
     }
@@ -1013,12 +1038,18 @@ export function countLabel(count: number, noun: string): string {
 }
 
 /** The chip text of a provider row. */
-export function healthLabel(row: Pick<ProviderRow, "health" | "worstCount">): string {
+export function healthLabel(
+  row: Pick<ProviderRow, "health" | "worstCount"> & {
+    keys?: Pick<ProviderKey, "health" | "spendCap">[];
+  },
+): string {
   switch (row.health) {
     case "failing":
       return "Failing";
     case "limited":
-      return `${row.worstCount} rate limited`;
+      return row.keys?.every((k) => k.health !== "limited" || k.spendCap)
+        ? `${row.worstCount} spend capped`
+        : `${row.worstCount} rate limited`;
     case "unchecked":
       return "Not checked yet";
     default:

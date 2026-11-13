@@ -160,7 +160,7 @@ import {
 } from "../utils/config-env-export";
 import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
-import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import type { RateLimitWindowTelemetry, SpendCap } from "../utils/error-tracker";
 import { getGitHubHostForSql } from "../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import { validateHeartbeatExpiry } from "../utils/heartbeat-expiry";
@@ -11884,6 +11884,8 @@ export interface ApiKeyStatus {
   scopeId: string | null;
   status: string;
   rateLimitedUntil: string | null;
+  /** The spend cap behind the current rate limit, or null for an ordinary one. */
+  spendCap: SpendCap | null;
   lastUsedAt: string | null;
   lastRateLimitAt: string | null;
   totalUsageCount: number;
@@ -11912,9 +11914,10 @@ export interface ApiKeyStatus {
   updatedAt: string;
 }
 
-type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows" | "providerAccount"> & {
+type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows" | "providerAccount" | "spendCap"> & {
   rateLimitWindows: string | null;
   providerAccount: string | null;
+  spendCap: string | null;
 };
 
 function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitWindowTelemetry {
@@ -11935,6 +11938,7 @@ function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
     ...row,
     rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows),
     providerAccount: parseProviderAccount(row.providerAccount),
+    spendCap: row.spendCap ? (JSON.parse(row.spendCap) as SpendCap) : null,
   };
 }
 
@@ -11947,6 +11951,8 @@ export interface AvailableKeyIndicesResult {
   earliestModelResetAt: string | null;
   /** Indices excluded because the key's subscription plan cannot run the model family. */
   seatBlockedIndices: number[];
+  /** Rate-limited indices whose limit is a provider spend cap: no retry helps before it resets. */
+  spendCappedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
 }
 
@@ -11991,7 +11997,7 @@ export async function getAvailableKeyIndices(
   // Auto-clear expired rate limits. Never an auth bench: only `clearAuthBench` lifts it.
   await client.run(
     `UPDATE api_key_status
-     SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
+     SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
      WHERE ${rowFilter}
        AND status = 'rate_limited' AND rateLimitedUntil <= ? AND consecutiveAuthFailures < ?`,
     [now, ...rowParams, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
@@ -12007,8 +12013,9 @@ export async function getAvailableKeyIndices(
     plan: string | null;
     authFailureSeq: number;
     lastValidationFailedAt: string | null;
+    spendCap: string | null;
   }>(
-    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt FROM api_key_status
+    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt, spendCap FROM api_key_status
        WHERE ${rowFilter}`,
     rowParams,
   );
@@ -12026,6 +12033,9 @@ export async function getAvailableKeyIndices(
   const blockedIndices = new Set(
     rows.filter((r) => r.status === "rate_limited").flatMap(positionsOf),
   );
+  const spendCappedIndices = [
+    ...new Set(rows.filter((r) => r.status === "rate_limited" && r.spendCap).flatMap(positionsOf)),
+  ];
   const rejectedIndices = [
     ...new Set(rows.filter((row) => row.lastValidationFailedAt !== null).flatMap(positionsOf)),
   ];
@@ -12081,6 +12091,7 @@ export async function getAvailableKeyIndices(
     rejectedIndices,
     modelBlockedIndices,
     seatBlockedIndices,
+    spendCappedIndices,
     earliestModelResetAt:
       earliestModelResetsAtSec !== undefined
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()
@@ -12198,7 +12209,10 @@ export async function setApiKeyPlan(
   return result.changes > 0;
 }
 
-/** Mark a key as rate-limited until a retry-after timestamp; never shortens an auth-failure bench. */
+/**
+ * Mark a key as rate-limited until a retry-after timestamp; never shortens an auth-failure bench.
+ * `spendCap` records a provider spend limit behind it; an ordinary rate limit clears it.
+ */
 export async function markKeyRateLimited(
   keyType: string,
   keySuffix: string,
@@ -12206,22 +12220,35 @@ export async function markKeyRateLimited(
   rateLimitedUntil: string,
   scope = "global",
   scopeId: string | null = null,
+  spendCap: SpendCap | null = null,
 ): Promise<void> {
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
   await getDbClient().run(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt)
-       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?)
+    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt, spendCap)
+       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?, ?)
        ON CONFLICT(keyType, keySuffix, scope, scopeId)
        DO UPDATE SET
          status = 'rate_limited',
          rateLimitedUntil = CASE WHEN status = 'rate_limited' AND consecutiveAuthFailures >= ${CODEX_AUTH_FAILURE_BENCH_THRESHOLD} THEN MAX(COALESCE(rateLimitedUntil, ''), excluded.rateLimitedUntil) ELSE excluded.rateLimitedUntil END,
+         spendCap = excluded.spendCap,
          lastRateLimitAt = excluded.lastRateLimitAt,
          rateLimitCount = rateLimitCount + 1,
          keyIndex = excluded.keyIndex,
          updatedAt = excluded.updatedAt`,
-    [keyType, keySuffix, keyIndex, scope, effectiveScopeId, rateLimitedUntil, now, provider, now],
+    [
+      keyType,
+      keySuffix,
+      keyIndex,
+      scope,
+      effectiveScopeId,
+      rateLimitedUntil,
+      now,
+      provider,
+      now,
+      spendCap ? JSON.stringify(spendCap) : null,
+    ],
   );
 }
 
@@ -12388,7 +12415,7 @@ export async function clearKeyRateLimit(
     // The key's rows in every scope: `getAvailableKeyIndices` reads them all by suffix.
     const result = await tx.run(
       `UPDATE api_key_status
-         SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
+         SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
          WHERE keyType = ? AND keySuffix = ?
            AND status = 'rate_limited' AND ((? AND authFailureSeq <= ?) OR consecutiveAuthFailures < ?)`,
       [
@@ -12404,7 +12431,8 @@ export async function clearKeyRateLimit(
     if (!clearAuthBench) return cleared;
     const lifted = await tx.query<{ keySuffix: string }>(
       `UPDATE api_key_status SET consecutiveAuthFailures = 0, updatedAt = ?1,
-           status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END
+           status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END,
+           spendCap = CASE WHEN keySuffix = ?2 THEN spendCap END
          WHERE keyType = ?3 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
            AND ((keySuffix = ?2 AND authFailureSeq <= ?7)
              OR (keySuffix != ?2 AND keyIndex = ?6 AND scope = ?4 AND scopeId = ?5)) RETURNING keySuffix`,

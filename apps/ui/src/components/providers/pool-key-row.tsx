@@ -180,9 +180,11 @@ function KeySubLine({ k }: { k: ProviderKey }) {
     return (
       <span className="flex items-center gap-1 text-xs text-status-warning-strong">
         <Timer aria-hidden className="size-3 shrink-0" />
-        {k.rateLimitedUntil
-          ? `Rate limited, back at ${backAt(k.rateLimitedUntil)}`
-          : "Rate limited"}
+        {k.reason
+          ? k.reason
+          : k.rateLimitedUntil
+            ? `Rate limited, back at ${backAt(k.rateLimitedUntil)}`
+            : "Rate limited"}
       </span>
     );
   }

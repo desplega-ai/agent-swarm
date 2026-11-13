@@ -92,6 +92,7 @@ import { getContextWindowSize } from "../utils/context-window.ts";
 import {
   CredentialAllowlistError,
   type CredentialSelection,
+  KeySpendCapError,
   ModelWindowExhaustedError,
   normalizeProviderKeyAliases,
   resolveCredentialPools,
@@ -4640,7 +4641,9 @@ export async function spawnProviderProcess(
     ));
   } catch (err) {
     if (
-      (err instanceof ModelWindowExhaustedError || err instanceof CredentialAllowlistError) &&
+      (err instanceof ModelWindowExhaustedError ||
+        err instanceof CredentialAllowlistError ||
+        err instanceof KeySpendCapError) &&
       realTaskId
     ) {
       const reason = err.message;

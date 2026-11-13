@@ -53,6 +53,7 @@ src/be/migrations/  # migration runner and SQL files
 
 # Escape hatch: races and budgets that need injected readers and limits no route exposes.
 src/tests/primitives-object-webhooks.test.ts  # interleaved applyFileChange races, reindex byte/time budgets and replica ensure races need injected readers, gates and limits; the HTTP paths are in scripts/e2e/scenarios/knowledge-objects.ts
+src/tests/spend-cap-credentials.test.ts  # resolveCredentialPools runs only inside the worker harness, which the contract e2e suite never starts
 
 # Dashboard: stays on until Playwright is required and fills in (plan section 4).
 apps/ui/  # dashboard units, until the Playwright delete PR
