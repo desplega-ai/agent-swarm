@@ -30,6 +30,11 @@ export function getBearerHeaders(): Record<string, string> {
   return headers;
 }
 
+/** A `/`-rooted path; `//` and `/\` are rejected as protocol-relative forms. */
+function isApiPath(endpoint: unknown): endpoint is string {
+  return typeof endpoint === "string" && /^\/(?![/\\])/.test(endpoint);
+}
+
 export interface SwarmActionCallbacks {
   /** Test-injection: override `fetch` so dispatch is mockable. */
   fetchImpl?: typeof fetch;
@@ -70,6 +75,11 @@ export function createSwarmActionHandlers({
     "swarm.call": async (params: SwarmCallActionParams | undefined) => {
       onError(null);
       if (!params) return;
+      // The endpoint is appended to the API URL and sent with the viewer's
+      // bearer, so it must be a path: anything else can change the host.
+      if (!isApiPath(params.endpoint)) {
+        return fail(`swarm.call endpoint must be a path starting with "/": ${params.endpoint}`);
+      }
       let res: Response;
       let text: string;
       try {
