@@ -480,7 +480,9 @@ export class WorktreeReaper {
     const top = await git(entry.path, ["rev-parse", "--show-toplevel"]);
     if (info.prunable || real === null || top.stdout !== real) {
       if (real === null) return { verdict: "finish-remove", reason: "missing" };
-      if (entry.removingAt) return { verdict: "finish-remove", reason: "interrupted-remove" };
+      if (entry.removingAt && !isInside(entry.repoRoot, real)) {
+        return { verdict: "finish-remove", reason: "interrupted-remove" };
+      }
       return { verdict: "skip", reason: "broken" };
     }
     const dirty = await git(entry.path, ["status", "--porcelain", "--untracked-files=no"]);
