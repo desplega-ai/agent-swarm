@@ -1,0 +1,941 @@
+{
+  "format": "swarm-embed-cases/1",
+  "description": "Shared test cases for the Markdown tags <SwarmSheet …/> and <SwarmBoard …/>. Two copies must stay byte-identical: agent-fs live/src/lib/swarm-embed-cases.json and the agent-swarm dashboard apps/ui/src/lib/markdown/swarm-embed-cases.json. Each repo's matcher must return `expect` for every `matcher` case, and its Markdown renderer must produce `embeds` for every `documents` case.",
+  "grammar": {
+    "where": "Only a whole CommonMark HTML block (mdast `html` node whose parent is not inline content): alone on its line with a blank line before it and after it. Inline occurrences, tags in code and tags in table cells are not embeds.",
+    "matcher": "Trim the node value. Over 512 characters: none. Otherwise it must match TAG, else none. Then read attributes with ATTRIBUTE in source order. Per attribute: not in the tag's allow list gives invalid 'unknown attribute `name`'; a repeated name gives invalid 'duplicate attribute `name`'; a bad value gives the invalid message of that attribute. A missing id gives invalid 'id is required'. The first broken rule wins. No broken rule gives embed.",
+    "TAG": "^<(SwarmSheet|SwarmBoard)((?:\\s+[a-z][a-zA-Z]{0,19}=\"[^\"<>&{}\\n]{0,200}\")*)\\s*/>$",
+    "ATTRIBUTE": "\\s+([a-z][a-zA-Z]{0,19})=\"([^\"<>&{}\\n]{0,200})\"",
+    "attributes": {
+      "SwarmSheet": [
+        "id",
+        "tab",
+        "range",
+        "height",
+        "readonly"
+      ],
+      "SwarmBoard": [
+        "id",
+        "height",
+        "readonly",
+        "fit"
+      ]
+    },
+    "values": {
+      "id": "uuid (any case), kept as written. Message: id must be a uuid",
+      "tab": "1 to 100 characters. Message: tab must be 1 to 100 characters",
+      "range": "^(?:[A-Z]{1,3}[1-9][0-9]{0,6}(?::[A-Z]{1,3}[1-9][0-9]{0,6})?|[A-Z]{1,3}:[A-Z]{1,3})$. Message: range must be an A1 range",
+      "height": "integer 160 to 1200, as up to 4 digits, typed as a number. Message: height must be an integer from 160 to 1200",
+      "readonly": "\"true\" or \"false\", typed as a boolean. Message: readonly must be \"true\" or \"false\"",
+      "fit": "\"true\" only, typed as a boolean (SwarmBoard). Message: fit must be \"true\""
+    },
+    "errorMessage": "Invalid <Tag> tag: <reason>"
+  },
+  "statuses": {
+    "embed": "A valid tag. `props` holds the typed attributes that were present.",
+    "invalid": "The shape of a tag with a rule broken. The dashboard shows `error` in an error chip; agent-fs live leaves the text as it is.",
+    "none": "Not a tag. The HTML stays whatever the renderer does with it today."
+  },
+  "matcher": [
+    {
+      "name": "sheet with only an id",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+        }
+      }
+    },
+    {
+      "name": "board with only an id",
+      "category": "valid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmBoard",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+        }
+      }
+    },
+    {
+      "name": "sheet with every attribute",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"Q4 plan\" range=\"B2:D9\" height=\"480\" readonly=\"true\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "tab": "Q4 plan",
+          "range": "B2:D9",
+          "height": 480,
+          "readonly": true
+        }
+      }
+    },
+    {
+      "name": "board with every attribute",
+      "category": "valid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"640\" readonly=\"false\" fit=\"true\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmBoard",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "height": 640,
+          "readonly": false,
+          "fit": true
+        }
+      }
+    },
+    {
+      "name": "attributes in any order",
+      "category": "valid",
+      "html": "<SwarmSheet readonly=\"true\" range=\"A1:B2\" id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "range": "A1:B2",
+          "readonly": true
+        }
+      }
+    },
+    {
+      "name": "no space before the slash",
+      "category": "valid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"/>",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmBoard",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+        }
+      }
+    },
+    {
+      "name": "no attribute space before the slash, extra spaces inside",
+      "category": "valid",
+      "html": "<SwarmSheet   id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"    tab=\"Data\"   />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "tab": "Data"
+        }
+      }
+    },
+    {
+      "name": "surrounding whitespace is trimmed",
+      "category": "valid",
+      "html": "  \t<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />  \n",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+        }
+      }
+    },
+    {
+      "name": "attributes may span lines",
+      "category": "valid",
+      "html": "<SwarmSheet\n  id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"\n  tab=\"Data\"\n/>",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "tab": "Data"
+        }
+      }
+    },
+    {
+      "name": "uppercase uuid is kept as written",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7F1C2A4E-9B3D-4E61-8A0F-5C2D1E3B4A67\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7F1C2A4E-9B3D-4E61-8A0F-5C2D1E3B4A67"
+        }
+      }
+    },
+    {
+      "name": "a single cell range",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"B2\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "range": "B2"
+        }
+      }
+    },
+    {
+      "name": "a whole-column range",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"A:C\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "range": "A:C"
+        }
+      }
+    },
+    {
+      "name": "height lower bound",
+      "category": "valid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"160\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmBoard",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "height": 160
+        }
+      }
+    },
+    {
+      "name": "height upper bound",
+      "category": "valid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"1200\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmBoard",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "height": 1200
+        }
+      }
+    },
+    {
+      "name": "tab of exactly 100 characters",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\" />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67",
+          "tab": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+        }
+      }
+    },
+    {
+      "name": "tag of exactly 512 characters",
+      "category": "valid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"                                                                                                                                                                                                                                                                                                                                                                                                                                                                         />",
+      "expect": {
+        "status": "embed",
+        "tag": "SwarmSheet",
+        "props": {
+          "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+        }
+      }
+    },
+    {
+      "name": "no attributes",
+      "category": "invalid",
+      "html": "<SwarmSheet />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: id is required"
+      }
+    },
+    {
+      "name": "id missing",
+      "category": "invalid",
+      "html": "<SwarmBoard height=\"400\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: id is required"
+      }
+    },
+    {
+      "name": "onload attribute",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" onload=\"alert(1)\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: unknown attribute `onload`"
+      }
+    },
+    {
+      "name": "mixed-case event attribute",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" onLoad=\"alert(1)\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: unknown attribute `onLoad`"
+      }
+    },
+    {
+      "name": "style attribute",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" style=\"position:fixed\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: unknown attribute `style`"
+      }
+    },
+    {
+      "name": "class attribute",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" class=\"x\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: unknown attribute `class`"
+      }
+    },
+    {
+      "name": "board attribute on a sheet",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" fit=\"true\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: unknown attribute `fit`"
+      }
+    },
+    {
+      "name": "sheet attribute on a board",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"Data\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: unknown attribute `tab`"
+      }
+    },
+    {
+      "name": "range on a board",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"A1:B2\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: unknown attribute `range`"
+      }
+    },
+    {
+      "name": "id is not a uuid",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"not-a-uuid\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: id must be a uuid"
+      }
+    },
+    {
+      "name": "javascript: as the id",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"javascript:alert(1)\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: id must be a uuid"
+      }
+    },
+    {
+      "name": "id with a path",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"../../etc/passwd\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: id must be a uuid"
+      }
+    },
+    {
+      "name": "empty id",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: id must be a uuid"
+      }
+    },
+    {
+      "name": "duplicate id",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: duplicate attribute `id`"
+      }
+    },
+    {
+      "name": "height below the range",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"159\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "height above the range",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"1201\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "height not a number",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"tall\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "height with a decimal",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"400.5\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "height with a unit",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" height=\"400px\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "readonly that is not a boolean word",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" readonly=\"yes\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: readonly must be \"true\" or \"false\""
+      }
+    },
+    {
+      "name": "fit set to false",
+      "category": "invalid",
+      "html": "<SwarmBoard id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" fit=\"false\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmBoard",
+        "error": "Invalid SwarmBoard tag: fit must be \"true\""
+      }
+    },
+    {
+      "name": "range in lowercase",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"a1:b2\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: range must be an A1 range"
+      }
+    },
+    {
+      "name": "range with a tab prefix",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"Sheet1!A1\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: range must be an A1 range"
+      }
+    },
+    {
+      "name": "range with a missing end",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" range=\"A1:\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: range must be an A1 range"
+      }
+    },
+    {
+      "name": "empty tab",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: tab must be 1 to 100 characters"
+      }
+    },
+    {
+      "name": "tab of 101 characters",
+      "category": "invalid",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: tab must be 1 to 100 characters"
+      }
+    },
+    {
+      "name": "the first broken rule wins, in attribute order",
+      "category": "invalid",
+      "html": "<SwarmSheet height=\"1\" id=\"x\" onload=\"y\" />",
+      "expect": {
+        "status": "invalid",
+        "tag": "SwarmSheet",
+        "error": "Invalid SwarmSheet tag: height must be an integer from 160 to 1200"
+      }
+    },
+    {
+      "name": "expression in a value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"{x}\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "expression as an attribute value",
+      "category": "hostile",
+      "html": "<SwarmSheet id={uuid} />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "expression as an attribute",
+      "category": "hostile",
+      "html": "<SwarmSheet {...props} />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "single-quoted value",
+      "category": "hostile",
+      "html": "<SwarmSheet id='7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67' />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "unquoted value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67 />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "entity in a value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"a&amp;b\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "angle bracket in a value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"<b>\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "nested tag",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"><b>x</b></SwarmSheet>",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "newline inside a value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"a\nb\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "uppercase attribute name",
+      "category": "hostile",
+      "html": "<SwarmSheet ID=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "capitalised attribute name",
+      "category": "hostile",
+      "html": "<SwarmSheet Id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "attribute name of 21 letters",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" aaaaaaaaaaaaaaaaaaaaa=\"x\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "attribute value of 201 characters",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" tab=\"ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "attribute without a value",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" readonly />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "lowercase tag name",
+      "category": "hostile",
+      "html": "<swarmsheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "uppercase tag name",
+      "category": "hostile",
+      "html": "<SWARMSHEET id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "unknown tag name",
+      "category": "hostile",
+      "html": "<SwarmChart id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "not self-closed",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\">",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "closing tag instead of self-close",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"></SwarmSheet>",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "unclosed",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "space between slash and bracket",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" / >",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "text after the tag",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" /> and more",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "second tag on the line",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" /><SwarmBoard id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "text before the tag",
+      "category": "hostile",
+      "html": "see <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "tag of 513 characters",
+      "category": "hostile",
+      "html": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"                                                                                                                                                                                                                                                                                                                                                                                                                                                                          />",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "script element",
+      "category": "hostile",
+      "html": "<script>alert(1)</script>",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "javascript: link",
+      "category": "hostile",
+      "html": "<a href=\"javascript:alert(1)\">x</a>",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "iframe",
+      "category": "hostile",
+      "html": "<iframe srcdoc=\"<script>parent.x=1</script>\"></iframe>",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "an HTML comment",
+      "category": "hostile",
+      "html": "<!-- <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" /> -->",
+      "expect": {
+        "status": "none"
+      }
+    },
+    {
+      "name": "empty string",
+      "category": "hostile",
+      "html": "",
+      "expect": {
+        "status": "none"
+      }
+    }
+  ],
+  "documents": [
+    {
+      "name": "a sheet and a board between prose",
+      "markdown": "# Report\n\nBefore.\n\n<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n\nBetween.\n\n<SwarmBoard id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" height=\"400\" />\n\nAfter.\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        },
+        {
+          "tag": "SwarmBoard",
+          "props": {
+            "id": "0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384",
+            "height": 400
+          }
+        }
+      ],
+      "visibleText": []
+    },
+    {
+      "name": "two embeds in a row",
+      "markdown": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n\n<SwarmBoard id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" height=\"400\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        },
+        {
+          "tag": "SwarmBoard",
+          "props": {
+            "id": "0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384",
+            "height": 400
+          }
+        }
+      ],
+      "visibleText": []
+    },
+    {
+      "name": "a hostile tag is text and the valid tag still renders",
+      "markdown": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n\n<SwarmBoard id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" onload=\"alert(1)\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        }
+      ],
+      "visibleText": [
+        "<SwarmBoard id=\"0d9b6e2a-3c41-4f8e-b7a5-91e2c6f0d384\" onload=\"alert(1)\" />"
+      ]
+    },
+    {
+      "name": "an expression tag is text",
+      "markdown": "Intro.\n\n<SwarmSheet id={uuid} />\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id={uuid} />"
+      ]
+    },
+    {
+      "name": "a tag inside a paragraph is not an embed",
+      "markdown": "Text <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" /> more text.\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "a tag right after a paragraph line is not an embed",
+      "markdown": "A paragraph line\n<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "a tag with a line after it, no blank line, is not an embed",
+      "markdown": "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\nnext line\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />",
+        "next line"
+      ]
+    },
+    {
+      "name": "a tag split over lines is not an embed",
+      "markdown": "<SwarmSheet\n  id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\"\n/>\n",
+      "embeds": [],
+      "visibleText": [
+        "id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\""
+      ]
+    },
+    {
+      "name": "a tag in a fenced code block is code",
+      "markdown": "```html\n<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n```\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "a tag in inline code is code",
+      "markdown": "Write `<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />` to embed.\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "a tag indented four spaces is a code block",
+      "markdown": "Intro.\n\n    <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "a tag indented three spaces is an embed",
+      "markdown": "Intro.\n\n   <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        }
+      ],
+      "visibleText": []
+    },
+    {
+      "name": "a tag in a blockquote is an embed",
+      "markdown": "> Quoted.\n>\n> <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        }
+      ],
+      "visibleText": []
+    },
+    {
+      "name": "a tag in a list item is an embed",
+      "markdown": "- item\n\n  <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        }
+      ],
+      "visibleText": []
+    },
+    {
+      "name": "a tag in a table cell is not an embed",
+      "markdown": "| a |\n| - |\n| <SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" /> |\n",
+      "embeds": [],
+      "visibleText": [
+        "<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />"
+      ]
+    },
+    {
+      "name": "other HTML is not an embed",
+      "markdown": "<details>\n<summary>x</summary>\n</details>\n\n<SwarmSheet id=\"7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67\" />\n",
+      "embeds": [
+        {
+          "tag": "SwarmSheet",
+          "props": {
+            "id": "7f1c2a4e-9b3d-4e61-8a0f-5c2d1e3b4a67"
+          }
+        }
+      ],
+      "visibleText": []
+    }
+  ]
+}
