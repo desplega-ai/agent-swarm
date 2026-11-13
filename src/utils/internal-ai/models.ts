@@ -14,12 +14,34 @@
  *     env (kept for backwards-compat with the claude hook).
  */
 
-export type CredentialKind = "openrouter" | "anthropic" | "openai" | "openai-codex" | "claude-cli";
+/**
+ * A provider the internal-ai layer can call. The value doubles as the
+ * `provider/` prefix a model string carries (`parseModelStr`), so a kind and
+ * its provider id are the same string by construction.
+ */
+export type CredentialKind =
+  | "openrouter"
+  | "anthropic"
+  | "openai"
+  | "openai-codex"
+  | "claude-cli"
+  | "fireworks"
+  | "amazon-bedrock";
 
 /**
  * Per-credential default model strings. The "claude-cli" kind uses the
  * shorthand "haiku" because the only consumer is the `claude -p --model haiku`
  * shellout, not pi-ai's `getModel`.
+ *
+ * Every `provider/model-id` value here must exist in pi-ai's own catalog
+ * (`getBuiltinModel(provider, modelId)`), because `complete-structured.ts`
+ * resolves it through that catalog and a miss is a silent no-op.
+ *
+ * `amazon-bedrock` names a cross-region inference profile
+ * (`global.` prefix). A foundation-model id would only be invocable in the one
+ * region that owns it, and the profile prefix is what current Claude models on
+ * Bedrock actually take. Pin a region-scoped profile (`us.…`, `eu.…`) with
+ * `MEMORY_RATER_MODEL` / `TASK_AUTO_TITLE_MODEL` where an account needs one.
  */
 export const DEFAULT_MODEL: Record<CredentialKind, string> = {
   openrouter: "openrouter/deepseek/deepseek-v4.1-flash",
@@ -27,6 +49,8 @@ export const DEFAULT_MODEL: Record<CredentialKind, string> = {
   openai: "openai/gpt-6-luna",
   "openai-codex": "openai-codex/gpt-6-luna",
   "claude-cli": "haiku",
+  fireworks: "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+  "amazon-bedrock": "amazon-bedrock/global.anthropic.claude-haiku-5-5",
 };
 
 /**
@@ -46,6 +70,16 @@ export const MEMORY_RATER_DEFAULT_MODEL: Record<CredentialKind, string> = {
   openai: "openai/gpt-6-luna",
   "openai-codex": "openai-codex/gpt-6-luna",
   "claude-cli": "haiku",
+  // Same model family as the OpenRouter judge above (DeepSeek V4.1 Flash), so a
+  // Fireworks deployment rates with the model the distribution was tuned on
+  // rather than shifting it. `fireworks/accounts/fireworks/models/…` is the
+  // provider's native id; the `routers/…` variants cost more per token.
+  fireworks: "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+  // A Haiku, i.e. the same family the Anthropic kind rates with, reached
+  // through a global inference profile. Not `anthropic.claude-haiku-4-5`: that
+  // generation costs 1.00/5.00 per million on Bedrock, ten times this one, and
+  // a new kind has no existing rating distribution to stay consistent with.
+  "amazon-bedrock": "amazon-bedrock/global.anthropic.claude-haiku-5-5",
 };
 
 /**
@@ -64,6 +98,8 @@ const PROVIDER_TO_KIND: Record<string, CredentialKind> = {
   anthropic: "anthropic",
   openai: "openai",
   "openai-codex": "openai-codex",
+  fireworks: "fireworks",
+  "amazon-bedrock": "amazon-bedrock",
 };
 
 /**
