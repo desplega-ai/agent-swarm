@@ -93,10 +93,11 @@ export const CHANNEL_DEFS: ChannelDef[] = [
     name: "Rocket.Chat",
     description: "Mention the bot in a self-hosted Rocket.Chat room.",
     needs: "Instance URL, access token and webhook token",
+    logoSrc: "/integration-logos/rocketchat.svg",
     href: chatSdkAdapterHref("rocketchat"),
     keywords: ["chat sdk", "rocket.chat", "self-hosted", "on-prem"],
     more: true,
-    beta: "Tested only against fixtures so far, not a real server. The adapter is a community package.",
+    beta: "Tested only against fixtures so far, not a real server.",
     adapter: "rocketchat",
   },
   {
