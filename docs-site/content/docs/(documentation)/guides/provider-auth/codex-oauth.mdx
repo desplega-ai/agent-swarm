@@ -99,6 +99,8 @@ The device code expires after 15 minutes. The API limits checks to OpenAI's requ
 
 After approval, the API exchanges the code and stores the credential in the first free `codex_oauth_N` slot.
 
+The setup card's **Run agents on** control picks the harness for the subscription: Codex (the default) or Pi-Mono. Pi-Mono agents get `openai-codex/<model>` models, which run on the same `codex_oauth` slots. Opencode is not offered: it keeps credentials in its own store and cannot read these slots.
+
 You can also call the same authenticated API directly:
 
 ```bash

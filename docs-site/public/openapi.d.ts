@@ -9134,7 +9134,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A non-admin user token named an email other than its own */
+                /** @description The caller is not the operator key or a user, or a non-admin user token named an email other than its own */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30543,6 +30543,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow run not found */
                 404: {
                     headers: {
@@ -30606,6 +30615,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

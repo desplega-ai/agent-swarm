@@ -201,7 +201,10 @@ With multi-runtime mode enabled, one logical agent may be served by several
 worker processes, each recorded in `runtime_instances`. Workers send their per-boot `X-Runtime-Instance-ID` on `POST /ping` and on
 `GET /api/poll`; either refreshes that row's `last_seen_at`, so liveness
 tracks actual worker traffic rather than one endpoint's cadence — a worker
-sitting inside the long-poll loop keeps itself fresh. For pooled runtimes, `POST /close` retires
+sitting inside the long-poll loop keeps itself fresh. An idle `/api/poll`
+runs read-only and skips the refresh while `last_seen_at` is newer than a
+tenth of `RUNTIME_STALE_THRESHOLD_MIN` (30 s at the default); it takes the
+write lock only to refresh, claim, or record a budget refusal. For pooled runtimes, `POST /close` retires
 the row only when the runner sends `runtimeShutdown: true`. Session hooks preserve the row and token.
 Static workers retain their existing close behavior. A ping cannot revive a retired or expired runtime: the refresh
 only matches a row that is already live, and registration is the sole path

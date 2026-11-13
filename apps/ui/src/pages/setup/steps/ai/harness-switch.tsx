@@ -43,8 +43,10 @@ async function switchOne(
     const { configs } = await queryClient.fetchQuery(resolvedConfigsQuery({ agentId: id }));
     const model = configs.find((c) => c.key === "MODEL_OVERRIDE");
     const effort = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
-    const level =
+    const carried =
       model?.scope === "agent" ? dialLevelOfAnyHarness(model.value, effort, dialContext) : null;
+    // pi with no subscription model would run its OpenRouter tier default: write Optimal.
+    const level = carried ?? (harness === "pi" && dialContext.chatgpt ? "optimal" : null);
     const setting = level ? dialSetting(harness, level, dialContext) : null;
     if (setting) {
       await api.updateAgentRuntime({
@@ -114,7 +116,10 @@ export function HarnessSwitch({
   dialContext: DialContext;
 }) {
   const queryClient = useQueryClient();
-  const [target, setTarget] = useState<ProviderName>(targets[0]);
+  const [picked, setTarget] = useState<ProviderName>(targets[0]);
+  // The card's targets can change while the list stays mounted (Run agents on
+  // Codex -> Pi-Mono): a pick outside the new targets falls back to the first.
+  const target = targets.includes(picked) ? picked : targets[0];
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
 

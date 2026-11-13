@@ -126,16 +126,18 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "fable",
   },
   "claude-managed": {
-    smol: "claude-haiku-4-5",
-    regular: "claude-sonnet-5",
-    smart: "claude-opus-4-8",
-    ultra: "claude-fable-5",
+    smol: "claude-haiku-5-5",
+    regular: "claude-sonnet-5-5",
+    smart: "claude-opus-5-5",
+    ultra: "claude-fable-5-1",
   },
+  // The newest model of each GPT family (luna, terra, sol, astra) in the
+  // catalog; apps/ui/src/lib/model-catalog-drift.test.ts fails when one ages.
   codex: {
-    smol: "gpt-5.6-luna",
-    regular: "gpt-5.6-terra",
-    smart: "gpt-5.6-sol",
-    ultra: "gpt-5.6-sol",
+    smol: "gpt-6-luna",
+    regular: "gpt-6.1-terra",
+    smart: "gpt-6.1-sol",
+    ultra: "gpt-6-astra",
   },
   pi: {
     smol: "openrouter/deepseek/deepseek-v4.1-flash",

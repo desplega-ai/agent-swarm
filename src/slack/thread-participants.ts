@@ -9,7 +9,6 @@ import { getFirstTaskInThread } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import type { SlackParticipantTrust, TaskSlackParticipant, TaskSlackParticipants } from "../types";
 import {
-  getOurSlackTeamId,
   resolveSlackParticipant,
   rewriteSlackMentions,
   type SlackParticipantResolution,
@@ -118,9 +117,6 @@ export async function buildSlackThreadSnapshot(
   ].filter((id) => id !== botUserId);
   const listed = ordered.slice(0, SLACK_PARTICIPANT_CAP);
 
-  const ourTeamId = [...latest.values()].some((entry) => entry.userTeam)
-    ? await getOurSlackTeamId(client)
-    : undefined;
   // shortcut: people past the cap are not resolved, so their trust is unknown to the "untrusted present" rule; resolve them too if the cap ever hides one.
   const people: TaskSlackParticipant[] = await Promise.all(
     listed.map(async (slackUserId) => {
@@ -128,7 +124,6 @@ export async function buildSlackThreadSnapshot(
         sampleEventType: opts.sampleEventType,
         sampleContext: latest.get(slackUserId)?.text ?? "",
         userTeam: latest.get(slackUserId)?.userTeam,
-        ourTeamId,
       });
       return {
         slackUserId,

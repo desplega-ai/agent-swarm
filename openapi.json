@@ -25944,7 +25944,7 @@
             }
           },
           "403": {
-            "description": "A non-admin user token named an email other than its own",
+            "description": "The caller is not the operator key or a user, or a non-admin user token named an email other than its own",
             "content": {
               "application/json": {
                 "schema": {
@@ -73481,6 +73481,16 @@
               }
             }
           },
+          "403": {
+            "description": "Event name is reserved for provider webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Workflow run not found",
             "content": {
@@ -73556,6 +73566,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Event name is reserved for provider webhooks",
             "content": {
               "application/json": {
                 "schema": {
