@@ -14,11 +14,21 @@ import {
   toolErr,
   toolOk,
 } from "@/tools/utils";
-import { AgentTaskStatusSchema } from "@/types";
+import { type AgentLog, type AgentTask, AgentTaskStatusSchema, type TaskAttachment } from "@/types";
 import { getUserCommsPrefs } from "@/utils/requester-comms";
+
+/** Extras a caller can add on top of the compact default response. */
+export const GET_TASK_DETAILS_INCLUDE = ["logs", "fullText", "requester"] as const;
+type GetTaskDetailsInclude = (typeof GET_TASK_DETAILS_INCLUDE)[number];
 
 export const getTaskDetailsInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to get details for."),
+  include: z
+    .array(z.enum(GET_TASK_DETAILS_INCLUDE))
+    .optional()
+    .describe(
+      'Optional extras beyond the compact default. "logs": every log entry with all its fields (default: lifecycle events plus the last 5 progress lines, values cut to 300 chars). "fullText": task, output, failureReason and progress uncut (default cuts long ones). "requester": the requester\'s notes and communication preferences.',
+    ),
 });
 
 // Loosened, output-only mirror of FollowUpConfigSchema / RoutingAffinitySchema
@@ -176,7 +186,23 @@ export const getTaskDetailsOutputSchema = swarmToolOutputSchema({
     .describe(
       "Resolved user who requested this task, with role/notes and structured communication preferences (users.metadata.comms) when set",
     ),
-  logs: z.array(looseAgentLogSchema).optional(),
+  logs: z
+    .array(looseAgentLogSchema)
+    .optional()
+    .describe(
+      'Log history. Compact by default (lifecycle events plus the last progress lines); include "logs" for every entry.',
+    ),
+  slimmed: z
+    .looseObject({
+      cutText: z.record(z.string(), z.number()).optional(),
+      omittedLogs: z.number().optional(),
+      requesterOmitted: z.boolean().optional(),
+      include: z.string().optional(),
+    })
+    .optional()
+    .describe(
+      "What the compact default left out: original char counts of cut text fields, the number of log entries not shown, and the include values that return them.",
+    ),
   attachments: z
     .array(looseTaskAttachmentSchema)
     .optional()
@@ -187,9 +213,58 @@ export const getTaskDetailsOutputSchema = swarmToolOutputSchema({
 
 type GetTaskDetailsArgs = z.infer<typeof getTaskDetailsInputSchema>;
 
+// Compact default. Most get-task-details calls come from a model checking a task's state, and
+// the full row plus every log entry and the requester profile passes the 10 KB wire limit on
+// most real tasks, which spills the whole response to KV and costs the caller a second call.
+// The default keeps every field agents act on (status, output, failureReason, attachments,
+// parentTaskId), cuts long text, and trims the log history; `include` returns the rest.
+const TEXT_LIMITS = { task: 3000, output: 3000, failureReason: 1500, progress: 600 } as const;
+const LOG_VALUE_LIMIT = 300;
+const RECENT_PROGRESS_LOGS = 5;
+const MAX_COMPACT_LOGS = 15;
+
+function cutText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}… [cut at ${limit} of ${value.length} chars; include "fullText" for all]`;
+}
+
+/** Drop null, undefined, empty-string, empty-array and empty-object values. */
+function withoutEmpty<T extends object>(record: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value === null || value === undefined || value === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out as Partial<T>;
+}
+
+function compactLogs(logs: AgentLog[]): AgentLog[] {
+  const lastProgress = new Set(
+    logs.filter((log) => log.eventType === "task_progress").slice(-RECENT_PROGRESS_LOGS),
+  );
+  let kept = logs.filter((log) => log.eventType !== "task_progress" || lastProgress.has(log));
+  if (kept.length > MAX_COMPACT_LOGS) {
+    const [first, ...rest] = kept;
+    kept = first ? [first, ...rest.slice(-(MAX_COMPACT_LOGS - 1))] : [];
+  }
+  return kept.map(
+    (log) =>
+      withoutEmpty({
+        eventType: log.eventType,
+        oldValue: log.oldValue ? cutText(log.oldValue, LOG_VALUE_LIMIT) : undefined,
+        newValue: log.newValue ? cutText(log.newValue, LOG_VALUE_LIMIT) : undefined,
+        createdAt: log.createdAt,
+      }) as AgentLog,
+  );
+}
+
 export async function getTaskDetailsHandler(
   ctx: ToolCtx,
-  { taskId }: GetTaskDetailsArgs,
+  { taskId, include }: GetTaskDetailsArgs,
 ): Promise<SwarmToolResult> {
   const task = await getTaskById(taskId);
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
@@ -208,7 +283,7 @@ export async function getTaskDetailsHandler(
   const requestedByUser = task.requestedByUserId
     ? await getUserById(task.requestedByUserId)
     : undefined;
-  const requestedBy = requestedByUser
+  const requesterProfile = requestedByUser
     ? {
         name: requestedByUser.name,
         email: requestedByUser.email,
@@ -218,15 +293,68 @@ export async function getTaskDetailsHandler(
       }
     : undefined;
 
+  // Script and extension calls never reach a model context and get their own response guard,
+  // so they keep the complete shape.
+  const origin = ctx.kind === "owner" ? ctx.requestInfo?.callOrigin : undefined;
+  const full = origin === "script-sdk" || origin === "extension";
+  const wants = (value: GetTaskDetailsInclude) => full || (include?.includes(value) ?? false);
+
+  const cut: Record<string, number> = {};
+  let shownTask: Partial<AgentTask> = task;
+  if (!full) {
+    shownTask = withoutEmpty(task);
+    if (!wants("fullText")) {
+      for (const [field, limit] of Object.entries(TEXT_LIMITS) as Array<
+        [keyof typeof TEXT_LIMITS, number]
+      >) {
+        const value = shownTask[field];
+        if (typeof value === "string" && value.length > limit) {
+          cut[field] = value.length;
+          shownTask = { ...shownTask, [field]: cutText(value, limit) };
+        }
+      }
+    }
+  }
+
+  const shownLogs = wants("logs") ? logs : compactLogs(logs);
+  const requesterOmitted =
+    !wants("requester") && Boolean(requesterProfile?.notes || requesterProfile?.comms);
+  const requestedBy =
+    requesterProfile && requesterOmitted
+      ? { name: requesterProfile.name, email: requesterProfile.email, role: requesterProfile.role }
+      : requesterProfile;
+
+  const omittedLogs = logs.length - shownLogs.length;
+  const wanted = [
+    Object.keys(cut).length > 0 ? "fullText" : undefined,
+    logs.length > 0 && !wants("logs") ? "logs" : undefined,
+    requesterOmitted ? "requester" : undefined,
+  ].filter((value): value is GetTaskDetailsInclude => Boolean(value));
+  const slimmed =
+    !full && wanted.length > 0
+      ? withoutEmpty({
+          cutText: cut,
+          omittedLogs: omittedLogs > 0 ? omittedLogs : undefined,
+          requesterOmitted: requesterOmitted || undefined,
+          include: JSON.stringify(wanted),
+        })
+      : undefined;
+
   const data = {
     yourAgentId: agentId,
-    task,
+    task: shownTask,
     requestedBy,
-    logs,
-    attachments,
+    logs: shownLogs,
+    attachments: full
+      ? attachments
+      : attachments.map((attachment) => withoutEmpty(attachment) as TaskAttachment),
+    ...(slimmed ? { slimmed } : {}),
   };
 
-  return toolOk(`Task "${taskId}" (${task.status}) details retrieved.`, {
+  const message = slimmed
+    ? `Task "${taskId}" (${task.status}) details retrieved. Compact view; include ${slimmed.include} for the rest.`
+    : `Task "${taskId}" (${task.status}) details retrieved.`;
+  return toolOk(message, {
     details: JSON.stringify(data),
     data,
   });
@@ -238,7 +366,7 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
     {
       title: "Get task details",
       description:
-        "Returns detailed information about a specific task, including output, failure reason, and log history.",
+        'Returns detailed information about a specific task, including output, failure reason, and log history. The default view is compact: long text is cut, the log history is trimmed, and the requester profile is reduced to name, email and role. Pass include ["fullText", "logs", "requester"] for the rest.',
       annotations: { readOnlyHint: true },
       inputSchema: getTaskDetailsInputSchema,
       outputSchema: getTaskDetailsOutputSchema,
