@@ -19644,7 +19644,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge */
+                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -19797,7 +19797,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -33273,13 +33273,42 @@ export interface components {
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
+        RepoMergePolicy: {
+            autoMerge?: {
+                /** @default false */
+                enabled: boolean;
+                /** @default 80 */
+                threshold: number;
+                /** @default {} */
+                baseScores: {
+                    [key: string]: number;
+                };
+                /** @default {} */
+                maxLines: {
+                    [key: string]: number;
+                };
+                /** @default [] */
+                riskyPaths: string[];
+                /** @default [] */
+                classes: string[];
+            };
+            agentsMayMerge?: boolean;
+            notify?: {
+                /** @default true */
+                dmWhenNotAutoMerging: boolean;
+                digestAt?: string;
+                timezone?: string;
+            };
+        };
         RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
         RequestComposition: {
             /** Format: uuid */
