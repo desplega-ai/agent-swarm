@@ -759,6 +759,12 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
                 REPO_HOOKS_ENABLED=$(echo "$repo" | jq -r '.hooks.enabled // false')
 
+                # A leading dash would reach git as an option (git fetch has --upload-pack).
+                if [[ "$REPO_URL" == -* || "$REPO_BRANCH" == -* ]]; then
+                    echo "  Skipping ${REPO_NAME}: url and branch must not start with '-'"
+                    continue
+                fi
+
                 # Ensure parent directory exists and is owned by worker so the
                 # gosu-dropped clone/pull below can write into it. Lenient chown
                 # mirrors the pattern used for /workspace/personal subdirs above.
@@ -774,18 +780,19 @@ if [ -n "$AGENT_ID" ]; then
                     # Keep feature branches and dirty worktrees untouched; clean default
                     # branches are reset to origin so local swarm-autostash commits do
                     # not permanently block startup updates.
-                    gosu worker bash -c "cd '$REPO_DIR' && \
-                        CURRENT_BRANCH=\$(git branch --show-current) && \
-                        if [ \"\$CURRENT_BRANCH\" != '$REPO_BRANCH' ]; then \
-                            echo '    Skipping sync: checked out on' \"\$CURRENT_BRANCH\"; \
+                    # Fields go in as positional args, never spliced into the script.
+                    gosu worker bash -c 'cd -- "$1" && \
+                        CURRENT_BRANCH=$(git branch --show-current) && \
+                        if [ "$CURRENT_BRANCH" != "$2" ]; then \
+                            echo "    Skipping sync: checked out on" "$CURRENT_BRANCH"; \
                             exit 0; \
                         fi && \
                         if ! git diff --quiet || ! git diff --cached --quiet; then \
-                            echo '    Skipping sync: worktree has local changes'; \
+                            echo "    Skipping sync: worktree has local changes"; \
                             exit 0; \
                         fi && \
-                        git fetch origin '$REPO_BRANCH' --prune && \
-                        git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
+                        git fetch origin "$2" --prune && \
+                        git reset --hard "origin/$2"' bash "$REPO_DIR" "$REPO_BRANCH" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
                     prepare_clone_target "$REPO_DIR"
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
@@ -796,10 +803,9 @@ if [ -n "$AGENT_ID" ]; then
                     # hostname has no "gitlab." in it (empty glob when GITLAB_URL is unset).
                     GITLAB_URL_GLOB="${GITLAB_URL:+${GITLAB_URL%/}/*}"
                     case "$REPO_URL" in
-                        *dev.azure.com*|*.visualstudio.com*|*bitbucket.org*|*gitlab.*|$GITLAB_URL_GLOB) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
-                        *) CLONE_CMD="gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" ;;
-                    esac
-                    gosu worker bash -c "$CLONE_CMD" || echo "  Warning: Could not clone ${REPO_NAME}"
+                        *dev.azure.com*|*.visualstudio.com*|*bitbucket.org*|*gitlab.*|$GITLAB_URL_GLOB) gosu worker git clone --branch "$REPO_BRANCH" --single-branch -- "$REPO_URL" "$REPO_DIR" ;;
+                        *) gosu worker gh repo clone "$REPO_URL" "$REPO_DIR" -- --branch "$REPO_BRANCH" --single-branch ;;
+                    esac || echo "  Warning: Could not clone ${REPO_NAME}"
                 fi
 
                 if [ "$REPO_HOOKS_ENABLED" = "true" ]; then
