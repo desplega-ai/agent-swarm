@@ -795,6 +795,8 @@ export interface ProviderKey {
   /** Why the key is failing or limited ("HTTP 401", "Sign in again"). */
   reason: string | null;
   rateLimitedUntil: string | null;
+  /** Set when the limit is a provider spend cap. */
+  spendCap: SpendCap | null;
   lastUsedAt: string | null;
   plan: string | null;
   planSource: ApiKeyStatus["planSource"];
@@ -938,6 +940,7 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
     details: {
       reason?: string | null;
       rateLimitedUntil?: string | null;
+      spendCap?: SpendCap | null;
       accountPlan?: string | null;
     },
   ): ProviderKey {
@@ -953,6 +956,7 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
       health,
       reason: details.reason ?? null,
       rateLimitedUntil: details.rateLimitedUntil ?? status?.rateLimitedUntil ?? null,
+      spendCap: details.spendCap ?? null,
       lastUsedAt: status?.lastUsedAt ?? null,
       plan: status?.plan ?? null,
       planSource: status?.planSource ?? null,
@@ -1007,6 +1011,7 @@ export function buildProviderRows(input: ProviderRowsInput): ProviderRow[] {
         makeKey(poolVar, key.index, key.suffix, `Key ending ${key.suffix}`, poolKeyHealth(key), {
           reason: key.spendCap ? spendCapText(key.spendCap) : key.error,
           rateLimitedUntil: key.rateLimitedUntil,
+          spendCap: key.spendCap,
         }),
       );
     }
@@ -1033,12 +1038,18 @@ export function countLabel(count: number, noun: string): string {
 }
 
 /** The chip text of a provider row. */
-export function healthLabel(row: Pick<ProviderRow, "health" | "worstCount">): string {
+export function healthLabel(
+  row: Pick<ProviderRow, "health" | "worstCount"> & {
+    keys?: Pick<ProviderKey, "health" | "spendCap">[];
+  },
+): string {
   switch (row.health) {
     case "failing":
       return "Failing";
     case "limited":
-      return `${row.worstCount} rate limited`;
+      return row.keys?.every((k) => k.health !== "limited" || k.spendCap)
+        ? `${row.worstCount} spend capped`
+        : `${row.worstCount} rate limited`;
     case "unchecked":
       return "Not checked yet";
     default:
