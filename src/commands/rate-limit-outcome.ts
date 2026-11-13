@@ -3,6 +3,7 @@ import {
   isCodexCreditsExhaustedMessage,
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
+  MAX_SPEND_CAP_HOLD_MS,
   parseRateLimitResetTime,
   type RateLimitWindowTelemetry,
   type SpendCap,
@@ -68,12 +69,6 @@ function clampMs(candidateMs: number, nowMs: number, maxResetMs = MAX_RATE_LIMIT
   const maxMs = nowMs + maxResetMs;
   return Math.min(Math.max(candidateMs, minMs), maxMs);
 }
-
-/**
- * Longest a spend-capped key stays benched: a monthly key limit resets up to
- * 31 days out, and a cap with no reset holds this long unless the key is edited.
- */
-export const MAX_SPEND_CAP_HOLD_MS = 31 * 24 * 60 * 60 * 1000;
 
 /** OpenRouter's key spend limit (403 `openrouter_key_limit`) and its out-of-credits 402. */
 const SPEND_CAP_TEXT =

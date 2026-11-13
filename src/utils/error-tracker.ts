@@ -180,6 +180,12 @@ export function redactRateLimitEventLine(line: string): string {
 export const MAX_RATE_LIMIT_RESET_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Longest a spend-capped key stays benched: a monthly key limit resets up to
+ * 31 days out, and a cap with no reset holds this long unless the key is edited.
+ */
+export const MAX_SPEND_CAP_HOLD_MS = 31 * 24 * 60 * 60 * 1000;
+
+/**
  * Single source of truth for "does this text look like a rate-limit signal?".
  * Shared by the runner's cooldown gate and {@link parseStderrForErrors} so the
  * two matchers can't drift. Tolerates a qualifier between "your" and "limit"

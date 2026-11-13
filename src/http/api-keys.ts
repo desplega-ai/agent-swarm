@@ -20,7 +20,11 @@ import {
   KeyWindowUsageLimitError,
   keyWindowUsageSchema,
 } from "../be/key-window-usage";
-import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
+import {
+  MAX_RATE_LIMIT_RESET_MS,
+  MAX_SPEND_CAP_HOLD_MS,
+  type RateLimitWindowTelemetry,
+} from "../utils/error-tracker";
 import {
   activeModelBlocks,
   isModelScopedWindow,
@@ -757,8 +761,12 @@ export async function handleApiKeys(
     const parsed = await reportRateLimit.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId, spendCap } =
-      parsed.body;
+    const { keyType, keySuffix, keyIndex, scope, scopeId, spendCap } = parsed.body;
+    // A spend cap fails admission for the whole pool, so the reporter never sets an unbounded hold.
+    const holdUntilMs = Date.now() + (spendCap ? MAX_SPEND_CAP_HOLD_MS : MAX_RATE_LIMIT_RESET_MS);
+    const rateLimitedUntil = new Date(
+      Math.min(Date.parse(parsed.body.rateLimitedUntil), holdUntilMs),
+    ).toISOString();
     try {
       await markKeyRateLimited(
         keyType,

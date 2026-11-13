@@ -238,6 +238,19 @@ export const platformKeys: Scenario = {
         cappedAvailability.availableIndices.join() === "1",
       "available lists a spend-capped key and skips it",
     );
+    // The reporter cannot hold a key past the spend-cap horizon (31 days).
+    await report(ctx, "report-rate-limit", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      rateLimitedUntil: "2099-01-01T00:00:00.000Z",
+      spendCap,
+    });
+    expect(
+      Date.parse(String((await statusOf(ctx, keyType, suffixA)).rateLimitedUntil)) <=
+        Date.now() + 31 * 86_400_000,
+      "a spend-cap hold is clamped to 31 days",
+    );
     await report(ctx, "clear-rate-limit", { keyType, keySuffix: suffixA });
     expect(
       (await statusOf(ctx, keyType, suffixA)).spendCap === null &&

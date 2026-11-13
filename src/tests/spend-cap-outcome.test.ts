@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { classifyProviderErrorOf } from "../commands/provider-error-class";
-import {
-  classifyRateLimitOutcome,
-  MAX_SPEND_CAP_HOLD_MS,
-  parseSpendCapMessage,
-} from "../commands/rate-limit-outcome";
+import { classifyRateLimitOutcome, parseSpendCapMessage } from "../commands/rate-limit-outcome";
+import { MAX_SPEND_CAP_HOLD_MS } from "../utils/error-tracker";
 
 const NOW = Date.parse("2026-11-12T21:14:00Z");
 
