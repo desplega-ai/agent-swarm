@@ -322,6 +322,10 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PASSWORD` | When local Postgres is enabled | None | Explicit non-empty superuser password; applied to new and existing clusters on each helper invocation |
 | `LOCAL_POSTGRES_DB` | No | `app` | Database created in the optional local Postgres cluster |
+| `WORKTREE_REAPER_MODE` | No | `dry-run` | What workers do with the git worktrees agents leave behind: `dry-run` only logs what it would remove, `on` removes them, `off` disables the reaper. See [Configuration](/docs/ui/configuration#worktree-reaper) |
+| `WORKTREE_TTL_HOURS` | No | `72` | Age after which the sweep removes unowned and pushed-branch worktrees, and deletes the ignored `node_modules` of held ones. Clamped to 1 hour to 90 days |
+| `WORKTREE_SWEEP_INTERVAL_MINUTES` | No | `60` | How often each worker runs the worktree TTL sweep. Clamped to 5 minutes to 24 hours |
+| `WORKTREE_REAPER_EXTRA_ROOTS` | No | — | Comma-separated repository paths the reaper also checks, for clones outside `/workspace/personal` |
 
 ## Git Configuration
 

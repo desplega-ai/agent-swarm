@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-11-14
+
+### Added
+- Tasks: `get-task-details` fits responses to a size budget with the least loss (#3135).
+- Runner: workers reap the git worktrees agents leave behind (#3118); the `WORKTREE_*` reaper keys are in Settings > Configuration, the docs and the agent prompt (#3121).
+- Apps: low-level primitives for spec-only widgets (#3117).
+- UI: a `<swarm-object>` page embed for sheets and boards (#3122); live `SwarmSheet` and `SwarmBoard` tags in Markdown files (#3116).
+
+### Changed
+- agent-fs pins bumped 0.18.26 -> 0.18.27.
+- Providers: OpenAI credentials resolve subscription-first, with one trait per harness (#3100).
+- CI: `agent-swarm-ui:latest` publishes on every main merge (#3126); main-tip image builds are never cancelled, superseded runs are skipped instead (#3127).
+- Dependencies: Chat SDK packages 4.45.0 (#3128), agent-browser 0.43.0 (#3113), worker harness bumps for claude-code, opencode, dsh, amp, copilot, qwen and kiro (#3114, #3130).
+- Docs: the review-loop routing and limits in workflows (#3131); guides for disputed product returns (#3109) and supplier performance reviews (#3111); guide corrections (#3106, #3107, #3108); heartbeat spec synced (#3112); seeded swarm-scripts skill patches (#3105); worktree reaper keys in the environment variables reference.
+
+### Fixed
+- Security: tasks apply the requester rule to steering and script runs (#3132); only the creator or a lead changes what a schedule runs (#3134); OAuth token, script-connection OAuth and MCP OAuth/proxy fetches check every hop and the resolved address (#3123, #3124, #3125); an unknown-team Slack sender gets unknown trust, not internal (#3103); only the owner may wire an owned global script as a script action (#3104); json-render `swarm.call` requires a path endpoint (#3110); the entrypoint passes repo fields to clone and sync as arguments (#3115).
+- Keys: OpenRouter spend caps are treated as caps, not 5-minute rate limits (#3101).
+- Agents: one saved model per agent when a profile and `MODEL_OVERRIDE` are both set (#3119).
+- UI: the Codex model picker works with gateway credentials (#3133); a task's own model is no longer flagged as a pending agent change (#3099).
+- Tests: the memory search scan count waits for the write's invalidation hook (#3129).
+
 ## [2.13.0] - 2026-11-13
 
 ### Added
