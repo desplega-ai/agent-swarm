@@ -16,6 +16,7 @@
     "ai-operations-shift-handoff",
     "ai-returns-exception-handoff",
     "supplier-security-evidence-review",
+    "privacy-data-request-handoff",
     "supplier-performance-review",
     "deployment",
     "one-click-deploy",
