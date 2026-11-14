@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.7
+ARG OPENCODE_VERSION=2.3.0
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -551,8 +551,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.2
-ARG DSH_SHA512=27bdbbaf60b8ef5c767185c68ea6740fd4f5672698403147fd89f1f22abef39a2c94ce27932e584c19db02e4edc4c856ee7858f30b8011f8e314243e2ba4b083
+ARG DSH_VERSION=0.2.2-rc.3
+ARG DSH_SHA512=4bee2851854a5ae73548230ca759a951ada5971572d28f60220a7b4c383f11aecfbaf5d59007e7ca4a921f5fe80d7541fb2e55cc49b440826e968d4b201dea46
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -567,9 +567,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794542441-g4e0611
-ARG AMP_SHA512_AMD64=46bbab59cd7950d1fa66a1dc9e5fdb5639d6b986d743a44b2b7370845c7c163ff407bc65a05f00327ab4b7d958651da958c567102244f8a119812da1aa678983
-ARG AMP_SHA512_ARM64=6093f5697b80f00e017f0eb62a827593b3ee7b6d3005dff3da5e3187635c448856c1bf0c9b0fb5815b6b89d94bc69891ccf41598ddf857d0b8203a40aba0465a
+ARG AMP_VERSION=0.0.1794571247-g07b20f
+ARG AMP_SHA512_AMD64=745d6a5b909b20f77c76b79f774ed8474e7818947dc9fae52f95300c1fdd4f63b2278d2e6542a379fc0b8500309628c0da7eebbd8b3e918438ef5e7c39ec32bb
+ARG AMP_SHA512_ARM64=caa7fa19c2d432b780c12d1a9a0d6e60f1bf1165a634bda24e21f812a3538a1af6644b94575f10f799792962e2b4d4e5d44dd973ed76f0ec8a64b208a8e8dc84
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -617,7 +617,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.110
+ARG COPILOT_CLI_VERSION=1.0.111
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
