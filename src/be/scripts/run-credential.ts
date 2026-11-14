@@ -15,6 +15,16 @@ import {
  */
 const SCRIPT_RUN_TOKEN_TTL_MS = 15 * 60 * 1000;
 
+/**
+ * Lifetime of a user MCP run's token. `SCRIPT_RUN_USER_TOKEN_TTL_MS` is a test
+ * seam (the e2e suite sets it so a run can watch its own token expire); it can
+ * only shorten the backstop, never extend it.
+ */
+function userScriptRunTokenTtlMs(): number {
+  const override = Number(process.env.SCRIPT_RUN_USER_TOKEN_TTL_MS);
+  return override > 0 && override < SCRIPT_RUN_TOKEN_TTL_MS ? override : SCRIPT_RUN_TOKEN_TTL_MS;
+}
+
 export type ScriptApiCredential = {
   /**
    * The bearer the script's `ctx.swarm` SDK calls present to the api, or
@@ -100,7 +110,7 @@ export async function runScriptAsUserWithRunCredential(
   >,
   userId: string,
 ): Promise<RunScriptOutput> {
-  const token = await mintUserScriptRunToken(userId, SCRIPT_RUN_TOKEN_TTL_MS);
+  const token = await mintUserScriptRunToken(userId, userScriptRunTokenTtlMs());
   try {
     return await runScript({
       ...input,

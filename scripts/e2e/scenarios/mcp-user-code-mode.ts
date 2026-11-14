@@ -8,7 +8,8 @@ import { getLead, toolText, upsertScript } from "./script-helpers";
 // Code mode on /mcp-user: script-search, script-get-types and script-run run as the
 // requesting user. A run has no agent identity (its ctx.swarm calls send no X-Agent-ID),
 // records a script_runs row for the user, and its short-lived token stays off the user's
-// token list. A viewer, who holds neither script.search nor script.run, is refused both.
+// token list, is revoked when the run ends (even when the script throws) and is refused
+// once expired. A viewer, who holds neither script.search nor script.run, is refused both.
 
 const DOUBLER = `export default async function (args: { n: number }) {
   return { doubled: args.n * 2 };
@@ -18,6 +19,24 @@ const DOUBLER = `export default async function (args: { n: number }) {
 // the run's token authenticated (not 401) and named no agent (a user token naming one is 403).
 const WHOAMI = `export default async function (_args: unknown, ctx: any) {
   return await ctx.swarm.agent_info({});
+}`;
+
+const THROWS = `export default async function () {
+  throw new Error("code mode run threw");
+}`;
+
+// The SUT runs with SCRIPT_RUN_USER_TOKEN_TTL_MS=5000, so the run's own token expires
+// mid-run: 400 (authenticated, no agent) until then, 401 after.
+const OUTLIVES_TOKEN = `export default async function (_args: unknown, ctx: any) {
+  const status = async () => (await ctx.swarm.agent_info({})).status;
+  const first = await status();
+  let last = first;
+  const deadline = Date.now() + 20_000;
+  while (last === first && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    last = await status();
+  }
+  return { first, last };
 }`;
 
 async function connectUser(ctx: ScenarioContext, userId: string): Promise<Client> {
@@ -102,6 +121,19 @@ export const mcpUserCodeMode: Scenario = {
         `a user run carries no agent identity, got ${JSON.stringify(whoamiResult).slice(0, 300)}`,
       );
 
+      const thrown = await call(admin, "script-run", { source: THROWS });
+      expect(
+        thrown.text.includes("code mode run threw"),
+        `a throwing run reports its error, got ${thrown.text.slice(0, 300)}`,
+      );
+
+      const outlived = await call(admin, "script-run", { source: OUTLIVES_TOKEN });
+      const outlivedResult = asRecord(outlived.body.result);
+      expect(
+        outlivedResult.first === 400 && outlivedResult.last === 401,
+        `an expired run token is refused, got ${JSON.stringify(outlivedResult)} ${outlived.text.slice(0, 200)}`,
+      );
+
       const both = await call(admin, "script-run", { name: scriptName, source: DOUBLER });
       expect(both.isError && both.text.includes("exactly one"), "name plus source is refused");
 
@@ -116,6 +148,16 @@ export const mcpUserCodeMode: Scenario = {
           rows[0]?.requestedByUserId === userId &&
           rows[0]?.status === "completed",
         `one completed run recorded for the user, got ${JSON.stringify(rows).slice(0, 400)}`,
+      );
+
+      // One token per executed run (named, whoami, throws, outlives), each revoked at run end.
+      const runTokens = ctx.db.query<{ revokedAt: string | null }>(
+        "SELECT revokedAt FROM user_tokens WHERE userId = ? AND expiresAt IS NOT NULL",
+        [userId],
+      );
+      expect(
+        runTokens.length === 4 && runTokens.every((t) => t.revokedAt !== null),
+        `every run token is revoked, got ${JSON.stringify(runTokens)}`,
       );
 
       const user = await ctx.api("GET", `/api/users/${userId}`);

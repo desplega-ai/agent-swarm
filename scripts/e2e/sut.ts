@@ -267,6 +267,8 @@ export async function startSut(
     MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
     // The mcp-user-events scenario's webhook receiver listens on http://127.0.0.1.
     MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS: "true",
+    // mcp-user-code-mode watches a user run's token expire; 5 s outlasts a fast run's own calls.
+    SCRIPT_RUN_USER_TOKEN_TTL_MS: "5000",
     CODEX_OAUTH_DEVICE_BASE_URL: `http://127.0.0.1:${codexDevicePort}`,
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",
