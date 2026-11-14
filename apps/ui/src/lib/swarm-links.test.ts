@@ -174,6 +174,11 @@ describe("parseSwarmLink: github", () => {
     expect(github("https://www.github.com/o/r/")).toMatchObject({ kind: "repo" });
   });
 
+  test("issue and PR number zero is rejected", () => {
+    expect(parse("https://github.com/o/r/issues/0")).toBeNull();
+    expect(parse("https://github.com/o/r/pull/0")).toBeNull();
+  });
+
   test("other github.com pages and hosts are plain links", () => {
     expect(parse("https://github.com/o/r/tree/main/src")).toBeNull();
     expect(parse("https://github.com/o/r/pull/abc")).toBeNull();
@@ -218,6 +223,10 @@ describe("parseGithubShorthand", () => {
       sha: "a1b2c3d",
       href: "https://github.com/o/r/commit/a1b2c3d",
     });
+  });
+
+  test("issue number zero is rejected", () => {
+    expect(parseGithubShorthand("o/r#0")).toBeNull();
   });
 
   test("anything else is not shorthand", () => {

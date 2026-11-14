@@ -172,7 +172,7 @@ function parseGithubUrl(
   const [owner, repo, section, id] = url.pathname.split("/").filter(Boolean);
   if (!owner || !repo) return null;
   if (!section) return githubLink("repo", owner, repo, {}, href);
-  if ((section === "pull" || section === "issues") && id && /^\d{1,9}$/.test(id)) {
+  if ((section === "pull" || section === "issues") && id && /^[1-9]\d{0,8}$/.test(id)) {
     return githubLink(
       section === "pull" ? "pull" : "issue",
       owner,
@@ -199,7 +199,7 @@ export function parseGithubShorthand(
 ): SwarmLink | null {
   const text = raw.trim();
   const base = githubOrigin(webUrl);
-  const ref = /^([\w.-]+)\/([\w.-]+)#(\d{1,9})$/.exec(text);
+  const ref = /^([\w.-]+)\/([\w.-]+)#([1-9]\d{0,8})$/.exec(text);
   if (ref) {
     const [, owner = "", repo = "", n = ""] = ref;
     return githubLink(
