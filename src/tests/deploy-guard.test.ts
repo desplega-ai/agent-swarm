@@ -152,3 +152,27 @@ describe.skipIf(!hasYq && !process.env.CI)("deploy guard (scripts/deploy-guard.s
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
 });
+
+// Job-level concurrency orders jobs by when they reach the gate, not by commit:
+// with cancel-in-progress an older run whose detect job finished last cancelled
+// the main tip's builds, and :latest stayed on an older build. Builds now never
+// cancel; a superseded run skips them instead.
+test("build jobs never cancel each other and skip when superseded", async () => {
+  type Job = { if?: string; concurrency?: Record<string, unknown> };
+  const wf = Bun.YAML.parse(await Bun.file(join(REPO_ROOT, WORKFLOW)).text()) as {
+    jobs: Record<string, Job>;
+  };
+  const builds = Object.entries(wf.jobs).filter(([name]) => name.startsWith("build-and-push-"));
+  expect(builds.length).toBeGreaterThanOrEqual(7);
+  for (const [name, job] of builds) {
+    expect({ name, cancel: job.concurrency?.["cancel-in-progress"] }).toEqual({
+      name,
+      cancel: false,
+    });
+    expect({ name, queue: job.concurrency?.queue }).toEqual({ name, queue: "max" });
+    expect({ name, if: job.if }).toEqual({
+      name,
+      if: "needs.detect-version-change.outputs.superseded != 'true'",
+    });
+  }
+});

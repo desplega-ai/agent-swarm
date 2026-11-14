@@ -48944,7 +48944,7 @@
             }
           },
           "403": {
-            "description": "Deferral owned by another agent",
+            "description": "Deferral or target owned by another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -49360,7 +49360,7 @@
             }
           },
           "403": {
-            "description": "Deferral owned by another agent",
+            "description": "Deferral or target owned by another agent",
             "content": {
               "application/json": {
                 "schema": {

@@ -273,6 +273,10 @@
         "audit-attribution-skills"
       ]
     },
+    "requester-hint": {
+      "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
+      "scenarios": ["requester-hint"]
+    },
     "budget-refusal": {
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
       "scenarios": ["core-budgets"]
@@ -570,6 +574,14 @@
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
     },
+    "task-details-field-contract": {
+      "description": "get-task-details keeps status, output, failureReason, attachments and the parent link reachable on an oversized task, and taskId stays the one required input",
+      "scenarios": ["task-details-field-contract"]
+    },
+    "task-details-fit": {
+      "description": "get-task-details fits an oversized response under its 9 KB budget without spilling: log rows compact, the oldest non-lifecycle rows go before any text is cut, the newest progress and lifecycle rows stay, include opts out of each step, a small response is unchanged and a script SDK call gets the full shape",
+      "scenarios": ["task-details-fit"]
+    },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
       "scenarios": ["poll-concurrent-claim"]
@@ -644,6 +656,10 @@
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
+    },
+    "schedule-target-owner": {
+      "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
+      "scenarios": ["schedule-target-owner"]
     },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",

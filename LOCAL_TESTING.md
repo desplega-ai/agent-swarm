@@ -194,7 +194,7 @@ Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), a
 Fx needs a preinstalled `fx` executable (worker-full ships the pinned release) and defaults to `openrouter/openai/gpt-5-mini` on `OPENROUTER_API_KEY`. A bare `E2E_MODEL_FX=gpt-5-mini` needs `OPENAI_API_KEY`, and `vercel/<vendor>/<id>` needs `AI_GATEWAY_API_KEY`. Run `bun run e2e --only health --harness fx`.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.2` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.3` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.

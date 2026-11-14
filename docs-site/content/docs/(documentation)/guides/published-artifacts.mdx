@@ -14,7 +14,7 @@ All images are multi-arch (`linux/amd64` + `linux/arm64`) and published to GitHu
 | `ghcr.io/desplega-ai/agent-swarm` | `Dockerfile` | API server — compiled binary, migrations, script runtimes. Small by design (~400 MB). |
 | `ghcr.io/desplega-ai/agent-swarm-worker` | `Dockerfile.worker` (target `worker-full`) | Full worker — all four harnesses plus the complete dev environment (see below). |
 | `ghcr.io/desplega-ai/agent-swarm-worker:slim` | `Dockerfile.worker` (target `worker-slim`) | Slim worker for CI and E2E — all four harnesses, none of the heavy extras. |
-| `ghcr.io/desplega-ai/agent-swarm-ui` | `Dockerfile.ui` | Dashboard — the static `apps/ui` build served by unprivileged nginx on port 8080. Tagged `{VERSION}` and `sha-{GIT_SHA}` only (no `latest`). |
+| `ghcr.io/desplega-ai/agent-swarm-ui` | `Dockerfile.ui` | Dashboard — the static `apps/ui` build served by unprivileged nginx on port 8080. Tagged `latest`, `{VERSION}` and `sha-{GIT_SHA}` (no `slim` or `prod`). |
 
 ### Tag scheme
 

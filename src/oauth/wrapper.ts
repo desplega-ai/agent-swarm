@@ -7,6 +7,8 @@ import {
   storeOAuthTokens,
   updateOAuthTokensAfterRefresh,
 } from "../be/db-queries/oauth";
+import { createSsrfGuardedFetch } from "../utils/egress-guard";
+import { publicEndpointSsrfOptions } from "./mcp-wrapper";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -145,6 +147,16 @@ function tokenRequestInit(
   return { headers, body: new URLSearchParams(bodyParams).toString() };
 }
 
+/**
+ * The token endpoint receives the client secret plus the code or refresh
+ * token, so it goes through the guarded fetch: a public name that resolves to
+ * a private address is refused, and each redirect hop is re-checked. Built per
+ * call because the SSRF options read the environment.
+ */
+function tokenEndpointFetch(): typeof fetch {
+  return createSsrfGuardedFetch(publicEndpointSsrfOptions());
+}
+
 export interface OAuthTokenResponse {
   accessToken: string;
   refreshToken?: string;
@@ -165,7 +177,7 @@ export async function exchangeAuthorizationCode(
   config: OAuthProviderConfig,
   params: { code: string; codeVerifier: string; redirectUri: string },
 ): Promise<OAuthTokenResponse> {
-  const response = await fetch(config.tokenUrl, {
+  const response = await tokenEndpointFetch()(config.tokenUrl, {
     method: "POST",
     ...tokenRequestInit(config, {
       grant_type: "authorization_code",
@@ -242,7 +254,7 @@ export async function refreshTokenGrant(
   config: OAuthProviderConfig,
   refreshToken: string,
 ): Promise<OAuthTokenResponse> {
-  const response = await fetch(config.tokenUrl, {
+  const response = await tokenEndpointFetch()(config.tokenUrl, {
     method: "POST",
     ...tokenRequestInit(config, {
       grant_type: "refresh_token",
@@ -297,7 +309,7 @@ export async function performTokenRefreshRequest(
   scope?: string;
   expiresAt: string | null;
 }> {
-  const response = await fetch(config.tokenUrl, {
+  const response = await tokenEndpointFetch()(config.tokenUrl, {
     method: "POST",
     ...tokenRequestInit(config, {
       grant_type: "refresh_token",
