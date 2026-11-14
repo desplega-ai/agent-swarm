@@ -338,6 +338,13 @@ function spawnHarness(spec: HarnessSpec, tmpdir: string): HarnessProcess {
  * The user module dir is created only after the spare has started: Bun
  * snapshots the cwd listing at startup, and a subdir created later is
  * resolved from disk (see the note above `userModulePath` in eval-harness.ts).
+ *
+ * Under a dropped identity the spare's run dir stays owned by the API until a
+ * run takes it. Every script shares that identity, so a dir it owned while
+ * idle could hold links planted by another script, and the API's writes and
+ * chowns below would follow them. The harness writes nothing before it reads
+ * stdin, so the spare needs no write access while it waits. A taken spare's
+ * dir gets the cold path's order: write as the API, then chown.
  */
 interface WarmHarness {
   key: string;
@@ -402,9 +409,10 @@ async function startWarmHarness(key: string, spec: HarnessSpec): Promise<void> {
   const tmpdir = `${spec.baseTmpDir}/swarm-script-${crypto.randomUUID()}`;
   let started = false;
   try {
-    await mkdir(tmpdir, { recursive: true });
+    // The run dir stays owned by the API until a run takes the spare (see
+    // above): no chown here.
+    await mkdir(tmpdir, { recursive: true, mode: 0o755 });
     await linkOrWriteBareImportShims(spec.baseTmpDir, tmpdir);
-    if (spec.runAs) await chown(tmpdir, spec.runAs.uid, spec.runAs.gid);
     if (warmHarnesses.has(key)) return;
     const proc = spawnHarness(spec, tmpdir);
     // A spare must not keep the API (or a CLI / test process) alive.
@@ -494,35 +502,21 @@ export class NativeScriptExecutor implements ScriptExecutor {
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
-      if (warm) {
-        // The spare already has its run dir and node_modules link; the
-        // user-module dir is created by this write (Bun.write makes parents).
-        await Promise.all([
-          Bun.write(argsFile, JSON.stringify(input.args ?? null)),
-          Bun.write(sourceFile, input.source),
-        ]);
-        if (runAs) {
-          await Promise.all(
-            [`${tmpdir}/user-module`, argsFile, sourceFile].map((path) =>
-              chown(path, runAs.uid, runAs.gid),
-            ),
-          );
-        }
-      } else {
-        await mkdir(`${tmpdir}/user-module`, { recursive: true });
-        await Promise.all([
-          Bun.write(argsFile, JSON.stringify(input.args ?? null)),
-          Bun.write(sourceFile, input.source),
-          linkOrWriteBareImportShims(baseTmpDir, tmpdir),
-        ]);
-        if (runAs) {
-          // The child writes its result and marker files into the run dir.
-          await Promise.all(
-            [tmpdir, `${tmpdir}/user-module`, argsFile, sourceFile].map((path) =>
-              chown(path, runAs.uid, runAs.gid),
-            ),
-          );
-        }
+      // A spare's run dir already has its node_modules link, and is still
+      // owned by the API: write as the API first, then chown, on both paths.
+      await mkdir(`${tmpdir}/user-module`, { recursive: true });
+      await Promise.all([
+        Bun.write(argsFile, JSON.stringify(input.args ?? null)),
+        Bun.write(sourceFile, input.source),
+        ...(warm ? [] : [linkOrWriteBareImportShims(baseTmpDir, tmpdir)]),
+      ]);
+      if (runAs) {
+        // The child writes its result and marker files into the run dir.
+        await Promise.all(
+          [tmpdir, `${tmpdir}/user-module`, argsFile, sourceFile].map((path) =>
+            chown(path, runAs.uid, runAs.gid),
+          ),
+        );
       }
 
       // No await between this check and the spawn below.
