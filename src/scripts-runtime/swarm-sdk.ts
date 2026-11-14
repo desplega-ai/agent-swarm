@@ -1,4 +1,3 @@
-import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import {
@@ -565,6 +564,39 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+type SecretScrubber = typeof import("../utils/secret-scrubber");
+
+let scrubberLoad: Promise<SecretScrubber> | undefined;
+
+/**
+ * The secret scrubber, loaded on the first bridge call instead of at import.
+ * In a spawned script harness, loading the module and building its matchers
+ * (known values, rule tables, gitleaks rules) costs several milliseconds on
+ * the first scrub. `callBridgeApi` starts the load right after it sends its
+ * request, so that work runs while the api answers. A script that never calls
+ * the api never pays it. The scrub itself is unchanged: every response is
+ * still scrubbed before the script sees it.
+ */
+function loadScrubber(): Promise<SecretScrubber> {
+  if (!scrubberLoad) {
+    const load = import("../utils/secret-scrubber").then((scrubber) => {
+      // Build the matchers now, while the request is in flight.
+      scrubber.scrubSecrets("warm-up");
+      return scrubber;
+    });
+    // A failed load is retried by the next call; the caller awaiting this one still sees the error.
+    load.catch(() => {
+      if (scrubberLoad === load) scrubberLoad = undefined;
+    });
+    scrubberLoad = load;
+  }
+  return scrubberLoad;
+}
+
+async function scrubBridgeResult<T>(scrubber: Promise<SecretScrubber>, value: T): Promise<T> {
+  return (await scrubber).scrubObject(value);
+}
+
 /**
  * What a retry that ran out of budget hands back: the failure the caller would
  * have seen with no retry, the earlier status with a note in place of its
@@ -648,7 +680,7 @@ async function callBridgeApi(
   // Tools without a specific REST route go through the generic MCP bridge
   if (!request) {
     const mcpToolName = mcpToolNameForSdkMethod(name);
-    const res = await bridgeFetch(
+    const sent = bridgeFetch(
       `${baseUrl}/api/mcp-bridge`,
       {
         method: "POST",
@@ -658,6 +690,8 @@ async function callBridgeApi(
       bridgeSafety(isReadOnlyBridgeCall(name, "POST"), false),
       options.signal,
     );
+    const scrubber = loadScrubber();
+    const res = await sent;
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
     if (!res.ok && options.throwOnError) {
       const message =
@@ -678,7 +712,7 @@ async function callBridgeApi(
         : undefined;
     const toolRefused = envelope?.success === false;
     const refusalMessage = toolRefused ? envelope?.message : undefined;
-    return scrubObject({
+    return scrubBridgeResult(scrubber, {
       success: res.ok && !toolRefused,
       status: res.status,
       data,
@@ -686,7 +720,7 @@ async function callBridgeApi(
     });
   }
 
-  const res = await bridgeFetch(
+  const sent = bridgeFetch(
     `${baseUrl}${request.path}`,
     {
       method: request.method,
@@ -696,6 +730,8 @@ async function callBridgeApi(
     bridgeSafety(isReadOnlyBridgeCall(name, request.method), hasIdempotencyKey(request.headers)),
     options.signal,
   );
+  const scrubber = options.preserveData ? undefined : loadScrubber();
+  const res = await sent;
   const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
   if (!res.ok && options.throwOnError) {
     const message =
@@ -705,7 +741,7 @@ async function callBridgeApi(
     throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
   }
   const result = { success: res.ok, status: res.status, data };
-  return options.preserveData ? result : scrubObject(result);
+  return scrubber ? scrubBridgeResult(scrubber, result) : result;
 }
 
 async function callTool(
