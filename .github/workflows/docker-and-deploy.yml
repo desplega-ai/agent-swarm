@@ -48,6 +48,7 @@ jobs:
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       version: ${{ steps.check.outputs.version }}
+      superseded: ${{ steps.supersede.outputs.is_tip == 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,21 +78,36 @@ jobs:
             echo "Version unchanged: $NEW_VERSION"
           fi
 
+      # A newer main commit that touches on.push.paths has its own run, which builds
+      # and promotes. This run's builds would only be thrown away, so skip them. A
+      # release run always builds. Fail-open: a guard error means build.
+      - name: Check for a newer main run
+        id: supersede
+        if: github.ref == 'refs/heads/main' && steps.check.outputs.version_changed != 'true'
+        continue-on-error: true
+        run: bash scripts/deploy-guard.sh
+
   # Supersede: the merge queue lands each PR of a group as its own main commit, a
-  # few seconds apart, and each push starts this workflow. All six build jobs sit
-  # in a per-ref concurrency group with cancel-in-progress, so a newer run cancels
-  # an older run's builds, and with them its merge, promote and notify jobs.
+  # few seconds apart, and each push starts this workflow. A run whose commit is
+  # already behind a newer trigger-path main commit skips its builds (job
+  # detect-version-change, output superseded), and with them its merge, promote
+  # and notify jobs. Build jobs never cancel each other: job-level concurrency
+  # orders jobs by when they reach the gate, not by commit, so cancel-in-progress
+  # let an older run whose detect job finished last cancel the main tip's builds
+  # and strand :latest on an older build. queue: max keeps every queued build.
   # Only the newest run moves :latest and :slim. Prod runs :prod, which only
   # deploy.yml moves, on a schedule. A run that bumps package.json's version is
   # the only one that sees the bump (detect-version-change diffs against
-  # github.event.before), so it gets a group of its own and is never cancelled:
+  # github.event.before), so it gets a group of its own and never skips:
   # its :VERSION images, git tag, npm, E2B and GitHub release all still publish.
   build-and-push-server-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-server-amd64', github.run_id) || format('docker-build-{0}-server-amd64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -133,9 +149,11 @@ jobs:
   build-and-push-server-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-server-arm64', github.run_id) || format('docker-build-{0}-server-arm64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -227,9 +245,11 @@ jobs:
   build-and-push-worker-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-amd64', github.run_id) || format('docker-build-{0}-worker-amd64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -272,9 +292,11 @@ jobs:
   build-and-push-worker-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-arm64', github.run_id) || format('docker-build-{0}-worker-arm64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -370,9 +392,11 @@ jobs:
   build-and-push-worker-slim-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-slim-amd64', github.run_id) || format('docker-build-{0}-worker-slim-amd64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -418,9 +442,11 @@ jobs:
   build-and-push-worker-slim-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-slim-arm64', github.run_id) || format('docker-build-{0}-worker-slim-arm64', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
@@ -517,9 +543,11 @@ jobs:
   build-and-push-ui:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.superseded != 'true'
     concurrency:
       group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-ui', github.run_id) || format('docker-build-{0}-ui', github.ref) }}
-      cancel-in-progress: true
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write
