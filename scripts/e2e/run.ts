@@ -283,7 +283,7 @@ async function printLogTails(sut: Sut): Promise<void> {
   console.error(tails.join("\n"));
 }
 
-/** Coverage only the API process of a rerun saw: its DB is gone once the rerun stops. */
+/** Coverage that the final DB read may no longer show: a rerun's DB is gone once it stops, and the main DB is read after the reruns. */
 type RerunObservations = { nodeTypes: Set<string>; stateValues: Map<string, Set<string>> };
 
 function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations {
@@ -425,7 +425,9 @@ async function main(): Promise<number> {
   if (scenarioResults.some((result) => result.status === "fail")) await printLogTails(sut);
 
   // A failure reruns once, alone, on a fresh API: a pass there is `flaky`, not a failure.
-  const rerunObserved: RerunObservations = { nodeTypes: new Set(), stateValues: new Map() };
+  // Seeded with the main DB as the scenarios left it: a rerun or harness leg keeps the API up
+  // past the 5 s boot sweep, which fails the `in_progress` tasks the strict gate needs.
+  const rerunObserved = observe(db, manifest);
   const byName = new Map(scenarios.map((scenario) => [scenario.name, scenario]));
   for (const [index, first] of scenarioResults.entries()) {
     if (first.status !== "fail") continue;
