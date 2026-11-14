@@ -56,6 +56,7 @@ let runtimeMetadata:
   | undefined;
 let runtimeError = false;
 let envPresence: Record<string, boolean> = {};
+let requestedPresenceKeys: string[] = [];
 mock.module("@/api/hooks/use-config-api", () => ({
   ...require("../../api/hooks/use-config-api"),
   useResolvedConfigs: () => ({ data: resolvedConfigs }),
@@ -83,7 +84,10 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
   }),
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
-  useEnvPresence: () => ({ data: envPresence }),
+  useEnvPresence: (keys: string[]) => {
+    requestedPresenceKeys = keys;
+    return { data: envPresence };
+  },
 }));
 mock.module("@/api/hooks/use-models-catalog", () => ({
   useModelsCatalog: () => ({ data: undefined }),
@@ -864,6 +868,45 @@ describe("AgentRuntimeSettings model profile", () => {
     expect(saves.at(-1)).toMatchObject({ harnessProvider: "claude", model: "claude-haiku-4-5" });
     expect(saves.at(-1)).not.toHaveProperty("profile");
     await view.unmount();
+  });
+
+  test("None selects and saves a known Codex model through gateway presence without custom mode", async () => {
+    envPresence = { CODEX_GATEWAY_BASE_URL: true, CODEX_GATEWAY_API_KEY: true };
+    const profile = {
+      ...modelProfileRow("codex-smart", "gpt-5.6-sol", "high"),
+      harness: "codex" as const,
+    };
+    modelProfiles = [profile];
+    resolvedConfigs = [
+      { key: "MODEL_PROFILE", value: profile.name },
+      { key: "MODEL_OVERRIDE", value: "gpt-5.6-sol" },
+    ];
+    const view = await mountSettings("codex");
+    expect(requestedPresenceKeys).toContain("CODEX_GATEWAY_BASE_URL");
+    expect(requestedPresenceKeys).toContain("CODEX_GATEWAY_API_KEY");
+    await pickSelect(view.container, profile.name, "None (set model below)");
+    expect(view.container.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    await pickModel(view.container, "GPT-5.6 Sol", "GPT-5.6 Luna");
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({
+      harnessProvider: "codex",
+      model: "gpt-5.6-luna",
+      allowCustomModel: false,
+    });
+    expect(saves.at(-1)).not.toHaveProperty("profile");
+    await view.unmount();
+
+    // Rehydrate the saved API representation, as after a page reload.
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: String(saves.at(-1)?.model) }];
+    const reloaded = await mountSettings("codex");
+    expect(reloaded.container.textContent).toContain("GPT-5.6 Luna");
+    expect(reloaded.container.textContent).toContain("None (set model below)");
+    expect(reloaded.container.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    await reloaded.unmount();
   });
 
   test("a harness switch drops a profile that runs on the old harness", async () => {
