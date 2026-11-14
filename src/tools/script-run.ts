@@ -1,6 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  MCP_RESULT_WIRE_LIMIT_BYTES,
+  type SwarmToolResult,
+  swarmToolResultBytes,
+} from "@/tools/utils";
 import {
   proxyScriptsApi,
   scriptExecutorSchema,
@@ -13,7 +18,11 @@ import {
 export const SCRIPT_RUN_DESCRIPTION =
   "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Inline source executes without the `script-upsert` compile-time typecheck. Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`. The run ends when the script's default export resolves: a call it did not await gets 2 s more, then is stopped (native) or aborted at once (quickjs), so await every write that must land. A `Promise.race` deadline therefore bounds the run; a nested `script_run` that lost the race keeps running on the server under its own wall.";
 
-function renderRunOutput(data: unknown): string | undefined {
+/**
+ * Text-channel rendering of a successful run. `compact` renders an object
+ * result as single-line JSON: the same value without indentation.
+ */
+function renderRunOutput(data: unknown, compact = false): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const body = data as {
     result?: unknown;
@@ -26,7 +35,13 @@ function renderRunOutput(data: unknown): string | undefined {
   const parts: string[] = [];
   if (body.result !== undefined) {
     parts.push(
-      `result:\n${typeof body.result === "string" ? body.result : JSON.stringify(body.result, null, 2)}`,
+      `result:\n${
+        typeof body.result === "string"
+          ? body.result
+          : compact
+            ? JSON.stringify(body.result)
+            : JSON.stringify(body.result, null, 2)
+      }`,
     );
   }
   if (typeof body.stdout === "string" && body.stdout.trim()) {
@@ -43,6 +58,24 @@ function renderRunOutput(data: unknown): string | undefined {
   }
   if (notes.length > 0) parts.push(`(${notes.join("; ")})`);
   return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+/**
+ * Agent-facing success shape. Each harness reads one channel: `data` already
+ * carries the full run body (result, stdout, stderr, exitCode, autoSaved,
+ * kvSaved) on the structured channel, and `details` renders the same fields
+ * for the text channel, so the structured channel skips that duplicate.
+ * The result stays pretty-printed while it fits the wire limit; when only the
+ * single-line rendering fits, that one goes out instead of a spill.
+ */
+function fitAgentRunResult(result: SwarmToolResult): SwarmToolResult {
+  const pretty: SwarmToolResult = { ...result, omitStructuredDetails: true };
+  if (swarmToolResultBytes(pretty) <= MCP_RESULT_WIRE_LIMIT_BYTES) return pretty;
+  const body = (result.data as { data?: unknown } | undefined)?.data;
+  const compactDetails = renderRunOutput(body, true);
+  if (compactDetails === undefined || compactDetails === result.details) return pretty;
+  const compact: SwarmToolResult = { ...pretty, details: compactDetails };
+  return swarmToolResultBytes(compact) <= MCP_RESULT_WIRE_LIMIT_BYTES ? compact : pretty;
 }
 
 export const registerScriptRunTool = (server: McpServer) => {
@@ -83,14 +116,21 @@ export const registerScriptRunTool = (server: McpServer) => {
       }),
       outputSchema: scriptToolOutputSchema,
     },
-    async (args, requestInfo) =>
-      proxyScriptsApi({
+    async (args, requestInfo) => {
+      const result = await proxyScriptsApi({
         method: "POST",
         path: "/api/scripts/run",
         body: args,
         requestInfo,
         successMessage: () => "Script run completed.",
-        successDetails: renderRunOutput,
-      }),
+        successDetails: (data) => renderRunOutput(data),
+      });
+      // Script and extension calls never reach a model context, so they keep
+      // the exact current shape.
+      const scriptInternal =
+        requestInfo.callOrigin === "script-sdk" || requestInfo.callOrigin === "extension";
+      if (scriptInternal || !result.ok || !result.data) return result;
+      return fitAgentRunResult(result);
+    },
   );
 };
