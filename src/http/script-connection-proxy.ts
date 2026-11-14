@@ -88,12 +88,23 @@ function connectionScopeMatches(
   connection: { scope: string; scopeId: string | null },
   agentId: string,
   syntheticPrincipal: boolean,
+  isLead: boolean,
 ): boolean {
   if (connection.scope === "global") return true;
   if (connection.scope === "agent") return !syntheticPrincipal && connection.scopeId === agentId;
-  // Repo-scoped descriptors are only handed to scripts with matching repo context at generation time.
-  // The proxy receives only a connection id + tool call from that descriptor, so allow the call here.
-  if (connection.scope === "repo") return true;
+  // The proxy has no repo context to compare with scopeId, and a repo-scoped connection resolves
+  // repo secret rows. Require the same grant that reads those rows on /api/config/resolved.
+  if (connection.scope === "repo") {
+    return (
+      !syntheticPrincipal &&
+      can({
+        principal: { kind: "agent", agentId, isLead },
+        verb: "config.read.secrets",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow
+    );
+  }
   return false;
 }
 
@@ -151,7 +162,7 @@ export async function handleScriptConnectionProxy(
     jsonError(res, `Script connection is not ${isSql ? "a SQL" : "an MCP"} connection`, 400);
     return true;
   }
-  if (!connectionScopeMatches(connection, agentId, syntheticPrincipal)) {
+  if (!connectionScopeMatches(connection, agentId, syntheticPrincipal, agent?.isLead ?? false)) {
     jsonError(res, "Script connection is not available to this agent", 403);
     return true;
   }

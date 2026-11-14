@@ -373,13 +373,17 @@ describe("sql-query route", () => {
     expect(executorCalls).toHaveLength(0);
   });
 
-  test("repo-scoped connections resolve the repo-scope secret", async () => {
+  test("repo-scoped connections resolve the repo-scope secret for a lead only", async () => {
     const repoId = crypto.randomUUID();
     const connection = await createSql({ scope: "repo", scopeId: repoId });
     expect(await configRows("connection.analytics.secret")).toEqual([
       expect.objectContaining({ scope: "repo", scopeId: repoId }),
     ]);
-    const response = await sqlQuery(connection.id, workerId, { sql: "select 1" });
+    expect((await sqlQuery(connection.id, workerId, { sql: "select 1" })).status).toBe(403);
+    expect((await sqlQuery(connection.id, "workflow", { sql: "select 1" })).status).toBe(403);
+    expect(executorCalls).toHaveLength(0);
+
+    const response = await sqlQuery(connection.id, leadId, { sql: "select 1" });
     expect(response.json()).toMatchObject({ ok: true });
     expect(executorCalls[0]?.dsn).toBe(DSN);
   });
