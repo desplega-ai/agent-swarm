@@ -1,0 +1,86 @@
+---
+title: 'Reviewing a proposed customer pricing change with AI agents'
+description: "Agent Swarm gathers the agreement, price list and billing records behind a proposed price change and hands finance a source-linked packet. People decide."
+agent:
+  when: "Someone wants sales, finance and operations to check a proposed customer price change against agreements and billing records before it is communicated"
+---
+
+Agent Swarm can be configured so a shared-agent workflow assembles the evidence that sales, finance and operations need to review a proposed customer pricing change before anyone communicates it. Configured steps gather the agreement, the approved price list and the billing records, flag the dates and terms that disagree, and put one source-linked packet in front of two named owners. People interpret the contract language and approve or reject the change. They update the billing and CRM records and decide what the customer is told. What the workflow removes is the assembly: finding one account's agreement and billing history across four systems, and saying where they disagree.
+
+The scope is one proposed change: a future price for one account, or for one defined set of accounts, reviewed before anyone approves it. A charge a customer is already disputing is a different case ([customer billing disputes](/docs/guides/customer-billing-dispute-review)). So is a supplier invoice mismatch ([supplier invoice discrepancies](/docs/guides/ai-invoice-discrepancy-review)), a renewal decision ([customer renewal review](/docs/guides/customer-renewal-review)) and a delivery commitment already made ([customer commitment tracking](/docs/guides/customer-commitment-tracking)).
+
+## When another tool fits better
+
+**Your billing, subscription or contract-management system's own price-change workflow.** Platforms that already hold the subscription record usually ship an amendment or scheduled-change screen: a future amount, an effective date, an approval step, sometimes a notice rule. When the change is straightforward and standardized, and its records all sit in that one tool, that path is the better one. It keeps the change and the record it produces in the same place.
+
+Agent Swarm fits when the pieces are apart. The signed agreement may sit in a document store or an e-signature tool, and the approved price list may live in a finance spreadsheet. The billing history is in the billing platform, while what the account team knows is in CRM notes. The person approving the change needs all of it. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split between a tool that finishes routine work and a shared platform for work that crosses systems and owners.
+
+## An illustrative workflow
+
+This is an illustrative scenario, not a built-in pricing feature and not a customer result. It needs integrations, source permissions and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative pricing change review flow, from a logged proposal to a human decision on the change and the customer message." chart={`flowchart LR
+  A["Proposed change logged<br/>(account, price,<br/>effective date)"] --> B["Gather permitted records<br/>(agreement, approved<br/>price list, billing)"]
+  B --> C["Deterministic comparison<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>finance owner and<br/>account owner"}}
+  G -- "approve" --> R["Owners decide, update<br/>systems and approve<br/>the customer message"]
+  G -- "reject" --> S["Archive, return<br/>or escalate"]
+`} />
+
+**1. The proposed change is recorded.** Someone in sales or finance writes the change down: the account, the current price, the proposed price, the date it would take effect and who is asking for it. The workflow starts from that record, not from a message in a thread.
+
+**2. The swarm gathers the permitted records.** Configured connections pull the agreement and its amendments, the approved price list for the product and market, the account's billing records, and the account notes the team allows. Scripts reach them through [script connections](/docs/guides/script-connections), with credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret enters script source.
+
+**3. Deterministic steps do the checking.** A `swarm-script` step compares the dates: the proposed effective date against the term end, the notice period stated in the agreement, the billing cycle. It looks for missing terms, such as an agreement with no price-change clause or no approved list price for that product and market. It sets the proposed price beside the approved list price and the current billed price. The output is JSON, produced the same way on every run. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and an agent writing from it, and says which parts ship with agent-swarm and which are custom source skills your team builds.
+
+**4. An agent writes the review packet.** The Researcher turns that JSON and the records behind it into one document. Every line carries a source link and the date of the record it rests on.
+
+**5. Two people clear the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow and resumes only on a human response. The gate names a finance owner and the account owner. On approve, they decide the change, update the systems and approve the wording of the customer message. On reject, the packet is archived, returned for more detail or escalated. Clearing the gate is a human review step. It is never a statement that the price is legally correct or that the review covered everything.
+
+Two questions it answers plainly.
+
+**How can sales, finance and operations use shared AI agents to review a customer pricing change against contracts and billing records?** By giving all three functions the same source-linked packet instead of three partial views. The agents collect and compare the records, and each function reads the packet and adds what it knows. The finance owner and the account owner decide together, so the change has one trail instead of a chain of forwards.
+
+**How can teams check a proposed price change against existing agreements before telling the customer?** A deterministic step sets the effective date, the term, the notice period and the approved list price beside the proposal and names what disagrees or is missing. An agent writes that into one document with sources. The conversation with the customer starts after people have read the same facts.
+
+## What the review packet contains
+
+Each item carries the date of the record behind it.
+
+- **The proposed change as it was written**, with the person or team that proposed it.
+- **The account's current price and its billing records**, with the invoice or subscription dates they come from.
+- **The agreement terms that govern price changes**, with their effective dates: the price-change clause, the notice period, the term end.
+- **The approved price list version** the proposed price should follow, with its own date.
+- **Flagged date inconsistencies and missing terms**, side by side with their sources. The packet leaves the choice to the owners.
+- **Gaps, named, with the owner who can supply each one.** A record the swarm cannot read stays a gap, never an estimate.
+- **The named finance owner and account owner**, plus a backup for each, and the point at which the gate expires.
+
+## What people decide
+
+Four things stay with people here.
+
+- **What the contract language means.** Whether a clause covers this change, and what a notice period requires in practice, is a reading of the document. The packet quotes the terms and does not interpret them.
+- **Whether the change happens.** Moving a price, holding it, phasing it or dropping the proposal is a commercial decision. The packet informs it and recommends nothing.
+- **The billing and CRM records.** The agent does not edit the subscription, the invoice schedule, the price list or the CRM. Someone with write access does it, inside the system that owns the record.
+- **What the customer is told.** The wording, the explanation and the timing belong to the person who will answer the reply. The agents never send it.
+
+The HITL guide's rule holds here: gate the irreversible steps and let the reversible ones run. Gathering records and writing the packet are reversible. A price change that reaches a customer's invoice is not.
+
+When the gate is not cleared, the proposal has not been reviewed. The gate carries a timeout and a fallback path, as [HITL gates](/docs/playbooks/patterns/hitl-gates) recommends. A reminder goes to the two owners and a named backup, then an explicit hold keeps the proposal on an open list. It never proceeds on silence.
+
+## Limits and setup
+
+**Every source system is a custom integration.** Your team configures each connection and grants the permissions it needs, scoped `global`, `agent` or `repo`, as [script connections](/docs/guides/script-connections) describes. Nothing here is a supported list of pricing or CRM systems.
+
+**What the product does not do.** It ships no contract parsing, no pricing optimization, no automatic billing change and no legal or compliance check. The guide describes a workflow you build, not a feature you switch on.
+
+**Coverage is what the sources expose.** An agreement that lives in a mailbox, a discount agreed on a call and never written down, or a price list nobody maintains is not in the packet. The packet says so instead of filling the hole.
+
+**Stale and conflicting records are reported, not resolved.** A price list superseded but never replaced goes into the packet with its date. So does a billing export that stops before the current billing period, or a second agreement version that states a different notice period. Where the sources disagree, both values stay and the owners decide which one governs.
+
+**No measured outcome is claimed here.** No customer has run this scenario, and no result is described.
+
+**Access is a written decision.** Who may read which record, and who grants access, belongs in the team's governance record ([AI operations governance](/docs/guides/ai-operations-governance)). A record the swarm cannot reach gets named, with the owner who could grant access to it. Nobody is asked to paste it into a thread instead.
+
+**Legal review stays with counsel** where the change or the agreement calls for it. Clearing the gate is a review by the two named owners, not a legal opinion.
