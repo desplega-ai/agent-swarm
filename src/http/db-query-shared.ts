@@ -111,6 +111,74 @@ function openReadOnlyReader(): Database {
   return reader;
 }
 
+function readRootPages(db: Database): Map<number, string> {
+  const rootPages = new Map<number, string>();
+  for (const row of db
+    .query("SELECT rootpage, tbl_name FROM main.sqlite_master WHERE rootpage > 0")
+    .all() as Array<{ rootpage: number; tbl_name: string }>) {
+    rootPages.set(row.rootpage, row.tbl_name.toLowerCase());
+  }
+  return rootPages;
+}
+
+/**
+ * The read-only connection the bounded path's deny check compiles user SQL
+ * on, kept open across queries. Opening a reader costs ~3 ms (file open,
+ * schema parse, sqlite-vec load), while the check itself takes well under
+ * 1 ms, and script runs issue db-query calls in loops. Bound to the
+ * application handle it was opened for: a closed or swapped handle gets a
+ * fresh reader. File-backed databases only; an in-memory database is
+ * snapshotted per check as before, because a kept snapshot would not see
+ * later schema changes.
+ *
+ * Staying correct across schema changes: SQLite re-reads the schema on this
+ * connection whenever the schema cookie moves, so `EXPLAIN` always compiles
+ * against the current schema. The root-page map is cached under the
+ * `schema_version` it was read at; DDL and VACUUM (the only operations that
+ * create, drop or move root pages) bump it, so the map is re-read then. No
+ * statement stays open between checks, so the reader holds no read
+ * transaction and never blocks a WAL checkpoint.
+ */
+type SharedDenyCheckReader = {
+  owner: Database;
+  reader: Database;
+  schemaVersion: number;
+  rootPages: Map<number, string>;
+};
+let sharedDenyCheckReader: SharedDenyCheckReader | null = null;
+
+function closeSharedDenyCheckReader(): void {
+  const shared = sharedDenyCheckReader;
+  sharedDenyCheckReader = null;
+  try {
+    shared?.reader.close();
+  } catch {
+    // Already closed.
+  }
+}
+
+function getSharedDenyCheckReader(): SharedDenyCheckReader | null {
+  const owner = getDb();
+  if (!owner.filename || owner.filename === ":memory:") {
+    closeSharedDenyCheckReader();
+    return null;
+  }
+  if (sharedDenyCheckReader?.owner !== owner) {
+    closeSharedDenyCheckReader();
+    sharedDenyCheckReader = {
+      owner,
+      reader: openReadOnlyReader(),
+      schemaVersion: -1,
+      rootPages: new Map(),
+    };
+  }
+  return sharedDenyCheckReader;
+}
+
+function schemaVersionOf(db: Database): number {
+  return (db.query("PRAGMA schema_version").get() as { schema_version: number }).schema_version;
+}
+
 /**
  * Reject `sql` if it reads a denied table. Works on the compiled program, not
  * the SQL text: `EXPLAIN` lists every b-tree the statement opens by root page,
@@ -118,32 +186,60 @@ function openReadOnlyReader(): Database {
  * table name. Views, CTEs and subqueries are already expanded in the program,
  * so no SQL parsing is needed. A user `EXPLAIN ...` returns bytecode, never
  * row data, so it is allowed as is.
+ *
+ * Without a `reader`, the check runs on the shared deny-check reader (see
+ * {@link SharedDenyCheckReader}); a failure on it drops the reader so the next
+ * check opens a fresh one.
  */
 export function assertNoDeniedTables(sql: string, reader?: Database): void {
   const statement = stripTrailingSemicolon(sql);
   if (/^explain\b/i.test(stripLeadingComments(statement))) return;
 
-  const db = reader ?? openReadOnlyReader();
-  try {
-    const rootPages = new Map<number, string>();
-    for (const row of db
-      .query("SELECT rootpage, tbl_name FROM main.sqlite_master WHERE rootpage > 0")
-      .all() as Array<{ rootpage: number; tbl_name: string }>) {
-      rootPages.set(row.rootpage, row.tbl_name.toLowerCase());
-    }
-
-    using program = db.prepare(`EXPLAIN ${statement}`);
-    const denied = new Set<string>();
-    for (const op of program.all() as Array<{ opcode: string; p2: number; p3: number }>) {
-      // p3 is the schema index: 0 = main. Credential tables only live there.
-      if (!CURSOR_OPEN_OPCODES.has(op.opcode) || op.p3 !== 0) continue;
-      const table = rootPages.get(op.p2);
-      if (table && DB_QUERY_DENIED_TABLES.has(table)) denied.add(table);
-    }
-    if (denied.size > 0) throw new DbQueryDeniedTableError([...denied].sort());
-  } finally {
-    if (!reader) db.close();
+  if (reader) {
+    assertProgramReadsNoDeniedTable(reader, statement, readRootPages(reader));
+    return;
   }
+  const shared = getSharedDenyCheckReader();
+  if (!shared) {
+    const snapshot = openReadOnlyReader();
+    try {
+      assertProgramReadsNoDeniedTable(snapshot, statement, readRootPages(snapshot));
+    } finally {
+      snapshot.close();
+    }
+    return;
+  }
+  try {
+    const schemaVersion = schemaVersionOf(shared.reader);
+    if (schemaVersion !== shared.schemaVersion) {
+      shared.rootPages = readRootPages(shared.reader);
+      shared.schemaVersion = schemaVersion;
+    }
+    assertProgramReadsNoDeniedTable(shared.reader, statement, shared.rootPages);
+  } catch (err) {
+    // A denied table is the check working; anything else (a syntax error in
+    // the user's SQL included) keeps no state that could outlive this call.
+    if (!(err instanceof DbQueryDeniedTableError) && sharedDenyCheckReader === shared) {
+      closeSharedDenyCheckReader();
+    }
+    throw err;
+  }
+}
+
+function assertProgramReadsNoDeniedTable(
+  db: Database,
+  statement: string,
+  rootPages: Map<number, string>,
+): void {
+  using program = db.prepare(`EXPLAIN ${statement}`);
+  const denied = new Set<string>();
+  for (const op of program.all() as Array<{ opcode: string; p2: number; p3: number }>) {
+    // p3 is the schema index: 0 = main. Credential tables only live there.
+    if (!CURSOR_OPEN_OPCODES.has(op.opcode) || op.p3 !== 0) continue;
+    const table = rootPages.get(op.p2);
+    if (table && DB_QUERY_DENIED_TABLES.has(table)) denied.add(table);
+  }
+  if (denied.size > 0) throw new DbQueryDeniedTableError([...denied].sort());
 }
 
 function stripLeadingComments(sql: string): string {
