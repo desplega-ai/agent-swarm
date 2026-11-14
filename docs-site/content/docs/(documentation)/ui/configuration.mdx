@@ -692,6 +692,18 @@ A website, team size, and use case enable the full fleet benchmark. The API send
 
 The explicit consent sends these details to Desplega, even when telemetry is off. The API stores them in `SWARM_USED_BY_CONTACT_EMAIL`, `SWARM_USED_BY_CONTACT_FUNCTION`, and `SWARM_USED_BY_QUOTE`. Revocation clears all three local values after the proxy accepts the request. Desplega keeps the earlier grant record because the proxy has no delete path. To request deletion of that record, contact [contact@desplega.sh](mailto:contact@desplega.sh).
 
+### Slack transport
+
+**Slack transport** (`SLACK_MODE`) supports `socket` (the default) and `http`.
+Both modes require a bot token. Socket Mode also requires an app-level token.
+HTTP requires a signing secret and receives Events API deliveries, slash commands,
+and interactivity at `/api/integrations/slack/events`.
+
+Configure credentials on the Integrations page, then select the transport here.
+A saved `http` value uses the native signed HTTP receiver. The setup wizard configures
+Socket Mode and selects `socket` whenever you save its Slack tokens.
+See [Slack integration](/docs/integrations/slack) for the request URL and app manifest setup.
+
 ### Slack task-tree visibility
 
 **Show task tree in Slack threads** (`SLACK_RENDER_V2_TASK_TREE_ENABLED`) is On by default,

@@ -38,6 +38,16 @@ describe("automation integration configure surfaces", () => {
 });
 
 describe("Slack transport credential status", () => {
+  test("the transport selector describes the native signed HTTP receiver", () => {
+    const field = findCatalogField("SLACK_MODE")?.field;
+    expect(field?.options).toEqual([
+      { value: "socket", label: "Socket Mode" },
+      { value: "http", label: "HTTP" },
+    ]);
+    expect(field?.helpText).toContain("signing secret");
+    expect(field?.helpText).toContain("/api/integrations/slack/events");
+  });
+
   test("HTTP uses the signing secret and socket still needs an app token", () => {
     const slack = INTEGRATIONS.find((candidate) => candidate.id === "slack")!;
     const http: SwarmConfig = {
