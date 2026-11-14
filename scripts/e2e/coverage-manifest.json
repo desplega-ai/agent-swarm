@@ -645,6 +645,10 @@
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
     },
+    "schedule-target-owner": {
+      "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
+      "scenarios": ["schedule-target-owner"]
+    },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
