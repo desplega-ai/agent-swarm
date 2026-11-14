@@ -226,7 +226,9 @@ describe("CodexAppServer", () => {
 
   for (const { name, launchOnGateway } of [
     {
-      name: "pinned Codex rejects a gateway turn on an app-server launched without it",
+      // Codex <= 0.167 rejected this turn ("your current provider is openai").
+      // 0.168+ honors the thread-level provider, so both launches start the turn.
+      name: "pinned Codex accepts a gateway turn on an app-server launched without it",
       launchOnGateway: false,
     },
     {
@@ -267,11 +269,7 @@ describe("CodexAppServer", () => {
             threadId: started.thread.id,
             input: [{ type: "text", text: "hi" }],
           });
-          if (launchOnGateway) await turn;
-          else
-            await expect(turn).rejects.toThrow(
-              "This chat uses swarm-gateway, but your current provider is openai",
-            );
+          await turn;
         } finally {
           await server.close();
           await rm(home, { recursive: true, force: true });
