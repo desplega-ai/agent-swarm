@@ -149,7 +149,8 @@ function githubLink(
   rest: { number?: number; sha?: string },
   href: string,
 ): SwarmLink | null {
-  if (!GITHUB_NAME.test(owner) || !GITHUB_NAME.test(repo) || /^\.+$/.test(repo)) return null;
+  if (!GITHUB_NAME.test(owner) || !GITHUB_NAME.test(repo)) return null;
+  if (/^\.+$/.test(owner) || /^\.+$/.test(repo)) return null;
   if (GITHUB_RESERVED_OWNERS.has(owner.toLowerCase())) return null;
   return {
     type: "github",
