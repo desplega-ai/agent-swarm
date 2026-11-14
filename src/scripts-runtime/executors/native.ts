@@ -247,25 +247,206 @@ async function linkOrWriteBareImportShims(baseTmpDir: string, tmpdir: string): P
   }
 }
 
-function harnessCommand(
-  harnessPath: string,
-  input: ExecutorInput,
-  env: Record<string, string>,
-  runAs: SandboxIdentity | undefined,
-): string[] {
-  return buildSandboxedCommand(
-    ["bun", "run", harnessPath],
-    env,
-    {
+/**
+ * Everything that shapes a harness process before it reads its run config:
+ * the sandbox command, its limits, identity and environment. Two runs with an
+ * equal spec can use the same kind of pre-started process.
+ */
+type HarnessSpec = {
+  baseTmpDir: string;
+  harnessPath: string;
+  runtimeDir: string | null;
+  runAs: SandboxIdentity | null;
+  limits: {
+    virtualMemoryMb: number;
+    cpuTimeSec: number;
+    maxProcs: number;
+    maxFileKb: number;
+    maxFdCount: number;
+  };
+  hostValidatedArgs: boolean;
+  env: { PATH: string; HOME: string | null; LANG: string; LC_ALL: string };
+};
+
+function harnessSpecFor(input: ExecutorInput): HarnessSpec {
+  const runAs = resolveSandboxIdentity();
+  return {
+    baseTmpDir: process.env.TMPDIR ?? (process.platform === "win32" ? osTmpdir() : "/tmp"),
+    // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
+    // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
+    harnessPath: process.env.SCRIPT_RUNTIME_DIR
+      ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
+      : fileURLToPath(new URL("../eval-harness.ts", import.meta.url)),
+    runtimeDir: process.env.SCRIPT_RUNTIME_DIR ?? null,
+    runAs: runAs ? { uid: runAs.uid, gid: runAs.gid } : null,
+    limits: {
       virtualMemoryMb: input.resources.memoryMb,
       cpuTimeSec: input.resources.cpuTimeSec,
       maxProcs: input.resources.maxProcs,
       maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
       maxFdCount: input.resources.maxFdCount,
     },
-    "inline",
-    runAs,
-  );
+    hostValidatedArgs: input.hostValidatedArgs === true,
+    env: {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      // The dropped identity cannot use the API's HOME; null means the run dir.
+      HOME: runAs ? null : (process.env.HOME ?? "/tmp"),
+      LANG: process.env.LANG ?? "C.UTF-8",
+      LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+    },
+  };
+}
+
+/** A sandboxed harness process that has loaded its modules and waits on stdin for its run. */
+type StartedHarness = {
+  tmpdir: string;
+  proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+  argsFile: string;
+  sourceFile: string;
+  resultFile: string;
+  errorFile: string;
+  startedFile: string;
+};
+
+/**
+ * Create a fresh run dir and start the harness in it. The harness imports its
+ * runtime (most of a run's fixed cost), then blocks on stdin: it reads the
+ * config payload first and the args and source files only after that, so the
+ * caller writes those files and the payload once the run is known. No user
+ * code runs before the payload arrives.
+ */
+async function startHarness(spec: HarnessSpec): Promise<StartedHarness> {
+  const tmpdir = `${spec.baseTmpDir}/swarm-script-${crypto.randomUUID()}`;
+  // The user module lives in a subdir that exists before launch: Bun snapshots
+  // the cwd listing at startup, but not the listing of this subdir.
+  await mkdir(`${tmpdir}/user-module`, { recursive: true });
+  try {
+    await linkOrWriteBareImportShims(spec.baseTmpDir, tmpdir);
+    if (spec.runAs) {
+      const { uid, gid } = spec.runAs;
+      // The child writes its result and marker files into the run dir.
+      await Promise.all([tmpdir, `${tmpdir}/user-module`].map((path) => chown(path, uid, gid)));
+    }
+    const files = {
+      argsFile: `${tmpdir}/args.json`,
+      sourceFile: `${tmpdir}/user-module/user-script.ts`,
+      resultFile: `${tmpdir}/result.json`,
+      errorFile: `${tmpdir}/error.json`,
+      startedFile: `${tmpdir}/started.marker`,
+    };
+    const harnessEnv: Record<string, string> = {
+      PATH: spec.env.PATH,
+      HOME: spec.env.HOME ?? tmpdir,
+      LANG: spec.env.LANG,
+      LC_ALL: spec.env.LC_ALL,
+      TMPDIR: tmpdir,
+      SWARM_SCRIPT_TMPDIR: tmpdir,
+      SWARM_SCRIPT_ARGS_FILE: files.argsFile,
+      SWARM_SCRIPT_SOURCE_FILE: files.sourceFile,
+      SWARM_SCRIPT_RESULT_FILE: files.resultFile,
+      SWARM_SCRIPT_ERROR_FILE: files.errorFile,
+      SWARM_SCRIPT_STARTED_FILE: files.startedFile,
+      ...(spec.hostValidatedArgs ? { SWARM_SCRIPT_HOST_VALIDATED_ARGS: "1" } : {}),
+    };
+    const proc = registerProcessGroup(
+      Bun.spawn(
+        buildSandboxedCommand(
+          ["bun", "run", spec.harnessPath],
+          harnessEnv,
+          spec.limits,
+          "inline",
+          spec.runAs ?? undefined,
+        ),
+        {
+          // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
+          // binary for argv[0] — the sandboxed command's `env -i` prelude is
+          // what actually scrubs the child's environment down to `harnessEnv`
+          // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
+          // passes `harnessEnv` through directly instead — see
+          // `buildSandboxedCommand`'s win32 doc comment.
+          env: sandboxSpawnEnv(harnessEnv),
+          cwd: tmpdir,
+          detached: detachedProcessGroup,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      ),
+    );
+    return { tmpdir, proc, ...files };
+  } catch (error) {
+    await rm(tmpdir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/**
+ * How long a pre-started harness may wait for a run before it is stopped. It
+ * holds a bun process (tens of MB) and uses no CPU while it waits.
+ */
+const PRESTARTED_IDLE_MS = 120_000;
+/** Distinct harness specs that keep a pre-started process; others start cold. */
+const PRESTARTED_MAX_SPECS = 4;
+
+type Prestarted = {
+  harness: Promise<StartedHarness | null>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+};
+const prestarted = new Map<string, Prestarted>();
+
+async function discardHarness(harness: StartedHarness): Promise<void> {
+  harness.proc.stdin.end();
+  await terminateProcessGroup(harness.proc.pid);
+  await rm(harness.tmpdir, { recursive: true, force: true });
+}
+
+/**
+ * Start one harness for `spec` in the background, so the next run with the
+ * same spec skips bun startup and module loading. Each process serves exactly
+ * one run and is never reused, so runs stay isolated as before.
+ */
+function prestartHarness(key: string, spec: HarnessSpec): void {
+  if (prestarted.has(key) || prestarted.size >= PRESTARTED_MAX_SPECS) return;
+  const entry: Prestarted = {
+    harness: startHarness(spec).then(
+      (harness) => {
+        // A waiting harness must not keep the API (or a test process) alive.
+        harness.proc.unref();
+        if (prestarted.get(key) !== entry) {
+          void discardHarness(harness).catch(() => {});
+          return null;
+        }
+        entry.idleTimer = setTimeout(() => {
+          if (prestarted.get(key) !== entry) return;
+          prestarted.delete(key);
+          void discardHarness(harness).catch(() => {});
+        }, PRESTARTED_IDLE_MS);
+        entry.idleTimer.unref?.();
+        return harness;
+      },
+      () => {
+        if (prestarted.get(key) === entry) prestarted.delete(key);
+        return null;
+      },
+    ),
+  };
+  prestarted.set(key, entry);
+}
+
+/** Take the pre-started harness for `key` if one is ready and still waiting. */
+async function takePrestartedHarness(key: string): Promise<StartedHarness | null> {
+  const entry = prestarted.get(key);
+  if (!entry) return null;
+  prestarted.delete(key);
+  if (entry.idleTimer) clearTimeout(entry.idleTimer);
+  const harness = await entry.harness;
+  if (!harness) return null;
+  if (harness.proc.exitCode !== null || harness.proc.signalCode !== null || harness.proc.killed) {
+    void discardHarness(harness).catch(() => {});
+    return null;
+  }
+  harness.proc.ref();
+  return harness;
 }
 
 export class NativeScriptExecutor implements ScriptExecutor {
@@ -277,24 +458,12 @@ export class NativeScriptExecutor implements ScriptExecutor {
     }
 
     const start = Date.now();
-    const baseTmpDir = process.env.TMPDIR ?? (process.platform === "win32" ? osTmpdir() : "/tmp");
-    const tmpdir = `${baseTmpDir}/swarm-script-${crypto.randomUUID()}`;
-    await mkdir(`${tmpdir}/user-module`, { recursive: true });
-
-    const argsFile = `${tmpdir}/args.json`;
-    const sourceFile = `${tmpdir}/user-module/user-script.ts`;
-    const resultFile = `${tmpdir}/result.json`;
-    const errorFile = `${tmpdir}/error.json`;
-    const startedFile = `${tmpdir}/started.marker`;
-    const runAs = resolveSandboxIdentity();
-    // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
-    // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
-    const harnessPath = process.env.SCRIPT_RUNTIME_DIR
-      ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
-      : fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
+    const spec = harnessSpecFor(input);
+    const specKey = JSON.stringify(spec);
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
+    let harness: StartedHarness | null = null;
     let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
 
     const killedOutput = (): ExecutorOutput => ({
@@ -310,8 +479,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
     try {
       if (killed) return killedOutput();
 
-      // Listen before the first await: an abort during the file writes below
-      // must stop the spawn, not land between the writes and the listener.
+      // Listen before the first await: an abort while the harness starts or the
+      // run files are written must stop the run before its payload is sent.
       const onExternalAbort = () => {
         killed = true;
         if (proc) void terminateProcessGroup(proc.pid);
@@ -319,60 +488,31 @@ export class NativeScriptExecutor implements ScriptExecutor {
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
+      // A harness started ahead for this spec has already paid bun startup and
+      // module loading. Either way, start one for the next run in the background.
+      harness = (await takePrestartedHarness(specKey)) ?? (await startHarness(spec));
+      proc = harness.proc;
+      prestartHarness(specKey, spec);
+      if (killed) return killedOutput();
+
+      const { argsFile, sourceFile, resultFile, errorFile, startedFile } = harness;
       await Promise.all([
         Bun.write(argsFile, JSON.stringify(input.args ?? null)),
         Bun.write(sourceFile, input.source),
-        linkOrWriteBareImportShims(baseTmpDir, tmpdir),
       ]);
-      if (runAs) {
-        // The child writes its result and marker files into the run dir.
-        await Promise.all(
-          [tmpdir, `${tmpdir}/user-module`, argsFile, sourceFile].map((path) =>
-            chown(path, runAs.uid, runAs.gid),
-          ),
-        );
+      if (spec.runAs) {
+        const { uid, gid } = spec.runAs;
+        await Promise.all([argsFile, sourceFile].map((path) => chown(path, uid, gid)));
       }
 
-      // No await between this check and the spawn below.
+      // No await between this check and the payload write below: the harness
+      // runs nothing of the script before it reads the payload.
       if (killed) return killedOutput();
 
       const timeout = setTimeout(() => {
         timedOut = true;
         if (proc) void terminateProcessGroup(proc.pid);
       }, input.resources.wallClockMs);
-
-      const harnessEnv: Record<string, string> = {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        // The dropped identity cannot use the API's HOME.
-        HOME: runAs ? tmpdir : (process.env.HOME ?? "/tmp"),
-        LANG: process.env.LANG ?? "C.UTF-8",
-        LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
-        TMPDIR: tmpdir,
-        SWARM_SCRIPT_TMPDIR: tmpdir,
-        SWARM_SCRIPT_ARGS_FILE: argsFile,
-        SWARM_SCRIPT_SOURCE_FILE: sourceFile,
-        SWARM_SCRIPT_RESULT_FILE: resultFile,
-        SWARM_SCRIPT_ERROR_FILE: errorFile,
-        SWARM_SCRIPT_STARTED_FILE: startedFile,
-        ...(input.hostValidatedArgs ? { SWARM_SCRIPT_HOST_VALIDATED_ARGS: "1" } : {}),
-      };
-
-      proc = registerProcessGroup(
-        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv, runAs), {
-          // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
-          // binary for argv[0] — the sandboxed command's `env -i` prelude is
-          // what actually scrubs the child's environment down to `harnessEnv`
-          // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
-          // passes `harnessEnv` through directly instead — see
-          // `buildSandboxedCommand`'s win32 doc comment.
-          env: sandboxSpawnEnv(harnessEnv),
-          cwd: tmpdir,
-          detached: detachedProcessGroup,
-          stdin: "pipe",
-          stdout: "pipe",
-          stderr: "pipe",
-        }),
-      );
 
       proc.stdin.write(JSON.stringify(input.configPayload));
       proc.stdin.end();
@@ -386,7 +526,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       const runDirCheck: RunDirFileCheck = {
         // ulimit -f already bounds what the child can write.
         maxBytes: input.resources.maxFileBytes,
-        ...(runAs ? { ownerUid: runAs.uid } : {}),
+        ...(spec.runAs ? { ownerUid: spec.runAs.uid } : {}),
       };
       const result = exitCode === 0 ? await readResultFile(resultFile, runDirCheck) : undefined;
       const runtimeError =
@@ -419,7 +559,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     } finally {
       removeAbortListener?.();
       if (proc) await terminateProcessGroup(proc.pid);
-      await rm(tmpdir, { recursive: true, force: true });
+      if (harness) await rm(harness.tmpdir, { recursive: true, force: true });
     }
   }
 }
