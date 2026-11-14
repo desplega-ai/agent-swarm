@@ -374,11 +374,12 @@ Check whether an agent can run a model profile before you pass it as `profile` o
 
 **Get task details**
 
-Returns detailed information about a specific task, including output, failure reason, and log history.
+Returns detailed information about a specific task, including output, failure reason, attachments and log history. A response over the size budget is fitted with the least loss: log rows drop fields that repeat the task, then the oldest non-lifecycle rows, then the longest text is cut. `fitted` lists each reduction; include ["logs", "text"] returns the rest.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to get details for. |
+| `include` | `array` | No | - | Opt out of the size fit. A response that fits the budget is never reduced. One that does not is reduced only as far as needed, and `fitted` lists what changed. "logs": every log row verbatim. "text": every text field (task, output, progress, failureReason, requester notes, log values) uncut. A result over the wire limit still spills to KV. |
 
 ### store-progress
 

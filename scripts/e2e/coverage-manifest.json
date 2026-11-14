@@ -574,6 +574,14 @@
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
     },
+    "task-details-field-contract": {
+      "description": "get-task-details keeps status, output, failureReason, attachments and the parent link reachable on an oversized task, and taskId stays the one required input",
+      "scenarios": ["task-details-field-contract"]
+    },
+    "task-details-fit": {
+      "description": "get-task-details fits an oversized response under its 9 KB budget without spilling: log rows compact, the oldest non-lifecycle rows go before any text is cut, the newest progress and lifecycle rows stay, include opts out of each step, a small response is unchanged and a script SDK call gets the full shape",
+      "scenarios": ["task-details-fit"]
+    },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
       "scenarios": ["poll-concurrent-claim"]
