@@ -29,14 +29,20 @@ type CollectedImports = {
   unsupportedSyntax: "import()" | "require()" | "import-equals" | null;
 };
 
-function collectImportSpecifiers(source: string, strictDynamic = false): CollectedImports {
-  const sourceFile = ts.createSourceFile(
+function parseScriptSource(source: string): ts.SourceFile {
+  return ts.createSourceFile(
     "user-script.ts",
     source,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TS,
   );
+}
+
+function collectImportSpecifiers(
+  sourceFile: ts.SourceFile,
+  strictDynamic = false,
+): CollectedImports {
   const imports: string[] = [];
   let unsupportedSyntax: CollectedImports["unsupportedSyntax"] = null;
 
@@ -82,14 +88,7 @@ function collectImportSpecifiers(source: string, strictDynamic = false): Collect
   return { imports, unsupportedSyntax };
 }
 
-function findForbiddenDynamicCode(source: string, subject: string): string | null {
-  const sourceFile = ts.createSourceFile(
-    "user-script.ts",
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
+function findForbiddenDynamicCode(sourceFile: ts.SourceFile, subject: string): string | null {
   let diagnostic: string | null = null;
 
   const visit = (node: ts.Node) => {
@@ -135,10 +134,12 @@ export function checkImportAllowlist(
 ): ImportAllowlistResult {
   const isExtension = options.allowedBare.includes("swarm-extension");
   const subject = isExtension ? "swarm extensions" : "swarm scripts";
-  const dynamicDiagnostic = findForbiddenDynamicCode(source, subject);
+  // One parse serves both walks: building the AST is most of the check's cost.
+  const sourceFile = parseScriptSource(source);
+  const dynamicDiagnostic = findForbiddenDynamicCode(sourceFile, subject);
   if (dynamicDiagnostic) return { ok: false, diagnostic: dynamicDiagnostic, imports: [] };
 
-  const collected = collectImportSpecifiers(source, options.strictDynamic);
+  const collected = collectImportSpecifiers(sourceFile, options.strictDynamic);
   if (collected.unsupportedSyntax) {
     return {
       ok: false,
@@ -167,9 +168,40 @@ export function checkImportAllowlist(
   return { ok: false, diagnostic: `${reason}. ${remedy}`, imports: rejected };
 }
 
+/**
+ * Script-import verdicts by source sha256. The verdict is a pure function of
+ * the source text (the options below are fixed), so an entry can never go
+ * stale: an edited script has a new hash. Every script run checks its source,
+ * and parsing a 10-40 KB script with the TypeScript compiler costs 5-20 ms of
+ * a ~120 ms run, while saved scripts run the same source over and over.
+ * sha256, not a fast non-cryptographic hash: this check gates the sandbox, so
+ * a crafted source must not be able to collide with an approved one.
+ */
+const SCRIPT_IMPORT_VERDICT_CACHE_MAX = 512;
+const scriptImportVerdicts = new Map<string, ImportAllowlistResult>();
+
+function copyVerdict(result: ImportAllowlistResult): ImportAllowlistResult {
+  return result.ok ? { ok: true } : { ...result, imports: [...result.imports] };
+}
+
 export function validateScriptImports(source: string): ImportAllowlistResult {
-  return checkImportAllowlist(source, {
+  const key = new Bun.CryptoHasher("sha256").update(source).digest("hex");
+  const cached = scriptImportVerdicts.get(key);
+  if (cached) {
+    // Refresh recency: Map iteration order is insertion order, so the first
+    // key is always the least recently used one.
+    scriptImportVerdicts.delete(key);
+    scriptImportVerdicts.set(key, cached);
+    return copyVerdict(cached);
+  }
+  const result = checkImportAllowlist(source, {
     allowedBare: SCRIPT_ALLOWED_BARE_IMPORTS,
     allowRelative: true,
   });
+  scriptImportVerdicts.set(key, copyVerdict(result));
+  if (scriptImportVerdicts.size > SCRIPT_IMPORT_VERDICT_CACHE_MAX) {
+    const oldest = scriptImportVerdicts.keys().next().value;
+    if (oldest !== undefined) scriptImportVerdicts.delete(oldest);
+  }
+  return result;
 }
