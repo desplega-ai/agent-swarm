@@ -570,6 +570,10 @@
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
     },
+    "task-details-field-contract": {
+      "description": "get-task-details keeps status, output, failureReason, attachments and the parent link reachable on an oversized task, and taskId stays the one required input",
+      "scenarios": ["task-details-field-contract"]
+    },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
       "scenarios": ["poll-concurrent-claim"]
