@@ -1,6 +1,7 @@
-import { existsSync, constants as fsConstants } from "node:fs";
-import { chown, lstat, mkdir, open, rm, symlink } from "node:fs/promises";
+import { existsSync, constants as fsConstants, statSync } from "node:fs";
+import { chmod, chown, lstat, mkdir, mkdtemp, open, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir as osTmpdir } from "node:os";
+import { resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   detachedProcessGroup,
@@ -247,6 +248,118 @@ async function linkOrWriteBareImportShims(baseTmpDir: string, tmpdir: string): P
   }
 }
 
+/**
+ * Source mode (no SCRIPT_RUNTIME_DIR) used to spawn `bun run eval-harness.ts`,
+ * so every run resolved and transpiled the harness's ~60 TypeScript modules
+ * before user code started: about 25-45 ms of a ~120 ms run. Compiled mode
+ * already runs a pre-built `eval-harness.bundle.js` (see the Dockerfile). This
+ * builds the same bundle once per API process, from the same sources and with
+ * the same externals, and reuses it until one of its inputs changes on disk.
+ *
+ * The externals are rewritten to absolute paths: the bundle lives in
+ * TMPDIR, where a bare specifier would not resolve to the repo's node_modules.
+ * Any build failure falls back to the TypeScript entry, the previous behavior.
+ */
+interface DevHarnessBundle {
+  path: string;
+  inputs: Array<{ path: string; mtimeMs: number }>;
+}
+
+// zod stays external too: the harness loads it (credential-broker schemas), and a
+// user script's `import "zod"` must keep resolving to that same module instance,
+// as it did when the harness ran from source, instead of loading a second copy.
+const DEV_HARNESS_EXTERNALS = /^(just-bash|@desplega\.ai\/agent-fs-just-bash|zod(\/.*)?)$/;
+let devHarnessBundle: Promise<DevHarnessBundle | undefined> | undefined;
+let devHarnessDirPromise: Promise<string> | undefined;
+
+/**
+ * The bundle dir gets a random name, created exclusively by mkdtemp, so no other
+ * user of a shared TMPDIR can pre-create it and swap the bundle every later run
+ * executes. 0755: the sandbox identity reads the bundle but cannot write here.
+ */
+function devHarnessDir(baseTmpDir: string): Promise<string> {
+  devHarnessDirPromise ??= (async () => {
+    const dir = await mkdtemp(`${baseTmpDir}/swarm-script-harness-`);
+    await chmod(dir, 0o755);
+    return dir;
+  })().catch((err) => {
+    devHarnessDirPromise = undefined;
+    throw err;
+  });
+  return devHarnessDirPromise;
+}
+
+function devHarnessBundleIsCurrent(bundle: DevHarnessBundle): boolean {
+  if (!existsSync(bundle.path)) return false;
+  for (const input of bundle.inputs) {
+    const stat = statSync(input.path, { throwIfNoEntry: false });
+    if (!stat || stat.mtimeMs !== input.mtimeMs) return false;
+  }
+  return true;
+}
+
+async function buildDevHarnessBundle(
+  entry: string,
+  baseTmpDir: string,
+): Promise<DevHarnessBundle | undefined> {
+  try {
+    const externalsFrom = fileURLToPath(new URL("..", import.meta.url));
+    // `metafile` ships in the pinned Bun runtime but not yet in bun-types. A
+    // runtime without it returns no metafile, and the run falls back below.
+    const build = Bun.build as (
+      config: Bun.BuildConfig & { metafile: boolean },
+    ) => Promise<Bun.BuildOutput & { metafile?: { inputs: Record<string, unknown> } }>;
+    const built = await build({
+      entrypoints: [entry],
+      target: "bun",
+      splitting: false,
+      metafile: true,
+      plugins: [
+        {
+          name: "swarm-script-harness-externals",
+          setup(build) {
+            build.onResolve({ filter: DEV_HARNESS_EXTERNALS }, (args) => ({
+              path: Bun.resolveSync(args.path, externalsFrom),
+              external: true,
+            }));
+          },
+        },
+      ],
+    });
+    const output = built.outputs[0];
+    if (!built.success || !output || !built.metafile) return undefined;
+    // Metafile input paths are relative to the cwd at build time.
+    const cwd = process.cwd();
+    const inputs = Object.keys(built.metafile.inputs).map((input) => {
+      const path = resolvePath(cwd, input);
+      return { path, mtimeMs: statSync(path).mtimeMs };
+    });
+    const dir = await devHarnessDir(baseTmpDir);
+    const path = `${dir}/eval-harness.bundle.js`;
+    // Write then rename: a concurrent run never reads a partial bundle.
+    const staging = `${path}.${crypto.randomUUID()}.tmp`;
+    await Bun.write(staging, output);
+    await rename(staging, path);
+    return { path, inputs };
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveDevHarnessPath(baseTmpDir: string): Promise<string> {
+  const entry = fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
+  const pending = devHarnessBundle;
+  const current = pending ? await pending : undefined;
+  if (current && devHarnessBundleIsCurrent(current)) return current.path;
+  // A failed build would fail the same way on every run: keep the TypeScript
+  // entry for the rest of this process.
+  if (pending && !current) return entry;
+  if (devHarnessBundle === pending) {
+    devHarnessBundle = buildDevHarnessBundle(entry, baseTmpDir);
+  }
+  return (await devHarnessBundle)?.path ?? entry;
+}
+
 function harnessCommand(
   harnessPath: string,
   input: ExecutorInput,
@@ -289,9 +402,10 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const runAs = resolveSandboxIdentity();
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
-    const harnessPath = process.env.SCRIPT_RUNTIME_DIR
+    // Source mode runs a bundle built from the harness sources (resolveDevHarnessPath).
+    const compiledHarnessPath = process.env.SCRIPT_RUNTIME_DIR
       ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
-      : fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
+      : undefined;
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
@@ -319,7 +433,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
-      await Promise.all([
+      const [harnessPath] = await Promise.all([
+        compiledHarnessPath ?? resolveDevHarnessPath(baseTmpDir),
         Bun.write(argsFile, JSON.stringify(input.args ?? null)),
         Bun.write(sourceFile, input.source),
         linkOrWriteBareImportShims(baseTmpDir, tmpdir),
