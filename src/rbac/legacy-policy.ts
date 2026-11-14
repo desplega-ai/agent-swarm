@@ -362,6 +362,8 @@ export const LEGACY_POLICY = {
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
   "schedule.deferral.update.any": leadOrResourceOwner,
+  // A schedule fires as its creator, so only the creator or a lead picks what it runs.
+  "schedule.target.update.any": leadOrResourceOwner,
   // Pool writes pick the image that receives a runtime token, so only humans
   // may make them. The lead may only place agents into operator-made pools.
   "runtime_pool.write": operatorOrUser,

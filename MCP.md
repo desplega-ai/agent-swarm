@@ -1190,7 +1190,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 
 **Update Scheduled Task**
 
-Update an existing scheduled task. Any registered agent can update schedules.
+Update an existing scheduled task. Any registered agent can update schedules; only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

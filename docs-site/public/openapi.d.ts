@@ -21222,7 +21222,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral owned by another agent */
+                /** @description Deferral or target owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21426,7 +21426,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral owned by another agent */
+                /** @description Deferral or target owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;

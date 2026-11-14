@@ -410,6 +410,11 @@ export const PERMISSIONS = {
     description: "Change a defer-task schedule the caller did not create.",
     namespace: "schedule",
   },
+  "schedule.target.update.any": {
+    description:
+      "Change what a schedule the caller did not create runs (its target, task template, workflow, script, script args or params).",
+    namespace: "schedule",
+  },
   "runtime_pool.write": {
     description: "Create, update, or delete runtime pools (image, provider kind, placement).",
     namespace: "runtime_pool",
