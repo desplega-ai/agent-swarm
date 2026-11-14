@@ -1,0 +1,94 @@
+---
+title: 'Coordinating a customer data access request across support, privacy and engineering with AI agents'
+description: "Agent Swarm can coordinate a configured request-review handoff across your systems and give a named owner a source-linked packet. People decide."
+agent:
+  when: "Someone wants support, privacy and engineering to coordinate a customer's personal-data access request across systems with a named owner"
+---
+
+Agent Swarm can help coordinate a configured review handoff for a customer's personal-data access request, while people own the identity check, the legal interpretation, the disclosure of data and the decision on what goes back to the customer. What the workflow takes off the team is the assembly: finding which systems hold records about one person, pulling only the fields the request allows, then putting a source-linked packet in front of the owner who answers.
+
+The scope is one job. A customer asks to see the personal data a company holds about them, and that request has to travel from support through privacy to engineering without losing its owner or widening the data it touches. Answering a customer's security questionnaire about the company's own controls is a different job, documented in [the security questionnaire workflow](https://www.agent-swarm.dev/blog/omnia/ai-security-questionnaire-workflow). Reviewing a prospective supplier's security evidence is another, covered by the [supplier security evidence review guide](/docs/guides/supplier-security-evidence-review). Employee access provisioning is a third, described in [employee access requests](https://www.agent-swarm.dev/blog/omnia/ai-employee-access-request-handoffs). A change to the external privacy policy, and AI governance across the business, sit outside this workflow.
+
+## When another tool fits better
+
+**A dedicated privacy request management platform.** If the company handles a high volume of requests, tracks regulatory deadlines, needs identity verification built in, keeps a data map across dozens of systems with automated discovery, and produces audit reporting, a product built for that work fits better.
+
+**A manual checklist.** If requests arrive a few times a quarter and the records sit in one or two systems, one person with a checklist in a document is the cheaper control.
+
+Agent Swarm fits a different shape: a request whose records are spread across internal systems, where several people each hold a piece of the answer. The customer record sits in the CRM, the payment history in the billing platform, the support trail in the helpdesk, the access log in an engineering system. Coordinating that means gathering what each system holds and presenting it, restricted to the fields the request covers, to the person who answers. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split between judgment and coordination.
+
+## An illustrative workflow
+
+This is a fictional, illustrative adaptation, not a built-in privacy feature and not a customer result. It needs integrations, access controls and workflow configuration your team builds and tests.
+
+<Mermaid title="Illustrative personal-data access request, from a logged request to a human decision on the reply." chart={`flowchart LR
+  A["Request received<br/>in support queue"] --> B["Named request owner<br/>(privacy role)"]
+  B --> C["Identity check<br/>by a person"]
+  C --> D["Scoped collection from<br/>approved inventory"]
+  D --> E["Agent drafts<br/>source-linked<br/>evidence packet"]
+  E --> G{{"human-in-the-loop<br/>privacy owner"}}
+  G -- "approve" --> R["Owner sends the<br/>approved response"]
+  G -- "reject" --> S["Return, narrow<br/>or escalate"]
+`} />
+
+**1. A request arrives in the support queue.** A customer writes that they want to see the personal data the company holds about them. Support logs the request and the workflow starts from that log entry. Nothing is collected yet.
+
+**2. A named request owner takes it.** A person in the privacy role owns the request end to end, including the packet and the reply. The agent prepares material for that owner. It never owns the request.
+
+**3. A person checks identity first.** The team's existing process confirms the requester is who they say they are, before any collection starts. The swarm does not verify identity, and it does not decide that a request is genuine.
+
+**4. The owner works from an approved system inventory.** The privacy owner keeps a written list of which systems may be searched for this kind of request and which fields count as personal data in each one. Collection runs only against that list. The list, and the approval thresholds around it, belong in the workflow's [governance record](/docs/guides/ai-operations-governance).
+
+**5. Configured steps collect, scoped to that list.** `swarm-script` steps query only the approved systems for only the listed fields and emit JSON, so no model chooses what to open. Systems are reached through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so the raw secret stays out of script source and arguments. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents the collection-then-synthesis pattern and the line this guide follows: `script-run`, `swarm-script` nodes, Pages and agent-fs ship with the product, while each source connector is a custom integration skill the team writes and tests. For this use case, every system connector is custom work.
+
+**6. The agent drafts a source-linked evidence packet.** Each item names the system and the query it came from, with the date of the record. Records the collection returned outside the approved field list are flagged for the owner to exclude, so the packet carries no more than the request needs.
+
+**7. A missing source escalates.** When an approved system cannot be reached, or returns nothing where records were expected, the packet says so and the workflow routes it to that system's named engineering owner. The request is not marked complete.
+
+**8. A person reviews at a gate.** A [human-in-the-loop node](/docs/playbooks/patterns/hitl-gates) pauses the run and posts to Slack, then resumes only when the privacy owner responds. On approve, the packet becomes the record behind the reply. On reject, the request returns for a narrower scope, goes back for the missing source, or escalates to a named backup. The gate carries a timeout and a fallback path, and the run never proceeds on silence.
+
+**9. The owner sends the approved response.** The privacy owner, or someone working under their sign-off, sends the response through the channel the company already uses. The agent does not contact the requester.
+
+## What the packet shows
+
+- **The systems that answered,** with the fields returned for each and the date of the export.
+- **A system that returned nothing,** with the query it ran, so an empty result is visible instead of assumed clean.
+- **Records that disagree,** shown side by side with their sources. The packet does not pick one.
+- **A source the workflow cannot reach,** named with the engineering owner who can grant access.
+
+## Limits and escalation
+
+**No automatic compliance.** The workflow produces evidence for a person to review. Whether a response meets a legal obligation, or answers the request in full, is a judgment for the privacy owner and the company's counsel.
+
+**No discovery beyond the inventory, no deletion, no correction.** The swarm searches the systems the owner listed and nothing else, and it assembles a read-only packet. A record outside that list stays invisible until a person adds the system and its fields. Erasure and rectification requests follow their own approval path.
+
+**No identity verification and no deadline guarantee.** Both stay with the team's process and the team's calendar. A gate with a timeout keeps a request from sitting silently. It does not promise a statutory date is met.
+
+**Least privilege on every connector.** Give each connector the narrowest read access that answers its part of the request, and keep results in access-controlled storage, not in chat or task text. The [credential broker](/docs/guides/scripts-credential-broker) keeps secrets out of script source and arguments. [RBAC](/docs/guides/ai-operations-governance) gates requests made with user tokens. An operator-key or agent call is not affected, so the approved inventory is the stronger control. Swarm memory is visible to every agent, so keep record contents out of it and pass the packet by file reference.
+
+**Escalate when the owner does not answer.** The gate needs a reminder, then a named backup, then an explicit hold so the request stays on an open list.
+
+## What stays human-owned
+
+**The identity check.** Someone in the team confirms who is asking, before the workflow touches a record.
+
+**The scope judgment.** Which systems and fields count as in scope is the privacy owner's call, written down before collection starts.
+
+**The legal reading.** Whether a record is exempt, whether a third party's data must be withheld and what the reply must contain belong to people who can answer for that reading.
+
+**The disclosure.** No packet leaves the company until a person approves it and sends it.
+
+**The decision to close.** Marking a request answered, or reopening it for a missing source, is a recorded human decision.
+
+The pattern is the one the HITL guide states: gate the irreversible step, let the reversible ones run. Sending a customer their data is not reversible.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a personal-data access request is the illustrative part.
+
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic collection that emits JSON, then an agent that synthesizes it, plus the split between built-in pieces and custom integration skills.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [AI operations governance](/docs/guides/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and the source-of-truth rules the approved inventory rests on.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): between a privacy platform and a shared agent platform.
