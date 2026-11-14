@@ -310,8 +310,19 @@ function fitToBudget(full: DetailsData, include: ReadonlySet<GetTaskDetailsInclu
       const droppable = compact
         .map((_log, i) => i)
         .filter((i) => i !== newestProgress && !LIFECYCLE_EVENTS.has(compact[i]?.eventType ?? ""));
+      const { compacted } = fitted.logs;
+      // Sets the notice with the rows, so every size check measures the omitted counts too.
       const without = (count: number) => {
         const drop = new Set(droppable.slice(0, count));
+        const byEventType: Record<string, number> = {};
+        for (const i of drop) {
+          const type = compact[i]?.eventType ?? "unknown";
+          byEventType[type] = (byEventType[type] ?? 0) + 1;
+        }
+        fitted.logs =
+          count > 0
+            ? { compacted, omitted: count, omittedByEventType: byEventType }
+            : { compacted };
         return compact.filter((_, i) => !drop.has(i));
       };
       let low = 1;
@@ -324,14 +335,6 @@ function fitToBudget(full: DetailsData, include: ReadonlySet<GetTaskDetailsInclu
       }
       const dropped = Math.min(low, droppable.length);
       logs = without(dropped);
-      if (dropped > 0) {
-        const byEventType: Record<string, number> = {};
-        for (const i of droppable.slice(0, dropped)) {
-          const type = compact[i]?.eventType ?? "unknown";
-          byEventType[type] = (byEventType[type] ?? 0) + 1;
-        }
-        fitted.logs = { ...fitted.logs, omitted: dropped, omittedByEventType: byEventType };
-      }
     }
   }
 
