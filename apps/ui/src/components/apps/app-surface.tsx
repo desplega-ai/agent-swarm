@@ -1405,7 +1405,7 @@ export function AppSurface({
     return (
       <div
         ref={appVersion.scopeRef}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
@@ -1422,7 +1422,7 @@ export function AppSurface({
           scrollRef.current = node;
           appVersion.scopeRef.current = node;
         }}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
@@ -1438,7 +1438,7 @@ export function AppSurface({
     return (
       <div
         ref={appVersion.scopeRef}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
@@ -1469,7 +1469,7 @@ export function AppSurface({
   return (
     <div
       ref={appVersion.scopeRef}
-      onInputCapture={appVersion.markInteraction}
+      onInput={appVersion.markInteraction}
       onClickCapture={appVersion.markInteraction}
       className="flex flex-col flex-1 min-h-0 gap-4"
       data-testid="app-runtime"
