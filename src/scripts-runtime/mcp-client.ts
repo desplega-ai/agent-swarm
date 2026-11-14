@@ -35,7 +35,8 @@ function methodNames(
 function headers(config: SwarmConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-    "X-Agent-ID": Redacted.value(config.agentId),
+    // A user-scoped run has no agent; its user token must not name one.
+    ...(Redacted.value(config.agentId) ? { "X-Agent-ID": Redacted.value(config.agentId) } : {}),
     // Audit-only header: X-Source-Task-Id would also rescope kv, parent send-task, etc.
     ...(config.auditSourceTaskId
       ? { "X-Audit-Source-Task-Id": Redacted.value(config.auditSourceTaskId) }

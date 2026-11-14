@@ -297,6 +297,10 @@
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]
     },
+    "mcp-user-code-mode": {
+      "description": "Code mode on /mcp-user: script-search, script-get-types and script-run as the requesting user, with no agent identity, a recorded run, hidden run tokens, and RBAC refusals for a viewer",
+      "scenarios": ["mcp-user-code-mode"]
+    },
     "mcp-user-events": {
       "description": "MCP Events webhooks on /mcp-user: events/list, subscribe with a verified local callback, signed task.completed and task.failed deliveries, a plain client unchanged, unsubscribe stops delivery",
       "scenarios": ["mcp-user-events"]

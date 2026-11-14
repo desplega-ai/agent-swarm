@@ -23,7 +23,8 @@ type BridgeRequest = {
 function headers(config: SwarmConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-    "X-Agent-ID": Redacted.value(config.agentId),
+    // A user-scoped run has no agent; its user token must not name one.
+    ...(Redacted.value(config.agentId) ? { "X-Agent-ID": Redacted.value(config.agentId) } : {}),
     // Per-boot identity of the invoking worker process (system context, not
     // script input) — work-acquisition endpoints gate on it in multi-runtime
     // mode.

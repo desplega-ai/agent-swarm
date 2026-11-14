@@ -1,6 +1,11 @@
 import { type RunScriptInput, type RunScriptOutput, runScript } from "../../scripts-runtime/loader";
 import { getAgentById } from "../db";
-import { mintScriptRunToken, revokeSessionToken } from "../users";
+import {
+  mintScriptRunToken,
+  mintUserScriptRunToken,
+  revokeSessionToken,
+  revokeUserScriptRunToken,
+} from "../users";
 
 /**
  * Backstop lifetime of a script run's api credential. The run revokes its
@@ -72,5 +77,44 @@ export async function runScriptWithRunCredential(
     return await runScript({ ...input, apiKey: credential.apiKey });
   } finally {
     await credential.release();
+  }
+}
+
+/**
+ * Run a script for a user, with no executing agent: its `ctx.swarm` calls
+ * present a short-lived token bound to `userId`, so the api applies that
+ * user's permissions, and the run gets no agent's credentials, connections or
+ * deployment egress secrets. The token is revoked when the run ends.
+ */
+export async function runScriptAsUserWithRunCredential(
+  input: Omit<
+    RunScriptInput,
+    | "apiKey"
+    | "agentId"
+    | "egressSecrets"
+    | "failedBindings"
+    | "userConfig"
+    | "apiConnections"
+    | "mcpConnections"
+    | "agentFs"
+  >,
+  userId: string,
+): Promise<RunScriptOutput> {
+  const token = await mintUserScriptRunToken(userId, SCRIPT_RUN_TOKEN_TTL_MS);
+  try {
+    return await runScript({
+      ...input,
+      apiKey: token.plaintext,
+      // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
+      agentId: "",
+      // Explicit empties: omitted, the loader falls back to deployment-wide bindings.
+      egressSecrets: [],
+      failedBindings: [],
+      userConfig: {},
+      apiConnections: [],
+      mcpConnections: [],
+    });
+  } finally {
+    await revokeUserScriptRunToken(token.tokenId);
   }
 }

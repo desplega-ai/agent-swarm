@@ -701,8 +701,14 @@ function canonicalOverflowPayload(toolName: string, result: SwarmToolResult): st
  * and the full value could never leave the store over MCP. Its oversized
  * results go out whole; the harness applies its own truncation and the
  * kv-get nudge steers big-value processing toward scripts.
+ *
+ * script-get-types is the user MCP's type surface (src/server-user.ts): a user
+ * has no kv to read a spill back from, and the declarations only help whole.
  */
-export const CTX_CONTROL_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["kv-get"]);
+export const CTX_CONTROL_EXEMPT_TOOLS: ReadonlySet<string> = new Set([
+  "kv-get",
+  "script-get-types",
+]);
 
 type ArrayTarget = {
   path: string;

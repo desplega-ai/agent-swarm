@@ -356,6 +356,7 @@ export const LEGACY_POLICY = {
   "script.global.write": leadOnly,
   "script.global.delete": leadOnly,
   "script.search": anyAuthenticated,
+  "script.run": anyAuthenticated,
   "script.api.read.secrets": leadOnly,
   "script.api.create": leadOnly,
   "script.api.update": leadOnly,
