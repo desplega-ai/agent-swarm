@@ -22,7 +22,16 @@ import {
 // MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS=true so the receiver can be http://127.0.0.1.
 
 const EVENTS_EXTENSION = "io.modelcontextprotocol/events";
-const USER_TOOLS = ["cancel-task", "get-task-details", "get-tasks", "send-task", "steer-task"];
+const USER_TOOLS = [
+  "cancel-task",
+  "get-task-details",
+  "get-tasks",
+  "script-get-types",
+  "script-run",
+  "script-search",
+  "send-task",
+  "steer-task",
+];
 const LooseResult = z.looseObject({});
 
 type Delivery = { headers: Headers; body: string };
@@ -56,9 +65,7 @@ function verifySignature(delivery: Delivery, secret: string): boolean {
   const expected = createHmac("sha256", key)
     .update(`${id}.${timestamp}.${delivery.body}`)
     .digest("base64");
-  return (delivery.headers.get("webhook-signature") ?? "")
-    .split(" ")
-    .includes(`v1,${expected}`);
+  return (delivery.headers.get("webhook-signature") ?? "").split(" ").includes(`v1,${expected}`);
 }
 
 function eventBodies(deliveries: Delivery[]): Array<Record<string, unknown>> {
@@ -103,7 +110,9 @@ function eventsRequest(
       method,
       params: {
         ...params,
-        _meta: { "io.modelcontextprotocol/clientCapabilities": { extensions: { [EVENTS_EXTENSION]: {} } } },
+        _meta: {
+          "io.modelcontextprotocol/clientCapabilities": { extensions: { [EVENTS_EXTENSION]: {} } },
+        },
       },
     },
     LooseResult,
@@ -150,7 +159,10 @@ export const mcpUserEvents: Scenario = {
         `plain client lists exactly the user tools, got ${plainTools.join(",")}`,
       );
       const plainCaps = plain.getServerCapabilities() ?? {};
-      expect(plainCaps.tools !== undefined && plainCaps.logging !== undefined, "tools and logging still advertised");
+      expect(
+        plainCaps.tools !== undefined && plainCaps.logging !== undefined,
+        "tools and logging still advertised",
+      );
       const plainTasks = asRecord(await plain.callTool({ name: "get-tasks", arguments: {} }));
       expect(plainTasks.isError !== true, "plain client get-tasks still works");
 
@@ -168,15 +180,31 @@ export const mcpUserEvents: Scenario = {
         delivery: { mode: "webhook", url: receiver.url, secret },
         cursor: null,
       });
-      const completedSub = await eventsRequest(events, "events/subscribe", subscription("task.completed"));
-      const failedSub = await eventsRequest(events, "events/subscribe", subscription("task.failed"));
+      const completedSub = await eventsRequest(
+        events,
+        "events/subscribe",
+        subscription("task.completed"),
+      );
+      const failedSub = await eventsRequest(
+        events,
+        "events/subscribe",
+        subscription("task.failed"),
+      );
       expect(
         typeof completedSub.id === "string" && typeof completedSub.refreshBefore === "string",
         "subscribe returns an id and a lease",
       );
-      const challenges = receiver.deliveries.filter((d) => JSON.parse(d.body).type === "verification");
-      expect(challenges.length === 1, `one verification challenge per (user, url), got ${challenges.length}`);
-      expect(verifySignature(challenges[0] as Delivery, secret), "the challenge is signed with the secret");
+      const challenges = receiver.deliveries.filter(
+        (d) => JSON.parse(d.body).type === "verification",
+      );
+      expect(
+        challenges.length === 1,
+        `one verification challenge per (user, url), got ${challenges.length}`,
+      );
+      expect(
+        verifySignature(challenges[0] as Delivery, secret),
+        "the challenge is signed with the secret",
+      );
 
       // 2. A completed and a failed task each reach the receiver, signed.
       const completedId = await settleTask(ctx, workerId, subscriberId, "completed");
@@ -193,7 +221,10 @@ export const mcpUserEvents: Scenario = {
       const byName = new Map(eventBodies(receiver.deliveries).map((b) => [b.name, b]));
       const completed = asRecord(byName.get("task.completed"));
       const failed = asRecord(byName.get("task.failed"));
-      expect(asRecord(completed.data).taskId === completedId, "task.completed names the completed task");
+      expect(
+        asRecord(completed.data).taskId === completedId,
+        "task.completed names the completed task",
+      );
       expect(asRecord(failed.data).taskId === failedId, "task.failed names the failed task");
       expect(
         deliveries.some((d) => d.headers.get("x-mcp-subscription-id") === completedSub.id) &&
@@ -216,7 +247,9 @@ export const mcpUserEvents: Scenario = {
       await settleTask(ctx, workerId, subscriberId, "failed");
       await Bun.sleep(1_000);
       expect(eventBodies(receiver.deliveries).length === 2, "no delivery after unsubscribe");
-      ctx.log(`delivered ${eventBodies(receiver.deliveries).length} signed events, then none after unsubscribe`);
+      ctx.log(
+        `delivered ${eventBodies(receiver.deliveries).length} signed events, then none after unsubscribe`,
+      );
     } finally {
       await events.close();
       await plain.close();

@@ -6,7 +6,7 @@ import { proxyScriptsApi, scriptScopeSchema, scriptToolOutputSchema } from "./sc
 export const SCRIPT_SEARCH_DESCRIPTION =
   "Semantic search over swarm-shared TypeScript scripts (catalog persisted in the agent-swarm DB; callable from agents and workflows). For ephemeral throwaway TS on your local machine, use code-mode instead.";
 
-function renderSearchResults(data: unknown): string | undefined {
+export function renderSearchResults(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const results = (data as { results?: unknown[] }).results;
   if (!Array.isArray(results) || results.length === 0) return undefined;
@@ -18,6 +18,16 @@ function renderSearchResults(data: unknown): string | undefined {
       return `- ${String(item.name ?? "?")}${description}`;
     })
     .join("\n");
+}
+
+export function searchSuccessMessage(data: unknown): string {
+  const results =
+    typeof data === "object" &&
+    data !== null &&
+    Array.isArray((data as { results?: unknown[] }).results)
+      ? (data as { results: unknown[] }).results
+      : [];
+  return `Found ${results.length} script(s).`;
 }
 
 export const registerScriptSearchTool = (server: McpServer) => {
@@ -40,15 +50,7 @@ export const registerScriptSearchTool = (server: McpServer) => {
         path: "/api/scripts/search",
         body: args,
         requestInfo,
-        successMessage: (data) => {
-          const results =
-            typeof data === "object" &&
-            data !== null &&
-            Array.isArray((data as { results?: unknown[] }).results)
-              ? (data as { results: unknown[] }).results
-              : [];
-          return `Found ${results.length} script(s).`;
-        },
+        successMessage: searchSuccessMessage,
         successDetails: renderSearchResults,
       }),
   );

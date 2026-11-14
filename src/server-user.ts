@@ -6,6 +6,12 @@ import { isMcpUserEventsEnabled } from "./be/mcp-events/catalog";
 import { registerUserEvents } from "./be/mcp-events/protocol";
 import { enqueueAdmissionRow } from "./be/rbac-audit";
 import { getUserGrant } from "./be/rbac-roles";
+import {
+  runScriptForUser,
+  scriptTypesForUser,
+  searchScriptsForUser,
+  type UserCodeModeResponse,
+} from "./be/scripts/user-code-mode";
 import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import {
   type AdmissionRbac,
@@ -24,6 +30,14 @@ import {
   getTaskDetailsOutputSchema,
 } from "./tools/get-task-details";
 import { getTasksHandler, getTasksInputSchema, getTasksOutputSchema } from "./tools/get-tasks";
+import {
+  scriptNameSchema,
+  scriptsApiToolResult,
+  scriptToolOutputSchema,
+} from "./tools/script-common";
+import { renderTypeBlobs } from "./tools/script-query-types";
+import { renderRunOutput } from "./tools/script-run";
+import { renderSearchResults, searchSuccessMessage } from "./tools/script-search";
 import { checkOutputSchemaShape, sendTaskHandler, sendTaskOutputSchema } from "./tools/send-task";
 import {
   steerTaskHandler,
@@ -67,6 +81,17 @@ export const userSendTaskInputSchema = z
       ),
   })
   .superRefine((data, ctx) => checkOutputSchemaShape(data.outputSchema, ctx));
+
+const USER_CODE_MODE_SCOPE =
+  "Runs as you: the script's swarm calls carry your permissions, no agent's credentials or connections, and no task is created. Only global scripts are visible.";
+
+function codeModeResult(
+  response: UserCodeModeResponse,
+  rendering: Parameters<typeof scriptsApiToolResult>[2],
+): SwarmToolResult {
+  const ok = response.status >= 200 && response.status < 300;
+  return scriptsApiToolResult(response.body, { ok, status: response.status }, rendering);
+}
 
 function permission(verb: PermissionVerb): AdmissionRbac {
   return { permission: verb };
@@ -188,6 +213,79 @@ export function createUserServer(user: User, tokenId?: string): McpServer {
     const denied = await maybeDenyUserToolAdmission(user, "cancel-task", cancelTaskConfig);
     if (denied) return denied;
     return cancelTaskHandler(userCtx(user, info.sessionId), args);
+  });
+
+  // Code mode: the agent-side script-search / script-query-types / script-run,
+  // scoped to the user (see src/be/scripts/user-code-mode.ts).
+  const scriptSearchConfig = {
+    title: "Script Search",
+    description: `Search the swarm's reusable TypeScript scripts by intent. ${USER_CODE_MODE_SCOPE}`,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    rbac: permission("script.search"),
+    inputSchema: z.object({
+      query: z.string().default("").describe("What the script should do."),
+      limit: z.number().int().min(1).max(100).default(10).describe("Maximum results."),
+    }),
+    outputSchema: scriptToolOutputSchema,
+  };
+  registerTool("script-search", scriptSearchConfig, async (args) => {
+    const denied = await maybeDenyUserToolAdmission(user, "script-search", scriptSearchConfig);
+    if (denied) return denied;
+    return codeModeResult(await searchScriptsForUser(args), {
+      successMessage: searchSuccessMessage,
+      successDetails: renderSearchResults,
+    });
+  });
+
+  // Not `script-query-types`: this name is exempt from the result-size spill
+  // (CTX_CONTROL_EXEMPT_TOOLS), since a user has no kv to read a spill back from.
+  const scriptGetTypesConfig = {
+    title: "Script Get Types",
+    description: `Get the TypeScript declarations a script is written against: the \`swarm-sdk\` module (\`ScriptContext\`, \`ctx.swarm\`) and the \`stdlib\` module, about 12k tokens. Pass \`name\` to also get that script's signature and args schema. ${USER_CODE_MODE_SCOPE}`,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    inputSchema: z.object({
+      name: scriptNameSchema.optional().describe("Optional global script name."),
+    }),
+    outputSchema: scriptToolOutputSchema,
+  };
+  registerTool("script-get-types", scriptGetTypesConfig, async ({ name }) => {
+    const denied = await maybeDenyUserToolAdmission(user, "script-get-types", scriptGetTypesConfig);
+    if (denied) return denied;
+    const response = await scriptTypesForUser(name);
+    const { stdlibTypes: _types, ...small } = response.body as Record<string, unknown>;
+    return codeModeResult(
+      // The declarations go out once, in details; data keeps only the small fields.
+      { status: response.status, body: small },
+      {
+        successMessage: () =>
+          name
+            ? `Type definitions for script \`${name}\` fetched.`
+            : "Script type definitions fetched.",
+        successDetails: () => renderTypeBlobs(response.body),
+        uncappedDetails: true,
+      },
+    );
+  });
+
+  const scriptRunConfig = {
+    title: "Script Run",
+    description: `Run a global script by \`name\`, or inline TypeScript \`source\` that does \`export default async function (args, ctx)\`. Inline source is not typechecked or saved. ${USER_CODE_MODE_SCOPE}`,
+    annotations: { openWorldHint: true },
+    rbac: permission("script.run"),
+    inputSchema: z.object({
+      name: scriptNameSchema.optional().describe("Global script to run."),
+      source: z.string().min(1).optional().describe("Inline TypeScript source to run."),
+      args: z.unknown().optional().describe("JSON-serializable script arguments."),
+    }),
+    outputSchema: scriptToolOutputSchema,
+  };
+  registerTool("script-run", scriptRunConfig, async (args) => {
+    const denied = await maybeDenyUserToolAdmission(user, "script-run", scriptRunConfig);
+    if (denied) return denied;
+    return codeModeResult(await runScriptForUser({ userId: user.id, ...args }), {
+      successMessage: () => "Script run completed.",
+      successDetails: renderRunOutput,
+    });
   });
 
   if (isSteeringEnabled()) {
