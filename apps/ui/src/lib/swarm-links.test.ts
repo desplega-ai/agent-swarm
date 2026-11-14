@@ -212,6 +212,17 @@ describe("parseGithubShorthand", () => {
     expect(githubLabel(parseGithubShorthand(" o/r#4 ") as GithubLink)).toBe("r#4");
   });
 
+  test("owner/repo#0 is not a ref, since GitHub numbers start at 1", () => {
+    expect(parseGithubShorthand("o/r#0")).toBeNull();
+    expect(parseGithubShorthand("o/r#000")).toBeNull();
+    expect(parseSwarmLinkOrRef("o/r#0", ORIGINS)).toBeNull();
+    expect(parseGithubShorthand("o/r#1")).toMatchObject({
+      kind: "ref",
+      number: 1,
+      href: "https://github.com/o/r/issues/1",
+    });
+  });
+
   test("owner/repo@sha is a commit", () => {
     expect(parseGithubShorthand("o/r@A1B2C3D")).toMatchObject({
       kind: "commit",
