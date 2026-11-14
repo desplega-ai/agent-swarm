@@ -508,8 +508,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
       await Promise.all([
         Bun.write(argsFile, JSON.stringify(input.args ?? null)),
         Bun.write(sourceFile, input.source),
-        ...(warm ? [] : [linkOrWriteBareImportShims(baseTmpDir, tmpdir)]),
       ]);
+      if (!warm) await linkOrWriteBareImportShims(baseTmpDir, tmpdir);
       if (runAs) {
         // The child writes its result and marker files into the run dir.
         await Promise.all(
