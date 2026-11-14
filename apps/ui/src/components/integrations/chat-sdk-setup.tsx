@@ -45,6 +45,7 @@ const DOCS_ANCHOR: Record<ChatSdkAdapterName, string> = {
   slack: "slack",
   discord: "discord",
   teams: "microsoft-teams",
+  rocketchat: "rocketchat",
 };
 
 const SLACK_SCOPES = [
@@ -230,6 +231,39 @@ function steps(adapter: ChatSdkAdapterName, { docsUrl, inviteUrl }: StepContext)
           Optional: to let agents read thread history (<CodeChip>chat-read-thread</CodeChip>), grant
           the app the Microsoft Graph <CodeChip>Chat.Read.*</CodeChip> permission.
         </>,
+      ];
+    case "rocketchat":
+      return [
+        <>
+          Experimental: this adapter has run only against fixtures, not a real server. Report gaps
+          on{" "}
+          <ExternalLink href="https://github.com/desplega-ai/agent-swarm/issues/2973">
+            issue #2973
+          </ExternalLink>
+          .
+        </>,
+        <>
+          Rocket.Chat is self-hosted, so the instance URL is a deployment setting, not a field here.
+          Set <CodeChip>CHAT_SDK_API_URL_OVERRIDES</CodeChip> to{" "}
+          <CodeChip>{'{"rocketchat":"https://chat.example.com"}'}</CodeChip> in the API's
+          environment and restart it. A config row cannot set it, so a saved token can never be
+          redirected to another host.
+        </>,
+        <>
+          On the bot's account, open <b>My Account › Personal Access Tokens</b> and generate one.
+          Copy the token into <b>Personal access token</b>, the user id into <b>Bot user ID</b>, and
+          that account's username into <b>Bot user name</b> — a mention is matched against it.
+        </>,
+        <>
+          In <b>Administration › Workspace › Integrations</b>, create an <b>Outgoing WebHook</b> of
+          event type <b>Message Sent</b>. Point its <b>URLs</b> at the URL below, and leave{" "}
+          <b>Trigger Words</b> empty to receive every message in the selected channels.
+        </>,
+        <>
+          Copy that integration's <b>Token</b> into <b>Outgoing webhook token</b>. It is checked on
+          every webhook call, so a wrong one means the bot stays silent.
+        </>,
+        <>Turn on Rocket.Chat, enter the values, and save.</>,
       ];
   }
 }

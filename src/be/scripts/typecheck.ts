@@ -577,10 +577,10 @@ export interface SwarmSdk {
 
   // --- write: chat sdk ---
   chat_reply(args: { text?: string; card?: unknown }): Promise<unknown>;
-  chat_post(args: { adapter: "telegram" | "slack" | "discord" | "teams"; threadId?: string; channelId?: string; text?: string; card?: unknown }): Promise<unknown>;
-  chat_openDm(args: { adapter: "telegram" | "slack" | "discord" | "teams"; userId: string }): Promise<unknown>;
-  chat_registerChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams"; channelId: string; agentId?: string; workflowId?: string; name?: string }): Promise<unknown>;
-  chat_unregisterChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams"; channelId: string }): Promise<unknown>;
+  chat_post(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; threadId?: string; channelId?: string; text?: string; card?: unknown }): Promise<unknown>;
+  chat_openDm(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; userId: string }): Promise<unknown>;
+  chat_registerChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; channelId: string; agentId?: string; workflowId?: string; name?: string }): Promise<unknown>;
+  chat_unregisterChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; channelId: string }): Promise<unknown>;
 
   // --- write: messaging (internal) ---
   message_post(args: { channel?: string; content: string; to?: string }): Promise<unknown>;

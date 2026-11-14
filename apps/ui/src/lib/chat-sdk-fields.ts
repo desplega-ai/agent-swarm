@@ -5,7 +5,7 @@
 // This plain list mirrors those schemas. `src/tests/chat-sdk-fields-sync.test.ts`
 // fails when a field name or an enum option drifts from the API side.
 
-export type ChatSdkAdapterName = "telegram" | "slack" | "discord" | "teams";
+export type ChatSdkAdapterName = "telegram" | "slack" | "discord" | "teams" | "rocketchat";
 
 /**
  * - `secret`: stored as its own secret `swarm_config` row; the JSON carries a
@@ -39,6 +39,9 @@ export interface ChatSdkAdapterDef {
 
 const EXPERIMENTAL_NOTE =
   "Tested only against fixtures so far, not a real workspace. Setup steps may differ. Progress: github.com/desplega-ai/agent-swarm/issues/2149";
+
+const ROCKETCHAT_EXPERIMENTAL_NOTE =
+  "Tested only against fixtures so far, not a real server. Progress: github.com/desplega-ai/agent-swarm/issues/2973";
 
 const USER_NAME: ChatSdkField = {
   key: "userName",
@@ -174,6 +177,39 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
         options: ["MultiTenant", "SingleTenant"],
       },
       USER_NAME,
+    ],
+  },
+  {
+    name: "rocketchat",
+    label: "Rocket.Chat",
+    experimental: ROCKETCHAT_EXPERIMENTAL_NOTE,
+    fields: [
+      {
+        key: "token",
+        label: "Personal access token",
+        kind: "secret",
+        required: true,
+        hint: "My Account > Personal Access Tokens, on the bot account.",
+      },
+      {
+        key: "botUserId",
+        label: "Bot user ID",
+        kind: "text",
+        required: true,
+        hint: "Shown next to the personal access token. Sent with the token on every REST call.",
+      },
+      {
+        key: "webhookToken",
+        label: "Outgoing webhook token",
+        kind: "secret",
+        required: true,
+        hint: "The Token of the Outgoing WebHook integration. Rocket.Chat sends it with every webhook call.",
+      },
+      {
+        ...USER_NAME,
+        required: true,
+        hint: "The bot account's username, without the @. A mention is matched against it, so a wrong one means the bot never answers.",
+      },
     ],
   },
 ];
