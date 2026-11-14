@@ -13,7 +13,41 @@ import {
 export const SCRIPT_RUN_DESCRIPTION =
   "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Inline source executes without the `script-upsert` compile-time typecheck. Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`. The run ends when the script's default export resolves: a call it did not await gets 2 s more, then is stopped (native) or aborted at once (quickjs), so await every write that must land. A `Promise.race` deadline therefore bounds the run; a nested `script_run` that lost the race keeps running on the server under its own wall.";
 
-function renderRunOutput(data: unknown): string | undefined {
+/**
+ * JSON with only the top levels indented. `JSON.stringify(v, null, 2)`
+ * indents every level, so an array of row objects pays a newline plus up to
+ * a dozen spaces per field; that whitespace alone pushes many script results
+ * past the wire limit. Here a root array puts one item per line, and a root
+ * object puts one field per line with one more level expanded, so
+ * `{ rows: [...] }` also shows one row per line. Deeper values render inline
+ * with `": "` / `", "` separators. Parsing it gives back the identical value.
+ */
+function renderLayeredJson(
+  value: unknown,
+  levels = Array.isArray(value) ? 1 : 2,
+  depth = 0,
+): string {
+  if (typeof value !== "object" || value === null) return JSON.stringify(value) ?? "null";
+  const isArray = Array.isArray(value);
+  const entries: Array<[string | undefined, unknown]> = isArray
+    ? value.map((item) => [undefined, item === undefined ? null : item])
+    : Object.entries(value).filter(([, item]) => item !== undefined && typeof item !== "function");
+  const [open, close] = isArray ? ["[", "]"] : ["{", "}"];
+  if (entries.length === 0) return `${open}${close}`;
+  const render = ([key, item]: [string | undefined, unknown]) =>
+    `${key === undefined ? "" : `${JSON.stringify(key)}: `}${renderLayeredJson(item, levels - 1, depth + 1)}`;
+  if (levels <= 0) return `${open}${entries.map(render).join(", ")}${close}`;
+  const indent = "  ".repeat(depth + 1);
+  const body = entries.map((entry) => `${indent}${render(entry)}`).join(",\n");
+  return `${open}\n${body}\n${"  ".repeat(depth)}${close}`;
+}
+
+/**
+ * Text-channel rendering of a run. `layered` (agent-facing calls) renders an
+ * object result with `renderLayeredJson`; script and extension callers keep
+ * the fully indented shape byte for byte.
+ */
+function renderRunOutput(data: unknown, layered = false): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const body = data as {
     result?: unknown;
@@ -26,7 +60,7 @@ function renderRunOutput(data: unknown): string | undefined {
   const parts: string[] = [];
   if (body.result !== undefined) {
     parts.push(
-      `result:\n${typeof body.result === "string" ? body.result : JSON.stringify(body.result, null, 2)}`,
+      `result:\n${typeof body.result === "string" ? body.result : layered ? renderLayeredJson(body.result) : JSON.stringify(body.result, null, 2)}`,
     );
   }
   if (typeof body.stdout === "string" && body.stdout.trim()) {
@@ -83,14 +117,18 @@ export const registerScriptRunTool = (server: McpServer) => {
       }),
       outputSchema: scriptToolOutputSchema,
     },
-    async (args, requestInfo) =>
-      proxyScriptsApi({
+    async (args, requestInfo) => {
+      // Script and extension calls never reach a model context, so they keep the exact shape.
+      const origin = requestInfo.callOrigin;
+      const agentFacing = origin !== "script-sdk" && origin !== "extension";
+      return proxyScriptsApi({
         method: "POST",
         path: "/api/scripts/run",
         body: args,
         requestInfo,
         successMessage: () => "Script run completed.",
-        successDetails: renderRunOutput,
-      }),
+        successDetails: (data) => renderRunOutput(data, agentFacing),
+      });
+    },
   );
 };
