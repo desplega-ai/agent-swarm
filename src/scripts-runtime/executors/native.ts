@@ -59,6 +59,14 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
  */
 const SANDBOX_CAPACITY_EXIT_CODE = 134;
 
+/**
+ * How long a child that signalled its exit (see `signalExitToExecutor` in
+ * `eval-harness.ts`) may take to actually exit before its group is stopped.
+ * Kernel teardown takes milliseconds; a child that wrote the signal and kept
+ * running is stopped instead of living on to its wall clock.
+ */
+const SIGNALLED_EXIT_GRACE_MS = 1_000;
+
 export function classifyExit(
   exitCode: number,
   timedOut: boolean,
@@ -286,6 +294,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const resultFile = `${tmpdir}/result.json`;
     const errorFile = `${tmpdir}/error.json`;
     const startedFile = `${tmpdir}/started.marker`;
+    // Fixed name under the run dir; eval-harness.ts derives the same path.
+    const exitFile = `${tmpdir}/exit.code`;
     const runAs = resolveSandboxIdentity();
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
@@ -296,6 +306,11 @@ export class NativeScriptExecutor implements ScriptExecutor {
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
     let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
+    let exited: Promise<number> | undefined;
+    // Set when the run finished on the child's exit signal while the process
+    // was still tearing down: cleanup then waits for the real exit off the
+    // response path.
+    let exitSignalled = false;
 
     const killedOutput = (): ExecutorOutput => ({
       result: undefined,
@@ -377,17 +392,34 @@ export class NativeScriptExecutor implements ScriptExecutor {
       proc.stdin.write(JSON.stringify(input.configPayload));
       proc.stdin.end();
 
-      const [stdout, stderr, exitCode] = await Promise.all([
-        readStreamCapped(proc.stdout, input.resources.maxStdoutBytes),
-        readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
-        proc.exited.catch(() => (timedOut ? 124 : 1)),
-      ]).finally(() => clearTimeout(timeout));
+      const leaderExited = proc.exited.catch(() => (timedOut ? 124 : 1));
+      exited = leaderExited;
       // The child owns the run dir: read its files only through the checked reader.
       const runDirCheck: RunDirFileCheck = {
         // ulimit -f already bounds what the child can write.
         maxBytes: input.resources.maxFileBytes,
         ...(runAs ? { ownerUid: runAs.uid } : {}),
       };
+      // stdout and stderr reach EOF when the child closes them: at the end of
+      // process teardown, or earlier when the harness signals its exit.
+      const [stdout, stderr] = await Promise.all([
+        readStreamCapped(proc.stdout, input.resources.maxStdoutBytes),
+        readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
+      ]);
+      // A signalled exit counts only for code 0 with an empty stderr and a
+      // written result: Bun reports 0 to "exit" listeners after an unhandled
+      // rejection yet exits with 1, and it always prints that rejection to
+      // stderr. Every other case waits for the real exit status.
+      exitSignalled =
+        proc.exitCode === null &&
+        !timedOut &&
+        !killed &&
+        stderr.text === "" &&
+        (await readRunDirFile(exitFile, { ...runDirCheck, maxBytes: 16 })) === "0" &&
+        (await runDirEntryExists(resultFile));
+      const exitCode = exitSignalled ? 0 : await leaderExited;
+      if (exitSignalled) void leaderExited.finally(() => clearTimeout(timeout));
+      else clearTimeout(timeout);
       const result = exitCode === 0 ? await readResultFile(resultFile, runDirCheck) : undefined;
       const runtimeError =
         exitCode === 0 ? undefined : await readRuntimeError(errorFile, runDirCheck);
@@ -418,8 +450,21 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
     } finally {
       removeAbortListener?.();
-      if (proc) await terminateProcessGroup(proc.pid);
-      await rm(tmpdir, { recursive: true, force: true });
+      if (proc && exitSignalled && exited) {
+        // The group is stopped after the real exit (or the grace period), so
+        // the run's response does not wait on the kernel teardown. The run
+        // dir goes now, and again after the stop in case the child was
+        // still writing.
+        const pid = proc.pid;
+        void Promise.race([exited, Bun.sleep(SIGNALLED_EXIT_GRACE_MS)])
+          .then(() => terminateProcessGroup(pid))
+          .then(() => rm(tmpdir, { recursive: true, force: true }))
+          .catch(() => {});
+        await rm(tmpdir, { recursive: true, force: true });
+      } else {
+        if (proc) await terminateProcessGroup(proc.pid);
+        await rm(tmpdir, { recursive: true, force: true });
+      }
     }
   }
 }

@@ -1,3 +1,4 @@
+import { closeSync, writeFileSync } from "node:fs";
 import { buildCtx } from "./ctx";
 import { patchFetchWithEgressSubstitution } from "./egress-secrets";
 import { type SwarmConfigPayload, UNAWAITED_WORK_DRAIN_MS } from "./executors/types";
@@ -96,6 +97,36 @@ async function emitError(err: unknown): Promise<void> {
   }
 }
 
+/**
+ * Tell the native executor that this process is exiting, without making it
+ * wait for the kernel to tear the process down. Freeing a loaded Bun heap
+ * takes about 7 ms after the last line of JS, and stdout/stderr only reach EOF
+ * at the end of that teardown. Once the "exit" event fires, no JS of this
+ * process runs again except later "exit" listeners, so the listener records
+ * the exit code in the run dir and closes stdio. The executor sees EOF, reads
+ * the code and finishes the run while the process finishes dying.
+ *
+ * Registered after the result write, so it follows any "exit" listener the
+ * script added while it ran. It stays silent unless it is the last listener:
+ * one added later still has code to run. The executor only trusts a code of
+ * 0 with an empty stderr; see native.ts.
+ */
+function signalExitToExecutor(): void {
+  const exitFile = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/exit.code`;
+  const onExit = (code: number) => {
+    const listeners = process.listeners("exit");
+    if (listeners[listeners.length - 1] !== onExit) return;
+    try {
+      writeFileSync(exitFile, String(code));
+      closeSync(1);
+      closeSync(2);
+    } catch {
+      // Best-effort: without the signal the executor waits for the real exit.
+    }
+  };
+  process.on("exit", onExit);
+}
+
 try {
   const stdin = await Bun.stdin.text();
   if (!stdin.trim()) {
@@ -180,6 +211,7 @@ try {
     );
     process.exit(0);
   }, UNAWAITED_WORK_DRAIN_MS).unref();
+  signalExitToExecutor();
 } catch (error) {
   await emitError(error);
   process.exit(1);
