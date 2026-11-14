@@ -1,5 +1,5 @@
 import type { Bash, IFileSystem } from "just-bash";
-import { placeholderForConfigKey } from "./credential-broker";
+import { placeholderForConfigKey } from "./credential-broker/placeholder";
 import type { ScriptAgentFsDescriptor } from "./executors/types";
 import { ScratchFs } from "./scratch-fs";
 

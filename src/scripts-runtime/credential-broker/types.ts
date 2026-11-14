@@ -1,8 +1,8 @@
 import * as z from "zod";
 
-export const CREDENTIAL_BINDINGS_CONFIG_KEY = "SCRIPT_CREDENTIAL_BINDINGS";
+export { placeholderForConfigKey, REDACTED_PLACEHOLDER_PREFIX } from "./placeholder";
 
-export const REDACTED_PLACEHOLDER_PREFIX = "[REDACTED:";
+export const CREDENTIAL_BINDINGS_CONFIG_KEY = "SCRIPT_CREDENTIAL_BINDINGS";
 
 export const CredentialBindingScopeSchema = z.enum(["global", "agent", "repo"]);
 export const CredentialBindingAuthKindSchema = z.enum(["config", "oauth"]);
@@ -66,10 +66,6 @@ export interface CredentialBindingStore {
 
 export type CredentialResolver = (configKey: string) => string | undefined;
 export type OAuthCredentialResolver = (oauthAuthorizationId: string) => Promise<string | undefined>;
-
-export function placeholderForConfigKey(configKey: string): string {
-  return `${REDACTED_PLACEHOLDER_PREFIX}${configKey}]`;
-}
 
 export function normalizeCredentialBindingsDocument(
   input: unknown,
