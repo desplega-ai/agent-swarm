@@ -200,7 +200,7 @@ export function parseGithubShorthand(
   const text = raw.trim();
   const base = githubOrigin(webUrl);
   const ref = /^([\w.-]+)\/([\w.-]+)#(\d{1,9})$/.exec(text);
-  if (ref) {
+  if (ref && Number(ref[3]) > 0) {
     const [, owner = "", repo = "", n = ""] = ref;
     return githubLink(
       "ref",
