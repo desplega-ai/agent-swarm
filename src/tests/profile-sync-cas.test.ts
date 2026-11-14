@@ -12,6 +12,7 @@ import {
   SOUL_MD_PATH,
   syncProfileFilesToServer,
   TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
   writeIdentityBaselines,
   writeProfileFileFromDb,
 } from "../commands/profile-sync";
@@ -88,6 +89,44 @@ test("a DB edit survives a stale local edit and the next session can edit the re
   box.files[TOOLS_MD_PATH] = "session 3 edit";
   await box.sync();
   expect((await getAgentById(id))?.toolsMd).toBe("session 3 edit");
+});
+
+test("a non-Claude session sends its boot claudeMd token and recovers a conflict before editing again", async () => {
+  const boot = "workspace boot rules";
+  const local = "stale workspace edit";
+  const current = "rules updated by Lead";
+  await updateAgentProfile(id, { claudeMd: boot });
+  const box = workspace({ claudeMd: boot });
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = local;
+  await updateAgentProfile(id, { claudeMd: current });
+  const requests: Array<Record<string, unknown>> = [];
+  const sync = () =>
+    syncProfileFilesToServer({
+      agentId: id,
+      apiUrl: "http://profile.test",
+      apiKey: "test-key",
+      fields: ["claude"],
+      claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
+      io: box.io,
+      fetchImpl: (async (input, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return profileApi(input, init);
+      }) as typeof fetch,
+    });
+  await sync();
+  expect(requests[0]?.expectedHashes).toEqual({ claudeMd: contentSha256(boot) });
+  expect((await getAgentById(id))?.claudeMd).toBe(current);
+  expect(box.files[WORKSPACE_CLAUDE_MD_PATH]).toBe(current);
+  expect(
+    Object.entries(box.files).some(([path, content]) => path.includes(".bak") && content === local),
+  ).toBe(true);
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = "next session edit";
+  await sync();
+  expect(requests[1]?.expectedHashes).toEqual({ claudeMd: contentSha256(current) });
+  expect((await getAgentById(id))?.claudeMd).toBe("next session edit");
+  box.files[WORKSPACE_CLAUDE_MD_PATH] = "following session edit";
+  await sync();
+  expect((await getAgentById(id))?.claudeMd).toBe("following session edit");
 });
 
 test("a failed default upload on an empty DB is not an accepted base", async () => {

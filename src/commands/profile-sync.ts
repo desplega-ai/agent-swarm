@@ -70,7 +70,14 @@ export type IdentityBaselines = Partial<Record<VersionableField, string>> & {
   /** Responses settled per field since boot: a token can repeat, this count cannot. */
   settled?: ProfileSettledCounts;
 };
-const CAS_FIELDS = ["soulMd", "identityMd", "toolsMd", "heartbeatMd", "setupScript"] as const;
+const CAS_FIELDS = [
+  "soulMd",
+  "identityMd",
+  "toolsMd",
+  "heartbeatMd",
+  "setupScript",
+  "claudeMd",
+] as const;
 type ProfileSettledCounts = Partial<Record<(typeof CAS_FIELDS)[number], number>>;
 const PROFILE_PATHS = {
   soulMd: SOUL_MD_PATH,
@@ -1004,6 +1011,15 @@ export async function collectProfilePayloads(
           (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
         const body = planClaudeMdSync({ content: raw, record });
         if (body) payloads.push({ label: "claude", body });
+      } else if (claudeMdPath !== CLAUDE_MD_PATH) {
+        const token = baselines?.expected?.claudeMd;
+        if (!uploadsHeld && token) {
+          payloads.push({
+            label: "claude",
+            body: { claudeMd: raw, changeSource, expectedHashes: { claudeMd: token } },
+            settled: baselines?.settled?.claudeMd ?? 0,
+          });
+        }
       } else {
         payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
       }
@@ -1092,6 +1108,7 @@ async function settleProfileUpdate(
   payload: ProfilePayload,
   stored: Record<string, unknown> | null,
   io: ProfileFileIO,
+  claudeMdPath: string,
 ): Promise<void> {
   const field = CAS_FIELDS.find((field) => typeof payload.body[field] === "string");
   if (!field || !stored || !(field in stored)) return;
@@ -1112,7 +1129,7 @@ async function settleProfileUpdate(
       if (sentToken !== baselines.expected[field] || (payload.settled ?? 0) !== settled) return;
       let localValue = dbValue;
       if (dbValue !== sent) {
-        const path = PROFILE_PATHS[field];
+        const path = field === "claudeMd" ? claudeMdPath : PROFILE_PATHS[field];
         if (field === "setupScript") {
           const raw = await io.readFile(path);
           // Without the current composed file we cannot preserve its operator section.
@@ -1181,14 +1198,13 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
     try {
       const response = await sendProfileUpdate(opts, payload);
       if (!response) continue;
-      if (typeof payload.body.claudeMd === "string") {
-        // Keep #2600's workspace CLAUDE.md advancement; the personal file is
-        // still owned by the separate CLAUDE.md lineage lock below.
+      if (typeof payload.body.claudeMd === "string" && claudeMdPath === CLAUDE_MD_PATH) {
+        // The personal file remains owned by the separate CLAUDE.md lineage lock.
         await advanceIdentityBaselines({ claudeMd: payload.body.claudeMd }, io);
       } else {
         const stored: unknown = await response.json();
         if (stored && typeof stored === "object" && !Array.isArray(stored)) {
-          await settleProfileUpdate(payload, stored as Record<string, unknown>, io);
+          await settleProfileUpdate(payload, stored as Record<string, unknown>, io, claudeMdPath);
         }
       }
     } catch (err) {

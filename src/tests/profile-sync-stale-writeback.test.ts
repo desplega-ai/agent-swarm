@@ -197,7 +197,9 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     db = { claudeMd: boot };
     const io = memoryIO({
       [WORKSPACE_CLAUDE_MD_PATH]: boot,
-      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256(boot) }),
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(
+        bootIdentityBaselines({ claudeMd: boot }, undefined),
+      ),
     });
     const sync = () =>
       runnerSync(io, { fields: ["claude"], claudeMdPath: WORKSPACE_CLAUDE_MD_PATH });

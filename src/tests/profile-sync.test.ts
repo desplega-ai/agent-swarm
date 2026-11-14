@@ -379,7 +379,10 @@ describe("collectProfilePayloads (field gate)", () => {
   test("non-Claude providers sync /workspace/CLAUDE.md, not the personal file", async () => {
     // A codex/pi/opencode session edits the runner-materialized workspace file;
     // the Claude personal file (~/.claude/CLAUDE.md) is absent for them.
-    const files = reader({ [WORKSPACE_CLAUDE_MD_PATH]: "workspace claude md edit" });
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "workspace claude md edit",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(bootIdentityBaselines({}, undefined)),
+    });
 
     const payloads = await collectProfilePayloads(
       ["claude"],
@@ -391,6 +394,7 @@ describe("collectProfilePayloads (field gate)", () => {
     expect(payloads[0]?.body).toEqual({
       claudeMd: "workspace claude md edit",
       changeSource: "session_sync",
+      expectedHashes: { claudeMd: contentSha256("") },
     });
   });
 
@@ -765,10 +769,8 @@ describe("collectProfilePayloads (baseline integration)", () => {
     ]);
   });
 
-  test("session_sync of the workspace CLAUDE.md stays unconditional", async () => {
-    // Non-Claude harnesses edit /workspace/CLAUDE.md directly and nothing
-    // rematerializes it mid-life, so the boot baseline is not a valid base.
-    const baselines: IdentityBaselines = { claudeMd: contentSha256("original") };
+  test("session_sync of the workspace CLAUDE.md uses its boot DB token", async () => {
+    const baselines = bootIdentityBaselines({ claudeMd: "original" }, undefined);
     const files = reader({
       [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
       [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
@@ -781,7 +783,11 @@ describe("collectProfilePayloads (baseline integration)", () => {
       WORKSPACE_CLAUDE_MD_PATH,
     );
     expect(payloads.map((p) => p.body)).toEqual([
-      { claudeMd: "modified workspace md", changeSource: "session_sync" },
+      {
+        claudeMd: "modified workspace md",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: contentSha256("original") },
+      },
     ]);
   });
 
