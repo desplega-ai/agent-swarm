@@ -4,7 +4,7 @@ import { getAgentById } from "@/be/db";
 import { callMcpServerTool } from "@/be/mcp-proxy";
 import { getScriptConnectionById } from "@/be/script-connections";
 import { resolveSqlDsn, runReadOnlyQuery } from "@/be/sql-connections";
-import { can } from "@/rbac";
+import { can, type RbacPrincipal } from "@/rbac";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -88,7 +88,7 @@ function connectionScopeMatches(
   connection: { scope: string; scopeId: string | null },
   agentId: string,
   syntheticPrincipal: boolean,
-  isLead: boolean,
+  principal: RbacPrincipal,
 ): boolean {
   if (connection.scope === "global") return true;
   if (connection.scope === "agent") return !syntheticPrincipal && connection.scopeId === agentId;
@@ -98,7 +98,7 @@ function connectionScopeMatches(
     return (
       !syntheticPrincipal &&
       can({
-        principal: { kind: "agent", agentId, isLead },
+        principal,
         verb: "config.read.secrets",
         resource: { kind: "none" },
         source: "http",
@@ -138,8 +138,9 @@ export async function handleScriptConnectionProxy(
     return true;
   }
 
+  const principal: RbacPrincipal = { kind: "agent", agentId, isLead: agent?.isLead ?? false };
   const decision = can({
-    principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
+    principal,
     verb: "script-connection.invoke",
     resource: { kind: "none" },
     source: "http",
@@ -162,7 +163,7 @@ export async function handleScriptConnectionProxy(
     jsonError(res, `Script connection is not ${isSql ? "a SQL" : "an MCP"} connection`, 400);
     return true;
   }
-  if (!connectionScopeMatches(connection, agentId, syntheticPrincipal, agent?.isLead ?? false)) {
+  if (!connectionScopeMatches(connection, agentId, syntheticPrincipal, principal)) {
     jsonError(res, "Script connection is not available to this agent", 403);
     return true;
   }
