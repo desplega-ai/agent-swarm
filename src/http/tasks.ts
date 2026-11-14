@@ -59,7 +59,6 @@ import {
 } from "../be/steering";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
-import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
@@ -1543,15 +1542,12 @@ export async function handleTasks(
       return true;
     }
 
-    const trustedUserId = await await resolveHttpRequesterUserId(req, myAgentId);
-    let requestedByUserId = trustedUserId ?? undefined;
-    if (
-      process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&
-      !requestedByUserId &&
-      parsed.body.requestedByUserId
-    ) {
-      requestedByUserId = (await findUserById(parsed.body.requestedByUserId))?.id;
-    }
+    // Same rules as POST /api/tasks: a non-lead agent cannot name another user.
+    const requestedByUserId = await resolveTaskRequester(
+      req,
+      myAgentId,
+      parsed.body.requestedByUserId,
+    );
 
     try {
       const auth = getRequestAuth(req);
