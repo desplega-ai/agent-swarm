@@ -1,4 +1,4 @@
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Lock } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -68,7 +68,7 @@ export function ObjectEmbed({
   const kind = snapshot.object.kind;
   // Keyed by object: a view never carries one object's scene or save target into another.
   return (
-    <div className={box} style={{ height }} data-object-kind={kind}>
+    <div className={`relative ${box}`} style={{ height }} data-object-kind={kind}>
       <Suspense fallback={<Skeleton className="h-full w-full" />}>
         {kind === "board" ? (
           <BoardView
@@ -96,6 +96,15 @@ export function ObjectEmbed({
           </p>
         )}
       </Suspense>
+      {readOnly ? (
+        <p
+          className="pointer-events-none absolute top-1.5 right-1.5 z-10 flex items-center gap-1 rounded bg-background/90 px-1.5 py-0.5 text-xs text-muted-foreground shadow-sm"
+          data-object-readonly=""
+        >
+          <Lock className="size-3" aria-hidden />
+          Read-only
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import {
   type CellFocusedEvent,
   type ColDef,
   HighlightChangesModule,
+  type ICellRendererParams,
   ModuleRegistry,
   TextEditorModule,
 } from "ag-grid-community";
@@ -29,6 +30,16 @@ ModuleRegistry.registerModules([TextEditorModule, HighlightChangesModule]);
 type Row = { id: string; row: number; cells: Record<string, SheetCell> };
 
 const ROW_HEADER = "__row";
+
+// A span, not the bare text: the grid's flex cell never paints an ellipsis on a text node.
+function CellText({ valueFormatted }: ICellRendererParams<Row>) {
+  const text = valueFormatted ?? "";
+  return (
+    <span className="block min-w-0 truncate" title={text || undefined}>
+      {text}
+    </span>
+  );
+}
 
 export type SheetViewProps = {
   snapshot: ObjectSnapshot;
@@ -132,6 +143,7 @@ export default function SheetView({
         // The editor opens with the getter's value (the formula); the cell paints the formatter's.
         valueGetter: (p) => (p.data ? inputOf(p.data.cells[`${name}${p.data.row}`]) : ""),
         valueFormatter: (p) => (p.data ? displayOf(p.data.cells[`${name}${p.data.row}`]) : ""),
+        cellRenderer: CellText,
         cellClass: (p) =>
           p.data?.cells[`${name}${p.data.row}`]?.e ? "text-destructive" : undefined,
         valueSetter: (p) => {
