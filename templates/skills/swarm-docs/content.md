@@ -65,6 +65,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
 - [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
+- [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
 - [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
 - [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
@@ -72,6 +73,8 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
+- [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-onboarding-readiness). Reference.
+- [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/guides/digital-content-license-rights-review). Reference.
 - [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
 - [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-operations-shift-handoff). Reference.
 - [Preparing a disputed product return for a human decision with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-returns-exception-handoff). Reference.
