@@ -342,9 +342,29 @@ async function clearAssistantStatus(
   });
 }
 
+/**
+ * A Slack timing window from the environment, or `fallback` when the configured
+ * value is not a finite number greater than zero. `Number(raw) || fallback` is
+ * not enough: it lets a negative or `Infinity` value through, and
+ * `closureState` compares elapsed time straight against the window, so a
+ * negative one settles or times out a closure on its very first tick instead of
+ * waiting out the window.
+ */
+function positiveEnvNumber(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function slackTreeStallMinutes(): number {
-  const minutes = Number(process.env.SLACK_TREE_STALL_MIN);
-  return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
+  return positiveEnvNumber(process.env.SLACK_TREE_STALL_MIN, 15);
+}
+
+function slackConclusionSettleSeconds(): number {
+  return positiveEnvNumber(process.env.SLACK_CONCLUSION_SETTLE_SEC, 10);
+}
+
+function slackConclusionTimeoutMinutes(): number {
+  return positiveEnvNumber(process.env.SLACK_CONCLUSION_TIMEOUT_MIN, 240);
 }
 
 function isStalledMember(task: AgentTask, now: Date): boolean {
@@ -538,8 +558,8 @@ function normalizeV2Text(value: string): string {
  * so "concluded" here means "the engine gave up waiting", not "nothing left".
  */
 function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): string {
-  const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
-  const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
+  const settleSec = slackConclusionSettleSeconds();
+  const timeoutMin = slackConclusionTimeoutMinutes();
   const asks = tasks.filter((task) => task.source === "slack");
   const timedOut = asks.some(
     (ask) =>
@@ -1934,7 +1954,7 @@ type RenderPassContext = {
  * window starts after that.
  */
 function slackOutcomeWindow(delegationEnabled: boolean, now = Date.now()): SlackOutcomeWindow {
-  const timeoutMs = (Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240) * 60_000;
+  const timeoutMs = slackConclusionTimeoutMinutes() * 60_000;
   const windowMs = Math.max(timeoutMs, 60 * 60_000);
   return {
     finishedAfter: new Date(now - windowMs).toISOString(),
@@ -1984,8 +2004,8 @@ async function processSlackThread(
   ) {
     return "closed";
   }
-  const settleSec = Number(process.env.SLACK_CONCLUSION_SETTLE_SEC) || 10;
-  const timeoutMin = Number(process.env.SLACK_CONCLUSION_TIMEOUT_MIN) || 240;
+  const settleSec = slackConclusionSettleSeconds();
+  const timeoutMin = slackConclusionTimeoutMinutes();
   const closuresByAskId = new Map<string, AgentTask[]>();
   const ownerAskId = new Map<string, string>();
   if (delegationEnabled) {
