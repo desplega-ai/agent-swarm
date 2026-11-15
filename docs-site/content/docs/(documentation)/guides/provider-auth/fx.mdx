@@ -60,7 +60,7 @@ fx keeps sessions under `~/.fx` (`/home/worker/.fx` in the image), Nothing prune
 
 The swarm MCP server goes in `session/new` as a Streamable HTTP server. fx accepts only HTTPS or loopback HTTP MCP URLs, so when the API URL is plain HTTP on another host (`http://api:3013` in Docker) the adapter starts a `127.0.0.1` forwarder for the session. SSE MCP servers are dropped with a warning, because fx does not support them.
 
-fx names the tools `mcp_<server>_<tool>`. The swarm's tool schemas exceed fx's 64 KiB always-loaded budget, so fx defers them behind its `capability_search` tool. The model can still call a swarm tool directly by name.
+fx names the tools `mcp_<server>_<tool>`. The swarm's tool schemas exceed fx's 64 KiB always-loaded budget, so fx defers them behind its `toolbox` tool. The model calls a tool in its tool list directly. A deferred tool takes `toolbox` `search` to find it, then `toolbox` with `run` and `arguments` to call it; fx 0.0.17 rejects a direct call to a deferred tool.
 
 fx reads `~/.claude/skills/` natively, so the swarm's skills load with no extra setup.
 

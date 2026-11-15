@@ -525,7 +525,7 @@ registerTemplate({
   eventType: "system.agent.tool_discovery.fx",
   header: "",
   defaultBody:
-    "Most swarm tools are deferred behind `capability_search`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool you know by that name directly. To find one, use `capability_search`.",
+    "Most swarm tools are deferred behind `toolbox`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool in your tool list directly. A deferred tool fails when called directly: find it with `toolbox` `search`, then call `toolbox` with `run` set to its name and `arguments` set to its arguments.",
   variables: [],
   category: "system",
 });
