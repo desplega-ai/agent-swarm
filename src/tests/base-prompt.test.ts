@@ -1491,7 +1491,7 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain('import { store_progress } from "agent-swarm"');
   });
 
-  test("fx gets capability_search guidance with mcp_swarm_ tool names", async () => {
+  test("fx gets toolbox guidance with mcp_swarm_ tool names", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       provider: "fx",
@@ -1499,7 +1499,11 @@ describe("getBasePrompt: harness tool discovery", () => {
     });
     expect(result).not.toContain(deferred);
     expect(result).not.toContain("already in your tool list");
-    expect(result).toContain("`capability_search`");
+    // fx 0.0.17 removed `capability_search` and rejects a direct call to a
+    // deferred tool; it runs only through `toolbox` with `run` + `arguments`.
+    expect(result).not.toContain("capability_search");
+    expect(result).toContain("deferred behind `toolbox`");
+    expect(result).toContain("call `toolbox` with `run` set to its name and `arguments`");
     expect(result).toContain("`store-progress` is `mcp_swarm_store-progress`");
   });
 

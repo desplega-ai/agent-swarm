@@ -427,7 +427,7 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
-/** Qwen Code's `--auth-type` choices (0.27.3). `qwen-oauth` and `qwen-subscription` need an interactive sign-in, so they are left out. */
+/** Qwen Code's `--auth-type` choices (0.27.4). `qwen-oauth` and `qwen-subscription` need an interactive sign-in, so they are left out. */
 const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
 
 // Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt
@@ -844,7 +844,7 @@ type FxToolCallMeta = { fx?: { toolCall?: { mcp?: { server?: unknown; tool?: unk
 
 /**
  * fx's display adjustments:
- * - The `[context] … capability_search` notice arrives as its own assistant
+ * - The `[context] … toolbox` notice arrives as its own assistant
  *   chunk. It becomes an `fx_context_notice` custom event, so it never reaches
  *   the task output.
  * - A `tool_call` titles the action ("Running", "Get the agent swarm") and

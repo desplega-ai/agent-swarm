@@ -165,7 +165,7 @@ export class FxAdapter implements ProviderAdapter {
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
-    // fx defers swarm tools behind its own `capability_search`; the prompt
+    // fx defers swarm tools behind its own `toolbox` (search/run); the prompt
     // uses the fx-specific discovery line, not the generic tool-search one.
     hasToolSearch: false,
     // `~/.claude/skills` is a native fx skill root (verified: a planted skill loaded).

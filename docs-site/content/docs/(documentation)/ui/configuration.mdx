@@ -490,10 +490,14 @@ The API picks the provider in a fixed order and, inside a provider, the cheapest
 | 3 | `OPENAI_API_KEY` | `gpt-6-luna`, `gpt-5-nano` |
 | 4 | Codex OAuth (Connect → AI providers) | `gpt-6-luna` |
 | 5 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude -p --model haiku` |
+| 6 | `FIREWORKS_API_KEY` | `fireworks deepseek-v4p1-flash`, `glm-5p3-flash` |
+| 7 | AWS credential chain + `AWS_REGION` | `global.anthropic.claude-haiku-5-5`, `amazon.nova-micro-v1:0` |
+
+Bedrock authenticates through the AWS SDK credential chain (`AWS_PROFILE`, an IAM key pair, `AWS_BEARER_TOKEN_BEDROCK`, an ECS task role or IRSA) rather than an API key, so it needs `AWS_REGION` or `AWS_DEFAULT_REGION` too. Without a region it is skipped exactly like a provider with no key, rather than defaulting to `us-east-1`.
 
 A model error moves on to the next model, then to the next provider. One title reads at most 2000 characters of the prompt and writes about ten words, so a swarm with thousands of tasks a week spends cents.
 
-`TASK_AUTO_TITLE_MODEL` (string, applies on save) pins one model. Use `provider/model-id` (`openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-5-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`) or a `claude -p` alias such as `haiku`. The pinned model is tried first; the table above remains the fallback. A value for a provider with no credential is skipped.
+`TASK_AUTO_TITLE_MODEL` (string, applies on save) pins one model. Use `provider/model-id` (`openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-5-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, `fireworks/accounts/fireworks/models/deepseek-v4p1-flash`, `amazon-bedrock/global.anthropic.claude-haiku-5-5`) or a `claude -p` alias such as `haiku`. The pinned model is tried first; the table above remains the fallback. A value for a provider with no credential is skipped.
 
 ## Comb
 
