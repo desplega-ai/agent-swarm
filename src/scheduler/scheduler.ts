@@ -28,6 +28,7 @@ import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credentia
 import { getScript } from "@/be/scripts/db";
 import { runScriptWithRunCredential } from "@/be/scripts/run-credential";
 import { seededWorkflowState } from "@/be/seed/workflows-seeder";
+import { SCHEDULER_INTERVAL_MS_BOUNDS } from "@/be/swarm-config-guard";
 import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask, Workflow } from "@/types";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
@@ -558,6 +559,28 @@ export async function executeSchedule(
   }
 }
 
+/** Polling interval when `SCHEDULER_INTERVAL_MS` is absent or unusable. */
+const DEFAULT_SCHEDULER_INTERVAL_MS = 10_000;
+
+/**
+ * Parse SCHEDULER_INTERVAL_MS: an integer inside `SCHEDULER_INTERVAL_MS_BOUNDS`
+ * (1 ms to 24.8 days), or the 10-second default.
+ *
+ * `Number(value) || 10_000` kept a negative interval, and `setInterval` treats a
+ * non-positive delay as "as fast as the runtime permits", so a negative value made
+ * the scheduler poll in a tight loop (#3169). A delay above the 32-bit timer
+ * ceiling overflows to 1 ms and produces the same loop, so it falls back too. The
+ * config API validates the key against the same bounds; this is the boot-path
+ * guard for the deployment env, and for rows written before those bounds existed.
+ */
+export function parseSchedulerIntervalMs(raw: string | undefined): number {
+  const value = Number(raw);
+  const { min, max } = SCHEDULER_INTERVAL_MS_BOUNDS;
+  return Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : DEFAULT_SCHEDULER_INTERVAL_MS;
+}
+
 /**
  * Start the scheduler polling loop.
  * @param registry ExecutorRegistry for triggering workflows linked to schedules
@@ -565,7 +588,7 @@ export async function executeSchedule(
  */
 export function startScheduler(
   registry: ExecutorRegistry,
-  intervalMs = 10000,
+  intervalMs = DEFAULT_SCHEDULER_INTERVAL_MS,
   opts?: { runId?: string },
 ): void {
   if (schedulerRun) {

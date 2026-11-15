@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { closeDb, createAgent, createScheduledTask, createTaskExtended, initDb } from "../be/db";
-import { calculateNextRun, createStandaloneScheduleTask } from "./scheduler";
+import {
+  calculateNextRun,
+  createStandaloneScheduleTask,
+  parseSchedulerIntervalMs,
+} from "./scheduler";
 
 const TEST_DB_PATH = "./test-scheduler.sqlite";
 
@@ -18,6 +22,33 @@ afterAll(() => {
   } catch {
     // ignore if files don't exist
   }
+});
+
+describe("parseSchedulerIntervalMs", () => {
+  test("falls back to 10s unless the value is an integer inside the timer range", () => {
+    const unusable = [
+      undefined,
+      "",
+      "abc",
+      "NaN",
+      "Infinity",
+      "-Infinity",
+      "0",
+      "-1",
+      "1.5",
+      "2147483648",
+      "10000000000",
+    ];
+    for (const raw of unusable) {
+      expect(parseSchedulerIntervalMs(raw)).toBe(10_000);
+    }
+  });
+
+  test("keeps a positive configured interval unchanged", () => {
+    expect(parseSchedulerIntervalMs("2500")).toBe(2500);
+    expect(parseSchedulerIntervalMs("30000")).toBe(30_000);
+    expect(parseSchedulerIntervalMs("2147483647")).toBe(2_147_483_647);
+  });
 });
 
 describe("calculateNextRun", () => {
