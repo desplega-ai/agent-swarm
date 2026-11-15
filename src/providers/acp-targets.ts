@@ -844,7 +844,7 @@ type FxToolCallMeta = { fx?: { toolCall?: { mcp?: { server?: unknown; tool?: unk
 
 /**
  * fx's display adjustments:
- * - The `[context] … capability_search` notice arrives as its own assistant
+ * - The `[context] … toolbox` notice arrives as its own assistant
  *   chunk. It becomes an `fx_context_notice` custom event, so it never reaches
  *   the task output.
  * - A `tool_call` titles the action ("Running", "Get the agent swarm") and

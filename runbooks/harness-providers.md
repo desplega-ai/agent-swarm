@@ -233,7 +233,8 @@ none: the runner fails an affected task with installation guidance when `fx` is 
   (`src/providers/mcp-loopback-proxy.ts`) per session and stops it in
   `finish()`. SSE servers are dropped with a warning. Tools are named
   `mcp_<server>_<tool>`; the swarm tool schemas exceed fx's 64 KiB
-  always-loaded budget, so fx defers them behind `capability_search`. Keep
+  always-loaded budget, so fx defers them behind `toolbox` (`search`, then
+  `run` with `arguments`; 0.0.17 rejects a direct call to a deferred tool). Keep
   that deferral on: turning it off took turn input from 89.5k to 162.8k
   tokens on the same prompt.
 - **System prompt.** ACP `systemPrompt` (append mode), capped by fx at 64 KiB.
