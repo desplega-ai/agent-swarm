@@ -1,6 +1,7 @@
 #!/bin/bash
 # Main-tip guard for .github/workflows/docker-and-deploy.yml (job
-# promote-main-tags, step "guard").
+# promote-main-tags, step "guard"; job detect-version-change, step
+# "supersede", where is_tip=false skips the run's builds).
 #
 # Writes is_tip=true|false to $GITHUB_OUTPUT. is_tip=true means "this run
 # moves :latest and :slim". Prod runs :prod, which only deploy.yml moves.

@@ -15,12 +15,20 @@ import { getChatSdkTestHooks } from "./test-hooks";
  * `CLIENT_SECRET`, `MANAGED_IDENTITY_CLIENT_ID`, `CLOUD`) are closed by the
  * injection denylist in `getInjectableGlobalConfigs` (`src/be/db.ts`).
  * Deployment env can still set them on purpose.
+ *
+ * Rocket.Chat is self-hosted and has no platform default, so its entry is ""
+ * and `CHAT_SDK_API_URL_OVERRIDES.rocketchat` carries the instance URL. The
+ * adapter rejects an empty one, which surfaces as an adapter health error.
  */
+/** The bot name used when the operator set none. Chat requires one. */
+export const DEFAULT_BOT_USER_NAME = "swarm";
+
 const DEFAULT_API_URLS: Record<ChatSdkAdapterName, string> = {
   telegram: "https://api.telegram.org",
   slack: "https://slack.com/api/",
   discord: "https://discord.com/api/v10",
   teams: "",
+  rocketchat: "",
 };
 
 /**
@@ -123,6 +131,27 @@ export async function loadAdapter(
         ...(teamsWebhookVerifier ? { webhookVerifier: teamsWebhookVerifier } : {}),
         ...(teamsToken ? { token: teamsToken } : {}),
       } as Parameters<typeof createTeamsAdapter>[0]);
+    }
+    case "rocketchat": {
+      const { createRocketChatAdapter } = await import("./rocketchat");
+      // The adapter takes the instance as `baseUrl`, not `apiUrl`, and falls
+      // back to ROCKETCHAT_URL / ROCKETCHAT_TOKEN / ROCKETCHAT_USER_ID /
+      // ROCKETCHAT_WEBHOOK_TOKEN / ROCKETCHAT_BOT_USERNAME from `process.env`.
+      // Global swarm_config rows are injected into env, so every one of those
+      // is passed explicitly: an env fallback would let a config row redirect
+      // the bot token to another host. `baseUrl` comes from the env-only
+      // `CHAT_SDK_API_URL_OVERRIDES`, never from the adapter config.
+      const { apiUrl: _apiUrl, ...rest } = base;
+      return createRocketChatAdapter({
+        ...rest,
+        baseUrl: apiUrl,
+        token: typeof config.token === "string" ? config.token : "",
+        botUserId: typeof config.botUserId === "string" ? config.botUserId : "",
+        webhookToken: typeof config.webhookToken === "string" ? config.webhookToken : "",
+        // Required by the schema: mention detection matches `@<userName>` in
+        // the text, and the REST API offers no way to look the name up.
+        userName: typeof config.userName === "string" ? config.userName : "",
+      } as Parameters<typeof createRocketChatAdapter>[0]);
     }
   }
 }

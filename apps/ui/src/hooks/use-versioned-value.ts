@@ -22,6 +22,9 @@ export function useVersionedValue<T>(
   const [focusedDraft, setFocusedDraft] = useState(false);
   const onAutoApplyRef = useRef(options.onAutoApply);
   onAutoApplyRef.current = options.onAutoApply;
+  // Wire as `onInput`, never `onInputCapture`: the browser flushes a capture-phase
+  // state update before the field's bubble-phase onChange, and that re-render
+  // resets a controlled input, dropping the first keystroke after a load.
   const markInteraction = useCallback(
     (event: { target: EventTarget | null; type: string }) => {
       const target = event.target;

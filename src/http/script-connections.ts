@@ -66,6 +66,7 @@ import {
   type IntegrationType,
 } from "@/telemetry";
 import type { OAuthApp } from "@/tracker/types";
+import { createSsrfGuardedFetch, EgressDeniedError } from "@/utils/egress-guard";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { ensureHttpPermission } from "./config";
@@ -1456,7 +1457,10 @@ async function listOAuthApps() {
  * request was attempted (a revocationUrl is configured), false otherwise.
  * Network/HTTP failures are logged (scrubbed) and never fail the caller.
  */
-async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Promise<boolean> {
+export async function attemptRemoteRevocation(
+  app: OAuthApp,
+  accessToken: string,
+): Promise<boolean> {
   const revocationUrl = app.revocationUrl ?? undefined;
   if (!revocationUrl) return false;
 
@@ -1492,7 +1496,8 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    await fetch(revocationUrl, {
+    // Guarded: a public name that resolves to a private address is refused too.
+    await createSsrfGuardedFetch(publicEndpointSsrfOptions())(revocationUrl, {
       method: "POST",
       headers,
       body: body.toString(),
@@ -1527,9 +1532,11 @@ function oauthDiscoveryUrls(inputUrl: string): string[] {
 
 async function fetchJsonMetadata(url: string, signal: AbortSignal): Promise<unknown> {
   let current = assertUrlSafe(url, publicEndpointSsrfOptions());
+  // Checks each hop's resolved address; the loop below still owns redirects.
+  const guardedFetch = createSsrfGuardedFetch(publicEndpointSsrfOptions());
   let response: Response | null = null;
   for (let hop = 0; hop <= 5; hop += 1) {
-    response = await fetch(current, {
+    response = await guardedFetch(current, {
       headers: { accept: "application/json" },
       signal,
       redirect: "manual",
@@ -1573,7 +1580,7 @@ function extractOAuthDiscovery(metadata: unknown) {
   };
 }
 
-async function discoverOAuthApp(url: string) {
+export async function discoverOAuthApp(url: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
   const failures: string[] = [];
@@ -1604,6 +1611,7 @@ async function discoverOAuthApp(url: string) {
 function isUrlSafetyError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
+    error instanceof EgressDeniedError ||
     error.message.startsWith("Refusing ") ||
     error.message.startsWith("Invalid URL:") ||
     error.message.startsWith("Missing hostname:")

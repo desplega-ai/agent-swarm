@@ -39,6 +39,7 @@ import {
   scriptStdlibTypesWithGeneratedApis,
   typecheckScript,
 } from "../be/scripts/typecheck";
+import { toScriptSearchResults } from "../be/scripts/user-code-mode";
 import { can } from "../rbac";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import { extractScriptSignature, type ScriptSignature } from "../scripts-runtime/extract-signature";
@@ -962,17 +963,7 @@ export async function handleScripts(
       limit: parsed.body.limit,
     });
 
-    searchRoute.respond(res, 200, {
-      results: matches.map(({ script, score }) => ({
-        name: script.name,
-        signature: JSON.parse(script.signatureJson),
-        argsJsonSchema: script.argsJsonSchema
-          ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
-          : null,
-        description: script.description,
-        score,
-      })),
-    });
+    searchRoute.respond(res, 200, { results: toScriptSearchResults(matches) });
     return true;
   }
 

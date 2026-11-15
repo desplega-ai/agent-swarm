@@ -55,6 +55,10 @@ const DEFAULT_MODES: Partial<Record<ChatSdkAdapterName, string>> = {
   slack: "webhook",
 };
 
+/** Rocket.Chat only: set when the instance URL override is missing, which the adapter needs to start. */
+const ROCKETCHAT_NO_INSTANCE_URL =
+  'No instance URL. Set CHAT_SDK_API_URL_OVERRIDES to {"rocketchat":"https://chat.example.com"} in the deployment environment and restart the API.';
+
 const NOT_RUNNING =
   "The adapter is starting, or the last configuration save is still applying. Refresh in a few seconds.";
 
@@ -159,6 +163,11 @@ export async function getChatSdkStatus(): Promise<ChatSdkStatus> {
       error = "Turned off on the card. The configuration is kept.";
     } else if (config.enabled && configured) {
       error = blockedCause ? `Not started: ${blockedCause}` : NOT_RUNNING;
+    }
+    // The instance URL is env-only, so a complete card can still not start.
+    // Say which env var is missing instead of the adapter's own error.
+    if (name === "rocketchat" && configured && enabled && resolveAdapterApiUrl(name) === "") {
+      error = ROCKETCHAT_NO_INSTANCE_URL;
     }
     return {
       name,

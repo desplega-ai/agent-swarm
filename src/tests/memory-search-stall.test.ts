@@ -72,6 +72,11 @@ async function remember(
     sourceTaskId: sourceTaskId ?? undefined,
   });
   await store.updateEmbedding(row.id, mix(cos, 4), "test");
+  // The write's post-commit invalidation runs behind the DB lock queue (and the
+  // FTS backfill's statements), possibly after the caller resumes. A search that
+  // started first would see its count overtaken and retried, so the scan counts
+  // below would depend on timing. A query queued now runs after that hook.
+  await getDbClient().get("SELECT 1");
   return row.id;
 }
 

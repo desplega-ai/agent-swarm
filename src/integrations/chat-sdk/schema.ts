@@ -6,7 +6,13 @@ import { z } from "zod";
  * with it; `config.ts` adds the DB-backed resolution on top.
  */
 
-export const CHAT_SDK_ADAPTER_NAMES = ["telegram", "slack", "discord", "teams"] as const;
+export const CHAT_SDK_ADAPTER_NAMES = [
+  "telegram",
+  "slack",
+  "discord",
+  "teams",
+  "rocketchat",
+] as const;
 export type ChatSdkAdapterName = (typeof CHAT_SDK_ADAPTER_NAMES)[number];
 
 export const ConfigRefSchema = z.strictObject({ $config: z.string().min(1) });
@@ -18,11 +24,14 @@ const Str = z.union([z.string().trim().min(1), ConfigRefSchema]);
  * Keys an operator must never set. A base URL plus a `$config` ref would send
  * the referenced secret to an arbitrary host. A verifier or an "unverified"
  * switch bypasses the platform signature check on the public webhook.
- * Mock base URLs come only from the env-only `CHAT_SDK_API_URL_OVERRIDES`.
+ * Base URLs come only from the env-only `CHAT_SDK_API_URL_OVERRIDES`, which
+ * is how a self-hosted Rocket.Chat instance URL is set too: the adapter reads
+ * it as `baseUrl`, so that name is forbidden here for the same reason.
  */
 const FORBIDDEN_ADAPTER_KEYS = [
   "apiUrl",
   "apiBaseUrl",
+  "baseUrl",
   "webhookVerifier",
   "allowUnverifiedWebhooks",
 ] as const;
@@ -48,7 +57,8 @@ const COMMON_SHAPE = {
 };
 
 function adapterSchema<S extends AdapterShape>(shape: S) {
-  return z.looseObject({ ...shape, ...COMMON_SHAPE }).superRefine(forbiddenKeyIssues);
+  // The adapter's own shape wins: Rocket.Chat needs `userName` required.
+  return z.looseObject({ ...COMMON_SHAPE, ...shape }).superRefine(forbiddenKeyIssues);
 }
 
 /**
@@ -143,6 +153,26 @@ export const TeamsAdapterSchema = adapterSchema(TEAMS_SHAPE).superRefine((value,
   }
 });
 
+/**
+ * Rocket.Chat is self-hosted, so its instance URL is per deployment. It is
+ * not a field here: `baseUrl` is forbidden like every other base URL, and the
+ * instance comes from the env-only `CHAT_SDK_API_URL_OVERRIDES.rocketchat`.
+ * `botUserId` pairs with `token` on every REST call and identifies the bot's
+ * own messages; `webhookToken` is the Outgoing Webhook shared secret.
+ */
+// `userName` is required here, unlike the other adapters. Rocket.Chat detects
+// a mention by matching `@<userName>` in the message text, and the REST API
+// has no "who am I" call the adapter could use, so a wrong or defaulted name
+// means the bot silently never sees a mention.
+const ROCKETCHAT_SHAPE = {
+  token: Str,
+  botUserId: Str,
+  webhookToken: Str,
+  userName: Str,
+};
+
+export const RocketchatAdapterSchema = adapterSchema(ROCKETCHAT_SHAPE);
+
 // Strict: a typo'd adapter name must fail loudly, not silently disable it.
 export const ChatSdkAdaptersSchema = z
   .strictObject({
@@ -150,6 +180,7 @@ export const ChatSdkAdaptersSchema = z
     slack: SlackAdapterSchema,
     discord: DiscordAdapterSchema,
     teams: TeamsAdapterSchema,
+    rocketchat: RocketchatAdapterSchema,
   })
   .partial();
 
@@ -161,6 +192,7 @@ export const CHAT_SDK_ADAPTER_SCHEMAS: Record<ChatSdkAdapterName, z.ZodType> = {
   slack: SlackAdapterSchema,
   discord: DiscordAdapterSchema,
   teams: TeamsAdapterSchema,
+  rocketchat: RocketchatAdapterSchema,
 };
 
 /**
@@ -175,6 +207,7 @@ export const ChatSdkAdaptersDraftSchema = z
     slack: adapterSchema(draftShape(SLACK_SHAPE)),
     discord: adapterSchema(draftShape(DISCORD_SHAPE)).superRefine(discordPublicKeyIssue),
     teams: adapterSchema(draftShape(TEAMS_SHAPE)),
+    rocketchat: adapterSchema(draftShape(ROCKETCHAT_SHAPE)),
   })
   .partial();
 
@@ -215,6 +248,7 @@ export const CHAT_SDK_ADAPTER_FIELDS: Record<ChatSdkAdapterName, readonly string
   slack: formFields(SlackAdapterSchema.shape),
   discord: formFields(DiscordAdapterSchema.shape),
   teams: formFields(TeamsAdapterSchema.shape),
+  rocketchat: formFields(RocketchatAdapterSchema.shape),
 };
 
 /** `enabled` is the panel switch on the card, not a form field. */

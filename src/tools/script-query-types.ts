@@ -11,7 +11,7 @@ import {
 export const SCRIPT_QUERY_TYPES_DESCRIPTION =
   "Fetch the auto-generated `swarm-sdk.d.ts` (derived from the live MCP tool registry) + the `stdlib.d.ts` blobs — for IDE-style introspection before authoring or running a script. Pass `name` to also get that script's signature; omit it for the swarm-wide type surface. The same types are used by `script-upsert`'s typecheck pass, so they are authoritative.";
 
-function renderTypeBlobs(data: unknown): string | undefined {
+export function renderTypeBlobs(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const body = data as {
     signature?: unknown;

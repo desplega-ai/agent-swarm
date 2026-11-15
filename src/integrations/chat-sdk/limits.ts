@@ -10,6 +10,9 @@ const CHAT_MESSAGE_LIMITS: Record<string, number> = {
   // guidance for one readable message and stays well under that cap.
   slack: 4000,
   teams: 20000,
+  // Rocket.Chat's `Message_MaxAllowedSize` default. An administrator can raise
+  // it per workspace; this stays at the default so a message is never refused.
+  rocketchat: 5000,
 };
 
 /** Used for an adapter without an entry: the smallest known limit. */

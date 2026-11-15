@@ -35,6 +35,10 @@ mock.module("@excalidraw/excalidraw/index.css", () => ({}));
 mock.module("@/components/ui/button", () => ({
   Button: ({ size: _s, variant: _v, ...p }: Props) => <button type="button" {...p} />,
 }));
+// ObjectEmbed's chrome; the alias resolves only through mocks here.
+mock.module("@/components/shared/copy-value-button", () => ({ CopyValueButton: () => null }));
+mock.module("@/components/ui/alert-callout", () => ({ AlertCallout: () => null }));
+mock.module("@/components/ui/skeleton", () => ({ Skeleton: () => null }));
 mock.module("@/components/shared/data-grid", () => ({
   DataGrid: (p: Props) => {
     gridProps = p;
@@ -45,6 +49,7 @@ mock.module("@/components/shared/data-grid", () => ({
 const { default: BoardView, AUTOSAVE_MS } = await import("./board-view");
 const { default: SheetView } = await import("./sheet-view");
 const { useObject } = await import("./use-object");
+const { ObjectEmbed } = await import("./object-embed");
 const { createRoot } = await import("react-dom/client");
 
 type Root = ReturnType<typeof createRoot>;
@@ -101,6 +106,18 @@ test("a range pinned to a missing tab renders no grid and writes nothing", async
   expect(gridProps).toBeNull();
   expect(host.textContent).toContain("no tab “Missing”");
   expect(h.writes).toEqual([]);
+});
+
+test("a data cell paints its text in a truncating span titled with the full text", async () => {
+  const h = sheetHarness();
+  await mount(<SheetView {...h} snapshot={workbook(1, "Main")} />);
+  const CellText = gridProps?.columnDefs[1].cellRenderer;
+  const { host } = await mount(<CellText valueFormatted="a long cell value" />);
+  const span = host.querySelector("span");
+  expect(span?.className).toContain("truncate");
+  expect(span?.getAttribute("title")).toBe("a long cell value");
+  const empty = await mount(<CellText valueFormatted="" />);
+  expect(empty.host.querySelector("span")?.hasAttribute("title")).toBe(false);
 });
 
 test("a range that does not parse renders no grid instead of the first tab", async () => {
@@ -460,4 +477,17 @@ test("a read sent before this viewer's save cannot bring back the pre-save versi
   await act(async () => f.calls[1]?.resolve(read("A", 2)));
   expect(view.snapshot?.version).toBe(1);
   expect(view.snapshot?.content).toEqual({ elements: [{ id: "A-v1" }] });
+});
+
+// ---------- ObjectEmbed: the read-only hint ----------
+
+test("a read-only embed shows a Read-only label; an editable one does not", async () => {
+  const fetchFn = async () => Response.json({ ...workbook(1, "Main"), unchanged: false });
+  const locked = await mount(<ObjectEmbed objectId="obj" fetch={fetchFn} readOnly />);
+  await act(async () => {});
+  expect(locked.host.querySelector("[data-object-readonly]")?.textContent).toBe("Read-only");
+  const open = await mount(<ObjectEmbed objectId="obj" fetch={fetchFn} />);
+  await act(async () => {});
+  expect(open.host.querySelector("[data-object-kind]")).not.toBeNull();
+  expect(open.host.querySelector("[data-object-readonly]")).toBeNull();
 });

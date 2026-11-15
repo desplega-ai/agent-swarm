@@ -565,7 +565,7 @@ describe("script MCP connections", () => {
     }
   });
 
-  test("proxy route allows repo-scoped MCP connections after descriptor-time gating", async () => {
+  test("proxy route allows repo-scoped MCP connections for a lead only", async () => {
     const fake = startFakeMcpServer();
     try {
       const lead = await createAgent({ name: "mcp-repo-lead", isLead: true, status: "idle" });
@@ -579,17 +579,21 @@ describe("script MCP connections", () => {
         mcpServerId: mcpServer.id,
         agentId: lead.id,
       });
+      const call = (agentId: string) =>
+        dispatchProxyApi(`/api/script-connections/${connection.id}/mcp-call`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            "X-Agent-ID": agentId,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ tool: "echo-tool", arguments: { message: "repo" } }),
+        });
 
-      const response = await dispatchProxyApi(`/api/script-connections/${connection.id}/mcp-call`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "X-Agent-ID": worker.id,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ tool: "echo-tool", arguments: { message: "repo" } }),
-      });
+      expect((await call(worker.id)).status).toBe(403);
+      expect(fake.requests.filter((request) => request.method === "tools/call")).toHaveLength(0);
 
+      const response = await call(lead.id);
       expect(response.status).toBe(200);
       expect(((await response.json()) as { ok: boolean }).ok).toBe(true);
     } finally {

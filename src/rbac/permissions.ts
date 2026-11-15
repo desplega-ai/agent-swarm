@@ -386,6 +386,10 @@ export const PERMISSIONS = {
     description: "Search reusable scripts visible to the caller.",
     namespace: "script",
   },
+  "script.run": {
+    description: "Run a global or inline script as yourself from the user MCP.",
+    namespace: "script",
+  },
   "script.api.read.secrets": {
     description: "Reveal an external script API endpoint bearer token.",
     namespace: "script",
@@ -408,6 +412,11 @@ export const PERMISSIONS = {
   },
   "schedule.deferral.update.any": {
     description: "Change a defer-task schedule the caller did not create.",
+    namespace: "schedule",
+  },
+  "schedule.target.update.any": {
+    description:
+      "Change what a schedule the caller did not create runs (its target, task template, workflow, script, script args or params).",
     namespace: "schedule",
   },
   "runtime_pool.write": {

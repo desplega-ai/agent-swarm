@@ -304,7 +304,7 @@ export async function listUserTokens(userId: string): Promise<UserTokenSummary[]
   return getDbClient().query<UserTokenRow>(
     `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
          FROM user_tokens
-        WHERE userId = ?
+        WHERE userId = ? AND expiresAt IS NULL
         ORDER BY createdAt DESC`,
     [userId],
   );
@@ -512,6 +512,43 @@ export async function mintToken(
 }
 
 /**
+ * Mint the short-lived `aswt_` token a user MCP script run presents on its
+ * `ctx.swarm` calls, so the script can do only what the requesting user's own
+ * token can. It expires at `now + ttlMs` (the backstop for a run that dies
+ * without revoking) and stays off the People page token list. No identity
+ * event: one per run would flood the audit log, like `mintScriptRunToken`.
+ */
+export async function mintUserScriptRunToken(
+  userId: string,
+  ttlMs: number,
+): Promise<{ tokenId: string; plaintext: string }> {
+  const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
+  const tokenId = randomUUID().replace(/-/g, "");
+  const now = new Date();
+  await getDbClient().run(
+    `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt, expiresAt)
+     VALUES (?, ?, 'script-run', ?, ?, ?, ?)`,
+    [
+      tokenId,
+      userId,
+      sha256Hex(plaintext),
+      plaintext.slice(-4),
+      now.toISOString(),
+      new Date(now.getTime() + ttlMs).toISOString(),
+    ],
+  );
+  return { tokenId, plaintext };
+}
+
+/** Revoke a token minted by `mintUserScriptRunToken`. No-op if already revoked. */
+export async function revokeUserScriptRunToken(tokenId: string): Promise<void> {
+  await getDbClient().run(
+    "UPDATE user_tokens SET revokedAt = ? WHERE id = ? AND expiresAt IS NOT NULL AND revokedAt IS NULL",
+    [new Date().toISOString(), tokenId],
+  );
+}
+
+/**
  * Revoke a previously-minted token. Sets `revokedAt = now` and emits
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
@@ -586,11 +623,14 @@ export async function resolveUserToken(
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
 
-  const row = await client.get<{ id: string; userId: string; revokedAt: string | null }>(
-    "SELECT id, userId, revokedAt FROM user_tokens WHERE tokenHash = ?",
-    [hash],
-  );
+  const row = await client.get<{
+    id: string;
+    userId: string;
+    revokedAt: string | null;
+    expiresAt: string | null;
+  }>("SELECT id, userId, revokedAt, expiresAt FROM user_tokens WHERE tokenHash = ?", [hash]);
   if (!row || row.revokedAt !== null) return null;
+  if (row.expiresAt !== null && Date.parse(row.expiresAt) <= Date.now()) return null;
 
   // Best-effort lastUsedAt update — never let a failure here leak to the
   // caller and block a successful token resolution.
@@ -613,8 +653,9 @@ export async function resolveUserToken(
  */
 export async function isLiveUserToken(tokenId: string, userId: string): Promise<boolean> {
   const row = await getDbClient().get<{ found: number }>(
-    "SELECT 1 AS found FROM user_tokens WHERE id = ? AND userId = ? AND revokedAt IS NULL",
-    [tokenId, userId],
+    `SELECT 1 AS found FROM user_tokens
+      WHERE id = ? AND userId = ? AND revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > ?)`,
+    [tokenId, userId, new Date().toISOString()],
   );
   return row != null;
 }

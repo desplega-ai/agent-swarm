@@ -142,11 +142,7 @@ function describeScriptFailure(
   return undefined;
 }
 
-export async function proxyScriptsApi(args: {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
-  path: string;
-  body?: unknown;
-  requestInfo: RequestInfo;
+type ScriptToolRendering = {
   successMessage: (data: unknown) => string;
   /** Optional model-facing rendering of the success payload (appended to the text channel). */
   successDetails?: (data: unknown) => string | undefined;
@@ -162,26 +158,45 @@ export async function proxyScriptsApi(args: {
    * no pagination) — everything else stays capped.
    */
   uncappedDetails?: boolean;
-}): Promise<SwarmToolResult> {
+};
+
+/**
+ * Turn a scripts API response into the tool result. Shared by the agent
+ * tools (over HTTP) and the user MCP code-mode tools (in process).
+ */
+export function scriptsApiToolResult(
+  data: unknown,
+  res: { ok: boolean; status: number },
+  args: ScriptToolRendering,
+): SwarmToolResult {
+  const toolData = { status: res.status, data };
+  const failure = describeScriptFailure(res.ok, res.status, data);
+  if (failure) {
+    return toolErr(failure.message, {
+      details: failure.details ?? capDetails(args.failureDetails?.(data)),
+      data: toolData,
+    });
+  }
+
+  const successDetails = args.successDetails?.(data);
+  return toolOk(args.successMessage(data), {
+    details: args.uncappedDetails ? successDetails : capDetails(successDetails),
+    data: toolData,
+  });
+}
+
+export async function proxyScriptsApi(
+  args: {
+    method: "GET" | "POST" | "PATCH" | "DELETE";
+    path: string;
+    body?: unknown;
+    requestInfo: RequestInfo;
+  } & ScriptToolRendering,
+): Promise<SwarmToolResult> {
   return proxySwarmApi({
     ...args,
     transportError: SCRIPT_TRANSPORT_ERROR,
-    respond: (data, res) => {
-      const toolData = { status: res.status, data };
-      const failure = describeScriptFailure(res.ok, res.status, data);
-      if (failure) {
-        return toolErr(failure.message, {
-          details: failure.details ?? capDetails(args.failureDetails?.(data)),
-          data: toolData,
-        });
-      }
-
-      const successDetails = args.successDetails?.(data);
-      return toolOk(args.successMessage(data), {
-        details: args.uncappedDetails ? successDetails : capDetails(successDetails),
-        data: toolData,
-      });
-    },
+    respond: (data, res) => scriptsApiToolResult(data, res, args),
   });
 }
 
