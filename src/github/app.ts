@@ -1,3 +1,4 @@
+import { getSwarmRepos } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { githubApiUrl, resolveGitHubHost } from "../utils/github-host";
 
@@ -8,6 +9,12 @@ let privateKey: string | null = null;
 
 // Token cache: installationId -> { token, expiresAt }
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
+
+// Repo -> installation cache, so a worker's every git/gh call does not cost a
+// `GET /repos/{owner}/{repo}/installation`. Positive results only: an
+// installation added later works without restarting the API.
+const INSTALLATION_CACHE_TTL_MS = 10 * 60_000;
+const installationCache = new Map<string, { id: number; expiresAt: number }>();
 
 /** Raw PEM (with literal `\\n` escapes) or base64-encoded PEM. */
 function decodePrivateKey(raw: string): string {
@@ -31,6 +38,7 @@ export function resetGitHub(): void {
   appId = null;
   privateKey = null;
   tokenCache.clear();
+  installationCache.clear();
 }
 
 export function initGitHub(): boolean {
@@ -264,30 +272,107 @@ async function mintInstallationToken(
 export type WorkerInstallationToken =
   | { status: "ok"; token: string; expiresAt: string }
   | { status: "unconfigured" }
+  | { status: "forbidden" }
   | { status: "error" };
 
 /**
- * Installation token for worker `git` / `gh`, minted for the one installation
- * named by `GITHUB_APP_INSTALLATION_ID`. Callers never pick the installation, so
- * no request can get a token for an installation the swarm is not configured for.
+ * `owner/name`, lowercased, from a swarm repo URL (`https://github.com/o/r.git`),
+ * an scp-like remote (`git@host:o/r`) or the shorthand itself. GitHub treats
+ * owner and repo names case-insensitively, so the `swarm_repos` comparison does
+ * too; the last two path segments are the identity, whichever form the caller got.
+ * A `.`/`..` segment returns `""`, which matches no registered repo, so a caller
+ * cannot aim the installation lookup at another API path.
+ */
+export function normalizeRepo(repo: string): string {
+  const trimmed = repo.trim().replace(/\/+$/, "");
+  const lastTwo = trimmed.replace(/\.git$/i, "").match(/([^/:]+\/[^/:]+)$/);
+  if (!lastTwo) return trimmed.toLowerCase();
+  const [owner, name] = lastTwo[1]!.split("/") as [string, string];
+  if (owner === "." || owner === ".." || name === "." || name === "..") return "";
+  return lastTwo[1]!.toLowerCase();
+}
+
+/**
+ * The App installation that owns `repo`, asked of GitHub with an App JWT
+ * (`GET /repos/{owner}/{repo}/installation`). Cached for ten minutes because a
+ * worker asks once per git/gh call. `null` when GitHub does not answer 200:
+ * no installation, a revoked one, or an App that cannot see the repository.
+ */
+async function resolveInstallationId(
+  repo: string,
+  creds: { appId: string | null; privateKey: string | null },
+): Promise<number | null> {
+  const cached = installationCache.get(repo);
+  if (cached && cached.expiresAt > Date.now()) return cached.id;
+
+  const jwt = await generateAppJWT(creds);
+  if (!jwt) return null;
+
+  try {
+    const response = await fetch(githubApiUrl(`/repos/${repo}/installation`), {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${jwt}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (response.status !== 200) {
+      console.log(`[GitHub] No installation for ${repo}: ${response.status}`);
+      return null;
+    }
+    const data = (await response.json()) as { id?: unknown };
+    if (typeof data.id !== "number") return null;
+    installationCache.set(repo, {
+      id: data.id,
+      expiresAt: Date.now() + INSTALLATION_CACHE_TTL_MS,
+    });
+    return data.id;
+  } catch (error) {
+    console.error("[GitHub] Error resolving the repo installation:", error);
+    return null;
+  }
+}
+
+/**
+ * Installation token for worker `git` / `gh`.
+ *
+ * With a `repo` (`owner/name` or a URL), the token is minted for that
+ * repository's App installation, resolved with the App JWT: one App with an
+ * installation per owner can then serve repos from more than one account. The
+ * repository must be registered in `swarm_repos`, so a caller cannot aim the App
+ * at an installation the swarm does not manage.
+ *
+ * Without a `repo`, the fixed `GITHUB_APP_INSTALLATION_ID` is the fallback, so a
+ * single-installation deployment behaves exactly as before.
+ *
  * Reads env on each call: it works without the webhook (`initGitHub` loads App
  * credentials only when `GITHUB_WEBHOOK_SECRET` is set).
  */
-export async function getWorkerInstallationToken(): Promise<WorkerInstallationToken> {
+export async function getWorkerInstallationToken(repo?: string): Promise<WorkerInstallationToken> {
   if (isEnvFlagEnabled("GITHUB_DISABLE", false)) return { status: "unconfigured" };
   const workerAppId = process.env.GITHUB_APP_ID?.trim();
   const rawKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
-  const rawInstallation = process.env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
-  if (!workerAppId || !rawKey || !/^[1-9][0-9]{0,15}$/.test(rawInstallation)) {
-    return { status: "unconfigured" };
-  }
+  if (!workerAppId || !rawKey) return { status: "unconfigured" };
   if (!resolveGitHubHost().ok) return { status: "error" };
+  const creds = { appId: workerAppId, privateKey: decodePrivateKey(rawKey) };
+
+  let installationId: number;
+  if (repo) {
+    // Only repos the swarm manages may be used as a token target.
+    const target = normalizeRepo(repo);
+    const registered = (await getSwarmRepos()).some((r) => normalizeRepo(r.url) === target);
+    if (!registered) return { status: "forbidden" };
+    const resolved = await resolveInstallationId(target, creds);
+    if (resolved === null) return { status: "error" };
+    installationId = resolved;
+  } else {
+    const rawInstallation = process.env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
+    if (!/^[1-9][0-9]{0,15}$/.test(rawInstallation)) return { status: "unconfigured" };
+    installationId = Number(rawInstallation);
+  }
+
   // Hand out a token with at least 10 minutes left, so a worker can cache it.
-  const minted = await mintInstallationToken(
-    Number(rawInstallation),
-    { appId: workerAppId, privateKey: decodePrivateKey(rawKey) },
-    10 * 60_000,
-  );
+  const minted = await mintInstallationToken(installationId, creds, 10 * 60_000);
   if (!minted) return { status: "error" };
   return { status: "ok", token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
 }

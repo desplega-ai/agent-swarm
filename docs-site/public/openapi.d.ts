@@ -9515,7 +9515,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a GitHub App installation token for worker git and gh
-         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
+         * @description Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`), the API resolves that repository's App installation with the App JWT and mints for it; the repository must be registered in `swarm_repos`. Without a `repo`, the installation in `GITHUB_APP_INSTALLATION_ID` is the fallback, so single-installation deployments are unchanged. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.
          */
         post: {
             parameters: {
@@ -9526,7 +9526,9 @@ export interface paths {
             };
             requestBody?: {
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": {
+                        repo?: string;
+                    };
                 };
             };
             responses: {
@@ -9542,7 +9544,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Caller is not a registered agent */
+                /** @description Caller is not a registered agent, or the repo is not registered in the swarm */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -9560,7 +9562,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description GitHub refused or failed to mint the token */
+                /** @description GitHub refused or failed to mint the token, or the repo has no App installation */
                 502: {
                     headers: {
                         [name: string]: unknown;

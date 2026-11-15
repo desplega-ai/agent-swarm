@@ -34,6 +34,8 @@ const PAT = "ghp_fixtureStaticPat000000000000000000"; // gitleaks:allow (synthet
 
 let mode: "ok" | "unconfigured" = "ok";
 let calls = 0;
+/** Bodies the API received, in order: proves which repo (if any) the helper named. */
+let payloads: string[] = [];
 let server: ReturnType<typeof Bun.serve>;
 const tempDirs: string[] = [];
 
@@ -41,11 +43,12 @@ beforeAll(() => {
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       if (req.method !== "POST" || url.pathname !== "/api/github/installation-token") {
         return new Response("not found", { status: 404 });
       }
+      payloads.push(await req.text());
       calls++;
       if (
         req.headers.get("authorization") !== `Bearer ${API_KEY}` ||
@@ -69,6 +72,7 @@ afterAll(() => {
 afterEach(() => {
   mode = "ok";
   calls = 0;
+  payloads = [];
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -171,6 +175,58 @@ describe("swarm-github-token", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  test(
+    "names the repo so the API mints that repository's installation",
+    async () => {
+      const { env } = sandbox();
+
+      expect(
+        expectChildOk(
+          await helper(env, ["--repo", "clovellyapps/audb"]),
+          "--repo mode",
+        ).stdout.trim(),
+      ).toBe(APP_TOKEN);
+      // git hands the helper `url=` when it was given one, `host=` + `path=` otherwise.
+      const byUrl = expectChildOk(
+        await helper(
+          env,
+          ["git-credential", "get"],
+          "protocol=https\nhost=github.com\nurl=https://github.com/clovellyapps/audb.git\n\n",
+        ),
+        "credential get (url)",
+      );
+      expect(byUrl.stdout).toBe(`username=x-access-token\npassword=${APP_TOKEN}\n`);
+      expectChildOk(
+        await helper(
+          env,
+          ["git-credential", "get"],
+          "protocol=https\nhost=github.com\npath=clovellyapps/audb.git\n\n",
+        ),
+        "credential get (path)",
+      );
+      // The wrapper's channel: the repo travels in the env, never in argv.
+      expectChildOk(
+        await helper({ ...env, SWARM_GITHUB_TOKEN_REPO: "spanishkangaroo/recadame" }),
+        "env repo",
+      );
+      // No repo named: the deployment-wide GITHUB_APP_INSTALLATION_ID, byte for byte.
+      expectChildOk(await helper(env), "no repo");
+      // A value that is not `owner/name` is dropped rather than sent as JSON.
+      expectChildOk(await helper(env, ["--repo", "not a repo"]), "unsafe repo");
+
+      const expected = [
+        '{"repo":"clovellyapps/audb"}',
+        '{"repo":"clovellyapps/audb"}',
+        '{"repo":"clovellyapps/audb"}',
+        '{"repo":"spanishkangaroo/recadame"}',
+        "{}",
+        "{}",
+      ];
+      expect(payloads).toEqual(expected);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
 
 describe("gh-app-auth-wrapper", () => {
@@ -201,6 +257,59 @@ describe("gh-app-auth-wrapper", () => {
         "ghes",
       );
       expect(ghes.stdout.trim()).toBe(`args=api user GH_TOKEN= GH_ENTERPRISE_TOKEN=${APP_TOKEN}`);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "passes the repo from --repo, -R, GH_REPO, a gh api path or the origin remote",
+    async () => {
+      const { home, env } = sandbox();
+      const realGh = join(home, "real-gh");
+      writeFileSync(realGh, "#!/bin/sh\necho ok\n");
+      chmodSync(realGh, 0o755);
+      const tokenBin = join(home, "swarm-github-token");
+      writeFileSync(tokenBin, `#!/bin/sh\nexec bash ${HELPER} "$@"\n`);
+      chmodSync(tokenBin, 0o755);
+      const wrapperEnv = { ...env, SWARM_REAL_GH: realGh, SWARM_GITHUB_TOKEN_BIN: tokenBin };
+
+      // A repo whose origin remote is the target, for the cwd case.
+      const repoDir = join(home, "checkout");
+      mkdirSync(repoDir);
+      expectChildOk(await runChild(["git", "init", "-q"], { env, cwd: repoDir }), "git init");
+      expectChildOk(
+        await runChild(
+          ["git", "remote", "add", "origin", "https://github.com/clovellyapps/audb.git"],
+          { env, cwd: repoDir },
+        ),
+        "git remote add",
+      );
+
+      const cases: [string, string[], Record<string, string>, string][] = [
+        ["--repo", ["pr", "view", "--repo", "clovellyapps/audb"], {}, home],
+        ["-R", ["issue", "list", "-R", "clovellyapps/audb"], {}, home],
+        ["--repo=", ["pr", "view", "--repo=clovellyapps/audb"], {}, home],
+        ["GH_REPO", ["pr", "view"], { GH_REPO: "clovellyapps/audb" }, home],
+        ["gh api path", ["api", "repos/clovellyapps/audb/issues/1"], {}, home],
+        ["origin remote", ["pr", "view"], {}, repoDir],
+      ];
+      for (const [label, args, extraEnv, cwd] of cases) {
+        expectChildOk(
+          await runChild(["bash", WRAPPER, ...args], {
+            env: { ...wrapperEnv, ...extraEnv },
+            cwd,
+          }),
+          label,
+        );
+      }
+      expect(payloads).toEqual(cases.map(() => '{"repo":"clovellyapps/audb"}'));
+
+      // No flag, no env, no remote: the deployment-wide fallback, unchanged.
+      expectChildOk(
+        await runChild(["bash", WRAPPER, "pr", "view"], { env: wrapperEnv, cwd: home }),
+        "no repo",
+      );
+      expect(payloads.at(-1)).toBe("{}");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

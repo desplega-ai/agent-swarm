@@ -158,9 +158,11 @@ At boot each worker asks `POST /api/github/installation-token` (swarm API key pl
 - sets `swarm-github-token git-credential` as the git credential helper for the GitHub host, and
 - links a `gh` wrapper that passes the current token to `gh` on each call.
 
-Each git or `gh` call asks the API for a token. The API caches it in memory until 10 minutes before its 1-hour expiry, and the worker never writes it to disk. The API refuses ACP task tokens. ACP harnesses still run as the worker user and can read the worker's own env, so give untrusted ACP targets a worker without GitHub credentials. The token never goes into a URL, a git remote or `~/.gitconfig`. When the API cannot mint a token, git and `gh` fall back to `GITHUB_TOKEN`, so keep a PAT on workers if you want a fallback. Without `GITHUB_APP_INSTALLATION_ID` the API answers 404 and workers use `GITHUB_TOKEN` exactly as before. Boot logs `GitHub App worker auth configured` in App mode.
+Each git or `gh` call asks the API for a token. The API caches it in memory until 10 minutes before its 1-hour expiry, and the worker never writes it to disk. The API refuses ACP task tokens. ACP harnesses still run as the worker user and can read the worker's own env, so give untrusted ACP targets a worker without GitHub credentials. The token never goes into a URL, a git remote or `~/.gitconfig`. When the API cannot mint a token, git and `gh` fall back to `GITHUB_TOKEN`, so keep a PAT on workers if you want a fallback. Without `GITHUB_APP_INSTALLATION_ID` a call that names no repo answers 404 and workers use `GITHUB_TOKEN` exactly as before. Boot logs `GitHub App worker auth configured` in App mode.
 
-Only one installation is supported: workers can reach the repos that installation can see. Commits still use `GITHUB_EMAIL` / `GITHUB_NAME`.
+When a worker names a repository, the API resolves that repository's App installation with the App JWT and mints a token for it. The repository must be registered in the swarm: `POST /api/github/installation-token` answers 403 for a repo that is not in `swarm_repos`, and mints nothing. Without a repository, `GITHUB_APP_INSTALLATION_ID` is the fallback, so single-installation deployments are unchanged. A deployment can therefore serve repos from more than one account, as long as the same App is installed on each account.
+
+The worker's helper names the repo it is acting on: the `url=` of a git credential request, the `--repo`/`-R` argument or `GH_REPO` of a `gh` call, a `gh api repos/<owner>/<repo>/…` path, or the origin remote of the current checkout. A token minted for a repo whose installation does not exist comes back as 502, and git or `gh` then uses the `GITHUB_TOKEN` fallback. Commits still use `GITHUB_EMAIL` / `GITHUB_NAME`.
 
 ## GitHub Enterprise Server
 
@@ -188,7 +190,7 @@ Setup on GHES:
 2. Create a PAT (or bot-user token) on the GHES host with `repo` scope for `GITHUB_TOKEN`.
 3. Workers export `GH_HOST` and `GH_ENTERPRISE_TOKEN` for `gh`, and add a git credential helper for the GHES host. The PAT moves out of `GITHUB_TOKEN` and `GH_TOKEN` in the worker and session env, because `gh` sends those to github.com. GHES mode needs `gh` 2.93.0 or later; an older `gh` stops the boot. Boot logs `GitHub Enterprise auth configured (host: <host>)`.
 
-App worker auth works the same on GHES: create the App on the GHES host, set `GITHUB_APP_INSTALLATION_ID` on the API, and keep `GITHUB_URL` on the API and every worker. The API mints tokens on `<GITHUB_URL>/api/v3`, workers scope the credential helper to the GHES host and hand `gh` the token as `GH_ENTERPRISE_TOKEN`. The `gh` 2.93.0 minimum applies. A GHES PAT is optional and stays the fallback.
+App worker auth works the same on GHES: create the App on the GHES host, set `GITHUB_APP_INSTALLATION_ID` on the API as the no-repo fallback, and keep `GITHUB_URL` on the API and every worker. The API mints tokens on `<GITHUB_URL>/api/v3`, and the per-repo installation lookup (`GET /repos/{owner}/{repo}/installation`) uses the same base. Workers scope the credential helper to the GHES host and hand `gh` the token as `GH_ENTERPRISE_TOKEN`. The `gh` 2.93.0 minimum applies. A GHES PAT is optional and stays the fallback.
 
 Not supported: github.com and GHES in one deployment, the `claude-managed` harness (it refuses to start a repo task when `GITHUB_URL` is set), and remote skill install, which still reads public github.com repos.
 
