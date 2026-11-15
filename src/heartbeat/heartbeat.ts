@@ -148,14 +148,28 @@ function stallThresholdMinutes(): number {
   return Number.isInteger(value) && value > 0 ? value : 30;
 }
 
-/** Stall threshold: tasks with no active session (worker clearly dead) */
-function stallThresholdNoSessionMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+/**
+ * A finite positive number of minutes, or `fallback`.
+ *
+ * `Number(value) || fallback` kept a non-positive or non-finite threshold, and
+ * the stall comparisons below (`taskAgeMs >= threshold * 60_000`) match every
+ * task once the threshold is <= 0 (#3170). Fractions stay legal on purpose: the
+ * E2E and test setups drop these thresholds under a minute to watch a sweep
+ * finish inside a test's budget.
+ */
+function positiveMinutes(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-/** Stall threshold: tasks with stale worker heartbeat */
+/** Stall threshold: tasks with no active session (worker clearly dead). Default 5. */
+function stallThresholdNoSessionMin(): number {
+  return positiveMinutes(process.env.HEARTBEAT_STALL_NO_SESSION_MIN, 5);
+}
+
+/** Stall threshold: tasks with stale worker heartbeat. Default 15. */
 function stallThresholdStaleHeartbeatMin(): number {
-  return Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+  return positiveMinutes(process.env.HEARTBEAT_STALL_STALE_HB_MIN, 15);
 }
 
 /** Grace window for a fresh pending steering message before normal stall remediation resumes. */
