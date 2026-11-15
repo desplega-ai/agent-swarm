@@ -230,6 +230,16 @@ describe("parseGithubShorthand", () => {
     expect(parseGithubShorthand("https://github.com/o/r/pull/1")).toBeNull();
   });
 
+  test("a dot-only owner or repo is not a GitHub reference", () => {
+    for (const text of ["./repo#1", "../repo#1", "o/..#1", "./repo@a1b2c3d"]) {
+      expect(parseGithubShorthand(text)).toBeNull();
+    }
+  });
+
+  test("an owner with dots in it is still a link", () => {
+    expect(parseGithubShorthand("my.org/repo#1")).toMatchObject({ owner: "my.org", repo: "repo" });
+  });
+
   test("parseSwarmLinkOrRef takes shorthand, then URLs", () => {
     expect(parseSwarmLinkOrRef("o/r#1", ORIGINS)).toMatchObject({ type: "github" });
     expect(parseSwarmLinkOrRef(`/tasks/${TASK_ID}`, ORIGINS)).toMatchObject({ type: "dashboard" });
