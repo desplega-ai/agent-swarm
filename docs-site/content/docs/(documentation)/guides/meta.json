@@ -18,6 +18,7 @@
     "supplier-security-evidence-review",
     "privacy-data-request-handoff",
     "supplier-performance-review",
+    "ai-rfp-bid-qualification",
     "deployment",
     "one-click-deploy",
     "kubernetes",
