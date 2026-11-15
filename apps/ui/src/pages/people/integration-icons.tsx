@@ -29,6 +29,8 @@ export const INTEGRATION_LABELS: Record<string, string> = {
   agentmail: "AgentMail",
   jira: "Jira",
   "email-alias": "Email alias",
+  // The capitalize fallback would render "Rocketchat".
+  rocketchat: "Rocket.Chat",
 };
 
 export function getIntegrationLabel(kind: string): string {

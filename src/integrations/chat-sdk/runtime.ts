@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Chat } from "chat";
 import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
-import { loadAdapter, watchSocketConnection } from "./adapters";
+import { DEFAULT_BOT_USER_NAME, loadAdapter, watchSocketConnection } from "./adapters";
 import { drainBackground } from "./background";
 import { registerTelegramCommands } from "./commands";
 import {
@@ -57,15 +57,21 @@ export function isChatSdkStopping(): boolean {
   return stopping;
 }
 
-const DEFAULT_CHAT_USER_NAME = "swarm";
-
 /** Total wait for every step of `stopChatSdk`, inside the 15 s SIGTERM budget. */
 const SHUTDOWN_BUDGET_MS = 10_000;
 /** A config reload waits this long for the adapters to come back before it answers. */
 const RELOAD_START_BUDGET_MS = 15_000;
 
 /** Fields whose string value is a credential, registered with the scrubber. */
-const SECRET_FIELDS = ["botToken", "secretToken", "signingSecret", "appToken", "appPassword"];
+const SECRET_FIELDS = [
+  "botToken",
+  "secretToken",
+  "signingSecret",
+  "appToken",
+  "appPassword",
+  "token",
+  "webhookToken",
+];
 
 function setHealth(
   name: ChatSdkAdapterName,
@@ -116,7 +122,7 @@ async function startAdapter(
       state,
       // Chat requires a userName. The adapter only gets one when the operator
       // set it, so Telegram can still take the real bot name from getMe.
-      userName: typeof config.userName === "string" ? config.userName : DEFAULT_CHAT_USER_NAME,
+      userName: typeof config.userName === "string" ? config.userName : DEFAULT_BOT_USER_NAME,
       logger,
       // The swarm buffers bursts itself (Phase 2). The SDK "queue" strategy
       // would keep only the latest queued message and skip the rest.

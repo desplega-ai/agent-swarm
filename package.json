@@ -215,6 +215,7 @@
     "@aws-sdk/client-bedrock": "3.1048.0",
     "@boxd-sh/sdk": "0.2.20",
     "@chat-adapter/discord": "4.45.0",
+    "@chat-adapter/shared": "4.45.0",
     "@chat-adapter/slack": "4.45.0",
     "@chat-adapter/teams": "4.45.0",
     "@chat-adapter/telegram": "4.45.0",
