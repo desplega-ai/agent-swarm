@@ -78,6 +78,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
 - [Coordinating a customer data access request across support, privacy and engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/privacy-data-request-handoff). Reference.
 - [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-performance-review). Reference.
+- [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
