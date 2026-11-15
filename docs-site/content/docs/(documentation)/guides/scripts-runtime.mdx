@@ -659,6 +659,26 @@ A saved script can be opted in to a public HTTP endpoint —
 outside the swarm, with optional bearer auth and typed input validation
 against the same `argsJsonSchema` this page describes.
 
+## Running scripts from the user MCP
+
+The user MCP (`/mcp-user`) exposes code mode as three tools: `script-search`,
+`script-get-types` and `script-run`. A run there acts as the person who called
+it:
+
+- Its `ctx.swarm` calls present a short-lived token for that user, revoked when
+  the run ends. The API applies that user's permissions and sends no agent
+  identity, so tools that need an agent fail.
+- It gets no agent's credential bindings, connections or `/afs` drive, and no
+  deployment egress secrets.
+- It creates no task. It records a script run with `agentId` `user-mcp` and the
+  user as requester.
+- Only global scripts are visible. Inline source is neither typechecked nor
+  saved.
+
+With RBAC on, `script-search` needs `script.search` and `script-run` needs
+`script.run`. Admins hold both; the built-in `requester` and `viewer` roles
+hold neither. `script-get-types` is a read open to every user.
+
 ## When to escalate
 
 If you find code that runs fine in the runtime but fails the typecheck, treat

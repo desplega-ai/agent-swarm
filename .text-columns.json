@@ -3768,6 +3768,9 @@
     "tokenHash": {
       "exempt": "hash or digest"
     },
+    "expiresAt": {
+      "exempt": "timestamp"
+    },
     "tokenPreview": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },

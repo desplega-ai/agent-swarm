@@ -386,6 +386,10 @@ export const PERMISSIONS = {
     description: "Search reusable scripts visible to the caller.",
     namespace: "script",
   },
+  "script.run": {
+    description: "Run a global or inline script as yourself from the user MCP.",
+    namespace: "script",
+  },
   "script.api.read.secrets": {
     description: "Reveal an external script API endpoint bearer token.",
     namespace: "script",
