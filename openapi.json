@@ -56243,6 +56243,9 @@
                   "harnessCostBilled": {
                     "type": "boolean"
                   },
+                  "estimated": {
+                    "type": "boolean"
+                  },
                   "taskId": {
                     "type": "string"
                   },

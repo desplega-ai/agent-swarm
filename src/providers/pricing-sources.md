@@ -47,6 +47,9 @@ rate by hand should also update this file.
     Shortnames (`opus`, `sonnet`, `haiku`) ALSO get rows keyed by the current
     default full id (e.g. `opus → claude-opus-4-7`). Pi-mono uses the same
     shortname forms, so they're projected under `provider='pi'` as well.
+    A `claude` row posted with `estimated: true` (the session was killed
+    before its `result` event) carries per-message usage summed per model;
+    it is priced from these rows and tagged `estimated`, never recorded as $0.
   - OpenAI models → rows under `provider='codex'`, and `provider='pi'` for
     the ChatGPT subscription route. Pricing accepts `openai-codex/<id>`;
     `session_costs.model` and its per-model breakdown store the bare OpenAI

@@ -426,6 +426,121 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     expect(result.output).toBeUndefined();
   });
 
+  test("a session that ends without a result reports per-message usage as an estimated cost", async () => {
+    const usageA = {
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 50,
+      cache_creation: { ephemeral_5m_input_tokens: 20, ephemeral_1h_input_tokens: 30 },
+    };
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" }),
+      // One API message split over two lines: its usage counts once.
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", model: "claude-sonnet-5-5", content: [], usage: usageA },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", model: "claude-sonnet-5-5", content: [], usage: usageA },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg-b",
+          model: "claude-sonnet-5-5",
+          content: [],
+          usage: { input_tokens: 1, output_tokens: 7, cache_read_input_tokens: 200 },
+        },
+      }),
+      // A subagent on another model is billed too.
+      JSON.stringify({
+        type: "assistant",
+        parent_tool_use_id: "tool-1",
+        message: {
+          id: "msg-c",
+          model: "claude-haiku-4-5",
+          content: [],
+          usage: { input_tokens: 3, output_tokens: 4 },
+        },
+      }),
+      // Claude's local error message carries zero usage and is dropped.
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg-d",
+          model: "<synthetic>",
+          content: [],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0,
+      estimated: true,
+      provider: "claude",
+      numTurns: null,
+      inputTokens: 14,
+      outputTokens: 16,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 50,
+      cacheWrite5mTokens: 20,
+      cacheWrite1hTokens: 30,
+      models: [
+        {
+          model: "claude-sonnet-5-5",
+          inputTokens: 11,
+          outputTokens: 12,
+          cacheReadTokens: 300,
+          cacheWriteTokens: 50,
+        },
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 3,
+          outputTokens: 4,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    });
+  });
+
+  test("the result event's cost wins over the per-message estimate", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", content: [], usage: { input_tokens: 10, output_tokens: 5 } },
+      }),
+      JSON.stringify({ type: "result", total_cost_usd: 0.01, duration_ms: 100, num_turns: 1 }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost?.totalCostUsd).toBe(0.01);
+    expect(result.cost?.estimated).toBeUndefined();
+  });
+
+  test("a session with no usage at all reports no cost", async () => {
+    const lines = [JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" })];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toBeUndefined();
+  });
+
   test("result cost includes Claude cache TTL split and complete per-model usage", async () => {
     const lines = [
       JSON.stringify({

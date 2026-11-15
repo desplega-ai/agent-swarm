@@ -262,6 +262,44 @@ async function sessionCosts(
     `Attribution lacks the requesting user: ${response.text.slice(0, 300)}`,
   );
   expect(row.firstPassYield === null, "firstPassYield is not null");
+
+  // A Claude session killed before its result sends summed per-message usage
+  // flagged estimated: the server prices it and tags the row. Posted last so
+  // the counts above stay exact.
+  response = await ctx.api("POST", "/api/session-costs", {
+    body: {
+      sessionId: `core-cost-estimated-${ctx.nonce}`,
+      agentId: workerId,
+      taskId,
+      totalCostUsd: 0,
+      estimated: true,
+      inputTokens: 1000,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      durationMs: 5000,
+      numTurns: null,
+      model: "claude-sonnet-4-5",
+      provider: "claude",
+      models: [
+        {
+          model: "claude-sonnet-4-5",
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    },
+  });
+  expectStatus(response, [201], "store an estimated cost row");
+  const estimated = asRecord(asRecord(response.json).cost);
+  expect(
+    estimated.costSource === "estimated" &&
+      Number(estimated.totalCostUsd) > 0 &&
+      estimated.harnessCostUsd === null,
+    `An estimated row must be priced and tagged estimated: ${JSON.stringify(estimated)}`,
+  );
 }
 
 /** Active-session rows a worker keeps while it runs a task, and orphan recovery. */

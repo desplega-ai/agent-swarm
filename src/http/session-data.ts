@@ -202,6 +202,8 @@ const createSessionCostRoute = route({
     // The adapter's totalCostUsd is the provider's bill (e.g. OpenRouter's
     // `usage.cost`), so it wins over the pricing table.
     harnessCostBilled: z.boolean().optional(),
+    // Token counts summed from per-message usage; the priced row is tagged `estimated`.
+    estimated: z.boolean().optional(),
     taskId: z.string().optional(),
     // Phase 3: non-negative — the recompute no longer clamps, so negative
     // token counts must be rejected at the wire instead of pricing below $0.
@@ -451,6 +453,7 @@ export async function handleSessionData(
           model,
           harnessCostUsd: parsed.body.totalCostUsd,
           harnessCostBilled: parsed.body.harnessCostBilled,
+          estimated: parsed.body.estimated,
           inputTokens,
           outputTokens,
           cacheReadTokens: cachedInputTokens,
