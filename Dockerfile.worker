@@ -567,9 +567,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794657642-gc1e41b
-ARG AMP_SHA512_AMD64=36286e62a7be4a2a6e1372430d31511a4bb267092534c5d14f7af2a1e87d6c9a4ce951c7332ca00a1adc56c521a432c5de9ca3988d484006aeb1f20e5cf09bee
-ARG AMP_SHA512_ARM64=60fefdbaf02bc7c4c5c806fc090b804613e297cba67e7b90d488ce4c9e8549f9cf7ca23ce61fcab68cc9f0e829337600c86096b7143443597426e7dd7430a97a
+ARG AMP_VERSION=0.0.1794715238-g81da65
+ARG AMP_SHA512_AMD64=0c8bde425bd970a27f0ac0fadf2cc017db13828a11d8469a944b8b37a729449e91629750e7020f059b27995a567931c747bc157b6fb36ed4a5b41a3e9416a343
+ARG AMP_SHA512_ARM64=95e18aadb812cafff199295f9a969c9b04ffaada4f5804fb40b079a96e6ea7e742862761aadf5f06557d642a1b11456dc94135370624afbe58db452b75610ab7
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -585,7 +585,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.3.1
+ARG CURSOR_SDK_VERSION=1.4.0
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -699,9 +699,9 @@ RUN case "$TARGETARCH" in \
 # auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
 # by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
 # FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
-ARG FX_VERSION=0.0.16
-ARG FX_SHA512_AMD64=d5bb494d9f8fbbbf752f46db50ecb45232252dcdde30432f0b26702bed28037384f809a3facd98274a0b96501b2058cd7cea355c5b2a2a616290d84827817492
-ARG FX_SHA512_ARM64=e2fbfd4f35e979baac9a272eee6785a386df9d53990fe0722b3696adcb1c054f96a8c7771d9642c06b1b9422e2836efe5ab883f703741737cbed1900c3b7fb73
+ARG FX_VERSION=0.0.17
+ARG FX_SHA512_AMD64=8aa80856cb5d63f0b7e66809e4d56e911f0122e4c3bba7b340aa80b889ca752fe7b3b888ed958bc42ba5eb0b9669ac88e70aeae1693ba8a7e15cffb20c8830c7
+ARG FX_SHA512_ARM64=e882f68a0f56541065dc0b2d3c40460f139a4165ab3ef8f29ab925f9c8300dc69d30a4ab3a80c05923e736ca92e1045765d7e2bb88fa0699a4168961b7986aa9
 RUN case "$TARGETARCH" in \
       amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
       arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
