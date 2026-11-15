@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.2] - 2026-11-15
+
+### Added
+- Chat SDK: a Rocket.Chat adapter, kept in the repo with no new npm dependency; the instance URL comes from `CHAT_SDK_API_URL_OVERRIDES` (#3120).
+- MCP: `/mcp-user` exposes code mode (`script-search`, `script-get-types`, `script-run`) as the requesting user, with short-lived run tokens and the new `script.run` / `script.search` verbs (#3144).
+
+### Changed
+- agent-fs pins bumped 0.18.27 -> 0.18.28.
+- Scripts: one warm native harness per spec, so runs skip spawn and module load (#3147).
+- Dependencies: worker harness bumps for claude-code, codex, amp, copilot, acp sdk and goose (#3142, #3154).
+- Docs: guides for customer data access requests (#3140) and customer pricing change reviews (#3139); moderation appeals guide clarified (#3138); heartbeat spec synced (#3141); Rocket.Chat added to the README integrations line and the `CHAT_SDK_*` environment variables reference.
+
+### Fixed
+- Security: invoking a repo-scoped script connection requires `config.read.secrets` (#3137).
+- UI: sheet cells paint the ellipsis and read-only object embeds get a label (#3143); dot-only GitHub owners stay out of smart links (#3155).
+- Apps: app inputs keep the first keystroke after a page load (#3145).
+- E2E: state coverage survives flaky reruns and stand-in ports are reserved (#3156).
+
 ## [2.13.1] - 2026-11-14
 
 ### Added
