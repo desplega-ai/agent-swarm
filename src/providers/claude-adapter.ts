@@ -54,7 +54,7 @@ import {
   MIN_CLAUDE_THINKING_DISPLAY_VERSION,
   mergeClaudeSettingsArgs,
 } from "./claude-flag-settings";
-import { normalizeClaudeMessage } from "./claude-session-events";
+import { ClaudeUsageAccumulator, normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -917,6 +917,9 @@ class ClaudeSession implements ProviderSession {
   private transcript: string[];
   /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
   private backgroundKeepalive: ClaudeBackgroundKeepalive;
+  /** Per-message usage, the cost fallback for a session killed before its result. */
+  private usage = new ClaudeUsageAccumulator();
+  private readonly startedAt = Date.now();
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -1216,6 +1219,13 @@ class ClaudeSession implements ProviderSession {
       );
     }
 
+    // A session killed before its `result` event (its task turned terminal
+    // and the grace ran out) still bills its tokens: report them as estimated.
+    lastCost ??= this.usage.toCost(
+      { taskId: this.config.taskId, agentId: this.config.agentId, model: this.model },
+      { durationMs: Date.now() - this.startedAt, isError: (exitCode ?? 1) !== 0 },
+    );
+
     let failureReason: string | undefined;
     if (exitCode !== 0 && this.errorTracker.hasErrors()) {
       failureReason = this.errorTracker.buildFailureReason(exitCode ?? 1);
@@ -1241,6 +1251,7 @@ class ClaudeSession implements ProviderSession {
       const json = JSON.parse(trimmed);
 
       this.backgroundKeepalive.observe(json);
+      this.usage.observe(json, this.model);
       // In stream-json input mode Claude waits for EOF even after emitting a
       // successful result. End stdin at that turn boundary so normal tasks can
       // exit; steering messages written during the turn are already buffered
@@ -1302,6 +1313,15 @@ class ClaudeSession implements ProviderSession {
 
   async waitForCompletion(): Promise<ProviderResult> {
     return this.completionPromise;
+  }
+
+  /**
+   * End input so Claude exits after its current turn and emits its `result`
+   * (the cost report). Used when the task already turned terminal server-side.
+   */
+  finishInput(): void {
+    this.backgroundKeepalive.stop();
+    this.closeStdin();
   }
 
   async abort(): Promise<void> {

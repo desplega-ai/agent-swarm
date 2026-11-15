@@ -25,6 +25,12 @@ export interface CostData {
    * so it wins over the pricing table (opencode on OpenRouter).
    */
   harnessCostBilled?: boolean;
+  /**
+   * The token counts were summed from per-message usage because the session
+   * ended without its final cost report (Claude killed before its `result`
+   * event). The API prices them and tags the row `costSource: 'estimated'`.
+   */
+  estimated?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
@@ -207,6 +213,13 @@ export interface ProviderSession {
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
   abort(reason?: string): Promise<void>;
+  /**
+   * Optional. Stop taking input so the session ends after its current turn and
+   * still emits its final report (Claude's `result` carries the cost). The
+   * runner calls it when the task already turned terminal server-side, then
+   * aborts once `RUNNER_TERMINAL_TASK_GRACE_MS` passes. Absent: abort at once.
+   */
+  finishInput?(): void;
   /** Optional. Absent means the provider cannot accept mid-run input. */
   deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>;
   /**

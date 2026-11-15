@@ -2114,7 +2114,8 @@ export const SessionCostSchema = z
     //                      had no matching pricing rows; totalCostUsd is whatever
     //                      the worker submitted (often 0).
     //   'estimated'      — the API priced fallback token counts at an assumed
-    //                      model (amp with a failed thread export).
+    //                      model (amp with a failed thread export), or summed
+    //                      per-message usage (claude killed before its result).
     costSource: SessionCostSourceSchema.default("harness"),
     kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.

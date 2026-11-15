@@ -2895,6 +2895,11 @@ export interface RunningTask {
   /** When the runner asked the session to abort (cancel or reconcile). */
   abortRequestedAt?: number;
   /**
+   * When reconcile found the task terminal and ended the session's input
+   * instead of aborting it, so its final cost report can still arrive.
+   */
+  terminalGraceStartedAt?: number;
+  /**
    * Terminal status the server already holds for this task, found by
    * `reconcileActiveTasks` or set by an API-drain handoff. Completion then only
    * frees the slot and leaves the server's output and failureReason alone.
@@ -5630,6 +5635,20 @@ export async function spawnProviderProcess(
 export const DEFAULT_TASK_RECONCILE_INTERVAL_MS = 30_000;
 /** How long an aborted session gets to settle before the runner settles it. */
 export const ABORT_SETTLE_GRACE_MS = 10_000;
+/**
+ * How long a session whose task turned terminal server-side may finish its
+ * turn (and emit its cost report) after its input closes, before the abort.
+ */
+export const DEFAULT_TERMINAL_TASK_GRACE_MS = 45_000;
+
+/** `RUNNER_TERMINAL_TASK_GRACE_MS` (0 aborts at once), or the default when unset or invalid. */
+export function resolveTerminalTaskGraceMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.RUNNER_TERMINAL_TASK_GRACE_MS;
+  const value = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_TERMINAL_TASK_GRACE_MS;
+}
 
 /** `RUNNER_TASK_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
 export function resolveTaskReconcileIntervalMs(
@@ -5648,6 +5667,8 @@ export interface ReconcileActiveTasksOptions {
   fetchStatus: (taskId: string) => Promise<string | null>;
   intervalMs: number;
   abortGraceMs?: number;
+  /** Grace after ending input for a server-terminal task; default `DEFAULT_TERMINAL_TASK_GRACE_MS`. */
+  terminalGraceMs?: number;
   now?: () => number;
   /** In push mode, fetch cancellation only for these tasks. Abort settlement still runs. */
   cancelTaskIds?: ReadonlySet<string>;
@@ -5730,7 +5751,10 @@ export async function handOffTasksForApiDrain(
  * never settles cannot hold an execution slot forever:
  * - a task the server cancelled gets its session aborted (every call);
  * - every `intervalMs`, a task the server already holds as terminal (for
- *   example failed by the heartbeat sweep) gets its session aborted too;
+ *   example completed by its own agent, or failed by the heartbeat sweep) gets
+ *   its session aborted too. A session with `finishInput` first gets its input
+ *   closed and `terminalGraceMs` to end its turn, so Claude can still emit the
+ *   `result` that carries its cost;
  * - a session that has not settled `abortGraceMs` after an abort is settled
  *   here, and `checkCompletedProcesses` frees the slot on its next pass.
  * Exported for tests.
@@ -5742,6 +5766,7 @@ export async function reconcileActiveTasks(
 ): Promise<void> {
   const now = opts.now ?? Date.now;
   const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
+  const terminalGraceMs = opts.terminalGraceMs ?? DEFAULT_TERMINAL_TASK_GRACE_MS;
 
   // Each task touches only its own entry (plus an add to the shared
   // cancelledSignaled set), and both API reads swallow their errors, so the
@@ -5766,19 +5791,48 @@ export async function reconcileActiveTasks(
       }
     }
 
-    if (task.abortRequestedAt === undefined && opts.checkStatus !== false) {
+    if (
+      task.abortRequestedAt === undefined &&
+      task.terminalGraceStartedAt === undefined &&
+      opts.checkStatus !== false
+    ) {
       const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
       if (now() - lastCheck >= opts.intervalMs) {
         task.lastReconcileAt = now();
         const status = await opts.fetchStatus(taskId).catch(() => null);
         if (status && isTerminalTaskStatus(status)) {
-          console.warn(
-            `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
-          );
           task.serverTerminalStatus = status;
-          requestSessionAbort(task, `server task ${status}`, now());
+          // A cancel means stop now; the other terminal states let the turn end.
+          if (task.session.finishInput && terminalGraceMs > 0 && status !== "cancelled") {
+            console.warn(
+              `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — closing its input, abort in ${terminalGraceMs}ms`,
+            );
+            task.terminalGraceStartedAt = now();
+            try {
+              task.session.finishInput();
+            } catch {
+              // The abort below still runs when the grace ends.
+            }
+          } else {
+            console.warn(
+              `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
+            );
+            requestSessionAbort(task, `server task ${status}`, now());
+          }
         }
       }
+    }
+
+    if (
+      task.terminalGraceStartedAt !== undefined &&
+      task.abortRequestedAt === undefined &&
+      task.result === null &&
+      now() - task.terminalGraceStartedAt >= terminalGraceMs
+    ) {
+      console.warn(
+        `[${role}] Task ${taskId.slice(0, 8)} session did not end ${terminalGraceMs}ms after its input closed — aborting it`,
+      );
+      requestSessionAbort(task, `server task ${task.serverTerminalStatus}`, now());
     }
 
     if (
@@ -7550,6 +7604,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastOrphanRecoveryAt = 0;
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
+  const terminalTaskGraceMs = resolveTerminalTaskGraceMs();
 
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
     const deliveryChecks = pushDelivery.checks(state.deliveryMode ?? "poll");
@@ -7663,6 +7718,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
         fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
         intervalMs: taskReconcileIntervalMs,
+        terminalGraceMs: terminalTaskGraceMs,
         ...taskReconciliation(deliveryChecks),
       });
     }

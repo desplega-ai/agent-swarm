@@ -22250,6 +22250,7 @@ export interface paths {
                         harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
+                        estimated?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;

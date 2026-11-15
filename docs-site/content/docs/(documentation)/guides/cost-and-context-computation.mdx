@@ -49,6 +49,7 @@ When the API receives a `POST /api/session-costs` with a `provider` tag, it does
 | A tag was supplied but pricing cannot be completed | `'unpriced'` | Adapter report |
 | `amp` with a billed cost from `amp threads usage` | `'harness'` | What Amp billed for the thread; the token price fills the per-model breakdown |
 | `amp` without a per-model breakdown (the thread export failed) | `'estimated'` | Stream token totals priced at an assumed model |
+| `claude` posting `estimated: true` (the session ended before its `result` event) | `'estimated'` | Per-message usage summed per model and priced from the table |
 | `acp` whose target reported a USD cost in `usage_update` | `'harness'` | The target's cumulative session cost |
 | Any provider posting `harnessCostBilled: true` with a cost (opencode on OpenRouter) | `'harness'` | What the model provider billed |
 
