@@ -76,10 +76,14 @@ const resolveOAuthApiKey: OAuthApiKeyResolver = async (providerId, credentials) 
  * credential kind (`resolveRaterModelString`: `MEMORY_RATER_MODEL` env, else
  * the pinned `MEMORY_RATER_DEFAULT_MODEL`). It is not the general
  * `DEFAULT_MODEL`; callers that want that (workflow LLM nodes) read it directly.
+ *
+ * `region` exists only on the `amazon-bedrock` variant: the AWS SDK needs a
+ * region and there is no honest default to invent, so it is resolved once here
+ * and carried to the call site.
  */
 export type ResolvedCredential =
   | {
-      kind: "openrouter" | "anthropic" | "openai" | "openai-codex";
+      kind: "openrouter" | "anthropic" | "openai" | "openai-codex" | "fireworks";
       apiKey: string;
       modelDefault: string;
     }
@@ -87,6 +91,20 @@ export type ResolvedCredential =
       kind: "claude-cli";
       modelDefault: string;
       // No apiKey — the `claude` CLI uses CLAUDE_CODE_OAUTH_TOKEN from env directly.
+    }
+  | {
+      /**
+       * No `apiKey`: Bedrock authenticates through the AWS SDK's credential
+       * chain (profile, IAM keys, ECS task role, IRSA) or the
+       * `AWS_BEARER_TOKEN_BEDROCK` bearer identity, both of which the SDK reads
+       * from the environment itself. A placeholder key would be a lie that some
+       * downstream code could act on; the absence of the field is the honest
+       * shape.
+       */
+      kind: "amazon-bedrock";
+      modelDefault: string;
+      /** `AWS_REGION` (or `AWS_DEFAULT_REGION`), the SDK's required region. */
+      region: string;
     };
 
 export interface ResolveCredentialOptions {
@@ -111,6 +129,18 @@ export interface ResolveCredentialOptions {
 /**
  * Credential kinds in precedence order. `resolveCredentials` walks this list;
  * `resolveCredential` returns the first hit.
+ *
+ * `fireworks` and `amazon-bedrock` sit AFTER every kind that shipped before
+ * them. Both can be present in an environment that already works today (a
+ * deployment with an OpenRouter key and an ambient AWS profile, or a worker
+ * that sets FIREWORKS_API_KEY for its harness), so putting either of them
+ * earlier would silently capture calls that currently go to a key the
+ * operator chose explicitly. Adding them at the end keeps every existing
+ * caller on its current provider, which is the documented cost of being the
+ * newest entries rather than the guide for where they belong by quality.
+ *
+ * `amazon-bedrock` is last of the two because it resolves from an ambient
+ * credential chain rather than a key someone set on purpose for this layer.
  */
 export const CREDENTIAL_KIND_PRECEDENCE: readonly CredentialKind[] = [
   "openrouter",
@@ -118,6 +148,8 @@ export const CREDENTIAL_KIND_PRECEDENCE: readonly CredentialKind[] = [
   "openai",
   "openai-codex",
   "claude-cli",
+  "fireworks",
+  "amazon-bedrock",
 ];
 
 export interface ResolveCredentialsOptions extends ResolveCredentialOptions {
@@ -144,7 +176,9 @@ export interface ResolveCredentialsOptions extends ResolveCredentialOptions {
  *   3. `env.OPENAI_API_KEY`     (via pi-ai `getEnvApiKey("openai")`)
  *   4. codex OAuth (only when `apiUrl && apiKey` are provided)
  *   5. `env.CLAUDE_CODE_OAUTH_TOKEN` → claude-cli fallback
- *   6. null
+ *   6. `env.FIREWORKS_API_KEY` (via pi-ai `getEnvApiKey("fireworks")`)
+ *   7. the AWS credential chain **and** a region → `amazon-bedrock`
+ *   8. null
  */
 export async function resolveCredential(
   opts: ResolveCredentialOptions = {},
@@ -227,7 +261,49 @@ async function resolveKind(
       // hook subprocesses (security), so the hook reads the mirror instead.
       if (!env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN && !env.CLAUDE_CODE_OAUTH_TOKEN) return null;
       return { kind, modelDefault: resolveRaterModelString(kind) };
+    case "fireworks": {
+      const key = env.FIREWORKS_API_KEY ?? getEnvKey("fireworks");
+      if (!key) return null;
+      return {
+        kind,
+        apiKey: selectCredential(key, undefined, "FIREWORKS_API_KEY").selected,
+        modelDefault: resolveRaterModelString(kind),
+      };
+    }
+    case "amazon-bedrock":
+      return resolveBedrockCredential(env, getEnvKey);
   }
+}
+
+/**
+ * Bedrock is credential-chain auth, not a key: pi-ai's `getEnvApiKey` returns
+ * the sentinel `"<authenticated>"` when any link of the chain is configured
+ * (`AWS_PROFILE`, an IAM key pair, `AWS_BEARER_TOKEN_BEDROCK`, ECS task role,
+ * IRSA). Nothing in this layer ever sees or handles the actual credential.
+ *
+ * Region is required as well. pi-ai's adapter would fall back to `us-east-1`
+ * via the SDK, which may not be where inference is available; rather than
+ * guess, an unset region is treated like an absent key (a clean no-op), so no
+ * `region` is ever fabricated and the caller keeps whatever it had.
+ */
+function resolveBedrockCredential(
+  env: NodeJS.ProcessEnv,
+  getEnvKey: typeof getEnvApiKey,
+): ResolvedCredential | null {
+  // `||`, not `??`: an env var set to an empty or whitespace-only value is
+  // common (a compose file with `AWS_REGION=${AWS_REGION:-}`), and `??` would
+  // keep that empty string and discard a valid `AWS_DEFAULT_REGION`.
+  const region = env.AWS_REGION?.trim() || env.AWS_DEFAULT_REGION?.trim();
+  if (!region) return null;
+  if (!getEnvKey("amazon-bedrock", env as Record<string, string>)) return null;
+  // `AWS_BEARER_TOKEN_BEDROCK` is a bearer identity, not a key to hand around;
+  // the SDK reads it from the environment on its own. The regional Bedrock
+  // endpoint and the region are all the call site needs to add.
+  return {
+    kind: "amazon-bedrock",
+    modelDefault: resolveRaterModelString("amazon-bedrock"),
+    region,
+  };
 }
 
 async function resolveCodexOAuthCredential(

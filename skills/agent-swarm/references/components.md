@@ -65,7 +65,7 @@ Stored harness changes do not replace the credential requirements of the selecte
 | Component and reason | A: boot minimum | B: prefer swarm config | C: optional |
 |---|---|---|---|
 | API embeddings: enable semantic memory search. [Provider](https://github.com/desplega-ai/agent-swarm/blob/main/src/be/memory/providers/openai-embedding.ts) | None to boot. Without a usable key, search falls back to full-text search and fallback ranking. | `EMBEDDING_API_KEY` as a secret, or `OPENAI_API_KEY`. Set `EMBEDDING_MODEL` and optional `EMBEDDING_API_BASE_URL`. Restart the API after changes. | Defaults to OpenAI-compatible `text-embedding-3-small`. A compatible endpoint must support the requested dimensions. |
-| Session summaries and memory rating: preserve context and score retrieved memories. [Credential resolver](https://github.com/desplega-ai/agent-swarm/blob/main/src/utils/internal-ai/credentials.ts) | No extra key to boot. The runtime can reuse supported harness credentials. Bedrock credentials alone do not resolve here. | `MEMORY_RATERS=llm` opts into rating. Unset or empty selects no rating. Store additional provider keys as secrets when needed. | Production model override is `MEMORY_RATER_MODEL`. See the limitations below. |
+| Session summaries and memory rating: preserve context and score retrieved memories. [Credential resolver](https://github.com/desplega-ai/agent-swarm/blob/main/src/utils/internal-ai/credentials.ts) | No extra key to boot. The runtime can reuse supported harness credentials. Bedrock credentials alone do not resolve here unless `AWS_REGION` is also set. | `MEMORY_RATERS=llm` opts into rating. Unset or empty selects no rating. Store additional provider keys as secrets when needed. | Production model override is `MEMORY_RATER_MODEL`. See the limitations below. |
 
 Embedding key precedence is `EMBEDDING_API_KEY`, then `OPENAI_API_KEY`. An explicitly empty `EMBEDDING_API_KEY` blocks that fallback.
 `OPENROUTER_API_KEY` alone does not configure embeddings.
@@ -73,7 +73,7 @@ Local TEI needs no paid key. The [TEI overlay](https://github.com/desplega-ai/ag
 Follow the [embeddings procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/embeddings.md) to choose a provider and verify it.
 Read the [memory initialization](https://github.com/desplega-ai/agent-swarm/blob/main/src/be/memory/index.ts) and [search fallback](https://github.com/desplega-ai/agent-swarm/blob/main/src/be/memory/providers/sqlite-store.ts).
 
-Production summary credentials resolve in this order: OpenRouter, Anthropic API key, OpenAI API key, Codex OAuth, then Claude OAuth through the CLI.
+Production summary credentials resolve in this order: OpenRouter, Anthropic API key, OpenAI API key, Codex OAuth, Claude OAuth through the CLI, a Fireworks key, then the AWS credential chain for Bedrock.
 Without a supported credential, summaries and their rating step do not run.
 The catalog's `MEMORY_LLM_RATER_MODEL` controls a legacy direct Claude client. It does not control the production summary path.
 `MEMORY_RATER_MODEL` currently reads the worker process environment. Treat that override as a worker deployment setting and restart workers after changing it.
