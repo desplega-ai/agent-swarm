@@ -17,7 +17,7 @@
         "@chat-adapter/slack": "4.45.0",
         "@chat-adapter/teams": "4.45.0",
         "@chat-adapter/telegram": "4.45.0",
-        "@cursor/sdk": "1.3.1",
+        "@cursor/sdk": "1.4.0",
         "@desplega.ai/agent-fs-just-bash": "0.18.28",
         "@desplega.ai/business-use": "^0.4.2",
         "@earendil-works/pi-agent-core": "^1.5.2",
@@ -455,17 +455,17 @@
 
     "@connectrpc/connect-web": ["@connectrpc/connect-web@2.0.0-rc.3", "", { "peerDependencies": { "@bufbuild/protobuf": "^2.2.0", "@connectrpc/connect": "2.0.0-rc.3" } }, "sha512-w88P8Lsn5CCsA7MFRl2e6oLY4J/5toiNtJns/YJrlyQaWOy3RO8pDgkz+iIkG98RPMhj2thuBvsd3Cn4DKKCkw=="],
 
-    "@cursor/sdk": ["@cursor/sdk@1.3.1", "", { "dependencies": { "@bufbuild/protobuf": "1.10.0", "@connectrpc/connect": "^1.6.1", "@connectrpc/connect-web": "^1.6.1", "@statsig/js-client": "3.31.0" }, "optionalDependencies": { "@cursor/sdk-darwin-arm64": "1.3.1", "@cursor/sdk-darwin-x64": "1.3.1", "@cursor/sdk-linux-arm64": "1.3.1", "@cursor/sdk-linux-x64": "1.3.1", "@cursor/sdk-win32-x64": "1.3.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-Mn0gK8V+5BkOqm22J2ocU+1BrqnNH8QcK9kmA7SkRuawDOeq2ABC2BIZq9gRnF3z68x/I7J/ZU8jl6DcshCVUA=="],
+    "@cursor/sdk": ["@cursor/sdk@1.4.0", "", { "dependencies": { "@bufbuild/protobuf": "1.10.0", "@connectrpc/connect": "^1.6.1", "@connectrpc/connect-web": "^1.6.1", "@statsig/js-client": "3.31.0" }, "optionalDependencies": { "@cursor/sdk-darwin-arm64": "1.4.0", "@cursor/sdk-darwin-x64": "1.4.0", "@cursor/sdk-linux-arm64": "1.4.0", "@cursor/sdk-linux-x64": "1.4.0", "@cursor/sdk-win32-x64": "1.4.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-I3ICV4z8Qcj1DikmbVrAAIYMm5LzxJ/Q9uygkRnq3XXeF+5uzCoUYEqQMEsDh5RpkJ5IY9DZNHgG8adCEwRgbg=="],
 
-    "@cursor/sdk-darwin-arm64": ["@cursor/sdk-darwin-arm64@1.3.1", "", { "os": "darwin", "cpu": "arm64", "bin": { "rg": "./bin/rg" } }, "sha512-5JXgVJYeFPxXjDqnu1ha/rAmH+ATFh4abdx199x8E/RcYYM++9b55oJXO3GYv1/9/4Qa9RsE5JkHRY6FYc5vQw=="],
+    "@cursor/sdk-darwin-arm64": ["@cursor/sdk-darwin-arm64@1.4.0", "", { "os": "darwin", "cpu": "arm64", "bin": { "rg": "./bin/rg" } }, "sha512-fVUjxZAFFYfd8XBwURhtpBzy+e5QseT69i3mS9vb5SlabZdty6ApcFiPxBDPYLWNoK/IZwBBmzYXpI0XXCv95Q=="],
 
-    "@cursor/sdk-darwin-x64": ["@cursor/sdk-darwin-x64@1.3.1", "", { "os": "darwin", "cpu": "x64", "bin": { "rg": "./bin/rg" } }, "sha512-yHzIRER8IpOpIH/CUigquuwqvcjCEe62xV6OiJHzRfgApdnzxCjC8JMhLZP2M08/dofyZu9xeo7yr43H6oSRTA=="],
+    "@cursor/sdk-darwin-x64": ["@cursor/sdk-darwin-x64@1.4.0", "", { "os": "darwin", "cpu": "x64", "bin": { "rg": "./bin/rg" } }, "sha512-dEYElA2yxg5d0Es+0clV9h2Le6IMGhn69aADpbMKKXwunX5wW9uLjZamKwS+YdEsWiCBv1fIlCiMs8wEYNyRCA=="],
 
-    "@cursor/sdk-linux-arm64": ["@cursor/sdk-linux-arm64@1.3.1", "", { "os": "linux", "cpu": "arm64", "bin": { "rg": "./bin/rg" } }, "sha512-8wI7DUSQtJ7Rkyj5AhNONeR0M+5bjhR0qo8GJEEmRs6isi072sNPsFXwfhlzX7bhbtsX/FCtvsTG/vpam48ObA=="],
+    "@cursor/sdk-linux-arm64": ["@cursor/sdk-linux-arm64@1.4.0", "", { "os": "linux", "cpu": "arm64", "bin": { "rg": "./bin/rg" } }, "sha512-sdr8dBAOJxI9ljEiLbEMRsEEa/lt0r/iz9JBKbIu6PbQYaIu3Ih8c//Z5DIc+dXxn3SZ2gw4p7bG6qMKVWUqrg=="],
 
-    "@cursor/sdk-linux-x64": ["@cursor/sdk-linux-x64@1.3.1", "", { "os": "linux", "cpu": "x64", "bin": { "rg": "./bin/rg" } }, "sha512-jIwzTr3KhMtU4aJc8x0i1RlcBKttqcVYhor9FI/h1qJQm03yTgSwhyZjsMvfBHPQ5KoYDFVdu47S1dIhwaSWZA=="],
+    "@cursor/sdk-linux-x64": ["@cursor/sdk-linux-x64@1.4.0", "", { "os": "linux", "cpu": "x64", "bin": { "rg": "./bin/rg" } }, "sha512-kC55zy52WbpNm56cIRPyEcXJtOgCCtr6n9g+5Ht4tqlpftBxgyBi/lubOsRfIDWACXpSl2BP9kcdpWS1fKKa1w=="],
 
-    "@cursor/sdk-win32-x64": ["@cursor/sdk-win32-x64@1.3.1", "", { "os": "win32", "cpu": "x64", "bin": { "rg": "./bin/rg.exe" } }, "sha512-hqYllGgY27eaq+w035PebKdoc/JswcrvOSNCniqq/nicLXgWdK5zdKiAs5MyWUr73HGGL1sK0aiE7WdxbIKKVw=="],
+    "@cursor/sdk-win32-x64": ["@cursor/sdk-win32-x64@1.4.0", "", { "os": "win32", "cpu": "x64", "bin": { "rg": "./bin/rg.exe" } }, "sha512-N7BSufvhfxN18a8+BYFAIn9vQzVx0ly3qriUZL8WTgSUhthTSFXdUrj8Eliqd+QcoHPG/oq+V+Jg+HyeilMOSA=="],
 
     "@desplega.ai/agent-fs-just-bash": ["@desplega.ai/agent-fs-just-bash@0.18.28", "", { "peerDependencies": { "just-bash": ">=3.0.1" }, "optionalPeers": ["just-bash"] }, "sha512-E0+Fn1/dMULIbE/OLKHvc5M6NyE1iURMmR9OtNEgygAGlFlviNW7cN+Bb6lvlOGWgs6tr/Q//psWgk5IahPmwg=="],
 
