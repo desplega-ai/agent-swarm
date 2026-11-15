@@ -599,7 +599,7 @@ Every harness reports its own built-in tool calls (bash, read, write, edit) to `
 | Harness | Where | Block | Rewrite |
 | --- | --- | --- | --- |
 | `claude` | `PreToolUse` and `PostToolUse` in `src/hooks/hook.ts` | exit 2, reason on stderr | `hookSpecificOutput.updatedInput` with `permissionDecision: "allow"` |
-| `codex` | `PreToolUse` and `PostToolUse` in `src/hooks/codex-hook.ts` (image matcher `^(Bash\|apply_patch)$`) | exit 2, reason on stderr | `updatedInput` for `Bash` only; an `apply_patch` rewrite is dropped (unverified) |
+| `codex` | `PreToolUse` and `PostToolUse` in `src/hooks/codex-hook.ts` (image matcher `^(Bash\|apply_patch)$`) | exit 2, reason on stderr | `updatedInput` for `Bash` and `apply_patch` (verified on codex-cli 0.169.0); a rewrite of any other tool fails closed as a block whose reason carries the rewritten args |
 | `pi` | `tool_call` and `tool_result` in `src/providers/pi-mono-extension.ts` | `{ block: true, reason }` | mutate `event.input` in place |
 | `opencode` | `execute.before` and `execute.after` in `src/providers/opencode-swarm-plugin.ts` | throw | assign `event.input` |
 

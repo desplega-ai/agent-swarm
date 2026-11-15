@@ -273,6 +273,21 @@ export const nativeToolHooks: Scenario = {
           asRecord(codexOut.updatedInput).command === `echo REWRITTEN_${token}`,
         `codex rewrite output was ${codexRewrite.stdout}`,
       );
+      // An apply_patch rewrite reaches codex as updatedInput too (codex-cli 0.169.0 applies it).
+      const patchText = (file: string) => `*** Begin Patch\n*** Add File: ${file}\n+x\n*** End Patch\n`;
+      const codexPatch = await codexHook(ctx.baseUrl, {
+        hook_event_name: "PreToolUse",
+        tool_name: "apply_patch",
+        tool_input: { command: patchText(`E2E_REWRITE_${token}.txt`) },
+        tool_use_id: `toolu_${token}`,
+      });
+      const codexPatchOut = hookOutput(codexPatch, "codex apply_patch rewrite");
+      expect(
+        codexPatch.exitCode === 0 &&
+          codexPatchOut.permissionDecision === "allow" &&
+          asRecord(codexPatchOut.updatedInput).command === patchText(`REWRITTEN_${token}.txt`),
+        `codex apply_patch rewrite output was ${codexPatch.stdout}\n${codexPatch.stderr}`,
+      );
       const codexControl = await codexHook(ctx.baseUrl, bash(`echo E2E_OK_${token}`));
       expect(
         codexControl.exitCode === 0 && codexControl.stdout.trim() === "",
@@ -287,7 +302,7 @@ export const nativeToolHooks: Scenario = {
       });
       expect(codexPost.exitCode === 0, `codex post hook exit ${codexPost.exitCode}`);
 
-      // --- The run log holds what both shims sent: 3 blocks/rewrites each way, plus posts.
+      // --- The run log holds what both shims sent: 2 blocks, 4 rewrites (2 claude, 2 codex), plus posts.
       const seen = await pollUntil(
         async () =>
           count(await nativeRuns(ctx, extensionId as string), "post.tool.call", "continue") >= 2,
@@ -297,8 +312,8 @@ export const nativeToolHooks: Scenario = {
       expect(seen, "Both post reports did not reach the extension");
       const runs = await nativeRuns(ctx, extensionId);
       expect(
-        count(runs, "pre.tool.call", "block") === 2 && count(runs, "pre.tool.call", "modify") === 3,
-        `Expected 2 blocks and 3 rewrites in the run log, got ${JSON.stringify(
+        count(runs, "pre.tool.call", "block") === 2 && count(runs, "pre.tool.call", "modify") === 4,
+        `Expected 2 blocks and 4 rewrites in the run log, got ${JSON.stringify(
           runs.map((run) => `${run.event}:${run.action}`),
         )}`,
       );
