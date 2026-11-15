@@ -40,9 +40,15 @@ export interface TaskTitleCandidateGroup {
  * first: pay-per-token API keys before subscription OAuth, and the `claude -p`
  * shellout last (it spawns a full CLI process per call).
  *
+ * `fireworks` and `amazon-bedrock` are appended after every kind that shipped
+ * before them, matching `CREDENTIAL_KIND_PRECEDENCE`: an environment that
+ * already titles through OpenRouter/Anthropic/OpenAI keeps doing so.
+ *
  * Model prices (input / output, USD per million tokens, models.dev snapshot):
  *   deepseek-v4.1-flash 0.034 / 0.137 · claude-haiku-5.5 0.10 / 0.50 ·
- *   gpt-6-luna 0.10 / 0.50 · gpt-5-nano 0.05 / 0.40
+ *   gpt-6-luna 0.10 / 0.50 · gpt-5-nano 0.05 / 0.40 ·
+ *   fireworks deepseek-v4p1-flash 0.30 / 1.20 ·
+ *   bedrock global claude-haiku-5-5 0.10 / 0.50 · nova-micro 0.035 / 0.14
  */
 export const TASK_TITLE_MODEL_CANDIDATES: readonly TaskTitleCandidateGroup[] = [
   {
@@ -57,6 +63,25 @@ export const TASK_TITLE_MODEL_CANDIDATES: readonly TaskTitleCandidateGroup[] = [
   { kind: "openai", models: ["openai/gpt-6-luna", "openai/gpt-5-nano"] },
   { kind: "openai-codex", models: ["openai-codex/gpt-6-luna"] },
   { kind: "claude-cli", models: ["haiku"] },
+  {
+    kind: "fireworks",
+    // The native (non-router) ids are the cheap ones; `routers/…` costs 8x.
+    models: [
+      "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+      "fireworks/accounts/fireworks/models/glm-5p3-flash",
+    ],
+  },
+  {
+    kind: "amazon-bedrock",
+    // Both ids verified present in pi-ai's catalog (`getBuiltinModel`). The
+    // haiku entry is a global inference profile; Nova Micro is a plain
+    // foundation model, so it only answers in the region that owns it, which is
+    // why it is the fallback rather than the first choice.
+    models: [
+      "amazon-bedrock/global.anthropic.claude-haiku-5-5",
+      "amazon-bedrock/amazon.nova-micro-v1:0",
+    ],
+  },
 ];
 
 export { kindForModelString };
@@ -65,6 +90,11 @@ export { kindForModelString };
  * The candidate list for one environment. `TASK_AUTO_TITLE_MODEL` moves its
  * provider to the front and puts the pinned model first inside it; the rest of
  * the list stays as fallback. An unknown provider is ignored with a warning.
+ *
+ * `TASK_AUTO_TITLE_MODEL` that names a model string we do not recognise as a
+ * provider prefix is exactly why `kindForModelString` now knows
+ * `fireworks/…` and `amazon-bedrock/…`: without that, pinning a Bedrock judge
+ * would have logged "unsupported provider" and been silently dropped.
  */
 export function buildTaskTitlePlan(
   env: Record<string, string | undefined> = process.env,

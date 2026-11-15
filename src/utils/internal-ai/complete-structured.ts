@@ -213,6 +213,24 @@ export interface CompleteStructuredResult<TData> {
 }
 
 /**
+ * Extra pi-ai request options a credential kind needs, or `undefined` for the
+ * providers that need none.
+ *
+ * Only Bedrock: it has no key to pass, so the one thing the adapter cannot
+ * derive is the region, and the resolver established that (from `AWS_REGION` or
+ * `AWS_DEFAULT_REGION`). It goes in as the documented `region` option rather
+ * than an `env` override, because the catalog's model entries carry a
+ * `us-east-1` base URL and an explicit region is what stops that default from
+ * winning over the deployment's actual region. Credentials are deliberately
+ * absent: the AWS SDK reads its own chain from `process.env`, and no AWS
+ * variable is in the swarm-config allowlist, so there is nothing extra to
+ * forward.
+ */
+function providerRequestOptions(cred: ResolvedCredential): Record<string, unknown> | undefined {
+  return cred.kind === "amazon-bedrock" ? { region: cred.region } : undefined;
+}
+
+/**
  * Run a structured-output completion. Returns the parsed object on success,
  * `null` on auth-missing or exhausted retries (errors logged, never thrown).
  */
@@ -304,7 +322,8 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
     return null;
   }
 
-  // 3. pi-ai path (openrouter / anthropic / openai / openai-codex).
+  // 3. pi-ai path (openrouter / anthropic / openai / openai-codex / fireworks /
+  //    amazon-bedrock).
   const [provider, modelId] = parseModelStr(cred.modelDefault);
   let model: ReturnType<typeof getModel>;
   try {
@@ -341,10 +360,18 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
     provider === "openrouter" ? getOpenRouterAttributionHeaders(model.baseUrl, env) : {};
 
   const completeFn = opts._complete ?? complete;
+  // Bedrock's adapter maps a `{type:"tool"}` choice to `toolChoice: {tool:{name}}`,
+  // which is the same forcing the Anthropic adapter does. Without it the
+  // Converse request carries no toolChoice and the model is free to answer in
+  // prose, which costs a retry per call.
   const toolChoice =
-    model.api === "anthropic-messages"
+    model.api === "anthropic-messages" || model.api === "bedrock-converse-stream"
       ? ({ type: "tool", name: opts.toolName } as const)
       : ("required" as const);
+  // Bedrock is the one provider whose request config is not a key: the SDK
+  // reads its credential chain from the environment, and the region the
+  // resolver established has to travel with the request.
+  const providerOptions = providerRequestOptions(cred);
   let userPrompt = opts.userPrompt;
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -364,9 +391,13 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
         },
         // pi-ai's ProviderStreamOptions type only allows known providers;
         // we pass the validated apiKey through verbatim.
-        { apiKey: cred.apiKey, signal: opts.signal, toolChoice, headers } as Parameters<
-          typeof completeFn
-        >[2],
+        {
+          apiKey: "apiKey" in cred ? cred.apiKey : undefined,
+          signal: opts.signal,
+          toolChoice,
+          headers,
+          ...(providerOptions ?? {}),
+        } as Parameters<typeof completeFn>[2],
       );
 
       const toolCall = msg.content.find(

@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { completeStructuredWithModel } from "../../utils/internal-ai/complete-structured.js";
 import type {
   CredentialKind,
   ResolvedCredential,
   resolveCredentials,
 } from "../../utils/internal-ai/credentials.js";
+import {
+  DEFAULT_MODEL,
+  MEMORY_RATER_DEFAULT_MODEL,
+  parseModelStr,
+} from "../../utils/internal-ai/models.js";
 import {
   buildTaskTitlePlan,
   generateTaskTitle,
@@ -108,6 +114,8 @@ describe("buildTaskTitlePlan", () => {
       "anthropic",
       "openai-codex",
       "claude-cli",
+      "fireworks",
+      "amazon-bedrock",
     ]);
   });
 
@@ -131,6 +139,49 @@ describe("buildTaskTitlePlan", () => {
     expect(kindForModelString("openai-codex/gpt-6-luna")).toBe("openai-codex");
     expect(kindForModelString("haiku")).toBe("claude-cli");
     expect(kindForModelString("mistral/ministral-3b")).toBeNull();
+  });
+
+  test("kindForModelString recognises the two new providers", () => {
+    expect(kindForModelString("fireworks/accounts/fireworks/models/deepseek-v4p1-flash")).toBe(
+      "fireworks",
+    );
+    expect(kindForModelString("amazon-bedrock/global.anthropic.claude-haiku-5-5")).toBe(
+      "amazon-bedrock",
+    );
+    // No regression on the compound-id and bare-alias shapes.
+    expect(kindForModelString("openrouter/anthropic/claude-haiku-5.5")).toBe("openrouter");
+    expect(kindForModelString("sonnet")).toBe("claude-cli");
+  });
+
+  test("pinning either new provider moves it first with its own fallbacks", () => {
+    const fireworks = buildTaskTitlePlan({
+      [TASK_TITLE_MODEL_ENV]: "fireworks/accounts/fireworks/routers/kimi-k3-fast",
+    });
+    expect(fireworks[0]).toEqual({
+      kind: "fireworks",
+      models: [
+        "fireworks/accounts/fireworks/routers/kimi-k3-fast",
+        "fireworks/accounts/fireworks/models/deepseek-v4p1-flash",
+        "fireworks/accounts/fireworks/models/glm-5p3-flash",
+      ],
+    });
+
+    const bedrock = buildTaskTitlePlan({
+      [TASK_TITLE_MODEL_ENV]: "amazon-bedrock/eu.anthropic.claude-haiku-5-5",
+    });
+    expect(bedrock[0].kind).toBe("amazon-bedrock");
+    expect(bedrock[0].models[0]).toBe("amazon-bedrock/eu.anthropic.claude-haiku-5-5");
+    // A region-scoped pin does not displace the shipped defaults behind it.
+    expect(bedrock[0].models).toContain("amazon-bedrock/global.anthropic.claude-haiku-5-5");
+    expect(bedrock.map((group) => group.kind)).toEqual([
+      "amazon-bedrock",
+      "openrouter",
+      "anthropic",
+      "openai",
+      "openai-codex",
+      "claude-cli",
+      "fireworks",
+    ]);
   });
 });
 
@@ -279,5 +330,32 @@ describe("generateTaskTitle", () => {
     });
     expect(result).toEqual({ ok: false, reason: "no-credentials" });
     expect(models).toEqual([]);
+  });
+});
+
+describe("catalog verification for the new kinds", () => {
+  // Every default the registries name must resolve in pi-ai's own catalog: a
+  // miss is a silent null from `completeStructured`, which would leave titling
+  // and summarization dead in exactly the deployments this change is for.
+  test("DEFAULT_MODEL and MEMORY_RATER_DEFAULT_MODEL all exist in pi-ai's catalog", () => {
+    for (const registry of [DEFAULT_MODEL, MEMORY_RATER_DEFAULT_MODEL]) {
+      for (const [kind, modelStr] of Object.entries(registry)) {
+        if (kind === "claude-cli") continue; // a `claude -p` alias, not a pi-ai model
+        const [provider, modelId] = parseModelStr(modelStr);
+        expect(provider).toBe(kind);
+        expect(getBuiltinModel(provider as never, modelId as never)).toBeTruthy();
+      }
+    }
+  });
+
+  test("every titling candidate resolves in pi-ai's catalog", () => {
+    for (const group of TASK_TITLE_MODEL_CANDIDATES) {
+      if (group.kind === "claude-cli") continue;
+      for (const modelStr of group.models) {
+        const [provider, modelId] = parseModelStr(modelStr);
+        expect(provider).toBe(group.kind);
+        expect(getBuiltinModel(provider as never, modelId as never)).toBeTruthy();
+      }
+    }
   });
 });
