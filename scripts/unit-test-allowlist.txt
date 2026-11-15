@@ -24,6 +24,7 @@ src/commands/credential-outcome-report.ts  # worker runtime helper imported by t
 src/commands/credential-refresh.ts  # worker runtime helper imported by the runner
 src/commands/credential-wait.ts  # worker runtime helper imported by the runner
 src/commands/entrypoint-api-readiness.ts  # worker runtime helper run by the container entrypoint
+src/commands/entrypoint-mcp-config.ts  # worker runtime helper run by the container entrypoint
 src/commands/identity-refresh.ts  # worker runtime helper imported by the runner
 src/commands/profile-sync.ts  # worker runtime helper imported by the runner
 src/commands/profile-sync-audit.ts  # worker runtime helper imported by the runner

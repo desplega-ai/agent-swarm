@@ -427,75 +427,27 @@ fi
 # (`POST /api/fs/agent-credentials`) so workers never need the shared bootstrap
 # key and never write credential rows directly from shell startup.
 
-# Create .mcp.json in /workspace (project-level config).
-# Skip for claude-managed: managed agents read MCP servers from the Agent
-# definition (set by claude-managed-setup), not from a local filesystem file.
-if [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
-    echo "Skipping local .mcp.json (claude-managed reads MCP from agent definition)"
-else
-echo "Creating MCP config in /workspace..."
-# Build base MCP config with jq
-MCP_JSON=$(jq -n \
-  --arg url "${MCP_URL}/mcp" \
-  --arg apiKey "Bearer ${API_KEY}" \
-  '{mcpServers: {"agent-swarm": {type: "http", url: $url, headers: {Authorization: $apiKey}}}}')
+# Create .mcp.json in /workspace (project-level config) and pre-register the
+# installed MCP servers' permission patterns (mcp__<name>__*) in settings.json.
+# claude-managed is skipped inside the step: managed agents read MCP servers
+# from the Agent definition (set by claude-managed-setup), not from a file.
+#
+# The API key goes over stdin, not argv, so it never shows up in `ps`.
+# NOTE (issue #369): we intentionally do NOT bake resolved credentials (OAuth
+# Bearers, env secrets, static headers) into /workspace/.mcp.json. The
+# per-session dispatcher in src/providers/claude-adapter.ts re-fetches the
+# installed server list on every session start and injects fresh credentials
+# into a per-session MCP config via --mcp-config + --strict-mcp-config. Baking
+# credentials here made OAuth re-auth, secret rotation, and install/uninstall
+# silently fail to propagate until the worker was restarted.
+# BEGIN configure_mcp_config (shell shim exercised by src/tests/entrypoint-mcp-config.test.ts)
+configure_mcp_config() {
+    printf '%s' "$API_KEY" | /usr/local/bin/bun --no-orphans \
+        /usr/local/lib/agent-swarm/entrypoint-mcp-config.ts "$HOME" "/workspace" "$MCP_URL"
+}
+# END configure_mcp_config
 
-# Add X-Agent-ID header if set
-if [ -n "$AGENT_ID" ]; then
-    MCP_JSON=$(echo "$MCP_JSON" | jq --arg agentId "$AGENT_ID" \
-      '.mcpServers["agent-swarm"].headers["X-Agent-ID"] = $agentId')
-fi
-
-# Add agentmail-mcp if API key is present
-if [ -n "$AGENTMAIL_API_KEY" ]; then
-    MCP_JSON=$(echo "$MCP_JSON" | jq --arg key "$AGENTMAIL_API_KEY" \
-      '.mcpServers.agentmail = {command: "npx", args: ["-y", "agentmail-mcp"], env: {AGENTMAIL_API_KEY: $key}}')
-fi
-
-# === Installed MCP servers (from API) ===
-# NOTE (issue #369): we intentionally do NOT bake resolved credentials (OAuth Bearers,
-# env secrets, static headers) into /workspace/.mcp.json. The per-session dispatcher
-# in src/providers/claude-adapter.ts re-fetches the installed server list on every
-# session start and injects fresh credentials into a per-session MCP config via
-# --mcp-config + --strict-mcp-config. Baking credentials here made OAuth re-auth,
-# secret rotation, and install/uninstall silently fail to propagate until the
-# worker was restarted. We still fetch the list at startup so we can pre-register
-# permission patterns (mcp__<name>__*) in settings.json — that is not secret.
-MCP_SERVERS_RESPONSE=""
-SERVER_COUNT=0
-if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ]; then
-  echo "Fetching installed MCP server names (for permission patterns only)..."
-  # resolveSecrets=false: we only need names at entrypoint time; credentials are
-  # resolved per-session by the dispatcher.
-  MCP_SERVERS_RESPONSE=$(curl -sf -H "Authorization: Bearer $API_KEY" \
-    "${MCP_URL}/api/agents/${AGENT_ID}/mcp-servers?resolveSecrets=false" 2>/dev/null) || true
-
-  if [ -n "$MCP_SERVERS_RESPONSE" ]; then
-    SERVER_COUNT=$(echo "$MCP_SERVERS_RESPONSE" | jq '.servers | length' 2>/dev/null || echo "0")
-    if [ "$SERVER_COUNT" -gt 0 ]; then
-      echo "Found $SERVER_COUNT installed MCP server(s) — will be injected per-session, not baked into .mcp.json"
-    fi
-  fi
-fi
-
-echo "$MCP_JSON" > /workspace/.mcp.json
-
-# === Update settings.json with MCP server permissions ===
-if [ -n "$MCP_SERVERS_RESPONSE" ] && [ "$SERVER_COUNT" -gt 0 ]; then
-  SETTINGS_FILE="$HOME/.claude/settings.json"
-  if [ -f "$SETTINGS_FILE" ]; then
-    echo "Adding MCP server permission patterns to settings.json"
-    UPDATED_SETTINGS=$(echo "$MCP_SERVERS_RESPONSE" | jq --slurpfile settings "$SETTINGS_FILE" '
-      [.servers[].name] |
-      map("mcp__" + . + "__*") |
-      . as $new_perms |
-      $settings[0] |
-      .permissions.allow = (.permissions.allow + $new_perms | unique)
-    ')
-    echo "$UPDATED_SETTINGS" > "$SETTINGS_FILE"
-  fi
-fi
-fi  # /HARNESS_PROVIDER != claude-managed (MCP discovery skip)
+configure_mcp_config
 
 # Configure GitHub authentication if token is provided
 echo ""

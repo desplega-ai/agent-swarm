@@ -414,11 +414,12 @@ kill $(lsof -ti :3013)
 3. **Test failure mode — two different contracts**:
    - *Optional external dependencies* (integrations, setup-script fetch, etc.) are best-effort: stop the dependency, boot the container, verify it continues via `|| true` guards rather than crashing.
    - *The control-plane API itself* is not best-effort. `wait_for_api_ready` in `docker-entrypoint.sh` delegates to the standalone Bun step `src/commands/entrypoint-api-readiness.ts`, which polls `${MCP_URL}/health` once per second before any provider-specific setup runs. Each request and response body has a three-second cap, shortened to the remaining overall deadline. Point `MCP_BASE_URL` at an unreachable host, set a short `WORKER_API_READY_TIMEOUT_SECONDS` (e.g. `5`), boot the container, and verify it exits non-zero with the stable `[entrypoint] FATAL: API readiness timed out after Ns waiting for <url>; exiting.` line — never a silent `|| true` continuation. See `src/tests/entrypoint-api-readiness.test.ts` for shell-shim and Bun-helper regression coverage (immediate success, transient-then-success, unreachable/timeout, invalid timeout values, trailing-slash normalization, redirects, stalled bodies, no leaked secrets).
-4. **Test lead and worker paths separately**:
+4. **MCP config is a typed step**: `configure_mcp_config` in `docker-entrypoint.sh` pipes `API_KEY` on stdin and passes the resolved `MCP_URL` as an argument (it is shell-local, never exported) to the standalone Bun step `src/commands/entrypoint-mcp-config.ts`, which writes `/workspace/.mcp.json` (swarm server, plus agentmail when configured — never resolved credentials) and merges the installed servers' `mcp__<name>__*` patterns into `~/.claude/settings.json`. An unreachable API keeps boot moving; a malformed `settings.json` aborts it. `src/tests/entrypoint-mcp-config.test.ts` covers injected environment/fetch/file IO and the real Bash shim.
+5. **Test lead and worker paths separately**:
    - Lead: `--env-file .env.docker-lead -e AGENT_ROLE=lead`
    - Worker: `--env-file .env.docker`
-5. **Grep boot logs**: `docker logs <name> 2>&1 | grep -i "<feature>"` to confirm the codepath ran.
-6. **Verify persisted state**: `GET /api/config?includeSecrets=true` should show anything the entrypoint wrote to config.
+6. **Grep boot logs**: `docker logs <name> 2>&1 | grep -i "<feature>"` to confirm the codepath ran.
+7. **Verify persisted state**: `GET /api/config?includeSecrets=true` should show anything the entrypoint wrote to config.
 
 ## MCP tool testing over HTTP
 
