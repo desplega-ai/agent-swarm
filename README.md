@@ -121,7 +121,7 @@ Kubernetes: [install the OCI Helm chart](./charts/agent-swarm/README.md).
 
 ## Integrations
 
-Slack · GitHub · GitLab · Azure DevOps · Linear · Jira · AgentMail · WhatsApp (Kapso) · Telegram, Teams and Discord ([Chat SDK](https://docs.agent-swarm.dev/docs/integrations/chat-sdk)) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
+Slack · GitHub · GitLab · Azure DevOps · Linear · Jira · AgentMail · WhatsApp (Kapso) · Telegram, Teams, Discord and Rocket.Chat ([Chat SDK](https://docs.agent-swarm.dev/docs/integrations/chat-sdk)) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
 
 AgentMail archives verified inbound deliveries before acknowledging them and retains the archive for 30 days, including mail excluded from task routing. See the [contact inbox triage runbook](runbooks/contact-inbox-triage.md) for retention, coverage limits, and rollout instructions.
 
