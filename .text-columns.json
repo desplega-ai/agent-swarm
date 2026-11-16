@@ -2578,7 +2578,18 @@
       "exempt": "identifier"
     }
   },
+  "script_run_sources": {
+    "hash": {
+      "exempt": "hash or digest"
+    },
+    "source": {
+      "exempt": "executable source, stored and served byte-exact; runtime writers refuse embedded secrets via src/be/scripts/source-secrets.ts, and migration preserves existing source verbatim"
+    }
+  },
   "script_runs": {
+    "sourceHash": {
+      "exempt": "hash or digest"
+    },
     "id": {
       "exempt": "identifier"
     },

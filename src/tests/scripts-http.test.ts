@@ -715,7 +715,9 @@ describe("/api/scripts HTTP", () => {
         });
       const row = async (marker: string) =>
         await getDbClient().get<{ sourceStepId: string | null; parentScriptRunId: string | null }>(
-          "SELECT sourceStepId, parentScriptRunId FROM script_runs WHERE source LIKE ?",
+          `SELECT r.sourceStepId, r.parentScriptRunId FROM script_runs r
+           LEFT JOIN script_run_sources s ON s.hash = r.sourceHash
+           WHERE COALESCE(s.source, r.source) LIKE ?`,
           [`%${marker}%`],
         );
 
@@ -1003,7 +1005,9 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
       expect(JSON.stringify(out.result)).not.toContain(shortSecretValue);
 
       const row = await getDbClient().get<{ output: string | null }>(
-        "SELECT output FROM script_runs WHERE agentId = ? AND source = ?",
+        `SELECT r.output FROM script_runs r
+         LEFT JOIN script_run_sources s ON s.hash = r.sourceHash
+         WHERE r.agentId = ? AND COALESCE(s.source, r.source) = ?`,
         [workerId, source],
       );
       expect(row?.output).toBeTruthy();
@@ -1029,7 +1033,9 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     expect(out.stderr).not.toContain(shortSecretValue);
 
     const row = await getDbClient().get<{ error: string | null }>(
-      "SELECT error FROM script_runs WHERE agentId = ? AND source = ?",
+      `SELECT r.error FROM script_runs r
+       LEFT JOIN script_run_sources s ON s.hash = r.sourceHash
+       WHERE r.agentId = ? AND COALESCE(s.source, r.source) = ?`,
       [workerId, source],
     );
     expect(row?.error).toBeTruthy();
