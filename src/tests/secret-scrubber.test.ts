@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import {
   clearVolatileSecretsForTesting,
@@ -434,7 +434,20 @@ describe("scrubObject", () => {
     tokens.slice(1).forEach((token, i) => {
       input[token] = i + 1;
     });
-    const out = scrubObject(input);
+    // Cost guard: count the clash probes. A rescan from `#2` on every clash
+    // costs ~N^2/2 (about 2M here); the per-marker next-suffix cache keeps it
+    // near 2N. The lower bound proves the spy still sees the probe path.
+    const hasOwn = spyOn(Object, "hasOwn");
+    let out: Record<string, number>;
+    let probes: number;
+    try {
+      out = scrubObject(input);
+      probes = hasOwn.mock.calls.length;
+    } finally {
+      hasOwn.mockRestore();
+    }
+    expect(probes).toBeGreaterThanOrEqual(2001);
+    expect(probes).toBeLessThanOrEqual(4 * 2001);
     expect(Object.keys(out)).toHaveLength(2001);
     expect(out["[REDACTED:github_token]"]).toBe(0);
     expect(out["[REDACTED:github_token]#2"]).toBe(1);
