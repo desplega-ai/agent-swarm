@@ -567,9 +567,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794744038-ga74b43
-ARG AMP_SHA512_AMD64=6d11c38658c878ba59fc185aa2a1739c2a412e7a37cfa41ecce5d588d5d4c4e17dc93819b65bfa28a0072dcc969c23cd07c830fc2522486e959b8f05f36b7f04
-ARG AMP_SHA512_ARM64=301564f90db3774b0f0613e4e67473cdf535868f1f606467d7766134b337f0122512234a0d6b3c421a3c04b55a7381513219571c503fe288624f721b3f84e079
+ARG AMP_VERSION=0.0.1794801642-g11f2f8
+ARG AMP_SHA512_AMD64=27d977ca160483d5dd1461fab4903ab33825f7338f2491bc0cd8382bab39add9da46434bc95e2cffc72e634703a856830329c3a0aba95ccafa808c5c3e8d91c5
+ARG AMP_SHA512_ARM64=0033593ee9b2626c35dfe281785b65951256a75a0f8c5a659076f993ae89b51ce30e8f44165052a6b9628c50b6534ee253444fb5247168932d7b608d1bb1fd7c
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -638,9 +638,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.59.1
-ARG GOOSE_SHA256_AMD64=04c08900ab2ae78b8e2f556f1ed535a91b61c080a3ff62e9fd8b280cceb544ef
-ARG GOOSE_SHA256_ARM64=e3619b2ebf76dbbe8924561fd748220f289a34671e2757cda1cd833e44194f8e
+ARG GOOSE_VERSION=1.59.2
+ARG GOOSE_SHA256_AMD64=c63cf82953e968d84b7542eb38a621dfdb5050b967728ed363517be5cdc666ea
+ARG GOOSE_SHA256_ARM64=ec2e0aded1e2aba8d310727a5138f2e3cce0769f2611fbe196ed014c31ce370a
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
