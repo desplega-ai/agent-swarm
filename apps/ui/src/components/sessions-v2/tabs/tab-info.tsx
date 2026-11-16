@@ -32,6 +32,7 @@ import {
 } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
 import { type Activity, activityOf } from "../sidebar/session-row";
+import { useAssetTabLabel } from "./asset-tab";
 
 const SECTION_TABS: Record<SessionSection, { title: string; icon: LucideIcon }> = {
   inbox: { title: "Inbox", icon: Inbox },
@@ -90,7 +91,17 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
   const { data: users } = useUsers();
   const nameOf = (id: string) => userName(users, id);
   const labels = useSessionLabels();
+  const asset = useAssetTabLabel(tab);
 
+  if (asset) {
+    return {
+      title: asset.title,
+      tip: asset.title,
+      icon: asset.icon,
+      unread: false,
+      activity: null,
+    };
+  }
   if (tab === NEW_SESSION_TAB) {
     return {
       title: "New session",

@@ -6,28 +6,56 @@ import type {
   SessionTreeResponse,
 } from "../api/types";
 import {
-  closeSplit,
-  closeTab,
-  closeUrlTab,
+  ASSET_TAB_PREFIX,
+  canSplitTab,
+  closePaneTab,
+  closeSplitPane,
   detailGroupKey,
   focusedTab,
   GROUP_TAB,
+  isAssetTab,
   isSessionTab,
   latestTask,
+  moveTab,
   NEW_SESSION_TAB,
+  openInPane,
   openTab,
+  type Panes,
+  paneOf,
   parseTabs,
   parseView,
-  replaceTab,
+  replacePaneTab,
+  SPLIT_DEFAULT_RATIO,
+  SPLIT_KEEPS_GROUP_TAB,
+  SPLIT_NEEDS_SECOND_TAB,
+  SPLIT_PANE_MIN_WIDTH,
+  serializeSplitFocus,
   serializeTabs,
   sessionCostUsd,
-  splitTo,
+  splitLayout,
   tabPath,
   tabsWithFocus,
   treeCount,
-  urlTabs,
+  urlPanes,
   withGroupTab,
 } from "./sessions-v2";
+
+/** Panes from a short form: `panes("a*,b", "c,d*")`. The star marks the focused tab. */
+function panes(main: string, split = ""): Panes {
+  const read = (list: string) => {
+    const tabs = list ? list.split(",") : [];
+    const focused = tabs.find((tab) => tab.endsWith("*"))?.slice(0, -1) ?? null;
+    return { tabs: tabs.map((tab) => tab.replace("*", "")), focused };
+  };
+  const m = read(main);
+  const s = read(split);
+  return {
+    tabs: m.tabs,
+    focused: m.focused ?? m.tabs[0],
+    split: s.tabs,
+    splitFocused: s.focused ?? s.tabs[0] ?? null,
+  };
+}
 
 describe("sessions v2 URL state", () => {
   test("parseTabs trims, drops blanks and repeats, and keeps the order", () => {
@@ -55,22 +83,23 @@ describe("sessions v2 URL state", () => {
     expect(parseView("")).toBeNull();
   });
 
-  test("openTab replaces the focused tab, or adds a new tab after it", () => {
-    expect(openTab(["a", "b"], "a", "c")).toEqual(["c", "b"]);
-    expect(openTab(["a", "b"], "a", "c", { newTab: true })).toEqual(["a", "c", "b"]);
+  test("openTab keeps every open tab, as browser tabs: a new one opens after the focused tab", () => {
+    expect(openTab(["a", "b"], "a", "c")).toEqual(["a", "c", "b"]);
     expect(openTab(["a", "b"], "a", "b")).toEqual(["a", "b"]);
     expect(openTab(["a"], "x", "c")).toEqual(["a", "c"]);
   });
 
-  test("closeTab moves the focus right, then left, and leaves a New session tab", () => {
-    expect(closeTab(["a", "b", "c"], "b", "b")).toEqual({ tabs: ["a", "c"], focused: "c" });
-    expect(closeTab(["a", "b"], "b", "b")).toEqual({ tabs: ["a"], focused: "a" });
-    expect(closeTab(["a", "b"], "a", "b")).toEqual({ tabs: ["a"], focused: "a" });
-    expect(closeTab(["a"], "a", "a")).toEqual({
-      tabs: [NEW_SESSION_TAB],
-      focused: NEW_SESSION_TAB,
-    });
-    expect(closeTab(["a"], "a", "zz")).toEqual({ tabs: ["a"], focused: "a" });
+  test("clicking one session, then another, leaves both open in their own tabs", () => {
+    // Each click focuses the session it opened, so the next one opens after it.
+    let tabs = ["a"];
+    let focused = "a";
+    for (const id of ["b", "c", "b"]) {
+      tabs = openTab(tabs, focused, id);
+      focused = id;
+    }
+    expect(tabs).toEqual(["a", "b", "c"]);
+    expect(focused).toBe("b");
+    expect(serializeTabs(tabs, focused)).toBe("a,b,c");
   });
 
   test("tabPath maps the New session tab to /sessions", () => {
@@ -96,97 +125,162 @@ describe("sessions v2 URL state", () => {
     ]);
   });
 
-  test("Send turns the New session tab into its session", () => {
-    expect(replaceTab(["a", NEW_SESSION_TAB, "b"], NEW_SESSION_TAB, "c")).toEqual(["a", "c", "b"]);
-    expect(replaceTab(["a"], NEW_SESSION_TAB, "c")).toEqual(["a", "c"]);
-  });
-
-  test("the URL keeps the split session out of the main tabs", () => {
-    const at = (tabs: string | null, focused: string, split: string | null, view = null) =>
-      urlTabs(tabs, { focused, view, split });
-    expect(at("a,b", "a", "b")).toEqual({ tabs: ["a"], split: "b" });
-    expect(at("a,b", "a", "a")).toEqual({ tabs: ["a", "b"], split: null });
-    expect(at(`a,${GROUP_TAB}`, "a", null)).toEqual({ tabs: ["a"], split: null });
-    expect(urlTabs("a", { focused: "a", view: "inbox", split: GROUP_TAB })).toEqual({
-      tabs: ["a"],
-      split: null,
-    });
-    expect(urlTabs(`a,${GROUP_TAB}`, { focused: "a", view: "inbox", split: null })).toEqual({
-      tabs: ["a", GROUP_TAB],
-      split: null,
-    });
-  });
-
-  test("the split can hold the New session tab, and only one New session shows", () => {
-    const at = (tabs: string | null, focused: string, split: string | null) =>
-      urlTabs(tabs, { focused, view: null, split });
-    expect(at("a", "a", NEW_SESSION_TAB)).toEqual({ tabs: ["a"], split: NEW_SESSION_TAB });
-    expect(at(`a,${NEW_SESSION_TAB}`, "a", NEW_SESSION_TAB)).toEqual({
-      tabs: ["a"],
-      split: NEW_SESSION_TAB,
-    });
-    expect(at(null, NEW_SESSION_TAB, NEW_SESSION_TAB)).toEqual({
-      tabs: [NEW_SESSION_TAB],
-      split: null,
-    });
-    expect(splitTo(["a"], "a", null, NEW_SESSION_TAB)).toEqual({
-      tabs: ["a"],
-      focused: "a",
-      split: NEW_SESSION_TAB,
-    });
-    expect(splitTo(["a", NEW_SESSION_TAB], NEW_SESSION_TAB, null, NEW_SESSION_TAB)).toEqual({
-      tabs: ["a"],
-      focused: "a",
-      split: NEW_SESSION_TAB,
-    });
-  });
-
   test("View all adds the group tab after the focused tab, and a second one reuses it", () => {
     expect(withGroupTab(["a", "b"], "a")).toEqual(["a", GROUP_TAB, "b"]);
     expect(withGroupTab(["a", GROUP_TAB, "b"], "b")).toEqual(["a", GROUP_TAB, "b"]);
   });
+});
 
-  test("closing the group tab clears ?view=, and New session goes back to /sessions", () => {
-    const closed = closeUrlTab([GROUP_TAB, NEW_SESSION_TAB], NEW_SESSION_TAB, "inbox", GROUP_TAB);
-    expect(closed).toEqual({ tabs: [NEW_SESSION_TAB], focused: NEW_SESSION_TAB, view: null });
-    expect(tabPath(closed.focused, closed.view !== null)).toBe("/sessions");
-    expect(closeUrlTab(["a", GROUP_TAB], "a", "inbox", "a").view).toBe("inbox");
-  });
+describe("sessions v2 panes", () => {
+  const asset = `${ASSET_TAB_PREFIX}link:abc`;
 
-  test("splitTo moves a tab into the split, and needs a second tab first", () => {
-    expect(splitTo(["a"], "a", null, "a")).toEqual({
-      message: "Open a second session first. Then split.",
-    });
-    expect(splitTo(["a", "b"], "a", null, "b")).toEqual({ tabs: ["a"], focused: "a", split: "b" });
-    expect(splitTo(["a", "b"], "a", null, "a")).toEqual({ tabs: ["b"], focused: "b", split: "a" });
-    expect(splitTo(["a"], "a", null, "c")).toEqual({ tabs: ["a"], focused: "a", split: "c" });
-    expect(splitTo(["a"], "a", "c", "c")).toEqual({ tabs: ["a"], focused: "a", split: "c" });
-  });
-
-  test("splitTo swaps the only tab with the split session", () => {
-    expect(splitTo(["a"], "a", "x", "a")).toEqual({ tabs: ["x"], focused: "x", split: "a" });
-  });
-
-  test("splitTo puts the old split session back where the moved tab was", () => {
-    expect(splitTo(["a", "b", "c"], "a", "x", "b")).toEqual({
-      tabs: ["a", "x", "c"],
-      focused: "a",
-      split: "b",
-    });
-    expect(splitTo(["a", "b"], "a", "x", "c")).toEqual({
-      tabs: ["a", "x", "b"],
-      focused: "a",
-      split: "c",
-    });
-  });
-
-  test("closeSplit keeps the split session as the last tab only on request", () => {
-    expect(closeSplit(["a"], "b", true)).toEqual(["a", "b"]);
-    expect(closeSplit(["a"], "b", false)).toEqual(["a"]);
-    expect(closeSplit(["a", "b"], "b", true)).toEqual(["a", "b"]);
+  test("an asset tab is no session, and it can go to the split", () => {
+    expect(isAssetTab(asset)).toBe(true);
+    expect(isSessionTab(asset)).toBe(false);
     expect(isSessionTab("a")).toBe(true);
-    expect(isSessionTab(GROUP_TAB)).toBe(false);
-    expect(isSessionTab(NEW_SESSION_TAB)).toBe(false);
+    expect(canSplitTab(asset)).toBe(true);
+    expect(canSplitTab(NEW_SESSION_TAB)).toBe(true);
+    expect(canSplitTab(GROUP_TAB)).toBe(false);
+  });
+
+  test("the URL keeps a split tab out of the main tabs, and the focused tab in the main pane", () => {
+    const at = (tabs: string | null, focused: string, split: string | null, view = null) =>
+      urlPanes(tabs, { focused, view, split });
+    expect(at("a,b", "a", "b")).toEqual(panes("a*", "b*"));
+    expect(at("a,b", "a", "a")).toEqual(panes("a*,b"));
+    expect(at("a,b,c", "a", "b,c")).toEqual(panes("a*", "b*,c"));
+    expect(at("a,b", "a", "a,b")).toEqual(panes("a*", "b*"));
+    expect(at(`a,${GROUP_TAB}`, "a", null)).toEqual(panes("a*"));
+    expect(urlPanes("a", { focused: "a", view: "inbox", split: GROUP_TAB })).toEqual(panes("a*"));
+    expect(urlPanes(`a,${GROUP_TAB}`, { focused: "a", view: "inbox", split: null })).toEqual(
+      panes(`a*,${GROUP_TAB}`),
+    );
+  });
+
+  test("?splitFocus= names the split's focused tab, and drops out for its first tab", () => {
+    const at = (splitFocus: string | null) =>
+      urlPanes("a", { focused: "a", view: null, split: "b,c", splitFocus });
+    expect(at("c")).toEqual(panes("a*", "b,c*"));
+    expect(at(null)).toEqual(panes("a*", "b*,c"));
+    expect(at("zz")).toEqual(panes("a*", "b*,c"));
+    expect(serializeSplitFocus(panes("a*", "b,c*"))).toBe("c");
+    expect(serializeSplitFocus(panes("a*", "b*,c"))).toBe("");
+    expect(serializeSplitFocus(panes("a*"))).toBe("");
+  });
+
+  test("the split can hold the New session tab, and only one New session shows", () => {
+    const at = (tabs: string | null, focused: string, split: string | null) =>
+      urlPanes(tabs, { focused, view: null, split });
+    expect(at("a", "a", NEW_SESSION_TAB)).toEqual(panes("a*", `${NEW_SESSION_TAB}*`));
+    expect(at(`a,${NEW_SESSION_TAB}`, "a", NEW_SESSION_TAB)).toEqual(
+      panes("a*", `${NEW_SESSION_TAB}*`),
+    );
+    expect(at(null, NEW_SESSION_TAB, NEW_SESSION_TAB)).toEqual(panes(`${NEW_SESSION_TAB}*`));
+  });
+
+  test("an open adds a tab after the pane's focused tab, and never replaces one", () => {
+    expect(openInPane(panes("a*,b"), 0, "c")).toEqual(panes("a,c*,b"));
+    expect(openInPane(panes("a*", "b*,c"), 1, "d")).toEqual(panes("a*", "b,d*,c"));
+    // Pane 1 with no split starts the split.
+    expect(openInPane(panes("a*"), 1, asset)).toEqual(panes("a*", `${asset}*`));
+    // The group tab opens in the main pane only.
+    expect(openInPane(panes("a*", "b*"), 1, GROUP_TAB)).toEqual(panes(`a,${GROUP_TAB}*`, "b*"));
+  });
+
+  test("an open tab takes the focus in the pane that holds it", () => {
+    expect(openInPane(panes("a*,b", "c*,d"), 0, "d")).toEqual(panes("a*,b", "c,d*"));
+    expect(openInPane(panes("a*,b", "c*"), 1, "b")).toEqual(panes("a,b*", "c*"));
+    expect(paneOf(panes("a*", "b*"), "b")).toBe(1);
+    expect(paneOf(panes("a*", "b*"), "a")).toBe(0);
+    expect(paneOf(panes("a*", "b*"), "zz")).toBeNull();
+  });
+
+  test("a tab moved to the split joins its tabs: it replaces none", () => {
+    expect(moveTab(panes("a*,b"), "b", 1)).toEqual(panes("a*", "b*"));
+    expect(moveTab(panes("a*,b,c", "d*"), "b", 1)).toEqual(panes("a*,c", "d,b*"));
+    // The focused tab leaves: its right neighbor takes the focus.
+    expect(moveTab(panes("a*,b", "c*"), "a", 1)).toEqual(panes("b*", "c,a*"));
+    // A tab that is not open opens there.
+    expect(moveTab(panes("a*"), "z", 1)).toEqual(panes("a*", "z*"));
+  });
+
+  test("a move names its place: before a tab, last, or after the focused tab", () => {
+    expect(moveTab(panes("a*", "b*,c"), "a2", 1, "c")).toEqual(panes("a*", "b,a2*,c"));
+    expect(moveTab(panes("a*,x", "b*,c"), "x", 1, null)).toEqual(panes("a*", "b,c,x*"));
+    expect(moveTab(panes("a*,x", "b*,c"), "x", 1)).toEqual(panes("a*", "b,x*,c"));
+    expect(moveTab(panes("a*,b", "c*,d"), "d", 0, "a")).toEqual(panes("d*,a,b", "c*"));
+  });
+
+  test("a move in the same pane changes the order and keeps the focus", () => {
+    expect(moveTab(panes("a*,b,c"), "c", 0, "a")).toEqual(panes("c,a*,b"));
+    expect(moveTab(panes("a*,b,c"), "a", 0, null)).toEqual(panes("b,c,a*"));
+    expect(moveTab(panes("a*", "b*,c,d"), "d", 1, "b")).toEqual(panes("a*", "d,b*,c"));
+    // No change: the same object comes back, so the URL stays.
+    const same = panes("a*,b,c");
+    expect(moveTab(same, "b", 0, "c")).toBe(same);
+    expect(moveTab(same, "b", 0, "b")).toBe(same);
+  });
+
+  test("the main pane's only tab cannot start a split, and the group tab stays in the main pane", () => {
+    expect(moveTab(panes("a*"), "a", 1)).toEqual({ message: SPLIT_NEEDS_SECOND_TAB });
+    expect(moveTab(panes(`a*,${GROUP_TAB}`), GROUP_TAB, 1)).toEqual({
+      message: SPLIT_KEEPS_GROUP_TAB,
+    });
+  });
+
+  test("the panes join when the main pane's last tab goes to the split", () => {
+    expect(moveTab(panes("a*", "b*,c"), "a", 1)).toEqual(panes("b,a*,c"));
+  });
+
+  test("the split closes when its last tab moves to the main pane", () => {
+    expect(moveTab(panes("a*,b", "c*"), "c", 0)).toEqual(panes("a,c*,b"));
+  });
+
+  test("closing a tab focuses its right neighbor, then its left one", () => {
+    expect(closePaneTab(panes("a,b*,c"), "b")).toEqual(panes("a,c*"));
+    expect(closePaneTab(panes("a,b*"), "b")).toEqual(panes("a*"));
+    expect(closePaneTab(panes("a*,b"), "b")).toEqual(panes("a*"));
+    expect(closePaneTab(panes("a*", "b,c*,d"), "c")).toEqual(panes("a*", "b,d*"));
+    expect(closePaneTab(panes("a*"), "zz")).toEqual(panes("a*"));
+  });
+
+  test("the split closes with its last tab, and the main pane takes the split's tabs with its own last tab", () => {
+    expect(closePaneTab(panes("a*", "b*"), "b")).toEqual(panes("a*"));
+    expect(closePaneTab(panes("a*", "b,c*"), "a")).toEqual(panes("b,c*"));
+    expect(closePaneTab(panes("a*"), "a")).toEqual(panes(`${NEW_SESSION_TAB}*`));
+  });
+
+  test("closing the group tab leaves New session on /sessions", () => {
+    const closed = closePaneTab(panes(`${GROUP_TAB},${NEW_SESSION_TAB}*`), GROUP_TAB);
+    expect(closed).toEqual(panes(`${NEW_SESSION_TAB}*`));
+    expect(tabPath(closed.focused, false)).toBe("/sessions");
+  });
+
+  test("Send turns the New session tab into its session, in its pane", () => {
+    expect(replacePaneTab(panes(`a,${NEW_SESSION_TAB}*,b`), NEW_SESSION_TAB, "c")).toEqual(
+      panes("a,c*,b"),
+    );
+    expect(replacePaneTab(panes("a*", `b,${NEW_SESSION_TAB}*`), NEW_SESSION_TAB, "c")).toEqual(
+      panes("a*", "b,c*"),
+    );
+    expect(replacePaneTab(panes("a*"), NEW_SESSION_TAB, "c")).toEqual(panes("a,c*"));
+  });
+
+  test("the split button joins the panes: the split's tabs go to the end of the main pane", () => {
+    expect(closeSplitPane(panes("a*,b", "c,d*"), true)).toEqual(panes("a*,b,c,d"));
+    expect(closeSplitPane(panes("a*,b", "c,d*"), false)).toEqual(panes("a*,b"));
+  });
+
+  test("the URL of moved panes reads back as the same panes", () => {
+    const moved = moveTab(panes("a*,b,c", "d*"), "b", 1) as Panes;
+    expect(
+      urlPanes(serializeTabs(moved.tabs, moved.focused), {
+        focused: moved.focused,
+        view: null,
+        split: moved.split.join(","),
+        splitFocus: serializeSplitFocus(moved) || null,
+      }),
+    ).toEqual(moved);
   });
 });
 
@@ -282,5 +376,33 @@ describe("treeCount", () => {
 
   test("is zero before the tree loads", () => {
     expect(treeCount(undefined, "running")).toBe(0);
+  });
+});
+
+describe("splitLayout", () => {
+  test("half the row with no stored size, or a bad one", () => {
+    expect(splitLayout(null, 1000)).toEqual({ width: 500, min: 320, max: 680, ratio: 0.5 });
+    expect(splitLayout(Number.NaN, 1000).width).toBe(500);
+    expect(splitLayout(0, 1000).width).toBe(500);
+    expect(splitLayout(1, 1000).width).toBe(500);
+    expect(SPLIT_DEFAULT_RATIO).toBe(0.5);
+  });
+
+  test("a stored share follows the row width, and each pane keeps its minimum", () => {
+    expect(splitLayout(0.3, 2000)).toEqual({ width: 600, min: 320, max: 1680, ratio: 0.3 });
+    expect(splitLayout(0.3, 1200).width).toBe(360);
+    // Too narrow for 30%: the main pane keeps the minimum, and the share says so.
+    const narrow = splitLayout(0.1, 1000);
+    expect(narrow.width).toBe(SPLIT_PANE_MIN_WIDTH);
+    expect(narrow.ratio).toBeCloseTo(0.32);
+    expect(splitLayout(0.95, 1000).width).toBe(1000 - SPLIT_PANE_MIN_WIDTH);
+  });
+
+  test("a row too narrow for two minimum panes splits in half, with max >= min", () => {
+    expect(splitLayout(0.2, 500)).toEqual({ width: 250, min: 250, max: 250, ratio: 0.5 });
+  });
+
+  test("an unmeasured row keeps the stored share", () => {
+    expect(splitLayout(0.4, 0)).toEqual({ width: 0, min: 0, max: 0, ratio: 0.4 });
   });
 });

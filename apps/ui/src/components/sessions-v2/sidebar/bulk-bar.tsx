@@ -124,8 +124,8 @@ export function BulkBar({
       role="group"
       aria-label={wholeOn || offer ? `${label} selected` : label}
       data-bulk-bar=""
-      // Over the sidebar header (h-10), on the same fill as a selected row.
-      className="absolute inset-x-0 top-0 z-20 flex h-10 items-center gap-0.5 border-b border-primary/30 bg-surface pr-1.5 pl-4 before:absolute before:inset-0 before:-z-10 before:bg-primary/10"
+      // Over the sidebar header (h-9), on the same fill as a selected row.
+      className="absolute inset-x-0 top-0 z-20 flex h-9 items-center gap-0.5 border-b border-primary/30 bg-surface pr-1.5 pl-4 before:absolute before:inset-0 before:-z-10 before:bg-primary/10"
     >
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="min-w-0 truncate text-sm font-semibold tabular-nums">{label}</span>

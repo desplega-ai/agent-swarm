@@ -1,22 +1,40 @@
 import { type MouseEvent, memo, type ReactNode } from "react";
 import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { plural } from "@/lib/sessions-v2";
+import { cn } from "@/lib/utils";
 import { rowPropsEqual, TreeRow as TreeRowFrame } from "./tree-row";
 import type { TreeRow } from "./tree-rows";
 
 /**
  * A plain sidebar section header (My groups, Shared with me): the title, and
- * the number of sessions on the right. Nothing else (SPEC R5). It is drawn
- * only: the tree group it heads carries the same words as its label.
+ * the number of sessions on the right (SPEC R5). The words are drawn only:
+ * the tree group it heads carries them as its label. `action` (My groups:
+ * New group) sits at the right end.
  */
-export function SectionHeader({ label, count }: { label: string; count: number }) {
+export function SectionHeader({
+  label,
+  count,
+  action,
+}: {
+  label: string;
+  count: number;
+  action?: ReactNode;
+}) {
   return (
     <div
-      aria-hidden
-      className="mx-1.5 mt-3 flex h-7 items-center gap-1.5 pr-2 pl-3 font-mono text-meta text-muted-foreground"
+      className={cn(
+        "mx-1.5 mt-3 flex h-7 items-center gap-1.5 pl-3 font-mono text-meta text-muted-foreground",
+        // The action lines up with the row actions under it.
+        action ? "pr-1.5" : "pr-2",
+      )}
     >
-      <span className="min-w-0 flex-1 truncate tracking-widest uppercase">{label}</span>
-      <span className="shrink-0 tabular-nums">{count}</span>
+      <span aria-hidden className="min-w-0 flex-1 truncate tracking-widest uppercase">
+        {label}
+      </span>
+      <span aria-hidden className="shrink-0 tabular-nums">
+        {count}
+      </span>
+      {action}
     </div>
   );
 }
@@ -88,10 +106,13 @@ export function segmentsOf(rows: TreeRow[]): TreeSegment[] {
 export function TreeSection({
   section,
   describedBy,
+  action,
   children,
 }: {
   section: NonNullable<TreeSegment["section"]>;
   describedBy?: string;
+  /** A control at the right end of the header. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   const unit = section.unit ?? "session";
@@ -102,7 +123,7 @@ export function TreeSection({
       aria-label={`${section.label}, ${section.count} ${unit}${section.count === 1 ? "" : "s"}`}
       aria-describedby={describedBy}
     >
-      <SectionHeader label={section.label} count={section.count} />
+      <SectionHeader label={section.label} count={section.count} action={action} />
       {children}
     </div>
   );
