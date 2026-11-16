@@ -97,6 +97,21 @@ test("runtime supervisor and Docker fallbacks are operator settings", () => {
   });
 });
 
+test("Slack transport offers both implemented modes with their setup requirements", () => {
+  const entry = CONFIGURATION_GROUPS.flatMap((group) => group.entries).find(
+    (entry) => entry.key === "SLACK_MODE",
+  );
+  expect(entry).toMatchObject({
+    kind: "enum",
+    defaultValue: "socket",
+    options: ["socket", "http"],
+  });
+  expect(entry?.description).toContain("app-level token");
+  expect(entry?.description).toContain("signing secret");
+  expect(entry?.description).toContain("/api/integrations/slack/events");
+  expect(entry?.description).not.toContain("unavailable");
+});
+
 test("CSV empty selections and unknown entries survive editing", () => {
   expect(parseConfigList("")).toEqual([]);
   expect(parseConfigList("llm, future-rater, llm,")).toEqual(["llm", "future-rater"]);

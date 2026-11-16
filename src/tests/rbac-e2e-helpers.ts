@@ -71,7 +71,7 @@ export async function spawnSwarmServer(opts: {
       const server = launchSwarmServer(opts, port, logFd);
       if (opts.waitForListen === false) return server;
       try {
-        await waitForListen(server);
+        await waitForListen(server, undefined, logStart);
       } catch (error) {
         if (server.proc.exitCode !== null) {
           const attemptLog = await Bun.file(opts.logPath).slice(logStart).text();
@@ -139,7 +139,11 @@ function launchSwarmServer(
   };
 }
 
-export async function waitForListen(server: SwarmServer, deadlineMs = 90_000): Promise<void> {
+export async function waitForListen(
+  server: SwarmServer,
+  deadlineMs = 90_000,
+  logStart = 0,
+): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < deadlineMs) {
     if (server.proc.exitCode !== null) {
@@ -148,8 +152,13 @@ export async function waitForListen(server: SwarmServer, deadlineMs = 90_000): P
       );
     }
     try {
-      const res = await fetch(`${server.base}/docs`, { signal: AbortSignal.timeout(500) });
-      if (res.ok) return;
+      // Another test can take the released port and answer /docs during boot.
+      // Wait for this child to bind before trusting an HTTP readiness response.
+      const log = await Bun.file(server.logPath).slice(logStart).text();
+      if (log.includes(`MCP HTTP server running on http://localhost:${server.port}/mcp`)) {
+        const res = await fetch(`${server.base}/docs`, { signal: AbortSignal.timeout(500) });
+        if (res.ok) return;
+      }
     } catch {
       // not up yet
     }
