@@ -6,8 +6,8 @@ export default defineConfig({
   // overflow.spec.ts (206 s) on one worker. Each worker still has its own API and DB, and
   // `mode: "serial"` describes stay together.
   fullyParallel: true,
-  // 3 in CI too: a 4-vCPU runner keeps up, and it cuts the 8 shards from about 2.1 min of tests.
-  workers: 3,
+  // 2 in CI: 3 workers on a 4-vCPU runner ran no faster and timed out a favorites spec.
+  workers: process.env.CI ? 2 : 3,
   // No reruns: a spec that fails once fails the shard, so a flake shows up red instead of
   // passing as "flaky". Fix or quarantine the spec.
   retries: 0,
