@@ -24,6 +24,29 @@ export const scriptInlineRun: Scenario = {
   order: 400,
   async run(ctx) {
     const agentId = await registerAgent(ctx, "inline");
+    const aliasRun = await runScript(ctx, agentId, {
+      source: `export default async function (_args: unknown, ctx: any) {
+        const read = async (args: Record<string, string>) => {
+          try { return await ctx.swarm.memory_get({ ...args, intent: "alias regression" }); }
+          catch (error) { return String(error); }
+        };
+        const memoryId = "00000000-0000-4000-8000-000000000000";
+        return {
+          canonical: await read({ memoryId }),
+          alias: await read({ id: memoryId }),
+          matching: await read({ memoryId, id: memoryId }),
+          conflict: await read({ memoryId, id: "different" }),
+        };
+      }`,
+      args: {},
+      intent: "verify memory_get aliases",
+    });
+    expectRunOk(aliasRun, "memory_get aliases");
+    const aliases = asRecord(aliasRun.result);
+    expect(JSON.stringify(aliases.alias) === JSON.stringify(aliases.canonical), "id differs from memoryId");
+    expect(JSON.stringify(aliases.matching) === JSON.stringify(aliases.canonical), "matching aliases differ");
+    expect(String(aliases.conflict).includes("memoryId and id must identify the same memory; supply only one."), "conflicting aliases must be rejected");
+
     const marker = `inline-${ctx.nonce}`;
     const intent = `e2e inline double ${ctx.nonce}`;
 
