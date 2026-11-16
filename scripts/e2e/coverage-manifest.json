@@ -635,12 +635,13 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
-        "workflow-webhook-hmac-sha1"
+        "workflow-webhook-hmac-sha1",
+        "workflow-agent-task-crash-window"
       ]
     },
     "workflow-engine-nodes": {
