@@ -38,6 +38,7 @@ Agents can also request a human decision with the `request-human-input` MCP tool
 - Define both branches: what happens on approve **and** on reject (archive, retry, escalate).
 - Set a timeout/fallback so a forgotten gate doesn't wedge the workflow forever.
 - Ask one simple question when the approver should decide from Slack. A card with a single `approval`, `boolean`, `single-select` (up to 5 options) or one-line `text` question gets answer buttons; Deny and text answers open a short form. Any other card links to the dashboard only. A click counts only when the Slack user is linked to a swarm user who may answer; anyone else gets a private refusal and nothing changes.
+- Send the card to Telegram with `notifications: [{ channel: "telegram", target: "<chat id>" }]` (or a `telegram:<chat>:<topic>` thread id). It needs the Telegram Chat SDK adapter. The same questions get buttons, except text answers, which stay on the dashboard because Telegram has no forms; Deny rejects without a reason. The clicker must be linked to a swarm user by their Telegram user id. A refusal goes to their direct messages with the bot.
 
 ## Ask a person for a secret
 

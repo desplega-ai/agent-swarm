@@ -75,7 +75,7 @@ function formatTimeout(seconds: number): string {
 }
 
 export interface ApprovalNotificationChannel {
-  channel: "slack" | "email";
+  channel: "slack" | "email" | "telegram";
   target: string;
 }
 
@@ -109,7 +109,12 @@ export async function dispatchApprovalNotifications(
 
   const approvalUrl = `${getAppUrl()}/approval-requests/${requestId}`;
   const updatedChannels: Array<
-    ApprovalNotificationChannel & { messageTs?: string; channelId?: string }
+    ApprovalNotificationChannel & {
+      messageTs?: string;
+      channelId?: string;
+      threadId?: string;
+      messageId?: string;
+    }
   > = [...notifications];
   let updated = false;
 
@@ -118,6 +123,43 @@ export async function dispatchApprovalNotifications(
 
     if (notification.channel === "email") {
       console.warn(`[HITL] Email notifications not yet supported (target: ${notification.target})`);
+      continue;
+    }
+
+    if (notification.channel === "telegram") {
+      try {
+        const { postChatMessage } = await import("../integrations/chat-sdk/outbound");
+        const { buildChatApprovalCard } = await import("../integrations/chat-sdk/approvals");
+        // A bare chat id is the chat's main thread; `telegram:<chat>:<topic>` names a forum topic.
+        const threadId = notification.target.startsWith("telegram:")
+          ? notification.target
+          : `telegram:${notification.target}`;
+        const posted = await postChatMessage({
+          adapter: "telegram",
+          threadId,
+          text: [],
+          card: buildChatApprovalCard({
+            requestId,
+            title,
+            questions,
+            approvalUrl,
+            timeoutText:
+              timeoutSeconds !== undefined
+                ? `Times out in ${formatTimeout(timeoutSeconds)} if not answered.`
+                : undefined,
+          }),
+        });
+        const messageId = posted.messageIds.at(-1);
+        if (messageId) {
+          updatedChannels[i] = { ...notification, threadId: posted.threadId, messageId };
+          updated = true;
+        }
+      } catch (err) {
+        console.error(
+          `[HITL] Failed to send Telegram notification to ${notification.target}:`,
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
+      }
       continue;
     }
 
@@ -341,6 +383,9 @@ type ApprovalSlackEntry = {
   target: string;
   messageTs?: string;
   channelId?: string;
+  /** Chat SDK cards (Telegram): the thread and message the card was posted as. */
+  threadId?: string;
+  messageId?: string;
 };
 
 /**
@@ -429,6 +474,7 @@ export async function updateResolvedApprovalCards(
     | ApprovalCardSlackClient
     | undefined,
 ): Promise<void> {
+  await updateResolvedChatApprovalCards(approvals);
   if (!client) return;
   for (const approval of approvals) {
     const cards = ((approval.notificationChannels ?? []) as ApprovalSlackEntry[]).filter(
@@ -477,6 +523,59 @@ export async function updateResolvedApprovalCards(
       }
     }
   }
+}
+
+/**
+ * Edit each resolved request's Chat SDK card (Telegram) in place, under the
+ * same one-claim-per-card rule as the Slack cards. Never throws.
+ */
+async function updateResolvedChatApprovalCards(
+  approvals: ReadonlyArray<Pick<ApprovalRequest, "id" | "notificationChannels">>,
+): Promise<void> {
+  for (const approval of approvals) {
+    const cards = ((approval.notificationChannels ?? []) as ApprovalSlackEntry[]).filter(
+      (n) => n.channel === "telegram" && n.threadId && n.messageId,
+    );
+    for (const card of cards) {
+      const key = `card:${card.threadId}:${card.messageId}`;
+      try {
+        const claim = await claimApprovalCancellationNotification(approval.id, key, {
+          anyTerminal: true,
+        });
+        if (!claim) continue;
+        try {
+          const rendered = await buildResolvedApprovalCard(claim.approval);
+          if (!rendered) throw new Error("approval is still pending");
+          const [{ editChatMessage }, { buildResolvedChatApprovalCard }] = await Promise.all([
+            import("../integrations/chat-sdk/outbound"),
+            import("../integrations/chat-sdk/approvals"),
+          ]);
+          await editChatMessage({
+            adapter: card.channel,
+            threadId: card.threadId!,
+            messageId: card.messageId!,
+            card: buildResolvedChatApprovalCard(
+              unescapeSlackMrkdwn(rendered.text),
+              `${getAppUrl()}/approval-requests/${approval.id}`,
+            ),
+          });
+          await completeApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
+        } catch (error) {
+          await releaseApprovalCancellationNotificationClaim(approval.id, key, claim.leaseToken);
+          throw error;
+        }
+      } catch (error) {
+        console.error(
+          `[HITL] Failed to update the ${card.channel} card for approval ${approval.id}:`,
+          scrubSecrets(error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
+}
+
+function unescapeSlackMrkdwn(text: string): string {
+  return text.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
 }
 
 /**

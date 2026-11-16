@@ -78,7 +78,8 @@ export const ApproverConfigSchema = z.object({
 });
 
 export const NotificationConfigSchema = z.object({
-  channel: z.enum(["slack", "email"]),
+  channel: z.enum(["slack", "email", "telegram"]),
+  // Telegram: a chat id, or a Chat SDK thread id (`telegram:<chat>[:<topic>]`).
   target: z.string(),
 });
 

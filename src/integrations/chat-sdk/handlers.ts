@@ -1,4 +1,5 @@
 import type { Chat, Message, Thread } from "chat";
+import { registerChatApprovalActions } from "./approvals";
 import { trackBackground } from "./background";
 import { registerChatCommands } from "./commands";
 import { type ChatInboundKind, handleChatInbound } from "./inbound";
@@ -25,4 +26,5 @@ export function registerChatHandlers(chat: Chat): void {
   // A `/command` message never reaches the handlers above: the adapters route
   // it here. Without a handler Telegram would drop it silently.
   registerChatCommands(chat);
+  registerChatApprovalActions(chat);
 }
