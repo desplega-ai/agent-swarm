@@ -143,6 +143,62 @@ export function reportTerminalSessionWindows(input: {
   });
 }
 
+/**
+ * Throttles mid-session window reports. A snapshot goes out when it carries a
+ * window the last report did not, when any window's utilization moved by
+ * `minDeltaPoints` percentage points or more, or when `minIntervalMs` passed.
+ * `post` is fire-and-forget: a rejection is logged, never thrown, and a
+ * failed report does not count as sent.
+ */
+export function createWindowStreamReporter(opts: {
+  post: (windows: RateLimitWindowTelemetry) => Promise<void>;
+  minDeltaPoints?: number;
+  minIntervalMs?: number;
+  now?: () => number;
+}): (windows: RateLimitWindowTelemetry) => void {
+  const minDelta = (opts.minDeltaPoints ?? 5) / 100;
+  const minIntervalMs = opts.minIntervalMs ?? 60_000;
+  const now = opts.now ?? Date.now;
+  let lastSentAt: number | undefined;
+  let lastSent: Record<string, number | undefined> = {};
+
+  const due = (windows: RateLimitWindowTelemetry, at: number): boolean => {
+    if (lastSentAt === undefined || at - lastSentAt >= minIntervalMs) return true;
+    return Object.entries(windows).some(([key, window]) => {
+      if (!(key in lastSent)) return true;
+      const before = lastSent[key];
+      const after = window.utilization;
+      if (before === undefined || after === undefined) return before !== after;
+      return Math.abs(after - before) >= minDelta - 1e-9;
+    });
+  };
+
+  return (windows) => {
+    if (Object.keys(windows).length === 0) return;
+    const at = now();
+    if (!due(windows, at)) return;
+    const previous = { sentAt: lastSentAt, sent: lastSent };
+    lastSentAt = at;
+    lastSent = Object.fromEntries(Object.entries(windows).map(([k, w]) => [k, w.utilization]));
+    let report: Promise<void>;
+    try {
+      report = opts.post(windows);
+    } catch (err) {
+      report = Promise.reject(err);
+    }
+    report.catch((err) => {
+      // Retry on the next event rather than wait out the interval.
+      if (lastSentAt === at) {
+        lastSentAt = previous.sentAt;
+        lastSent = previous.sent;
+      }
+      console.warn(
+        `[credential] Failed to stream rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  };
+}
+
 export interface CredentialOutcomeInput {
   apiUrl: string;
   apiKey: string;
