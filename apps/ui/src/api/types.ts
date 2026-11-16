@@ -3234,8 +3234,7 @@ export interface RateLimitWindow {
     Record<"durationMins" | "resetsAt" | "label" | "normalModelSlug", string>
   >;
   durationMins?: number;
-  /** `poll`: a Claude window read by the API-server quota probe, not by a session. */
-  source?: "claude" | "codex" | "poll";
+  source?: "claude" | "codex";
   limitId?: string;
   label?: string;
   /** Display metadata only: it does not prove which models the quota charges. */

@@ -125,8 +125,6 @@ export function formatPeriod(durationMins: number): string {
 }
 
 function windowSource(status: ApiKeyStatus, window: RateLimitWindow): "claude" | "codex" | null {
-  // A `poll` window is a Claude window read by the API-server quota probe.
-  if (window.source === "poll") return "claude";
   if (window.source) return window.source;
   if (status.provider === "claude") return "claude";
   return status.provider === "codex" ? "codex" : null;

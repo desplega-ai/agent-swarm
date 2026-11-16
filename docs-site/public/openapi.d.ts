@@ -6601,7 +6601,7 @@ export interface paths {
                                 };
                                 durationMins?: number;
                                 /** @enum {string} */
-                                source?: "claude" | "codex" | "poll";
+                                source?: "claude" | "codex";
                                 limitId?: string;
                                 label?: string;
                                 normalModelSlug?: string;
@@ -6944,7 +6944,7 @@ export interface paths {
                                         };
                                         durationMins?: number;
                                         /** @enum {string} */
-                                        source?: "claude" | "codex" | "poll";
+                                        source?: "claude" | "codex";
                                         limitId?: string;
                                         label?: string;
                                         normalModelSlug?: string;
