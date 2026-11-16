@@ -11,7 +11,17 @@
  *
  * For each issue, the contest pool is every open PR that targets it, except
  * bot PRs and PRs labelled `allow-duplicate`. Those are never closed and never
- * cause another PR to be closed. Drafts count. The winner is:
+ * cause another PR to be closed. Drafts count.
+ *
+ * Every time that orders the contest is the time a state began and has held
+ * since, never a creation time, so an edit after the fact cannot buy an earlier
+ * place. A PR ranks by when it started targeting the issue: the oldest body
+ * revision in its latest unbroken run of revisions that link the issue, or its
+ * latest manual link, and never before it was last reopened. A comment claims
+ * from the oldest revision in its latest unbroken run of claim revisions. A
+ * revision deleted from the edit history ends the run.
+ *
+ * The winner is:
  *   1. the earliest PR of the earliest claimant who has a PR in the pool. A claim
  *      is an issue assignment or an issue comment with a claim phrase ("I'll take
  *      it", "can I take", "assign me", "I'm working on this", ...). Unassigning a
@@ -19,8 +29,9 @@
  *      when it predates every other author's PR in the pool, so a late comment
  *      cannot close a PR that was already open.
  *   2. else the earliest maintainer PR (author association OWNER, MEMBER or
- *      COLLABORATOR): a maintainer never loses to an unclaimed contributor PR.
- *   3. else the earliest-opened PR.
+ *      COLLABORATOR, or write access to the repo): a maintainer never loses to an
+ *      unclaimed contributor PR.
+ *   3. else the PR that targeted the issue first.
  * Maintainer PRs are never closed. Every other non-winner is a loser. A PR that
  * targets several issues is closed only when it lost on one and won none.
  *
@@ -47,9 +58,30 @@ export type PullRequest = {
   authorAssociation: string;
   labels: string[];
   closingIssues: number[];
+  /** Body edit history; absent when the body was never edited. */
+  edits?: EditHistory;
+  lastEditedAt?: string | null;
+  /** Last time the PR was reopened. */
+  reopenedAt?: string | null;
+  /** Live manual links (the Development sidebar): issue and the time of its latest connect. */
+  connected?: { issue: number; at: string }[];
+  /** Author has write, maintain or admin on the repo (authorAssociation hides private org members). */
+  authorCanWrite?: boolean;
 };
 
-export type IssueComment = { author: string; authorIsBot: boolean; createdAt: string; body: string; url: string };
+/** One revision from GitHub's userContentEdits; the original body is the oldest. `text` is null when deleted. */
+export type Revision = { editedAt: string; text: string | null };
+/** `complete` is false when older revisions exist that were not fetched. */
+export type EditHistory = { revisions: Revision[]; complete: boolean };
+
+export type IssueComment = {
+  author: string;
+  authorIsBot: boolean;
+  createdAt: string;
+  body: string;
+  url: string;
+  edits?: EditHistory;
+};
 export type AssignmentEvent = { kind: "assigned" | "unassigned"; login: string; createdAt: string };
 export type Issue = {
   number: number;
@@ -75,10 +107,44 @@ export type Closure = { pr: PullRequest; losses: { issue: number; winner: number
 
 const lower = (s: string) => s.toLowerCase();
 const ts = (s: string) => Date.parse(s);
-const byCreated = (a: PullRequest, b: PullRequest) => ts(a.createdAt) - ts(b.createdAt) || a.number - b.number;
 
 export function isMaintainer(pr: PullRequest): boolean {
-  return MAINTAINER_ASSOCIATIONS.has(pr.authorAssociation);
+  return MAINTAINER_ASSOCIATIONS.has(pr.authorAssociation) || pr.authorCanWrite === true;
+}
+
+/**
+ * Since when `holds` has been true of a text, judged from its edit history:
+ * the oldest revision of the latest unbroken run that holds. Null when the
+ * current text does not hold. Never earlier than the history proves.
+ */
+export function heldSince(
+  createdAt: string,
+  current: string,
+  edits: EditHistory | undefined,
+  holds: (text: string) => boolean,
+): string | null {
+  if (!holds(current)) return null;
+  const revisions = [...(edits?.revisions ?? [])].sort((a, b) => ts(b.editedAt) - ts(a.editedAt));
+  if (revisions.length === 0) return createdAt;
+  let since = (revisions[0] as Revision).editedAt;
+  for (const r of revisions) {
+    if (r.text === null || !holds(r.text)) return since;
+    since = r.editedAt;
+  }
+  return edits?.complete ? createdAt : since;
+}
+
+/** When a PR started targeting an issue and has kept targeting it while open. */
+export function linkedSince(pr: PullRequest, issue: number, repo: string): string {
+  const times: string[] = [];
+  const body = heldSince(pr.createdAt, pr.body, pr.edits, (t) => parseLinkedIssues(t, repo).includes(issue));
+  if (body) times.push(body);
+  const manual = pr.connected?.find((c) => c.issue === issue);
+  if (manual) times.push(manual.at);
+  // Linked in a way we cannot date (a keyword only GitHub parses): the last body edit is the earliest safe time.
+  let at = times.sort((a, b) => ts(a) - ts(b))[0] ?? pr.lastEditedAt ?? pr.createdAt;
+  if (pr.reopenedAt && ts(pr.reopenedAt) > ts(at)) at = pr.reopenedAt;
+  return at;
 }
 
 export function isBot(pr: PullRequest): boolean {
@@ -150,9 +216,10 @@ export function findClaims(issue: Issue): Claim[] {
     }
   }
   for (const c of issue.comments) {
-    if (!c.authorIsBot && isClaimComment(c.body)) {
-      raw.push({ login: c.author, at: c.createdAt, kind: "comment", url: c.url });
-    }
+    if (c.authorIsBot) continue;
+    // An old comment edited into a claim claims from the edit, not from when it was posted.
+    const at = heldSince(c.createdAt, c.body, c.edits, isClaimComment);
+    if (at) raw.push({ login: c.author, at, kind: "comment", url: c.url });
   }
   // Unassigning someone voids every claim they made before it.
   const lastUnassigned = new Map<string, number>();
@@ -172,8 +239,10 @@ export function findClaims(issue: Issue): Claim[] {
 }
 
 /** Pick the PR to keep for one issue, and the PRs that lose to it. */
-export function decideIssue(issue: Issue, prs: PullRequest[]): IssueDecision {
-  const pool = prs.filter((p) => !isBot(p) && !isExempt(p)).sort(byCreated);
+export function decideIssue(issue: Issue, prs: PullRequest[], repo: string): IssueDecision {
+  const since = new Map(prs.map((p) => [p.number, ts(linkedSince(p, issue.number, repo))]));
+  const rank = (p: PullRequest) => since.get(p.number) as number;
+  const pool = prs.filter((p) => !isBot(p) && !isExempt(p)).sort((a, b) => rank(a) - rank(b) || a.number - b.number);
   const base = { issue: issue.number, pool: pool.map((p) => p.number) };
   if (pool.length === 0) return { ...base, winner: null, reason: null, losers: [] };
 
@@ -181,9 +250,9 @@ export function decideIssue(issue: Issue, prs: PullRequest[]): IssueDecision {
   let reason: WinReason | undefined;
   for (const claim of findClaims(issue)) {
     // Anyone can comment, so a comment claim made after someone else's PR
-    // opened cannot close it. Assignments come from maintainers and always count.
+    // targeted the issue cannot close it. Assignments come from maintainers and always count.
     const firstOther = pool.find((p) => lower(p.author) !== lower(claim.login));
-    if (claim.kind === "comment" && firstOther && ts(claim.at) >= ts(firstOther.createdAt)) continue;
+    if (claim.kind === "comment" && firstOther && ts(claim.at) >= rank(firstOther)) continue;
     winner = pool.find((p) => lower(p.author) === lower(claim.login));
     if (winner) {
       reason = { kind: "claim", claim };
@@ -239,7 +308,7 @@ function reasonText(reason: WinReason, winner: PullRequest | undefined): string 
     return `${who} ${how} first.`;
   }
   if (reason.kind === "maintainer") return `it comes from a maintainer and no contributor claimed the issue before them.`;
-  return "it was opened first.";
+  return "it linked the issue first.";
 }
 
 /** The comment posted on a closed PR. */
@@ -254,7 +323,7 @@ export function closeComment(closure: Closure, prsByNumber: Map<number, PullRequ
   }
   lines.push(
     "",
-    "To keep one PR per issue, the first person to claim an issue on the issue itself (a comment such as \"I'll take it\", or an assignment) keeps it. With no claim, the earliest PR stays open.",
+    "To keep one PR per issue, the first person to claim an issue on the issue itself (a comment such as \"I'll take it\", or an assignment) keeps it. With no claim, the PR that linked the issue first stays open.",
     "",
     `If this PR should stay open (for example, it takes a different approach), ask a maintainer to add the \`${EXEMPT_LABEL}\` label and reopen it.`,
   );
@@ -314,10 +383,25 @@ function makeClient(token: string) {
     });
     if (!res.ok) throw new Error(`${method} ${path}: HTTP ${res.status}: ${await res.text()}`);
   };
-  return { gql, rest };
+  // Throws on anything but 200 or 404, so a failed lookup fails the run before it closes anything.
+  const canWrite = async (owner: string, name: string, login: string) => {
+    const path = `/repos/${owner}/${name}/collaborators/${encodeURIComponent(login)}/permission`;
+    const res = await fetch(`https://api.github.com${path}`, { headers });
+    if (res.status === 404) return false;
+    if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}: ${await res.text()}`);
+    const { permission } = (await res.json()) as { permission?: string };
+    return permission === "admin" || permission === "write";
+  };
+  return { gql, rest, canWrite };
 }
 
 type GqlActor = { login: string; __typename: string } | null;
+type GqlEdits = { pageInfo: { hasPreviousPage: boolean }; nodes: { editedAt: string; diff: string | null }[] };
+const EDITS_FIELDS = "pageInfo{hasPreviousPage} nodes{editedAt diff}";
+const toHistory = (e: GqlEdits): EditHistory => ({
+  revisions: e.nodes.map((n) => ({ editedAt: n.editedAt, text: n.diff })),
+  complete: !e.pageInfo.hasPreviousPage,
+});
 
 async function fetchOpenPrs(gql: Gql, owner: string, name: string): Promise<PullRequest[]> {
   const query = `query($owner:String!,$name:String!,$cursor:String){
@@ -325,7 +409,7 @@ async function fetchOpenPrs(gql: Gql, owner: string, name: string): Promise<Pull
       pullRequests(states:OPEN,first:50,after:$cursor,orderBy:{field:CREATED_AT,direction:ASC}){
         pageInfo{hasNextPage endCursor}
         nodes{
-          number url title body createdAt isDraft authorAssociation
+          number url title body createdAt lastEditedAt isDraft authorAssociation
           author{login __typename}
           labels(first:50){nodes{name}}
           closingIssuesReferences(first:25){nodes{number repository{nameWithOwner}}}
@@ -339,6 +423,7 @@ async function fetchOpenPrs(gql: Gql, owner: string, name: string): Promise<Pull
     title: string;
     body: string;
     createdAt: string;
+    lastEditedAt: string | null;
     isDraft: boolean;
     authorAssociation: string;
     author: GqlActor;
@@ -361,6 +446,7 @@ async function fetchOpenPrs(gql: Gql, owner: string, name: string): Promise<Pull
         title: n.title,
         body: n.body ?? "",
         createdAt: n.createdAt,
+        lastEditedAt: n.lastEditedAt,
         isDraft: n.isDraft,
         author: n.author?.login ?? "ghost",
         authorIsBot: n.author?.__typename === "Bot",
@@ -383,7 +469,7 @@ async function fetchIssue(gql: Gql, owner: string, name: string, number: number)
       issue(number:$number){
         number url
         assignees(first:20){nodes{login}}
-        comments(first:100){nodes{url createdAt body author{login __typename}}}
+        comments(first:100){nodes{url createdAt body author{login __typename} userContentEdits(last:20){${EDITS_FIELDS}}}}
         timelineItems(first:100,itemTypes:[ASSIGNED_EVENT,UNASSIGNED_EVENT]){nodes{
           __typename
           ... on AssignedEvent{createdAt assignee{... on User{login} ... on Bot{login}}}
@@ -398,7 +484,9 @@ async function fetchIssue(gql: Gql, owner: string, name: string, number: number)
         number: number;
         url: string;
         assignees: { nodes: { login: string }[] };
-        comments: { nodes: { url: string; createdAt: string; body: string; author: GqlActor }[] };
+        comments: {
+          nodes: { url: string; createdAt: string; body: string; author: GqlActor; userContentEdits: GqlEdits }[];
+        };
         timelineItems: {
           nodes: { __typename: string; createdAt: string; assignee: { login?: string } | null }[];
         };
@@ -418,6 +506,7 @@ async function fetchIssue(gql: Gql, owner: string, name: string, number: number)
       createdAt: c.createdAt,
       body: c.body ?? "",
       url: c.url,
+      edits: toHistory(c.userContentEdits),
     })),
     assignments: issue.timelineItems.nodes
       .filter((e) => e.assignee?.login)
@@ -426,6 +515,59 @@ async function fetchIssue(gql: Gql, owner: string, name: string, number: number)
         login: e.assignee?.login as string,
         createdAt: e.createdAt,
       })),
+  };
+}
+
+/** Body edits, last reopen and live manual links of one PR: what `linkedSince` needs. */
+async function fetchPrHistory(
+  gql: Gql,
+  owner: string,
+  name: string,
+  number: number,
+): Promise<Pick<PullRequest, "edits" | "reopenedAt" | "connected">> {
+  // shortcut: last 100 edits (older ones only move a PR later) and last 100 reopen/link events; paginate if a PR ever has more.
+  const issueRef = "source{... on Issue{number repository{nameWithOwner}}} subject{... on Issue{number repository{nameWithOwner}}}";
+  const query = `query($owner:String!,$name:String!,$number:Int!){
+    repository(owner:$owner,name:$name){
+      pullRequest(number:$number){
+        userContentEdits(last:100){${EDITS_FIELDS}}
+        timelineItems(last:100,itemTypes:[REOPENED_EVENT,CONNECTED_EVENT,DISCONNECTED_EVENT]){nodes{
+          __typename
+          ... on ReopenedEvent{createdAt}
+          ... on ConnectedEvent{createdAt ${issueRef}}
+          ... on DisconnectedEvent{createdAt ${issueRef}}
+        }}
+      }
+    }
+  }`;
+  type Ref = { number?: number; repository?: { nameWithOwner: string } } | null;
+  type Data = {
+    repository: {
+      pullRequest: {
+        userContentEdits: GqlEdits;
+        timelineItems: { nodes: { __typename: string; createdAt: string; source?: Ref; subject?: Ref }[] };
+      };
+    };
+  };
+  const pr = (await gql<Data>(query, { owner, name, number })).repository.pullRequest;
+  const repo = lower(`${owner}/${name}`);
+  let reopenedAt: string | null = null;
+  const links = new Map<number, string>();
+  const events = [...pr.timelineItems.nodes].sort((a, b) => ts(a.createdAt) - ts(b.createdAt));
+  for (const ev of events) {
+    if (ev.__typename === "ReopenedEvent") {
+      reopenedAt = ev.createdAt;
+      continue;
+    }
+    const ref = [ev.source, ev.subject].find((r) => r?.number && lower(r.repository?.nameWithOwner ?? "") === repo);
+    if (!ref?.number) continue;
+    if (ev.__typename === "ConnectedEvent") links.set(ref.number, ev.createdAt);
+    else links.delete(ref.number);
+  }
+  return {
+    edits: toHistory(pr.userContentEdits),
+    reopenedAt,
+    connected: [...links].map(([issue, at]) => ({ issue, at })),
   };
 }
 
@@ -448,7 +590,7 @@ async function main() {
   const repoFull = process.env.GITHUB_REPOSITORY;
   if (!token || !repoFull) throw new Error("GITHUB_TOKEN and GITHUB_REPOSITORY are required.");
   const [owner, name] = repoFull.split("/") as [string, string];
-  const { gql, rest } = makeClient(token);
+  const { gql, rest, canWrite } = makeClient(token);
 
   const prs = await fetchOpenPrs(gql, owner, name);
   const prsByNumber = new Map(prs.map((p) => [p.number, p]));
@@ -472,6 +614,8 @@ async function main() {
     for (const n of closable) for (const p of prsOfIssue.get(n) ?? []) for (const m of issuesOf.get(p.number) ?? []) scope.add(m);
   }
 
+  const enriched = new Set<number>();
+  const writers = new Map<string, boolean>();
   const decisions: IssueDecision[] = [];
   for (const n of [...scope].sort((a, b) => a - b)) {
     const linked = prsOfIssue.get(n) ?? [];
@@ -481,7 +625,16 @@ async function main() {
     }
     const issue = await fetchIssue(gql, owner, name, n);
     if (!issue) continue; // `#N` is a PR or a missing issue
-    decisions.push(decideIssue(issue, linked));
+    for (const p of linked) {
+      if (enriched.has(p.number)) continue;
+      enriched.add(p.number);
+      Object.assign(p, await fetchPrHistory(gql, owner, name, p.number));
+      if (isBot(p) || MAINTAINER_ASSOCIATIONS.has(p.authorAssociation)) continue;
+      const login = lower(p.author);
+      if (!writers.has(login)) writers.set(login, await canWrite(owner, name, p.author));
+      p.authorCanWrite = writers.get(login);
+    }
+    decisions.push(decideIssue(issue, linked, repoFull));
   }
   const closures = planClosures(decisions, prsByNumber, closable);
 
