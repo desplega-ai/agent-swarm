@@ -15,7 +15,7 @@ With pools disabled, existing workers keep their registration and poll behavior.
 | --- | --- |
 | Agent | Durable identity, profile, credentials, task queue, and logical `maxTasks` limit. |
 | Pool | Infrastructure kind, controller placement, worker image, delivery mode, lifecycle, and capacity limits. |
-| Controller | Starts and stops runtimes through Docker, E2B, or boxd. A built-in controller runs inside the API. A remote controller runs elsewhere. |
+| Controller | Starts and stops runtimes through Docker, E2B, boxd, or kosa8. A built-in controller runs inside the API. A remote controller runs elsewhere. |
 | Runtime | One worker process serving an agent. It has its own identity, slots, liveness record, and scoped credential. |
 
 An agent binds to one pool. A pool has one controller placement in this release.
@@ -25,7 +25,7 @@ Workspace files remain local to each runtime unless the pool sets a [persistent 
 ## Recommended topology
 
 Keep one Lead on a `static` pool with `delivery: "poll"`. Operators manage static workers themselves.
-Put coding agents on a `docker`, `e2b`, or `boxd` pool with `delivery: "push"` and on-demand capacity.
+Put coding agents on a `docker`, `e2b`, `boxd`, or `kosa8` pool with `delivery: "push"` and on-demand capacity.
 Use `minRuntimes: 0` to permit an agent to sleep when no work remains.
 
 The router first selects an eligible live worker with free capacity.
@@ -121,7 +121,7 @@ controller's target, placement or credentials, or deleting the controller.
 Deferred cleanup errors appear in the API logs and
 `runtime_cache_releases.last_error`; upgrade older controllers to complete cleanup.
 
-Static, E2B and boxd pools currently reject this setting. Controllers declare
+Static, E2B, boxd and kosa8 pools currently reject this setting. Controllers declare
 `persistentCache` separately from `ephemeralDisk`; an older Docker controller
 starts without the cache and reports the reason in the pool's `lastError`.
 A failed volume preparation also falls back without cache and reports a warning.
@@ -153,6 +153,7 @@ the size a new claim gets.
 | `k8s` | Yes, a `ReadWriteOncePod` PersistentVolumeClaim per workspace, `sizeGb` (default 20) Gi. Needs Kubernetes 1.29+ and a CSI driver that supports the access mode. Set `K8S_STORAGE_CLASS` on the controller to pick the storage class, and grant the API `get` and `create` on `persistentvolumeclaims`. |
 | `e2b` | No. E2B volumes are in private beta and E2B advises against Git and package installs on them. Pause and resume already keep the sandbox disk. |
 | `boxd` | Not yet. |
+| `kosa8` | Not yet. |
 | `static` | Not applicable. The operator owns the worker's disk. |
 
 The API rejects a workspace on an unsupported kind.
@@ -293,6 +294,26 @@ boxd snapshots save swarm-base swarm-worker-slim
 boxd machine remove swarm-base --confirm
 ```
 
+## kosa8 pools
+
+Choose `kind: "kosa8"` with a kosa8 controller and an HTTPS API URL reachable by the sandbox.
+Each runtime is one [kosa8](https://kosa8.com) Cloud sandbox, a microVM booted from the pool `image` itself, with no Docker daemon in between.
+Use the same worker images as Docker pools.
+Set `KOSA8_API_KEY` on the API and restart it to seed an online `builtin-kosa8` controller. Other controllers store the key in their encrypted secret configuration.
+For setup, snapshots, and limits, see [kosa8 runtime provider](/docs/guides/kosa8-runtime-provider).
+
+| Controller setting | Behavior |
+| --- | --- |
+| `KOSA8_SNAPSHOT` | Start each sandbox from this snapshot (`snap_…`) instead of booting the image. The snapshot's size and region apply. |
+| `KOSA8_DELETE_AFTER_SEC` | Delete each sandbox this many seconds after creation, in any state (60 to 7776000). A safety net for per-task pools. |
+| `KOSA8_REGION` | `us-ash1`, `eu-hel1`, or the area alone (`us`, `eu`). Default: the org's region. |
+| `KOSA8_API_URL` | Another kosa8 API endpoint. Default `https://api.kosa8.com`. |
+| `KOSA8_START_TIMEOUT_SEC` | Seconds the cold boot may take, image pull included. Default 600. |
+| `KOSA8_TEARDOWN_TIMEOUT_SEC` | Seconds terminate waits for kosa8 to confirm the sandbox is gone. Default 30. |
+
+Pool `resources` select the smallest size that covers them: 2 vCPU and 4 GiB, 4 and 8, 8 and 16, or 16 and 32.
+Sandboxes never sleep on their own and have no lease. They run until the supervisor terminates them, so keep the API running or set `KOSA8_DELETE_AFTER_SEC`.
+
 ## Remote controllers
 
 Use a remote controller when the API cannot reach the infrastructure that starts workers.
@@ -360,7 +381,7 @@ docker compose logs -f swarm-controller
 ```
 
 For an E2B controller, set `--kind e2b`, remove the Docker flags and the socket volume, and add `E2B_API_KEY` to `environment`.
-For a boxd controller, set `--kind boxd` and add `BOXD_API_KEY` instead. Like E2B, the controller checks for an HTTPS worker URL in its own environment, so also set `MCP_BASE_URL` to the public API URL.
+For a boxd controller, set `--kind boxd` and add `BOXD_API_KEY` instead; for a kosa8 controller, set `--kind kosa8` and add `KOSA8_API_KEY`. Like E2B, the controller checks for an HTTPS worker URL in its own environment, so also set `MCP_BASE_URL` to the public API URL.
 
 **systemd.** Run the CLI with Bun under a dedicated user in the `docker` group.
 Membership in the `docker` group gives root-equivalent access to the host, so keep this user for the controller only.

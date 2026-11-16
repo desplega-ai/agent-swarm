@@ -7102,6 +7102,7 @@
               "docker",
               "e2b",
               "boxd",
+              "kosa8",
               "k8s"
             ]
           },
@@ -7433,6 +7434,7 @@
               "docker",
               "e2b",
               "boxd",
+              "kosa8",
               "k8s"
             ]
           },
@@ -76656,6 +76658,7 @@
                       "docker",
                       "e2b",
                       "boxd",
+                      "kosa8",
                       "k8s"
                     ]
                   },
@@ -76978,6 +76981,7 @@
                       "docker",
                       "e2b",
                       "boxd",
+                      "kosa8",
                       "k8s"
                     ]
                   },
@@ -77570,6 +77574,7 @@
                       "docker",
                       "e2b",
                       "boxd",
+                      "kosa8",
                       "k8s"
                     ]
                   },
@@ -77783,6 +77788,7 @@
                       "docker",
                       "e2b",
                       "boxd",
+                      "kosa8",
                       "k8s"
                     ]
                   },

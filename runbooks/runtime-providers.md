@@ -47,7 +47,7 @@ Commands carry an ID, operation, and payload. Results carry the same ID and succ
 Provision commands use `RUNTIME_PROVISION_TIMEOUT_SEC`, with a default of 300 seconds.
 Other commands have a 60-second timeout. A timeout fails only that command and preserves the socket.
 The remote protocol includes renewal, pause, and resume for E2B lease management.
-The remote controller CLI accepts static, Docker, E2B, and boxd providers. Kubernetes requires a built-in controller.
+The remote controller CLI accepts static, Docker, E2B, boxd, and kosa8 providers. Kubernetes requires a built-in controller.
 The API pings every 15 seconds and checks token validity.
 The CLI client also pings every 15 seconds. It drops a socket that receives no frame (message, ping, or pong) for 45 seconds and reconnects, so a network cut is detected within 60 seconds.
 A new authenticated session replaces the previous session for that controller.
@@ -84,6 +84,7 @@ They do not increment provision failures, apply backoff, or change the pool circ
 | `docker` | `DockerRuntimeProvider` | Creates and starts worker containers through a local Unix socket. |
 | `e2b` | `E2BRuntimeProvider` | Creates worker sandboxes and starts `/docker-entrypoint.sh` as a tracked background process. |
 | `boxd` | `BoxdRuntimeProvider` | Creates isolated boxd microVMs and runs the worker image in each machine's Docker daemon. |
+| `kosa8` | `Kosa8RuntimeProvider` | Creates kosa8 Cloud microVM sandboxes booted from the worker image and starts `/docker-entrypoint.sh` as a background command. |
 | `k8s` | `KubernetesRuntimeProvider` | Creates worker pods through a built-in controller using the Kubernetes API. |
 
 Kubernetes controllers require `placement: "builtin"`. Remote Kubernetes controllers remain unsupported.
@@ -183,9 +184,9 @@ The controller sets `handle.controllerId`. Adapters never set it.
 
 Controllers supply a stable `ownerId` for their swarm. Keep this value stable across restarts.
 Adapters stamp `swarm.owner`, `swarm.runtime-id`, `swarm.pool-id`, and `swarm.agent-id` on every created runtime.
-These labels override user labels. Docker uses container labels, E2B uses sandbox metadata, and boxd uses machine labels.
+These labels override user labels. Docker uses container labels, E2B uses sandbox metadata, boxd uses machine labels, and kosa8 uses sandbox labels.
 Listing requires both the runtime label and the matching owner label. Runtimes without an owner label remain excluded.
-Two swarms on one Docker host, E2B team, or boxd org must use different owner IDs.
+Two swarms on one Docker host, E2B team, boxd org, or kosa8 org must use different owner IDs.
 Termination and status use explicit handles. Controllers must obtain those handles from their own records or owner-filtered lists.
 
 ## k8s
@@ -362,7 +363,7 @@ Pools accept `cache: { mountPath: "/home/worker/.cache" }` or `null` (the defaul
 `RuntimeProviderTraits.persistentCache` is optional; absent means unsupported.
 The supervisor passes `ProvisionRequest.cache: { key, mountPath }`
 only to a controller that advertises the capability. The working disk still has
-`ephemeralDisk: true`. Docker is the first supported adapter; static, E2B, and boxd
+`ephemeralDisk: true`. Docker is the first supported adapter; static, E2B, boxd, and kosa8
 reject cache configuration until their adapters implement it.
 
 Docker creates the named volume with authoritative `swarm.owner`, `swarm.pool-id`,
@@ -538,6 +539,44 @@ Pause suspends the machine to RAM. Resume wakes a suspended or hibernated machin
 The supervisor does not pause boxd runtimes in this release.
 The adapter keeps one SDK client per credential, because boxd rate-limits key exchanges.
 
+## kosa8
+
+`KOSA8_API_KEY` is required. The key selects its org. `KOSA8_API_URL` selects another API endpoint (default `https://api.kosa8.com`).
+`KOSA8_REGION` picks a region (`us-ash1`, `eu-hel1`, or `us` / `eu`); without it, kosa8 uses the org default.
+Worker URLs must use HTTPS and use the same resolver as E2B.
+With `KOSA8_API_KEY` in the API environment, seeding creates a `builtin-kosa8` controller and copies that key into its encrypted configuration.
+Without the key, seeding creates no kosa8 controller. Other controllers require their own stored key.
+The API environment's `KOSA8_API_URL`, `KOSA8_REGION`, `KOSA8_SNAPSHOT`, `KOSA8_DELETE_AFTER_SEC`,
+`KOSA8_START_TIMEOUT_SEC`, and `KOSA8_TEARDOWN_TIMEOUT_SEC` apply only to the builtin kosa8 controller.
+Controller config overrides these defaults. Other kosa8 controllers set these values in controller config.
+
+Each runtime is one sandbox named `swarm-rt-<runtime-id>`, a microVM booted from the pool image (no Docker daemon in between).
+The worker env is set on the sandbox at create. kosa8 keeps the values on the sandbox's host and never logs or returns them; the command line carries none.
+kosa8 takes at most 64 env vars per sandbox, so a larger worker env fails the provision before anything is created.
+Sleep is off (`sleep_after_s: 0`), because a sleeping worker cannot receive work.
+The adapter labels the sandbox before the cold boot, so `list` finds it while it boots, then waits for it to run.
+It starts `/docker-entrypoint.sh` in `/workspace` as a background command. The worker's output goes to `/workspace/.swarm-worker.log`.
+The adapter stores the background command's id in the `kosa8.worker-exec` label.
+If any step after create fails (labels, boot, or the worker start), the adapter deletes the sandbox before it returns the original error.
+`KOSA8_START_TIMEOUT_SEC` bounds the cold boot, image pull included (default 600).
+
+Pool `resources` select the smallest kosa8 size that covers them: 2 vCPU and 4 GiB, 4 and 8, 8 and 16, or 16 and 32.
+Larger requests fail. Without `resources`, kosa8 boots the image at 2 vCPU and 4 GiB.
+`KOSA8_SNAPSHOT` (a `snap_…` id) starts each sandbox from a snapshot instead of booting the image. The snapshot's size and region apply and pool `resources` and `KOSA8_REGION` are ignored.
+Take the snapshot from a sandbox booted from the worker image before any worker runs in it: a snapshot holds memory and processes too.
+`KOSA8_DELETE_AFTER_SEC` (60 to 7776000) sets a lifetime after which kosa8 deletes the sandbox in any state.
+Use it as a safety net for per-task pools. An idle runtime that outlives it is deleted and recovered.
+
+Status reads the sandbox. A missing, deleted, or stopped sandbox reports `exited`. `creating` reports `starting`. Sleeping and paused sandboxes report `paused`. `error` and `host_lost` report `failed`.
+A running sandbox reports its worker command: `running`, `exited` for exit code 0, or `failed` for other exit codes. Without the `kosa8.worker-exec` label it reports `starting`.
+A worker lookup that fails reports `unknown`. Authentication and transport failures on the sandbox lookup remain errors.
+The worker is read only while the sandbox runs, because reading a sleeping sandbox's command wakes it.
+`list` filters sandboxes by the runtime label and the owner label, server-side, and skips deleted ones.
+Terminate deletes the sandbox, then waits until the lookup reports it missing or deleted, up to `KOSA8_TEARDOWN_TIMEOUT_SEC` (default 30).
+A lookup that still finds it at that point, or fails for another reason, fails the terminate so the supervisor retries it; a repeated terminate is safe.
+Pause sleeps the sandbox: kosa8 saves memory, processes, and disk and frees its RAM. Resume wakes it, and the worker continues where it was.
+The supervisor does not pause kosa8 runtimes in this release.
+
 ## Adding a provider
 
 1. Add the kind to `RuntimeProviderKindSchema` in `src/types.ts`.
@@ -553,7 +592,7 @@ Any change to this contract requires a runbook update in the same PR.
 ## Verification
 
 ```bash
-bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts src/tests/runtime-providers-boxd.test.ts
+bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts src/tests/runtime-providers-boxd.test.ts src/tests/runtime-providers-kosa8.test.ts
 bash scripts/check-db-boundary.sh
 bun run lint
 bun run tsc:check:tsc
@@ -572,6 +611,7 @@ The script exits unsuccessfully unless the task completes and its runtime disapp
 Omit `--owner-id` to generate an isolated owner. Use `--keep` to inspect the runtime after the task.
 Optional E2B smoke uses `--provider e2b`, an E2B template, and an HTTPS URL reachable by the sandbox.
 Optional boxd smoke uses `--provider boxd`, `BOXD_API_KEY` in the environment, a worker image, and an HTTPS URL reachable by the machine.
+Optional kosa8 smoke uses `--provider kosa8`, `KOSA8_API_KEY` in the environment, a worker image, and an HTTPS URL reachable by the sandbox.
 
 ## Push delivery
 

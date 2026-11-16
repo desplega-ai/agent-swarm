@@ -3,7 +3,9 @@ import type { RuntimeProvider, RuntimeProviderKind, RuntimeTargetConfig } from "
 export type * from "./types";
 
 export function canProvisionKind(kind: RuntimeProviderKind): boolean {
-  return kind === "docker" || kind === "e2b" || kind === "boxd" || kind === "k8s";
+  return (
+    kind === "docker" || kind === "e2b" || kind === "boxd" || kind === "kosa8" || kind === "k8s"
+  );
 }
 
 /**
@@ -31,13 +33,17 @@ export async function createRuntimeProvider(
       const { BoxdRuntimeProvider } = await import("./boxd");
       return new BoxdRuntimeProvider();
     }
+    case "kosa8": {
+      const { Kosa8RuntimeProvider } = await import("./kosa8");
+      return new Kosa8RuntimeProvider();
+    }
     case "k8s": {
       const { KubernetesRuntimeProvider } = await import("./k8s");
       return new KubernetesRuntimeProvider();
     }
     default:
       throw new Error(
-        `Unknown runtime provider: "${kind}". Supported: static, docker, e2b, boxd, k8s`,
+        `Unknown runtime provider: "${kind}". Supported: static, docker, e2b, boxd, kosa8, k8s`,
       );
   }
 }

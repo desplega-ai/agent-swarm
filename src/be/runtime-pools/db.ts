@@ -160,6 +160,16 @@ export async function getRuntimeControllerTarget(
           BOXD_TEARDOWN_TIMEOUT_SEC: env.BOXD_TEARDOWN_TIMEOUT_SEC,
         }
       : {}),
+    ...(controller.kind === "kosa8" && controller.placement === "builtin"
+      ? {
+          KOSA8_API_URL: env.KOSA8_API_URL,
+          KOSA8_REGION: env.KOSA8_REGION,
+          KOSA8_SNAPSHOT: env.KOSA8_SNAPSHOT,
+          KOSA8_DELETE_AFTER_SEC: env.KOSA8_DELETE_AFTER_SEC,
+          KOSA8_START_TIMEOUT_SEC: env.KOSA8_START_TIMEOUT_SEC,
+          KOSA8_TEARDOWN_TIMEOUT_SEC: env.KOSA8_TEARDOWN_TIMEOUT_SEC,
+        }
+      : {}),
     ...controller.config,
     ...secrets,
     KUBERNETES_SERVICE_HOST: env.KUBERNETES_SERVICE_HOST,

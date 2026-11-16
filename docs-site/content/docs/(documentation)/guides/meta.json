@@ -70,6 +70,7 @@
     "x402-payments",
     "multi-runtime-agents",
     "runtime-pools",
-    "boxd-runtime-provider"
+    "boxd-runtime-provider",
+    "kosa8-runtime-provider"
   ]
 }

@@ -2539,7 +2539,14 @@ export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisi
 /**
  * Infrastructure kind a runtime pool provisions on.
  */
-export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "boxd", "k8s"]);
+export const RuntimeProviderKindSchema = z.enum([
+  "static",
+  "docker",
+  "e2b",
+  "boxd",
+  "kosa8",
+  "k8s",
+]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
 
 export const DeliveryModeSchema = z.enum(["poll", "push"]);

@@ -230,6 +230,7 @@
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
     "@json-render/chat": "0.22.0",
     "@json-render/core": "0.22.0",
+    "@kosa8/sdk": "0.4.0",
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@openai/codex": "0.169.0",

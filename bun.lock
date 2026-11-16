@@ -28,6 +28,7 @@
         "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
         "@json-render/chat": "0.22.0",
         "@json-render/core": "0.22.0",
+        "@kosa8/sdk": "0.4.0",
         "@linear/sdk": "^77.0.0",
         "@modelcontextprotocol/sdk": "1.32.1",
         "@openai/codex": "0.169.0",
@@ -758,6 +759,8 @@
     "@json-render/react": ["@json-render/react@0.19.0", "", { "dependencies": { "@json-render/core": "0.19.0" }, "peerDependencies": { "react": "^19.2.3" } }, "sha512-kTW6b6cSNRrlEfCUf/69SLoLn+CufC968ruge9tnQlp9pDTGG/SK8pgM541FdgwMFA4zm3s5mpM3G8rdODKc/A=="],
 
     "@konsistent/convention": ["@konsistent/convention@1.0.0-beta.1", "", { "dependencies": { "citty": "^0.2", "jiti": "^2" }, "peerDependencies": { "zod": "^4" }, "bin": { "konsistent-convention": "./dist/cli.js" } }, "sha512-MidQWenua30khP6/8CDWsy6vVBQQBFj9SgC4IKE8r3+6fRWrnBklWsT9r7ndGC/VQtlb+8WMZUIRIBhZK26k6w=="],
+
+    "@kosa8/sdk": ["@kosa8/sdk@0.4.0", "", {}, "sha512-y4eishNTbYrroYBKudTl1lMaQhRAMs0LHObKHSlThIjcep/8QELQw60ydqUzhp7ufj631tJcd42XPujzHpTGaA=="],
 
     "@libsql/client": ["@libsql/client@0.15.15", "", { "dependencies": { "@libsql/core": "^0.15.14", "@libsql/hrana-client": "^0.7.0", "js-base64": "^3.7.5", "libsql": "^0.5.22", "promise-limit": "^2.7.0" } }, "sha512-twC0hQxPNHPKfeOv3sNT6u2pturQjLcI+CnpTM0SjRpocEGgfiZ7DWKXLNnsothjyJmDqEsBQJ5ztq9Wlu470w=="],
 

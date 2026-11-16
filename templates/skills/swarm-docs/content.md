@@ -137,6 +137,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Multi-runtime agents](https://docs.agent-swarm.dev/docs/guides/multi-runtime-agents). Reference.
 - [Runtime pools (beta)](https://docs.agent-swarm.dev/docs/guides/runtime-pools). Reference.
 - [boxd runtime provider](https://docs.agent-swarm.dev/docs/guides/boxd-runtime-provider). Reference.
+- [kosa8 runtime provider](https://docs.agent-swarm.dev/docs/guides/kosa8-runtime-provider). Reference.
 - [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-delivery-delay-handoff). Reference.
 - [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-service-capacity-planning). Reference.
 - [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/guides/maintenance-work-order-triage). Reference.

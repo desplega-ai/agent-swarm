@@ -631,6 +631,10 @@ boxd requires `BOXD_API_KEY` and an HTTPS worker URL. A deployment `BOXD_API_KEY
 boxd machines have no lease, so `BOXD_DELETE_AFTER_SEC` in controller configuration is the safety net when the API stops.
 See the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md#boxd) for details.
 
+kosa8 requires `KOSA8_API_KEY` and an HTTPS worker URL. A deployment `KOSA8_API_KEY` seeds the `builtin-kosa8` controller; without it, seeding creates no kosa8 controller.
+kosa8 sandboxes have no lease, so `KOSA8_DELETE_AFTER_SEC` in controller configuration is the safety net when the API stops.
+See the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md#kosa8) for details.
+
 The routing and wake settings accept nonnegative integers. Zero permits an immediate wake or reroute.
 For the routing interval, zero uses the default. Positive values below 500 use 500 milliseconds.
 Negative or invalid deployment values use the default interval.

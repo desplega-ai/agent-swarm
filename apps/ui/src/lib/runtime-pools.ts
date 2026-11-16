@@ -25,6 +25,7 @@ export const RUNTIME_PROVIDER_KINDS: readonly RuntimeProviderKind[] = [
   "docker",
   "e2b",
   "boxd",
+  "kosa8",
   "k8s",
 ];
 
@@ -33,6 +34,7 @@ export const RUNTIME_KIND_LABEL: Record<RuntimeProviderKind, string> = {
   docker: "Docker",
   e2b: "E2B",
   boxd: "boxd",
+  kosa8: "kosa8",
   k8s: "Kubernetes",
 };
 
@@ -41,6 +43,7 @@ export const RUNTIME_KIND_DESCRIPTION: Record<RuntimeProviderKind, string> = {
   docker: "Containers on a Docker host.",
   e2b: "E2B cloud sandboxes.",
   boxd: "boxd microVMs that run the worker image.",
+  kosa8: "kosa8 Cloud microVMs booted from the worker image.",
   k8s: "Worker pods in a Kubernetes namespace, managed by the swarm API.",
 };
 
