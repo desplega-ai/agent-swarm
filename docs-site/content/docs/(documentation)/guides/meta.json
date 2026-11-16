@@ -20,6 +20,7 @@
     "ai-returns-exception-handoff",
     "supplier-security-evidence-review",
     "privacy-data-request-handoff",
+    "guest-accessibility-request-handoff",
     "supplier-performance-review",
     "food-supplier-ingredient-change-review",
     "ai-rfp-bid-qualification",
