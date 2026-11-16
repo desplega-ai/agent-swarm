@@ -188,15 +188,15 @@ export const designSystem: Scenario = {
       const seeded = asRecord(run.result);
       expect(seeded.saved === false, `seed does not save by default: ${JSON.stringify(seeded).slice(0, 300)}`);
       const previewApiUrl = asString(seeded.previewApiUrl, "preview api url");
-      const preview = ctx.db.get<{ theme: string | null; theme_tokens: string | null; auth_mode: string }>(
-        "SELECT theme, theme_tokens, auth_mode FROM pages WHERE id = ?",
+      const preview = ctx.db.get<{ theme: string | null; theme_tokens: string | null; authMode: string }>(
+        "SELECT theme, theme_tokens, authMode FROM pages WHERE id = ?",
         [previewApiUrl.slice(previewApiUrl.lastIndexOf("/") + 1)],
       );
       expect(
         preview?.theme === "hive" && String(preview.theme_tokens).includes('"--radius-xl":"0.75rem"'),
         `the preview page carries the seeded tokens: ${JSON.stringify(preview)}`,
       );
-      expect(preview?.auth_mode === "authed", "the preview page is not public");
+      expect(preview?.authMode === "authed", "the preview page is not public");
       expect((await stateOf(ctx)).status === "active", "the seed left the saved record alone");
     } finally {
       // Leave no brand behind: declined styles nothing and stops the ask for later scenarios.
