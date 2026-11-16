@@ -9,6 +9,7 @@ import { closeDb, getDbClient, getKeyStatuses, initDb, recordKeyRateLimitWindows
 import {
   CLAUDE_QUOTA_KEY_TYPE,
   parseQuotaProbeHeaders,
+  resetClaudeQuotaProbeCooldowns,
   selectDueQuotaProbeKeys,
   sweepClaudeQuotaProbe,
 } from "../http/claude-quota-probe";
@@ -233,6 +234,7 @@ describe("sweepClaudeQuotaProbe", () => {
 
   beforeEach(async () => {
     calls.length = 0;
+    resetClaudeQuotaProbeCooldowns();
     await getDbClient().run("DELETE FROM api_key_status");
   });
 
@@ -345,5 +347,36 @@ describe("sweepClaudeQuotaProbe", () => {
     });
     expect(result.outcomes.no_data).toBe(1);
     expect((await windowsOf("00001"))?.rateLimitWindows).toEqual(before!);
+  });
+
+  test("400: logs the status and body, then cools the key down for 30 minutes", async () => {
+    await seed("00001", 0);
+    const rejected = () =>
+      new Response('{"error":{"message":"only authorized for use with Claude Code"}}', {
+        status: 400,
+      });
+    const first = await sweepClaudeQuotaProbe({
+      now: () => NOW,
+      fetchImpl: fetchReturning({ "tok-key-00001": rejected() }),
+    });
+    expect(first.outcomes.error).toBe(1);
+    expect(first.failed).toEqual([
+      '...00001: HTTP 400: {"error":{"message":"only authorized for use with Claude Code"}}',
+    ]);
+
+    // Next tick: still stale and open, but inside the cooldown.
+    const second = await sweepClaudeQuotaProbe({
+      now: () => NOW + 5 * 60_000,
+      fetchImpl: fetchReturning({ "tok-key-00001": rejected() }),
+    });
+    expect(second).toMatchObject({ due: 0, probed: 0 });
+
+    // After the cooldown the key is probed again.
+    const third = await sweepClaudeQuotaProbe({
+      now: () => NOW + 31 * 60_000,
+      fetchImpl: fetchReturning({ "tok-key-00001": rejected() }),
+    });
+    expect(third.probed).toBe(1);
+    expect(calls).toHaveLength(2);
   });
 });

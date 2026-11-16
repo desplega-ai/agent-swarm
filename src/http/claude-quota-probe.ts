@@ -13,6 +13,7 @@
  * - Probe only keys whose five_hour value is older than 15 minutes, and skip a
  *   key with a rejected window until that window resets.
  * - At most 10 keys per tick, oldest observation first.
+ * - After an `error` result, skip that key for 30 minutes.
  * - A missing header is no data. It never becomes 0 %.
  *
  * Kill switch: CLAUDE_QUOTA_PROBE_DISABLE=true. Model: CLAUDE_QUOTA_PROBE_MODEL.
@@ -31,6 +32,14 @@ export const CLAUDE_QUOTA_PROBE_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 export const CLAUDE_QUOTA_PROBE_MAX_PER_TICK = 10;
 /** A five_hour value older than this is stale and due for a probe. */
 export const CLAUDE_QUOTA_STALE_MS = 15 * 60 * 1000;
+/**
+ * After a probe ends in `error` (unexpected HTTP status, network failure,
+ * timeout), skip that key for this long. 30 minutes is 6 ticks: a systematic
+ * failure (400, 404 for a retired model) costs 1 request per key per half
+ * hour instead of 1 per tick, and a transient 5xx still recovers well inside
+ * the 5-hour window.
+ */
+export const CLAUDE_QUOTA_ERROR_COOLDOWN_MS = 30 * 60 * 1000;
 
 const PROBE_URL = "https://api.anthropic.com/v1/messages";
 const PROBE_TIMEOUT_MS = 15_000;
@@ -152,6 +161,14 @@ export interface ClaudeQuotaProbeDeps {
   model?: string;
 }
 
+/** keySuffix -> epoch ms until which the key is not probed after an `error`. */
+const errorCooldownUntil = new Map<string, number>();
+
+/** Test hook: forget every error cooldown. */
+export function resetClaudeQuotaProbeCooldowns(): void {
+  errorCooldownUntil.clear();
+}
+
 function probeModel(): string {
   return process.env.CLAUDE_QUOTA_PROBE_MODEL?.trim() || CLAUDE_QUOTA_PROBE_DEFAULT_MODEL;
 }
@@ -161,7 +178,7 @@ async function probeKey(
   fetchImpl: typeof fetch,
   model: string,
   now: () => number,
-): Promise<QuotaProbeOutcome> {
+): Promise<Exclude<QuotaProbeOutcome, "error">> {
   const res = await fetchImpl(PROBE_URL, {
     method: "POST",
     headers: {
@@ -177,8 +194,8 @@ async function probeKey(
     }),
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
-  // The text is not used; drain it so the connection is released.
-  await res.text().catch(() => "");
+  // Drain the body so the connection is released; keep it for the error text.
+  const body = await res.text().catch(() => "");
 
   if (res.status === 401 || res.status === 403) {
     // Key status only, no windows. recordKeyValidation keeps its rule that
@@ -199,7 +216,9 @@ async function probeKey(
     );
     return "auth_failed";
   }
-  if (!res.ok && res.status !== 429) return "error";
+  if (!res.ok && res.status !== 429) {
+    throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
 
   const lastSeenAt = new Date(now()).toISOString();
   const parsed = parseQuotaProbeHeaders(res.headers, res.status, lastSeenAt);
@@ -236,7 +255,14 @@ export async function sweepClaudeQuotaProbe(
   const { members } = await readPool(CLAUDE_QUOTA_KEY_TYPE);
   if (members.length === 0) return { members: 0, due: 0, probed: 0, outcomes, failed };
   const statuses = await getKeyStatuses(CLAUDE_QUOTA_KEY_TYPE, "global", null);
-  const due = selectDueQuotaProbeKeys(members, statuses, now());
+  const nowMs = now();
+  for (const [suffix, until] of errorCooldownUntil) {
+    if (until <= nowMs) errorCooldownUntil.delete(suffix);
+  }
+  // Drop cooling-down keys before the per-tick cap so they do not take a slot.
+  const due = selectDueQuotaProbeKeys(members, statuses, nowMs, Number.POSITIVE_INFINITY)
+    .filter((candidate) => !errorCooldownUntil.has(candidate.keySuffix))
+    .slice(0, CLAUDE_QUOTA_PROBE_MAX_PER_TICK);
 
   let probed = 0;
   for (const candidate of due) {
@@ -244,9 +270,9 @@ export async function sweepClaudeQuotaProbe(
     try {
       const outcome = await probeKey(candidate, fetchImpl, model, now);
       outcomes[outcome]++;
-      if (outcome === "error") failed.push(`...${candidate.keySuffix}: unexpected HTTP status`);
     } catch (err) {
       outcomes.error++;
+      errorCooldownUntil.set(candidate.keySuffix, now() + CLAUDE_QUOTA_ERROR_COOLDOWN_MS);
       const message = err instanceof Error ? err.message : String(err);
       failed.push(scrubSecrets(`...${candidate.keySuffix}: ${message}`));
     }
