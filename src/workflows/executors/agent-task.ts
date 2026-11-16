@@ -12,6 +12,7 @@ import {
   RoutingReasonSchema,
   splitLegacyModelAlias,
 } from "../../types";
+import { getNodeEnv } from "../../utils/node-env";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
@@ -185,7 +186,7 @@ export class AgentTaskExecutor extends BaseExecutor<
  * e2e scenario workflow-agent-task-crash-window sets it for one restart.
  */
 function crashAfterTaskInsertForTest(description: string): void {
-  if (process.env.NODE_ENV !== "test") return;
+  if (getNodeEnv() !== "test") return;
   const marker = process.env.E2E_CRASH_AFTER_WORKFLOW_TASK_INSERT;
   if (marker && description.includes(marker)) process.kill(process.pid, "SIGKILL");
 }
