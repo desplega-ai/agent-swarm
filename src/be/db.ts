@@ -169,6 +169,7 @@ import {
   checkIdentityFieldBudget,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { keyUsageFromWindows } from "../utils/key-usage";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
 import {
@@ -11955,6 +11956,11 @@ export interface AvailableKeyIndicesResult {
   /** Rate-limited indices whose limit is a provider spend cap: no retry helps before it resets. */
   spendCappedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
+  /**
+   * Usage per pool position (`keyUsageFromWindows`: max of the live 5h and 7d
+   * utilization, 0 when unobserved or reset). Ranks admissible keys only.
+   */
+  keyUsage: number[];
 }
 
 /**
@@ -12087,6 +12093,16 @@ export async function getAvailableKeyIndices(
     availableIndices.push(i);
   }
 
+  // A position several rows apply to (one key pooled in several scopes) takes the highest reading.
+  const keyUsage = new Array<number>(totalKeys).fill(0);
+  for (const row of rows) {
+    const usage = keyUsageFromWindows(parseRateLimitWindowsJson(row.rateLimitWindows), nowMs);
+    if (usage === 0) continue;
+    for (const i of positionsOf(row)) {
+      if (i >= 0 && i < totalKeys) keyUsage[i] = Math.max(keyUsage[i]!, usage);
+    }
+  }
+
   return {
     availableIndices,
     rejectedIndices,
@@ -12098,6 +12114,7 @@ export async function getAvailableKeyIndices(
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()
         : null,
     authFailureFence: Math.max(0, ...rows.map((r) => r.authFailureSeq)),
+    keyUsage,
   };
 }
 

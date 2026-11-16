@@ -21059,6 +21059,12 @@
                     },
                     "authFailureFence": {
                       "type": "integer"
+                    },
+                    "keyUsage": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
                     }
                   },
                   "required": [
@@ -21066,7 +21072,8 @@
                     "availableIndices",
                     "totalKeys",
                     "spendCappedIndices",
-                    "authFailureFence"
+                    "authFailureFence",
+                    "keyUsage"
                   ]
                 }
               }

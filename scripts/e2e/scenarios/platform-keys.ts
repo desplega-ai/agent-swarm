@@ -46,6 +46,7 @@ async function available(ctx: ScenarioContext, query: string) {
     earliestModelResetAt?: string | null;
     seatBlockedIndices?: number[];
     spendCappedIndices: number[];
+    keyUsage: number[];
   };
 }
 
@@ -607,6 +608,14 @@ export const platformKeys: Scenario = {
       "other families are unaffected",
     );
     expect(
+      forHaiku.keyUsage.join() === "0.4,0",
+      "available ranks keys by live 5h/7d usage, model windows aside, unobserved as 0",
+    );
+    expect(
+      forOpus.keyUsage.join() === "0.4,0",
+      "keyUsage covers every pool position, also a model-blocked one",
+    );
+    expect(
       (await available(ctx, `keyType=${keyType}&totalKeys=2`)).modelBlockedIndices === undefined,
       "model fields are only present when a model is asked for",
     );
@@ -967,7 +976,8 @@ export const platformPoolKeys: Scenario = {
         "keys",
       );
       expect(
-        cappedPool[0]?.status === "spend_capped" && asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
+        cappedPool[0]?.status === "spend_capped" &&
+          asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
         "the pool view shows the spend cap",
       );
       await report(ctx, "clear-rate-limit", { keyType: NAN_KEY, keySuffix: goodSuffix });

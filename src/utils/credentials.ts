@@ -7,6 +7,7 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import { deriveDefaultRoute, routeCredentialStatus } from "@desplega/model-routing";
+import { pickLowestUsage } from "./key-usage";
 import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
 /** Env vars that may contain comma-separated credential pools */
@@ -307,12 +308,17 @@ export function splitCredentialPool(value: string): string[] {
  * `allowedIndices` (a profile's credential allowlist, as pool positions)
  * bounds every pick, including the "all rate-limited, pick anyway" fallbacks.
  * Indices stay positions in the full pool.
+ *
+ * `usageByIndex` (per pool position, from `GET /api/keys/available`) orders
+ * the pick among the available indices: the lowest usage wins, ties break at
+ * random. It never excludes a key, whatever its usage.
  */
 export function selectCredential(
   value: string,
   availableIndices?: number[],
   keyType = "ANTHROPIC_API_KEY",
   allowedIndices?: number[],
+  usageByIndex?: number[],
 ): CredentialSelection {
   // A CODEX_OAUTH value is one JSON blob ({access, refresh, expires, accountId}),
   // never a comma-separated pool: its commas are field separators. Splitting it
@@ -351,7 +357,7 @@ export function selectCredential(
       (i) => i >= 0 && i < credentials.length && (!drawFrom || drawFrom.includes(i)),
     );
     if (validIndices.length > 0) {
-      index = validIndices[Math.floor(Math.random() * validIndices.length)]!;
+      index = pickLowestUsage(validIndices, usageByIndex)!;
     } else {
       // All available indices out of range — fall back to random from all
       index = pickAny();
@@ -458,6 +464,8 @@ export interface AvailabilityInfo {
   seatBlockedIndices?: number[];
   /** Rate-limited indices whose limit is a provider spend cap. */
   spendCappedIndices?: number[];
+  /** Usage per pool position (see `keyUsageFromWindows`). Orders the pick; never excludes. */
+  keyUsage?: number[];
 }
 
 /**
@@ -496,6 +504,7 @@ async function fetchAvailableIndices(
             earliestModelResetAt?: string | null;
             seatBlockedIndices?: number[];
             spendCappedIndices?: number[];
+            keyUsage?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
@@ -504,6 +513,7 @@ async function fetchAvailableIndices(
             earliestModelResetAt: data.earliestModelResetAt,
             seatBlockedIndices: data.seatBlockedIndices,
             spendCappedIndices: data.spendCappedIndices,
+            keyUsage: data.keyUsage,
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
@@ -681,18 +691,22 @@ export async function resolveCredentialPools(
         }
       }
 
+      const usage = info?.keyUsage;
       const result = seatFallbackIndices
         ? {
-            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx),
+            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx, usage),
             isRateLimitFallback: true,
           }
         : uncapped?.length
-          ? { ...selectCredential(val, uncapped, envVar, allowedIdx), isRateLimitFallback: true }
-          : selectCredential(val, available, envVar, allowedIdx);
+          ? {
+              ...selectCredential(val, uncapped, envVar, allowedIdx, usage),
+              isRateLimitFallback: true,
+            }
+          : selectCredential(val, available, envVar, allowedIdx, usage);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
-        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]${info?.rejectedIndices?.length ? ` (${info.rejectedIndices.length} rejected)` : ""}`,
+        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]${usage ? ` usage ${Math.round((usage[result.index] ?? 0) * 100)}%` : ""}${info?.rejectedIndices?.length ? ` (${info.rejectedIndices.length} rejected)` : ""}`,
       );
       selections.push({
         ...result,

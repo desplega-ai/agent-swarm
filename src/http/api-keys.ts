@@ -422,6 +422,12 @@ const getAvailable = route({
          * `authFence` on `clear-rate-limit`: failures recorded after it survive the clear.
          */
         authFailureFence: z.number().int(),
+        /**
+         * Usage per pool position: max utilization (fraction, can exceed 1) of the key's
+         * live `five_hour` and `seven_day` windows; 0 when unobserved or reset. The worker
+         * picks the lowest among `availableIndices`. It never excludes a key.
+         */
+        keyUsage: z.array(z.number()),
       }),
     },
     400: { description: "Validation error" },
@@ -912,6 +918,7 @@ export async function handleApiKeys(
         spendCappedIndices: result.spendCappedIndices,
         totalKeys,
         authFailureFence: result.authFailureFence,
+        keyUsage: result.keyUsage,
         ...(model !== undefined
           ? {
               modelBlockedIndices: result.modelBlockedIndices,
