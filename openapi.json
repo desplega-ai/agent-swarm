@@ -43542,6 +43542,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller may not open pages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Page not found",
             "content": {

@@ -8,9 +8,10 @@
  * Reference: https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
  *
  * Supported node types: paragraph, heading, bulletList, orderedList, listItem,
- * text, mention, hardBreak, codeBlock, blockquote. Unknown types descend into
- * `content` if present, else are skipped silently. In non-prod environments a
- * debug line is emitted so unhandled cases surface during dev.
+ * text, mention, hardBreak, codeBlock, blockquote, inlineCard, blockCard,
+ * embedCard. Unknown types descend into `content` if present, else are skipped
+ * silently. In non-prod environments a debug line is emitted so unhandled cases
+ * surface during dev.
  */
 
 import { getNodeEnv } from "../utils/node-env";
@@ -33,17 +34,22 @@ function asNodeArray(value: unknown): AdfNode[] {
 
 /**
  * Recursively concatenate text from an ADF tree. Mentions are inlined as
- * `@<displayName>` (or `@<accountId>` if no displayName is present).
+ * `@<displayName>` (or `@<accountId>` if no displayName is present). Card nodes
+ * emit their `attrs.url`, since a pasted Confluence or GitHub link carries no
+ * text content of its own.
  *
  * Block-level nodes insert a trailing newline so consecutive paragraphs render
- * as separate lines. Hard breaks and list items also produce newlines.
+ * as separate lines. Hard breaks and list items also produce newlines. Ordered
+ * list items are numbered from `attrs.order` (default 1).
  */
 export function extractText(adf: unknown): string {
   if (!isNode(adf)) return "";
 
   const out: string[] = [];
 
-  const visit = (node: AdfNode): void => {
+  // A list passes each listItem its marker ("- " or "3. "); every other node
+  // visits its children without one.
+  const visit = (node: AdfNode, marker?: string): void => {
     const type = typeof node.type === "string" ? node.type : "";
 
     switch (type) {
@@ -73,13 +79,23 @@ export function extractText(adf: unknown): string {
         out.push("\n");
         return;
       }
-      case "bulletList":
+      case "bulletList": {
+        for (const child of asNodeArray(node.content)) visit(child, "- ");
+        return;
+      }
       case "orderedList": {
-        for (const child of asNodeArray(node.content)) visit(child);
+        // ADF allows an `order` of 0 or more, so a zero-start list keeps its 0;
+        // only a missing or non-integer value falls back to 1.
+        const order = node.attrs?.order;
+        const start =
+          typeof order === "number" && Number.isInteger(order) && order >= 0 ? order : 1;
+        asNodeArray(node.content).forEach((child, index) => {
+          visit(child, `${start + index}. `);
+        });
         return;
       }
       case "listItem": {
-        out.push("- ");
+        out.push(marker ?? "- ");
         for (const child of asNodeArray(node.content)) visit(child);
         // Block children inside a listItem already trail a newline, so we don't
         // double-add. But if the listItem only contained inline content, ensure
@@ -87,6 +103,16 @@ export function extractText(adf: unknown): string {
         if (out.length > 0 && !out[out.length - 1]?.endsWith("\n")) {
           out.push("\n");
         }
+        return;
+      }
+      case "inlineCard":
+      case "blockCard":
+      case "embedCard": {
+        const url = node.attrs?.url;
+        if (typeof url === "string" && url.length > 0) out.push(url);
+        // Block and embed cards stand alone on their own line; an inline card
+        // sits inside a line of text.
+        if (type !== "inlineCard") out.push("\n");
         return;
       }
       case "doc": {

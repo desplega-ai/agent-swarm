@@ -22,6 +22,7 @@ const REQUESTER_VERBS = [
   "fs.join.own",
   "objects.read",
   "objects.write",
+  "page.launch",
   "session.presence",
   "session.share",
   "task.action.own",
@@ -206,6 +207,7 @@ describe("ensureRbacSeedsSynced", () => {
       "favorite.write.own",
       "fs.join.own",
       "objects.read",
+      "page.launch",
       "session.presence",
     ]);
     for (const verb of viewerVerbs) expect(REQUESTER_VERBS).toContain(verb);

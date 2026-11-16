@@ -350,6 +350,8 @@ export const LEGACY_POLICY = {
   "page.delete.any": leadOrResourceOwner,
   // Any agent records the requester's answer to the first-page ask (src/tools/design-system.ts).
   "design-system.write": anyAuthenticated,
+  // Opening a page is a read. Writes from the page session keep their own verbs.
+  "page.launch": anyAuthenticated,
   // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
   "objects.read": operatorOrUser,
   "objects.write": operatorOrUser,

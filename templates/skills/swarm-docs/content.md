@@ -67,9 +67,11 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
 - [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
 - [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
 - [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
+- [Preparing unmatched bank transactions for finance review with AI agents](https://docs.agent-swarm.dev/docs/guides/agent-assisted-bank-reconciliation-review). Reference.
 - [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
@@ -80,6 +82,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Preparing a disputed product return for a human decision with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-returns-exception-handoff). Reference.
 - [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
 - [Coordinating a customer data access request across support, privacy and engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/privacy-data-request-handoff). Reference.
+- [Coordinating a guest accessibility request between guest support and property operations with AI agents](https://docs.agent-swarm.dev/docs/guides/guest-accessibility-request-handoff). Reference.
 - [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-performance-review). Reference.
 - [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/guides/food-supplier-ingredient-change-review). Reference.
 - [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-rfp-bid-qualification). Reference.

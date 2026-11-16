@@ -4,6 +4,10 @@ import { detectVcsProvider } from "../vcs";
 describe("detectVcsProvider", () => {
   test("detects github.com URLs", () => {
     expect(detectVcsProvider("https://github.com/org/repo")).toBe("github");
+    expect(detectVcsProvider("git@github.com:org/repo.git")).toBe("github");
+    expect(detectVcsProvider("https://www.github.com/org/repo")).toBe("github");
+    // A `dev.azure.com` path segment on a GitHub URL is still a GitHub URL.
+    expect(detectVcsProvider("https://github.com/acme/dev.azure.com/tree/main")).toBe("github");
   });
 
   test("detects shorthand org/repo as github", () => {
@@ -58,5 +62,9 @@ describe("detectVcsProvider", () => {
   test("returns null for unrecognised URLs", () => {
     expect(detectVcsProvider("https://example.com")).toBeNull();
     expect(detectVcsProvider("https://notbitbucket.org/org/repo")).toBeNull();
+    // A `github.com` path segment on another host keeps that host's provider.
+    expect(detectVcsProvider("https://gitea.example.com/mirrors/github.com/acme/repo")).toBeNull();
+    expect(detectVcsProvider("https://notgithub.com/acme/repo")).toBeNull();
+    expect(detectVcsProvider("https://code.example.com/acme/repo")).toBeNull();
   });
 });
