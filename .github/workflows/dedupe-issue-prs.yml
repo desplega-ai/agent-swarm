@@ -18,9 +18,11 @@ on:
         type: boolean
         default: true
 
+# Never cancel a run between its comment and its close. A newer pending run
+# replaces an older pending one, which is fine: each run re-reads live state.
 concurrency:
   group: dedupe-issue-prs-${{ github.event.pull_request.number || 'scan' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions: {}
 
