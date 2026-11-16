@@ -1,4 +1,4 @@
-import type { Adapter, Message, Thread } from "chat";
+import type { Message, Thread } from "chat";
 import { z } from "zod";
 import { sessionGroupKey } from "@/assets/key";
 import { sessionSourceKey } from "@/assets/source-key";
@@ -35,6 +35,7 @@ import {
 import { getChatThreadResetAt } from "./commands";
 import { type ChatAddressedReason, formatChatHeaderFacts, readChatMessageFacts } from "./facts";
 import { errorMessage } from "./logger";
+import { botMentionForms, stripBotMention } from "./mentions";
 import { chatMessageText } from "./message-text";
 import { emitChatMessageSent, postChatMessage } from "./outbound";
 import {
@@ -82,22 +83,6 @@ export const ChatRouteModifySchema = z
 const THREAD_CONTEXT_LIMIT = 20;
 const AGENT_MESSAGE_TRUNCATE = 500;
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Remove the bot's own `@name` / `<@id>` mention; other mentions stay. */
-function stripBotMention(text: string, adapter: Adapter): string {
-  let out = text;
-  if (adapter.userName) {
-    out = out.replace(new RegExp(`(?<!\\w)@${escapeRegex(adapter.userName)}(?![\\w-])`, "gi"), "");
-  }
-  if (adapter.botUserId) {
-    out = out.replace(new RegExp(`<@${escapeRegex(adapter.botUserId)}>`, "g"), "");
-  }
-  return out.trim();
-}
-
 /** The adapter name is the thread id's first segment; the rest of the id is opaque. */
 function adapterOf(threadId: string): string {
   const i = threadId.indexOf(":");
@@ -124,7 +109,10 @@ export async function handleChatInbound(
     messageId: message.id,
   });
 
-  let text = stripBotMention(chatMessageText(message), thread.adapter);
+  let text = stripBotMention(
+    chatMessageText(message),
+    await botMentionForms(thread.adapter, message),
+  );
   const immediate = /^!now\b/i.test(text);
   if (immediate) text = text.replace(/^!now\s*/i, "").trim();
   const attachments = message.attachments ?? [];

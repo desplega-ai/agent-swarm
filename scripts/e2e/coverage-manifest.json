@@ -464,7 +464,7 @@
     },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
-      "scenarios": ["script-runs-durable"]
+      "scenarios": ["script-runs-durable", "script-run-storage"]
     },
     "script-saved-lifecycle": {
       "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",

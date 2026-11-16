@@ -32,6 +32,7 @@ export const MAX_ACTIVE_CAPABILITY_DISPATCHES = 8;
 export type ScriptExecutionResult = {
   exitCode: number | null;
   stderr: string;
+  terminated?: boolean;
 };
 
 export type ScriptExecutionHandle = {
@@ -193,6 +194,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     let proc: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
     let capabilitySocket: Socket | undefined;
     let protocolFailure: Error | undefined;
+    let terminated = false;
     const sockets = new Set<Socket>();
     const server = createServer((socket) => {
       sockets.add(socket);
@@ -412,6 +414,9 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       clearInterval(heartbeat);
       await terminateProcessGroup(spawned.pid);
       let stderr = await stderrPromise;
+      // The caller owns the status for pause/cancel/limits. On API shutdown,
+      // leaving it running lets the next supervisor replay the durable journal.
+      if (terminated) return { exitCode: processExitCode, stderr, terminated: true };
       try {
         if (protocolFailure) throw protocolFailure;
         if (processExitCode !== 0) {
@@ -450,6 +455,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       startedAtMs: Date.now(),
       exited,
       terminate: async (signal = "SIGTERM") => {
+        terminated = true;
         built.abortInFlightSteps();
         if (signal === "SIGTERM") await terminateProcessGroup(spawned.pid);
         else if (signal === "SIGKILL") forceTerminateProcessGroup(spawned.pid);

@@ -170,22 +170,49 @@ describe("script_runs age-based retention", () => {
     });
   });
 
-  test("drains a backlog larger than one batch within the batch ceiling", async () => {
-    await getDbClient().run(
-      `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < 1200)
-       INSERT INTO script_runs (id, agentId, source, status, startedAt)
-       SELECT 'bulk-' || v, 'agent-1', 'x', 'completed', ? FROM n`,
-      [OLD_ISO],
-    );
-    process.env[DAYS_KEY] = "1";
+  test("drains a backlog larger than one batch within the batch ceiling and reclaims file space", async () => {
+    // The preload normally deserializes an in-memory template. Exercise a real
+    // fresh file here: vacuum mode must be set before its first schema object.
+    const globals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
+    const template = globals.__testMigrationTemplate;
+    closeDb();
+    delete globals.__testMigrationTemplate;
+    await removeDbFiles();
+    try {
+      initDb(TEST_DB_PATH);
+      const client = getDbClient();
+      expect(await client.get("PRAGMA auto_vacuum")).toEqual({ auto_vacuum: 2 });
+      await client.run(
+        `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < 1200)
+         INSERT INTO script_run_sources (hash, source)
+         SELECT 'bulk-hash-' || v, printf('%08192d', v) FROM n`,
+      );
+      await client.run(
+        `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v + 1 FROM n WHERE v < 1200)
+         INSERT INTO script_runs (id, agentId, source, sourceHash, status, startedAt)
+         SELECT 'bulk-' || v, 'agent-1', '', 'bulk-hash-' || v, 'completed', ? FROM n`,
+        [OLD_ISO],
+      );
+      await client.query("PRAGMA wal_checkpoint(TRUNCATE)");
+      const before = Bun.file(TEST_DB_PATH).size;
+      process.env[DAYS_KEY] = "1";
 
-    await runDbRetentionTick({ now: NOW });
+      await runDbRetentionTick({ now: NOW });
 
-    const stats = getDbRetentionStats().scriptRuns;
-    expect(await runIds()).toEqual([]);
-    expect(stats?.rowsDeleted).toBe(1200);
-    expect(stats?.batches).toBeGreaterThan(1);
-    expect(stats?.batchSize).toBeLessThanOrEqual(500);
+      const stats = getDbRetentionStats().scriptRuns;
+      expect(await runIds()).toEqual([]);
+      expect(await client.get("SELECT COUNT(*) AS n FROM script_run_sources")).toEqual({ n: 0 });
+      expect(stats?.rowsDeleted).toBe(1200);
+      expect(stats?.batches).toBeGreaterThan(1);
+      expect(stats?.batchSize).toBeLessThanOrEqual(500);
+      await client.query("PRAGMA wal_checkpoint(TRUNCATE)");
+      expect(Bun.file(TEST_DB_PATH).size).toBeLessThan(before);
+    } finally {
+      closeDb();
+      globals.__testMigrationTemplate = template;
+      await removeDbFiles();
+      initDb(TEST_DB_PATH);
+    }
   });
 
   test("the delete, the backlog count and the journal cascade all use an index", async () => {
