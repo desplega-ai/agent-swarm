@@ -13,6 +13,8 @@ export interface SystemOneServiceView {
   readonly defaultModel?: string;
   /** The only model ids the host accepts, when it has a list. */
   readonly allowedModels?: readonly string[];
+  /** Other model ids verified on the host. Not enforced; found by search. */
+  readonly knownModels?: readonly string[];
 }
 
 export interface SystemOneHostView {
@@ -55,7 +57,23 @@ export const SYSTEM_ONE_HOST_VIEWS: readonly SystemOneHostView[] = [
     detail: "openrouter.ai, with no gateway",
     keyName: "OPENROUTER_API_KEY",
     sharedWithLlms: true,
-    decide: { defaultModel: "~typesafe/jev-latest" },
+    decide: {
+      defaultModel: "~typesafe/jev-latest",
+      knownModels: [
+        "~perplexity/pplx-decider-latest",
+        "~perplexity/pplx-decider-flash-latest",
+        "perplexity/pplx-decider-v1.3:free",
+        "perplexity/pplx-decider-flash-v1.3:free",
+        "liquid/d1.1",
+        "liquid/d1-ultra",
+        "google/gemini-decision-1",
+        "morph/reflex",
+        "baseten/joey-1",
+        "baseten/elephant-1",
+        "baseten/mammoth-1",
+        "respan/span-02",
+      ],
+    },
   },
   {
     id: "cloudflare",
@@ -121,9 +139,12 @@ export function systemOneServiceModels(service?: SystemOneServiceView): string[]
   return [...(service.allowedModels ?? (service.defaultModel ? [service.defaultModel] : []))];
 }
 
-/** The models a host serves, decide first, for search. */
+/** The models a host serves, decide first, known models included, for search. */
 export function systemOneModels(host: SystemOneHostView): string[] {
-  return [...systemOneServiceModels(host.decide), ...systemOneServiceModels(host.extract)];
+  return [host.decide, host.extract].flatMap((service) => [
+    ...systemOneServiceModels(service),
+    ...(service?.knownModels ?? []),
+  ]);
 }
 
 /** Every key the host needs set: its secret (or a fallback) and its config value. */

@@ -73,6 +73,11 @@ interface SystemOneServiceBase {
   readonly defaultModel?: string;
   /** When set, the only model ids the node may use (checked at save and at run). */
   readonly allowedModels?: readonly string[];
+  /**
+   * Other model ids verified on this host, listed in the dashboard and docs. Not
+   * enforced: a host without `allowedModels` sends any id as written.
+   */
+  readonly knownModels?: readonly string[];
 }
 
 export interface SystemOneDecideService extends SystemOneServiceBase {
@@ -151,6 +156,22 @@ async function readFirstGlobalConfig(
   return undefined;
 }
 
+/** OpenRouter decision models besides Jev (`GET /api/v1/models?output_modalities=decisions`). */
+const OPENROUTER_DECISION_MODELS = [
+  "~perplexity/pplx-decider-latest",
+  "~perplexity/pplx-decider-flash-latest",
+  "perplexity/pplx-decider-v1.3:free",
+  "perplexity/pplx-decider-flash-v1.3:free",
+  "liquid/d1.1",
+  "liquid/d1-ultra",
+  "google/gemini-decision-1",
+  "morph/reflex",
+  "baseten/joey-1",
+  "baseten/elephant-1",
+  "baseten/mammoth-1",
+  "respan/span-02",
+] as const;
+
 /** Every Workers AI model is reached at the same account-scoped route; only the model differs. */
 const CLOUDFLARE_ENDPOINT: SystemOneBuiltEndpoint = {
   configKey: CLOUDFLARE_ACCOUNT_KEY,
@@ -216,6 +237,8 @@ export const SYSTEM_ONE_HOSTS = {
     decide: {
       endpoint: "https://openrouter.ai/api/alpha/decisions",
       defaultModel: "~typesafe/jev-latest",
+      // Decision models of other makers on the same route and wire, live-probed 2026-11-16.
+      knownModels: OPENROUTER_DECISION_MODELS,
       confidenceField: "confidence",
     },
   },
