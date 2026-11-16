@@ -29,6 +29,8 @@ export function detectVcsProvider(url: string): VcsProvider | null {
       ?.toLowerCase();
   }
   if (hostname?.startsWith("gitlab.")) return "gitlab";
-  if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
+  // Host only: a `github.com` path segment on another host is not GitHub.
+  if (hostname === "github.com" || hostname === "www.github.com") return "github";
+  if (/^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
   return null;
 }
