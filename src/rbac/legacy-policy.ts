@@ -348,6 +348,8 @@ export const LEGACY_POLICY = {
   "comb.presence": operatorOrUser,
   "fs.join.own": anyAuthenticated,
   "page.delete.any": leadOrResourceOwner,
+  // Opening a page is a read. Writes from the page session keep their own verbs.
+  "page.launch": anyAuthenticated,
   // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
   "objects.read": operatorOrUser,
   "objects.write": operatorOrUser,

@@ -315,7 +315,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/oauth/keep-warm/codex": BACKLOG_REASON,
   "POST /api/oauth/refresh-locks/{key}": BACKLOG_REASON,
   "POST /api/pages": BACKLOG_REASON,
-  "POST /api/pages/{id}/launch": BACKLOG_REASON,
   "POST /api/pricing/{provider}/{model}/{tokenClass}": BACKLOG_REASON,
   "POST /api/prompt-templates/{id}/checkout": BACKLOG_REASON,
   "POST /api/prompt-templates/{id}/reset": BACKLOG_REASON,
