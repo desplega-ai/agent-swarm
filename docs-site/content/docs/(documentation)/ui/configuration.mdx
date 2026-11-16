@@ -84,7 +84,7 @@ Every 5 minutes, the probe sends a 1-token request to each Claude pool key whose
 It skips a key with no open 5-hour window, a key with a rejected window, and, for 30 minutes, a key whose last probe failed.
 
 - `CLAUDE_QUOTA_PROBE_DISABLE`: `true` stops the sweep. The API reads it at startup, so restart the server after you save it.
-- `CLAUDE_QUOTA_PROBE_MODEL`: the model of the 1-token request, `claude-haiku-4-5-20251001` by default. The sweep reads it on every run, so a saved change needs no restart.
+- `CLAUDE_QUOTA_PROBE_MODEL`: the model of the 1-token request, `claude-haiku-4-5-20251001` by default. The sweep reads it on every run, so a saved change needs no restart. {/* gitleaks:allow (model id, not a secret) */}
 
 ### Worktree reaper
 
