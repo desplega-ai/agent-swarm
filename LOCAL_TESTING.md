@@ -24,7 +24,7 @@ bun run test:root                                      # all unit tests, one pro
 bun run test:root -- src/tests/<file>.test.ts          # one file
 bun run test:root -- --watch src/tests/<file>.test.ts
 bun run test:root -- --parallel=4 --changed=$(git merge-base origin/main HEAD)   # only files affected by this branch
-bun run test:root -- --parallel=4 --shard=1/4                                    # CI shard 1 (CI also passes restored --timings files)
+bun run test:root -- --parallel=4 --shard=1/8                                    # CI shard 1 (CI also passes restored --timings files; PRs add --changed)
 ```
 
 `--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and every shard downloads the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
@@ -40,7 +40,7 @@ Conventions:
 - **A spawned Bun child must not outlive its run.** `afterAll` does not run when the run is killed. The preload sets `BUN_FEATURE_FLAG_NO_ORPHANS=1`, so a Bun child that inherits `process.env` exits when its parent dies. A spawn that builds its env from scratch passes `--no-orphans` itself, as `scripts/e2e/sut.ts` does.
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 - **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
-- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
+- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, the preload or its preload-only `hang-watchdog*.ts` helpers, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
 
 Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
 
@@ -278,8 +278,8 @@ Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/R
 
 ### CI
 
-Merge Gate runs the suite in four duration-balanced shards (`.github/workflows/ui-e2e-shards.yml`, weights in `packages/ui-e2e/shard-weights.json`) on pull requests and merge groups that touch the UI, the API, or the package, and needs it: it is a required check.
-A spec reruns once. A pass on the rerun is reported as `flaky` and does not fail the shard.
+Merge Gate runs the suite in eight duration-balanced shards (`.github/workflows/ui-e2e-shards.yml`, weights in `packages/ui-e2e/shard-weights.json`) on pull requests and merge groups that touch the UI, the API, or the package, and needs it: it is a required check.
+Specs never rerun (`retries: 0`): a spec that fails once fails its shard, and its trace is kept (`trace: "retain-on-failure"`). The shard planner packs whole spec files, so keep any one file under about an eighth of the suite's test time; `overflow-<viewport>.spec.ts` is split per viewport for that reason.
 Each shard records dashboard line coverage (`UI_E2E_COVERAGE=1`: a sourcemapped build plus V8 JS coverage per test, written as `packages/ui-e2e/coverage/lcov.info`).
 `.github/workflows/ui-e2e-report.yml` merges the shard reports into the `ui-e2e-html-report` artifact, merges the coverage, and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results and the coverage line. Merge Gate does not need the report job.
 `.github/workflows/ui-e2e.yml` is the nightly and manual entry to the same two workflows.

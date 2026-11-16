@@ -21,7 +21,7 @@ export const registerSkillListTool = (server: McpServer) => {
     "skill-list",
     {
       title: "List Skills",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description: "List available skills with optional filters.",
       inputSchema: z.object({
         type: z.enum(["remote", "personal"]).optional().describe("Filter by type"),

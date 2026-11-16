@@ -25,7 +25,7 @@ export const registerMcpServerListTool = (server: McpServer) => {
     "mcp-server-list",
     {
       title: "List MCP Servers",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "List MCP servers with optional filters. Use installedOnly to see servers installed for the calling agent.",
       inputSchema: z.object({

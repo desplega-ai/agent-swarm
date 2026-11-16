@@ -21,7 +21,7 @@ export const registerSkillSearchTool = (server: McpServer) => {
     "skill-search",
     {
       title: "Search Skills",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description: "Search skills by keyword (name and description).",
       inputSchema: z.object({
         query: z.string().min(1).describe("Search query"),

@@ -102,7 +102,7 @@ export const registerListWorkflowRunsTool = (server: McpServer) => {
     "list-workflow-runs",
     {
       title: "List Workflow Runs",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status. Returns SLIM rows WITHOUT the full `context` or trigger data — each row carries a bounded `triggerDataSummary` instead. To inspect a run's context and steps, call `get-workflow-run` by id, or pass `includeContext: true` here.",
       inputSchema: listWorkflowRunsInputSchema,

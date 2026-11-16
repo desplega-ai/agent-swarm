@@ -330,10 +330,17 @@ test.describe("phone header", () => {
       }
       await page.keyboard.press("Escape");
       await expect(sheet).toBeHidden();
-
-      await summary.tap();
+      // The drawer's overlay and focus cleanup outlive its content by the exit animation.
+      // A tap in that window can be swallowed, or open the popover only for the cleanup to
+      // close it again. Retry the tap until the details stay open.
+      await expect(page.locator("[data-vaul-overlay]")).toHaveCount(0);
       const details = page.getByRole("dialog");
-      await expect(details.getByText(description, { exact: true })).toBeVisible();
+      await expect(async () => {
+        if (!(await details.isVisible())) await summary.tap();
+        await expect(details.getByText(description, { exact: true })).toBeVisible({
+          timeout: 1_000,
+        });
+      }).toPass({ timeout: 10_000 });
       await expect(details.getByText(`slug: ${slug}`)).toBeVisible();
       // Let the popover open animation settle for the attached screenshot.
       await page.waitForTimeout(300);

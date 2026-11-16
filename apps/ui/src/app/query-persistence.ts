@@ -7,6 +7,9 @@ const MEMORY_ONLY = new Set<unknown>([
   "agent-fs",
   // Cmd+K search answers, which can name a user's private tasks.
   PALETTE_QUERY_ROOT,
+  // Stars. A restored copy counts as fresh for the 30 s staleTime, so a reload right after
+  // a toggle could show the old star until the next fetch.
+  "favorites",
 ]);
 
 /**

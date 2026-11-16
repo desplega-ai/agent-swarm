@@ -1,12 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
-import type { FullConfig, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
+import type { FullConfig, Reporter, Suite, TestCase, TestResult } from "@playwright/test/reporter";
 
 interface SummaryResult {
   specId: string;
   titlePath: string[];
   title: string;
   file: string;
+  /** The spec file that registered the test; differs from `file` for a shared helper. */
+  specFile: string;
   line: number;
   project: string | undefined;
   status: TestResult["status"];
@@ -21,6 +23,12 @@ interface SummaryResult {
 
 // boot/run.ts balances shards by duration and runs each one as a file list, so Playwright's
 // config.shard is unset there. UI_E2E_SHARD ("i/n") carries the shard instead.
+function specFileOf(test: TestCase): string {
+  let suite: Suite | undefined = test.parent;
+  while (suite && suite.type !== "file") suite = suite.parent;
+  return suite?.location?.file ?? test.location.file;
+}
+
 function shardFromEnv(): FullConfig["shard"] {
   const match = /^(\d+)\/(\d+)$/.exec(process.env.UI_E2E_SHARD ?? "");
   return match ? { current: Number(match[1]), total: Number(match[2]) } : null;
@@ -45,6 +53,7 @@ class SummaryReporter implements Reporter {
       titlePath: test.titlePath().slice(3),
       title: test.title,
       file: relative(packageRoot, test.location.file).split(sep).join("/"),
+      specFile: relative(packageRoot, specFileOf(test)).split(sep).join("/"),
       line: test.location.line,
       project: test.parent.project()?.name,
       status: result.status,

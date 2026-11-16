@@ -910,11 +910,12 @@ async function executeStep(
       if (current && (current.status !== "running" || executingSteps.has(current.id))) {
         return { current };
       }
-      // An orphaned `sub-workflow` row is this same invocation: it covers the
-      // current predecessor completions, so it is not a new loop iteration.
-      // Re-enter it under its step id, key and retry count, so the executor
-      // reconnects to the child it already started instead of a second one.
-      if (current && node.type === "sub-workflow") {
+      // An orphaned `sub-workflow` or `agent-task` row is this same invocation:
+      // it covers the current predecessor completions, so it is not a new loop
+      // iteration. Re-enter it under its step id, key and retry count, so the
+      // executor reconnects to the child run or task it already started (a
+      // crash between the insert and the step parking) instead of a second one.
+      if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
         claimedStepId = current.id;
         executingSteps.add(current.id);
         return {

@@ -566,6 +566,10 @@
       "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
       "scenarios": ["core-task-controls"]
     },
+    "task-terminal-fence": {
+      "description": "A session whose task was superseded is refused send-task and slack-reply, and keeps store-progress and read-only tools",
+      "scenarios": ["core-terminal-task-fence"]
+    },
     "task-defer-wake": {
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
       "scenarios": ["core-task-tools"]
@@ -627,20 +631,21 @@
       "scenarios": ["platform-users-access"]
     },
     "workflow-approvals": {
-      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards",
-      "scenarios": ["workflow-approvals"]
+      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards, inline Slack approval buttons",
+      "scenarios": ["workflow-approvals", "slack-approval-buttons"]
     },
     "workflow-definitions": {
       "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
-        "workflow-webhook-hmac-sha1"
+        "workflow-webhook-hmac-sha1",
+        "workflow-agent-task-crash-window"
       ]
     },
     "workflow-engine-nodes": {

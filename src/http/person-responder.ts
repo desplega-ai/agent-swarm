@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { getUserGrant } from "../be/rbac-roles";
+import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -63,4 +64,31 @@ export async function approvalResponder(
 
 export function responderKey(responder: ApprovalResponder): string {
   return responder.kind === "user" ? responder.user.id : "operator";
+}
+
+/**
+ * The responder for a person identified outside HTTP, such as a chat user
+ * mapped through `user_external_ids`. Applies the checks `approvalResponder`
+ * applies to a user credential: an active, unmerged account (what credential
+ * resolution requires), the `approval.respond` verb and, with RBAC on, a role
+ * that grants it.
+ */
+export async function userApprovalResponder(
+  userId: string,
+): Promise<{ ok: true; responder: ApprovalResponder } | { ok: false; message: string }> {
+  const refused = {
+    ok: false as const,
+    message: "You are not allowed to answer approval requests.",
+  };
+  const user = await findUserById(userId);
+  // Credential resolution refuses invited, suspended and merged-away users, so
+  // a chat identity mapped to one must not answer either.
+  if (!user || user.status !== "active" || user.mergedIntoUserId) return refused;
+  const verb: PermissionVerb = "approval.respond";
+  if (!can({ principal: { kind: "user", userId }, verb, source: "http" }).allow) return refused;
+  if (isRbacEnabled()) {
+    const grant = await getUserGrant(userId);
+    if (!grant.grantsAll && !grant.verbs.has(verb)) return refused;
+  }
+  return { ok: true, responder: { kind: "user", user } };
 }
