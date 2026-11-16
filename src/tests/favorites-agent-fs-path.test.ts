@@ -67,7 +67,7 @@ describe("favorites: agent-fs-path item type (fresh DB)", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDb(TEST_DB_PATH);
   });
 
@@ -235,7 +235,7 @@ describe("favorites: key item type (fresh DB)", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDb(KEY_DB_PATH);
   });
 

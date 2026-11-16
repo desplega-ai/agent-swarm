@@ -46,7 +46,7 @@ afterAll(async () => {
   _resetAutoReloadForTests();
   __resetInjectedEnvTracking();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   templateGlobals.__testMigrationTemplate = template;
   if (original === undefined) delete process.env[key];
   else process.env[key] = original;
@@ -78,7 +78,7 @@ test("empty round-trips through HTTP, hydration, restart and restoring deploymen
   expect(presence.presence[key]).toBe(true);
 
   // Reopen the persisted database and restore deployment env like a new process.
-  closeDb();
+  await closeDb();
   __resetInjectedEnvTracking();
   process.env[key] = "owl";
   initDb(dbPath);

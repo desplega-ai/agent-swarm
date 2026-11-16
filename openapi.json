@@ -64971,6 +64971,13 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "dbDriver": {
+                      "type": "string",
+                      "enum": [
+                        "sqlite",
+                        "worker"
+                      ]
+                    },
                     "agents": {
                       "type": "object",
                       "properties": {
@@ -65072,6 +65079,7 @@
                     }
                   },
                   "required": [
+                    "dbDriver",
                     "agents",
                     "tasks",
                     "steeringEnabled",

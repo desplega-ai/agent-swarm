@@ -132,8 +132,8 @@ beforeAll(async () => {
   registerManageUserTool(server);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 /** One admin write that hands the caller a credential or identity on `target`. */

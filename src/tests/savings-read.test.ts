@@ -216,7 +216,7 @@ describe("savings read for schedules", () => {
   afterAll(async () => {
     server?.close();
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 
@@ -383,7 +383,7 @@ describe("savings completeness across midnight", () => {
 
   afterAll(async () => {
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
     await removeDbFiles(path);
   });
 

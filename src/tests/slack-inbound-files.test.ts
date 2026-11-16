@@ -190,13 +190,13 @@ beforeAll(async () => {
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   slackFiles.stop(true);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);

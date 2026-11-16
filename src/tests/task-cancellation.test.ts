@@ -126,7 +126,7 @@ describe("Task Cancellation", () => {
     });
 
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {

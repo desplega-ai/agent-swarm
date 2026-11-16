@@ -15,7 +15,7 @@ import {
 } from "../be/db";
 import {
   getScriptConnectionById,
-  getScriptMcpConnectionDescriptors,
+  getScriptMcpConnectionDescriptorsAsync,
   refreshScriptConnection,
   setScriptConnectionEnabled,
   upsertScriptConnection,
@@ -255,7 +255,7 @@ let savedEnv: NodeJS.ProcessEnv;
 beforeAll(async () => {
   savedEnv = { ...process.env };
   await removeDbFiles(TEST_DB_PATH);
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
@@ -263,7 +263,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
@@ -307,7 +307,7 @@ describe("script MCP connections", () => {
         (candidate) => candidate.slug === "external",
       );
       expect(connection).toBeDefined();
-      const descriptor = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const descriptor = (await getScriptMcpConnectionDescriptorsAsync({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "external",
       );
       expect(descriptor).toEqual(
@@ -681,7 +681,7 @@ describe("script MCP connections", () => {
         mcpServerId: mcpServer.id,
         agentId: lead.id,
       });
-      const before = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const before = (await getScriptMcpConnectionDescriptorsAsync({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "refreshable",
       );
       expect(before?.tools.map((tool) => tool.name)).toEqual(["echo-tool"]);
@@ -690,7 +690,7 @@ describe("script MCP connections", () => {
       const refreshed = await refreshScriptConnection(connection.id);
 
       expect(refreshed?.generationError).toBeNull();
-      const after = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const after = (await getScriptMcpConnectionDescriptorsAsync({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "refreshable",
       );
       expect(after?.tools.map((tool) => tool.name)).toEqual(["echo-tool", "new-tool"]);

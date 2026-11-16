@@ -91,7 +91,7 @@ async function removeDbFiles() {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   // Ensure the lead allow-path for register-kapso-number never talks to the
@@ -121,7 +121,7 @@ afterAll(async () => {
   } else {
     delete process.env.KAPSO_API_KEY;
   }
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

@@ -171,14 +171,14 @@ process.env.SECRETS_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 // keyed by a hash of everything that shapes it. A cache hit is a single file
 // read instead of 130+ migrations plus seeding. AGENT_SWARM_TEST_TEMPLATE_CACHE=0
 // bypasses the cache (no read, no write) for the run.
-testTemplateGlobals.__testMigrationTemplate = loadOrBuildMigrationTemplate();
+testTemplateGlobals.__testMigrationTemplate = await loadOrBuildMigrationTemplate();
 // Building the template cold runs initDb, which also sets process-wide state
 // (encryption-key cache, prompt-resolver DI, sqlite-vec load, startup audit).
 // A cache hit skips that, so open the template once through initDb's fast path
 // to reproduce the same side effects, then close it. Tests that call
 // getEncryptionKey() before their own initDb() depend on this.
 initDb(":memory:");
-closeDb();
+await closeDb();
 
 function migrationTemplateCacheKey(): string {
   const hash = createHash("sha256");
@@ -187,6 +187,10 @@ function migrationTemplateCacheKey(): string {
     join(import.meta.dir, "preload.ts"),
     join(import.meta.dir, "../be/db.ts"),
     join(import.meta.dir, "../be/db/runtime.ts"),
+    join(import.meta.dir, "../be/db/prompt-templates.ts"),
+    join(import.meta.dir, "../be/db-client.ts"),
+    join(import.meta.dir, "../be/db/worker-driver.ts"),
+    join(import.meta.dir, "../be/db/db-worker.ts"),
     join(import.meta.dir, "../be/seed-prompt-templates.ts"),
   ];
   const migrationsDir = join(import.meta.dir, "../be/migrations");
@@ -205,7 +209,7 @@ function migrationTemplateCacheKey(): string {
   return hash.digest("hex").slice(0, 32);
 }
 
-function loadOrBuildMigrationTemplate(): Uint8Array {
+async function loadOrBuildMigrationTemplate(): Promise<Uint8Array> {
   const cacheEnabled = process.env.AGENT_SWARM_TEST_TEMPLATE_CACHE !== "0";
   const cacheDir = join(tmpdir(), "agent-swarm-test-template");
   const key = cacheEnabled ? migrationTemplateCacheKey() : null;
@@ -221,7 +225,7 @@ function loadOrBuildMigrationTemplate(): Uint8Array {
 
   initDb(":memory:");
   const template = getDb().serialize();
-  closeDb();
+  await closeDb();
 
   if (cachePath && key) {
     try {

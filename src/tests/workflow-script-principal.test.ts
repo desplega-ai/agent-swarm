@@ -173,7 +173,7 @@ afterAll(async () => {
   setScriptEmbeddingProviderForTests(null);
   stopRetryPoller();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

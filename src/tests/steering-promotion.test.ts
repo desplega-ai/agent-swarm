@@ -34,14 +34,14 @@ describe("steering promotion on terminal tasks", () => {
         await unlink(`${TEST_DB_PATH}${suffix}`);
       } catch {}
     }
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
     else process.env.STEERING_ENABLED = originalSteeringEnabled;
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

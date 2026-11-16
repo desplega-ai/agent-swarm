@@ -93,7 +93,7 @@ async function taskDescendants(rootId: string, count: number, shape: "wide" | "d
 beforeAll(async () => {
   migrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(DB_PATH);
   workflowId = (await createWorkflow({ name: "retention", definition: { nodes: [] } })).id;
@@ -120,7 +120,7 @@ afterAll(async () => {
   await resetDbRetentionForTests();
   delete process.env[DAYS_KEY];
   delete process.env.DB_RETENTION_DRY_RUN;
-  closeDb();
+  await closeDb();
   testGlobals.__testMigrationTemplate = migrationTemplate;
   await removeDbFiles();
 });
@@ -352,7 +352,7 @@ describe("workflow run retention", () => {
     expect(await ids()).toEqual([]);
     expect(await ids("agent_tasks")).toHaveLength(descendants + 1);
     expect(await pendingHumanFreeReclassifications()).toBe(1);
-    closeDb();
+    await closeDb();
     initDb(DB_PATH);
     expect(await pendingHumanFreeReclassifications()).toBe(1);
     let passes = 0;

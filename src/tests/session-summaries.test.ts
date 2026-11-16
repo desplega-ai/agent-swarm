@@ -281,8 +281,8 @@ beforeAll(async () => {
   for (let i = 0; i < 3; i++) users.push((await createUser({ name: `summary user ${i}` })).id);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(dbPath + suffix);

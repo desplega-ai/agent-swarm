@@ -107,7 +107,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 describe("POST /api/tasks/{id}/progress ownership", () => {

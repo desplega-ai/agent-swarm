@@ -123,7 +123,7 @@ afterAll(async () => {
   proxy.stop(true);
   mock.stop();
   restoreEnv();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

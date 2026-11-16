@@ -104,7 +104,7 @@ beforeAll(async () => {
   initDb(path);
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await cleanup();
   if (savedFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
   else process.env.RUNTIME_POOLS_ENABLED = savedFlag;

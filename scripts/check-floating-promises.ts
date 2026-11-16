@@ -4,13 +4,15 @@
 // Catches: `someAsyncFn();` as a bare statement (result discarded, not awaited),
 // the regression class the async-DB refactor creates and that neither tsc nor
 // biome (type-inference bails on src/be/db.ts) can see.
-// Deliberately NOT flagged: `await f()`, `void f()` (explicit opt-out),
+// Outside transaction scopes, deliberately NOT flagged: `await f()`, `void f()` (explicit opt-out),
 // `.then(...)/.catch(...)/.finally(...)` chains (pre-existing idiom).
+// Transaction callbacks and reachable DB helpers use the stricter ownership analysis.
 import * as path from "node:path";
 import ts from "typescript";
+import { checkTransactionPromises } from "./db-promise-analysis";
 
 const repoRoot = path.resolve(import.meta.dir, "..");
-const configPath = path.join(repoRoot, "tsconfig.json");
+const configPath = path.join(repoRoot, process.argv[2] ?? "tsconfig.json");
 const parsed = ts.getParsedCommandLineOfConfigFile(
   configPath,
   {},
@@ -30,10 +32,9 @@ function isThenable(type: ts.Type): boolean {
   if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return false;
   const then = type.getProperty("then");
   if (!then) return false;
-  const thenType = checker.getTypeOfSymbolAtLocation(
-    then,
-    then.valueDeclaration ?? then.declarations?.[0]!,
-  );
+  const declaration = then.valueDeclaration ?? then.declarations?.[0];
+  if (!declaration) return false;
+  const thenType = checker.getTypeOfSymbolAtLocation(then, declaration);
   return thenType.getCallSignatures().length > 0;
 }
 
@@ -77,6 +78,16 @@ for (const sf of program.getSourceFiles()) {
     ts.forEachChild(node, visit);
   };
   visit(sf);
+}
+
+for (const finding of checkTransactionPromises(program)) {
+  const sf = finding.node.getSourceFile();
+  violations.push({
+    file: path.relative(repoRoot, sf.fileName),
+    line: sf.getLineAndCharacterOfPosition(finding.node.getStart()).line + 1,
+    text: `${finding.reason} ${finding.node.getText().slice(0, 90).replace(/\n/g, " ")}`,
+    dbLayer: true,
+  });
 }
 
 const dbOnes = violations.filter((v) => v.dbLayer);

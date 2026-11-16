@@ -181,7 +181,7 @@ beforeAll(async () => {
   else process.env.SCRIPTS_ONLY_MCP = originalScriptsOnlyMcp;
 
   await removeDbFiles(TEST_DB_PATH);
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   server = createTestServer();
   baseUrl = `http://127.0.0.1:${await listenOnFreePort(server, "127.0.0.1")}`;
@@ -190,7 +190,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await scriptsOnlyEnvQueue;
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

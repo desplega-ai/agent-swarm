@@ -293,6 +293,7 @@ value:getDailySpendGlobal
 value:getDashboardCostSummary
 value:getDb
 value:getDbClient
+value:getDbDriver
 value:getDependentTasks
 value:getDueScheduledTasks
 value:getDueWaitStates
@@ -564,6 +565,7 @@ value:reservedRoleViolation
 value:resetEmptyPollCount
 value:resetOrphanedInProgressTasksForAgent
 value:resetPromptTemplateToDefault
+value:resetPromptTemplateToDefaultForBoot
 value:resetTasksNotified
 value:resolveApprovalRequest
 value:resolvePromptTemplate
@@ -631,11 +633,13 @@ value:upsertChannelActivityCursor
 value:upsertInboxState
 value:upsertKv
 value:upsertPromptTemplate
+value:upsertPromptTemplateForBoot
 value:upsertScriptRunJournalStep
 value:upsertService
 value:upsertSkillFile
 value:upsertSkillFiles
 value:upsertSwarmConfig
+value:whenDbReady
 value:withFavoriteFlags`.split("\n");
 const selected = `type:ExistingTrackerContextWork
 type:ExistingTrackerContextWorkReason

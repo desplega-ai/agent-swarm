@@ -131,7 +131,7 @@ describe("Session Logs API", () => {
     });
 
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {

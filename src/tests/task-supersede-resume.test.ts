@@ -64,7 +64,7 @@ describe("Task Supersede + Resume", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await cleanup();
   });
 

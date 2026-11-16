@@ -21,7 +21,7 @@ async function removeDbFiles(dbPath: string): Promise<void> {
 }
 
 afterEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles(INCOMPLETE_DB_PATH);
   await removeDbFiles(FRESH_DB_PATH);
   await removeDbFiles(REPAIR_DB_PATH);

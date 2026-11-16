@@ -153,7 +153,7 @@ beforeAll(async () => {
   // Hide preload.ts's in-memory template so initDb opens the real file.
   testTemplateGlobals.__savedE2eTemplate = testTemplateGlobals.__testMigrationTemplate;
   testTemplateGlobals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   await createAgent({ id: agentId, name: "E2E Agent", isLead: false, status: "idle" });
@@ -165,10 +165,11 @@ beforeAll(async () => {
   );
 
   store = new SqliteMemoryStore();
+  await store.whenReady();
 }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedE2eTemplate;
   testTemplateGlobals.__savedE2eTemplate = undefined;
   if (serverProc) {

@@ -35,7 +35,7 @@ describe("swarm_config.encrypted column (migration 038)", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await cleanupDb();
   });
 

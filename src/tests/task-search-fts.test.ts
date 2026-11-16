@@ -69,7 +69,7 @@ describe("task search over agent_tasks_fts", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 
@@ -429,13 +429,13 @@ describe("agent_tasks rebuild in runtime.ts", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     globals.__testMigrationTemplate = template;
     await removeDbFiles(REBUILD_DB_PATH);
   });
 
   test("keeps rowids and the index triggers", async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(REBUILD_DB_PATH);
     initDb(REBUILD_DB_PATH);
     const first = await newTask("first survivor");
@@ -483,7 +483,7 @@ describe("agent_tasks rebuild in runtime.ts", () => {
       for (const object of objects) db.run(object.sql);
     }).immediate();
     db.run("PRAGMA foreign_keys = ON");
-    closeDb();
+    await closeDb();
 
     initDb(REBUILD_DB_PATH);
     const rebuilt = getDb()

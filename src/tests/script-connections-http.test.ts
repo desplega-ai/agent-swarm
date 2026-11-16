@@ -140,7 +140,7 @@ beforeAll(async () => {
 afterAll(async () => {
   globalThis.fetch = originalFetch;
   setOpenapiSpecFetchForTesting(null);
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

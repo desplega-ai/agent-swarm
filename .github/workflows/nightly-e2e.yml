@@ -14,7 +14,7 @@
 # check rewrites the codex result to an auth-chain failure before upload.
 # E2E_OPENROUTER_API_KEY is a plain OpenRouter key.
 #
-# Shape: `contract` runs the deterministic scenarios once. Each `harness` leg runs one real
+# Shape: `contract` and `contract-worker` run separate deterministic suites. Each harness runs one real
 # LLM task through one provider. `report` merges every result file into one step summary,
 # uploads it as `nightly-e2e-report`, and keeps one sticky issue open while the nightly fails.
 name: Nightly E2E
@@ -59,6 +59,45 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-e2e-contract
+          path: out/
+          if-no-files-found: warn
+
+  contract-worker:
+    if: github.repository == 'desplega-ai/agent-swarm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Full contract coverage, including the authenticated effective-driver assertion.
+      - name: Run complete Worker contract
+        run: >-
+          bun run e2e --sut-env DB_DRIVER=worker --strict
+          --json out/e2e-worker-results.json --summary-md out/e2e-worker-summary.md
+
+      - name: Add Worker job summary
+        if: always()
+        run: test ! -f out/e2e-worker-summary.md || cat out/e2e-worker-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Worker contract results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-e2e-contract-worker
           path: out/
           if-no-files-found: warn
 
@@ -200,7 +239,7 @@ jobs:
           if-no-files-found: warn
 
   report:
-    needs: [contract, harness]
+    needs: [contract, contract-worker, harness]
     if: ${{ !cancelled() && github.repository == 'desplega-ai/agent-swarm' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

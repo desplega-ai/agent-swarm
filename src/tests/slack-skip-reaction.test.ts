@@ -61,8 +61,8 @@ beforeAll(async () => {
   workerId = (await createAgent({ name: "skip-worker", isLead: false, status: "idle" })).id;
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

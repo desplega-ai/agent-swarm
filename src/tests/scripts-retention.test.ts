@@ -45,7 +45,7 @@ describe("scratch script retention", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await clearDb();
     if (savedApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
     else process.env.AGENT_SWARM_API_KEY = savedApiKey;

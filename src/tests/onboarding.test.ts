@@ -78,7 +78,7 @@ beforeAll(async () => {
 afterAll(async () => {
   _resetAutoReloadForTests();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   telemetry.onboarding = originalOnboardingTelemetry;
   for (const key of ENV_KEYS) {
     const value = savedEnv.get(key);

@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { listScriptConnections } from "../be/script-connections";
+import { listScriptConnectionsAsync } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import { APPS_JSON_COLUMN_MAX_BYTES_BOUNDS } from "../be/swarm-config-guard";
@@ -902,7 +902,7 @@ async function modelSourceIssues(
       });
     }
     if (source.connection !== undefined) {
-      const reachable = listScriptConnections({ agentId: runAs });
+      const reachable = await listScriptConnectionsAsync({ agentId: runAs });
       if (!reachable.some((connection) => connection.slug === source.connection)) {
         issues.push({
           path: `${path}.connection`,

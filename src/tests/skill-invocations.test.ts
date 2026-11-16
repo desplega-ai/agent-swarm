@@ -72,7 +72,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDb(TEST_DB_PATH);
   await removeDb(MIGRATION_DB_PATH);
 });

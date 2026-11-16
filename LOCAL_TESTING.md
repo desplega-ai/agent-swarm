@@ -145,8 +145,9 @@ environment plus common token shapes) before they enter the result file or the c
 
 ### Nightly E2E workflow
 
-`.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
-leg per provider inside the `worker:slim` image, plus a separate Claude SDK leg.
+`.github/workflows/nightly-e2e.yml` runs separate SQLite and Worker contract jobs on plain Ubuntu.
+The full Worker job passes `--sut-env DB_DRIVER=worker --strict` and includes the authenticated effective-driver assertion.
+Provider legs run inside the `worker:slim` image, including a separate Claude SDK leg.
 Both Claude legs use Haiku, the same image, and the dedicated OAuth secret.
 Each leg asserts the selected transport from the completed task and requires persisted cost records.
 The container uses `--init` to reap child processes.
@@ -158,6 +159,11 @@ lists cost per leg, the cost trend over earlier runs, warnings (retries, missing
 Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
 issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it. The issue body
 omits the log tails, and the uploaded log files are redacted copies, because both are public.
+
+The report expects SQLite and harness files named `e2e-results.json`.
+It also requires `e2e-worker-results.json` from `nightly-e2e-contract-worker`.
+It reports the two contracts separately. Missing Worker results, failed scenarios, or failed Worker coverage gates fail the report.
+The targeted PR Worker job provides smoke coverage. It does not replace the complete nightly Worker contract.
 
 Rebuild a report locally from downloaded artifacts:
 

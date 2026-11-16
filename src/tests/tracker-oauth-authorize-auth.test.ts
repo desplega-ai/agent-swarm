@@ -176,7 +176,7 @@ afterAll(async () => {
   }
   appServer.close();
   await providerServer.stop(true);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"])
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});
 });

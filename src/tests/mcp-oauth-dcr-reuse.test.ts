@@ -174,7 +174,7 @@ describe("MCP OAuth DCR client reuse", () => {
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     delete process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS;
     delete process.env.PUBLIC_MCP_BASE_URL;

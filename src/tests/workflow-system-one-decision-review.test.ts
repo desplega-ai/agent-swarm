@@ -262,7 +262,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   stopListening?.();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

@@ -47,7 +47,7 @@ describe("getTaskLineage", () => {
   }
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDb();
   });
 

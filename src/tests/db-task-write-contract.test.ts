@@ -316,6 +316,7 @@ value:getDailySpendGlobal
 value:getDashboardCostSummary
 value:getDb
 value:getDbClient
+value:getDbDriver
 value:getDependentTasks
 value:getDueScheduledTasks
 value:getDueWaitStates
@@ -587,6 +588,7 @@ value:reservedRoleViolation
 value:resetEmptyPollCount
 value:resetOrphanedInProgressTasksForAgent
 value:resetPromptTemplateToDefault
+value:resetPromptTemplateToDefaultForBoot
 value:resetTasksNotified
 value:resolveApprovalRequest
 value:resolvePromptTemplate
@@ -654,11 +656,13 @@ value:upsertChannelActivityCursor
 value:upsertInboxState
 value:upsertKv
 value:upsertPromptTemplate
+value:upsertPromptTemplateForBoot
 value:upsertScriptRunJournalStep
 value:upsertService
 value:upsertSkillFile
 value:upsertSkillFiles
 value:upsertSwarmConfig
+value:whenDbReady
 value:withFavoriteFlags`.split("\n");
 const selected = `value:assignUnassignedTaskPending
 value:backfillSupersedeTaskResumeTaskId
@@ -1070,7 +1074,7 @@ releaseStaleReviewingTasks
 releaseTask
 replaceTaskAttachment
 reserveSlackMessage
-resetPromptTemplateToDefault
+resetPromptTemplateToDefaultForBoot
 resolveApprovalRequest
 resolvePromptTemplate
 resolveWaitState
@@ -1166,7 +1170,7 @@ upsertBudget
 upsertChannelActivityCursor
 upsertInboxState
 upsertKv
-upsertPromptTemplate
+upsertPromptTemplateForBoot
 upsertScriptRunJournalStep
 upsertService
 upsertSkillFile
@@ -1246,7 +1250,7 @@ test(
     expect(completedEvents).toHaveLength(1);
     expect(completedEvents[0].props.provider).toBe("codex");
     expect(completedEvents[0].props.harnessVersion).toBe("3");
-    db.closeDb();
+    await db.closeDb();
     console.log("task-write-initialization-ok");
   `;
     const child = await runChild([process.execPath, "--eval", source], {

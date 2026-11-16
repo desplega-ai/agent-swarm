@@ -58,8 +58,8 @@ beforeEach(() => {
   resetAgentMail();
   initAgentMail();
 });
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
   resetAgentMail();
   for (const key of [
     "AGENTMAIL_WEBHOOK_SECRET",

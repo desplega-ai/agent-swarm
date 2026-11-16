@@ -47,7 +47,7 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -152,7 +152,7 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     await removeDbFiles(ROUTE_TEST_DB_PATH);
   });
 

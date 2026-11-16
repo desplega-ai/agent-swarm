@@ -26,7 +26,7 @@ import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/tas
 import type { TaskCreateEvent } from "../extensions/contract";
 import { providerPath } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import {
   createTaskWithSiblingAwareness,
   prepareTaskWithSiblingAwareness,
@@ -510,7 +510,7 @@ export async function notifySlackFileFailures(
   const failedFiles = [...byFile.values()]
     .map((f) => `\`${f.file.name}\` (${f.reason})`)
     .join(", ");
-  const { text } = resolveTemplate("slack.message.attachment_failed", {
+  const { text } = await resolveTemplateAsync("slack.message.attachment_failed", {
     failed_files: failedFiles,
   });
   try {

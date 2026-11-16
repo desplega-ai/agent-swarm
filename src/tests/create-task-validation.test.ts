@@ -36,9 +36,9 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${addr.port}`;
 });
 
-afterAll(() => {
+afterAll(async () => {
   server.close();
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(TEST_DB_PATH + suffix);

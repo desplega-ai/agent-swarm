@@ -42,8 +42,8 @@ beforeAll(() => {
   initDb(TEST_DB_PATH);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   removeDbFiles();
 });
 

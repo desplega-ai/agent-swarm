@@ -48,7 +48,7 @@ describe("trigger_surface on task telemetry", () => {
     calls.find((c) => c.props.taskId === taskId && c.event === event);
 
   beforeEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     _resetTriggerSurfaceCacheForTests();
@@ -62,7 +62,7 @@ describe("trigger_surface on task telemetry", () => {
 
   afterEach(async () => {
     spy.mockRestore();
-    closeDb();
+    await closeDb();
     await removeTestDb();
   });
 

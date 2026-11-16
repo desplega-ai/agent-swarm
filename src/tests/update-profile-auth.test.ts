@@ -71,7 +71,7 @@ describe("update-profile authorization", () => {
       }
     }
 
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
 
     await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
@@ -83,7 +83,7 @@ describe("update-profile authorization", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await Bun.file(TEST_DB_PATH + suffix).delete();

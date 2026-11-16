@@ -65,7 +65,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   for (const key of SEED_TOGGLE_KEYS) {
     const original = ORIGINAL_TOGGLES[key];
@@ -183,7 +183,7 @@ describe("seeder registry", () => {
       // The preload serves test DBs from an in-memory template; the real CLI
       // needs the same saved configuration in a file-backed database.
       await Bun.write(TEST_DB_PATH, getDb().serialize());
-      closeDb();
+      await closeDb();
       const result = await runChild(
         [process.execPath, "--no-env-file", "scripts/seed-scripts.ts"],
         {

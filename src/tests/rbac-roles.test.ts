@@ -40,8 +40,8 @@ async function removeDbFiles() {
   }
 }
 
-function resetDb() {
-  closeDb();
+async function resetDb() {
+  await closeDb();
   initDb(TEST_DB_PATH);
   ensureRbacSeedsSynced({ quiet: true });
 }
@@ -80,15 +80,15 @@ async function insertCustomRole(
 
 beforeEach(async () => {
   await removeDbFiles();
-  resetDb();
+  await resetDb();
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

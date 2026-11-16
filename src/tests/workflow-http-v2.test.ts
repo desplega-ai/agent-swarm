@@ -142,7 +142,7 @@ describe("Workflow HTTP API v2", () => {
   afterAll(async () => {
     stopRetryPoller();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

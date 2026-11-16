@@ -101,7 +101,7 @@ async function removeDbFiles(): Promise<void> {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "Requester Lead", isLead: true, status: "idle" });
   await createAgent({ id: WORKER_ID, name: "Requester Worker", isLead: false, status: "idle" });
@@ -142,7 +142,7 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) =>
     routeServer.close((error) => (error ? reject(error) : resolve())),
   );
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

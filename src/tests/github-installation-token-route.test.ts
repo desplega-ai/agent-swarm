@@ -96,10 +96,10 @@ beforeAll(async () => {
   port = await listenOnFreePort(server);
 });
 
-afterAll(() => {
+afterAll(async () => {
   server.close();
   github.stop(true);
-  closeDb();
+  await closeDb();
   cleanupDb();
 });
 

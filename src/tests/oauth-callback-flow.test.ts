@@ -133,7 +133,7 @@ afterAll(async () => {
   else process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = savedAllowPrivateHosts;
   appServer.close();
   await providerServer.stop(true);
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

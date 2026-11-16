@@ -6,8 +6,8 @@ import { Readable } from "node:stream";
 import { SQL } from "bun";
 import { closeDb, createAgent, getDb, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptApiTypes,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptApiTypesAsync,
   getScriptConnectionById,
   setScriptConnectionEnabled,
   upsertScriptConnection,
@@ -115,7 +115,7 @@ async function configRows(key: string) {
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
@@ -124,7 +124,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setSqlExecutorForTesting(null);
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
@@ -303,12 +303,12 @@ describe("sql connection registration", () => {
     const created = (await registerSql({ dsn: { secret: DSN } })).json().connection as {
       id: string;
     };
-    expect(getScriptApiConnectionDescriptors({ agentId: workerId })).toContainEqual({
+    expect(await getScriptApiConnectionDescriptorsAsync({ agentId: workerId })).toContainEqual({
       slug: "analytics",
       kind: "sql",
       connectionId: created.id,
     });
-    expect(getScriptApiTypes({ agentId: workerId })).toContain("query<T");
+    expect(await getScriptApiTypesAsync({ agentId: workerId })).toContain("query<T");
 
     const typecheck = await typecheckScript(
       `
@@ -521,7 +521,7 @@ describe("ctx.api sql runtime", () => {
       const savedExecutor = process.env.SCRIPT_EXECUTOR;
       process.env.SCRIPT_EXECUTOR = executor;
       try {
-        const apiConnections = getScriptApiConnectionDescriptors({ agentId: workerId });
+        const apiConnections = await getScriptApiConnectionDescriptorsAsync({ agentId: workerId });
         const egressSecrets = await buildScriptCredentialBindings({ agentId: workerId });
         expect(JSON.stringify({ apiConnections, egressSecrets })).not.toContain("postgres://");
         const output = await runScript({

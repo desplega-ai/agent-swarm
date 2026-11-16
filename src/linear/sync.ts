@@ -17,7 +17,7 @@ import {
 import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { ensureToken } from "../oauth/ensure-token";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { isTerminalTaskStatus } from "../types";
@@ -619,7 +619,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const requestSection = buildSessionRequestSection(event, actorName);
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
   const templateName = existing ? "linear.issue.reassigned" : "linear.issue.assigned";
-  const templateResult = resolveTemplate(templateName, {
+  const templateResult = await resolveTemplateAsync(templateName, {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,
@@ -913,7 +913,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     promptedSampleContext,
   );
 
-  const followupResult = resolveTemplate("linear.issue.followup", {
+  const followupResult = await resolveTemplateAsync("linear.issue.followup", {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,

@@ -95,8 +95,8 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   delete process.env.KAPSO_WEBHOOK_HMAC_SECRET;
   delete process.env.KAPSO_API_KEY;
   delete process.env.KAPSO_API_BASE_URL;

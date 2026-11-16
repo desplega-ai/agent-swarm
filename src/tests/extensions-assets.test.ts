@@ -170,7 +170,7 @@ describe("extension assets", () => {
   afterAll(async () => {
     await stopExtensionRuntime();
     setScriptEmbeddingProviderForTests(null);
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

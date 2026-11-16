@@ -239,7 +239,7 @@ describe("citation persistence and completion warnings", () => {
     ).id;
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await Promise.all(["", "-wal", "-shm"].map((suffix) => rm(dbPath + suffix, { force: true })));
   });
 

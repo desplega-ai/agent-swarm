@@ -55,7 +55,7 @@ beforeAll(async () => {
     isEnterpriseInstall: false,
   }));
   await getSlackWorkspaceIdentity();
-  closeDb();
+  await closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
   removeTestDb();
@@ -63,11 +63,11 @@ beforeAll(async () => {
   process.env.SLACK_RENDER_V2 = "false";
 });
 
-afterAll(() => {
+afterAll(async () => {
   resetSlackWorkspaceGuardForTests();
   if (previousRenderV2 === undefined) delete process.env.SLACK_RENDER_V2;
   else process.env.SLACK_RENDER_V2 = previousRenderV2;
-  closeDb();
+  await closeDb();
   removeTestDb();
   testGlobals.__testMigrationTemplate = savedMigrationTemplate;
 });

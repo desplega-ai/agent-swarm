@@ -72,7 +72,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});
   }

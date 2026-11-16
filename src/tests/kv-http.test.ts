@@ -83,8 +83,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // The body-cap response can leave an upload connection open after its assertion.
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

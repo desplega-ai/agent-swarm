@@ -84,7 +84,7 @@ afterEach(async () => {
   }
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   templateGlobals.__testMigrationTemplate = savedTemplate;
   await rm(dir, { recursive: true, force: true });
 });
@@ -316,7 +316,7 @@ describe("defer-task wakeOn", () => {
       const successor = (await getScheduledTaskById(deferred.structuredContent.scheduleId!))!;
       await executeSchedule(successor);
       current = (await children(successor.id))[0]!;
-      closeDb();
+      await closeDb();
       initDb(path);
       await initDeferredTaskWaits();
       expect(await children(schedule.id)).toHaveLength(0);
@@ -564,7 +564,7 @@ describe("defer-task wakeOn", () => {
 
     await failTask(current.id, "real failure");
     // Reopen to verify the new watched task is durable across restarts.
-    closeDb();
+    await closeDb();
     initDb(path);
     await initDeferredTaskWaits();
     const child = await awaitChild(schedule.id);
@@ -707,7 +707,7 @@ describe("defer-task wakeOn", () => {
     const missed = await fixture("settled");
     stopDeferredTaskWaits();
     await completeTask(missed.producer.id, "completed while listener was down");
-    closeDb();
+    await closeDb();
     initDb(path);
     await initDeferredTaskWaits();
     expect(await children(missed.schedule.id)).toHaveLength(1);
@@ -756,7 +756,7 @@ describe("defer-task wakeOn", () => {
   test("restart reconciles cancellation missed while the listener was stopped", async () => {
     const { producer, schedule } = await fixture();
     await cancelTask(producer.id, "cancelled while stopped");
-    closeDb();
+    await closeDb();
     initDb(path);
     await initDeferredTaskWaits();
     expect(await waitState(schedule.id)).toMatchObject({
@@ -848,7 +848,7 @@ describe("defer-task wakeOn", () => {
       current = await resumeTask(current.id);
     }
     await completeTask(current.id, "final result");
-    closeDb();
+    await closeDb();
     initDb(path);
     await initDeferredTaskWaits();
     expect(await waitState(schedule.id)).toMatchObject({ taskId: current.id, status: "fired" });
@@ -924,7 +924,7 @@ describe("defer-task wakeOn", () => {
     const { producers, schedule } = await multiFixture("all");
     await cutWithQueuedRetry(producers[0]!.id);
     await completeTask(producers[1]!.id, "done while stopped");
-    closeDb();
+    await closeDb();
     initDb(path);
     await initDeferredTaskWaits();
     expect(await waitState(schedule.id)).toMatchObject({ status: "fired" });

@@ -746,3 +746,13 @@ reject the reserved key; legacy stored values are ignored at startup and reload 
 The API warns once per process at startup or first use when the deployment opt-out is enabled.
 Denied-origin logs name the origin and `CORS_ALLOWED_ORIGINS` so a missing SPA origin is diagnosable.
 CORS controls browser response access; it does not replace authentication or CSRF protection.
+
+## Database execution
+
+`DB_DRIVER` accepts `sqlite` or `worker`, with `sqlite` as the default.
+Worker mode is experimental and requires a file database outside tests.
+Set this variable in the deployment environment. Stored configuration cannot override it.
+Restart the API after each change. Authenticated `/api/stats` reports the effective `dbDriver`.
+To restore the default, set `DB_DRIVER=sqlite` and restart against the same database file.
+Migrations and seeders remain synchronous. Some prompt, script-type, memory, and metrics paths also remain synchronous.
+Worker transport failure requires a process restart. The API never replays uncertain writes.

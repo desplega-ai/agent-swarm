@@ -114,7 +114,7 @@ export function migrateLegacyCredentialBindingBlob(database: Database): number {
       .prepare<unknown, [string]>("DELETE FROM swarm_config WHERE key = ?")
       .run(CREDENTIAL_BINDINGS_CONFIG_KEY);
   });
-  tx();
+  tx.immediate();
 
   console.log(
     `[credential-bindings] Migrated ${imported} legacy SCRIPT_CREDENTIAL_BINDINGS entr(ies) to relational rows and retired the blob key.`,

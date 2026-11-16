@@ -233,7 +233,7 @@ describe("HITL port-based routing", () => {
         // Already deleted
       }
     }
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

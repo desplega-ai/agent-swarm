@@ -324,7 +324,7 @@ afterAll(async () => {
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
   });
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   if (originalFlag === undefined) delete process.env.MULTI_RUNTIME_ENABLED;
   else process.env.MULTI_RUNTIME_ENABLED = originalFlag;

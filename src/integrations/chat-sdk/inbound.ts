@@ -16,7 +16,7 @@ import { resolveIdentity } from "@/be/identity";
 import { SteeringBlockedError } from "@/be/steering";
 import { recordUnmappedIdentity } from "@/be/unmapped-identities";
 import { dispatchPre } from "@/extensions/dispatcher";
-import { resolveTemplate } from "@/prompts/resolver";
+import { resolveTemplateAsync } from "@/prompts/resolver";
 import { chatSdkContextKey } from "@/tasks/context-key";
 import { TaskCreationBlockedError } from "@/tasks/errors";
 import type { CreateTaskOptions } from "@/types";
@@ -549,19 +549,25 @@ export async function flushChatThread(
     mostRecentTask && thread
       ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)), resetAt)
       : "";
-  const header = resolveTemplate("chat.message.header", {
-    chat_facts: formatChatHeaderFacts(
-      adapter,
-      otherSenders > 0
-        ? { ...requester.facts, from: `${requester.facts.from} +${otherSenders} more` }
-        : requester.facts,
-      requester.addressed,
-    ),
-  }).text;
+  const header = (
+    await resolveTemplateAsync("chat.message.header", {
+      chat_facts: formatChatHeaderFacts(
+        adapter,
+        otherSenders > 0
+          ? { ...requester.facts, from: `${requester.facts.from} +${otherSenders} more` }
+          : requester.facts,
+        requester.addressed,
+      ),
+    })
+  ).text;
   const description = [
     header,
     threadContext
-      ? resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }).text
+      ? (
+          await resolveTemplateAsync("chat.message.thread_context", {
+            thread_messages: threadContext,
+          })
+        ).text
       : "",
     marked,
   ]

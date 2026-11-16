@@ -65,6 +65,10 @@ bun scripts/e2e/diff-coverage.ts                   # the PR comment: changed API
 ```
 
 Wall clock for the full suite is a few minutes on a laptop. The Slack scenarios dominate.
+For the experimental runtime driver, use `bun run e2e --sut-env DB_DRIVER=worker --strict`.
+The authenticated stats assertion rejects silent driver fallback. Public health responses omit the driver.
+PRs run targeted Worker smoke separately from the three SQLite shards. Nightly runs the complete Worker contract.
+Worker results never enter the SQLite shard union. See [CI driver coverage](./ci.md#database-driver-coverage) for artifacts and report requirements.
 The runner boots the API with a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`)
 instead of the 10 s server default; `--sut-env SLACK_TASK_WATCHER_INTERVAL_MS=10000` runs
 the suite at production cadence, and the Slack absence windows widen with it.

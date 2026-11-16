@@ -33,7 +33,7 @@ describe("/status instance signals", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

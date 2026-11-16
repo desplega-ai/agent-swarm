@@ -84,7 +84,7 @@ describe("slack-read response boundaries", () => {
   afterAll(async () => {
     if (savedApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
     else process.env.AGENT_SWARM_API_KEY = savedApiKey;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

@@ -132,7 +132,7 @@ beforeAll(async () => {
   // process can keep writing to the previous template-restored DB while the
   // spawned server reads from TEST_DB_PATH — defensive even if today's CI
   // ordering happens to leave `db` null here.
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
   await createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
@@ -144,10 +144,11 @@ beforeAll(async () => {
   await getDbClient().run(insertTaskSql, [taskB, agentA, "task B", now, now]);
 
   store = new SqliteMemoryStore();
+  await store.whenReady();
 }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   // Restore preload.ts's template for any subsequent suites.
   testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedRateTemplate;
   testTemplateGlobals.__savedRateTemplate = undefined;

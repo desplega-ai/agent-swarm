@@ -93,7 +93,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   restoreEnv();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

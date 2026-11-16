@@ -228,7 +228,7 @@ describe("Approval Requests", () => {
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

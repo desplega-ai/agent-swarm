@@ -334,7 +334,7 @@ describe("translateCursorMessage", () => {
   });
 
   test("composeFirstMessage renders the registered template", async () => {
-    configureDbResolver((eventType) =>
+    configureDbResolver(async (eventType) =>
       eventType === "system.agent.cursor.first_message"
         ? { template: { id: "custom", scope: "global", body: "[{{systemPrompt}}] {{prompt}}" } }
         : null,
@@ -350,7 +350,7 @@ describe("translateCursorMessage", () => {
         throw new Error("db down");
       },
     ]) {
-      configureDbResolver(resolver);
+      configureDbResolver(async () => resolver());
       expect(await composeFirstMessage("sys", "task")).toBe(
         "<system_instructions>\nsys\n</system_instructions>\n\ntask",
       );

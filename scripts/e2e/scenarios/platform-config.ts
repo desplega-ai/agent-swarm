@@ -225,6 +225,8 @@ export const platformConfig: Scenario = {
       // ── validation ─────────────────────────────────────────────────────────
       const invalid: Array<[Record<string, unknown>, string]> = [
         [{ key: "API_KEY", value: "x" }, "a reserved key"],
+        [{ key: "DB_DRIVER", value: "sqlite" }, "the environment-only database driver"],
+        [{ key: "db_driver", value: "sqlite" }, "the database driver in another case"],
         [{ key: "api_key", value: "x" }, "a reserved key in another case"],
         [{ key: "SECRETS_ENCRYPTION_KEY", value: "x" }, "the encryption key"],
         [{ key: "onboarding_state", value: "x" }, "an internal key"],

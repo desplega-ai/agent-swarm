@@ -39,7 +39,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   globalThis.fetch = originalFetch;
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

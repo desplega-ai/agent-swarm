@@ -32,7 +32,7 @@ import {
   markTrackerDelivery,
   updateTrackerSyncSwarmId,
 } from "../be/db-queries/tracker";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { azureDevOpsWorkItemContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { TrackerSync } from "../tracker/types";
@@ -376,7 +376,7 @@ async function createWorkItemTask(
             description_section: description ? `Description:\n${description}\n\n` : "",
           };
 
-  const result = resolveTemplate(templateName, variables);
+  const result = await resolveTemplateAsync(templateName, variables);
   if (result.skipped) return null;
 
   const lead = await findLeadAgent();

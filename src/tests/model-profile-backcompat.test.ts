@@ -77,7 +77,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server.stop(true);
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

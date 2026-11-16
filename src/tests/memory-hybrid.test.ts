@@ -67,12 +67,15 @@ describe("memory hybrid search", () => {
     initDb(TEST_DB_PATH);
     await createAgent({ id: agentId, name: "Hybrid Test Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
   });
 
   afterAll(async () => {
     if (prevHybridFlag === undefined) delete process.env.MEMORY_HYBRID_SEARCH;
     else process.env.MEMORY_HYBRID_SEARCH = prevHybridFlag;
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -274,6 +277,9 @@ describe("memory search score scale", () => {
       status: "idle",
     });
     store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
 
     const exact = await store.store({
       agentId: scaleAgentId,

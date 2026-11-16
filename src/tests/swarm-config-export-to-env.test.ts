@@ -69,7 +69,7 @@ describe("swarm_config exportToEnv", () => {
   afterAll(async () => {
     clearVolatileSecretsForTesting();
     server.close();
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});
     }

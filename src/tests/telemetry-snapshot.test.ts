@@ -106,7 +106,7 @@ describe("org snapshot", () => {
   let sent: Array<{ event: string; properties: Record<string, unknown> }>;
 
   beforeEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     _resetTelemetryStateForTests();
@@ -122,7 +122,7 @@ describe("org snapshot", () => {
     globalThis.fetch = originalFetch;
     process.env.ANONYMIZED_TELEMETRY = "true";
     _resetTelemetryStateForTests();
-    closeDb();
+    await closeDb();
     await removeTestDb();
   });
 

@@ -39,7 +39,7 @@ export function currentLoopPath(): string {
   return pathContext.getStore() ?? "unknown";
 }
 
-type RecordedStatement = { path: string; sql: string; ms: number };
+type RecordedStatement = { path: string; sql: string; ms: number; driver?: "sqlite" | "worker" };
 
 /** Statements shorter than this cannot make a stall worth a log line. */
 const STATEMENT_RECORD_MIN_MS = 10;
@@ -50,10 +50,14 @@ const ring: RecordedStatement[] = [];
  * Called by the DB client for each driver call. Stores a reference to the SQL
  * string only; the label is built only when a stall line is logged.
  */
-export function recordStatement(sql: string, ms: number): void {
+export function recordStatement(
+  sql: string,
+  ms: number,
+  driver: "sqlite" | "worker" = "sqlite",
+): void {
   if (ms < STATEMENT_RECORD_MIN_MS) return;
   if (ring.length === STATEMENT_RING_MAX) ring.shift();
-  ring.push({ path: currentLoopPath(), sql, ms });
+  ring.push({ path: currentLoopPath(), sql, ms, driver });
 }
 
 const PROBE_MS = 100;
@@ -82,18 +86,23 @@ function statementLabel(sql: string): string {
 export function formatStallLine(lagMs: number, statements: readonly RecordedStatement[]): string {
   let dbMs = 0;
   const perPath = new Map<string, number>();
-  for (const s of statements) {
+  const synchronous = statements.filter((s) => s.driver !== "worker");
+  for (const s of synchronous) {
     dbMs += s.ms;
     perPath.set(s.path, (perPath.get(s.path) ?? 0) + 1);
   }
-  const top = [...statements].sort((a, b) => b.ms - a.ms).slice(0, TOP_STATEMENTS);
+  const top = [...synchronous].sort((a, b) => b.ms - a.ms).slice(0, TOP_STATEMENTS);
   const path = top[0]?.path ?? "unknown";
+  const workerMs = statements
+    .filter((s) => s.driver === "worker")
+    .reduce((sum, s) => sum + s.ms, 0);
   const parts = [
     `[event-loop] stall ${Math.round(lagMs)}ms`,
     `path=${path}`,
-    `statements=${statements.length}`,
+    `statements=${synchronous.length}`,
     `db_ms=${Math.round(dbMs)}`,
   ];
+  if (workerMs) parts.push(`driver=worker worker_execution_ms=${Math.round(workerMs)}`);
   if (top.length > 0) {
     parts.push(`top=${top.map((s) => `${Math.round(s.ms)}ms:${statementLabel(s.sql)}`).join("|")}`);
     parts.push(

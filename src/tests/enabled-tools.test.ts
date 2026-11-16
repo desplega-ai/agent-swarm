@@ -117,7 +117,7 @@ beforeAll(async () => {
   else process.env.SLACK_DISABLE = originalSlackDisable;
 
   await removeDbFiles(TEST_DB_PATH);
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -132,7 +132,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

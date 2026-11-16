@@ -17,7 +17,7 @@ import {
   findUserByExternalId,
   linkIdentity,
 } from "../be/users";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { azureDevOpsContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
@@ -302,7 +302,7 @@ export async function handlePullRequestCreated(
 
   const context = pr.description ? extractMentionContext(pr.description, botId) : "";
   const prUrl = pullRequestWebUrl(pr);
-  const result = resolveTemplate("azure-devops.pull_request.opened", {
+  const result = await resolveTemplateAsync("azure-devops.pull_request.opened", {
     pr_id: pr.pullRequestId,
     pr_title: pr.title,
     repo,
@@ -402,7 +402,7 @@ export async function handlePullRequestCommented(
     : "";
 
   const prUrl = pullRequestWebUrl(pr);
-  const result = resolveTemplate("azure-devops.comment.mentioned", {
+  const result = await resolveTemplateAsync("azure-devops.comment.mentioned", {
     pr_id: pr.pullRequestId,
     pr_title: pr.title,
     username: await renderAzureDevOpsIdentity(comment.author),

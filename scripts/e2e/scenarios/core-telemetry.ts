@@ -158,6 +158,10 @@ async function dashboards(ctx: ScenarioContext, agentId: string, taskId: string)
   response = await ctx.api("GET", "/api/stats");
   expectStatus(response, [200], "stats");
   const stats = asRecord(response.json);
+  expect(
+    stats.dbDriver === (ctx.sutEnv.DB_DRIVER ?? "sqlite"),
+    "stats must report the selected database driver",
+  );
   const agents = asRecord(stats.agents);
   const tasks = asRecord(stats.tasks);
   expect(

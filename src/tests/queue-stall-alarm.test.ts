@@ -19,8 +19,8 @@ import {
 const TEST_DB_PATH = "./test-queue-stall-alarm.sqlite";
 const NOW = new Date("2026-08-17T17:00:00.000Z");
 
-beforeAll(() => {
-  closeDb();
+beforeAll(async () => {
+  await closeDb();
   initDb(TEST_DB_PATH);
 });
 
@@ -34,7 +34,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   _test.resetState();
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

@@ -91,8 +91,8 @@ afterEach(async () => {
   await getDbClient().run("DELETE FROM script_connections");
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   removeDbFiles(TEST_DB_PATH);
 });
 

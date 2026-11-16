@@ -68,8 +68,8 @@ beforeAll(async () => {
   } as never);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   try {
     unlinkSync(TEST_DB_PATH);
     unlinkSync(`${TEST_DB_PATH}-wal`);

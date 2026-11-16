@@ -14,13 +14,13 @@ import {
 
 const TEST_DB_PATH = "./test-pool-session-logs.sqlite";
 
-beforeAll(() => {
-  closeDb();
+beforeAll(async () => {
+  await closeDb();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

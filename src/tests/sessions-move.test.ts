@@ -74,7 +74,7 @@ beforeAll(async () => {
 afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 async function call(path: string, body: unknown, userId: string | null = owner, agent?: string) {
@@ -154,7 +154,7 @@ test("bulk source moves allow exits and exact Undo keys, but refuse source group
 });
 
 test("prefix refuses source prefixes before audit and root scans, including bypass requests", async () => {
-  const auditSpy = spyOn(audit, "auditAssetKeys");
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync");
   const prefixScan = spyOn(sessionMoves, "listPrefixRoots");
   const sharedScan = spyOn(sessionMoves, "listSharedPrefixRoots");
   try {
@@ -252,7 +252,7 @@ test("bulk moves every chain task and attachment mapping with history and preser
     lastReadAt: grandchild.lastUpdatedAt,
   });
   const before = await listRecentSessions({ viewer: { userId: owner, scope: "all" } });
-  const auditSpy = spyOn(audit, "auditAssetKeys");
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync");
   try {
     const result = await call("session-moves", {
       rootTaskIds: [root.id, root.id],
@@ -572,7 +572,7 @@ test("bulk cannot distinguish missing roots from inaccessible roots or children"
 
 test("unexpected move errors propagate as 500 even when their message contains blocked until", async () => {
   const { root } = await session("shared/unexpected/");
-  const failure = spyOn(audit, "auditAssetKeys").mockImplementation(() => {
+  const failure = spyOn(audit, "auditAssetKeysAsync").mockImplementation(() => {
     throw new TypeError("unexpected blocked until failure");
   });
   try {
@@ -696,9 +696,9 @@ test("prefix pages past skipped roots and reaches zero with skipped roots remain
 test("audit warnings block all moves with the existing message and one audit per request", async () => {
   const first = await session("shared/audit/");
   const second = await session("shared/audit/");
-  const originalAudit = audit.auditAssetKeys;
-  const auditSpy = spyOn(audit, "auditAssetKeys").mockImplementation((db) => ({
-    ...originalAudit(db),
+  const originalAudit = audit.auditAssetKeysAsync;
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync").mockImplementation(async (db) => ({
+    ...(await originalAudit(db)),
     ok: false,
     warningCount: 1,
   }));

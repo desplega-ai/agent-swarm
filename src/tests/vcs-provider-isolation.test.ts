@@ -30,7 +30,7 @@ beforeAll(async () => {
   process.env.BITBUCKET_BOT_ACCOUNT_ID = "557058:00000000-0000-4000-8000-0000000000b0";
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
   resetBitbucketDedup();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(DB + suffix).catch(() => {});

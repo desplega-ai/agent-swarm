@@ -163,7 +163,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
         // Already deleted
       }
     }
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

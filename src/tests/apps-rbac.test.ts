@@ -196,7 +196,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   if (previousPageSecret === undefined) delete process.env.PAGE_SESSION_SECRET;
   else process.env.PAGE_SESSION_SECRET = previousPageSecret;
   if (previousSwarmKey === undefined) delete process.env.AGENT_SWARM_API_KEY;

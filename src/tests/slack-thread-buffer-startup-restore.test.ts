@@ -42,7 +42,7 @@ afterAll(async () => {
   await stopSlackApp();
   process.env = saved;
   await stopSlackMock(slack, false);
-  closeDb();
+  await closeDb();
 });
 
 describe.each(["socket", "http"] as const)("Slack startup in %s mode", (mode) => {

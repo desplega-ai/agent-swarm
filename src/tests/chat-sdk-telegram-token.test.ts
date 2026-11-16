@@ -47,7 +47,7 @@ afterEach(async () => {
 afterAll(async () => {
   mock.stop();
   restoreEnv();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

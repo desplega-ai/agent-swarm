@@ -159,7 +159,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"])
     await Bun.file(dbPath + suffix)
       .delete()

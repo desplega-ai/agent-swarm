@@ -999,10 +999,10 @@ describe("POST /agentfs/auth/register needs a swarm credential", () => {
     fake.registerBody = null;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     server.close();
     fake.stop();
-    closeDb();
+    await closeDb();
     for (const [k, v] of [
       ["AGENT_FS_PROXY", saved.proxy],
       ["AGENT_FS_API_URL", saved.url],

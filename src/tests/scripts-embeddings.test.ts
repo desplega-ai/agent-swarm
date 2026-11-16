@@ -113,7 +113,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setScriptEmbeddingProviderForTests(null);
-  closeDb();
+  await closeDb();
   await clearDb();
 });
 

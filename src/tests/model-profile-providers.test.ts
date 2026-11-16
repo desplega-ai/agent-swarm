@@ -99,7 +99,7 @@ beforeAll(async () => {
 afterAll(async () => {
   server.close();
   configServer.stop(true);
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

@@ -81,7 +81,7 @@ beforeAll(async () => {
     isEnterpriseInstall: false,
   }));
   await getSlackWorkspaceIdentity();
-  closeDb();
+  await closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
   removeTestDb();
@@ -102,14 +102,14 @@ beforeAll(async () => {
   } as never);
 });
 
-afterAll(() => {
+afterAll(async () => {
   resetSlackWorkspaceGuardForTests();
   resolveSlackUserIdSpy.mockRestore();
   for (const [key, value] of Object.entries(previousEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  closeDb();
+  await closeDb();
   removeTestDb();
   testGlobals.__testMigrationTemplate = savedMigrationTemplate;
 });

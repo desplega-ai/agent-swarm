@@ -55,7 +55,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 test("human REST reply after Coder and Reviewer work reaches Lead without worker requirements", async () => {

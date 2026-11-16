@@ -64,7 +64,7 @@ describe("improvement payload whitelist", () => {
     globalThis.fetch = originalFetch;
     if (savedTelemetry === undefined) delete process.env.ANONYMIZED_TELEMETRY;
     else process.env.ANONYMIZED_TELEMETRY = savedTelemetry;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

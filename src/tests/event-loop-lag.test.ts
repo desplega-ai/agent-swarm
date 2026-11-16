@@ -127,6 +127,24 @@ describe("event-loop lag probe", () => {
 });
 
 describe("formatStallLine", () => {
+  test("Worker cost cannot name the blocking path or enter synchronous statement rankings", () => {
+    const line = formatStallLine(1000, [
+      { path: "worker.request", sql: "SELECT worker", ms: 900, driver: "worker" },
+      { path: "main.request", sql: "SELECT main", ms: 100, driver: "sqlite" },
+    ]);
+    expect(line).toContain("path=main.request statements=1 db_ms=100");
+    expect(line).toContain("worker_execution_ms=900");
+    expect(line).toContain("top=100ms:SELECT main paths=main.request:1");
+    expect(line).not.toContain("worker.request");
+    expect(line).not.toContain("SELECT worker");
+    expect(
+      formatStallLine(1000, [
+        { path: "worker.request", sql: "SELECT worker", ms: 900, driver: "worker" },
+      ]),
+    ).toBe(
+      "[event-loop] stall 1000ms path=unknown statements=0 db_ms=0 driver=worker worker_execution_ms=900",
+    );
+  });
   test("reports unknown with no statements recorded (non-SQLite block)", () => {
     expect(formatStallLine(1234.4, [])).toBe(
       "[event-loop] stall 1234ms path=unknown statements=0 db_ms=0",

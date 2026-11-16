@@ -27,7 +27,7 @@ beforeAll(async () => {
   initDb(path);
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await cleanup();
 });
 beforeEach(async () => {

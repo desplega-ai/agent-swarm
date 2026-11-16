@@ -194,9 +194,9 @@ afterEach(async () => {
   logSpy.mockRestore();
   errorSpy.mockRestore();
 });
-afterAll(() => {
+afterAll(async () => {
   clearRuntimeOwnerIdCache();
-  closeDb();
+  await closeDb();
   for (const key of envKeys) {
     if (previous[key] === undefined) delete process.env[key];
     else process.env[key] = previous[key];

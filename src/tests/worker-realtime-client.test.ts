@@ -40,8 +40,8 @@ beforeAll(() => {
   setApiKey("test-worker-realtime-client-key");
   process.env.RUNTIME_POOLS_ENABLED = "true";
 });
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   process.env = previousEnv;
 });
 beforeEach(async () => {

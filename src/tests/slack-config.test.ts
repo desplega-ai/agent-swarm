@@ -118,7 +118,7 @@ test.each([
   } finally {
     await stopSlackApp();
     await stopSlackMock(slack, false);
-    closeDb();
+    await closeDb();
   }
 }, 20_000);
 
@@ -139,6 +139,6 @@ test("Socket Mode lifecycle drives the live connection state read by /status", a
   } finally {
     await stopSlackApp();
     await stopSlackMock(slack, false);
-    closeDb();
+    await closeDb();
   }
 }, 20_000);

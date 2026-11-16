@@ -77,13 +77,14 @@ beforeEach(() => registerVolatileSecret(secret.value, secret.name));
 
 afterAll(async () => {
   secret.cleanup();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 
 describe("agent_memory", () => {
   test("store scrubs name, content, summary, tags, version row and FTS row", async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
     const memory = await store.store({
       agentId,
       scope: "agent",
@@ -115,6 +116,7 @@ describe("agent_memory", () => {
 
   test("edit scrubs the new content", async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
     const memory = await store.store({
       agentId,
       scope: "agent",

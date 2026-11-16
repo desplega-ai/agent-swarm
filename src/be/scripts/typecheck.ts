@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { getScriptAppTypes } from "@/apps/script-types";
-import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
+import { getScriptApiTypesAsync, getScriptMcpTypesAsync } from "@/be/script-connections";
 import type { ScriptTypeContext } from "./type-contributors";
 
 /**
@@ -935,10 +935,12 @@ export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<un
 `;
 
 export async function scriptSdkTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypes?: string,
+  mcpTypes?: string,
   appTypes?: string,
 ): Promise<string> {
+  apiTypes ??= await getScriptApiTypesAsync();
+  mcpTypes ??= await getScriptMcpTypesAsync();
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
   return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}\n`;
@@ -1011,10 +1013,12 @@ export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
  * `ctx.api.<slug>` completions break in the editor.
  */
 export async function scriptStdlibTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypes?: string,
+  mcpTypes?: string,
   appTypes?: string,
 ): Promise<string> {
+  apiTypes ??= await getScriptApiTypesAsync();
+  mcpTypes ??= await getScriptMcpTypesAsync();
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
   return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}`);
@@ -1589,8 +1593,8 @@ export async function typecheckScript(
   source: string,
   context: ScriptTypeContext = {},
 ): Promise<ScriptTypecheckResult> {
-  const apiTypes = getScriptApiTypes(context);
-  const mcpTypes = getScriptMcpTypes(context);
+  const apiTypes = await getScriptApiTypesAsync(context);
+  const mcpTypes = await getScriptMcpTypesAsync(context);
   const appTypes = await getScriptAppTypes(context);
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
   const stdlibTypes = appTypes

@@ -43,7 +43,7 @@ describe("savings fleet read on a busy connection", () => {
     // db-query path, which snapshots an in-memory database (see the scale test).
     templateGlobals.__savedFleetLatencyTemplate = templateGlobals.__testMigrationTemplate;
     templateGlobals.__testMigrationTemplate = undefined;
-    closeDb();
+    await closeDb();
     dbDir = mkdtempSync(join(tmpdir(), "savings-fleet-latency-"));
     initDb(join(dbDir, "fleet.sqlite"));
     await resetSavingsRollupForTests();
@@ -86,9 +86,9 @@ describe("savings fleet read on a busy connection", () => {
     port = await listenOnFreePort(server);
   }, 60_000);
 
-  afterAll(() => {
+  afterAll(async () => {
     server?.close();
-    closeDb();
+    await closeDb();
     templateGlobals.__testMigrationTemplate = templateGlobals.__savedFleetLatencyTemplate;
     templateGlobals.__savedFleetLatencyTemplate = undefined;
     if (dbDir) rmSync(dbDir, { recursive: true, force: true });

@@ -159,8 +159,8 @@ jobs:
           # reads vendored-openapi/ at runtime. scripts/e2e/ is the runner, and
           # its tsconfig extends the root one. The manifests and lockfile feed the
           # frozen install. Docs, runbooks, apps/ui sources, docs-site and other
-          # workflows skip it.
-          E2E=$(match '^(src/|packages/|templates/|vendored-openapi/|slack-manifest\.json$|scripts/e2e/|scripts/check-e2e-boundary\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+          # workflows skip it, except the contract workflow definitions themselves.
+          E2E=$(match '^(src/|packages/|templates/|vendored-openapi/|slack-manifest\.json$|scripts/e2e/|scripts/check-e2e-boundary\.sh$|\.github/workflows/(merge-gate|nightly-e2e)\.yml$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
 
           for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_E2E UI_IMAGE TEMPLATES_WORKFLOWS E2E; do
             v=$(eval echo \$$k)
@@ -710,10 +710,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Keeps the E2E Contract name: unions the shards' coverage, then applies --strict once.
+  # Targeted Worker smoke coverage. Full Worker contract coverage runs nightly.
+  e2e-worker-smoke:
+    name: E2E Worker Smoke
+    needs: detect-changes
+    if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # core-telemetry asserts dbDriver=worker through authenticated GET /api/stats.
+      - name: Run Worker smoke scenarios
+        run: >-
+          bun run e2e --sut-env DB_DRIVER=worker
+          --only health,db-driver-startup,task-lifecycle,core-sessions,core-telemetry,knowledge-prompt-templates,script-connections,script-inline-run,knowledge-memory
+          --json e2e-worker-smoke.json --summary-md e2e-worker-summary.md
+
+      - name: Add Worker job summary
+        if: always()
+        run: test ! -f e2e-worker-summary.md || cat e2e-worker-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Worker smoke results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-worker-smoke-results
+          path: e2e-worker-smoke.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Union only the SQLite shards. Require the independent Worker smoke job too.
   e2e-contract:
     name: E2E Contract
-    needs: [detect-changes, e2e-contract-shard]
+    needs: [detect-changes, e2e-contract-shard, e2e-worker-smoke]
     # Runs after a failed shard too, so the summary names what failed.
     if: always() && needs.detect-changes.result == 'success' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true')
     runs-on: ubuntu-latest
@@ -745,6 +786,12 @@ jobs:
       # merge.ts imports no package, so no install. A missing shard file fails the merge.
       - name: Merge shards (strict coverage gate)
         run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json
+
+      - name: Require Worker smoke success
+        if: always()
+        env:
+          WORKER_RESULT: ${{ needs.e2e-worker-smoke.result }}
+        run: test "$WORKER_RESULT" = success
 
       - name: Add E2E job summary
         if: always()

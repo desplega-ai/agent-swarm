@@ -141,7 +141,7 @@ beforeAll(async () => {
 afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   resetFileStorageProvider();
   if (multiRuntime === undefined) delete process.env.MULTI_RUNTIME_ENABLED;
   else process.env.MULTI_RUNTIME_ENABLED = multiRuntime;

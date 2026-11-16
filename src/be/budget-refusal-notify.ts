@@ -12,7 +12,7 @@
 // (see plan §5.1). Operators audit via
 // `SELECT ... FROM budget_refusal_notifications WHERE follow_up_task_id IS NULL`.
 
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import type { AgentTask } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -99,7 +99,7 @@ export async function emitBudgetRefusalSideEffects(
         const taskDesc = ctx.task.task.slice(0, 200);
         const spendSummary = formatSpendSummary(ctx);
 
-        const resolved = resolveTemplate(
+        const resolved = await resolveTemplateAsync(
           "task.budget.refused",
           {
             cause: ctx.cause,

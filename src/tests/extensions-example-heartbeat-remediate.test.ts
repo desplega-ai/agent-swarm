@@ -26,13 +26,13 @@ async function removeDbFiles(): Promise<void> {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   await stopExtensionRuntime();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

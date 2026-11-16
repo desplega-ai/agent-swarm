@@ -322,7 +322,7 @@ describe("org email domain", () => {
   const savedProfile = Object.fromEntries(PROFILE_KEYS.map((key) => [key, process.env[key]]));
 
   beforeEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     _resetTelemetryIdentityForTests();
@@ -334,7 +334,7 @@ describe("org email domain", () => {
       if (savedProfile[key] === undefined) delete process.env[key];
       else process.env[key] = savedProfile[key];
     }
-    closeDb();
+    await closeDb();
     await removeTestDb();
   });
 

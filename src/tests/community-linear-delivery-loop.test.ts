@@ -2080,7 +2080,7 @@ describe("script-upsert typecheck", () => {
     initDb(DB);
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       await Bun.file(DB + suffix)
         .delete()

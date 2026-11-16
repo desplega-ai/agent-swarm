@@ -288,7 +288,7 @@ async function main() {
     timingsMs: { list, count, tree, treeAll, updateTaskProgress: progress },
     queryPlan: { sessionSummary: plan(summary.sql, summary.params) },
   };
-  closeDb();
+  await closeDb();
   if (args.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   else log(JSON.stringify(result.queryPlan, null, 2));
 }

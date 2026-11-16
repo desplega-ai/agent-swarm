@@ -134,7 +134,7 @@ test("provision errors persist backoff through restart and pruning, then fail th
   const template = globals.__testMigrationTemplate;
   delete globals.__testMigrationTemplate;
   try {
-    closeDb();
+    await closeDb();
     initDb(dbPath);
   } finally {
     globals.__testMigrationTemplate = template;

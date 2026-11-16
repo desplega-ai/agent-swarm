@@ -167,7 +167,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   server?.stop(true);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     const file = Bun.file(dbPath + suffix);
     if (await file.exists()) await file.delete();

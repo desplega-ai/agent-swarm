@@ -58,9 +58,9 @@ describe("normal REST API user-bound token auth", () => {
     port = await listenOnFreePort(server);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     server.close();
-    closeDb();
+    await closeDb();
     cleanupDb();
   });
 

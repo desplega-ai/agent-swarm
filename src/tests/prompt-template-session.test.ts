@@ -6,7 +6,7 @@ import {
   getAllTemplateDefinitions,
   getTemplateDefinition,
 } from "../prompts/registry";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplate, resolveTemplateAsync } from "../prompts/resolver";
 import { restoreAllTemplateDefinitions } from "./template-registry-helpers";
 
 // Side-effect import: register session + system templates
@@ -93,7 +93,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
@@ -328,7 +328,7 @@ describe("Session templates: MUST pointers", () => {
 // Composite resolution
 // ============================================================================
 
-describe("Session templates: composite resolution", () => {
+describe("Session templates: composite resolution", async () => {
   beforeEach(async () => {
     await ensureTemplatesRegistered();
   });
@@ -342,8 +342,8 @@ describe("Session templates: composite resolution", () => {
   };
 
   for (const eventType of SESSION_TEMPLATES) {
-    test(`${eventType} resolves every template reference`, () => {
-      const result = resolveTemplate(eventType, vars);
+    test(`${eventType} resolves every template reference`, async () => {
+      const result = await resolveTemplateAsync(eventType, vars);
       expect(result.skipped).toBe(false);
       expect(result.unresolved.length).toBe(0);
       expect(result.text).not.toContain("{{@template[");
@@ -376,8 +376,8 @@ describe("Session templates: composite resolution", () => {
   }
 
   for (const eventType of ["system.agent.worker", "system.agent.worker.remote"]) {
-    test(`${eventType} pairs completion requirements with the output budget`, () => {
-      const { text } = resolveTemplate(eventType, {});
+    test(`${eventType} pairs completion requirements with the output budget`, async () => {
+      const { text } = await resolveTemplateAsync(eventType, {});
       expect(text).toContain("under 120 words by default");
       expect(text).toContain("Link documents instead of inlining them; omit process narration");
       expect(text).toContain("under 120 words by default, with the exceptions in How you write");
@@ -385,8 +385,11 @@ describe("Session templates: composite resolution", () => {
   }
 
   for (const eventType of ["system.agent.slack", "system.agent.scripts_only_mode.slack"]) {
-    test(`${eventType} applies the output budget to the engine-owned card`, () => {
-      const { text } = resolveTemplate(eventType, { slackChannelId: "C123", slackThreadTs: "1.2" });
+    test(`${eventType} applies the output budget to the engine-owned card`, async () => {
+      const { text } = await resolveTemplateAsync(eventType, {
+        slackChannelId: "C123",
+        slackThreadTs: "1.2",
+      });
       expect(text).toContain("The outcome card publishes your `output` verbatim");
       expect(text).toContain(
         "Keep free-text `output` under 120 words by default, with the exceptions in How you write",
@@ -394,9 +397,10 @@ describe("Session templates: composite resolution", () => {
     });
   }
 
-  test("lead and worker differ only in the contract block", () => {
-    const lead = resolveTemplate("system.session.lead", { ...vars, role: "lead" }).text;
-    const worker = resolveTemplate("system.session.worker", vars).text;
+  test("lead and worker differ only in the contract block", async () => {
+    const lead = (await resolveTemplateAsync("system.session.lead", { ...vars, role: "lead" }))
+      .text;
+    const worker = (await resolveTemplateAsync("system.session.worker", vars)).text;
 
     // Shared blocks: workspace, memory, communication, secrets.
     for (const shared of [
@@ -415,9 +419,9 @@ describe("Session templates: composite resolution", () => {
     expect(worker).not.toContain("## How you lead");
   });
 
-  test("the managed composite is the worker composite with the remote workspace", () => {
-    const managed = resolveTemplate("system.session.worker.managed", vars).text;
-    const worker = resolveTemplate("system.session.worker", vars).text;
+  test("the managed composite is the worker composite with the remote workspace", async () => {
+    const managed = (await resolveTemplateAsync("system.session.worker.managed", vars)).text;
+    const worker = (await resolveTemplateAsync("system.session.worker", vars)).text;
 
     expect(managed).toContain("## How you work");
     expect(managed).toContain(
@@ -432,8 +436,8 @@ describe("Session templates: composite resolution", () => {
     }
   });
 
-  test("the remote composite names no swarm tool", () => {
-    const remote = resolveTemplate("system.session.worker.remote", vars).text;
+  test("the remote composite names no swarm tool", async () => {
+    const remote = (await resolveTemplateAsync("system.session.worker.remote", vars)).text;
 
     for (const tool of ["store-progress", "get-swarm", "memory-store", "update-profile"]) {
       expect(remote).not.toContain(tool);
@@ -479,12 +483,14 @@ describe("Session templates: getBasePrompt integration", () => {
   test("a local worker prompt opens with the worker composite verbatim", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
     const agentId = "integration-test-worker";
-    const composite = resolveTemplate("system.session.worker", {
-      name: "an agent",
-      role: "worker",
-      agentId,
-      persona: "",
-    }).text;
+    const composite = (
+      await resolveTemplateAsync("system.session.worker", {
+        name: "an agent",
+        role: "worker",
+        agentId,
+        persona: "",
+      })
+    ).text;
 
     const result = await getBasePrompt({ role: "worker", agentId });
     expect(result).toStartWith(collapse(composite));
@@ -494,13 +500,15 @@ describe("Session templates: getBasePrompt integration", () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
     const agentId = "integration-test-lead";
     const { getAppUrl } = await import("../utils/constants");
-    const composite = resolveTemplate("system.session.lead", {
-      name: "an agent",
-      role: "lead",
-      agentId,
-      persona: "",
-      appUrl: getAppUrl(),
-    }).text;
+    const composite = (
+      await resolveTemplateAsync("system.session.lead", {
+        name: "an agent",
+        role: "lead",
+        agentId,
+        persona: "",
+        appUrl: getAppUrl(),
+      })
+    ).text;
 
     const result = await getBasePrompt({ role: "lead", agentId });
     expect(result).toStartWith(collapse(composite));

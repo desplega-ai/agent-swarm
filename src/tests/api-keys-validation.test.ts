@@ -48,7 +48,7 @@ describe("pooled key validation", () => {
     await getDbClient().run("DELETE FROM api_key_status");
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       await Bun.file(TEST_DB + suffix)
         .delete()

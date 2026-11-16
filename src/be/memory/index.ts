@@ -1,6 +1,9 @@
+import { getDbClient } from "../db/runtime";
+import type { DbClient } from "../db-client";
 import type { EmbeddingProvider, MemoryStore } from "./types";
 
 let embeddingProvider: EmbeddingProvider | null = null;
+let memoryClient: DbClient | null = null;
 let memoryStore: MemoryStore | null = null;
 
 export function getEmbeddingProvider(): EmbeddingProvider {
@@ -25,7 +28,9 @@ export function resetEmbeddingProvider(): void {
 }
 
 export function getMemoryStore(): MemoryStore {
-  if (!memoryStore) {
+  const client = getDbClient();
+  if (!memoryStore || memoryClient !== client) {
+    memoryClient = client;
     const { SqliteMemoryStore } =
       require("./providers/sqlite-store") as typeof import("./providers/sqlite-store");
     memoryStore = new SqliteMemoryStore();

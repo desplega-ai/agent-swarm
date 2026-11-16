@@ -74,7 +74,7 @@ afterAll(async () => {
   await stopChatSdk();
   setChatSdkTestHooks({});
   restoreEnv();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

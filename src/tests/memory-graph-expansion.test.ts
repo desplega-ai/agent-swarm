@@ -86,12 +86,13 @@ describe("memory graph expansion", () => {
       [taskId, agentId, "graph expansion provenance task", nowIso, nowIso],
     );
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
     if (prevFlag === undefined) delete process.env.MEMORY_GRAPH_EXPANSION;
     else process.env.MEMORY_GRAPH_EXPANSION = prevFlag;
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

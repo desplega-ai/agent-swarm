@@ -125,7 +125,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await harness.stop();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   await rm(fsDir, { recursive: true, force: true });
   for (const [key, value] of savedEnv) {

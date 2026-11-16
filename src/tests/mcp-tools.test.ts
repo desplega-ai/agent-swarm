@@ -37,7 +37,7 @@ describe("script MCP tools", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     if (savedDatabasePath === undefined) delete process.env.DATABASE_PATH;
     else process.env.DATABASE_PATH = savedDatabasePath;
     await removeDbFiles(TEST_DB_PATH);

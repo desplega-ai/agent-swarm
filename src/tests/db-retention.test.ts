@@ -116,14 +116,14 @@ async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs: n
 }
 
 beforeAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   await resetDbRetentionForTests();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

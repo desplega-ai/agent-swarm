@@ -177,7 +177,7 @@ afterAll(async () => {
   resetFixtureCatalog();
   await stopExtensionRuntime();
   setScriptEmbeddingProviderForTests(null);
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];

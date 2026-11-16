@@ -21,8 +21,8 @@ beforeAll(() => {
   process.env.RUNTIME_POOLS_ENABLED = "true";
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   if (previousFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
   else process.env.RUNTIME_POOLS_ENABLED = previousFlag;
 });

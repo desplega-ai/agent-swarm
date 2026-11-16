@@ -58,7 +58,7 @@ beforeAll(async () => {
 afterAll(async () => {
   detach();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const [name, value] of Object.entries({
     AGENT_SWARM_API_KEY: previous.key,
     RUNTIME_POOLS_ENABLED: previous.enabled,

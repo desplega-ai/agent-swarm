@@ -65,7 +65,7 @@ describe("create_page MCP tool", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     if (originalPublicMcpBaseUrl === undefined) {
       delete process.env.PUBLIC_MCP_BASE_URL;
     } else {

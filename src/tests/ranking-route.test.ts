@@ -104,7 +104,7 @@ describe("ranking routes", () => {
     }
     globalThis.fetch = originalFetch;
     _resetTelemetryStateForTests();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

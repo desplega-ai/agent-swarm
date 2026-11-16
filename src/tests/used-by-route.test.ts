@@ -83,7 +83,7 @@ describe("POST /api/used-by", () => {
     if (savedEnvWebsite !== undefined) process.env.SWARM_ORG_WEBSITE = savedEnvWebsite;
     if (savedEnvName !== undefined) process.env.SWARM_ORG_NAME = savedEnvName;
     globalThis.fetch = originalFetch;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 
@@ -354,7 +354,7 @@ describe("fillOrgLogoFromWebsite", () => {
 
   afterAll(async () => {
     if (savedEnvLogo !== undefined) process.env.SWARM_ORG_LOGO_URL = savedEnvLogo;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

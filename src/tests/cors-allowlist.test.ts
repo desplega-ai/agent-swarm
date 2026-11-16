@@ -303,7 +303,7 @@ describe("page-session CORS over HTTP", () => {
   });
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     if (originalPort === undefined) delete process.env.PORT;
     else process.env.PORT = originalPort;
     rmSync(dir, { recursive: true, force: true });

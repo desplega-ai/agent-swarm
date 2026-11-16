@@ -55,7 +55,7 @@ describe("seeded skills with bundled files", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 

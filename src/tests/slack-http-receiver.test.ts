@@ -76,9 +76,9 @@ beforeAll(() => {
   initDb(":memory:");
 });
 
-afterAll(() => {
+afterAll(async () => {
   resetSlackWorkspaceGuardForTests();
-  closeDb();
+  await closeDb();
 });
 
 beforeEach(async () => {

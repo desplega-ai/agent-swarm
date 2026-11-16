@@ -1,13 +1,47 @@
 import { Database } from "bun:sqlite";
 import { configureDbResolver } from "../../prompts/resolver";
 import { VersionableFieldSchema } from "../../types";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import { enforceAssetKeyStartupAudit } from "../asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "../connection-bindings-blob-migration";
 import { resolveEncryptionKey } from "../crypto";
-import { createBunSqliteClient, type DbClient } from "../db-client";
+import { createBunSqliteClient, createDbClient, type DbClient } from "../db-client";
 import { runMigrations } from "../migrations/runner";
 import { autoEncryptLegacyOAuthSecrets } from "../oauth-encryption-backfill";
 import { sealedReplayExistsSql } from "../sealed-json";
+
+import { createWorkerSqliteDriver } from "./worker-driver";
+
+let closingDb: Promise<void> | null = null;
+let ready: Promise<void> = Promise.resolve();
+let effectiveDriver: "sqlite" | "worker" = "sqlite";
+let databasePath = "";
+let customSQLite: string | undefined;
+
+export function requestedDbDriver(): "sqlite" | "worker" {
+  const value = process.env.DB_DRIVER ?? "sqlite";
+  if (value !== "sqlite" && value !== "worker")
+    throw new Error("DB_DRIVER must be sqlite or worker");
+  return value;
+}
+// Read identity without opening a database or creating a client.
+export function getDbConnectionIdentity(): object | null {
+  return db;
+}
+
+export function isCurrentDbClient(client: DbClient): boolean {
+  return dbClientInstance === client && closingDb === null;
+}
+
+export function getDbDriver(): "sqlite" | "worker" {
+  return effectiveDriver;
+}
+export async function whenDbReady(): Promise<void> {
+  getDbClient();
+  await ready;
+  const { getMemoryStore } = require("../memory") as typeof import("../memory");
+  await getMemoryStore().whenReady();
+}
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
@@ -75,6 +109,7 @@ function loadSqliteVec(database: Database): void {
     sqliteVecAvailable = true;
     console.log(`[db] sqlite-vec loaded${extensionPath ? ` from ${extensionPath}` : ""}`);
   } catch (err) {
+    if (process.env.SQLITE_VEC_EXTENSION_PATH) throw err;
     console.warn(
       "[db] sqlite-vec not available, falling back to in-memory cosine:",
       (err as Error).message,
@@ -83,8 +118,22 @@ function loadSqliteVec(database: Database): void {
 }
 
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
-  if (db) {
-    return db;
+  if (closingDb) throw new Error("db-client: database is closing");
+  requestedDbDriver();
+  if (db) return db;
+  databasePath = dbPath;
+  if (process.platform === "darwin" && requestedDbDriver() === "worker") {
+    customSQLite ??= [
+      "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+      "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+    ].find((candidate) => require("node:fs").existsSync(candidate));
+    if (customSQLite) {
+      try {
+        Database.setCustomSQLite(customSQLite);
+      } catch {
+        // Another boot caller selected SQLite already. Worker startup still verifies vectors.
+      }
+    }
   }
 
   // Load facade callbacks only after module evaluation. Boot stays synchronous,
@@ -352,22 +401,86 @@ export function getDb(path?: string): Database {
   return db;
 }
 
-export function closeDb(): void {
-  if (db) {
-    db.close();
+export function closeDb(): Promise<void> {
+  if (closingDb) return closingDb;
+  // With no client, boot-only callers can close synchronously.
+  if (!dbClientInstance) {
+    db?.close();
     db = null;
+    sqliteVecAvailable = false;
+    dbCreatedThisBoot = false;
+    return Promise.resolve();
   }
-  sqliteVecAvailable = false;
-  dbCreatedThisBoot = false;
+  closingDb = (async () => {
+    try {
+      const { stopMemoryStores } =
+        require("../memory/providers/sqlite-store") as typeof import("../memory/providers/sqlite-store");
+      // Cancel future batches before closing admission. Drain admitted operations through the client.
+      const populations = stopMemoryStores(dbClientInstance!);
+      await dbClientInstance!.close();
+      // Failed closure already reached the client's bound. Do not wait again on blocked work.
+      await populations;
+    } finally {
+      db?.close();
+      db = null;
+      dbClientInstance = null;
+      sqliteVecAvailable = false;
+      dbCreatedThisBoot = false;
+      effectiveDriver = "sqlite";
+      closingDb = null;
+    }
+  })();
+  return closingDb;
 }
 
-// Async seam over the shared connection. The client resolves the underlying
-// handle per operation via getDb(), so close/reopen cycles need no reset.
 let dbClientInstance: DbClient | null = null;
 
 export function getDbClient(): DbClient {
+  // Keep the draining client available to admitted transactions and hooks.
+  // Its admission guard rejects unrelated calls until closure completes.
   if (!dbClientInstance) {
-    dbClientInstance = createBunSqliteClient(() => getDb());
+    const requested = requestedDbDriver();
+    const database = getDb();
+    const inMemory = database.filename === ":memory:" || database.filename === "";
+    if (requested === "worker" && inMemory && process.env.NODE_ENV !== "test") {
+      throw new Error("DB_DRIVER=worker requires a file database outside tests");
+    }
+    effectiveDriver = requested === "worker" && !inMemory ? "worker" : "sqlite";
+    if (effectiveDriver === "worker") {
+      const bootVecAvailable = sqliteVecAvailable;
+      const driver = createWorkerSqliteDriver({
+        filename: databasePath,
+        vecExtensionPath: bootVecAvailable ? resolveSqliteVecExtensionPath() : undefined,
+        vecExtensionRequired: Boolean(process.env.SQLITE_VEC_EXTENSION_PATH),
+        customSQLite,
+        pragmas: [
+          "PRAGMA journal_mode=WAL",
+          "PRAGMA busy_timeout=5000",
+          "PRAGMA foreign_keys=ON",
+          "PRAGMA synchronous=NORMAL",
+          "PRAGMA cache_size=-64000",
+          "PRAGMA mmap_size=268435456",
+          "PRAGMA temp_store=MEMORY",
+        ],
+      });
+      sqliteVecAvailable = false;
+      ready = driver.ready.then((capability) => {
+        sqliteVecAvailable = capability.sqliteVec;
+      });
+      void ready.catch(() => {});
+      void driver.failed.catch((error) => {
+        // Recovery requires process restart. Never keep serving healthy responses.
+        console.error(
+          "[db-worker] Fatal database transport failure. Restart the API.",
+          scrubSecrets(String(error)),
+        );
+        process.exit(1);
+      });
+      dbClientInstance = createDbClient(driver);
+    } else {
+      dbClientInstance = createBunSqliteClient(() => database);
+      ready = Promise.resolve();
+    }
   }
   return dbClientInstance;
 }

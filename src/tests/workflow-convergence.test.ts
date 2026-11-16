@@ -135,7 +135,7 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
         // Already deleted
       }
     }
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

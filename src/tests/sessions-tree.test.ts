@@ -93,7 +93,7 @@ afterAll(async () => {
   setSystemTime();
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 async function task(

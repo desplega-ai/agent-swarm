@@ -221,7 +221,7 @@ describe("Session Costs API", () => {
     });
 
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {

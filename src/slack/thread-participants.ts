@@ -6,7 +6,7 @@
 
 import type { WebClient } from "@slack/web-api";
 import { getFirstTaskInThread } from "../be/db";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import type { SlackParticipantTrust, TaskSlackParticipant, TaskSlackParticipants } from "../types";
 import {
   getOurSlackTeamId,
@@ -181,7 +181,8 @@ async function renderThreadContext(
   });
   let body = await rewriteSlackMentions(lines.join("\n"), botUserId, trust);
   if ([...trust.values()].some(isUntrusted)) {
-    body = `${resolveTemplate("slack.message.thread_context_untrusted", {}).text}\n${body}`;
+    body = `${(await resolveTemplateAsync("slack.message.thread_context_untrusted", {})).text}\n${body}`;
   }
-  return resolveTemplate("slack.message.thread_context", { thread_messages: body }).text;
+  return (await resolveTemplateAsync("slack.message.thread_context", { thread_messages: body }))
+    .text;
 }

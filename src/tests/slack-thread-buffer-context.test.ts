@@ -50,8 +50,8 @@ beforeAll(async () => {
   await createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

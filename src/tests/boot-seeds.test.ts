@@ -38,13 +38,13 @@ async function countBuiltinPermissions(): Promise<number> {
 
 // Fresh DB handle per test: the guards are keyed on the live handle.
 beforeEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
 });
 
 afterAll(async () => {
@@ -63,7 +63,7 @@ describe("ensurePricingSeeded", () => {
     expect(await countPricingSeedRows()).toBe(0);
 
     // Reopening the same file gives a new handle, which is seeded again.
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     ensurePricingSeeded();
     expect(await countPricingSeedRows()).toBe(seeded);
@@ -80,7 +80,7 @@ describe("ensureRbacSeeded", () => {
     ensureRbacSeeded();
     expect(await countBuiltinPermissions()).toBe(0);
 
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     ensureRbacSeeded();
     expect(await countBuiltinPermissions()).toBe(seeded);

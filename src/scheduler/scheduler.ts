@@ -21,8 +21,8 @@ import {
   updateScheduledTask,
 } from "@/be/db";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptMcpConnectionDescriptorsAsync,
 } from "@/be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
@@ -117,8 +117,8 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
         egressSecrets: credentials.egressSecrets,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+        apiConnections: await getScriptApiConnectionDescriptorsAsync({ agentId }),
+        mcpConnections: await getScriptMcpConnectionDescriptorsAsync({ agentId }),
         timeoutMs: 60_000,
       },
       { sourceScriptRunId: record.id },

@@ -169,10 +169,11 @@ describe("memory_link DB surface", () => {
     await createAgent({ id: agentX, name: "Link Agent X", isLead: false, status: "idle" });
     await createAgent({ id: agentY, name: "Link Agent Y", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

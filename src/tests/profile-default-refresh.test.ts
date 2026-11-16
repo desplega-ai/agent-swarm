@@ -24,7 +24,7 @@ beforeAll(async () => {
   initDb(join(directory, "test.sqlite"));
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await rm(directory, { recursive: true, force: true });
 });
 

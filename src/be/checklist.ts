@@ -177,10 +177,7 @@ async function getUseCaseSignal(userId: string | null): Promise<boolean> {
 function lazySignals(userId: string | null) {
   const once = <T>(fn: () => Promise<T>) => {
     let value: Promise<T> | undefined;
-    return () => {
-      value ??= fn();
-      return value;
-    };
+    return () => (value ??= fn());
   };
   const flags = once(async () => setupIntegrationFlags(await getAutomationSetupStates()));
   const adapters = once(async () => {

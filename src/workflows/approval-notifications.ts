@@ -13,7 +13,7 @@ import {
   updateApprovalRequestNotifications,
 } from "../be/db";
 import { approvalCancellationNotificationKey } from "../be/db/approvals";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { getSlackApp } from "../slack/app";
 import { isSlackUserId, resolveSlackConversationId } from "../slack/dm";
 import {
@@ -496,7 +496,7 @@ export async function createApprovalFollowUpTask(
 
   const { text: taskText } =
     templateEventType === "hitl.follow_up"
-      ? resolveTemplate("hitl.follow_up", {
+      ? await resolveTemplateAsync("hitl.follow_up", {
           request_id: request.id,
           title: request.title,
           status: request.status,
@@ -505,7 +505,7 @@ export async function createApprovalFollowUpTask(
             (request.responses ?? {}) as Record<string, unknown>,
           ),
         })
-      : resolveTemplate("hitl.timeout", {
+      : await resolveTemplateAsync("hitl.timeout", {
           request_id: request.id,
           title: request.title,
           expires_at: request.expiresAt ?? "",

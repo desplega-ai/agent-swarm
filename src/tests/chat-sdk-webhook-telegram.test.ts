@@ -92,7 +92,7 @@ afterAll(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

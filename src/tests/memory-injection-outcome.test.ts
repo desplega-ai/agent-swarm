@@ -80,10 +80,11 @@ describe("200_backfill_auto_memory_expiry", () => {
     initDb(TEST_DB_PATH);
     await createAgent({ id: agentId, name: "Backfill Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

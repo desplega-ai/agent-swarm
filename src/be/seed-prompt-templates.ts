@@ -8,7 +8,11 @@
 
 import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import { getAllTemplateDefinitions } from "../prompts/registry";
-import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate } from "./db";
+import {
+  resetPromptTemplateToDefaultForBoot as resetPromptTemplateToDefault,
+  upsertPromptTemplateForBoot as upsertPromptTemplate,
+} from "./db";
+import { getPromptTemplatesForBoot as getPromptTemplates } from "./db/prompt-templates-boot";
 
 // Side-effect imports: register ALL template definitions so they're seeded on API startup.
 // Webhook handler templates (github, gitlab, etc.) are loaded transitively by the API server's

@@ -45,7 +45,7 @@ afterAll(async () => {
   detach();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await closeRooms();
-  closeDb();
+  await closeDb();
 });
 
 async function openSocket(user: User) {

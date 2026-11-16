@@ -52,7 +52,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await stopChatSdk();
   mock.stop();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   __resetInjectedEnvTracking();
   restoreChatEnv();

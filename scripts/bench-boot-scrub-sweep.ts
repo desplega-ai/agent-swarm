@@ -20,7 +20,7 @@ if (!mode || !dbPath) {
 if (mode === "gen") {
   const { initDb, closeDb } = await import("../src/be/db");
   initDb(dbPath);
-  closeDb();
+  await closeDb();
   const rows = Number(rowsArg ?? 1_000_000);
   const pool = buildLinePool(new URL("..", import.meta.url).pathname);
   const rand = rng(7);

@@ -114,6 +114,7 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
   const store = new SqliteMemoryStore();
+  await store.whenReady();
   for (const { chunks, agentId, manualIds } of scenarios) {
     await createAgent({
       id: agentId,
@@ -157,7 +158,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);

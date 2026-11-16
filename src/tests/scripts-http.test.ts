@@ -79,7 +79,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   setScriptEmbeddingProviderForTests(null);
   await removeDbFiles(TEST_DB_PATH);
   for (const key of Object.keys(process.env)) {

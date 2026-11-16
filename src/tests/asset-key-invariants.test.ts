@@ -57,8 +57,8 @@ beforeAll(async () => {
   ).id;
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe("cross-entity asset namespace invariants", () => {

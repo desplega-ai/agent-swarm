@@ -355,7 +355,7 @@ describe("the claim trigger carries the profile's allowlist", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 

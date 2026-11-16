@@ -8,7 +8,7 @@ import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isChatSdkEnabled } from "./integrations/chat-sdk/config";
 import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
-import { resolveTemplate } from "./prompts/resolver";
+import { resolveTemplateAsync } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
 import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
@@ -478,7 +478,7 @@ export async function createServer(
     },
     {
       ...(opts.preloadedTools?.length
-        ? { instructions: resolveTemplate("system.agent.tool_preload", {}).text }
+        ? { instructions: (await resolveTemplateAsync("system.agent.tool_preload", {})).text }
         : {}),
       capabilities: {
         logging: {},

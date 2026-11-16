@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getDb, getDbClient, upsertSwarmConfig } from "@/be/db";
+import { getDbClient, upsertSwarmConfig } from "@/be/db";
 import { getAuthorizationById, getOAuthAppById } from "@/be/db-queries/oauth";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
@@ -554,12 +554,6 @@ export async function disableCredentialBinding(
   return row ? bindingFromRow(row) : null;
 }
 
-// NOTE: kept synchronous (raw getDb()) rather than routed through getDbClient().
-// getScriptApiTypes()/getScriptMcpTypes() below are used as DEFAULT PARAMETER
-// VALUES in src/be/scripts/typecheck.ts's scriptSdkTypesWithGeneratedApis /
-// scriptStdlibTypesWithGeneratedApis — a default-parameter expression cannot
-// contain an await, so listScriptConnections (and everything that only reads
-// through it) must stay synchronous.
 type ScriptConnectionListContext = {
   agentId?: string;
   repoId?: string;
@@ -582,15 +576,6 @@ function filterScriptConnections(
         context.allScopes === true ||
         applies(connection.scope, connection.scopeId, context),
     );
-}
-
-export function listScriptConnections(
-  context?: ScriptConnectionListContext,
-): ScriptConnectionRecord[] {
-  const rows = getDb()
-    .prepare<ConnectionRow, []>("SELECT * FROM script_connections ORDER BY slug ASC")
-    .all();
-  return filterScriptConnections(rows, context);
 }
 
 export async function listScriptConnectionsAsync(
@@ -2152,10 +2137,10 @@ export async function deleteScriptConnection(id: string): Promise<ScriptConnecti
   return deleted;
 }
 
-export function getScriptApiConnectionDescriptors(
+export async function getScriptApiConnectionDescriptorsAsync(
   context: { agentId?: string; repoId?: string } = {},
-): ScriptApiConnectionDescriptor[] {
-  return listScriptConnections(context)
+): Promise<ScriptApiConnectionDescriptor[]> {
+  return (await listScriptConnectionsAsync(context))
     .filter((connection) => ["openapi", "graphql", "sql"].includes(connection.kind))
     .map((connection) => {
       if (!connection.generatedRuntimeJson) return null;
@@ -2168,10 +2153,10 @@ export function getScriptApiConnectionDescriptors(
     .filter((descriptor): descriptor is ScriptApiConnectionDescriptor => Boolean(descriptor));
 }
 
-export function getScriptMcpConnectionDescriptors(
+export async function getScriptMcpConnectionDescriptorsAsync(
   context: { agentId?: string; repoId?: string } = {},
-): ScriptMcpConnectionDescriptor[] {
-  return listScriptConnections({ ...context, kind: "mcp" })
+): Promise<ScriptMcpConnectionDescriptor[]> {
+  return (await listScriptConnectionsAsync({ ...context, kind: "mcp" }))
     .map((connection) => {
       if (!connection.generatedRuntimeJson) return null;
       try {
@@ -2183,8 +2168,10 @@ export function getScriptMcpConnectionDescriptors(
     .filter((descriptor): descriptor is ScriptMcpConnectionDescriptor => Boolean(descriptor));
 }
 
-export function getScriptApiTypes(context: { agentId?: string; repoId?: string } = {}): string {
-  const connections = listScriptConnections(context).filter((connection) =>
+export async function getScriptApiTypesAsync(
+  context: { agentId?: string; repoId?: string } = {},
+): Promise<string> {
+  const connections = (await listScriptConnectionsAsync(context)).filter((connection) =>
     ["openapi", "graphql", "sql"].includes(connection.kind),
   );
   const blocks = connections
@@ -2197,8 +2184,10 @@ export function getScriptApiTypes(context: { agentId?: string; repoId?: string }
   return `${blocks.join("\n\n")}\n\nexport interface ScriptApiRegistry {\n${members.join("\n")}\n}\n`;
 }
 
-export function getScriptMcpTypes(context: { agentId?: string; repoId?: string } = {}): string {
-  const connections = listScriptConnections({ ...context, kind: "mcp" });
+export async function getScriptMcpTypesAsync(
+  context: { agentId?: string; repoId?: string } = {},
+): Promise<string> {
+  const connections = await listScriptConnectionsAsync({ ...context, kind: "mcp" });
   const blocks = connections
     .filter((connection) => connection.generatedTypes)
     .map((connection) => connection.generatedTypes as string);

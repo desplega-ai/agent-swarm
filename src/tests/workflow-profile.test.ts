@@ -92,7 +92,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   if (oldEncryptionKey === undefined) delete process.env.SECRETS_ENCRYPTION_KEY;
   else process.env.SECRETS_ENCRYPTION_KEY = oldEncryptionKey;

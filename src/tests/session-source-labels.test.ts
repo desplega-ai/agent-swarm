@@ -59,7 +59,7 @@ afterAll(async () => {
   getApp.mockRestore();
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 async function until(check: () => Promise<boolean> | boolean): Promise<void> {

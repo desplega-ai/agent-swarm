@@ -110,7 +110,7 @@ afterAll(async () => {
   await new Promise<void>((resolve) => api.close(() => resolve()));
   stt.stop(true);
   slackHost.stop(true);
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   await rm(fsDir, { recursive: true, force: true });
   delete process.env.AGENT_FS_LOCAL_DIR;

@@ -48,7 +48,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const s of ["", "-wal", "-shm"]) await unlink(`${TEST_DB_PATH}${s}`).catch(() => {});
 });
 

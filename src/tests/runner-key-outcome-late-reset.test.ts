@@ -88,7 +88,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all(pendingClears);
   for (const s of [proxy, api]) await new Promise<void>((resolve) => s.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB).catch(() => {});
   await unlink(`${TEST_DB}-wal`).catch(() => {});
   await unlink(`${TEST_DB}-shm`).catch(() => {});

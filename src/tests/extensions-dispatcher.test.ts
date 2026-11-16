@@ -84,7 +84,7 @@ describe("extension dispatcher", () => {
       await loaded.dispose();
     }
     await cleanExtensionTmpRoot();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     if (savedTimeout === undefined) delete process.env.EXTENSION_HANDLER_TIMEOUT_MS;
     else process.env.EXTENSION_HANDLER_TIMEOUT_MS = savedTimeout;

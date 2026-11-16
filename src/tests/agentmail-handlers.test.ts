@@ -104,8 +104,8 @@ beforeEach(async () => {
   await import(`../agentmail/templates?t=${Date.now()}`);
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

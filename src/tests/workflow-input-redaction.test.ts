@@ -140,7 +140,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
     } catch {

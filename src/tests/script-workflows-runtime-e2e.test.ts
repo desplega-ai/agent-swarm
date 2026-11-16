@@ -208,7 +208,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await closeServer(server);
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   await rm(WORKFLOW_RUNTIME_DIR, { recursive: true, force: true });
   for (const key of Object.keys(process.env)) {

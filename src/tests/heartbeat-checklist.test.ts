@@ -50,7 +50,7 @@ describe("Heartbeat Checklist", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await unlink(TEST_DB_PATH).catch(() => {});
     await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
@@ -282,7 +282,7 @@ describe("Heartbeat Checklist", () => {
         "UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ? WHERE id = ?",
         ["boom", new Date(Date.now() - 1000).toISOString(), failure.id],
       );
-      const template = upsertPromptTemplate({
+      const template = await upsertPromptTemplate({
         eventType: "heartbeat.checklist",
         scope: "global",
         state: "enabled",

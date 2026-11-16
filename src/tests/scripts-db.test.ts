@@ -50,7 +50,7 @@ describe("scripts DB helpers", () => {
 
   afterAll(async () => {
     setScriptEmbeddingProviderForTests(null);
-    closeDb();
+    await closeDb();
     await clearDb();
   });
 

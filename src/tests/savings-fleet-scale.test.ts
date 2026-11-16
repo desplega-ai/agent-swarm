@@ -82,7 +82,7 @@ describe("savings fleet read at fleet scale", () => {
     // fails: a test-only stall that broke the bound on slow CI runners.
     templateGlobals.__savedFleetScaleTemplate = templateGlobals.__testMigrationTemplate;
     templateGlobals.__testMigrationTemplate = undefined;
-    closeDb();
+    await closeDb();
     dbDir = mkdtempSync(join(tmpdir(), "savings-fleet-scale-"));
     initDb(join(dbDir, "fleet.sqlite"));
     await resetSavingsRollupForTests();
@@ -126,9 +126,9 @@ describe("savings fleet read at fleet scale", () => {
     port = await listenOnFreePort(server);
   }, 60_000);
 
-  afterAll(() => {
+  afterAll(async () => {
     server?.close();
-    closeDb();
+    await closeDb();
     templateGlobals.__testMigrationTemplate = templateGlobals.__savedFleetScaleTemplate;
     templateGlobals.__savedFleetScaleTemplate = undefined;
     if (dbDir) rmSync(dbDir, { recursive: true, force: true });

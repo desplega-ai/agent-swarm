@@ -38,7 +38,7 @@ describe("kv-storage helpers", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await clearDb();
   });
 
@@ -493,7 +493,7 @@ describe("kv-storage namespaces are isolated", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await clearDb();
   });
 

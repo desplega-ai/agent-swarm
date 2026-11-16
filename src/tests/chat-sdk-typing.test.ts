@@ -53,7 +53,7 @@ afterAll(async () => {
   stopAllTypingKeepalives();
   setChatSdkTestHooks({});
   await harness.stop();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

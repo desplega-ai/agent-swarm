@@ -93,13 +93,13 @@ async function createStalledTask(options: {
 describe("pre.heartbeat.remediate extensions", () => {
   beforeAll(async () => {
     await removeDbFiles();
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
     await stopExtensionRuntime();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

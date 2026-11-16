@@ -128,7 +128,7 @@ beforeAll(async () => {
 afterAll(async () => {
   teardown?.();
   await drainForeachDrives();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

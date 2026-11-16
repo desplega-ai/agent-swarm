@@ -26,10 +26,10 @@ describe("seedDbRetentionDefaults", () => {
   let inheritedEnv: Record<string, string | undefined>;
 
   // The preload's afterEach puts the inherited values back.
-  beforeEach(() => {
+  beforeEach(async () => {
     inheritedEnv = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
     for (const key of KEYS) delete process.env[key];
-    closeDb();
+    await closeDb();
     initDb(":memory:");
   });
 

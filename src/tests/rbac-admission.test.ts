@@ -158,7 +158,7 @@ beforeAll(() => {
 beforeEach(async () => {
   await closeServer(server);
   server = undefined;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 
   process.env.RBAC_ENABLED = "false";
@@ -179,7 +179,7 @@ afterEach(async () => {
   await flushAuditBuffer();
   await closeServer(server);
   server = undefined;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

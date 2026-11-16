@@ -29,10 +29,11 @@ describe("applyRating", () => {
     await getDbClient().run(insertTaskSql, [taskId, agentA, "test task", nowIso, nowIso]);
     await getDbClient().run(insertTaskSql, [taskIdAlt, agentA, "test task alt", nowIso, nowIso]);
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

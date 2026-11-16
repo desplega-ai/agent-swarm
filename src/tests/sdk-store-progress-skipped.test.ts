@@ -105,7 +105,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   httpServer.stop(true);
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   if (savedApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
   else process.env.AGENT_SWARM_API_KEY = savedApiKey;

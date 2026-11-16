@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   checkoutPromptTemplate,
   deletePromptTemplate,
-  getDbClient,
   getPromptTemplateById,
   getPromptTemplateHistory,
   getPromptTemplates,
@@ -13,7 +12,7 @@ import {
 } from "../be/db";
 import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { type PromptTemplate, PromptTemplateHistorySchema, PromptTemplateSchema } from "../types";
 import { interpolate } from "../utils/template";
 import { route } from "./route-def";
@@ -289,8 +288,8 @@ export async function handlePromptTemplates(
       return true;
     }
 
-    const result = resolveTemplate(eventType, {}, { agentId, repoId });
-    const dbResult = resolvePromptTemplate(eventType, agentId, repoId);
+    const result = await resolveTemplateAsync(eventType, {}, { agentId, repoId });
+    const dbResult = await resolvePromptTemplate(eventType, agentId, repoId);
     const definition = getTemplateDefinition(eventType);
 
     resolvedRoute.respond(res, 200, {
@@ -352,7 +351,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     const { eventType, variables, agentId, repoId } = parsed.body;
-    const result = resolveTemplate(eventType, variables ?? {}, { agentId, repoId });
+    const result = await resolveTemplateAsync(eventType, variables ?? {}, { agentId, repoId });
     renderRoute.respond(res, 200, result);
     return true;
   }
@@ -394,12 +393,7 @@ export async function handlePromptTemplates(
     }
 
     try {
-      // The sync helper stays on the raw handle for the boot seeder; on this
-      // request path, run it inside a client transaction so the write holds
-      // the FIFO lock instead of landing inside a foreign BEGIN window.
-      const template = await getDbClient().transaction(async () =>
-        resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody),
-      );
+      const template = await resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody);
       resetRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -448,7 +442,7 @@ export async function handlePromptTemplates(
     const parsed = await listRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const templates = getPromptTemplates({
+    const templates = await getPromptTemplates({
       eventType: parsed.query.eventType || undefined,
       scope: parsed.query.scope || undefined,
       scopeId: parsed.query.scopeId || undefined,
@@ -485,19 +479,15 @@ export async function handlePromptTemplates(
     }
 
     try {
-      // Same rationale as the reset route: serialize the sync raw-handle
-      // write through the client's lock on this request path.
-      const template = await getDbClient().transaction(async () =>
-        upsertPromptTemplate({
-          eventType,
-          scope,
-          scopeId: scopeId || null,
-          state,
-          body,
-          changedBy,
-          changeReason,
-        }),
-      );
+      const template = await upsertPromptTemplate({
+        eventType,
+        scope,
+        scopeId: scopeId || null,
+        state,
+        body,
+        changedBy,
+        changeReason,
+      });
       upsertRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

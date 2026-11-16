@@ -113,8 +113,8 @@ beforeAll(async () => {
   initDb(":memory:");
   await createAgent({ id: agentId, name: "Learner", isLead: false, status: "idle" });
 });
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   if (originalEmbeddingKey === undefined) delete process.env.EMBEDDING_API_KEY;
   else process.env.EMBEDDING_API_KEY = originalEmbeddingKey;
   if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -683,7 +683,7 @@ describe("store-progress learning near-duplicate guard", () => {
 
     /** A fresh in-memory DB, opened with `vecPath` as the sqlite-vec extension path. */
     async function reopenDb(vecPath: string | undefined) {
-      closeDb();
+      await closeDb();
       if (vecPath === undefined) delete process.env.SQLITE_VEC_EXTENSION_PATH;
       else process.env.SQLITE_VEC_EXTENSION_PATH = vecPath;
       initDb(":memory:");
@@ -696,7 +696,14 @@ describe("store-progress learning near-duplicate guard", () => {
     }
 
     beforeAll(async () => {
-      await reopenDb("/nonexistent/vec.so");
+      const load = spyOn(Database.prototype, "loadExtension").mockImplementation(() => {
+        throw new Error("Synthetic optional extension failure");
+      });
+      try {
+        await reopenDb(undefined);
+      } finally {
+        load.mockRestore();
+      }
       expect(isSqliteVecAvailable()).toBe(false);
     });
     afterAll(() => reopenDb(originalVecPath));
@@ -964,3 +971,5 @@ describe("279_backfill_learning_expiry", () => {
     for (const [id, value] of before) expect(expiry(id)).toBe(value);
   });
 });
+
+import { Database } from "bun:sqlite";

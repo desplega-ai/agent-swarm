@@ -75,7 +75,7 @@ beforeAll(async () => {
   delete process.env.RBAC_AUDIT_DISABLED;
   delete process.env.RBAC_AUDIT_RETENTION_DAYS;
 
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 
@@ -87,7 +87,7 @@ afterAll(async () => {
   stopAuditWriter();
   stopAuditGc();
   clearAuditSink();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 
   for (const key of Object.keys(process.env)) {

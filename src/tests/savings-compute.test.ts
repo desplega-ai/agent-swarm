@@ -159,7 +159,7 @@ describe("savings compute", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     testGlobals.__testMigrationTemplate = testGlobals.__savedSavingsTemplate;
     testGlobals.__savedSavingsTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);

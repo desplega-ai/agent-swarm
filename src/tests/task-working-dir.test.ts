@@ -25,7 +25,7 @@ describe("Task Working Directory", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

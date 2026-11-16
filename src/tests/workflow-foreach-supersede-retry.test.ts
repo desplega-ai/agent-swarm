@@ -63,7 +63,7 @@ afterAll(async () => {
   teardown?.();
   stopRetryPoller();
   await drainForeachDrives();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

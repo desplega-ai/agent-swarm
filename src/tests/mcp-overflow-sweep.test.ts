@@ -34,7 +34,7 @@ describe("MCP overflow sweep lifecycle", () => {
 
   afterAll(async () => {
     stopMcpOverflowSweep();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

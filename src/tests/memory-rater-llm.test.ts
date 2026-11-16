@@ -686,7 +686,7 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     // process can keep writing to the previous template-restored DB while the
     // spawned server reads from TEST_DB_PATH — defensive even if today's CI
     // ordering happens to leave `db` null here.
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     await createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
 
@@ -697,10 +697,11 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     await getDbClient().run(insertTaskSql, [taskB, agentA, "rater llm task B", now, now]);
 
     store = new SqliteMemoryStore();
+    await store.whenReady();
   }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedRaterLlmTemplate;
     testTemplateGlobals.__savedRaterLlmTemplate = undefined;
     if (serverProc) {

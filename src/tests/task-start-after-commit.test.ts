@@ -27,7 +27,7 @@ async function removeTestDb(): Promise<void> {
 
 describe("startTask lifecycle notifications", () => {
   beforeEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     await createAgent({ id: workerId, name: "Start Worker", isLead: false, status: "idle" });
@@ -35,7 +35,7 @@ describe("startTask lifecycle notifications", () => {
   });
 
   afterEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
   });
 

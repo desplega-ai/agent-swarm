@@ -70,7 +70,7 @@ beforeAll(() => {
 afterAll(async () => {
   await stopRuntimeSupervisor();
   await server.stop(true);
-  closeDb();
+  await closeDb();
   clearRuntimeOwnerIdCache();
   for (const suffix of ["", "-wal", "-shm"])
     await Bun.file(path + suffix)

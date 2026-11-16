@@ -1,14 +1,14 @@
 #!/bin/bash
 # Enforce the async DB seam invariant.
 #
-# All runtime DB access goes through the async DbClient (getDbClient() from
-# src/be/db.ts). Raw synchronous access — getDb(), statement.prepare(), or a
-# bun:sqlite import — is only allowed in the seam itself and in boot-path code
-# that runs once during startup (migrations, backfills, seeders), where the
-# async seam buys nothing and sync is the safer shape.
+# Runtime DB access uses the async DbClient (getDbClient() from src/be/db.ts).
+# Raw synchronous access belongs to the seam and main-thread boot code.
+# Boot includes migrations, backfills, seeders, and startup audits.
+# Explorer introspection, its explicit synchronous fallback, and metrics
+# retain the separate read-only connection exceptions listed below.
 #
-# Allowlist source of truth: the stay-sync-boot classification from the async
-# refactor (see PR for .asyncdb/txn-analysis.json). Finalize after Step 3.
+# This script is the allowlist source of truth. See Phase 4 in
+# thoughts/taras/plans/2026-11-12-worker-sqlite-db-client.md.
 #
 # Note: `.prepare(` currently only ever appears on bun:sqlite handles in this
 # repo; if a non-DB prepare() API ever appears, tighten the pattern instead of
@@ -17,7 +17,8 @@
 set -euo pipefail
 
 ALLOWLIST=(
-  src/be/db.ts                                  # remaining sync sites until db-12-facade-cleanup
+  src/be/db/db-worker.ts                        # owns the runtime Worker connection
+  src/be/db.ts                                  # boot: synchronous prompt-template helpers
   src/be/db/runtime.ts                          # singleton lifecycle + async client seam owner
   src/be/db-client.ts                           # the seam implementation
   src/be/migrations/runner.ts                   # boot: SQL migrations
@@ -26,13 +27,11 @@ ALLOWLIST=(
   src/be/seed-pricing.ts                        # boot: seeder
   src/be/rbac-roles.ts                          # boot: ensureRbacSeedsSynced
   src/be/boot-seeds.ts                          # boot: once-per-handle guards around the two seeders (getDb() only identifies the handle)
+  src/be/db/prompt-templates-boot.ts             # boot: synchronous prompt listing for startup seeding
   src/be/asset-key-audit.ts                     # boot: startup audit (raw handle param)
-  src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
-  src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)
   src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
   src/http/db-query-shared.ts                   # same columnNames guard (in-process fallback path)
   src/http/db-query-bounded.ts                  # child process opens its own connection outside the seam; parent only reads getDb().filename
-  src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys (wrapped in a client transaction at the call site)
 )
 
 PATTERN='(\bgetDb\s*\(|\.prepare\s*\(|from\s+["'\'']bun:sqlite)'

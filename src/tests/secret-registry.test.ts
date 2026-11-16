@@ -100,15 +100,15 @@ beforeAll(async () => {
   process.env.SECRETS_ENCRYPTION_KEY = randomBytes(32).toString("base64");
   __resetEncryptionKeyForTests();
   tempDir = mkdtempSync(join(tmpdir(), "secret-registry-"));
-  closeDb();
+  await closeDb();
   initDb(join(tempDir, "registry.sqlite"));
   refreshSecretScrubberCache();
   const agent = await createAgent({ name: "registry-worker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   clearVolatileSecretsForTesting();
   if (savedKey === undefined) delete process.env.SECRETS_ENCRYPTION_KEY;
   else process.env.SECRETS_ENCRYPTION_KEY = savedKey;

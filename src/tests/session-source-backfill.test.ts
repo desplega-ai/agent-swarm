@@ -144,7 +144,7 @@ test("moves both old defaults, whole chains and mapped files with history, witho
   const historyBefore = await getDbClient().query(
     "SELECT entity_type, entity_id, previous_key, new_key, changed_by FROM asset_key_history",
   );
-  const auditSpy = spyOn(audit, "auditAssetKeys");
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync");
   try {
     expect(await runSessionSourceBackfill({ batchSize: 1 })).toEqual({
       scanned: 2,
@@ -237,7 +237,7 @@ test("a completed run does not scan or audit again, even if another old root app
   await runSessionSourceBackfill();
   const before = await getDbClient().query("SELECT * FROM asset_key_history ORDER BY id");
   const later = await seedTask(slack);
-  const auditSpy = spyOn(audit, "auditAssetKeys");
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync");
   try {
     expect(await runSessionSourceBackfill()).toBeNull();
     expect(auditSpy).not.toHaveBeenCalled();
@@ -393,9 +393,9 @@ test("resumes after a committed cursor, including skipped roots, when afterBatch
 
 test("a blocked audit warns without a marker or cursor, then retries successfully", async () => {
   const root = await seedTask(slack);
-  const originalAudit = audit.auditAssetKeys;
-  const auditSpy = spyOn(audit, "auditAssetKeys").mockImplementation((db) => ({
-    ...originalAudit(db),
+  const originalAudit = audit.auditAssetKeysAsync;
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync").mockImplementation(async (db) => ({
+    ...(await originalAudit(db)),
     ok: false,
     warningCount: 1,
   }));
@@ -417,7 +417,7 @@ test("a blocked audit warns without a marker or cursor, then retries successfull
 });
 
 test("unexpected audit errors propagate without a marker", async () => {
-  const auditSpy = spyOn(audit, "auditAssetKeys").mockImplementation(() => {
+  const auditSpy = spyOn(audit, "auditAssetKeysAsync").mockImplementation(() => {
     throw new TypeError("Unexpected audit failure");
   });
   try {

@@ -140,7 +140,7 @@ beforeAll(async () => {
 afterAll(async () => {
   restoreEnv("STEERING_ENABLED", originalSteeringEnabled);
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   restoreEnv("DATABASE_PATH", originalDatabasePath);
   await removeTestDb();
 });

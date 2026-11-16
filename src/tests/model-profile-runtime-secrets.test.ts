@@ -59,7 +59,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   if (oldKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
   else process.env.AGENT_SWARM_API_KEY = oldKey;
   if (oldEncryptionKey === undefined) delete process.env.SECRETS_ENCRYPTION_KEY;
