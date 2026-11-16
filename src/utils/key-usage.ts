@@ -1,5 +1,5 @@
 /**
- * Lowest-usage-first key ranking. Pure: shared by `GET /api/keys/available`
+ * Lowest-usage-first key ranking, with a 10-point band. Pure: shared by `GET /api/keys/available`
  * (which computes the figure from stored windows) and the worker picker
  * (`selectCredential`). It only orders admissible keys; it never excludes one.
  */
@@ -31,13 +31,22 @@ export function keyUsageFromWindows(
 }
 
 /**
- * Picks the index with the lowest usage. Ties break at random, so equal keys
- * still spread the load. An index with no usage entry ranks as 0.
+ * Width of the low-usage band, as a utilization fraction. Every admissible key
+ * within this distance of the lowest usage is an equal candidate.
+ */
+export const KEY_USAGE_BAND = 0.1;
+
+/**
+ * Picks at random among the indices whose usage is within `band` of the
+ * lowest. A plain minimum would send every concurrent draw to one key until
+ * the next usage report lands; the band spreads a burst over the keys that are
+ * almost as fresh. An index with no usage entry ranks as 0.
  */
 export function pickLowestUsage(
   indices: readonly number[],
   usageByIndex: readonly (number | null | undefined)[] | undefined,
   random: () => number = Math.random,
+  band: number = KEY_USAGE_BAND,
 ): number | undefined {
   if (indices.length === 0) return undefined;
   const usageOf = (i: number) => {
@@ -45,6 +54,7 @@ export function pickLowestUsage(
     return typeof usage === "number" && Number.isFinite(usage) ? usage : 0;
   };
   const lowest = Math.min(...indices.map(usageOf));
-  const best = indices.filter((i) => usageOf(i) === lowest);
+  // The epsilon keeps a key exactly `band` above the lowest inside the band.
+  const best = indices.filter((i) => usageOf(i) <= lowest + band + 1e-9);
   return best[Math.floor(random() * best.length)];
 }

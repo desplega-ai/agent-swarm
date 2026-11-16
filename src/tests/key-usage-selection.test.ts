@@ -1,7 +1,7 @@
 /**
  * P5: among admissible keys, the worker picks the lowest-usage key. Usage is
  * the max of the live 5h and 7d windows; a reset window and an unobserved key
- * count as 0; ties break at random. No usage level ever excludes a key.
+ * count as 0; the pick is random among keys within 0.10 of the lowest. No usage level ever excludes a key.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { resolveCredentialPools, selectCredential } from "../utils/credentials";
@@ -91,6 +91,16 @@ describe("pickLowestUsage", () => {
     expect([...seen].sort()).toEqual([0, 2, 3]);
   });
 
+  test("picks at random within 0.10 of the lowest, never above the band", () => {
+    const usage = [0.11, 0.12, 0.21, 0.22, 0.6];
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0)).toBe(0);
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0.5)).toBe(1);
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0.99)).toBe(2);
+    const seen = new Set<number>();
+    for (let i = 0; i < 300; i++) seen.add(pickLowestUsage([0, 1, 2, 3, 4], usage)!);
+    expect([...seen].sort()).toEqual([0, 1, 2]);
+  });
+
   test("an empty list picks nothing", () => {
     expect(pickLowestUsage([], [0.1])).toBeUndefined();
   });
@@ -131,14 +141,31 @@ describe("selectCredential with usage", () => {
   });
 
   test("the allowlist still bounds the pick", () => {
-    const pick = selectCredential(
-      POOL,
-      [0, 1, 2, 3],
-      "CLAUDE_CODE_OAUTH_TOKEN",
-      [2, 3],
-      [0, 0, 0.5, 0.4],
-    );
-    expect(pick.index).toBe(3);
+    const seen = new Set<number>();
+    for (let i = 0; i < 200; i++) {
+      seen.add(
+        selectCredential(POOL, [0, 1, 2, 3], "CLAUDE_CODE_OAUTH_TOKEN", [2, 3], [0, 0, 0.5, 0.4])
+          .index,
+      );
+    }
+    // 0.5 is within 0.10 of 0.4, so both allowlisted keys share the draw.
+    expect([...seen].sort()).toEqual([2, 3]);
+  });
+
+  test("a burst spreads over keys within the band", () => {
+    const seen = new Set<number>();
+    for (let i = 0; i < 200; i++) {
+      seen.add(
+        selectCredential(
+          POOL,
+          [0, 1, 2, 3],
+          "CLAUDE_CODE_OAUTH_TOKEN",
+          undefined,
+          [0.11, 0.12, 0.4, 0.9],
+        ).index,
+      );
+    }
+    expect([...seen].sort()).toEqual([0, 1]);
   });
 });
 
