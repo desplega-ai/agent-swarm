@@ -3,8 +3,29 @@
  * the worker (no DB imports).
  */
 
+/**
+ * True when the URL's host is Azure Repos: `dev.azure.com`,
+ * `ssh.dev.azure.com`, or a legacy `*.visualstudio.com` host. Only the host
+ * counts, so a `dev.azure.com` path segment on another host is not Azure.
+ */
 export function isAzureDevOpsUrl(url: string): boolean {
-  return /(^|[/@.])dev\.azure\.com[/:]|\.visualstudio\.com[/:]/i.test(url);
+  const trimmed = url.trim();
+  // SCP-style SSH: user@host:path
+  const scp = trimmed.match(/^[^@/\s:]+@([^:/\s]+):/);
+  if (scp) return isAzureDevOpsHost(scp[1] as string);
+  try {
+    return isAzureDevOpsHost(new URL(trimmed).hostname);
+  } catch {
+    // Scheme-less `dev.azure.com/org/project`
+    return /^(?:ssh\.)?dev\.azure\.com(\/|$)|^[\w.-]+\.visualstudio\.com(\/|$)/i.test(trimmed);
+  }
+}
+
+function isAzureDevOpsHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "dev.azure.com" || host === "ssh.dev.azure.com" || host.endsWith(".visualstudio.com")
+  );
 }
 
 /**
