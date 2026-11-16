@@ -73,6 +73,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
+- [Investigating a stale partner data feed with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-data-feed-freshness-review). Reference.
 - [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-onboarding-readiness). Reference.
 - [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/guides/digital-content-license-rights-review). Reference.
 - [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
