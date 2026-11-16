@@ -3,6 +3,11 @@ import type { Adapter, Logger } from "chat";
 import { type ChatSdkAdapterName, type ResolvedAdapterConfig, readApiUrlOverrides } from "./config";
 import { isTelegramReplyToBot, type TelegramRawMessage } from "./facts";
 import { withInfoFilter } from "./logger";
+import {
+  type DiscordGatewayMessage,
+  discordJsMentionLookup,
+  resolveDiscordMentions,
+} from "./mentions";
 import { getChatSdkTestHooks } from "./test-hooks";
 
 /**
@@ -110,15 +115,40 @@ export async function loadAdapter(
       } as Parameters<typeof createSlackAdapter>[0]);
     }
     case "discord": {
-      const { createDiscordAdapter } = await import("@chat-adapter/discord");
+      const { DiscordAdapter } = await import("@chat-adapter/discord");
+      // The adapter turns `<@id>`, `<@&id>` and `<#id>` into bare `@id` /
+      // `#id`, so agents would see numbers. The Gateway message carries the
+      // names in `mentions`; write them into the content first. The view
+      // reads every other field from the real message.
+      class SwarmDiscordAdapter extends DiscordAdapter {
+        // The parameter is a discord.js `Message`; discord.js is not a direct dependency.
+        protected override handleGatewayMessage(
+          message: DiscordGatewayMessage,
+          isMentioned: boolean,
+        ): Promise<void> {
+          const content = resolveDiscordMentions(
+            message.content,
+            this.botUserId,
+            discordJsMentionLookup(message.mentions),
+          );
+          if (content === message.content) {
+            return super.handleGatewayMessage(message as never, isMentioned);
+          }
+          const view = new Proxy(message, {
+            get: (target, prop) =>
+              prop === "content" ? content : Reflect.get(target, prop, target),
+          });
+          return super.handleGatewayMessage(view as never, isMentioned);
+        }
+      }
       // `[]` (not undefined) blocks the DISCORD_RESPOND_TO_CHANNEL_IDS and
       // DISCORD_MENTION_ROLE_IDS env fallbacks.
-      return createDiscordAdapter({
+      return new SwarmDiscordAdapter({
         ...base,
         logger: withInfoFilter(logger, keepDiscordInfoLine),
         respondToChannelIds: config.respondToChannelIds ?? [],
         mentionRoleIds: config.mentionRoleIds ?? [],
-      } as Parameters<typeof createDiscordAdapter>[0]);
+      } as ConstructorParameters<typeof DiscordAdapter>[0]);
     }
     case "teams": {
       const { createTeamsAdapter } = await import("@chat-adapter/teams");
