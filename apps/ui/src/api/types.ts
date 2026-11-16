@@ -250,7 +250,7 @@ export type RuntimeInstanceStatus = "active" | "offline";
 
 // ── Runtime pools (mirror RuntimePoolSchema / RuntimeControllerSchema in src/types.ts) ──
 
-export type RuntimeProviderKind = "static" | "docker" | "e2b" | "boxd" | "k8s";
+export type RuntimeProviderKind = "static" | "docker" | "e2b" | "boxd" | "kosa8" | "k8s";
 export type RuntimeDeliveryMode = "poll" | "push";
 export type RuntimePoolLifecycle = "idle" | "per-task";
 

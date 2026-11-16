@@ -1,0 +1,129 @@
+---
+title: kosa8 runtime provider
+description: Run each pool worker in its own kosa8 Cloud microVM, booted straight from the worker image
+---
+
+Agent Swarm can run each pool worker in its own [kosa8](https://kosa8.com) Cloud sandbox. The kosa8 runtime provider creates one microVM per runtime, booted from the pool's worker image itself, and starts the worker in it. The image is the same one a Docker pool runs.
+
+The provider is part of [Agent Swarm](https://agent-swarm.dev) runtime pools.
+
+## What it does
+
+- **One microVM per worker.** Every runtime gets a new sandbox named `swarm-rt-<runtime-id>`. Its own kernel is the isolation boundary, so worker code cannot see other workers or the controller.
+- **The image is the VM.** kosa8 boots the worker image as the sandbox's root filesystem. There is no Docker daemon in the sandbox and no `docker run` step. Pool `env`, `slotsPerRuntime`, and lifecycle settings apply as they do for a Docker pool.
+- **Secrets stay off the command line.** The worker env is set on the sandbox at create. kosa8 keeps the values on the sandbox's host and never logs or returns them.
+- **Fast starts from a snapshot.** A fresh sandbox pulls the worker image on every provision. A snapshot of a sandbox that already booted the image skips the pull.
+- **Scale down to no sandboxes.** `minRuntimes: 0` lets a pool scale down to zero. A `per-task` runtime ends with its task. An `idle` runtime ends after `idleMinutes`, and stays up when `idleMinutes` is unset.
+
+## When to use it
+
+- The swarm API runs on a host that cannot start containers, such as a managed platform.
+- You want each worker in its own microVM, not a container on a shared kernel.
+- You want to run the same workers on your own hardware later: kosa8 also runs self-hosted.
+
+A Docker pool needs less setup when all workers share one Docker host. See [runtime pools](/docs/guides/runtime-pools) to compare the providers.
+
+## What you need first
+
+| Requirement | Detail |
+| --- | --- |
+| A kosa8 account and API key | Make a key at [app.kosa8.com](https://app.kosa8.com). Sandboxes are created and billed in the key's organization. Booting your own image needs a plan with a payment method. |
+| A public HTTPS API URL | The sandbox connects back to the API over the internet, so the URL must use HTTPS and be reachable from outside your network. Set it as `RUNTIME_WORKER_API_URL` in step 1. If your kosa8 org has an egress policy, allow that host. |
+| A worker image | Use the same image as a Docker pool, for example `ghcr.io/desplega-ai/agent-swarm-worker:slim`. |
+| Runtime pools turned on | Set `RUNTIME_POOLS_ENABLED=true` and keep `MULTI_RUNTIME_ENABLED=true`. |
+
+## Configure a pool
+
+1. Add the settings to the API environment and restart the API:
+
+```bash
+RUNTIME_POOLS_ENABLED=true
+MULTI_RUNTIME_ENABLED=true
+RUNTIME_WORKER_API_URL=https://swarm.example.com
+KOSA8_API_KEY=k8c_live_...
+```
+
+`RUNTIME_WORKER_API_URL` is the public HTTPS origin of your API, the address the sandboxes use to reach it. If it is unset, the API falls back to `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`, which defaults to `http://localhost:3013`. The controller stays offline until the URL is HTTPS.
+
+On restart, the API seeds a `builtin-kosa8` controller and copies the key into that controller's encrypted configuration.
+
+2. Set the two variables the `curl` commands on this page use, then confirm that the controller is online:
+
+```bash
+export API=https://swarm.example.com          # your API origin
+export AGENT_SWARM_API_KEY=...                # your swarm API key
+curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  "$API/api/runtime-controllers" | jq '.controllers[] | {id, kind, status}'
+```
+
+3. Create a pool on that controller:
+
+```bash
+POOL=$(curl -s -X POST "$API/api/runtime-pools" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coders","kind":"kosa8","placements":["builtin-kosa8"],"image":"ghcr.io/desplega-ai/agent-swarm-worker:slim","delivery":"push","lifecycle":"per-task","slotsPerRuntime":1,"maxRuntimes":3,"minRuntimes":0,"resources":{"cpu":2,"memoryMb":8192}}' \
+  | jq -r '.pool.id')
+```
+
+4. Create an agent in the pool:
+
+```bash
+curl -s -X POST "$API/api/runtime-pools/$POOL/agents" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coder-1","maxTasks":3}' | jq -r '.agent.id'
+```
+
+The new agent starts offline. Its first runtime is provisioned when a task arrives, or kept warm by `minRuntimes`.
+
+The dashboard runs the same steps under **Settings → Runtime pools**.
+
+`resources` selects the smallest sandbox size that covers the request: 2 vCPU and 4 GiB, 4 and 8, 8 and 16, or 16 and 32. Without `resources`, kosa8 boots the image at 2 vCPU and 4 GiB.
+
+## Start workers from a snapshot
+
+Boot the worker image once, save the sandbox as a snapshot, then point the controller at it. Take the snapshot before any worker runs in the sandbox: a kosa8 snapshot holds memory and processes as well as disk.
+
+```bash
+K8=https://api.kosa8.com; AUTH="Authorization: Bearer $KOSA8_API_KEY"
+SBX=$(curl -s -X POST $K8/v1/sandboxes -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"image":"ghcr.io/desplega-ai/agent-swarm-worker:slim","size":"2x4","name":"swarm-base"}' | jq -r .sandbox.id)
+# Poll until it runs (the first boot pulls the image).
+until [ "$(curl -s $K8/v1/sandboxes/$SBX -H "$AUTH" | jq -r .sandbox.state)" = running ]; do sleep 5; done
+curl -s -X POST $K8/v1/sandboxes/$SBX/snapshots -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"swarm-worker-slim"}' | jq -r .snapshot.id
+curl -s -X DELETE $K8/v1/sandboxes/$SBX -H "$AUTH"
+```
+
+Set `KOSA8_SNAPSHOT=snap_...` in the controller configuration. Every new runtime starts from that snapshot, which skips the image pull. A sandbox made from a snapshot keeps the snapshot's size and region, so pool `resources` and `KOSA8_REGION` no longer apply. Refresh the snapshot after a worker image upgrade. Otherwise new sandboxes start the older image.
+
+## Check that a worker started
+
+A runtime instance moves from `provisioning` to `active` when the worker registers with the API.
+
+```bash
+curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  "$API/api/runtime-pools/$POOL/runtimes" \
+  | jq '.runtimes[] | {id, agentId, status, reportedSlots, lastSeenAt, provisionError}'
+```
+
+| Field | Meaning |
+| --- | --- |
+| `status: "provisioning"` | The sandbox is booting, or the worker is starting. |
+| `status: "active"` | The worker registered and reports its slots. |
+| `provisionError` | The reason the last provision attempt failed. Empty after a successful provision. |
+
+The sandboxes themselves appear in the kosa8 dashboard and in `GET /v1/sandboxes?label=swarm.owner=<owner-id>`, with the name `swarm-rt-<runtime-id>`. The worker's output is in `/workspace/.swarm-worker.log` inside the sandbox.
+
+A running sandbox does not prove a running worker. When kosa8 reports the sandbox as running, the provider also reads the worker's background command, so `exited` and `failed` come from the worker, not from the sandbox.
+
+## Limits
+
+- **Maximum size is 16 vCPU and 32 GiB.** A larger `resources` request fails with an error.
+- **At most 64 env vars.** kosa8 keeps at most 64 env vars on a sandbox. A pool whose worker env has more fails to provision.
+- **Sandboxes have no lease.** A sandbox runs until the supervisor terminates it; the provider turns kosa8's idle sleep off. Keep the API running, or set `KOSA8_DELETE_AFTER_SEC` in the controller configuration. kosa8 deletes the sandbox at that time in any state.
+- **No persistent cache or workspace.** kosa8 pools reject the pool `cache` and `workspace` settings.
+- **No idle pause.** The provider can sleep a sandbox (memory and processes kept) and wake it, but the supervisor does not pause kosa8 runtimes in this release.
+- **Provision timeouts.** `KOSA8_START_TIMEOUT_SEC` bounds the cold boot, image pull included, and defaults to 600 seconds. `KOSA8_TEARDOWN_TIMEOUT_SEC` defaults to 30.
+- **A failed provision deletes its sandbox.** If the sandbox does not boot or the worker does not start, the provider deletes the sandbox and reports the original error.
+
+See [Configuration](/docs/ui/configuration#runtime-pools) for the environment settings, and [runtime pools](/docs/guides/runtime-pools) for pools, controllers, and push delivery.

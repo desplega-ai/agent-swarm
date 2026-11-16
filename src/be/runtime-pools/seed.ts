@@ -45,13 +45,15 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
       },
       { id: "builtin-e2b", kind: "e2b" as const, status: "offline" },
       { id: "builtin-boxd", kind: "boxd" as const, status: "offline" },
+      { id: "builtin-kosa8", kind: "kosa8" as const, status: "offline" },
     ];
     for (const controller of controllers) {
       const existing = await getRuntimeController(controller.id);
       if (!existing) {
         if (controller.kind === "docker" && !dockerAvailable) continue;
-        // Opt-in: only a deployment that sets BOXD_API_KEY gets a boxd controller.
+        // Opt-in: only a deployment that sets BOXD_API_KEY (or KOSA8_API_KEY) gets that controller.
         if (controller.kind === "boxd" && !env.BOXD_API_KEY) continue;
+        if (controller.kind === "kosa8" && !env.KOSA8_API_KEY) continue;
         if (await tx.get("SELECT id FROM runtime_controllers WHERE name = ?", [controller.id]))
           continue;
         await createRuntimeController(
@@ -86,20 +88,20 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
         );
         controller.status = config.ready ? "online" : "offline";
       }
-      if (controller.kind === "boxd") {
-        if (
-          env.BOXD_API_KEY &&
-          !stored.secretConfigError &&
-          !stored.secretConfigKeys.includes("BOXD_API_KEY")
-        )
+      if (controller.kind === "boxd" || controller.kind === "kosa8") {
+        const keyName = controller.kind === "boxd" ? "BOXD_API_KEY" : "KOSA8_API_KEY";
+        const key = env[keyName];
+        if (key && !stored.secretConfigError && !stored.secretConfigKeys.includes(keyName))
           await updateRuntimeController(controller.id, {
-            secretConfig: { BOXD_API_KEY: env.BOXD_API_KEY }, // gitleaks:allow (env reference)
+            secretConfig: { [keyName]: key }, // gitleaks:allow (env reference)
           });
         const target = await getRuntimeControllerTarget(
           (await getRuntimeController(controller.id))!,
           env,
         );
-        controller.status = (await createRuntimeProvider("boxd", target)).checkConfig(target).ready
+        controller.status = (await createRuntimeProvider(controller.kind, target)).checkConfig(
+          target,
+        ).ready
           ? "online"
           : "offline";
       }

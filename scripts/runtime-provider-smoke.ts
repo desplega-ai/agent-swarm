@@ -21,6 +21,9 @@
  *   BOXD_API_KEY=bxd_... bun scripts/runtime-provider-smoke.ts --provider boxd \
  *     --api http://localhost:3913 --worker-api https://<public-api-host> \
  *     --image ghcr.io/desplega-ai/agent-swarm-worker:slim
+ *   KOSA8_API_KEY=k8c_live_... bun scripts/runtime-provider-smoke.ts --provider kosa8 \
+ *     --api http://localhost:3913 --worker-api https://<public-api-host> \
+ *     --image ghcr.io/desplega-ai/agent-swarm-worker:slim
  */
 import { parseArgs } from "node:util";
 import { createRuntimeProvider, type RuntimeProviderKind } from "../src/runtime-providers";
@@ -42,7 +45,9 @@ const { values: args } = parseArgs({
 
 const kind = args.provider as RuntimeProviderKind;
 if (!kind || !args.image || !args["worker-api"]) {
-  console.error("required: --provider docker|e2b|boxd --image <image|template> --worker-api <url>");
+  console.error(
+    "required: --provider docker|e2b|boxd|kosa8 --image <image|template> --worker-api <url>",
+  );
   process.exit(2);
 }
 const apiKey = args["api-key"] ?? getApiKey();
@@ -74,12 +79,20 @@ const target: Record<string, string | undefined> =
           BOXD_SNAPSHOT: process.env.BOXD_SNAPSHOT,
           WORKER_API_URL: args["worker-api"],
         }
-      : {
-          E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
-          E2B_API_BASE: process.env.E2B_API_BASE,
-          E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
-          WORKER_API_URL: args["worker-api"],
-        };
+      : kind === "kosa8"
+        ? {
+            KOSA8_API_KEY: process.env.KOSA8_API_KEY,
+            KOSA8_API_URL: process.env.KOSA8_API_URL,
+            KOSA8_REGION: process.env.KOSA8_REGION,
+            KOSA8_SNAPSHOT: process.env.KOSA8_SNAPSHOT,
+            WORKER_API_URL: args["worker-api"],
+          }
+        : {
+            E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
+            E2B_API_BASE: process.env.E2B_API_BASE,
+            E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
+            WORKER_API_URL: args["worker-api"],
+          };
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T | undefined> {
   const res = await fetch(`${args.api}${path}`, {

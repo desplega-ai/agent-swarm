@@ -113,24 +113,30 @@ test("E2B seeding records an HTTPS configuration error even with a key", async (
     lastError: expect.stringContaining("HTTPS"),
   });
 });
-test("boxd seeds only with a deployment key and keeps the stored key", async () => {
-  const env = { RUNTIME_POOLS_ENABLED: "true", RUNTIME_WORKER_API_URL: "https://swarm.test" };
-  await seedRuntimePools(env);
-  expect(await getRuntimeController("builtin-boxd")).toBeNull();
-  const secret = `bxd_${crypto.randomUUID()}`;
-  await seedRuntimePools({ ...env, BOXD_API_KEY: secret });
-  expect(await getRuntimeController("builtin-boxd")).toMatchObject({
-    kind: "boxd",
-    placement: "builtin",
-    status: "online",
-    secretConfigKeys: ["BOXD_API_KEY"],
+for (const [kind, keyName, prefix] of [
+  ["boxd", "BOXD_API_KEY", "bxd_"],
+  ["kosa8", "KOSA8_API_KEY", "k8c_live_"],
+] as const) {
+  test(`${kind} seeds only with a deployment key and keeps the stored key`, async () => {
+    const env = { RUNTIME_POOLS_ENABLED: "true", RUNTIME_WORKER_API_URL: "https://swarm.test" };
+    const id = `builtin-${kind}`;
+    await seedRuntimePools(env);
+    expect(await getRuntimeController(id)).toBeNull();
+    const secret = `${prefix}${crypto.randomUUID()}`;
+    await seedRuntimePools({ ...env, [keyName]: secret });
+    expect(await getRuntimeController(id)).toMatchObject({
+      kind,
+      placement: "builtin",
+      status: "online",
+      secretConfigKeys: [keyName],
+    });
+    await seedRuntimePools({ ...env, [keyName]: "different-env-key" });
+    expect(await getRuntimeControllerSecrets(id)).toEqual({ [keyName]: secret });
+    await seedRuntimePools({ ...env, RUNTIME_WORKER_API_URL: "http://swarm.test" });
+    expect(await getRuntimeController(id)).toMatchObject({ status: "offline" });
+    expect(await getRuntimeControllerSecrets(id)).toEqual({ [keyName]: secret });
   });
-  await seedRuntimePools({ ...env, BOXD_API_KEY: "different-env-key" });
-  expect(await getRuntimeControllerSecrets("builtin-boxd")).toEqual({ BOXD_API_KEY: secret });
-  await seedRuntimePools({ ...env, RUNTIME_WORKER_API_URL: "http://swarm.test" });
-  expect(await getRuntimeController("builtin-boxd")).toMatchObject({ status: "offline" });
-  expect(await getRuntimeControllerSecrets("builtin-boxd")).toEqual({ BOXD_API_KEY: secret });
-});
+}
 test("docker status follows reachability on every boot", async () => {
   const server = Bun.serve({ port: 0, fetch: () => new Response("OK") });
   const env = { RUNTIME_POOLS_ENABLED: "true", RUNTIME_DOCKER_HOST: server.url.origin };
