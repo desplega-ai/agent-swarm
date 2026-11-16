@@ -58,16 +58,17 @@ The packet is not a legal conclusion. It does not establish that a breach occurr
 
 This scenario is fictional. It names no company or customer, and nothing in it is a measured result.
 
-Northwind Logistics supports Fairhaven Grocers under an agreement committing to a first response within four business hours, Monday to Friday, 09:00 to 17:00 in the customer's time zone. The review covers one month: did any ticket fall outside that window?
+One provider team supports one customer under an agreement committing to a first response within four business hours, Monday to Friday, 09:00 to 17:00 in the customer's time zone. The review covers one month: did any ticket fall outside that window?
 
 | Ticket | Opened | First response | Elapsed business hours | Result | Source |
 | --- | --- | --- | --- | --- | --- |
 | NW-4412 | Mon 12 Jan, 09:40 | Mon 12 Jan, 12:15 | 2.6 | Within the window | Ticket history export, 12 Jan |
 | NW-4418 | Tue 13 Jan, 16:05 | Wed 14 Jan, 09:50 | 1.8 | Within the window, clock paused overnight | Ticket history export, 14 Jan |
 | NW-4427 | Thu 15 Jan, 14:20 | Not recorded | Not computed | Flagged: no first-response timestamp | Ticket export, 20 Jan |
-| NW-4431 | Fri 16 Jan, 23:10 | Mon 19 Jan, 08:05 | Not computed | Flagged: opened across a time-zone boundary | Ticket export and the customer's message |
+| NW-4431 | Fri 16 Jan, 23:10 (customer time) | Mon 19 Jan, 08:05 (team time) | 0.1 | Within the window once both records are read in the customer's time zone: 09:05 on Monday, five minutes after the clock starts. Flagged: the two records are stamped in different time zones | Ticket export (team time) and the customer's message (customer time) |
+| NW-4436 | Tue 20 Jan, 10:30 | Wed 21 Jan, 11:00 | 8.5 | Outside the window by 4.5 business hours | Ticket history export, 22 Jan |
 
-Two rows go to the reviewer, not to a verdict. The missing timestamp on NW-4427 is a gap in the export, and the packet names the mailbox where the reply may sit. NW-4431 was opened late on a Friday in the customer's time zone, in the team's weekend, and the clock-start rule does not settle whether the two days between count. The reviewer confirms the timestamps and reads the agreement on exceptions. Account and finance owners then decide the reply and any credit.
+Three rows go to the reviewer, not to a verdict. NW-4436 is the only ticket the packet reports outside the window: it links the export and carries both timestamps, 10:30 on Tuesday and 11:00 on Wednesday morning, which come to 8.5 business hours against a window of four. The named reviewer confirms both timestamps against that export and reads the agreement for an exception that could stop the clock, such as scheduled maintenance, a customer-caused delay or a named exclusion, and checks the on-call log for those hours. On NW-4427 the missing timestamp is a gap in the export, and the packet names the mailbox where the reply may sit. On NW-4431 the customer's message dates the ticket in customer time and the export stamps the first response in the team's time zone, one hour behind. Read in the customer's time zone, the response lands at 09:05 on Monday, five minutes after the clock starts, and the Friday night to Monday morning gap never enters the count, because the clock runs only Monday to Friday, 09:00 to 17:00. Account and finance owners then decide whether to reply to the customer and whether a credit is offered.
 
 ## Sensitive data, stale records and escalation
 
