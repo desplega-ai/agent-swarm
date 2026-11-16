@@ -248,6 +248,54 @@ export const scriptSdkCalls: Scenario = {
       "KV value written by the script is wrong",
     );
 
+    // A script completes the task with an artifact and a source: the bridge must
+    // reach the store-progress tool, which owns both fields (#3211).
+    const artifactUrl = `https://example.com/${ctx.nonce}/report.md`;
+    const completion = await runScript(ctx, agentId, {
+      source: `export default async function (args: { taskId: string; url: string }, ctx: any) {
+  return await ctx.swarm.task_storeProgress({
+    taskId: args.taskId,
+    status: "completed",
+    output: "Delivered the report [citation:1]",
+    attachments: [{ kind: "url", url: args.url, name: "report.md", isPrimary: true }],
+    citations: [{ index: 1, kind: "url", ref: args.url, label: "Report" }],
+  });
+}`,
+      args: { taskId, url: artifactUrl },
+      intent: `e2e sdk completion artifacts ${ctx.nonce}`,
+    });
+    expectRunOk(completion, "sdk completion script");
+    expect(
+      asRecord(completion.result).success === true,
+      `task_storeProgress completion failed: ${JSON.stringify(asRecord(completion.result)).slice(0, 500)}`,
+    );
+    const finished = await ctx.api("GET", `/api/tasks/${taskId}`);
+    expectStatus(finished, [200], "read the task the script completed");
+    const finishedTask = asRecord(finished.json);
+    expect(
+      finishedTask.status === "completed" && String(finishedTask.output).includes("[citation:1]"),
+      `the script's completion did not land: ${finished.text.slice(0, 300)}`,
+    );
+    const attachments = Array.isArray(finishedTask.attachments)
+      ? finishedTask.attachments.map(asRecord)
+      : [];
+    expect(
+      attachments.length === 1 &&
+        attachments[0]?.kind === "url" &&
+        attachments[0]?.url === artifactUrl,
+      `the script's completion dropped its attachment: ${JSON.stringify(finishedTask.attachments).slice(0, 300)}`,
+    );
+    const citations = Array.isArray(finishedTask.citations)
+      ? finishedTask.citations.map(asRecord)
+      : [];
+    expect(
+      citations.length === 1 &&
+        citations[0]?.index === 1 &&
+        citations[0]?.kind === "url" &&
+        citations[0]?.ref === artifactUrl,
+      `the script's completion dropped its citation: ${JSON.stringify(finishedTask.citations).slice(0, 300)}`,
+    );
+
     // the scratch filesystem dies with the run
     const later = await runScript(ctx, agentId, {
       source: `export default async function (args: unknown, ctx: any) { return { gone: !(await ctx.fs.exists("/scratch/a.txt")) }; }`,
