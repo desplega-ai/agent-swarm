@@ -863,6 +863,7 @@ declare module "swarm-sdk" {
       agentId?: string;
       workflowId?: string;
       name?: string;
+      defaultThreadId?: string;
     }): Promise<unknown>;
     chat_unregisterChannel(args: {
       adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat";

@@ -497,6 +497,11 @@ async function click(element: Element | undefined | null) {
   await act(async () => {
     (element as HTMLElement).click();
   });
+  // Radix restores focus in a timer after closing a select. Finish that cleanup
+  // before opening the next popover, or it can steal focus and dismiss it.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 /** Pick an option of a Radix select by the trigger's current text. */

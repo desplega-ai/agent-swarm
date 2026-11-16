@@ -1192,7 +1192,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_MODE",
         label: "Slack transport",
         description:
-          "Choose Socket Mode or signed HTTP delivery. HTTP remains unavailable until the HTTP receiver is installed; selecting it never falls back to a socket.",
+          "Both modes require a bot token. Socket Mode also requires an app-level token. HTTP requires a signing secret and delivers events, slash commands, and interactivity to /api/integrations/slack/events.",
         kind: "enum",
         options: ["socket", "http"],
         defaultValue: "socket",

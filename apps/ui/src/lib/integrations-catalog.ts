@@ -338,9 +338,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
         default: "socket",
         options: [
           { value: "socket", label: "Socket Mode" },
-          { value: "http", label: "HTTP (not available yet)" },
+          { value: "http", label: "HTTP" },
         ],
-        helpText: "HTTP configuration is preparatory; its receiver is not installed yet.",
+        helpText:
+          "HTTP requires a bot token and signing secret. Set the Events API, interactivity, and slash-command request URLs to /api/integrations/slack/events on your API server.",
       },
       {
         key: "SLACK_BOT_TOKEN",
