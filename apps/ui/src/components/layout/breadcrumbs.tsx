@@ -12,7 +12,6 @@ import { useScheduledTask } from "@/api/hooks/use-schedules";
 import { useOAuthApps, useScriptConnection } from "@/api/hooks/use-script-connections";
 import { useScriptRun } from "@/api/hooks/use-script-runs";
 import { useScript } from "@/api/hooks/use-scripts";
-import { useSession } from "@/api/hooks/use-sessions";
 import { useSkill } from "@/api/hooks/use-skills";
 import { useUser } from "@/api/hooks/use-users";
 import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
@@ -27,7 +26,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { chatSdkPageChannel } from "@/lib/channel-cards";
 import { connectPageHref, connectPageTitle, INTEGRATIONS } from "@/lib/integrations-catalog";
 import { shortId } from "@/lib/short-id";
-import { cn, sessionDisplayTitle } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   AncestorMenuItem,
   HiddenAncestorsMenu,
@@ -171,7 +170,12 @@ export function Breadcrumbs() {
   const location = useLocation();
   const pathSegments = location.pathname.split("/").filter(Boolean);
   // Comb (`/file/~/<org>/<drive>/<path>`) draws its own path trail in the page.
-  const segments = pathSegments[0] === "file" ? pathSegments.slice(0, 1) : pathSegments;
+  // Sessions stops at "Sessions": the open session's title is in its tab and
+  // in the pane header, so a third crumb would say it again.
+  const segments =
+    pathSegments[0] === "file" || pathSegments[0] === "sessions"
+      ? pathSegments.slice(0, 1)
+      : pathSegments;
   // Home shows the greeting in the breadcrumb slot (there is no trail to
   // draw and no in-page h1 anymore). Called before the early return so hook
   // order stays stable across routes.
@@ -193,16 +197,13 @@ export function Breadcrumbs() {
       : undefined;
   const idFor = (route: string): string => (parent === route && detailId ? detailId : "");
 
-  // `usePage` / `useUser` / `useSession` accept `string | undefined`; the rest
+  // `usePage` / `useUser` accept `string | undefined`; the rest
   // accept `string` and disable themselves on a falsy id. Pass `""` uniformly.
   const pageId = parent === "pages" && detailId ? detailId : undefined;
   const { data: pageMeta } = usePage(pageId);
 
   const personId = parent === "people" && detailId ? detailId : undefined;
   const { data: personMeta } = useUser(personId);
-
-  const sessionId = parent === "sessions" && detailId ? detailId : undefined;
-  const { data: sessionMeta } = useSession(sessionId);
 
   const { data: appMeta } = useApp(idFor("apps") || undefined);
   const { data: agentMeta } = useAgent(idFor("agents"));
@@ -257,33 +258,31 @@ export function Breadcrumbs() {
         ? pageMeta?.title
         : parent === "people"
           ? personMeta?.name
-          : parent === "sessions"
-            ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
-            : parent === "agents"
-              ? agentMeta?.name
-              : parent === "workflows"
-                ? workflowMeta?.name
-                : parent === "workflow-runs"
-                  ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
-                  : parent === "schedules"
-                    ? scheduleMeta?.name
-                    : parent === "scripts"
-                      ? scriptMeta?.name
-                      : parent === "script-runs"
-                        ? scriptRunMeta?.run.scriptName
-                        : parent === "skills"
-                          ? skillMeta?.name
-                          : parent === "mcp-servers"
-                            ? mcpServerMeta?.name
-                            : parent === "repos"
-                              ? repoMeta?.name
-                              : parent === "approval-requests"
-                                ? approvalMeta?.title
-                                : parent === "connections"
-                                  ? connectionMeta?.slug
-                                  : parent === "oauth-apps"
-                                    ? oauthAppName
-                                    : undefined
+          : parent === "agents"
+            ? agentMeta?.name
+            : parent === "workflows"
+              ? workflowMeta?.name
+              : parent === "workflow-runs"
+                ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
+                : parent === "schedules"
+                  ? scheduleMeta?.name
+                  : parent === "scripts"
+                    ? scriptMeta?.name
+                    : parent === "script-runs"
+                      ? scriptRunMeta?.run.scriptName
+                      : parent === "skills"
+                        ? skillMeta?.name
+                        : parent === "mcp-servers"
+                          ? mcpServerMeta?.name
+                          : parent === "repos"
+                            ? repoMeta?.name
+                            : parent === "approval-requests"
+                              ? approvalMeta?.title
+                              : parent === "connections"
+                                ? connectionMeta?.slug
+                                : parent === "oauth-apps"
+                                  ? oauthAppName
+                                  : undefined
     : undefined;
 
   // `/apps/:id/p/<page>` — one app page. The literal `p` segment is not a

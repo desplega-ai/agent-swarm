@@ -4,7 +4,14 @@ import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import type { SessionsListResponse } from "@/api/types";
 import { sidebarListParams } from "@/lib/sessions-v2";
 import type { MyGroups } from "../use-my-groups";
-import { buildTreeRows, type ContainerId, type ListState, type TreeRow } from "./tree-rows";
+import {
+  buildTreeRows,
+  type ContainerId,
+  KEEP_ORDER_CONTAINERS,
+  keepRowOrder,
+  type ListState,
+  type TreeRow,
+} from "./tree-rows";
 
 const NO_LISTS: ReadonlyMap<ContainerId, ListState> = new Map();
 
@@ -92,6 +99,9 @@ export function useTreeRows({
   // The last loaded page of each list, for this viewer. A Mine / All or
   // source switch changes every list key, and `useQueries` starts fresh
   // observers for new keys, so `placeholderData` never sees the old page.
+  // The Inbox and Working also keep the row order they showed: a poll that
+  // reports progress does not move a row. A list that showed another view's
+  // page (`stale`) or was folded takes the server's order again.
   const shown = useRef<{ me: string | null; lists: ReadonlyMap<ContainerId, ListState> }>({
     me,
     lists: NO_LISTS,
@@ -101,11 +111,15 @@ export function useTreeRows({
     return new Map(
       containers.map((container, i): [ContainerId, ListState] => {
         const state = states[i]!;
-        const old = previous.get(container)?.data;
-        return [
-          container,
-          !state.data && !state.failed && old ? { data: old, failed: false, stale: true } : state,
-        ];
+        const before = previous.get(container);
+        const old = before?.data;
+        if (!state.data && !state.failed && old) {
+          return [container, { data: old, failed: false, stale: true }];
+        }
+        if (state.data && old && !before?.stale && KEEP_ORDER_CONTAINERS.has(container)) {
+          return [container, { ...state, data: keepRowOrder(old, state.data) }];
+        }
+        return [container, state];
       }),
     );
   }, [me, containers, states]);

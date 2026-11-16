@@ -43,6 +43,7 @@ export function SidebarSearch({
   groups = [],
   onSearchMode,
   action,
+  onReveal,
 }: {
   /** The search in the URL. */
   value: string;
@@ -58,6 +59,11 @@ export function SidebarSearch({
   onSearchMode?: (on: boolean) => void;
   /** At the end of the row: the filter menu. The phone hides it while searching. */
   action?: ReactNode;
+  /**
+   * `/` calls it before it focuses the field: the shell shows a collapsed
+   * sidebar here (synchronously), so the field is visible when it takes the focus.
+   */
+  onReveal?: () => void;
 }) {
   const [text, setText] = useState(value);
   // The last value this field sent. A different URL value came from
@@ -83,6 +89,7 @@ export function SidebarSearch({
     onChange("");
   };
   useKeyboardShortcuts(matchSlash, () => {
+    onReveal?.();
     inputRef.current?.focus();
     inputRef.current?.select();
     return true;

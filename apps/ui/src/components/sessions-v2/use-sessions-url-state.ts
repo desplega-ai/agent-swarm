@@ -2,21 +2,25 @@ import { useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import {
-  closeSplit as closeSplitIn,
-  closeUrlTab,
+  closePaneTab,
+  closeSplitPane,
   focusedTab,
   GROUP_TAB,
   type GroupPane,
+  moveTab as moveTabIn,
   NEW_SESSION_TAB,
-  openTab,
+  openInPane,
+  type PaneIndex,
+  type Panes,
+  paneOf,
   parseGroupPane,
   parseView,
-  replaceTab,
+  replacePaneTab,
+  serializeSplitFocus,
   serializeTabs,
-  splitTo,
   tabPath,
   tabsWithFocus,
-  urlTabs,
+  urlPanes,
   withGroupTab,
 } from "@/lib/sessions-v2";
 
@@ -28,8 +32,10 @@ export interface SessionsUrlState {
   focused: string;
   /** The open tabs of the main pane in order (`?tabs=`), the focused one included. */
   tabs: string[];
-  /** The session in the split pane (`?split=`). */
-  split: string | null;
+  /** The open tabs of the split pane in order (`?split=`). Empty: no split. */
+  split: string[];
+  /** The focused tab of the split pane (`?splitFocus=`, else its first tab). */
+  splitFocused: string | null;
   /** The list of the group tab (`?view=`): `inbox`, `later`, `done`, `nogroup`, or a group key. */
   view: string | null;
   /** The group tab's face the URL asks for (`?tab=`): the Overview or the list. */
@@ -37,36 +43,42 @@ export interface SessionsUrlState {
   /** The sidebar search (`?q=`). */
   q: string;
   /**
-   * Open a session in the focused tab, or in a new tab after it. `background`
-   * adds the tab and keeps the focus where it is.
+   * Open a tab (a session or an asset) in a pane, after its focused tab, as
+   * a browser tab: an open never replaces a tab. An open tab only takes the
+   * focus, in the pane that holds it. Pane 1 with no split starts the split.
+   * `background` adds a main pane tab and keeps the focus where it is.
+   * Returns the pane that holds the tab.
    */
-  openSession: (id: string, options?: { newTab?: boolean; background?: boolean }) => void;
-  /** Send in the New session tab: the tab turns into the new session. */
+  openSession: (id: string, options?: { pane?: PaneIndex; background?: boolean }) => PaneIndex;
+  /** Send in the New session tab: the tab turns into the new session, in its pane. */
   replaceNewTab: (id: string) => void;
-  /** Focus an open tab (or `NEW_SESSION_TAB`). */
-  focusTab: (tab: string) => void;
-  /** Close a tab. It replaces the history entry, also when the focus moves. */
+  /** Focus an open tab (or `NEW_SESSION_TAB`), in the pane that holds it. Returns that pane. */
+  focusTab: (tab: string) => PaneIndex;
+  /** Close a tab of either pane. It replaces the history entry, also when the focus moves. */
   closeTab: (tab: string) => void;
   /** Open (or focus) the group tab on a list ("View all N"). */
   openView: (view: string) => void;
   /** Focus the group tab on its Overview or its list (`?tab=`). */
   focusGroupPane: (pane: GroupPane) => void;
-  /** Open a session in the split pane. Returns why it cannot, or null. */
-  openInSplit: (id: string) => string | null;
-  /** Open a session in the split pane in place of the one there (a click in the split pane). */
-  replaceSplit: (id: string) => void;
-  /** Close the split. `keep` moves its session back to the main pane as a tab. */
+  /**
+   * Move a tab to a pane, or to a new place in its pane: before the tab
+   * `before`, at the end (null), or after the pane's focused tab. A tab that
+   * is not open opens there. Returns why it cannot, or null.
+   */
+  moveTab: (id: string, to: PaneIndex, before?: string | null) => string | null;
+  /** Close the split. `keep` moves its tabs back to the main pane. */
   closeSplit: (keep: boolean) => void;
   setQuery: (q: string) => void;
 }
 
 /**
  * The sessions v2 state that lives in the URL (plan D12). `/sessions/:rootTaskId`
- * is the focused session, so old links keep working. Opening or focusing a
- * tab, the group tab, or the split pushes a history entry, so browser back
- * returns to the last place. Closing a tab or the split replaces the
- * current entry, also when the focus moves, so back never reopens a closed
- * tab. A background tab and the search replace the current entry.
+ * is the focused tab of the main pane, so old links keep working. Opening
+ * or focusing a tab, the group tab, or a move to the other pane pushes a
+ * history entry, so browser back returns to the last place. Closing a tab
+ * or the split replaces the current entry, also when the focus moves, so
+ * back never reopens a closed tab. A background tab, a new place in the same
+ * pane, and the search replace the current entry.
  * Navigation keeps every other query param.
  */
 export function useSessionsUrlState(): SessionsUrlState {
@@ -77,19 +89,18 @@ export function useSessionsUrlState(): SessionsUrlState {
   const focused = focusedTab(rootTaskId, view);
   const tabsParam = searchParams.get("tabs");
   const splitParam = readStringParam(searchParams, "split") || null;
-  const { tabs, split } = useMemo(
-    () => urlTabs(tabsParam, { focused, view, split: splitParam }),
-    [tabsParam, focused, view, splitParam],
+  const splitFocusParam = readStringParam(searchParams, "splitFocus") || null;
+  const panes = useMemo(
+    () => urlPanes(tabsParam, { focused, view, split: splitParam, splitFocus: splitFocusParam }),
+    [tabsParam, focused, view, splitParam, splitFocusParam],
   );
+  const { tabs, split, splitFocused } = panes;
   const q = readStringParam(searchParams, "q");
   const groupPane = parseGroupPane(searchParams.get("tab"));
 
   const go = useCallback(
     (
-      next: {
-        tabs: string[];
-        focused: string;
-        split?: string | null;
+      next: Panes & {
         view?: string | null;
         /** The group tab's face. Undefined keeps it, null drops it. */
         pane?: GroupPane | null;
@@ -100,10 +111,11 @@ export function useSessionsUrlState(): SessionsUrlState {
       const value = serializeTabs(next.tabs, next.focused);
       if (value) params.set("tabs", value);
       else params.delete("tabs");
-      // The split as shown: a split param that names the focused tab drops out.
-      const nextSplit = next.split !== undefined ? next.split : split;
-      if (nextSplit && nextSplit !== next.focused) params.set("split", nextSplit);
+      if (next.split.length > 0) params.set("split", next.split.join(","));
       else params.delete("split");
+      const splitFocus = serializeSplitFocus(next);
+      if (splitFocus) params.set("splitFocus", splitFocus);
+      else params.delete("splitFocus");
       const nextView = next.view !== undefined ? next.view : view;
       if (nextView) params.set("view", nextView);
       else params.delete("view");
@@ -115,64 +127,71 @@ export function useSessionsUrlState(): SessionsUrlState {
         replace,
       });
     },
-    [navigate, searchParams, view, split, groupPane],
+    [navigate, searchParams, view, groupPane],
   );
 
   const openSession = useCallback(
-    (id: string, options?: { newTab?: boolean; background?: boolean }) => {
+    (id: string, options?: { pane?: PaneIndex; background?: boolean }) => {
       if (options?.background) {
-        const next = openTab(tabs, focused, id, { newTab: true });
-        if (next !== tabs) go({ tabs: next, focused }, true);
-      } else go({ tabs: openTab(tabs, focused, id, options), focused: id });
+        if (paneOf(panes, id) === null) {
+          go({ ...panes, tabs: tabsWithFocus(openInPane(panes, 0, id).tabs, focused) }, true);
+        }
+        return paneOf(panes, id) ?? 0;
+      }
+      const next = openInPane(panes, options?.pane ?? 0, id);
+      go(next);
+      return paneOf(next, id) ?? 0;
     },
-    [go, tabs, focused],
+    [go, panes, focused],
   );
   const replaceNewTab = useCallback(
-    (id: string) => go({ tabs: replaceTab(tabs, NEW_SESSION_TAB, id), focused: id }),
-    [go, tabs],
+    (id: string) => go(replacePaneTab(panes, NEW_SESSION_TAB, id)),
+    [go, panes],
   );
   const focusTab = useCallback(
-    (tab: string) => go({ tabs: tabsWithFocus(tabs, tab), focused: tab }),
-    [go, tabs],
+    (tab: string) => {
+      const next = openInPane(panes, 0, tab);
+      go(next);
+      return paneOf(next, tab) ?? 0;
+    },
+    [go, panes],
   );
   const closeTab = useCallback(
-    (tab: string) => go(closeUrlTab(tabs, focused, view, tab), true),
-    [go, tabs, focused, view],
+    (tab: string) =>
+      go({ ...closePaneTab(panes, tab), view: tab === GROUP_TAB ? null : view }, true),
+    [go, panes, view],
   );
   // One group tab: a second "View all" shows its list in the same tab. A new
   // list drops `?tab=`, so a use-case group opens on its Overview.
   const openView = useCallback(
     (next: string) =>
       go({
+        ...panes,
         tabs: withGroupTab(tabs, focused),
         focused: GROUP_TAB,
         view: next,
         ...(next === view ? {} : { pane: null }),
       }),
-    [go, tabs, focused, view],
+    [go, panes, tabs, focused, view],
   );
   const focusGroupPane = useCallback(
-    (pane: GroupPane) => go({ tabs: tabsWithFocus(tabs, GROUP_TAB), focused: GROUP_TAB, pane }),
-    [go, tabs],
+    (pane: GroupPane) =>
+      go({ ...panes, tabs: tabsWithFocus(tabs, GROUP_TAB), focused: GROUP_TAB, pane }),
+    [go, panes, tabs],
   );
-  const openInSplit = useCallback(
-    (id: string) => {
-      const result = splitTo(tabs, focused, split, id);
+  const moveTab = useCallback(
+    (id: string, to: PaneIndex, before?: string | null) => {
+      const result = moveTabIn(panes, id, to, before);
       if ("message" in result) return result.message;
-      if (result.split !== split || result.tabs !== tabs) go(result);
+      // A new place in the same pane is no new history entry.
+      if (result !== panes) go(result, paneOf(panes, id) === to);
       return null;
     },
-    [go, tabs, focused, split],
-  );
-  const replaceSplit = useCallback(
-    (id: string) => {
-      if (id !== split) go({ tabs, focused, split: id });
-    },
-    [go, tabs, focused, split],
+    [go, panes],
   );
   const closeSplit = useCallback(
-    (keep: boolean) => go({ tabs: closeSplitIn(tabs, split, keep), focused, split: null }, true),
-    [go, tabs, focused, split],
+    (keep: boolean) => go(closeSplitPane(panes, keep), true),
+    [go, panes],
   );
   const setQuery = useCallback((next: string) => setParam("q", next), [setParam]);
 
@@ -180,6 +199,7 @@ export function useSessionsUrlState(): SessionsUrlState {
     focused,
     tabs,
     split,
+    splitFocused,
     view,
     groupPane,
     q,
@@ -189,8 +209,7 @@ export function useSessionsUrlState(): SessionsUrlState {
     closeTab,
     openView,
     focusGroupPane,
-    openInSplit,
-    replaceSplit,
+    moveTab,
     closeSplit,
     setQuery,
   };

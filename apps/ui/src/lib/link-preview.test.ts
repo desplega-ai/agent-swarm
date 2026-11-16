@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { isPlainClick, linkPreviewOpenHref, linkPreviewTarget } from "./link-preview";
+import {
+  assetTabId,
+  assetTabTarget,
+  isPlainClick,
+  linkPreviewOpenHref,
+  linkPreviewTarget,
+} from "./link-preview";
+import { isAssetTab, parseTabs } from "./sessions-v2";
 import type { SwarmLinkOrigins } from "./swarm-links";
 
 const ORIGINS: SwarmLinkOrigins = {
@@ -80,6 +87,41 @@ describe("linkPreviewOpenHref", () => {
       "/file/~/org-1/drive-1/a.md?comment=c1",
     );
     expect(linkPreviewOpenHref(file, { connected: false })).toBe(href);
+  });
+});
+
+describe("asset tabs", () => {
+  test("a link's tab id reads back as the same target", () => {
+    for (const href of [
+      "https://fs.example.com/file/~/org-1/drive-1/docs/My%20notes, v2 (ü).md",
+      `/pages/${PAGE_ID}?tab=one&x=a,b`,
+    ]) {
+      const tab = assetTabId(target(href)!);
+      expect(isAssetTab(tab)).toBe(true);
+      expect(assetTabTarget(tab, ORIGINS)).toEqual(target(href));
+    }
+  });
+
+  test("a task's tab id keeps the task id", () => {
+    const tab = assetTabId({ kind: "task", taskId: "t-1" });
+    expect(tab).toBe("asset:task:t-1");
+    expect(assetTabTarget(tab, ORIGINS)).toEqual({ kind: "task", taskId: "t-1" });
+  });
+
+  test("a tab id is one item of ?tabs= and one path segment", () => {
+    const tab = assetTabId(target("https://fs.example.com/file/~/org-1/drive-1/a,b/c?.md")!);
+    expect(parseTabs(`a,${tab},b`)).toEqual(["a", tab, "b"]);
+    expect(tab).not.toMatch(/[/?#,+=]/);
+  });
+
+  test("a session id, a bad id, and a link that previews nothing give no target", () => {
+    expect(assetTabTarget("0b6e-session", ORIGINS)).toBeNull();
+    expect(assetTabTarget("asset:link:%%%", ORIGINS)).toBeNull();
+    expect(assetTabTarget("asset:other:x", ORIGINS)).toBeNull();
+    expect(assetTabTarget("asset:task:", ORIGINS)).toBeNull();
+    expect(
+      assetTabTarget(assetTabId({ kind: "page", id: "x", query: "", href: "/tasks/abc" }), ORIGINS),
+    ).toBeNull();
   });
 });
 

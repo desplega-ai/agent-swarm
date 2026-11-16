@@ -43,13 +43,25 @@ export function parseGroupPane(value: string | null): GroupPane | null {
   return value === "overview" || value === "list" ? value : null;
 }
 
-/** A tab that holds a session (not the New session tab, the group tab, or the Overview). */
-export function isSessionTab(tab: string): boolean {
-  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
+/**
+ * An asset tab: a file, a page, or a task that a link in a session opens
+ * next to it (`lib/link-preview.ts` builds and reads the id). It sits in a
+ * pane's tab strip with the session tabs.
+ */
+export const ASSET_TAB_PREFIX = "asset:";
+
+/** A tab that shows a file, a page, or a task. */
+export function isAssetTab(tab: string): boolean {
+  return tab.startsWith(ASSET_TAB_PREFIX);
 }
 
-/** A tab the split pane can hold: a session or the New session tab. */
-function isSessionOrNewTab(tab: string): boolean {
+/** A tab that holds a session (not the New session tab, the group tab, the Overview, or an asset). */
+export function isSessionTab(tab: string): boolean {
+  return tab !== NEW_SESSION_TAB && tab !== GROUP_TAB && tab !== OVERVIEW_TAB && !isAssetTab(tab);
+}
+
+/** A tab the split pane can hold: a session, the New session tab, or an asset. */
+export function canSplitTab(tab: string): boolean {
   return tab !== GROUP_TAB && tab !== OVERVIEW_TAB;
 }
 
@@ -91,48 +103,76 @@ export function parseView(value: string | null): string | null {
 
 /**
  * The tab list after opening `id`. An open tab keeps its place. Otherwise
- * `newTab` adds it after the focused tab, and a plain open replaces the
- * focused tab (a click opens in the current tab). The New session tab and
- * the group tab are never replaced: a session opens next to them (mockup
- * `index.html:2337-2338`), so a draft and a list survive a click.
+ * the session opens in a new tab after the focused tab, as a browser tab
+ * does: an open never replaces a tab, so every opened session stays open
+ * until its tab closes. The New session tab and the group tab keep their
+ * place too, so a draft and a list survive a click.
  */
-export function openTab(
-  tabs: string[],
-  focused: string,
-  id: string,
-  options: { newTab?: boolean } = {},
-): string[] {
+export function openTab(tabs: string[], focused: string, id: string): string[] {
   if (tabs.includes(id)) return tabs;
   const at = tabs.indexOf(focused);
   if (at < 0) return [...tabs, id];
   const next = [...tabs];
-  if (options.newTab || !isSessionTab(focused)) next.splice(at + 1, 0, id);
-  else next[at] = id;
+  next.splice(at + 1, 0, id);
   return next;
 }
 
-/** The tab list with `from` turned into `to` (Send turns the New session tab into its session). */
-export function replaceTab(tabs: string[], from: string, to: string): string[] {
-  if (!tabs.includes(from)) return openTab(tabs, from, to);
-  return tabs.filter((tab) => tab !== to).map((tab) => (tab === from ? to : tab));
+/** 0: the main pane. 1: the split pane. */
+export type PaneIndex = 0 | 1;
+
+/**
+ * The two panes. Each is a tab group: the main pane's tabs with its focused
+ * tab (the route), and the split pane's tabs with its own focused tab. No
+ * split tabs is no split. One tab never shows in both panes, so one session
+ * (or one New session draft) never mounts twice.
+ */
+export interface Panes {
+  tabs: string[];
+  focused: string;
+  split: string[];
+  /** The focused tab of the split pane. Null with no split. */
+  splitFocused: string | null;
 }
 
 /**
- * The tabs and the split of a URL. A group tab with no list in `?view=` is
- * gone. The split holds a session or the New session tab. It never shows in
- * the main pane too: a split that names the focused tab is no split, and a
- * tab that is the split leaves the list. So one session (or one New session
- * draft) never mounts in two panes.
+ * The panes of a URL. A group tab with no list in `?view=` is gone. The
+ * split holds sessions, the New session tab, and assets. The main pane's
+ * focused tab stays there, so a split that names it loses it, and a tab in
+ * the split leaves the main list. `?splitFocus=` names the split's focused
+ * tab: its first tab when the param is missing or stale.
  */
-export function urlTabs(
+export function urlPanes(
   tabsParam: string | null,
-  { focused, view, split }: { focused: string; view: string | null; split: string | null },
-): { tabs: string[]; split: string | null } {
-  const shownSplit = split && isSessionOrNewTab(split) && split !== focused ? split : null;
+  {
+    focused,
+    view,
+    split,
+    splitFocus,
+  }: { focused: string; view: string | null; split: string | null; splitFocus?: string | null },
+): Panes {
+  const splitTabs = parseTabs(split).filter((tab) => canSplitTab(tab) && tab !== focused);
   const listed = parseTabs(tabsParam).filter(
-    (tab) => (tab !== GROUP_TAB || view !== null) && tab !== shownSplit && tab !== OVERVIEW_TAB,
+    (tab) =>
+      (tab !== GROUP_TAB || view !== null) && !splitTabs.includes(tab) && tab !== OVERVIEW_TAB,
   );
-  return { tabs: tabsWithFocus(listed, focused), split: shownSplit };
+  return {
+    tabs: tabsWithFocus(listed, focused),
+    focused,
+    split: splitTabs,
+    splitFocused:
+      splitFocus && splitTabs.includes(splitFocus) ? splitFocus : (splitTabs[0] ?? null),
+  };
+}
+
+/** `?splitFocus=`: empty (drop the param) when the split's first tab has the focus. */
+export function serializeSplitFocus(panes: Panes): string {
+  return panes.splitFocused && panes.splitFocused !== panes.split[0] ? panes.splitFocused : "";
+}
+
+/** The pane that holds a tab, or null when it is not open. */
+export function paneOf(panes: Panes, tab: string): PaneIndex | null {
+  if (panes.tabs.includes(tab)) return 0;
+  return panes.split.includes(tab) ? 1 : null;
 }
 
 /** The tab list with the group tab: it keeps its place, or comes in after the focused tab. */
@@ -142,78 +182,222 @@ export function withGroupTab(tabs: string[], focused: string): string[] {
   return [...tabs.slice(0, at + 1), GROUP_TAB, ...tabs.slice(at + 1)];
 }
 
-/** `closeTab`, plus the list of the group tab: closing that tab clears `?view=`. */
-export function closeUrlTab(
-  tabs: string[],
-  focused: string,
-  view: string | null,
-  tab: string,
-): { tabs: string[]; focused: string; view: string | null } {
-  return { ...closeTab(tabs, focused, tab), view: tab === GROUP_TAB ? null : view };
-}
+/** Why the only tab of the main pane cannot go to the split while no split is open. */
+export const SPLIT_NEEDS_SECOND_TAB = "Open a second session first. Then split.";
+/** Why the group tab cannot go to the split. */
+export const SPLIT_KEEPS_GROUP_TAB = "The group tab stays in the main pane.";
 
-/** Where the split stands after "Open in split" (one split, two panes, SPEC R2.9). */
-export type SplitResult =
-  | { tabs: string[]; focused: string; split: string }
-  /** It cannot split: the session is the only tab. `message` says why. */
-  | { message: string };
-
-/**
- * Open `id` in the split pane. A tab of the main pane moves there (it needs
- * a second tab first). A session that was in the split before goes back to
- * the main pane, at the place of the moved tab or after the focused tab, so
- * nothing open is lost.
- */
-export function splitTo(
+/** A tab list without `id`, and the focus after it: the right neighbor, else the left one. */
+function without(
   tabs: string[],
-  focused: string,
-  split: string | null,
+  focused: string | null,
   id: string,
-): SplitResult {
-  if (id === split) return { tabs, focused, split };
-  let next = tabs;
-  let nextFocused = focused;
-  let at = tabs.indexOf(focused) + 1;
-  if (tabs.includes(id)) {
-    // The only tab swaps with the split session. With no split, there is nothing to swap.
-    if (tabs.length === 1 && !split) return { message: "Open a second session first. Then split." };
-    if (tabs.length === 1 && split) return { tabs: [split], focused: split, split: id };
-    at = tabs.indexOf(id);
-    ({ tabs: next, focused: nextFocused } = closeTab(tabs, focused, id));
-  }
-  if (split && !next.includes(split)) {
-    next = [...next];
-    next.splice(Math.min(at, next.length), 0, split);
-  }
-  return { tabs: next, focused: nextFocused, split: id };
-}
-
-/**
- * The tab list after the split closes. `keep` (Cmd+K "Close the split")
- * moves its session back to the main pane as the last tab. Closing its tab
- * drops it.
- */
-export function closeSplit(tabs: string[], split: string | null, keep: boolean): string[] {
-  if (!keep || !split || tabs.includes(split)) return tabs;
-  return [...tabs, split];
-}
-
-/**
- * The tab list and the focus after closing `id`. Closing the focused tab
- * focuses its right neighbor, else its left one. Closing the last tab leaves
- * a New session tab.
- */
-export function closeTab(
-  tabs: string[],
-  focused: string,
-  id: string,
-): { tabs: string[]; focused: string } {
+): { tabs: string[]; focused: string | null } {
   const at = tabs.indexOf(id);
   if (at < 0) return { tabs, focused };
   const next = tabs.filter((tab) => tab !== id);
-  if (next.length === 0) return { tabs: [NEW_SESSION_TAB], focused: NEW_SESSION_TAB };
   if (id !== focused) return { tabs: next, focused };
-  return { tabs: next, focused: next[Math.min(at, next.length - 1)] };
+  return { tabs: next, focused: next[Math.min(at, next.length - 1)] ?? null };
+}
+
+/**
+ * `id` in a tab list: before the tab `before`, at the end (null), or after
+ * the focused tab (undefined), as a browser places a new tab.
+ */
+function insertTab(
+  tabs: string[],
+  focused: string | null,
+  id: string,
+  before: string | null | undefined,
+): string[] {
+  const at =
+    before === undefined
+      ? tabs.indexOf(focused ?? "") + 1 || tabs.length
+      : before === null || !tabs.includes(before)
+        ? tabs.length
+        : tabs.indexOf(before);
+  const next = [...tabs];
+  next.splice(at, 0, id);
+  return next;
+}
+
+/**
+ * The panes in a valid state. A main pane with no tab takes the split's
+ * tabs (the split closes, as an editor group does when its last tab
+ * leaves). With no tab at all, a New session tab stays.
+ */
+function settle(
+  tabs: string[],
+  focused: string | null,
+  split: string[],
+  splitFocused: string | null,
+): Panes {
+  if (tabs.length === 0 && split.length > 0) {
+    return { tabs: split, focused: splitFocused ?? split[0], split: [], splitFocused: null };
+  }
+  if (tabs.length === 0) {
+    return { tabs: [NEW_SESSION_TAB], focused: NEW_SESSION_TAB, split: [], splitFocused: null };
+  }
+  return {
+    tabs,
+    focused: focused ?? tabs[0],
+    split,
+    splitFocused: split.length === 0 ? null : (splitFocused ?? split[0]),
+  };
+}
+
+/**
+ * Open `id` in a pane. An open tab keeps its pane and its place, and takes
+ * the focus there. Otherwise it opens after the focused tab of `pane`: an
+ * open never replaces a tab. Opening in pane 1 with no split starts the split.
+ */
+export function openInPane(panes: Panes, pane: PaneIndex, id: string): Panes {
+  const at = paneOf(panes, id);
+  if (at === 0) return { ...panes, focused: id };
+  if (at === 1) return { ...panes, splitFocused: id };
+  if (pane === 0 || !canSplitTab(id)) {
+    return { ...panes, tabs: openTab(panes.tabs, panes.focused, id), focused: id };
+  }
+  return {
+    ...panes,
+    split: insertTab(panes.split, panes.splitFocused, id, undefined),
+    splitFocused: id,
+  };
+}
+
+/** The panes after a move, or why the tab cannot move. */
+export type MoveResult = Panes | { message: string };
+
+/**
+ * Move a tab to a pane, or to a new place in its own pane. It lands before
+ * the tab `before`, at the end (null), or after the pane's focused tab
+ * (undefined). A tab that changes pane takes the focus there, and the pane
+ * it left focuses its neighbor. The group tab stays in the main pane. The
+ * main pane's only tab cannot start a split. When the main pane's last tab
+ * goes to the split, the two panes join into one. A tab that is not open
+ * opens in the pane. A tab the pane holds already, with no place named,
+ * takes the focus where it is.
+ */
+export function moveTab(
+  panes: Panes,
+  id: string,
+  to: PaneIndex,
+  before?: string | null,
+): MoveResult {
+  const from = paneOf(panes, id);
+  if (to === 1 && !canSplitTab(id)) return { message: SPLIT_KEEPS_GROUP_TAB };
+  if (to === 1 && from === 0 && panes.tabs.length === 1 && panes.split.length === 0) {
+    return { message: SPLIT_NEEDS_SECOND_TAB };
+  }
+  if (before === id) return panes;
+  if (from === to) {
+    // No place named ("Open in split" on a tab the split holds): the tab
+    // stays where it is and takes the focus, so it shows.
+    if (before === undefined) {
+      if (id === (to === 0 ? panes.focused : panes.splitFocused)) return panes;
+      return to === 0 ? { ...panes, focused: id } : { ...panes, splitFocused: id };
+    }
+    // A new place in the same pane: the focus stays on the same tab.
+    const list = to === 0 ? panes.tabs : panes.split;
+    const moved = insertTab(
+      list.filter((tab) => tab !== id),
+      to === 0 ? panes.focused : panes.splitFocused,
+      id,
+      before,
+    );
+    if (moved.every((tab, i) => tab === list[i])) return panes;
+    return to === 0 ? { ...panes, tabs: moved } : { ...panes, split: moved };
+  }
+  const main = from === 0 ? without(panes.tabs, panes.focused, id) : panes;
+  const side =
+    from === 1
+      ? without(panes.split, panes.splitFocused, id)
+      : { tabs: panes.split, focused: panes.splitFocused };
+  if (to === 0) {
+    return settle(insertTab(main.tabs, main.focused, id, before), id, side.tabs, side.focused);
+  }
+  return settle(main.tabs, main.focused, insertTab(side.tabs, side.focused, id, before), id);
+}
+
+/**
+ * The panes after closing a tab. The pane focuses the right neighbor of a
+ * closed focused tab, else the left one. The split closes with its last
+ * tab. The main pane takes the split's tabs when its last tab closes.
+ */
+export function closePaneTab(panes: Panes, id: string): Panes {
+  const main = without(panes.tabs, panes.focused, id);
+  const side = without(panes.split, panes.splitFocused, id);
+  return settle(main.tabs, main.focused, side.tabs, side.focused);
+}
+
+/** The panes with `from` turned into `to`, in its pane (Send turns the New session tab into its session). */
+export function replacePaneTab(panes: Panes, from: string, to: string): Panes {
+  const at = paneOf(panes, from);
+  if (at === null) return openInPane(panes, 0, to);
+  const swap = (tabs: string[]) =>
+    tabs.filter((tab) => tab !== to).map((tab) => (tab === from ? to : tab));
+  const tabs = swap(panes.tabs);
+  const split = swap(panes.split);
+  return settle(
+    tabs,
+    at === 0 ? to : tabs.includes(panes.focused) ? panes.focused : null,
+    split,
+    at === 1
+      ? to
+      : panes.splitFocused && split.includes(panes.splitFocused)
+        ? panes.splitFocused
+        : null,
+  );
+}
+
+/**
+ * The panes after the split closes. `keep` (the split button, Cmd+K "Close
+ * the split") moves its tabs to the end of the main pane. Without it they close.
+ */
+export function closeSplitPane(panes: Panes, keep: boolean): Panes {
+  return {
+    tabs: keep ? [...panes.tabs, ...panes.split] : panes.tabs,
+    focused: panes.focused,
+    split: [],
+    splitFocused: null,
+  };
+}
+
+/** The narrowest a pane of the split may get. */
+export const SPLIT_PANE_MIN_WIDTH = 320;
+/** The main pane's share of the row when no size is stored: half. */
+export const SPLIT_DEFAULT_RATIO = 0.5;
+/** One arrow key press on the split's drag edge. */
+export const SPLIT_WIDTH_STEP = 32;
+
+/** The main pane's width in a split row, and the bounds of its drag edge. */
+export interface SplitLayout {
+  /** The main pane's width in px. */
+  width: number;
+  min: number;
+  max: number;
+  /** `width` as a share of the row: what the browser stores. */
+  ratio: number;
+}
+
+/**
+ * The main pane's size in a split row of `rowWidth` px. The stored size is a
+ * share of the row, so it holds when the sidebar or a link preview changes
+ * the row. Each pane keeps `SPLIT_PANE_MIN_WIDTH`. A row too narrow for two
+ * of them splits in half. A missing or bad share gives half.
+ */
+export function splitLayout(ratio: number | null, rowWidth: number): SplitLayout {
+  const value =
+    ratio !== null && Number.isFinite(ratio) && ratio > 0 && ratio < 1
+      ? ratio
+      : SPLIT_DEFAULT_RATIO;
+  if (!(rowWidth > 0)) return { width: 0, min: 0, max: 0, ratio: value };
+  const half = Math.round(rowWidth / 2);
+  // Keep max >= min: an inverted clamp would overwrite the stored size.
+  const min = Math.min(SPLIT_PANE_MIN_WIDTH, half);
+  const max = Math.max(min, Math.round(rowWidth - SPLIT_PANE_MIN_WIDTH));
+  const width = Math.round(Math.min(max, Math.max(min, value * rowWidth)));
+  return { width, min, max, ratio: width / rowWidth };
 }
 
 /**

@@ -22,13 +22,15 @@ import { SessionsV2Shell } from "@/components/sessions-v2/sessions-v2-shell";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { useIsPhone } from "@/hooks/use-mobile";
 import { newViewLink, useSessionsView, useSessionsViewCommand } from "@/hooks/use-sessions-view";
-import { NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import { isAssetTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
 import SessionDetailPage from "./[rootTaskId]/page";
 
 export default function SessionsPage() {
   const { rootTaskId: routeId } = useParams<{ rootTaskId: string }>();
-  // The v2 view puts a New session tab on `/sessions/new` while a group tab is open.
-  const rootTaskId = routeId === NEW_SESSION_TAB ? undefined : routeId;
+  // The v2 view puts a New session tab on `/sessions/new` while a group tab is
+  // open, and an asset tab on `/sessions/asset:…`. Neither is a session.
+  const rootTaskId =
+    routeId === NEW_SESSION_TAB || (routeId && isAssetTab(routeId)) ? undefined : routeId;
   const gate = useFeatureGate("1.76.0");
   const sessionsView = useSessionsView();
   useSessionsViewCommand(sessionsView);
