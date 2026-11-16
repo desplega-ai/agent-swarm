@@ -255,6 +255,59 @@ export const scriptSdkCalls: Scenario = {
     });
     expect(asRecord(later.result).gone === true, "ctx.fs state leaked across runs");
 
+    // memory_rate takes memoryId as an alias for id and rejects conflicting aliases like the MCP tool
+    const indexed = await ctx.api("POST", "/api/memory/index", {
+      agentId,
+      body: {
+        content: `SDK rate fact ${ctx.nonce}: the tapir${ctx.nonce} naps at noon.`,
+        name: `SDK rate ${ctx.nonce}`,
+        scope: "agent",
+        source: "manual",
+        agentId,
+      },
+    });
+    expectStatus(indexed, [202], "index the memory the script rates");
+    const memoryId = String((asRecord(indexed.json).memoryIds as unknown[])[0]);
+    // explicit-self ratings need a retrieval of the memory by the task
+    const retrieved = await ctx.api("GET", `/api/memory/${memoryId}?intent=e2e`, {
+      agentId,
+      headers: { "X-Source-Task-ID": taskId },
+    });
+    expectStatus(retrieved, [200], "retrieve the memory under the task");
+    const rating = await runScript(ctx, agentId, {
+      source: `export default async function (args: { memoryId: string; taskId: string }, ctx: any) {
+  const rated = await ctx.swarm.memory_rate({ memoryId: args.memoryId, useful: true, taskId: args.taskId });
+  let conflict = "no error";
+  try {
+    await ctx.swarm.memory_rate({ id: args.memoryId, memoryId: "other", useful: true });
+  } catch (error: any) {
+    conflict = String(error?.message ?? error);
+  }
+  return { rated, conflict };
+}`,
+      args: { memoryId, taskId },
+      intent: `e2e sdk memory_rate alias ${ctx.nonce}`,
+    });
+    expectRunOk(rating, "memory_rate alias script");
+    const rated = asRecord(asRecord(rating.result).rated);
+    expect(
+      rated.success === true && asRecord(rated.data).applied === 1,
+      `memory_rate with memoryId was not applied: ${JSON.stringify(rated)}`,
+    );
+    expect(
+      ctx.db.get<{ n: number }>(
+        "SELECT count(*) AS n FROM memory_rating WHERE memoryId = ? AND source = 'explicit-self'",
+        [memoryId],
+      )?.n === 1,
+      "memory_rate with memoryId left no rating row",
+    );
+    expect(
+      String(asRecord(rating.result).conflict).includes(
+        "id and memoryId must identify the same memory; supply only one.",
+      ),
+      `conflicting memory_rate aliases: ${String(asRecord(rating.result).conflict)}`,
+    );
+
     // a script that throws inside an SDK-using body surfaces the message, not a hang
     const failing = await runScript(ctx, agentId, {
       source: `export default async function (args: unknown, ctx: any) { await ctx.swarm.kv_set({ key: "boom-${ctx.nonce}", value: 1 }); throw new Error("after-sdk-${ctx.nonce}"); }`,
