@@ -353,7 +353,7 @@ jobs:
           retention-days: 1
 
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
+    name: Run Tests (${{ matrix.shard }}/8)
     needs: restore-timings
     runs-on: ubuntu-latest
     # Checkout only. Cache + artifact steps use the runner token, and the
@@ -363,7 +363,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
     # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
     services:
@@ -403,7 +403,7 @@ jobs:
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (separate bun package with its own deps + CI test step). 4 shards x
+        # (separate bun package with its own deps + CI test step). 8 shards x
         # --parallel=4 to match merge-gate.yml's partitioning so ci-timings
         # PR-vs-main wall-clock comparisons are apples-to-apples. --parallel runs
         # each test file in its own worker process (implies --isolate); the
@@ -417,7 +417,7 @@ jobs:
           mkdir -p .bun-test-timings/next .bun-test-results
           echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
           # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/4 \
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/8 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
@@ -463,7 +463,7 @@ jobs:
           set -euo pipefail
           if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
           bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
-            --shard ${{ matrix.shard }}/4 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --shard ${{ matrix.shard }}/8 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
           echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
 
@@ -513,7 +513,7 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:8}, job:("test (\($idx)/8)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
