@@ -517,6 +517,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#codex-oauth-keep-warm`,
       },
       {
+        key: "CLAUDE_QUOTA_PROBE_DISABLE",
+        label: "Disable Claude quota probe",
+        description:
+          "Stop the API's 5-minute sweep that sends a 1-token request to each stale Claude pool key to refresh its 5-hour and 7-day usage. Read at startup.",
+        kind: "boolean",
+        defaultValue: "false",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#claude-quota-probe`,
+      },
+      {
+        key: "CLAUDE_QUOTA_PROBE_MODEL",
+        label: "Claude quota probe model",
+        description:
+          "Model the Claude quota probe sends its 1-token request to. Read on every sweep, so a saved change needs no restart.",
+        kind: "string",
+        defaultValue: "claude-haiku-4-5-20251001",
+        placeholder: "claude-haiku-4-5-20251001",
+        docsUrl: `${DOCS}ui/configuration#claude-quota-probe`,
+      },
+      {
         key: "RUNTIME_POOLS_ENABLED",
         label: "Runtime pools (beta)",
         description:
