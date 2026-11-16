@@ -1,11 +1,12 @@
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { deleteConfig, putConfig, reloadConfig } from "./platform-helpers";
+import { deleteConfig, putConfig, registerAgent, reloadConfig } from "./platform-helpers";
 import {
   createWorkflow,
   registerWorker,
   stepOf,
   triggerWorkflow,
+  type WorkflowDef,
   waitForApproval,
   waitForRun,
 } from "./workflow-helpers";
@@ -22,7 +23,9 @@ async function getApproval(ctx: ScenarioContext, id: string): Promise<Record<str
  * Inline approval buttons on Telegram: the HITL card goes out with an inline
  * keyboard, an unlinked clicker changes nothing, a linked approver resolves the
  * run with one click, and the card is edited to the outcome with its keyboard
- * removed. A late click leaves the decision as it was.
+ * removed. A late click leaves the decision as it was. A workflow written by a
+ * non-lead agent may not post a Telegram card: its step fails and the bot sends
+ * nothing.
  */
 export const telegramApprovalButtons: Scenario = {
   name: "telegram-approval-buttons",
@@ -93,32 +96,57 @@ export const telegramApprovalButtons: Scenario = {
       );
       await reloadConfig(ctx);
 
-      const title = `Telegram approve ${ctx.nonce}`;
-      const workerId = await registerWorker(ctx, "tg-appr");
-      const workflowId = await createWorkflow(
-        ctx,
-        "tg-approve",
-        {
-          nodes: [
-            {
-              id: "ask",
-              type: "human-in-the-loop",
-              config: {
-                title,
-                questions: [{ id: "ship", type: "approval", label: "Ship it?" }],
-                approvers: { policy: "any" },
-                notifications: [{ channel: "telegram", target: chatId }],
-              },
-              next: { approved: "yes", rejected: "no", timeout: "no" },
+      const approvalWorkflow = (title: string): WorkflowDef => ({
+        nodes: [
+          {
+            id: "ask",
+            type: "human-in-the-loop",
+            config: {
+              title,
+              questions: [{ id: "ship", type: "approval", label: "Ship it?" }],
+              approvers: { policy: "any" },
+              notifications: [{ channel: "telegram", target: chatId }],
             },
-            { id: "yes", type: "script", config: { runtime: "bash", script: "echo yes" } },
-            { id: "no", type: "script", config: { runtime: "bash", script: "echo no" } },
-          ],
-        },
+            next: { approved: "yes", rejected: "no", timeout: "no" },
+          },
+          { id: "yes", type: "script", config: { runtime: "bash", script: "echo yes" } },
+          { id: "no", type: "script", config: { runtime: "bash", script: "echo no" } },
+        ],
+      });
+
+      // A non-lead writer: the step fails before any approval or Telegram send.
+      const deniedTitle = `Telegram denied ${ctx.nonce}`;
+      const workerId = await registerWorker(ctx, "tg-appr");
+      const deniedWorkflowId = await createWorkflow(
+        ctx,
+        "tg-denied",
+        approvalWorkflow(deniedTitle),
         {},
         workerId,
       );
-      const run = await triggerWorkflow(ctx, workflowId, {}, { agentId: workerId });
+      const deniedRun = await triggerWorkflow(ctx, deniedWorkflowId, {}, { agentId: workerId });
+      const failed = await waitForRun(ctx, deniedRun.runId, "failed", 30_000, "Telegram denied");
+      expect(
+        /integration\.chat\.post/.test(JSON.stringify(stepOf(failed, "ask"))),
+        `the step names the missing verb: ${JSON.stringify(stepOf(failed, "ask")).slice(0, 1500)}`,
+      );
+      expect(
+        !calls.some(
+          (c) => c.method === "sendMessage" && JSON.stringify(c.body).includes(deniedTitle),
+        ),
+        "a non-lead workflow sends no Telegram card",
+      );
+
+      const title = `Telegram approve ${ctx.nonce}`;
+      const leadId = await registerAgent(ctx, "tg-appr-lead", { lead: true });
+      const workflowId = await createWorkflow(
+        ctx,
+        "tg-approve",
+        approvalWorkflow(title),
+        {},
+        leadId,
+      );
+      const run = await triggerWorkflow(ctx, workflowId, {}, { agentId: leadId });
       const approval = await waitForApproval(ctx, run.runId);
       const approvalId = String(approval.id);
 
