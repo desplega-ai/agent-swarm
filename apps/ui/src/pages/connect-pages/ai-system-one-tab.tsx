@@ -255,7 +255,11 @@ function HostRow({
         {known.length > 0 ? (
           <details className="mt-0.5">
             <summary className="cursor-pointer">+{known.length} more</summary>
-            {known.join(", ")}
+            {known.map((model) => (
+              <span key={model} className="block">
+                {model}
+              </span>
+            ))}
           </details>
         ) : null}
       </div>
