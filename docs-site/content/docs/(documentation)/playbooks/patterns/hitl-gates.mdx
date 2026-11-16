@@ -37,6 +37,7 @@ Agents can also request a human decision with the `request-human-input` MCP tool
 - Give the human enough context *in the gate message* to decide without digging: a summary + a link to the full artifact in [agent-fs](https://github.com/desplega-ai/agent-fs).
 - Define both branches: what happens on approve **and** on reject (archive, retry, escalate).
 - Set a timeout/fallback so a forgotten gate doesn't wedge the workflow forever.
+- Ask one simple question when the approver should decide from Slack. A card with a single `approval`, `boolean`, `single-select` (up to 5 options) or one-line `text` question gets answer buttons; Deny and text answers open a short form. Any other card links to the dashboard only. A click counts only when the Slack user is linked to a swarm user who may answer; anyone else gets a private refusal and nothing changes.
 
 ## Ask a person for a secret
 

@@ -15812,6 +15812,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -16316,6 +16332,22 @@
                                     },
                                     "respondedAt": {
                                       "type": "string"
+                                    },
+                                    "via": {
+                                      "type": "object",
+                                      "properties": {
+                                        "channel": {
+                                          "type": "string"
+                                        },
+                                        "platformUserId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "channel",
+                                        "platformUserId"
+                                      ],
+                                      "description": "Set when the answer came from a chat button: the channel and the platform user."
                                     }
                                   },
                                   "required": [
@@ -16891,6 +16923,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -17375,6 +17423,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -17881,6 +17945,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [

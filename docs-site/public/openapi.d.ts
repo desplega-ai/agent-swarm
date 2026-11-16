@@ -4300,6 +4300,11 @@ export interface paths {
                                     /** @description The `respondedBy` the client sent. Unverified; display only. */
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
                                 }[] | null;
                                 /** @description Quorum progress while the request is pending; null once it is resolved. */
                                 approvalProgress: {
@@ -4531,6 +4536,11 @@ export interface paths {
                                     /** @description The `respondedBy` the client sent. Unverified; display only. */
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
                                 }[] | null;
                                 /** @description Quorum progress while the request is pending; null once it is resolved. */
                                 approvalProgress: {
@@ -4697,6 +4707,11 @@ export interface paths {
                                     /** @description The `respondedBy` the client sent. Unverified; display only. */
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
                                 }[] | null;
                                 /** @description Quorum progress while the request is pending; null once it is resolved. */
                                 approvalProgress: {
@@ -4868,6 +4883,11 @@ export interface paths {
                                     /** @description The `respondedBy` the client sent. Unverified; display only. */
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
                                 }[] | null;
                                 /** @description Quorum progress while the request is pending; null once it is resolved. */
                                 approvalProgress: {
@@ -5057,6 +5077,11 @@ export interface paths {
                                     /** @description The `respondedBy` the client sent. Unverified; display only. */
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
                                 }[] | null;
                                 /** @description Quorum progress while the request is pending; null once it is resolved. */
                                 approvalProgress: {
