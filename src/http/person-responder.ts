@@ -69,8 +69,9 @@ export function responderKey(responder: ApprovalResponder): string {
 /**
  * The responder for a person identified outside HTTP, such as a chat user
  * mapped through `user_external_ids`. Applies the checks `approvalResponder`
- * applies to a user credential: the `approval.respond` verb and, with RBAC on,
- * a role that grants it.
+ * applies to a user credential: an active, unmerged account (what credential
+ * resolution requires), the `approval.respond` verb and, with RBAC on, a role
+ * that grants it.
  */
 export async function userApprovalResponder(
   userId: string,
@@ -80,7 +81,9 @@ export async function userApprovalResponder(
     message: "You are not allowed to answer approval requests.",
   };
   const user = await findUserById(userId);
-  if (!user) return refused;
+  // Credential resolution refuses invited, suspended and merged-away users, so
+  // a chat identity mapped to one must not answer either.
+  if (!user || user.status !== "active" || user.mergedIntoUserId) return refused;
   const verb: PermissionVerb = "approval.respond";
   if (!can({ principal: { kind: "user", userId }, verb, source: "http" }).allow) return refused;
   if (isRbacEnabled()) {

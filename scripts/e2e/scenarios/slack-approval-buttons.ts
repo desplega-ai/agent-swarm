@@ -70,7 +70,7 @@ async function waitForCardOutcome(
 
 /**
  * Inline approval buttons on the Slack card: a linked approver resolves the run
- * with one click, an unlinked user is refused and nothing changes, a click on a
+ * with one click, an unlinked or suspended user is refused and nothing changes, a click on a
  * resolved request (twice, or after a dashboard answer) only re-renders, and
  * Deny opens a modal whose reason is stored.
  */
@@ -87,7 +87,9 @@ export const slackApprovalButtons: Scenario = {
     const strangerSlackId = `U0STR${tag}`;
     ctx.slack.addUser({ id: approverSlackId, name: `approver-${tag.toLowerCase()}` });
     ctx.slack.addUser({ id: strangerSlackId, name: `stranger-${tag.toLowerCase()}` });
-    ctx.slack.invite(CHANNEL, [approverSlackId, strangerSlackId]);
+    const suspendedSlackId = `U0SUS${tag}`;
+    ctx.slack.addUser({ id: suspendedSlackId, name: `suspended-${tag.toLowerCase()}` });
+    ctx.slack.invite(CHANNEL, [approverSlackId, strangerSlackId, suspendedSlackId]);
 
     const created = await ctx.api("POST", "/api/users", {
       body: {
@@ -98,6 +100,15 @@ export const slackApprovalButtons: Scenario = {
     });
     expectStatus(created, [200, 201], "create the linked approver");
     const approverUserId = asString(asRecord(asRecord(created.json).user).id, "approver id");
+    const suspended = await ctx.api("POST", "/api/users", {
+      body: {
+        name: `Suspended Approver ${ctx.nonce}`,
+        email: `suspended-approver-${ctx.nonce}@example.com`,
+        status: "suspended",
+        identities: [{ kind: "slack", externalId: suspendedSlackId }],
+      },
+    });
+    expectStatus(suspended, [200, 201], "create the suspended linked user");
 
     const workerId = await registerWorker(ctx, "inline-appr");
     const workflow = (title: string, questions: unknown[]) => ({
@@ -151,6 +162,21 @@ export const slackApprovalButtons: Scenario = {
     expect(
       (await getApproval(ctx, approvalId)).status === "pending",
       "an unlinked click changes nothing",
+    );
+
+    // A linked but suspended user is refused like any credential of theirs.
+    const seen1 = ctx.slack.ephemeralMessages(CHANNEL).length;
+    await ctx.slack.clickButton({
+      channel: CHANNEL,
+      ts: card.ts,
+      action_id: "hitl_answer:y",
+      value: approvalId,
+      user: suspendedSlackId,
+    });
+    await waitForEphemeral(ctx, suspendedSlackId, /not allowed/, "suspended click", seen1);
+    expect(
+      (await getApproval(ctx, approvalId)).status === "pending",
+      "a suspended user's click changes nothing",
     );
 
     await ctx.slack.clickButton({
