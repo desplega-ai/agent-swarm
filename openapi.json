@@ -21065,6 +21065,13 @@
                       "items": {
                         "type": "number"
                       }
+                    },
+                    "activeSessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   },
                   "required": [
@@ -21073,7 +21080,8 @@
                     "totalKeys",
                     "spendCappedIndices",
                     "authFailureFence",
-                    "keyUsage"
+                    "keyUsage",
+                    "activeSessions"
                   ]
                 }
               }

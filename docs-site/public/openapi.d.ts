@@ -6845,6 +6845,7 @@ export interface paths {
                             spendCappedIndices: number[];
                             authFailureFence: number;
                             keyUsage: number[];
+                            activeSessions: number[];
                         };
                     };
                 };

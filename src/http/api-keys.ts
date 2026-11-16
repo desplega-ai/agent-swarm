@@ -428,6 +428,12 @@ const getAvailable = route({
          * picks the lowest among `availableIndices`. It never excludes a key.
          */
         keyUsage: z.array(z.number()),
+        /**
+         * Running sessions per pool position: `in_progress` tasks whose credential is this
+         * key type and the position's key suffix. The worker picks the fewest among the
+         * keys within 0.10 of the lowest `keyUsage`. It never excludes a key.
+         */
+        activeSessions: z.array(z.number().int().min(0)),
       }),
     },
     400: { description: "Validation error" },
@@ -919,6 +925,7 @@ export async function handleApiKeys(
         totalKeys,
         authFailureFence: result.authFailureFence,
         keyUsage: result.keyUsage,
+        activeSessions: result.activeSessions,
         ...(model !== undefined
           ? {
               modelBlockedIndices: result.modelBlockedIndices,

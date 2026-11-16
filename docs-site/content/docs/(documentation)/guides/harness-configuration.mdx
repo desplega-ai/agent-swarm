@@ -749,7 +749,7 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-token1,sk-ant-oat-token2,sk-ant-oat-token3
 ANTHROPIC_API_KEY=sk-ant-api-key1,sk-ant-api-key2
 ```
 
-Each session selects one available credential from the pool: the key with the lowest current usage (the higher of its live 5-hour and 7-day utilization; a reset or unobserved window counts as 0), with ties broken at random. Usage only orders the pick: no usage level excludes a key. Codex OAuth slots still pick at random. A log line indicates the selected index and its usage (never the credential itself). Single values work unchanged.
+Each session selects one available credential from the pool in three steps. First, it keeps the keys within 0.10 of the lowest current usage (the higher of a key's live 5-hour and 7-day utilization; a reset or unobserved window counts as 0). Second, among those, it keeps the keys with the fewest running sessions (`in_progress` tasks on that key). Third, it breaks ties at random. Usage only orders the pick: no usage level excludes a key. Codex OAuth slots still pick at random. A log line indicates the selected index and its usage (never the credential itself). Single values work unchanged.
 
 This is useful when running multiple concurrent workers that would otherwise hit rate limits on a single subscription.
 

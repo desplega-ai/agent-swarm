@@ -78,14 +78,14 @@ describe("pickLowestUsage", () => {
 
   test("an unobserved index ranks as 0", () => {
     expect(pickLowestUsage([0, 1, 2], [0.3, 0.2])).toBe(2);
-    expect(pickLowestUsage([0, 1], undefined, () => 0.99)).toBe(1);
+    expect(pickLowestUsage([0, 1], undefined, undefined, () => 0.99)).toBe(1);
   });
 
   test("ties break at random", () => {
     const usage = [0.1, 0.5, 0.1, 0.1];
-    expect(pickLowestUsage([0, 1, 2, 3], usage, () => 0)).toBe(0);
-    expect(pickLowestUsage([0, 1, 2, 3], usage, () => 0.5)).toBe(2);
-    expect(pickLowestUsage([0, 1, 2, 3], usage, () => 0.99)).toBe(3);
+    expect(pickLowestUsage([0, 1, 2, 3], usage, undefined, () => 0)).toBe(0);
+    expect(pickLowestUsage([0, 1, 2, 3], usage, undefined, () => 0.5)).toBe(2);
+    expect(pickLowestUsage([0, 1, 2, 3], usage, undefined, () => 0.99)).toBe(3);
     const seen = new Set<number>();
     for (let i = 0; i < 200; i++) seen.add(pickLowestUsage([0, 1, 2, 3], usage)!);
     expect([...seen].sort()).toEqual([0, 2, 3]);
@@ -93,12 +93,21 @@ describe("pickLowestUsage", () => {
 
   test("picks at random within 0.10 of the lowest, never above the band", () => {
     const usage = [0.11, 0.12, 0.21, 0.22, 0.6];
-    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0)).toBe(0);
-    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0.5)).toBe(1);
-    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, () => 0.99)).toBe(2);
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, undefined, () => 0)).toBe(0);
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, undefined, () => 0.5)).toBe(1);
+    expect(pickLowestUsage([0, 1, 2, 3, 4], usage, undefined, () => 0.99)).toBe(2);
     const seen = new Set<number>();
     for (let i = 0; i < 300; i++) seen.add(pickLowestUsage([0, 1, 2, 3, 4], usage)!);
     expect([...seen].sort()).toEqual([0, 1, 2]);
+  });
+
+  test("within the band, the fewest running sessions wins, ties at random", () => {
+    const usage = [0.11, 0.12, 0.2, 0.6];
+    // Index 3 has no sessions but sits above the band.
+    const sessions = [2, 1, 1, 0];
+    expect(pickLowestUsage([0, 1, 2, 3], usage, sessions, () => 0)).toBe(1);
+    expect(pickLowestUsage([0, 1, 2, 3], usage, sessions, () => 0.99)).toBe(2);
+    expect(pickLowestUsage([0, 1, 2], usage, [3, 0], () => 0.99)).toBe(2);
   });
 
   test("an empty list picks nothing", () => {

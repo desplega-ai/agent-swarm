@@ -11961,6 +11961,12 @@ export interface AvailableKeyIndicesResult {
    * utilization, 0 when unobserved or reset). Ranks admissible keys only.
    */
   keyUsage: number[];
+  /**
+   * `in_progress` tasks per pool position whose `credentialKeyType` is this key
+   * type and whose `credentialKeySuffix` is the position's suffix. Breaks ties
+   * within the usage band; it never excludes a key.
+   */
+  activeSessions: number[];
 }
 
 /**
@@ -12103,6 +12109,29 @@ export async function getAvailableKeyIndices(
     }
   }
 
+  // Running sessions per position. A task stamps its key suffix at session start
+  // (`recordKeyUsage`), so this moves within seconds, before any usage report.
+  // Without `keySuffixes`, a position takes the suffix of its stored row in scope.
+  const suffixAt = (i: number): string | undefined =>
+    suffixes
+      ? suffixes[i]
+      : rows.find((r) => r.keyIndex === i && r.scope === scope && r.scopeId === effectiveScopeId)
+          ?.keySuffix;
+  const positionSuffixes = Array.from({ length: totalKeys }, (_, i) => suffixAt(i));
+  const distinctSuffixes = [...new Set(positionSuffixes.filter((s): s is string => !!s))];
+  const sessionsBySuffix = new Map<string, number>();
+  if (distinctSuffixes.length > 0) {
+    const counts = await client.query<{ suffix: string; n: number }>(
+      `SELECT credentialKeySuffix AS suffix, COUNT(*) AS n FROM agent_tasks
+         WHERE status = 'in_progress' AND credentialKeyType = ?
+           AND credentialKeySuffix IN (${distinctSuffixes.map(() => "?").join(", ")})
+         GROUP BY credentialKeySuffix`,
+      [keyType, ...distinctSuffixes],
+    );
+    for (const { suffix, n } of counts) sessionsBySuffix.set(suffix, n);
+  }
+  const activeSessions = positionSuffixes.map((s) => (s ? (sessionsBySuffix.get(s) ?? 0) : 0));
+
   return {
     availableIndices,
     rejectedIndices,
@@ -12115,6 +12144,7 @@ export async function getAvailableKeyIndices(
         : null,
     authFailureFence: Math.max(0, ...rows.map((r) => r.authFailureSeq)),
     keyUsage,
+    activeSessions,
   };
 }
 

@@ -37,24 +37,32 @@ export function keyUsageFromWindows(
 export const KEY_USAGE_BAND = 0.1;
 
 /**
- * Picks at random among the indices whose usage is within `band` of the
- * lowest. A plain minimum would send every concurrent draw to one key until
- * the next usage report lands; the band spreads a burst over the keys that are
- * almost as fresh. An index with no usage entry ranks as 0.
+ * Picks the key for a draw among `indices`:
+ * 1. the keys whose usage is within `band` of the lowest;
+ * 2. among them, the keys with the fewest running sessions (`sessionsByIndex`);
+ * 3. ties at random.
+ *
+ * A plain minimum would send every concurrent draw to one key until the next
+ * usage report lands. The session count moves at session start, so a burst
+ * spreads within seconds; the band still covers draws that land before the
+ * session-start report. An index with no usage or session entry counts as 0.
  */
 export function pickLowestUsage(
   indices: readonly number[],
   usageByIndex: readonly (number | null | undefined)[] | undefined,
+  sessionsByIndex?: readonly (number | null | undefined)[],
   random: () => number = Math.random,
   band: number = KEY_USAGE_BAND,
 ): number | undefined {
   if (indices.length === 0) return undefined;
-  const usageOf = (i: number) => {
-    const usage = usageByIndex?.[i];
-    return typeof usage === "number" && Number.isFinite(usage) ? usage : 0;
+  const entryAt = (values: typeof usageByIndex, i: number) => {
+    const value = values?.[i];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
   };
-  const lowest = Math.min(...indices.map(usageOf));
+  const lowest = Math.min(...indices.map((i) => entryAt(usageByIndex, i)));
   // The epsilon keeps a key exactly `band` above the lowest inside the band.
-  const best = indices.filter((i) => usageOf(i) <= lowest + band + 1e-9);
+  const inBand = indices.filter((i) => entryAt(usageByIndex, i) <= lowest + band + 1e-9);
+  const fewest = Math.min(...inBand.map((i) => entryAt(sessionsByIndex, i)));
+  const best = inBand.filter((i) => entryAt(sessionsByIndex, i) === fewest);
   return best[Math.floor(random() * best.length)];
 }

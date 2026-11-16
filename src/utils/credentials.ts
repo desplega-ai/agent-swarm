@@ -311,7 +311,9 @@ export function splitCredentialPool(value: string): string[] {
  *
  * `usageByIndex` (per pool position, from `GET /api/keys/available`) orders
  * the pick among the available indices: the lowest usage wins, ties break at
- * random. It never excludes a key, whatever its usage.
+ * random. It never excludes a key, whatever its usage. `sessionsByIndex`
+ * (running sessions per pool position, same source) breaks ties within the
+ * usage band: the fewest wins.
  */
 export function selectCredential(
   value: string,
@@ -319,6 +321,7 @@ export function selectCredential(
   keyType = "ANTHROPIC_API_KEY",
   allowedIndices?: number[],
   usageByIndex?: number[],
+  sessionsByIndex?: number[],
 ): CredentialSelection {
   // A CODEX_OAUTH value is one JSON blob ({access, refresh, expires, accountId}),
   // never a comma-separated pool: its commas are field separators. Splitting it
@@ -357,7 +360,7 @@ export function selectCredential(
       (i) => i >= 0 && i < credentials.length && (!drawFrom || drawFrom.includes(i)),
     );
     if (validIndices.length > 0) {
-      index = pickLowestUsage(validIndices, usageByIndex)!;
+      index = pickLowestUsage(validIndices, usageByIndex, sessionsByIndex)!;
     } else {
       // All available indices out of range — fall back to random from all
       index = pickAny();
@@ -466,6 +469,8 @@ export interface AvailabilityInfo {
   spendCappedIndices?: number[];
   /** Usage per pool position (see `keyUsageFromWindows`). Orders the pick; never excludes. */
   keyUsage?: number[];
+  /** Running sessions per pool position. Breaks ties within the usage band; never excludes. */
+  activeSessions?: number[];
 }
 
 /**
@@ -505,6 +510,7 @@ async function fetchAvailableIndices(
             seatBlockedIndices?: number[];
             spendCappedIndices?: number[];
             keyUsage?: number[];
+            activeSessions?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
@@ -514,6 +520,7 @@ async function fetchAvailableIndices(
             seatBlockedIndices: data.seatBlockedIndices,
             spendCappedIndices: data.spendCappedIndices,
             keyUsage: data.keyUsage,
+            activeSessions: data.activeSessions,
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
@@ -692,17 +699,18 @@ export async function resolveCredentialPools(
       }
 
       const usage = info?.keyUsage;
+      const sessions = info?.activeSessions;
       const result = seatFallbackIndices
         ? {
-            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx, usage),
+            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx, usage, sessions),
             isRateLimitFallback: true,
           }
         : uncapped?.length
           ? {
-              ...selectCredential(val, uncapped, envVar, allowedIdx, usage),
+              ...selectCredential(val, uncapped, envVar, allowedIdx, usage, sessions),
               isRateLimitFallback: true,
             }
-          : selectCredential(val, available, envVar, allowedIdx, usage);
+          : selectCredential(val, available, envVar, allowedIdx, usage, sessions);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
