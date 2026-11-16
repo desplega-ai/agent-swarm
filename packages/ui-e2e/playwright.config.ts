@@ -2,13 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./specs",
-  // Test-level, not file-level: `--shard=i/4` then splits by test count. File-level left
+  // Test-level, not file-level: tests of one file spread over both workers. File-level left
   // overflow.spec.ts (206 s) on one worker. Each worker still has its own API and DB, and
   // `mode: "serial"` describes stay together.
   fullyParallel: true,
   workers: process.env.CI ? 2 : 3,
-  // One rerun. A pass on it reports as flaky (comment and tracker) and exits 0.
-  retries: 1,
+  // No reruns: a spec that fails once fails the shard, so a flake shows up red instead of
+  // passing as "flaky". Fix or quarantine the spec.
+  retries: 0,
   timeout: 60_000,
   grepInvert: process.env.E2E_API_URL ? /@local/ : undefined,
   globalSetup: "./global-setup.ts",
@@ -23,7 +24,8 @@ export default defineConfig({
       ]
     : [["list"], ["html", { open: "never" }], ["./reporter/summary.ts"]],
   use: {
-    trace: "on-first-retry",
+    // No retries, so keep the trace of the failed run itself.
+    trace: "retain-on-failure",
     screenshot: "on",
     video: "off",
     viewport: { width: 1440, height: 900 },

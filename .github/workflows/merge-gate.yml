@@ -38,6 +38,8 @@ jobs:
       ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
       e2e: ${{ steps.check.outputs.e2e }}
+      test_scope: ${{ steps.test-scope.outputs.scope }}
+      test_base: ${{ steps.test-scope.outputs.base }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,6 +170,42 @@ jobs:
             echo "${key}=${v}" >> $GITHUB_OUTPUT
             echo "${key}=${v}"
           done
+
+      # Unit-test scope for the Run Tests shards. Pull requests run only the test files whose
+      # import graph reaches a changed file (`bun test --changed=<base>`). The merge queue
+      # runs the full suite, so a dependency the import graph cannot see (a file a test
+      # reads at runtime) still cannot reach main untested. The full suite also runs on a
+      # PR that touches an input every test loads outside the import graph: migrations
+      # (the preload's DB template), templates/ (seeders), the preload, bunfig.toml,
+      # tsconfig.json, bun.lock, a package.json change beyond the version, or this
+      # workflow. scripts/pre-push-tests.sh uses the same list, minus this workflow.
+      # src/tests/merge-gate-detect-changes.test.ts runs this step.
+      - name: Compute unit-test scope
+        id: test-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "scope=full ($EVENT_NAME)"
+            exit 0
+          fi
+          # The pull_request checkout is the merge commit; its first parent is the base tip,
+          # so HEAD^1..HEAD is exactly this PR's change.
+          base=$(git rev-parse HEAD^1)
+          CHANGED=$(git diff --no-renames --name-only "$base" HEAD)
+          scope=changed
+          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/preload\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
+            scope=full
+          elif echo "$CHANGED" | grep -qx 'package.json' &&
+            git diff -U0 "$base" HEAD -- package.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' |
+              grep -qvE '^[+-][[:space:]]*"version":'; then
+            scope=full
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "scope=$scope base=$base"
 
   lint-and-typecheck:
     name: Lint and Type Check
@@ -900,7 +938,7 @@ jobs:
           fi
 
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
+    name: Run Tests (${{ matrix.shard }}/8)
     needs: [detect-changes, restore-timings]
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
@@ -912,7 +950,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
     # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
     services:
@@ -931,6 +969,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit plus its parents: `--changed` diffs against the first parent.
+          fetch-depth: 2
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -955,11 +996,16 @@ jobs:
         # (it's a separate bun package with its own deps + its own CI test step in
         # the lint-and-typecheck job). --parallel=4 runs each test file in its own
         # worker process (implies --isolate), 4 at a time per runner; the restored
-        # per-file durations balance files across the 4 shards by total time.
+        # per-file durations balance files across the 8 shards by total time.
         # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
         # bunfig.toml no longer sets a global retry.
+        # TEST_SCOPE=changed (pull requests, see detect-changes) adds --changed=<base>:
+        # the shards split only the affected files, and a shard with none runs nothing.
+        # A base git cannot resolve fails the step; it never runs zero tests silently.
         env:
           SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+          TEST_SCOPE: ${{ needs.detect-changes.outputs.test_scope }}
+          TEST_BASE: ${{ needs.detect-changes.outputs.test_base }}
         run: |
           start=$(date +%s%3N)
           set +e
@@ -969,8 +1015,15 @@ jobs:
           # skip every later step, so sample memory into this step's log instead.
           ( while sleep 30; do echo "[mem $(date +%T)] $(free -m | awk 'NR==2{print "used " $3 " / " $2 " MiB, avail " $7}')"; done ) &
           sampler=$!
+          scope_args=()
+          if [ "$TEST_SCOPE" = "changed" ]; then
+            scope_args=("--changed=$TEST_BASE")
+          elif [ "$TEST_SCOPE" != "full" ]; then
+            echo "::error::unknown test scope '$TEST_SCOPE'"; exit 1
+          fi
+          echo "test scope: $TEST_SCOPE ${TEST_BASE:-}"
           # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/4 \
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/8 "${scope_args[@]}" \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
@@ -1030,7 +1083,7 @@ jobs:
           set -euo pipefail
           if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
           bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
-            --shard ${{ matrix.shard }}/4 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --shard ${{ matrix.shard }}/8 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
           echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
 
@@ -1078,16 +1131,17 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:8}, job:("test (\($idx)/8)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   # Merge the per-shard durations into one cache entry for the next run. Only
-  # after a fully green test matrix, so a crashed shard never poisons the split.
+  # after a fully green full-suite matrix: a crashed shard, or a --changed run that
+  # timed only some files, would poison the split.
   save-timings:
     name: Save test timings
-    needs: test
-    if: needs.test.result == 'success'
+    needs: [detect-changes, test]
+    if: needs.test.result == 'success' && needs.detect-changes.outputs.test_scope == 'full'
     runs-on: ubuntu-latest
     # No checkout. Same-run artifact download and cache save use the runner
     # token, not GITHUB_TOKEN.
