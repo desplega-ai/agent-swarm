@@ -32,6 +32,7 @@ oauth_refresh_locks
 permission_audit
 request_composition    # agent-written per-session prompt-size telemetry, like session_costs (248)
 script_embeddings
+script_run_sources     # immutable content-addressed source; attribution lives on script_runs (342)
 seed_state
 session_costs
 session_logs

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { backfillScriptRunSources } from "./script-run-sources";
 
 interface Migration {
   version: number;
@@ -198,6 +199,7 @@ export function runMigrations(db: Database): void {
       db,
       "no migrations directory could be located (see the preceding [migrations] warning)",
     );
+    backfillScriptRunSources(db);
     return;
   }
 
@@ -215,6 +217,7 @@ export function runMigrations(db: Database): void {
 
   if (migrations.length === 0) {
     assertNotEmptyDatabase(db, `no .sql migration files found in ${migrationsDir}`);
+    backfillScriptRunSources(db);
     return;
   }
 
@@ -311,4 +314,9 @@ export function runMigrations(db: Database): void {
   }
 
   db.run("PRAGMA foreign_keys = ON");
+
+  // Run outside the schema transactions so an interrupted boot keeps completed
+  // batches. Check the actual schema even when its SQL file is not packaged:
+  // an upgraded database can reuse it even with an incomplete migration bundle.
+  backfillScriptRunSources(db);
 }

@@ -225,6 +225,7 @@ import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageSearchSql } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
+import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
@@ -14251,6 +14252,7 @@ type ScriptRunRow = {
   agentId: string;
   scriptName: string | null;
   source: string;
+  storedSource?: string | null;
   args: string;
   kind: string;
   status: string;
@@ -14293,7 +14295,7 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
-    source: row.source,
+    source: row.storedSource ?? row.source,
     // Durable-run args are sealed replay state; callers get the redacted view.
     // The supervisor reads the exact value via getScriptRunExecutionArgs.
     args: sealedJsonForDisplay(row.args),
@@ -14341,40 +14343,43 @@ export async function createScriptRun(data: {
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
   const client = getDbClient();
-  if (data.idempotencyKey) {
-    const existing = await client.get<ScriptRunRow>(
-      "SELECT * FROM script_runs WHERE idempotencyKey = ?",
-      [data.idempotencyKey],
-    );
-    if (existing) return { run: rowToScriptRun(existing), existing: true };
-  }
+  return client.transaction(async () => {
+    if (data.idempotencyKey) {
+      const existing = await client.get<ScriptRunRow>(
+        `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
+        [data.idempotencyKey],
+      );
+      if (existing) return { run: rowToScriptRun(existing), existing: true };
+    }
 
-  const row = await client.get<ScriptRunRow>(
-    `INSERT INTO script_runs
-        (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, sourceTaskId,
+    const sourceHash = await storeScriptRunSource(data.source);
+    const row = await client.get<ScriptRunRow>(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, sourceHash, args, idempotencyKey, requestedByUserId, sourceTaskId,
          created_by, updated_by, startedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    [
-      data.id,
-      data.agentId,
-      data.scriptName ?? null,
-      data.source,
-      // Sealed, not scrubbed: this is the run's execution input. The supervisor
-      // launches (and relaunches after a restart or pause) from it, so a
-      // redacted value would change what the script receives.
-      sealJson(data.args ?? null),
-      data.idempotencyKey ?? null,
-      data.requestedByUserId ?? null,
-      data.sourceTaskId ?? null,
-      data.createdBy ?? null,
-      data.updatedBy ?? data.createdBy ?? null,
-      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
-      new Date().toISOString(),
-    ],
-  );
-  if (!row) throw new Error("Failed to create script run");
-  return { run: rowToScriptRun(row), existing: false };
+      [
+        data.id,
+        data.agentId,
+        data.scriptName ?? null,
+        sourceHash,
+        // Sealed, not scrubbed: this is the run's execution input. The supervisor
+        // launches (and relaunches after a restart or pause) from it, so a
+        // redacted value would change what the script receives.
+        sealJson(data.args ?? null),
+        data.idempotencyKey ?? null,
+        data.requestedByUserId ?? null,
+        data.sourceTaskId ?? null,
+        data.createdBy ?? null,
+        data.updatedBy ?? data.createdBy ?? null,
+        // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+        new Date().toISOString(),
+      ],
+    );
+    if (!row) throw new Error("Failed to create script run");
+    return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
+  });
 }
 
 // Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
@@ -14401,40 +14406,44 @@ export async function recordInlineScriptRun(data: {
   const args = scrubJsonValue(data.args ?? null);
   const output = data.output === undefined ? null : scrubJsonValue(data.output);
   const provenance = getCurrentRunProvenance();
-  const row = await getDbClient().get<ScriptRunRow>(
-    `INSERT INTO script_runs
-        (id, agentId, scriptName, source, args, kind, status, output, error,
+  const client = getDbClient();
+  return client.transaction(async () => {
+    const sourceHash = await storeScriptRunSource(data.source);
+    const row = await client.get<ScriptRunRow>(
+      `INSERT INTO script_runs
+        (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
          startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
          sourceStepId, parentScriptRunId)
-       VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    [
-      data.id,
-      data.agentId,
-      data.scriptName ?? null,
-      data.source,
-      args,
-      data.status,
-      output,
-      data.error ?? null,
-      data.startedAt,
-      data.finishedAt,
-      data.requestedByUserId ?? null,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-      data.apiEndpointId ?? null,
-      // A run called through another script run's token (a nested
-      // ctx.swarm.script_run) records that run and its workflow step.
-      provenance?.sourceStepId ?? null,
-      provenance?.sourceScriptRunId ?? null,
-    ],
-  );
-  if (!row) throw new Error("Failed to record inline script run");
-  return rowToScriptRun(row);
+      [
+        data.id,
+        data.agentId,
+        data.scriptName ?? null,
+        sourceHash,
+        args,
+        data.status,
+        output,
+        data.error ?? null,
+        data.startedAt,
+        data.finishedAt,
+        data.requestedByUserId ?? null,
+        data.createdBy ?? null,
+        data.createdBy ?? null,
+        data.apiEndpointId ?? null,
+        // A run called through another script run's token (a nested
+        // ctx.swarm.script_run) records that run and its workflow step.
+        provenance?.sourceStepId ?? null,
+        provenance?.sourceScriptRunId ?? null,
+      ],
+    );
+    if (!row) throw new Error("Failed to record inline script run");
+    return rowToScriptRun({ ...row, storedSource: data.source });
+  });
 }
 
 export async function getScriptRun(id: string): Promise<ScriptRun | null> {
-  const row = await getDbClient().get<ScriptRunRow>("SELECT * FROM script_runs WHERE id = ?", [id]);
+  const row = await getDbClient().get<ScriptRunRow>(`${SCRIPT_RUN_SELECT} WHERE r.id = ?`, [id]);
   return row ? rowToScriptRun(row) : null;
 }
 
@@ -14442,7 +14451,7 @@ export async function getScriptRunByIdempotencyKey(
   idempotencyKey: string,
 ): Promise<ScriptRun | null> {
   const row = await getDbClient().get<ScriptRunRow>(
-    "SELECT * FROM script_runs WHERE idempotencyKey = ?",
+    `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
     [idempotencyKey],
   );
   return row ? rowToScriptRun(row) : null;
@@ -14639,7 +14648,7 @@ async function updateScriptRunGuarded(
 
 export async function getRunningScriptRuns(): Promise<ScriptRun[]> {
   const rows = await getDbClient().query<ScriptRunRow>(
-    "SELECT * FROM script_runs WHERE status IN ('running', 'paused')",
+    `${SCRIPT_RUN_SELECT} WHERE r.status IN ('running', 'paused')`,
   );
   return rows.map(rowToScriptRun);
 }
