@@ -71,8 +71,11 @@ jobs:
       - name: Run UI E2E shard
         id: run
         continue-on-error: true
+        # UI_E2E_SKIP_TYPECHECK: Merge Gate's UI Lint and Type Check job runs `tsc -b` once
+        # whenever these shards run, so the shards build the bundle only.
         env:
           UI_E2E_COVERAGE: "1"
+          UI_E2E_SKIP_TYPECHECK: "1"
         run: bun run e2e:ui -- --shard=${{ matrix.shard }}/8
 
       - name: Upload blob report

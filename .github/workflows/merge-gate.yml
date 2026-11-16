@@ -1508,7 +1508,9 @@ jobs:
   ui-lint:
     name: UI Lint and Type Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.ui == 'true'
+    # Also whenever UI E2E runs: its shards skip `tsc -b` and rely on this job for it.
+    # apps/ui imports from src/, so an API change can break the dashboard's types.
+    if: needs.detect-changes.outputs.ui == 'true' || needs.detect-changes.outputs.ui_e2e == 'true'
     runs-on: ubuntu-latest
     # Checkout only; GITHUB_TOKEN needs nothing else.
     permissions:
