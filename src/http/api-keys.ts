@@ -195,7 +195,7 @@ export const rateLimitWindowSchema = z.object({
   resetsAt: z.number().finite().optional(),
   fieldObservedAt: windowFieldObservedAtSchema.optional(),
   durationMins: z.number().int().positive().max(576000).optional(),
-  source: z.enum(["claude", "codex"]).optional(),
+  source: z.enum(["claude", "codex", "poll"]).optional(),
   limitId: z.string().min(1).max(128).optional(),
   label: z.string().max(256).optional(),
   normalModelSlug: z.string().max(256).optional(),

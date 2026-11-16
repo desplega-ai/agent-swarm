@@ -20469,7 +20469,8 @@
                           "type": "string",
                           "enum": [
                             "claude",
-                            "codex"
+                            "codex",
+                            "poll"
                           ]
                         },
                         "limitId": {
@@ -21292,7 +21293,8 @@
                                   "type": "string",
                                   "enum": [
                                     "claude",
-                                    "codex"
+                                    "codex",
+                                    "poll"
                                   ]
                                 },
                                 "limitId": {

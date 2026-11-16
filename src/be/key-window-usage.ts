@@ -82,7 +82,10 @@ export function currentKeyWindows(statuses: ApiKeyStatus[], nowMs: number): KeyW
           "Too many provider windows. Filter by credential or scope.",
         );
       }
-      const legacyClaude = window.source ? window.source === "claude" : key.provider === "claude";
+      // A `poll` window is a Claude window read by the API-server quota probe.
+      const legacyClaude = window.source
+        ? window.source === "claude" || window.source === "poll"
+        : key.provider === "claude";
       const family = legacyClaude ? MODEL_SCOPED_WINDOWS[windowKey] : undefined;
       const durationMins =
         window.durationMins ??

@@ -131,7 +131,7 @@ const deletePoolKey = route({
 
 const ENV_POOL_ERROR = "These keys come from the deployment env. Change them there.";
 
-async function readPool(key: string) {
+export async function readPool(key: string) {
   const [row] = await getSwarmConfigs({ scope: "global", key });
   const envValue = getDeploymentEnvValue(key);
   const source = row ? "stored" : envValue ? "env" : "none";

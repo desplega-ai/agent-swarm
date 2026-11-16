@@ -559,6 +559,12 @@ async function shutdown() {
     await stopOAuthKeepalive();
   }
 
+  // Stop the Claude quota probe and wait for its in-flight write
+  if (!isEnvFlagEnabled("CLAUDE_QUOTA_PROBE_DISABLE", false)) {
+    const { stopClaudeQuotaProbe } = await import("./claude-quota-probe");
+    await stopClaudeQuotaProbe();
+  }
+
   // Stop the unified OAuth pending-session garbage collector (all flows)
   stopOAuthPendingGc();
 
@@ -957,6 +963,14 @@ httpServer
     if (!isEnvFlagEnabled("OAUTH_REFRESH_SWEEP_DISABLE", false)) {
       const { startOAuthRefreshSweep } = await import("../be/oauth-refresh-sweep");
       startOAuthRefreshSweep();
+    }
+
+    // Probe Claude keys with a stale but open 5-hour window for fresh usage
+    // (1-token quota_check, 5-min tick ±60 s, at most 10 keys per tick).
+    // See src/http/claude-quota-probe.ts.
+    if (!isEnvFlagEnabled("CLAUDE_QUOTA_PROBE_DISABLE", false)) {
+      const { startClaudeQuotaProbe } = await import("./claude-quota-probe");
+      startClaudeQuotaProbe();
     }
 
     // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
