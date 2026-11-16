@@ -667,7 +667,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "TASK_AUTO_TITLE_ENABLED",
   ]),
   TASK_AUTO_TITLE_MODEL: validateTaskAutoTitleModel,
-  ...enumValidator("SLACK_MODE", ["socket", "http"]),
+  ...enumValidator("SLACK_MODE", ["socket"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
   ...enumValidator("SLACK_SESSION_MIRROR", ["off", "reply", "both"]),
