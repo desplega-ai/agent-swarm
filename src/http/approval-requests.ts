@@ -122,6 +122,10 @@ const ApprovalVoteSchema = z.object({
     .optional()
     .describe("The `respondedBy` the client sent. Unverified; display only."),
   respondedAt: z.string(),
+  via: z
+    .object({ channel: z.string(), platformUserId: z.string() })
+    .optional()
+    .describe("Set when the answer came from a chat button: the channel and the platform user."),
 });
 
 const ApprovalProgressSchema = z
@@ -531,6 +535,275 @@ const listRoute = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+export type ApprovalAnswerResult =
+  | { kind: "resolved" | "recorded"; request: ApprovalRequest }
+  | { kind: "error"; status: 400 | 403 | 404 | 409; message: string }
+  /** `authorizeConfigSet` refused and already sent its own HTTP reply. */
+  | { kind: "handled" };
+
+export interface ApprovalAnswerInput {
+  id: string;
+  /** Who answers, from a verified identity (`approvalResponder` or `userApprovalResponder`). */
+  responder: ApprovalResponder;
+  responses: Record<string, unknown>;
+  respondedBy?: string;
+  via?: ApprovalVote["via"];
+  /** HTTP only: checks the caller may write config. Without it a config `set` answer is refused. */
+  authorizeConfigSet?: (keys: string[]) => Promise<boolean>;
+}
+
+/**
+ * Answer an approval request as an already verified responder. The respond
+ * route and the chat buttons both go through here, so every check (expiry,
+ * approver list, required answers, quorum, first-write-wins resolve) and every
+ * side effect (`approval.resolved`, the follow-up task) is the same.
+ */
+export async function answerApprovalRequest(
+  input: ApprovalAnswerInput,
+): Promise<ApprovalAnswerResult> {
+  const { responder } = input;
+
+  const existing = await getApprovalRequestById(input.id);
+  if (!existing) {
+    return { kind: "error", status: 404, message: "Approval request not found" };
+  }
+
+  if (existing.status !== "pending") {
+    const reason = existing.resolutionReason ? `: ${existing.resolutionReason}` : "";
+    return {
+      kind: "error",
+      status: 409,
+      message: `Approval request already resolved with status: ${existing.status}${reason}`,
+    };
+  }
+
+  // A late answer never resolves the request: it becomes timeout at once.
+  // A workflow run then routes on its timeout port on the next heartbeat
+  // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
+  if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
+    // The status change and the follow-up task commit together.
+    await getDbClient().transaction(async () => {
+      const timedOut = await resolveApprovalRequest(existing.id, {
+        status: "timeout",
+        resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
+      });
+      if (timedOut && !existing.workflowRunId) {
+        await createApprovalFollowUpTask(timedOut, "hitl.timeout");
+      }
+    });
+    return {
+      kind: "error",
+      status: 409,
+      message: `Approval request expired at ${existing.expiresAt}`,
+    };
+  }
+
+  const unavailableReason = await getWorkflowApprovalUnavailableReason(existing);
+  if (unavailableReason) {
+    return { kind: "error", status: 409, message: unavailableReason };
+  }
+
+  const approvers = existing.approvers as ApproversShape;
+  if (!isListedApprover(approvers, responder)) {
+    return { kind: "error", status: 403, message: "You are not one of this request's approvers" };
+  }
+
+  const questions = existing.questions as ApprovalQuestion[];
+  const missingRequired = missingRequiredResponseIds(questions, input.responses);
+  if (missingRequired.length > 0) {
+    return {
+      kind: "error",
+      status: 400,
+      message: `Responses missing or invalid: ${missingRequired.join(", ")}`,
+    };
+  }
+
+  // Config answers (D6) are checked here and replaced by their results (D7)
+  // before the vote exists, so no plaintext reaches any stored or sent copy.
+  const configQuestions = questions.filter(isConfigQuestion);
+  const configAnswers = new Map<string, { question: StoredConfigQuestion; answer: ConfigAnswer }>();
+  for (const question of configQuestions) {
+    const state = await readConfigState(question.config);
+    const answer = parseConfigAnswer(question, input.responses[question.id], state);
+    if (!answer.ok) {
+      return { kind: "error", status: 400, message: answer.error };
+    }
+    configAnswers.set(question.id, { question, answer: answer.answer });
+  }
+  if (configAnswers.size > 0 && approvers.policy !== "any") {
+    return { kind: "error", status: 409, message: 'Config questions need approvers.policy "any"' };
+  }
+  const setKeys = [...configAnswers.values()]
+    .filter(({ answer }) => answer.action === "set")
+    .map(({ question }) => question.config.key);
+  if (setKeys.length > 0) {
+    if (!input.authorizeConfigSet) {
+      return { kind: "error", status: 409, message: "Config values are set on the dashboard" };
+    }
+    if (!(await input.authorizeConfigSet(setKeys))) return { kind: "handled" };
+  }
+  const safeResponses: Record<string, unknown> = { ...input.responses };
+  for (const id of configAnswers.keys()) delete safeResponses[id];
+
+  // Determine status from responses: if any approval question has approved: false → rejected
+  let status: "approved" | "rejected" = "approved";
+  for (const q of questions) {
+    if (q.type === "approval") {
+      const answer = safeResponses[q.id] as { approved?: boolean } | undefined;
+      if (answer && answer.approved === false) {
+        status = "rejected";
+        break;
+      }
+    }
+  }
+
+  const responderId = responderKey(responder);
+  const respondedAt = new Date().toISOString();
+  const configWrites: { result: ConfigResult; value: string }[] = [];
+  // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
+  // `all` / `{ min: N }` request append in turn and never drop each other.
+  // Config writes share it, so a lost race writes nothing.
+  const outcome = await getDbClient()
+    .transaction(async () => {
+      const current = await getApprovalRequestById(input.id);
+      if (!current || current.status !== "pending") return { kind: "unavailable" as const };
+      const prior = current.approvals ?? [];
+      if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
+
+      // Config values are written only when the request resolves approved (D8).
+      const responses = { ...safeResponses };
+      for (const [id, { question, answer }] of configAnswers) {
+        if (status === "rejected" || answer.action === "skip") {
+          responses[id] = skippedConfigResult(question);
+        } else if (answer.action === "keep") {
+          const kept = await keptConfigResult(question);
+          if (!kept) {
+            throw new ConfigRespondAbort(
+              "conflict",
+              `config question "${id}": the key was removed before the answer was saved`,
+            );
+          }
+          responses[id] = kept;
+        } else {
+          const written = await applyConfigAnswer(question, answer.value);
+          configWrites.push({ result: written, value: answer.value });
+          responses[id] = written;
+        }
+      }
+
+      const vote: ApprovalVote = {
+        responder: responderId,
+        approved: status === "approved",
+        responses,
+        ...(input.respondedBy ? { claimedRespondedBy: input.respondedBy } : {}),
+        ...(input.via ? { via: input.via } : {}),
+        respondedAt,
+      };
+      const votes = [...prior, vote];
+      if (status === "rejected" || (await approvalQuorumMet(approvers, votes))) {
+        const resolved = await resolveApprovalRequest(
+          input.id,
+          { status, responses, approvals: votes, resolvedBy: responderId },
+          { requireActionableWorkflow: true },
+        );
+        if (!resolved && configWrites.length > 0) throw new ConfigRespondAbort("unavailable");
+        return resolved
+          ? { kind: "resolved" as const, request: resolved }
+          : { kind: "unavailable" as const };
+      }
+      const recorded = (await recordApprovalVotes(input.id, votes))
+        ? await getApprovalRequestById(input.id)
+        : null;
+      return recorded
+        ? { kind: "recorded" as const, request: recorded }
+        : { kind: "unavailable" as const };
+    })
+    .catch((error: unknown) => {
+      if (!(error instanceof ConfigRespondAbort)) throw error;
+      // Rolled back: nothing was written.
+      configWrites.length = 0;
+      return error.kind === "conflict"
+        ? { kind: "conflict" as const, message: error.message }
+        : { kind: "unavailable" as const };
+    });
+
+  if (outcome.kind === "conflict") {
+    return { kind: "error", status: 409, message: outcome.message };
+  }
+  // The transaction has committed: run what PUT /api/config runs after a write.
+  for (const { result, value } of configWrites) {
+    try {
+      await runConfigWriteSideEffects(result.scope, result.key, value);
+    } catch (err) {
+      console.error(
+        "[approval-requests] Config side effects failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+
+  if (outcome.kind === "duplicate") {
+    return { kind: "error", status: 409, message: "You already answered this approval request" };
+  }
+  if (outcome.kind === "recorded") {
+    return { kind: "recorded", request: outcome.request };
+  }
+  const updated = outcome.kind === "resolved" ? outcome.request : null;
+
+  if (!updated) {
+    const latest = await getApprovalRequestById(input.id);
+    const unavailableAfterRace = latest ? await getWorkflowApprovalUnavailableReason(latest) : null;
+    return {
+      kind: "error",
+      status: 409,
+      message:
+        unavailableAfterRace ??
+        `Failed to resolve approval request (status: ${latest?.status ?? "unknown"})`,
+    };
+  }
+
+  // Emit for every answered request, workflow or standalone. Workflow resume
+  // ignores a payload without a run and step id, and the extension bridge
+  // (`post.approval.resolved`) needs the standalone ones.
+  workflowEventBus.emit("approval.resolved", {
+    requestId: updated.id,
+    status: updated.status,
+    responses: updated.responses,
+    workflowRunId: updated.workflowRunId ?? undefined,
+    workflowRunStepId: updated.workflowRunStepId ?? undefined,
+    sourceTaskId: updated.sourceTaskId ?? undefined,
+  });
+
+  // For standalone (non-workflow) requests, create a follow-up task
+  // so the requesting agent is notified of the human's response
+  await createApprovalFollowUpTask(updated, "hitl.follow_up");
+
+  return { kind: "resolved", request: updated };
+}
+
+/** The config write checks PUT /api/config runs, for a respond call that sets config values. */
+async function authorizeHttpConfigSet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  keys: string[],
+): Promise<boolean> {
+  if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return false;
+  for (const key of keys) {
+    if (!(await ensureHumanOnlyConfigWrite(req, res, key))) return false;
+  }
+  // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
+  // every user, so check the config write grant here as PUT /api/config would.
+  const userId = authUserId(getRequestAuth(req));
+  if (userId && isRbacEnabled()) {
+    const grant = await getUserGrant(userId);
+    if (!grant.grantsAll && !grant.verbs.has("config.write.any")) {
+      jsonError(res, "Forbidden: setting a config value needs 'config.write.any'", 403);
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function handleApprovalRequests(
   req: IncomingMessage,
   res: ServerResponse,
@@ -547,241 +820,23 @@ export async function handleApprovalRequests(
       jsonError(res, responder.message, 403);
       return true;
     }
-
-    const existing = await getApprovalRequestById(parsed.params.id);
-    if (!existing) {
-      jsonError(res, "Approval request not found", 404);
-      return true;
-    }
-
-    if (existing.status !== "pending") {
-      const reason = existing.resolutionReason ? `: ${existing.resolutionReason}` : "";
-      jsonError(
-        res,
-        `Approval request already resolved with status: ${existing.status}${reason}`,
-        409,
-      );
-      return true;
-    }
-
-    // A late answer never resolves the request: it becomes timeout at once.
-    // A workflow run then routes on its timeout port on the next heartbeat
-    // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
-    if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
-      // The status change and the follow-up task commit together.
-      await getDbClient().transaction(async () => {
-        const timedOut = await resolveApprovalRequest(existing.id, {
-          status: "timeout",
-          resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
-        });
-        if (timedOut && !existing.workflowRunId) {
-          await createApprovalFollowUpTask(timedOut, "hitl.timeout");
-        }
-      });
-      jsonError(res, `Approval request expired at ${existing.expiresAt}`, 409);
-      return true;
-    }
-
-    const unavailableReason = await getWorkflowApprovalUnavailableReason(existing);
-    if (unavailableReason) {
-      jsonError(res, unavailableReason, 409);
-      return true;
-    }
-
-    const approvers = existing.approvers as ApproversShape;
-    if (!isListedApprover(approvers, responder.responder)) {
-      jsonError(res, "You are not one of this request's approvers", 403);
-      return true;
-    }
-
-    const questions = existing.questions as ApprovalQuestion[];
-    const missingRequired = missingRequiredResponseIds(questions, parsed.body.responses);
-    if (missingRequired.length > 0) {
-      jsonError(res, `Responses missing or invalid: ${missingRequired.join(", ")}`, 400);
-      return true;
-    }
-
-    // Config answers (D6) are checked here and replaced by their results (D7)
-    // before the vote exists, so no plaintext reaches any stored or sent copy.
-    const configQuestions = questions.filter(isConfigQuestion);
-    const configAnswers = new Map<
-      string,
-      { question: StoredConfigQuestion; answer: ConfigAnswer }
-    >();
-    for (const question of configQuestions) {
-      const state = await readConfigState(question.config);
-      const answer = parseConfigAnswer(question, parsed.body.responses[question.id], state);
-      if (!answer.ok) {
-        jsonError(res, answer.error, 400);
-        return true;
-      }
-      configAnswers.set(question.id, { question, answer: answer.answer });
-    }
-    if (configAnswers.size > 0 && approvers.policy !== "any") {
-      jsonError(res, 'Config questions need approvers.policy "any"', 409);
-      return true;
-    }
-    if ([...configAnswers.values()].some(({ answer }) => answer.action === "set")) {
-      if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
-      for (const { question, answer } of configAnswers.values()) {
-        if (answer.action !== "set") continue;
-        if (!(await ensureHumanOnlyConfigWrite(req, res, question.config.key))) return true;
-      }
-      // Admission only checked `approval.respond`; `ensureConfigAdmin` passes
-      // every user, so check the config write grant here as PUT /api/config would.
-      const userId = authUserId(getRequestAuth(req));
-      if (userId && isRbacEnabled()) {
-        const grant = await getUserGrant(userId);
-        if (!grant.grantsAll && !grant.verbs.has("config.write.any")) {
-          jsonError(res, "Forbidden: setting a config value needs 'config.write.any'", 403);
-          return true;
-        }
-      }
-    }
-    const safeResponses: Record<string, unknown> = { ...parsed.body.responses };
-    for (const id of configAnswers.keys()) delete safeResponses[id];
-
-    // Determine status from responses: if any approval question has approved: false → rejected
-    let status: "approved" | "rejected" = "approved";
-    for (const q of questions) {
-      if (q.type === "approval") {
-        const answer = safeResponses[q.id] as { approved?: boolean } | undefined;
-        if (answer && answer.approved === false) {
-          status = "rejected";
-          break;
-        }
-      }
-    }
-
-    const responderId = responderKey(responder.responder);
-    const respondedAt = new Date().toISOString();
-    const configWrites: { result: ConfigResult; value: string }[] = [];
-    // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
-    // `all` / `{ min: N }` request append in turn and never drop each other.
-    // Config writes share it, so a lost race writes nothing.
-    const outcome = await getDbClient()
-      .transaction(async () => {
-        const current = await getApprovalRequestById(parsed.params.id);
-        if (!current || current.status !== "pending") return { kind: "unavailable" as const };
-        const prior = current.approvals ?? [];
-        if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
-
-        // Config values are written only when the request resolves approved (D8).
-        const responses = { ...safeResponses };
-        for (const [id, { question, answer }] of configAnswers) {
-          if (status === "rejected" || answer.action === "skip") {
-            responses[id] = skippedConfigResult(question);
-          } else if (answer.action === "keep") {
-            const kept = await keptConfigResult(question);
-            if (!kept) {
-              throw new ConfigRespondAbort(
-                "conflict",
-                `config question "${id}": the key was removed before the answer was saved`,
-              );
-            }
-            responses[id] = kept;
-          } else {
-            const written = await applyConfigAnswer(question, answer.value);
-            configWrites.push({ result: written, value: answer.value });
-            responses[id] = written;
-          }
-        }
-
-        const vote: ApprovalVote = {
-          responder: responderId,
-          approved: status === "approved",
-          responses,
-          ...(parsed.body.respondedBy ? { claimedRespondedBy: parsed.body.respondedBy } : {}),
-          respondedAt,
-        };
-        const votes = [...prior, vote];
-        if (status === "rejected" || (await approvalQuorumMet(approvers, votes))) {
-          const resolved = await resolveApprovalRequest(
-            parsed.params.id,
-            { status, responses, approvals: votes, resolvedBy: responderId },
-            { requireActionableWorkflow: true },
-          );
-          if (!resolved && configWrites.length > 0) throw new ConfigRespondAbort("unavailable");
-          return resolved
-            ? { kind: "resolved" as const, request: resolved }
-            : { kind: "unavailable" as const };
-        }
-        const recorded = (await recordApprovalVotes(parsed.params.id, votes))
-          ? await getApprovalRequestById(parsed.params.id)
-          : null;
-        return recorded
-          ? { kind: "recorded" as const, request: recorded }
-          : { kind: "unavailable" as const };
-      })
-      .catch((error: unknown) => {
-        if (!(error instanceof ConfigRespondAbort)) throw error;
-        // Rolled back: nothing was written.
-        configWrites.length = 0;
-        return error.kind === "conflict"
-          ? { kind: "conflict" as const, message: error.message }
-          : { kind: "unavailable" as const };
-      });
-
-    if (outcome.kind === "conflict") {
-      jsonError(res, outcome.message, 409);
-      return true;
-    }
-    // The transaction has committed: run what PUT /api/config runs after a write.
-    for (const { result, value } of configWrites) {
-      try {
-        await runConfigWriteSideEffects(result.scope, result.key, value);
-      } catch (err) {
-        console.error(
-          "[approval-requests] Config side effects failed:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        );
-      }
-    }
-
-    if (outcome.kind === "duplicate") {
-      jsonError(res, "You already answered this approval request", 409);
-      return true;
-    }
-    if (outcome.kind === "recorded") {
-      respondRoute.respond(res, 200, {
-        approvalRequest: await toApprovalRequestResponse(outcome.request),
-      });
-      return true;
-    }
-    const updated = outcome.kind === "resolved" ? outcome.request : null;
-
-    if (!updated) {
-      const latest = await getApprovalRequestById(parsed.params.id);
-      const unavailableAfterRace = latest
-        ? await getWorkflowApprovalUnavailableReason(latest)
-        : null;
-      jsonError(
-        res,
-        unavailableAfterRace ??
-          `Failed to resolve approval request (status: ${latest?.status ?? "unknown"})`,
-        409,
-      );
-      return true;
-    }
-
-    // Emit for every answered request, workflow or standalone. Workflow resume
-    // ignores a payload without a run and step id, and the extension bridge
-    // (`post.approval.resolved`) needs the standalone ones.
-    workflowEventBus.emit("approval.resolved", {
-      requestId: updated.id,
-      status: updated.status,
-      responses: updated.responses,
-      workflowRunId: updated.workflowRunId ?? undefined,
-      workflowRunStepId: updated.workflowRunStepId ?? undefined,
-      sourceTaskId: updated.sourceTaskId ?? undefined,
+    const result = await answerApprovalRequest({
+      id: parsed.params.id,
+      responder: responder.responder,
+      responses: parsed.body.responses,
+      respondedBy: parsed.body.respondedBy,
+      authorizeConfigSet: (keys) => authorizeHttpConfigSet(req, res, keys),
     });
-
-    // For standalone (non-workflow) requests, create a follow-up task
-    // so the requesting agent is notified of the human's response
-    await createApprovalFollowUpTask(updated, "hitl.follow_up");
-
+    if (result.kind === "handled") return true;
+    if (result.kind === "error") {
+      jsonError(res, result.message, result.status);
+      return true;
+    }
     respondRoute.respond(res, 200, {
-      approvalRequest: await toApprovalRequestResponse(updated, { withConfigState: true }),
+      approvalRequest: await toApprovalRequestResponse(
+        result.request,
+        result.kind === "resolved" ? { withConfigState: true } : undefined,
+      ),
     });
     return true;
   }
