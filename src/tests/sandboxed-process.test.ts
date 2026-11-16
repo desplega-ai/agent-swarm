@@ -17,7 +17,7 @@ import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-pr
 
 const TEST_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: "/tmp" };
 function sandboxPrelude(command: readonly string[]): string {
-  return buildSandboxedCommand(command, TEST_ENV)[2] ?? "";
+  return buildSandboxedCommand(command, TEST_ENV).at(-1) ?? "";
 }
 
 /**
@@ -77,15 +77,18 @@ describe("buildSandboxedCommand spawn mode", () => {
       await Bun.write(startupFile, "exit 37\n");
       try {
         const env = { ...TEST_ENV, BASH_ENV: startupFile };
-        const command = buildSandboxedCommand(
-          ["printf", "ready"],
-          env,
-          DEFAULT_SANDBOX_LIMITS,
-          "spawn",
-        );
-        const result = await runChild(command, { env });
-        expectChildOk(result, "spawn-mode sandbox with BASH_ENV");
-        expect(result.stdout).toBe("ready");
+        for (const mode of ["inline", "spawn"] as const) {
+          const command = buildSandboxedCommand(
+            ["printf", "ready"],
+            TEST_ENV,
+            DEFAULT_SANDBOX_LIMITS,
+            mode,
+          );
+          const result = await runChild(command, { env, stdin: "" });
+          expectChildOk(result, `${mode} sandbox with BASH_ENV`);
+          expect(result.stdout).toBe("ready");
+          expect(result.stderr).toBe("");
+        }
       } finally {
         await Bun.file(startupFile).delete();
       }
@@ -146,8 +149,8 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
   test.each(["bun", "node", "npx"])("raises AS and nproc for direct %s commands", (runtime) => {
     const command = buildSandboxedCommand([runtime, "--version"], TEST_ENV);
     expect(command[0]).toBe("bash");
-    expect(command[2]).toContain(`ulimit -v ${BUN_SANDBOX_VIRTUAL_MEMORY_MB * 1024}`);
-    expect(command[2]).toContain(`ulimit -u ${JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS}`);
+    expect(command.at(-1)).toContain(`ulimit -v ${BUN_SANDBOX_VIRTUAL_MEMORY_MB * 1024}`);
+    expect(command.at(-1)).toContain(`ulimit -u ${JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS}`);
   });
 
   test.each(["bash", "sh", "dash"])("propagates the runtime profile through %s -c", (shell) => {
@@ -171,7 +174,7 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
   test("keeps strict resource defaults for direct non-interpreter commands, still rendered through bash", () => {
     const command = buildSandboxedCommand(["git", "status", "--short"], TEST_ENV);
     expect(command[0]).toBe("bash");
-    const prelude = command[2] ?? "";
+    const prelude = command.at(-1) ?? "";
     expect(prelude).toContain(`ulimit -v ${DEFAULT_SANDBOX_LIMITS.virtualMemoryMb * 1024}`);
     expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
   });
@@ -184,7 +187,7 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
   test("renders a real ulimit -u for a non-JS, non-shell command (python3) via bash", () => {
     const command = buildSandboxedCommand(["python3", "-c", "print('hi')"], TEST_ENV);
     expect(command[0]).toBe("bash");
-    const prelude = command[2] ?? "";
+    const prelude = command.at(-1) ?? "";
     expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
   });
 
@@ -261,7 +264,7 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
       // on behavior that could pass for the wrong reason (e.g. ambient
       // fleet-wide UID pressure happening to be low that run).
       expect(command[0]).toBe("bash");
-      expect(command[2]).toContain(`ulimit -u ${tinyLimits.maxProcs}`);
+      expect(command.at(-1)).toContain(`ulimit -u ${tinyLimits.maxProcs}`);
 
       const result = await runChild(command, { env: sandboxSpawnEnv(TEST_ENV) });
 

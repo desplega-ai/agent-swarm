@@ -3,6 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, ModelProfile, ModelProfileCheckResult } from "../../api/types";
+import type { LiveModelsCatalog } from "../../lib/agent-runtime-models";
 
 // A DOM for the interaction tests at the end; removed after this file so other
 // files keep their server-render environment.
@@ -89,8 +90,12 @@ mock.module("@/api/hooks/use-integrations-meta", () => ({
     return { data: envPresence };
   },
 }));
+let modelsCatalog: { providers: LiveModelsCatalog } | undefined;
+beforeEach(() => {
+  modelsCatalog = undefined;
+});
 mock.module("@/api/hooks/use-models-catalog", () => ({
-  useModelsCatalog: () => ({ data: undefined }),
+  useModelsCatalog: () => ({ data: modelsCatalog }),
 }));
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));
@@ -510,6 +515,11 @@ async function pickSelect(container: HTMLElement, triggerText: string, optionTex
       o.textContent?.includes(optionText),
     ),
   );
+  // Radix restores focus in a timer after the select closes. Let that finish
+  // before opening another popup, or the focus change dismisses that popup.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 /** Pick a model in the model combobox (the trigger shows `current`). */
@@ -871,6 +881,17 @@ describe("AgentRuntimeSettings model profile", () => {
   });
 
   test("None selects and saves a known Codex model through gateway presence without custom mode", async () => {
+    modelsCatalog = {
+      providers: {
+        openai: {
+          id: "openai",
+          models: {
+            "gpt-5.6-sol": { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true },
+            "gpt-5.6-luna": { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true },
+          },
+        },
+      },
+    };
     envPresence = { CODEX_GATEWAY_BASE_URL: true, CODEX_GATEWAY_API_KEY: true };
     const profile = {
       ...modelProfileRow("codex-smart", "gpt-5.6-sol", "high"),

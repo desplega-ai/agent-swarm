@@ -224,6 +224,10 @@
     }
   ],
   "flows": {
+    "database-driver-startup": {
+      "description": "Reject invalid driver and production in-memory settings, and ignore stored driver overrides during startup",
+      "scenarios": ["db-driver-startup"]
+    },
     "agent-access-tokens": {
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
       "scenarios": ["core-agent-access"]

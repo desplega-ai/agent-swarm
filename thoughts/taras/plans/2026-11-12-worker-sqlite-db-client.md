@@ -465,8 +465,12 @@ CI covers both drivers. Runbooks describe their lifecycle and limits. A separate
 **Review status, 2026-11-16:** independent Standards and Spec reviews accepted the CI and documentation changes.
 The parent corrected one Minor timing description to distinguish FIFO waits from SQLite BUSY spin.
 Both reviews passed nine report tests and checked artifact isolation and failure propagation.
-Full acceptance verification remains pending after upstream integration. Published PR checks remain a separate final gate.
+Final local verification includes both strict suites with 169 first-attempt passes per driver.
+The correction review found no Standards or Spec findings. The final root repetition passed 22,605 tests, with 43 skips and zero failures.
+One historical transient-state coverage race remains unexplained. Later strict runs passed without changing its exclusions.
+Published PR checks remain a separate final gate. Staging and the default change remain outside this PR.
 See [Phase 4 evidence](../research/2026-11-16-worker-sqlite-phase4.md).
+See [final verification](../research/2026-11-16-worker-sqlite-final-verification.md) for corrections, retained failures, and packaging evidence.
 
 ### Changes Required:
 
@@ -502,13 +506,13 @@ Phase 0's forced-collection samples do not establish production memory acceptanc
 ### Verification and Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run e2e --strict` and `bun run e2e --sut-env DB_DRIVER=worker --strict`
-- [ ] `bun run docs:openapi` committed with no further diff: `git diff --exit-code openapi.json`
-- [ ] `bun run check:local && bun run lint && bun run tsc:check:tsc`
+- [x] `bun run e2e --strict` and `bun run e2e --sut-env DB_DRIVER=worker --strict`
+- [x] `bun run docs:openapi` committed with no further diff: `git diff --exit-code openapi.json`
+- [x] `bun run check:local && bun run lint && bun run tsc:check:tsc` (local check used `--skip-e2e`; both full strict suites ran separately)
 - [ ] Merge-gate green on the PR with the new matrix entry: `gh pr checks <PR_NUMBER>`
 
 #### Automated QA:
-- [ ] Compare repeated runs with `bun run e2e:bench /tmp/e2e-sqlite.json /tmp/e2e-worker.json`. This command reports differences but does not enforce thresholds. Investigate scenarios above 1.5x and record absolute latency changes.
+- [x] Compare repeated runs with `bun run e2e:bench /tmp/e2e-sqlite.json /tmp/e2e-worker.json`. This command reports differences but does not enforce thresholds. Investigate scenarios above 1.5x and record absolute latency changes.
 
 #### Manual Verification:
 - [ ] Taras decides the flip date after reading the staging stall lines.

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { configureDbResolver } from "../../prompts/resolver";
 import { VersionableFieldSchema } from "../../types";
+import { getNodeEnv } from "../../utils/node-env";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { enforceAssetKeyStartupAudit } from "../asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "../connection-bindings-blob-migration";
@@ -469,7 +470,7 @@ export function getDbClient(): DbClient {
     const requested = requestedDbDriver();
     const database = getDb();
     const inMemory = database.filename === ":memory:" || database.filename === "";
-    if (requested === "worker" && inMemory && process.env.NODE_ENV !== "test") {
+    if (requested === "worker" && inMemory && getNodeEnv() !== "test") {
       throw new Error("DB_DRIVER=worker requires a file database outside tests");
     }
     effectiveDriver = requested === "worker" && !inMemory ? "worker" : "sqlite";

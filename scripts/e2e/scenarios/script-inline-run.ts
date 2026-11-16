@@ -38,14 +38,25 @@ export const scriptInlineRun: Scenario = {
     expect(result.doubled === 42 && result.marker === marker, "inline result is wrong");
     expect(
       JSON.stringify(result.ctxKeys) ===
-        JSON.stringify(["api", "boards", "fs", "logger", "mcp", "objects", "sh", "sheets", "stdlib", "swarm"]),
+        JSON.stringify([
+          "api",
+          "boards",
+          "fs",
+          "logger",
+          "mcp",
+          "objects",
+          "sh",
+          "sheets",
+          "stdlib",
+          "swarm",
+        ]),
       `ctx offers an unexpected surface: ${JSON.stringify(result.ctxKeys)}`,
     );
     expect(
       typeof run.stdout === "string" && run.stdout.includes(`log ${marker}`),
       "inline run did not capture stdout",
     );
-    expect(run.stderr === "", "clean run wrote to stderr");
+    expect(run.stderr === "", `clean run wrote to stderr: ${JSON.stringify(run.stderr)}`);
     expect(typeof run.durationMs === "number" && run.durationMs >= 0, "no durationMs");
     expect(
       JSON.stringify(run.truncated) === JSON.stringify({ stdout: false, stderr: false }),

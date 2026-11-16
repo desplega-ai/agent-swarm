@@ -1104,7 +1104,7 @@ export const knowledgeMemory: Scenario = {
       expect(["vec", "fallback"].includes(String(health.retrievalMode)), "health retrievalMode");
       expect(Array.isArray(health.reasons), "health reasons");
       expect(
-        counts.total === dbCount(ctx, "SELECT count(*) AS n FROM agent_memory"),
+        counts.total === dbCount(ctx, "SELECT count(*) AS n FROM agent_memory", []),
         "async health counts match committed source rows",
       );
       expect(asRecord(health.sqliteVec).distanceMetric === "cosine", "health distance metric");
@@ -1222,7 +1222,7 @@ export const knowledgeMemory: Scenario = {
       expectStatus(response, [200], "fresh memory health after deletion");
       expect(
         asRecord(asRecord(response.json).counts).total ===
-          dbCount(ctx, "SELECT count(*) AS n FROM agent_memory"),
+          dbCount(ctx, "SELECT count(*) AS n FROM agent_memory", []),
         "health invalidates counts after deletion",
       );
       expect(

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { writeLegacyDriverFixture } from "../db";
 import { asRecord, expect, pollUntil } from "../http";
 import type { Scenario } from "../run";
@@ -7,7 +9,7 @@ export const dbDriverStartup: Scenario = {
   name: "db-driver-startup",
   order: 23,
   async run(ctx) {
-    const root = `/private/tmp/db-worker-review-startup-${crypto.randomUUID()}`;
+    const root = join(tmpdir(), `db-worker-review-startup-${crypto.randomUUID()}`);
     await Bun.$`mkdir -p ${root}`.quiet();
     const endpoint = new URL(ctx.sutEnv.DESPLEGA_TELEMETRY_ENDPOINT!);
     expect(
