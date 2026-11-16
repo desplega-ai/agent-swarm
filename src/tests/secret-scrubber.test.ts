@@ -427,6 +427,22 @@ describe("scrubObject", () => {
     });
   });
 
+  test("key clashes skip a literal suffixed key and keep every entry", () => {
+    const tokens = Array.from({ length: 2000 }, () => ["ghp", randomToken(36)].join("_"));
+    const input: Record<string, number> = { [tokens[0] as string]: 0 };
+    input["[REDACTED:github_token]#3"] = -1;
+    tokens.slice(1).forEach((token, i) => {
+      input[token] = i + 1;
+    });
+    const out = scrubObject(input);
+    expect(Object.keys(out)).toHaveLength(2001);
+    expect(out["[REDACTED:github_token]"]).toBe(0);
+    expect(out["[REDACTED:github_token]#2"]).toBe(1);
+    expect(out["[REDACTED:github_token]#3"]).toBe(-1);
+    expect(out["[REDACTED:github_token]#4"]).toBe(2);
+    expect(out["[REDACTED:github_token]#2001"]).toBe(1999);
+  });
+
   test("handles circular references without recursing forever", () => {
     const value: Record<string, unknown> = { a: "ok" };
     value.self = value;

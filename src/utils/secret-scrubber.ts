@@ -1596,8 +1596,10 @@ export function scrubObject<T>(
 
   // Keys are scrubbed too: a map keyed by a token leaks it as a key. Two keys
   // can redact to the same marker, so a clash gets a `#<n>` suffix instead of
-  // overwriting the earlier entry.
+  // overwriting the earlier entry. `nextSuffix` remembers the next free `n`
+  // per marker, so N colliding keys cost O(N) probes, not O(N^2).
   const out: Record<string, unknown> = {};
+  const nextSuffix = new Map<string, number>();
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     let scrubbed = keyCache.get(key);
     if (scrubbed === undefined) {
@@ -1605,7 +1607,12 @@ export function scrubObject<T>(
       keyCache.set(key, scrubbed);
     }
     let outKey = scrubbed;
-    for (let n = 2; Object.hasOwn(out, outKey); n++) outKey = `${scrubbed}#${n}`;
+    if (Object.hasOwn(out, outKey)) {
+      let n = nextSuffix.get(scrubbed) ?? 2;
+      for (outKey = `${scrubbed}#${n}`; Object.hasOwn(out, outKey); outKey = `${scrubbed}#${n}`)
+        n++;
+      nextSuffix.set(scrubbed, n + 1);
+    }
     out[outKey] = scrubObject(child, seen, keyCache);
   }
   return out as T;
