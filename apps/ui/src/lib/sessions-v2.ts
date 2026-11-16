@@ -275,7 +275,8 @@ export type MoveResult = Panes | { message: string };
  * it left focuses its neighbor. The group tab stays in the main pane. The
  * main pane's only tab cannot start a split. When the main pane's last tab
  * goes to the split, the two panes join into one. A tab that is not open
- * opens in the pane.
+ * opens in the pane. A tab the pane holds already, with no place named,
+ * takes the focus where it is.
  */
 export function moveTab(
   panes: Panes,
@@ -290,13 +291,19 @@ export function moveTab(
   }
   if (before === id) return panes;
   if (from === to) {
+    // No place named ("Open in split" on a tab the split holds): the tab
+    // stays where it is and takes the focus, so it shows.
+    if (before === undefined) {
+      if (id === (to === 0 ? panes.focused : panes.splitFocused)) return panes;
+      return to === 0 ? { ...panes, focused: id } : { ...panes, splitFocused: id };
+    }
     // A new place in the same pane: the focus stays on the same tab.
     const list = to === 0 ? panes.tabs : panes.split;
     const moved = insertTab(
       list.filter((tab) => tab !== id),
       to === 0 ? panes.focused : panes.splitFocused,
       id,
-      before === undefined ? null : before,
+      before,
     );
     if (moved.every((tab, i) => tab === list[i])) return panes;
     return to === 0 ? { ...panes, tabs: moved } : { ...panes, split: moved };

@@ -221,6 +221,14 @@ describe("sessions v2 panes", () => {
     expect(moveTab(same, "b", 0, "b")).toBe(same);
   });
 
+  test("a move to the pane that holds the tab, with no place named, focuses it in place", () => {
+    // "Open in split" on an unfocused split tab: it shows, and keeps its place.
+    expect(moveTab(panes("a*", "b*,c,d"), "c", 1)).toEqual(panes("a*", "b,c*,d"));
+    expect(moveTab(panes("a*,b,c", "d*"), "b", 0)).toEqual(panes("a,b*,c", "d*"));
+    const same = panes("a*", "b*,c");
+    expect(moveTab(same, "b", 1)).toBe(same);
+  });
+
   test("the main pane's only tab cannot start a split, and the group tab stays in the main pane", () => {
     expect(moveTab(panes("a*"), "a", 1)).toEqual({ message: SPLIT_NEEDS_SECOND_TAB });
     expect(moveTab(panes(`a*,${GROUP_TAB}`), GROUP_TAB, 1)).toEqual({
