@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { backfillScriptRunSources } from "./script-run-sources";
 
 interface Migration {
   version: number;
@@ -311,4 +312,10 @@ export function runMigrations(db: Database): void {
   }
 
   db.run("PRAGMA foreign_keys = ON");
+
+  // Run outside the schema transactions so an interrupted boot keeps completed
+  // batches. Custom migration directories may not contain the source schema.
+  if (migrations.some((migration) => migration.name === "342_script_run_sources")) {
+    backfillScriptRunSources(db);
+  }
 }

@@ -146,6 +146,9 @@ function bootOpenedDb(
 ): Database {
   // Read before anything below can create a table.
   dbCreatedThisBoot = database.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get() === null;
+  // NONE -> INCREMENTAL on an existing schema requires a full VACUUM. Set it
+  // before the first table instead; upgrades keep their current mode.
+  if (dbCreatedThisBoot) database.run("PRAGMA auto_vacuum = INCREMENTAL;");
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");

@@ -122,6 +122,13 @@ own snapshots and does not reference this content-addressed store.
 
 ## Activate retention
 
+For an upgraded install with growing script history, set
+`SCRIPT_RUNS_RETENTION_DAYS=30` in **Settings → Configuration → Database**
+(or in the deployment environment if no stored value exists). This one setting
+bounds finished, unkeyed run history and releases shared source rows when their
+last run is deleted. Running, paused and idempotency-keyed runs remain protected.
+Follow the dry-run steps below before enabling deletion on an existing backlog.
+
 1. Verify that database backups include the history you need.
 2. Set one retention key, for example `SESSION_LOG_RETENTION_DAYS=30` or `CONTEXT_VERSIONS_KEEP_LATEST=100`.
 3. Set `DB_RETENTION_DRY_RUN=true`.
@@ -169,9 +176,31 @@ Enable tables one at a time, watching the monitors above before moving to the ne
 
 ## Disk space and SQLite vacuuming
 
-Deleting rows frees SQLite pages for reuse. It does not normally reduce the database file size.
+Script run source is stored once per SHA-256 hash in `script_run_sources`.
+Saved, inline, nested and durable runs share that store; run detail and execution
+still resolve the exact source. `script_runs.sourceHash` points at it, and the
+legacy `script_runs.source` column is empty after migration. SQL readers that
+need code should join `script_run_sources` on `sourceHash`.
 
-`PRAGMA incremental_vacuum(2000)` runs only after a non-dry-run sweep actually deletes rows. It does not run while every policy is disabled, when a sweep finds nothing to delete, or during dry run. It reclaims file space only when the database uses `auto_vacuum = INCREMENTAL`. Changing that mode requires a one-time blocking `VACUUM` operation. Schedule it in a maintenance window. Do not run `VACUUM` automatically on a production API database.
+On upgrade, the server moves existing sources in transactions of at most 25 runs,
+clearing each legacy copy in the same transaction as its hash is recorded.
+Committed batches survive interruption; the next boot resumes the remaining rows.
+This does not rebuild `script_runs` or require a second full-size table. Allow
+free space for a batch and its WAL; migration cannot start on a completely full
+disk. Until space is vacuumed, freed pages are available for SQLite to reuse.
+
+New databases use `auto_vacuum = INCREMENTAL` from creation.
+`PRAGMA incremental_vacuum(2000)` runs after a non-dry-run sweep actually deletes
+rows, reclaiming up to 2000 free pages without a full `VACUUM`. It does not run
+while every policy is disabled, when a sweep finds nothing to delete, or during
+dry run. In WAL mode, a checkpoint makes the reclaimed database-file size visible;
+long-lived readers can delay that checkpoint and keep WAL space in use.
+
+Existing databases keep their vacuum mode. Check it with `PRAGMA auto_vacuum`:
+`0` is NONE and `2` is INCREMENTAL. Converting NONE requires a one-time blocking
+`VACUUM`, with temporary free disk space potentially up to twice the database
+size. Schedule it offline in a maintenance window after verifying backups. The
+server never runs a full `VACUUM` automatically.
 
 ```sql
 PRAGMA auto_vacuum = INCREMENTAL;
