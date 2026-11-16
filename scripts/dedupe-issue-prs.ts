@@ -71,8 +71,7 @@ export type PullRequest = {
 
 /** One revision from GitHub's userContentEdits; the original body is the oldest. `text` is null when deleted. */
 export type Revision = { editedAt: string; text: string | null };
-/** `complete` is false when older revisions exist that were not fetched. */
-export type EditHistory = { revisions: Revision[]; complete: boolean };
+export type EditHistory = { revisions: Revision[] };
 
 export type IssueComment = {
   author: string;
@@ -131,7 +130,8 @@ export function heldSince(
     if (r.text === null || !holds(r.text)) return since;
     since = r.editedAt;
   }
-  return edits?.complete ? createdAt : since;
+  // The oldest fetched revision is the earliest evidence, even when GitHub omits the original text.
+  return since;
 }
 
 /** When a PR started targeting an issue and has kept targeting it while open. */
@@ -396,11 +396,10 @@ function makeClient(token: string) {
 }
 
 type GqlActor = { login: string; __typename: string } | null;
-type GqlEdits = { pageInfo: { hasPreviousPage: boolean }; nodes: { editedAt: string; diff: string | null }[] };
-const EDITS_FIELDS = "pageInfo{hasPreviousPage} nodes{editedAt diff}";
+type GqlEdits = { nodes: { editedAt: string; diff: string | null }[] };
+const EDITS_FIELDS = "nodes{editedAt diff}";
 const toHistory = (e: GqlEdits): EditHistory => ({
   revisions: e.nodes.map((n) => ({ editedAt: n.editedAt, text: n.diff })),
-  complete: !e.pageInfo.hasPreviousPage,
 });
 
 async function fetchOpenPrs(gql: Gql, owner: string, name: string): Promise<PullRequest[]> {

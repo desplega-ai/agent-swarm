@@ -59,7 +59,6 @@ const decide = (i: Issue, prs: PullRequest[]) => decideIssue(i, prs, REPO);
 
 const history = (...revisions: [string, string | null][]) => ({
   revisions: revisions.map(([editedAt, text]) => ({ editedAt, text })),
-  complete: true,
 });
 
 describe("edits after the fact", () => {
@@ -107,10 +106,8 @@ describe("edits after the fact", () => {
       pr(1, "mallory", JAN, { reopenedAt: MAR }),
       pr(1, "mallory", JAN, { connected: [{ issue: 10, at: MAR }] }),
       pr(1, "mallory", JAN, { body: "Fixes #10", edits: history([JAN, null], [MAR, "Fixes #10"]) }),
-      pr(1, "mallory", JAN, {
-        body: "Fixes #10",
-        edits: { ...history([MAR, "Fixes #10"]), complete: false },
-      }),
+      // History without the original text: rank from the oldest revision seen.
+      pr(1, "mallory", JAN, { body: "Fixes #10", edits: history([MAR, "Fixes #10"]) }),
       pr(1, "mallory", JAN, { lastEditedAt: MAR }),
     ];
     for (const m of variants) expect(decide(issue(), [m, alice]).winner).toBe(2);
