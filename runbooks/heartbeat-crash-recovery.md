@@ -383,6 +383,7 @@ flowchart TD
   Static workers retain their existing behavior.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
+  Each stall threshold reads its env value on every sweep and accepts a finite positive number of minutes (fractions included); a zero, negative or non-finite value falls back to the default above. Only a raw deployment env can carry such a value — the dashboard write path (`swarm_config`'s integer guard) rejects it — so a bad value must not make every task a stall candidate.
 
 Task creation records each routing reason's origin as `routingSource`.
 Caller-supplied reasons use `declared`.
