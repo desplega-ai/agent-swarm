@@ -8,7 +8,7 @@ export const registerSkillGetFileTool = (server: McpServer) => {
     "skill-get-file",
     {
       title: "Get Skill File",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "Fetch a bundled reference file from a complex skill by skillId and relative path. Use this when the file is not available on disk.",
       inputSchema: z.object({
