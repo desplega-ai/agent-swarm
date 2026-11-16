@@ -176,7 +176,8 @@ jobs:
       # runs the full suite, so a dependency the import graph cannot see (a file a test
       # reads at runtime) still cannot reach main untested. The full suite also runs on a
       # PR that touches an input every test loads outside the import graph: migrations
-      # (the preload's DB template), templates/ (seeders), the preload, bunfig.toml,
+      # (the preload's DB template), templates/ (seeders), the preload and its preload-only
+      # helpers (hang-watchdog*.ts; `--changed` ignores preload imports), bunfig.toml,
       # tsconfig.json, bun.lock, a package.json change beyond the version, or this
       # workflow. scripts/pre-push-tests.sh uses the same list, minus this workflow.
       # src/tests/merge-gate-detect-changes.test.ts runs this step.
@@ -196,7 +197,7 @@ jobs:
           base=$(git rev-parse HEAD^1)
           CHANGED=$(git diff --no-renames --name-only "$base" HEAD)
           scope=changed
-          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/preload\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
+          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
             scope=full
           elif echo "$CHANGED" | grep -qx 'package.json' &&
             git diff -U0 "$base" HEAD -- package.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' |

@@ -7,7 +7,8 @@
 #   - origin/main is not available (no merge-base to diff against), or
 #   - the branch touches an input that reaches every test outside the import
 #     graph: migrations (the preload template), templates/ (seeders), the preload
-#     itself, bunfig.toml ([test] config), tsconfig.json (path aliases), bun.lock
+#     and its preload-only helpers (`--changed` ignores preload imports),
+#     bunfig.toml ([test] config), tsconfig.json (path aliases), bun.lock
 #     (dependency graph), or any package.json change beyond the version field.
 #     merge-gate.yml's "Compute unit-test scope" step uses the same list.
 #
@@ -24,7 +25,7 @@ set -euo pipefail
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
 
-FULL_RUN_PATHS='^(src/be/migrations/|templates/|src/tests/preload\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock)'
+FULL_RUN_PATHS='^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock)'
 
 # The push compares commits only. `bun run check:local` (scripts/check.sh) sets
 # PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 so uncommitted edits count as changes too.

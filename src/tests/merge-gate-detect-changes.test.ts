@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 type Workflow = {
@@ -18,7 +18,42 @@ type Workflow = {
 
 // The GitHub expression the step uses for the diff base; the test substitutes a local branch.
 const BASE_REF_EXPR = ["$", "{{ steps.base.outputs.ref }}"].join("");
-const WORKFLOW_PATH = join(import.meta.dir, "../../.github/workflows/merge-gate.yml");
+const REPO_ROOT = resolve(import.meta.dir, "../..");
+const WORKFLOW_PATH = join(REPO_ROOT, ".github/workflows/merge-gate.yml");
+const PRE_PUSH_PATH = join(REPO_ROOT, "scripts/pre-push-tests.sh");
+const PRELOAD_PATH = join(REPO_ROOT, "src/tests/preload.ts");
+
+/**
+ * Repo-relative files the test preload loads: relative imports plus `new URL("./x", import.meta.url)`
+ * worker entries, followed transitively inside src/tests/. `local` = src/tests/ files (reached
+ * only through the preload); `external` = the preload's direct imports elsewhere in src/.
+ */
+async function preloadClosure(): Promise<{ local: string[]; external: string[] }> {
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const testsDir = join(REPO_ROOT, "src/tests");
+  const local = new Set<string>();
+  const external = new Set<string>();
+  const queue = [PRELOAD_PATH];
+  while (queue.length > 0) {
+    const file = queue.shift() as string;
+    const rel = relative(REPO_ROOT, file);
+    if (local.has(rel)) continue;
+    local.add(rel);
+    const src = await Bun.file(file).text();
+    const specs = transpiler.scanImports(src).map((i) => i.path);
+    for (const m of src.matchAll(/new URL\(\s*["'](\.[^"']+)["']\s*,\s*import\.meta\.url/g)) {
+      if (m[1]) specs.push(m[1]);
+    }
+    for (const spec of specs) {
+      if (!spec.startsWith(".")) continue;
+      let target = resolve(dirname(file), spec);
+      if (!target.endsWith(".ts")) target += ".ts";
+      if (target.startsWith(`${testsDir}/`)) queue.push(target);
+      else external.add(relative(REPO_ROOT, target));
+    }
+  }
+  return { local: [...local].sort(), external: [...external].sort() };
+}
 
 async function loadFlagStep(): Promise<string> {
   const wf = Bun.YAML.parse(await Bun.file(WORKFLOW_PATH).text()) as Workflow;
@@ -224,6 +259,8 @@ describe("merge-gate unit-test scope", () => {
     "src/be/migrations/999_new.sql",
     "templates/skills/x/content.md",
     "src/tests/preload.ts",
+    "src/tests/hang-watchdog.ts",
+    "src/tests/hang-watchdog-worker.ts",
     "bunfig.toml",
     "tsconfig.json",
     "bun.lock",
@@ -232,6 +269,66 @@ describe("merge-gate unit-test scope", () => {
     "%s runs the full suite on a pull request",
     async (path) => {
       expect((await scopeFor(["src/x.ts"], edit(path))).scope).toBe("full");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "every preload-only bootstrap file runs the full suite in CI and pre-push",
+    async () => {
+      const { local, external } = await preloadClosure();
+      // Positive control: the sweep sees the watchdog thread file only through `new URL`.
+      expect(local).toContain("src/tests/hang-watchdog-worker.ts");
+      const prePush = (await Bun.file(PRE_PUSH_PATH).text()).match(/^FULL_RUN_PATHS='(.+)'$/m)?.[1];
+      if (!prePush) throw new Error("FULL_RUN_PATHS not found in pre-push-tests.sh");
+      for (const path of local) {
+        expect({ path, scope: (await scopeFor(["src/x.ts"], edit(path))).scope }).toEqual({
+          path,
+          scope: "full",
+        });
+        expect({ path, prePush: new RegExp(prePush).test(path) }).toEqual({ path, prePush: true });
+      }
+      // A preload import outside src/tests/ is safe only while some test imports it too:
+      // `--changed` then selects that test, and it fails in the preload.
+      const tests = await Promise.all(
+        [...new Bun.Glob("src/**/*.test.ts").scanSync(REPO_ROOT)].map((f) =>
+          Bun.file(join(REPO_ROOT, f)).text(),
+        ),
+      );
+      for (const path of external) {
+        const spec = `/${path.replace(/^src\//, "").replace(/\.ts$/, "")}"`;
+        expect({ path, testImporter: tests.some((t) => t.includes(spec)) }).toEqual({
+          path,
+          testImporter: true,
+        });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "control: bun test --changed skips every test when only a preload-only import changes",
+    async () => {
+      const repo = await repoWith(
+        [
+          ["bunfig.toml", '[test]\npreload = ["./preload.ts"]\n'],
+          ["preload.ts", 'import "./dep";\n'],
+          ["dep.ts", "export {};\n"],
+          ["a.test.ts", 'import { test } from "bun:test";\ntest("a", () => {});\n'],
+        ],
+        edit("dep.ts", 'throw new Error("preload dependency regression");\n'),
+      );
+      const env = { ...GIT_ENV, HOME: process.env.HOME ?? tmpdir() };
+      const scoped = await runChild([process.execPath, "test", "--changed=base"], {
+        cwd: repo,
+        env,
+      });
+      const full = await runChild([process.execPath, "test"], { cwd: repo, env });
+      // Scoped: nothing selected, exit 0. Full: the preload throws.
+      expect(scoped.exitCode).toBe(0);
+      expect(`${scoped.stdout}${scoped.stderr}`).not.toContain("preload dependency regression");
+      expect(full.exitCode).not.toBe(0);
+      expect(`${full.stdout}${full.stderr}`).toContain("preload dependency regression");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

@@ -40,7 +40,7 @@ Conventions:
 - **A spawned Bun child must not outlive its run.** `afterAll` does not run when the run is killed. The preload sets `BUN_FEATURE_FLAG_NO_ORPHANS=1`, so a Bun child that inherits `process.env` exits when its parent dies. A spawn that builds its env from scratch passes `--no-orphans` itself, as `scripts/e2e/sut.ts` does.
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 - **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
-- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
+- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, the preload or its preload-only `hang-watchdog*.ts` helpers, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
 
 Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
 
