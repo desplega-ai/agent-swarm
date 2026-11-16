@@ -22,9 +22,10 @@ async function getApproval(ctx: ScenarioContext, id: string): Promise<Record<str
 async function waitForCard(
   ctx: ScenarioContext,
   title: string,
+  channel = CHANNEL,
 ): Promise<{ ts: string; raw: string }> {
   const card = await ctx.slack.waitForMessage(
-    (message) => message.channel === CHANNEL && JSON.stringify(message).includes(title),
+    (message) => message.channel === channel && JSON.stringify(message).includes(title),
     { timeoutMs: 15_000 },
   );
   return { ts: card.ts, raw: JSON.stringify(card) };
@@ -37,11 +38,12 @@ async function waitForEphemeral(
   label: string,
   /** Only ephemerals posted after this many. */
   after: number,
+  channel = CHANNEL,
 ): Promise<void> {
   const seen = await pollUntil(
     () =>
       ctx.slack
-        .ephemeralMessages(CHANNEL)
+        .ephemeralMessages(channel)
         .slice(after)
         .some((m) => JSON.stringify(m).includes(slackUserId) && pattern.test(m.text ?? "")),
     15_000,
@@ -49,7 +51,7 @@ async function waitForEphemeral(
   expect(
     seen,
     `${label}: no ephemeral matching ${pattern} for ${slackUserId}: ${JSON.stringify(
-      ctx.slack.ephemeralMessages(CHANNEL).slice(-5),
+      ctx.slack.ephemeralMessages(channel).slice(-5),
     ).slice(0, 1500)}`,
   );
 }
@@ -59,8 +61,9 @@ async function waitForCardOutcome(
   ts: string,
   outcome: RegExp,
   label: string,
+  channel = CHANNEL,
 ): Promise<void> {
-  const current = () => JSON.stringify(ctx.slack.messages(CHANNEL).find((m) => m.ts === ts) ?? {});
+  const current = () => JSON.stringify(ctx.slack.messages(channel).find((m) => m.ts === ts) ?? {});
   const updated = await pollUntil(
     () => outcome.test(current()) && !current().includes("hitl_answer:"),
     15_000,
@@ -73,11 +76,16 @@ async function waitForCardOutcome(
  * with one click, an unlinked or suspended user is refused and nothing changes, a click on a
  * resolved request (twice, or after a dashboard answer) only re-renders, and
  * Deny opens a modal whose reason is stored.
+ *
+ * The Approve leg posts into its own channel and marks the card for the Slack visuals:
+ * the thread frames show the card with its buttons, then the approved card, and the desktop
+ * view shows the refusals and the "already approved" reply next to it.
  */
 export const slackApprovalButtons: Scenario = {
   name: "slack-approval-buttons",
   // Next to workflow-approvals (340), on the default Socket Mode Slack mock.
   order: 340.5,
+  groups: ["visuals-v2"],
   async run(ctx) {
     const tag = ctx.nonce
       .toUpperCase()
@@ -90,6 +98,12 @@ export const slackApprovalButtons: Scenario = {
     const suspendedSlackId = `U0SUS${tag}`;
     ctx.slack.addUser({ id: suspendedSlackId, name: `suspended-${tag.toLowerCase()}` });
     ctx.slack.invite(CHANNEL, [approverSlackId, strangerSlackId, suspendedSlackId]);
+    // The Approve leg's own channel, so its rendered preview holds only this card's story.
+    const approveChannel = ctx.slack.addChannel({
+      id: `C0APR${tag}`,
+      name: `approvals-${tag.toLowerCase()}`,
+      members: [approverSlackId, strangerSlackId, suspendedSlackId],
+    }).id;
 
     const created = await ctx.api("POST", "/api/users", {
       body: {
@@ -111,7 +125,7 @@ export const slackApprovalButtons: Scenario = {
     expectStatus(suspended, [200, 201], "create the suspended linked user");
 
     const workerId = await registerWorker(ctx, "inline-appr");
-    const workflow = (title: string, questions: unknown[]) => ({
+    const workflow = (title: string, questions: unknown[], target = CHANNEL) => ({
       nodes: [
         {
           id: "ask",
@@ -120,7 +134,7 @@ export const slackApprovalButtons: Scenario = {
             title,
             questions,
             approvers: { policy: "any" },
-            notifications: [{ channel: "slack", target: CHANNEL }],
+            notifications: [{ channel: "slack", target }],
           },
           next: { approved: "yes", rejected: "no", timeout: "no" },
         },
@@ -135,14 +149,15 @@ export const slackApprovalButtons: Scenario = {
     const approveId = await createWorkflow(
       ctx,
       "inline-approve",
-      workflow(approveTitle, ship),
+      workflow(approveTitle, ship, approveChannel),
       {},
       workerId,
     );
     const approveRun = await triggerWorkflow(ctx, approveId, {}, { agentId: workerId });
     const approval = await waitForApproval(ctx, approveRun.runId);
     const approvalId = String(approval.id);
-    const card = await waitForCard(ctx, approveTitle);
+    const card = await waitForCard(ctx, approveTitle, approveChannel);
+    ctx.markThread("approve", approveChannel, card.ts);
     expect(
       card.raw.includes('"hitl_answer:y"') &&
         card.raw.includes('"hitl_answer:n"') &&
@@ -150,37 +165,51 @@ export const slackApprovalButtons: Scenario = {
       `the card has Approve, Deny and the dashboard link: ${card.raw.slice(0, 1500)}`,
     );
 
-    const seen0 = ctx.slack.ephemeralMessages(CHANNEL).length;
+    const seen0 = ctx.slack.ephemeralMessages(approveChannel).length;
     await ctx.slack.clickButton({
-      channel: CHANNEL,
+      channel: approveChannel,
       ts: card.ts,
       action_id: "hitl_answer:y",
       value: approvalId,
       user: strangerSlackId,
     });
-    await waitForEphemeral(ctx, strangerSlackId, /not linked/, "unlinked click", seen0);
+    await waitForEphemeral(
+      ctx,
+      strangerSlackId,
+      /not linked/,
+      "unlinked click",
+      seen0,
+      approveChannel,
+    );
     expect(
       (await getApproval(ctx, approvalId)).status === "pending",
       "an unlinked click changes nothing",
     );
 
     // A linked but suspended user is refused like any credential of theirs.
-    const seen1 = ctx.slack.ephemeralMessages(CHANNEL).length;
+    const seen1 = ctx.slack.ephemeralMessages(approveChannel).length;
     await ctx.slack.clickButton({
-      channel: CHANNEL,
+      channel: approveChannel,
       ts: card.ts,
       action_id: "hitl_answer:y",
       value: approvalId,
       user: suspendedSlackId,
     });
-    await waitForEphemeral(ctx, suspendedSlackId, /not allowed/, "suspended click", seen1);
+    await waitForEphemeral(
+      ctx,
+      suspendedSlackId,
+      /not allowed/,
+      "suspended click",
+      seen1,
+      approveChannel,
+    );
     expect(
       (await getApproval(ctx, approvalId)).status === "pending",
       "a suspended user's click changes nothing",
     );
 
     await ctx.slack.clickButton({
-      channel: CHANNEL,
+      channel: approveChannel,
       ts: card.ts,
       action_id: "hitl_answer:y",
       value: approvalId,
@@ -198,18 +227,25 @@ export const slackApprovalButtons: Scenario = {
         asRecord(vote.via).platformUserId === approverSlackId,
       `the vote records the mapped user and the Slack clicker: ${JSON.stringify(approvedRow)}`,
     );
-    await waitForCardOutcome(ctx, card.ts, /Approved/, "approved card");
+    await waitForCardOutcome(ctx, card.ts, /Approved/, "approved card", approveChannel);
 
     // A second click on the resolved request only re-renders.
-    const seen2 = ctx.slack.ephemeralMessages(CHANNEL).length;
+    const seen2 = ctx.slack.ephemeralMessages(approveChannel).length;
     await ctx.slack.clickButton({
-      channel: CHANNEL,
+      channel: approveChannel,
       ts: card.ts,
       action_id: "hitl_answer:n",
       value: approvalId,
       user: approverSlackId,
     });
-    await waitForEphemeral(ctx, approverSlackId, /already approved/, "double click", seen2);
+    await waitForEphemeral(
+      ctx,
+      approverSlackId,
+      /already approved/,
+      "double click",
+      seen2,
+      approveChannel,
+    );
     expect(
       (await getApproval(ctx, approvalId)).status === "approved",
       "a late Deny does not flip an approved request",
