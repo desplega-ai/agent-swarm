@@ -3,8 +3,25 @@
  * the worker (no DB imports).
  */
 
+/**
+ * true when the url host is Azure repos , only the host counts
+ */
 export function isAzureDevOpsUrl(url: string): boolean {
-  return /(^|[/@.])dev\.azure\.com[/:]|\.visualstudio\.com[/:]/i.test(url);
+  const trimmed = url.trim();
+  // SCP-style SSH: user@host:path
+  let host = trimmed.match(/^[^@/\s:]+@([^:/\s]+):/)?.[1];
+  if (!host) {
+    try {
+      host = new URL(trimmed).hostname;
+    } catch {
+      // scheme-less `dev.azure.com/org/project/_git/repo`
+      host = trimmed.split("/")[0] as string;
+    }
+  }
+  host = host.toLowerCase();
+  return (
+    host === "dev.azure.com" || host === "ssh.dev.azure.com" || host.endsWith(".visualstudio.com")
+  );
 }
 
 /**

@@ -15,6 +15,8 @@ describe("Azure Repos URL helpers", () => {
       "git@ssh.dev.azure.com:v3/org/project/repo",
       "https://fabrikam.visualstudio.com/DefaultCollection/_git/Fabrikam",
       "https://dev.azure.com/github-mirror/project/_git/repo",
+      "ssh://git@ssh.dev.azure.com/v3/org/project/repo",
+      "dev.azure.com/org/project/_git/repo",
     ]) {
       expect(isAzureDevOpsUrl(url)).toBe(true);
       expect(detectVcsProvider(url)).toBe("azure-devops");
@@ -22,6 +24,15 @@ describe("Azure Repos URL helpers", () => {
     expect(detectVcsProvider("desplega-ai/agent-swarm")).toBe("github");
     expect(detectVcsProvider("https://gitlab.com/group/project")).toBe("gitlab");
     expect(isAzureDevOpsUrl("https://example.com/dev.azure.com.html")).toBe(false);
+    // Only the host counts   not a path segment or a host suffix
+    for (const url of [
+      "https://github.com/acme/dev.azure.com/tree/main",
+      "https://example.com/mirrors/fabrikam.visualstudio.com/repo",
+      "https://notdev.azure.com/org/project/_git/repo",
+      "git@example.com:dev.azure.com/repo.git",
+    ]) {
+      expect(isAzureDevOpsUrl(url)).toBe(false);
+    }
   });
 
   test("canonicalizes clone URLs to one https form", () => {

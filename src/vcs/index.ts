@@ -29,6 +29,10 @@ export function detectVcsProvider(url: string): VcsProvider | null {
       ?.toLowerCase();
   }
   if (hostname?.startsWith("gitlab.")) return "gitlab";
-  if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
+  if (hostname === "github.com" || hostname === "www.github.com") return "github";
+  // scheme-less 
+  if (/^(www\.)?github\.com\//i.test(url.trim()) || /^[\w.-]+\/[\w.-]+$/.test(url)) {
+    return "github";
+  }
   return null;
 }
