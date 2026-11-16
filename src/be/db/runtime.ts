@@ -6,6 +6,7 @@ import { migrateLegacyCredentialBindingBlob } from "../connection-bindings-blob-
 import { resolveEncryptionKey } from "../crypto";
 import { createBunSqliteClient, type DbClient } from "../db-client";
 import { runMigrations } from "../migrations/runner";
+import { assertScriptRunSourceSchema } from "../migrations/script-run-sources";
 import { autoEncryptLegacyOAuthSecrets } from "../oauth-encryption-backfill";
 import { sealedReplayExistsSql } from "../sealed-json";
 
@@ -167,6 +168,7 @@ function bootOpenedDb(
   // Run database migrations (schema creation + incremental changes)
   try {
     runMigrations(database);
+    assertScriptRunSourceSchema(database);
   } catch (error) {
     db = null;
     try {

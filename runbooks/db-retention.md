@@ -185,6 +185,11 @@ need code should join `script_run_sources` on `sourceHash`.
 On upgrade, the server moves existing sources in transactions of at most 25 runs,
 clearing each legacy copy in the same transaction as its hash is recorded.
 Committed batches survive interruption; the next boot resumes the remaining rows.
+API startup requires the source table and hash column. If a custom
+`MIGRATIONS_DIR` omits migration `342_script_run_sources.sql`, an older database
+is rejected at startup with an instruction to include that migration. A database
+that already has the source schema can still start without the migration files;
+any pending source backfill resumes there too.
 This does not rebuild `script_runs` or require a second full-size table. Allow
 free space for a batch and its WAL; migration cannot start on a completely full
 disk. Until space is vacuumed, freed pages are available for SQLite to reuse.

@@ -3,8 +3,30 @@ import { createHash } from "node:crypto";
 
 const BATCH_SIZE = 25;
 
+function hasScriptRunSourceSchema(db: Database): boolean {
+  const schema = db
+    .prepare<{ ready: number }, []>(`SELECT
+    EXISTS (SELECT 1 FROM pragma_table_info('script_runs') WHERE name = 'sourceHash')
+    AND (SELECT count(*) FROM pragma_table_info('script_run_sources')
+         WHERE name IN ('hash', 'source')) = 2 AS ready`)
+    .get();
+  return Boolean(schema?.ready);
+}
+
+/** The API must have the schema its run readers and writers use. */
+export function assertScriptRunSourceSchema(db: Database): void {
+  if (!hasScriptRunSourceSchema(db)) {
+    throw new Error(
+      "[migrations] Required script-run source schema is missing. " +
+        "Ensure MIGRATIONS_DIR includes 342_script_run_sources.sql and run migrations before starting the API.",
+    );
+  }
+}
+
 /** Boot-only backfill: each committed batch can be safely skipped on restart. */
 export function backfillScriptRunSources(db: Database): void {
+  // The generic migration runner also handles partial historical schemas.
+  if (!hasScriptRunSourceSchema(db)) return;
   const pending = db.prepare<{ id: string; source: string }, []>(
     `SELECT id, source FROM script_runs WHERE sourceHash IS NULL LIMIT ${BATCH_SIZE}`,
   );

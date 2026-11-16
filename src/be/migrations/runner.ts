@@ -199,6 +199,7 @@ export function runMigrations(db: Database): void {
       db,
       "no migrations directory could be located (see the preceding [migrations] warning)",
     );
+    backfillScriptRunSources(db);
     return;
   }
 
@@ -216,6 +217,7 @@ export function runMigrations(db: Database): void {
 
   if (migrations.length === 0) {
     assertNotEmptyDatabase(db, `no .sql migration files found in ${migrationsDir}`);
+    backfillScriptRunSources(db);
     return;
   }
 
@@ -314,8 +316,7 @@ export function runMigrations(db: Database): void {
   db.run("PRAGMA foreign_keys = ON");
 
   // Run outside the schema transactions so an interrupted boot keeps completed
-  // batches. Custom migration directories may not contain the source schema.
-  if (migrations.some((migration) => migration.name === "342_script_run_sources")) {
-    backfillScriptRunSources(db);
-  }
+  // batches. Check the actual schema even when its SQL file is not packaged:
+  // an upgraded database can reuse it even with an incomplete migration bundle.
+  backfillScriptRunSources(db);
 }
