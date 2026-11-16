@@ -143,8 +143,16 @@ function spawnSutProcess(logPath: string, env: Record<string, string>, command: 
 }
 
 /** Start the API process for `sut` and wait for /health. */
-async function launch(sut: Sut, keep: boolean): Promise<void> {
-  const spawned = spawnSutProcess(sut.logPath, sut.env, await coverageCommand(sut));
+async function launch(
+  sut: Sut,
+  keep: boolean,
+  extraEnv: Record<string, string> = {},
+): Promise<void> {
+  const spawned = spawnSutProcess(
+    sut.logPath,
+    { ...sut.env, ...extraEnv },
+    await coverageCommand(sut),
+  );
   sut.process = spawned.child;
   sut.flushLog = spawned.flushLog;
   sut.drains = spawned.drains;
@@ -162,7 +170,7 @@ async function launch(sut: Sut, keep: boolean): Promise<void> {
     sut.coverageDir = undefined;
     sut.logPath = `${sut.logPaths[0]}.plain-${sut.logPaths.length}`;
     sut.logPaths.push(sut.logPath);
-    await launch(sut, keep);
+    await launch(sut, keep, extraEnv);
   }
 }
 
@@ -324,12 +332,15 @@ export async function startSut(
   return sut;
 }
 
-/** Restart only the API process while preserving every externalized SUT resource. */
-export async function restartSut(sut: Sut): Promise<void> {
+/**
+ * Restart only the API process while preserving every externalized SUT resource.
+ * `extraEnv` applies to this process only; the next restart boots the base env again.
+ */
+export async function restartSut(sut: Sut, extraEnv: Record<string, string> = {}): Promise<void> {
   await stopSutProcess(sut);
   sut.logPath = `${sut.logPaths[0]}.restart-${sut.logPaths.length}`;
   sut.logPaths.push(sut.logPath);
-  await launch(sut, true);
+  await launch(sut, true, extraEnv);
 }
 
 export async function stopSut(sut: Sut, keep: boolean): Promise<void> {

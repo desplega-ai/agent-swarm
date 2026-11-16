@@ -121,6 +121,11 @@ recoverOrphanedSubWorkflowSteps():
                 (one transaction, only while that attempt is still running)
 ```
 
+An `agent-task` step a crash left `running` (task inserted, step not yet
+`waiting`) is re-claimed the same way when the running-run pass walks its run:
+same step id, so the executor's `getTaskByWorkflowRunStepId` dedupe finds the
+task already created and parks on it instead of inserting a second one.
+
 A child run commits with its initial context, so recovery walks it from
 `trigger` / `input` like the first walk. A `running` child run with no stored
 context (created before that held) fails instead of walking on blanks.
