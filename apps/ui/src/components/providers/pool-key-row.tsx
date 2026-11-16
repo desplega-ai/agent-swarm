@@ -50,11 +50,14 @@ import { formatCost } from "@/lib/cost-format";
 import {
   currentQuotaWindows,
   planDisplay,
+  type QuotaWarning,
   type QuotaWindow,
   quotaIsHigh,
+  quotaIsStale,
   quotaLabel,
   quotaRemaining,
   quotaResetIn,
+  quotaWarning,
 } from "@/lib/provider-quota";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { KeyQuotaDetails, QuotaBar } from "./key-quota-details";
@@ -89,24 +92,39 @@ function modelName(model: string): string {
 /** Meters in the row. The popover lists every window. */
 const ROW_METERS = 2;
 
+/** The warning icon's tooltip: a rate limit and disabled usage credits read differently. */
+function warningText(warning: NonNullable<QuotaWarning>): string {
+  if (warning.kind === "overage-rejected") return "Usage credits disabled (overage rejected)";
+  return warning.untilMs === null
+    ? "Rate limited"
+    : `Rate limited until ${resetLabel(warning.untilMs)}`;
+}
+
 function Meter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
   const label = quotaLabel(window);
-  const warning = window.limited || window.overageStatus === "rejected";
+  const warning = quotaWarning(window);
+  const stale = quotaIsStale(window, nowMs);
+  const asOf = `as of ${backAt(window.observedAt)}`;
   return (
     <span className="flex min-w-0 items-center gap-2 text-xs">
       <span className="min-w-0 flex-1 truncate text-left text-foreground/70" title={label}>
         {label}
       </span>
       {warning ? (
-        <CircleAlert
-          aria-label="Limit or credits restricted"
-          className="size-3 text-status-warning-strong"
-        />
+        <span className="inline-flex shrink-0" title={warningText(warning)}>
+          <CircleAlert
+            aria-label={warningText(warning)}
+            className="size-3 text-status-warning-strong"
+          />
+        </span>
       ) : null}
       {window.percent === null ? (
         <span className="text-foreground/70">Unknown</span>
       ) : (
-        <>
+        <span
+          className={cn("flex shrink-0 items-center gap-2", stale && "opacity-50")}
+          title={stale ? `Usage ${asOf}. It may have changed since.` : undefined}
+        >
           <QuotaBar percent={window.percent} className="w-10 shrink-0" />
           <span
             className={cn(
@@ -116,8 +134,9 @@ function Meter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
           >
             {quotaRemaining(window.percent)}% left
           </span>
-        </>
+        </span>
       )}
+      {stale ? <span className="shrink-0 text-foreground/70">{asOf}</span> : null}
       {window.resetsAtMs !== null ? (
         <span
           className="inline-flex shrink-0 items-center gap-1 text-foreground/70"

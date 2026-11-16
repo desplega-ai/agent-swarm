@@ -44,6 +44,32 @@ export function quotaIsHigh(percent: number | null): boolean {
   return percent !== null && percent >= 75;
 }
 
+/** A window observed longer ago than this reads as stale in the pool row. */
+export const QUOTA_STALE_MS = 15 * MINUTE_MS;
+
+/** The window's utilization arrived more than 15 minutes ago (or never parses). */
+export function quotaIsStale(window: Pick<QuotaWindow, "observedAt">, nowMs: number): boolean {
+  const seenMs = Date.parse(window.observedAt);
+  return !Number.isFinite(seenMs) || nowMs - seenMs > QUOTA_STALE_MS;
+}
+
+/**
+ * Why the row shows a warning icon. A provider rejection wins over disabled
+ * usage credits: it is the one that stops requests now.
+ */
+export type QuotaWarning =
+  | { kind: "limited"; untilMs: number | null }
+  | { kind: "overage-rejected" }
+  | null;
+
+export function quotaWarning(
+  window: Pick<QuotaWindow, "limited" | "resetsAtMs" | "overageStatus">,
+): QuotaWarning {
+  if (window.limited) return { kind: "limited", untilMs: window.resetsAtMs };
+  if (window.overageStatus === "rejected") return { kind: "overage-rejected" };
+  return null;
+}
+
 export function quotaRemaining(percent: number): number {
   return Math.min(100, Math.max(0, 100 - percent));
 }
