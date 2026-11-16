@@ -7,6 +7,7 @@
     "customer-commitment-tracking",
     "service-level-breach-review",
     "ai-invoice-discrepancy-review",
+    "supplier-order-confirmation-review",
     "marketplace-payout-exception-review",
     "marketplace-moderation-appeals",
     "customer-billing-dispute-review",
