@@ -221,6 +221,7 @@ function HostRow({
   const panel = panelOf(host);
   const pill = STATE_PILL[state];
   const models = systemOneModels(host);
+  const known = [host.decide, host.extract].flatMap((service) => service?.knownModels ?? []);
   const keys = systemOneRequiredKeys(host).map((group) => group[0] ?? "");
   const name = systemOneHostName(host);
 
@@ -244,14 +245,20 @@ function HostRow({
           <ServesTag active={defaults.extract === host.id} capability="extract" />
         ) : null}
       </div>
-      <span className="col-span-2 min-w-0 font-mono text-xs text-muted-foreground md:col-span-1">
+      <div className="col-span-2 min-w-0 font-mono text-xs text-muted-foreground md:col-span-1">
         {models.length > 0
           ? [systemOneServiceModels(host.decide), systemOneServiceModels(host.extract)]
               .filter((list) => list.length > 0)
               .map((list) => list.join(", "))
               .join(" · ")
           : "Picked from the text"}
-      </span>
+        {known.length > 0 ? (
+          <details className="mt-0.5">
+            <summary className="cursor-pointer">+{known.length} more</summary>
+            {known.join(", ")}
+          </details>
+        ) : null}
+      </div>
       <div className="col-span-2 flex min-w-0 flex-row flex-wrap items-start gap-1 md:col-span-1 md:flex-col">
         {keys.map((key) => (
           <code
