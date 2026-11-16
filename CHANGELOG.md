@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.3] - 2026-11-16
+
+### Added
+- Internal AI: task titling and session summaries resolve Fireworks (`FIREWORKS_API_KEY`) and Bedrock (AWS credential chain plus `AWS_REGION`) credentials, after the existing providers (#3095).
+
+### Changed
+- agent-fs pins bumped 0.18.28 -> 0.18.29.
+- Dependencies: worker harness bumps for amp, qwen, cursor sdk and fx (#3166, #3178).
+- Docs: guides for competitor change briefs (#3159), RFP bid or no-bid reviews (#3160), service-level breach reviews (#3161), digital content license rights (#3162), marketplace partner launch readiness (#3163), employee offboarding access reviews (#3164), property maintenance request triage (#3165) and food supplier ingredient changes (#3175); maintenance triage guide drops unbacked claims (#3172); weekly release notes (#3183); `RUNNER_TERMINAL_TASK_GRACE_MS` and the Slack window fallbacks added to the environment variables reference.
+
+### Fixed
+- Runner: a task that turns terminal mid-session gets a grace window (`RUNNER_TERMINAL_TASK_GRACE_MS`, 45s) to end its turn, so its Claude cost is still recorded (#3179).
+- Codex hook: extension rewrites of `apply_patch` are applied instead of dropped; a rewrite of any other non-Bash tool fails closed (#3177).
+- Slack: a non-positive or non-finite conclusion settle or timeout value falls back to its default (#3176).
+- fx: the tool-discovery prompt points at `toolbox` instead of the removed `capability_search` (#3168).
+- Tests: the chunked-413 MCP test stops its client one byte over the cap (#3180).
+
 ## [2.13.2] - 2026-11-15
 
 ### Added
