@@ -67,6 +67,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
 - [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
 - [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
 - [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
