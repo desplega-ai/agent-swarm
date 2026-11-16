@@ -18,7 +18,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { upsertKv } from "../be/db";
+import { getDbClient, upsertKv } from "../be/db";
 import { bindLoopPath } from "../be/event-loop-lag";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
@@ -26,7 +26,12 @@ import { withSpan } from "../otel";
 import { COLOR_LITERAL_THRESHOLD } from "../pages/color-literals";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
-import { DEFAULT_MODEL_TIER_MAP, type ModelTier, type ProviderName } from "../types";
+import {
+  DEFAULT_MODEL_TIER_MAP,
+  isTerminalTaskStatus,
+  type ModelTier,
+  type ProviderName,
+} from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -1114,6 +1119,38 @@ async function applyPreToolCall(
   };
 }
 
+/** Tools a session may still call after its task reached a terminal status. */
+const TERMINAL_TASK_EXEMPT_TOOLS = new Set(["store-progress"]);
+
+/**
+ * Refuse a write from a session whose task already ended. A superseded or
+ * cancelled task's harness can keep running until the worker kills it, and its
+ * late `slack-reply` / `send-task` calls would act for a task the swarm
+ * already moved past. Read-only is the registrar's `readOnlyHint: true`; a
+ * tool without that annotation counts as a write. Scripts and extensions are
+ * not agent sessions and skip the check.
+ */
+async function refuseWriteForTerminalTask(
+  name: string,
+  annotations: ToolAnnotations | undefined,
+  requestInfo: RequestInfo,
+): Promise<SwarmToolResult | undefined> {
+  if (requestInfo.callOrigin !== "mcp" || !requestInfo.sourceTaskId) return undefined;
+  if (annotations?.readOnlyHint === true || TERMINAL_TASK_EXEMPT_TOOLS.has(name)) return undefined;
+  const row = await getDbClient().get<{ status: string }>(
+    "SELECT status FROM agent_tasks WHERE id = ?",
+    [requestInfo.sourceTaskId],
+  );
+  if (!row || !isTerminalTaskStatus(row.status)) return undefined;
+  return toolErr(
+    `Task ${requestInfo.sourceTaskId} is ${row.status}, so this session can no longer call ${name}. Stop working on it.`,
+    {
+      details:
+        "Only store-progress and read-only tools still work for a finished task. Any new work belongs to a new task.",
+    },
+  );
+}
+
 function dispatchPostToolCall(
   dispatcher: ExtensionDispatcher | undefined,
   name: string,
@@ -1170,7 +1207,9 @@ export const createToolRegistrar = (server: McpServer) => {
           async (span) => {
             const pre = await applyPreToolCall(name, {}, requestInfo);
             let durationMs = 0;
-            let outcome = pre.blocked;
+            let outcome =
+              pre.blocked ??
+              (await refuseWriteForTerminalTask(name, config.annotations, requestInfo));
             if (!outcome) {
               const startedAt = Date.now();
               try {
@@ -1210,7 +1249,9 @@ export const createToolRegistrar = (server: McpServer) => {
           const pre = await applyPreToolCall(name, args, requestInfo, config.inputSchema);
           const effectiveArgs = pre.args as InferInput<InputArgs>;
           let durationMs = 0;
-          let outcome = pre.blocked;
+          let outcome =
+            pre.blocked ??
+            (await refuseWriteForTerminalTask(name, config.annotations, requestInfo));
           if (!outcome) {
             const startedAt = Date.now();
             try {
