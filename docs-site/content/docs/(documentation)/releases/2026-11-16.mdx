@@ -1,0 +1,109 @@
+---
+title: "Release Notes — Week of November 9 to November 16, 2026"
+description: "Boards and sheets become first-class swarm objects with formulas, xlsx and live embeds, deferred tasks wake on external events, native tool hooks reach four harnesses, and Rocket.Chat joins Chat SDK, across 250 commits from v2.12.0 to v2.13.2."
+---
+
+250 commits landed from v2.12.0 to v2.13.2. The through-line is a shared workspace: agents and people edit the same spreadsheets and diagrams, waiting tasks are woken by the outside world instead of polling it, and every harness reports built-in tool calls to one hook surface. Six changes need an operator action, all under [Breaking Changes](#breaking-changes).
+
+## Highlights
+
+### Sheets and boards the swarm and your team edit together
+
+[#3014](https://github.com/desplega-ai/agent-swarm/pull/3014) adds a sheet object: a spreadsheet with live formulas that lives on your drive and opens in the dashboard. The formula engine runs in a worker of its own, so a workbook recomputes on every write without blocking the API. [#3013](https://github.com/desplega-ai/agent-swarm/pull/3013) adds boards over Excalidraw element JSON: shapes, text, and arrows that bind at both ends. Both are files first, and a call returns a link a person can open and edit.
+
+```ts
+export default async function (args, ctx) {
+  const { object, link } = await ctx.sheets.create({
+    path: "shared/q4-planning/tracker.sheet.json",
+    title: "Q4 tracker",
+    tabs: [
+      {
+        name: "Tasks",
+        rows: [
+          ["Task", "Hours", "Cost"],
+          ["Design", 3, "=B2*80"],
+          ["Build", 5, "=B3*80"],
+        ],
+      },
+    ],
+  });
+  await ctx.sheets.appendRows({
+    id: object.id,
+    tab: "Tasks",
+    rows: [["Total", "=SUM(B2:B3)", "=SUM(C2:C3)"]],
+  });
+  return { id: object.id, link };
+}
+```
+
+- **xlsx in and out.** `sheet-import-xlsx` keeps tabs, values, formulas, number formats, column widths and merges; `sheet-export-xlsx` writes them back, reporting what the other format cannot hold ([#3038](https://github.com/desplega-ai/agent-swarm/pull/3038)).
+- **Open it where the work already is.** HTTP routes read and save objects ([#3074](https://github.com/desplega-ai/agent-swarm/pull/3074)). An app shows a live, editable object with `ObjectEmbed` ([#3093](https://github.com/desplega-ai/agent-swarm/pull/3093)), a page embeds one with `<swarm-object>` ([#3122](https://github.com/desplega-ai/agent-swarm/pull/3122)), and a Markdown file renders `<SwarmSheet id="..." />` or `<SwarmBoard id="..." />` in place ([#3116](https://github.com/desplega-ai/agent-swarm/pull/3116)).
+- **Pointers stay current.** agent-fs `file.changed` webhooks keep the object pointer on each file in sync ([#3037](https://github.com/desplega-ai/agent-swarm/pull/3037)), and `object-reindex` takes a prefix and a `dryRun` and names the fix when a sheet lost its id ([#3076](https://github.com/desplega-ai/agent-swarm/pull/3076)).
+- **Agents get the habit.** A seeded `boards-and-sheets` skill teaches the choice: a sheet for data that changes, a board for a diagram someone will move, a Markdown table for something read once ([#3073](https://github.com/desplega-ai/agent-swarm/pull/3073)).
+
+Docs: [scripts runtime](/docs/guides/scripts-runtime), [objects API](/docs/api-reference/objects).
+
+### Deferred tasks wake on an external event
+
+A deferral no longer has to poll. `defer-task` takes a `wakeOn` event beside its usual deadline ([#3087](https://github.com/desplega-ai/agent-swarm/pull/3087)):
+
+```json
+{
+  "wakeOn": { "event": "vcs.pr.merged", "source": "github", "match": { "repo": "owner/name", "number": 123 } },
+  "note": "Run the post-merge checks on the merge commit."
+}
+```
+
+GitHub's `pull_request.closed` webhook only names a candidate: the server reads the PR and wakes you when it actually merged. A closed-unmerged PR does not wake you; the ceiling does. The call is refused when the event already happened, the integration is off, or you hold 20 pending waits. GitHub is the only provider so far.
+
+Docs: [scheduling](/docs/concepts/scheduling).
+
+### One tool-hook surface on four harnesses
+
+Claude Code, Codex, pi and opencode report each built-in call to `POST /api/tool-hooks` before it runs ([#3090](https://github.com/desplega-ai/agent-swarm/pull/3090)). `pre.tool.call` can block a call with a reason the model reads, or rewrite its arguments, and the rewrite lands on every harness, a Codex `apply_patch` patch included ([#3177](https://github.com/desplega-ai/agent-swarm/pull/3177), on main after v2.13.2). The shims fail open: an API slower than two seconds lets the call through, and workers send nothing until an extension lists `native` in its `toolSources`.
+
+Docs: [extensions](/docs/guides/extensions).
+
+### Rocket.Chat joins Chat SDK
+
+A self-hosted team can talk to the swarm where it already works ([#3120](https://github.com/desplega-ai/agent-swarm/pull/3120)): an adapter over the Rocket.Chat REST API and one Outgoing WebHook, no new npm dependency. The instance URL lives in `CHAT_SDK_API_URL_OVERRIDES`, not the adapter config, so a saved token cannot reach another host. `userName` is required because the REST API cannot report the bot's own name ([#3128](https://github.com/desplega-ai/agent-swarm/pull/3128) moves Chat SDK to 4.45.0).
+
+Docs: [Chat SDK](/docs/integrations/chat-sdk).
+
+### Code mode as the requesting user over MCP
+
+An MCP client that runs code mode now does so with the caller's identity and permissions, not a shared service account ([#3144](https://github.com/desplega-ai/agent-swarm/pull/3144)).
+
+### Sessions that pick up where you left off
+
+Star sessions, star and hide groups, and open a Done Slack session from the list, where a channel or DM counts as one session ([#3051](https://github.com/desplega-ai/agent-swarm/pull/3051), [#3061](https://github.com/desplega-ai/agent-swarm/pull/3061)). The composer keeps drafts and gains `@` and `/` mentions ([#3047](https://github.com/desplega-ai/agent-swarm/pull/3047)); follow-ups mirror into the Slack thread ([#3048](https://github.com/desplega-ai/agent-swarm/pull/3048)); Claude pre-tool updates render as progress lines ([#3011](https://github.com/desplega-ai/agent-swarm/pull/3011)).
+
+## Improvements
+
+- **Runner** reaps the git worktrees agents leave behind ([#3118](https://github.com/desplega-ai/agent-swarm/pull/3118), [#3121](https://github.com/desplega-ai/agent-swarm/pull/3121)).
+- **Repos** carry a per-repo merge policy record, so the rule follows the repository ([#3088](https://github.com/desplega-ai/agent-swarm/pull/3088)). Docs: [repo merge policy](/docs/guides/repo-merge-policy).
+- **Workflows** accept an `hmac-sha1` webhook verification format ([#3092](https://github.com/desplega-ai/agent-swarm/pull/3092)).
+- **Audit** records who created and last updated each script, skill, workflow and schedule ([#2825](https://github.com/desplega-ai/agent-swarm/pull/2825)); an agent is deleted and restored by an operator only, with `agent_history` keeping the record ([#3023](https://github.com/desplega-ai/agent-swarm/pull/3023)).
+- **Providers** prefer a subscription over an API key for OpenAI ([#3100](https://github.com/desplega-ai/agent-swarm/pull/3100)), run a pi agent on a ChatGPT subscription ([#3085](https://github.com/desplega-ai/agent-swarm/pull/3085)), propose the newest catalog models in setup, and list OpenCode Go ([#3039](https://github.com/desplega-ai/agent-swarm/pull/3039)).
+- **Performance**: one warm native harness per script spec ([#3147](https://github.com/desplega-ai/agent-swarm/pull/3147)), read-only idle polls that take the write lock only to claim ([#3089](https://github.com/desplega-ai/agent-swarm/pull/3089)), memory search off the event loop ([#3081](https://github.com/desplega-ai/agent-swarm/pull/3081), [#3097](https://github.com/desplega-ai/agent-swarm/pull/3097)), app rows scanned in key windows ([#3079](https://github.com/desplega-ai/agent-swarm/pull/3079)).
+- **Tooling**: a `get-task-details` response fitted to a size budget ([#3135](https://github.com/desplega-ai/agent-swarm/pull/3135)), primitives for spec-only app widgets ([#3117](https://github.com/desplega-ai/agent-swarm/pull/3117)), Fireworks and Bedrock resolved for internal titling and summaries ([#3095](https://github.com/desplega-ai/agent-swarm/pull/3095), on main after v2.13.2).
+- **People and files**: dismiss an unmapped identity and hide `[bot]` logins ([#3075](https://github.com/desplega-ai/agent-swarm/pull/3075)); stale comments drop out of the Files send tray ([#3082](https://github.com/desplega-ai/agent-swarm/pull/3082)).
+- **Docs** gained 21 solution guides, from supplier security evidence to marketplace payouts, plus a Software Factory playbook ([#3083](https://github.com/desplega-ai/agent-swarm/pull/3083)). Docs: [Software Factory](/docs/playbooks/software-factory).
+
+## Bug Fixes
+
+- **Security.** MCP OAuth and proxy fetches, script-connection OAuth and token endpoint calls check every hop and the resolved address ([#3123](https://github.com/desplega-ai/agent-swarm/pull/3123), [#3124](https://github.com/desplega-ai/agent-swarm/pull/3124), [#3125](https://github.com/desplega-ai/agent-swarm/pull/3125)). The scrubber redacts the URL-encoded form of a known secret and Convex deploy keys ([#3043](https://github.com/desplega-ai/agent-swarm/pull/3043), [#3044](https://github.com/desplega-ai/agent-swarm/pull/3044)); native script children run as `nobody` when the API runs as root ([#3033](https://github.com/desplega-ai/agent-swarm/pull/3033)). Inbound senders link only when AgentMail authenticated them ([#3050](https://github.com/desplega-ai/agent-swarm/pull/3050)) or a GitLab address is real ([#3077](https://github.com/desplega-ai/agent-swarm/pull/3077)), a webhook credential comparison no longer throws ([#3012](https://github.com/desplega-ai/agent-swarm/pull/3012)), and the requester rule covers steering and script runs ([#3132](https://github.com/desplega-ai/agent-swarm/pull/3132)).
+- **Runtime and workflows.** A join holds while a branch awaits its retry ([#3019](https://github.com/desplega-ai/agent-swarm/pull/3019)); the reboot sweep leaves step recovery to the engine ([#3008](https://github.com/desplega-ai/agent-swarm/pull/3008)) and no longer claims a superseded task failed without a resume ([#3009](https://github.com/desplega-ai/agent-swarm/pull/3009)); `task started` is emitted after commit ([#3010](https://github.com/desplega-ai/agent-swarm/pull/3010)). An OpenRouter spend cap is a cap, not a five-minute rate limit ([#3101](https://github.com/desplega-ai/agent-swarm/pull/3101)). An agent with a profile and `MODEL_OVERRIDE` keeps one saved model ([#3119](https://github.com/desplega-ai/agent-swarm/pull/3119)), and pi accepts every provider key pi-ai resolves ([#3096](https://github.com/desplega-ai/agent-swarm/pull/3096)). Repo fields reach the entrypoint as arguments ([#3115](https://github.com/desplega-ai/agent-swarm/pull/3115)), ad-hoc clones get the prek pre-push hook ([#3084](https://github.com/desplega-ai/agent-swarm/pull/3084)), agent-fs JSON uploads go as `octet-stream` ([#3060](https://github.com/desplega-ai/agent-swarm/pull/3060)), and KV sweep yields stop sharing a slice with DB time ([#3052](https://github.com/desplega-ai/agent-swarm/pull/3052)).
+- **UI.** Read-only object embeds are labelled and long sheet cells show an ellipsis ([#3143](https://github.com/desplega-ai/agent-swarm/pull/3143)); the first keystroke in an app input survives the page load ([#3145](https://github.com/desplega-ai/agent-swarm/pull/3145)); the Codex model picker works with gateway credentials ([#3133](https://github.com/desplega-ai/agent-swarm/pull/3133)); UUIDs generate on HTTP origins ([#3031](https://github.com/desplega-ai/agent-swarm/pull/3031)); dot-only GitHub owners stay out of smart links ([#3155](https://github.com/desplega-ai/agent-swarm/pull/3155)); a late clipboard copy is ignored ([#3021](https://github.com/desplega-ai/agent-swarm/pull/3021)); a task's own model is not a pending agent change ([#3099](https://github.com/desplega-ai/agent-swarm/pull/3099)); a json-render `swarm.call` needs a path endpoint ([#3110](https://github.com/desplega-ai/agent-swarm/pull/3110)).
+- **After the tag.** Three fixes merged after the v2.13.2 release commit and are on main: Claude cost kept when a task turns terminal mid-session ([#3179](https://github.com/desplega-ai/agent-swarm/pull/3179)), a Codex `apply_patch` rewrite applied ([#3177](https://github.com/desplega-ai/agent-swarm/pull/3177)), and Slack conclusion settle and timeout values validated ([#3176](https://github.com/desplega-ai/agent-swarm/pull/3176)).
+
+## Breaking Changes
+
+Six behavior changes for operators. Each tightens a permission or a trust boundary; none removes an API.
+
+- **Env and secret workflow inputs require `config.read.secrets`** ([#3046](https://github.com/desplega-ai/agent-swarm/pull/3046), [#3049](https://github.com/desplega-ai/agent-swarm/pull/3049)). Grant it to agents that run workflows rendering env or secret inputs, param-rendered ones included.
+- **Repo-scoped script connections require `config.read.secrets`** ([#3137](https://github.com/desplega-ai/agent-swarm/pull/3137)). Grant it to agents that invoke them.
+- **Only the creator or a lead changes what a schedule runs** ([#3134](https://github.com/desplega-ai/agent-swarm/pull/3134)). Route schedule target edits through the creator or a lead.
+- **Unknown Slack teams fail closed** ([#3103](https://github.com/desplega-ai/agent-swarm/pull/3103), [#3094](https://github.com/desplega-ai/agent-swarm/pull/3094), [#3091](https://github.com/desplega-ai/agent-swarm/pull/3091)). A sender from another Slack team gets unknown trust: no email linking, no Work Object access.
+- **Drive invites and script actions are narrowed** ([#3098](https://github.com/desplega-ai/agent-swarm/pull/3098), [#3104](https://github.com/desplega-ai/agent-swarm/pull/3104)). Issue shared-drive invites as the operator key or a user; only a script's owner can wire an owned global script as an app action.
+- **`EVALS_API_KEY` is required when serving with `NODE_ENV=production`** ([#3062](https://github.com/desplega-ai/agent-swarm/pull/3062)). Set it before you upgrade a production deployment.
