@@ -220,7 +220,7 @@
     "@chat-adapter/teams": "4.45.0",
     "@chat-adapter/telegram": "4.45.0",
     "@cursor/sdk": "1.4.0",
-    "@desplega.ai/agent-fs-just-bash": "0.18.30",
+    "@desplega.ai/agent-fs-just-bash": "0.18.31",
     "@desplega.ai/business-use": "^0.4.2",
     "@earendil-works/pi-agent-core": "^1.5.2",
     "@earendil-works/pi-ai": "^1.5.2",
