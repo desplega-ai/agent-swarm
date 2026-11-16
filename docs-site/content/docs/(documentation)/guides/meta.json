@@ -10,6 +10,7 @@
     "marketplace-payout-exception-review",
     "marketplace-moderation-appeals",
     "customer-billing-dispute-review",
+    "agent-assisted-bank-reconciliation-review",
     "customer-pricing-change-review",
     "ai-support-escalation-handoff",
     "marketplace-catalog-discrepancy-review",
