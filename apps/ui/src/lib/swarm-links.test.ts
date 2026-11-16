@@ -202,6 +202,27 @@ describe("parseSwarmLink: github", () => {
 });
 
 describe("parseGithubShorthand", () => {
+  test.each(["0", "00", "000000000"])("rejects issue number #%s", (number) => {
+    const raw = `desplega-ai/agent-swarm#${number}`;
+    expect(parseGithubShorthand(raw)).toBeNull();
+    expect(parseSwarmLinkOrRef(raw, ORIGINS)).toBeNull();
+  });
+
+  test.each(["1", "001", "999999999"])("accepts positive issue number #%s", (number) => {
+    const raw = `desplega-ai/agent-swarm#${number}`;
+    const expected = {
+      type: "github",
+      kind: "ref",
+      owner: "desplega-ai",
+      repo: "agent-swarm",
+      number: Number(number),
+      sha: null,
+      href: `https://github.com/desplega-ai/agent-swarm/issues/${number}`,
+    };
+    expect(parseGithubShorthand(raw)).toEqual(expected);
+    expect(parseSwarmLinkOrRef(raw, ORIGINS)).toEqual(expected);
+  });
+
   test("owner/repo#N is a ref to the issues URL, which GitHub redirects for a PR", () => {
     expect(parseGithubShorthand("desplega-ai/agent-swarm#2605")).toMatchObject({
       type: "github",
