@@ -566,6 +566,10 @@
       "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
       "scenarios": ["core-task-controls"]
     },
+    "task-terminal-fence": {
+      "description": "A session whose task was superseded is refused send-task and slack-reply, and keeps store-progress and read-only tools",
+      "scenarios": ["core-terminal-task-fence"]
+    },
     "task-defer-wake": {
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
       "scenarios": ["core-task-tools"]
