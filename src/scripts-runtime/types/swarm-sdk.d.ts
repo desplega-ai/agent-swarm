@@ -455,7 +455,7 @@ declare module "swarm-sdk" {
       source?: string;
       keyPrefix?: string;
     }): Promise<unknown>;
-    memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
+    memory_get(args: { memoryId?: string; id?: string; intent: string }): Promise<unknown>;
     memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
     // --- tasks ---
     task_list(args?: Record<string, unknown>): Promise<unknown>;
