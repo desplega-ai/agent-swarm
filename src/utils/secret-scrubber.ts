@@ -1575,7 +1575,12 @@ export function findSecretsIn(text: string): SecretFindings {
   return { knownValues: [...knownValues].sort(), gitleaksRules: [...gitleaksRules].sort() };
 }
 
-export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
+export function scrubObject<T>(
+  value: T,
+  seen = new WeakSet<object>(),
+  // Rows of one result repeat the same keys: scrub each distinct key once per call.
+  keyCache = new Map<string, string>(),
+): T {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return scrubSecrets(value) as T;
   if (typeof value !== "object") return value;
@@ -1586,7 +1591,7 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => scrubObject(item, seen)) as T;
+    return value.map((item) => scrubObject(item, seen, keyCache)) as T;
   }
 
   // Keys are scrubbed too: a map keyed by a token leaks it as a key. Two keys
@@ -1594,10 +1599,14 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
   // overwriting the earlier entry.
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    const scrubbed: string = scrubSecrets(key);
+    let scrubbed = keyCache.get(key);
+    if (scrubbed === undefined) {
+      scrubbed = scrubSecrets(key);
+      keyCache.set(key, scrubbed);
+    }
     let outKey = scrubbed;
     for (let n = 2; Object.hasOwn(out, outKey); n++) outKey = `${scrubbed}#${n}`;
-    out[outKey] = scrubObject(child, seen);
+    out[outKey] = scrubObject(child, seen, keyCache);
   }
   return out as T;
 }
