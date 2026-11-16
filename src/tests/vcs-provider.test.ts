@@ -7,6 +7,7 @@ describe("detectVcsProvider", () => {
     expect(detectVcsProvider("git@github.com:acme/repo.git")).toBe("github");
     expect(detectVcsProvider("ssh://git@GitHub.com/acme/repo.git")).toBe("github");
     expect(detectVcsProvider("github.com/acme/repo/tree/main")).toBe("github");
+    expect(detectVcsProvider("github.com:443/acme/repo")).toBe("github");
     // Only the host counts- an azure host name in a github path stays github
     expect(detectVcsProvider("https://github.com/acme/dev.azure.com/tree/main")).toBe("github");
   });

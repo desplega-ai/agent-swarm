@@ -17,6 +17,7 @@ describe("Azure Repos URL helpers", () => {
       "https://dev.azure.com/github-mirror/project/_git/repo",
       "ssh://git@ssh.dev.azure.com/v3/org/project/repo",
       "dev.azure.com/org/project/_git/repo",
+      "dev.azure.com:443/org/project/_git/repo",
     ]) {
       expect(isAzureDevOpsUrl(url)).toBe(true);
       expect(detectVcsProvider(url)).toBe("azure-devops");

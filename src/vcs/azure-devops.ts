@@ -14,9 +14,11 @@ export function isAzureDevOpsUrl(url: string): boolean {
     try {
       host = new URL(trimmed).hostname;
     } catch {
-      // scheme-less `dev.azure.com/org/project/_git/repo`
-      host = trimmed.split("/")[0] as string;
+      // scheme-less, handled below
     }
+    // scheme-less `dev.azure.com[:port]/org/project/_git/repo`. With a port,
+    // URL parses the host as a scheme and leaves hostname empty.
+    host ||= trimmed.split(/[/:]/)[0] as string;
   }
   host = host.toLowerCase();
   return (
