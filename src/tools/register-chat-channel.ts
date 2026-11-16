@@ -39,7 +39,7 @@ export const registerRegisterChatChannelTool = (server: McpServer) => {
       title: "Route a chat channel to an agent or workflow",
       annotations: { idempotentHint: true },
       description:
-        "Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.",
+        "Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. For Telegram, defaultThreadId sets the topic used by channel-only chat-post calls. Re-registering replaces the mapping; omit defaultThreadId to clear it. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.",
       inputSchema: z.object({
         adapter: z.enum(CHAT_SDK_ADAPTER_NAMES).describe("Chat SDK adapter name."),
         channelId: z
@@ -52,6 +52,13 @@ export const registerRegisterChatChannelTool = (server: McpServer) => {
           .optional()
           .describe("Workflow whose webhook trigger receives the channel's messages."),
         name: z.string().max(200).optional().describe("Display name for the mapping."),
+        defaultThreadId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Telegram topic used when chat-post gives only channelId, such as telegram:-100123:42. Must belong to this channel. Explicit threadId and chat-reply ignore this default.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -60,13 +67,14 @@ export const registerRegisterChatChannelTool = (server: McpServer) => {
           .looseObject({
             agentId: z.string().optional(),
             workflowId: z.string().optional(),
+            defaultThreadId: z.string().optional(),
             name: z.string().optional(),
             createdAt: z.string().optional(),
           })
           .optional(),
       }),
     },
-    async ({ adapter, channelId, agentId, workflowId, name }, requestInfo) => {
+    async ({ adapter, channelId, agentId, workflowId, name, defaultThreadId }, requestInfo) => {
       const data = { yourAgentId: requestInfo.agentId };
       try {
         if (!(await canManageChatChannels(requestInfo))) {
@@ -87,6 +95,7 @@ export const registerRegisterChatChannelTool = (server: McpServer) => {
           ...(agentId ? { agentId } : {}),
           ...(workflowId ? { workflowId } : {}),
           ...(name ? { name } : {}),
+          ...(defaultThreadId ? { defaultThreadId } : {}),
           createdAt: new Date().toISOString(),
         };
         const key = await putChatChannelMapping(adapter, channelId, mapping);

@@ -10,8 +10,10 @@ import {
   TELEGRAM_PHOTO_LIMIT,
 } from "./limits";
 import { errorMessage } from "./logger";
+import { getChatChannelMapping } from "./router";
 import { getChatInstance } from "./runtime";
 import { assertTrustedChatTarget } from "./teams-origin";
+import { assertTelegramTopicThreadId } from "./telegram-thread";
 
 /** The adapter is not configured, failed to start, or is shutting down. */
 export class ChatAdapterUnavailableError extends Error {
@@ -370,9 +372,24 @@ export async function postChatMessage(args: {
   files?: OutboundChatFile[];
   replyToMessageId?: string;
 }): Promise<ChatPostResult> {
+  let threadId = args.threadId;
+  if (!threadId && args.channelId && args.adapter === "telegram") {
+    const mapping = await getChatChannelMapping(args.adapter, args.channelId);
+    if (mapping?.defaultThreadId !== undefined) {
+      assertTelegramTopicThreadId(mapping.defaultThreadId, args.channelId);
+      threadId = mapping.defaultThreadId;
+    }
+  }
+  if (
+    args.adapter === "telegram" &&
+    threadId?.split(":").length === 3 &&
+    !threadId.startsWith("telegram:biz:")
+  ) {
+    assertTelegramTopicThreadId(threadId);
+  }
   // Ids come from tools and stored context keys. Check the Teams origin
   // before the adapter sends its token.
-  assertTrustedChatTarget(args.threadId ?? args.channelId ?? "");
+  assertTrustedChatTarget(threadId ?? args.channelId ?? "");
   const chat = getChatInstance(args.adapter);
   if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
   const parts = (typeof args.text === "string" ? [args.text] : args.text).map(scrubSecrets);
@@ -383,8 +400,8 @@ export async function postChatMessage(args: {
 
   let result: ChatPostResult;
   let target: PostTarget;
-  if (args.threadId) {
-    const thread = chat.thread(args.threadId);
+  if (threadId) {
+    const thread = chat.thread(threadId);
     target = thread;
     // Only adapters with a native reply (Telegram in this SDK version) anchor;
     // the others post unanchored, as before.
