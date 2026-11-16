@@ -1004,7 +1004,7 @@ jobs:
         # A base git cannot resolve fails the step; it never runs zero tests silently.
         env:
           SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
-          TEST_SCOPE: ${{ needs.detect-changes.outputs.test_scope }}
+          TEST_SCOPE: changed # TEMP: measure --changed on this PR; reverted next commit
           TEST_BASE: ${{ needs.detect-changes.outputs.test_base }}
         run: |
           start=$(date +%s%3N)
@@ -1141,7 +1141,7 @@ jobs:
   save-timings:
     name: Save test timings
     needs: [detect-changes, test]
-    if: needs.test.result == 'success' && needs.detect-changes.outputs.test_scope == 'full'
+    if: false # TEMP: measurement commit
     runs-on: ubuntu-latest
     # No checkout. Same-run artifact download and cache save use the runner
     # token, not GITHUB_TOKEN.
