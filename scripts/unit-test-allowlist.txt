@@ -56,6 +56,7 @@ src/be/migrations/  # migration runner and SQL files
 src/tests/primitives-object-webhooks.test.ts  # interleaved applyFileChange races, reindex byte/time budgets and replica ensure races need injected readers, gates and limits; the HTTP paths are in scripts/e2e/scenarios/knowledge-objects.ts
 src/tests/spend-cap-credentials.test.ts  # resolveCredentialPools runs only inside the worker harness, which the contract e2e suite never starts
 src/tests/key-usage-selection.test.ts  # selectCredential and resolveCredentialPools run only inside the worker harness; tie-breaking and window expiry need many enumerated cases
+src/tests/claude-quota-probe.test.ts  # the probe calls api.anthropic.com from a timer; no route exposes it, so the 200/429/401/403 paths need an injected fetch and clock
 
 # Dashboard: stays on until Playwright is required and fills in (plan section 4).
 apps/ui/  # dashboard units, until the Playwright delete PR
