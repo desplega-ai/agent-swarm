@@ -356,6 +356,10 @@ export const PERMISSIONS = {
     description: "Delete a page the caller does not own.",
     namespace: "page",
   },
+  "page.launch": {
+    description: "Open a public or authed page: mint its page-session cookie.",
+    namespace: "page",
+  },
   "objects.read": {
     description:
       "Read a board or sheet on the swarm's shared agent-fs drive through the object routes.",
