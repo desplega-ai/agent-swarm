@@ -166,6 +166,7 @@ export class AgentTaskExecutor extends BaseExecutor<
       if (modelProfileRefError(error) !== "missing") throw error;
       return { status: "failed", error: `Unknown model profile "${config.profile}".` };
     }
+    crashAfterTaskInsertForTest(preCreate.description);
 
     // 4. Return async result — engine will pause the workflow
     return {
@@ -175,4 +176,16 @@ export class AgentTaskExecutor extends BaseExecutor<
       correlationId: task.id,
     } as ExecutorResult<AgentTaskOutput>;
   }
+}
+
+/**
+ * Test-only crash point: kill the API between the task insert and the step
+ * parking, the window a real crash can hit. Fires only under NODE_ENV=test
+ * for a task whose text contains E2E_CRASH_AFTER_WORKFLOW_TASK_INSERT. The
+ * e2e scenario workflow-agent-task-crash-window sets it for one restart.
+ */
+function crashAfterTaskInsertForTest(description: string): void {
+  if (process.env.NODE_ENV !== "test") return;
+  const marker = process.env.E2E_CRASH_AFTER_WORKFLOW_TASK_INSERT;
+  if (marker && description.includes(marker)) process.kill(process.pid, "SIGKILL");
 }
