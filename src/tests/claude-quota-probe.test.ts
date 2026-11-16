@@ -170,6 +170,41 @@ describe("parseQuotaProbeHeaders", () => {
   });
 });
 
+describe("parseQuotaProbeHeaders 429 claim (review B1)", () => {
+  test("429 without status headers rejects only the claimed five_hour window", () => {
+    const at = new Date(NOW).toISOString();
+    const windows = parseQuotaProbeHeaders(
+      new Headers({
+        "anthropic-ratelimit-unified-5h-utilization": "1",
+        "anthropic-ratelimit-unified-5h-reset": String(NOW_SEC + 3600),
+        "anthropic-ratelimit-unified-7d-utilization": "0.2",
+        "anthropic-ratelimit-unified-7d-reset": String(NOW_SEC + 86400),
+        "anthropic-ratelimit-unified-representative-claim": "five_hour",
+      }),
+      429,
+      at,
+    );
+    expect(windows.five_hour).toMatchObject({ status: "rejected", utilization: 1 });
+    expect(windows.seven_day).toMatchObject({ status: "allowed", utilization: 0.2 });
+  });
+
+  test("429 without claim or status headers rejects every window", () => {
+    const at = new Date(NOW).toISOString();
+    const windows = parseQuotaProbeHeaders(
+      new Headers({
+        "anthropic-ratelimit-unified-5h-utilization": "0.7",
+        "anthropic-ratelimit-unified-5h-reset": String(NOW_SEC + 3600),
+        "anthropic-ratelimit-unified-7d-utilization": "0.2",
+        "anthropic-ratelimit-unified-7d-reset": String(NOW_SEC + 86400),
+      }),
+      429,
+      at,
+    );
+    expect(windows.five_hour?.status).toBe("rejected");
+    expect(windows.seven_day?.status).toBe("rejected");
+  });
+});
+
 describe("sweepClaudeQuotaProbe", () => {
   const POOL = ["tok-key-00001", "tok-key-00002"];
   const calls: Array<{ url: string; auth: string | null; body: Record<string, unknown> }> = [];

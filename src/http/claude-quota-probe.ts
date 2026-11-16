@@ -94,10 +94,11 @@ function headerNumber(headers: Headers, name: string): number | undefined {
  * Map the unified rate-limit headers to windows, in the shape that
  * `parseRateLimitWindowTelemetry` produces. A window needs its reset header.
  * On a 2xx it also needs its utilization header; a missing one is no data,
- * never 0 %. On a 429 the windows are written as rejected so the sweep skips
- * the key until the reset: the provider's own per-window status wins when it
- * says `rejected`; otherwise the representative-claim window (or every window
- * when no claim is sent) is marked rejected.
+ * never 0 %. A window without a status header is `rejected` at utilization
+ * >= 1, else `allowed`. On a 429 the sweep must skip the key until the reset:
+ * the representative-claim window is marked rejected first; only when no
+ * claim names a parsed window and no window is rejected yet is every window
+ * marked rejected.
  */
 export function parseQuotaProbeHeaders(
   headers: Headers,
@@ -113,7 +114,7 @@ export function parseQuotaProbeHeaders(
     const utilization = headerNumber(headers, `${prefix}-utilization`);
     if (utilization === undefined && !limited) continue;
     const reported = headers.get(`${prefix}-status`)?.trim().slice(0, 256);
-    const status = reported || (limited || (utilization ?? 0) >= 1 ? "rejected" : "allowed");
+    const status = reported || ((utilization ?? 0) >= 1 ? "rejected" : "allowed");
     windows[key] = {
       status,
       ...(utilization === undefined ? {} : { utilization }),
@@ -123,10 +124,14 @@ export function parseQuotaProbeHeaders(
       source: "poll",
     };
   }
-  if (limited && !Object.values(windows).some((w) => w.status === "rejected")) {
+  if (limited) {
     const claim = headers.get("anthropic-ratelimit-unified-representative-claim")?.trim();
-    const claimed = claim && windows[claim] ? [claim] : Object.keys(windows);
-    for (const key of claimed) windows[key] = { ...windows[key]!, status: "rejected" };
+    if (claim && windows[claim]) {
+      windows[claim] = { ...windows[claim], status: "rejected" };
+    } else if (!Object.values(windows).some((w) => w.status === "rejected")) {
+      for (const key of Object.keys(windows))
+        windows[key] = { ...windows[key]!, status: "rejected" };
+    }
   }
   return windows;
 }
