@@ -78,6 +78,26 @@ describe("decideIssue", () => {
     expect(d.losers).toEqual([1]);
   });
 
+  test("a comment claim made after another PR opened cannot close it; an assignment can", () => {
+    const prs = [pr(1, "alice", "2026-01-01T00:00:00Z"), pr(2, "mallory", "2026-01-02T00:00:00Z")];
+    const late = decideIssue(
+      issue({ comments: [comment("mallory", "2026-01-01T12:00:00Z", "I'll take it")] }),
+      prs,
+    );
+    expect(late.winner).toBe(1);
+    expect(late.reason?.kind).toBe("first");
+    expect(late.losers).toEqual([2]);
+
+    const assigned = decideIssue(
+      issue({
+        assignees: ["mallory"],
+        assignments: [{ kind: "assigned", login: "mallory", createdAt: "2026-01-01T12:00:00Z" }],
+      }),
+      prs,
+    );
+    expect(assigned.winner).toBe(2);
+  });
+
   test("the earliest claim wins between two claimants; a claimant with no PR is skipped", () => {
     const i = issue({
       comments: [

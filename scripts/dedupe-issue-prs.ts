@@ -15,7 +15,9 @@
  *   1. the earliest PR of the earliest claimant who has a PR in the pool. A claim
  *      is an issue assignment or an issue comment with a claim phrase ("I'll take
  *      it", "can I take", "assign me", "I'm working on this", ...). Unassigning a
- *      user voids every claim they made before it.
+ *      user voids every claim they made before it. A comment claim counts only
+ *      when it predates every other author's PR in the pool, so a late comment
+ *      cannot close a PR that was already open.
  *   2. else the earliest maintainer PR (author association OWNER, MEMBER or
  *      COLLABORATOR): a maintainer never loses to an unclaimed contributor PR.
  *   3. else the earliest-opened PR.
@@ -178,6 +180,10 @@ export function decideIssue(issue: Issue, prs: PullRequest[]): IssueDecision {
   let winner: PullRequest | undefined;
   let reason: WinReason | undefined;
   for (const claim of findClaims(issue)) {
+    // Anyone can comment, so a comment claim made after someone else's PR
+    // opened cannot close it. Assignments come from maintainers and always count.
+    const firstOther = pool.find((p) => lower(p.author) !== lower(claim.login));
+    if (claim.kind === "comment" && firstOther && ts(claim.at) >= ts(firstOther.createdAt)) continue;
     winner = pool.find((p) => lower(p.author) === lower(claim.login));
     if (winner) {
       reason = { kind: "claim", claim };
