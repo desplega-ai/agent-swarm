@@ -24,6 +24,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getPage, incrementPageViewCount } from "../be/db";
+import { getActiveDesignSystem } from "../be/design-system";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
 import {
@@ -38,6 +39,7 @@ import {
   PAGE_THEME_PARAM,
 } from "../pages/page-head";
 import { resolvePageTheme } from "../themes/page-theme";
+import { getThemePreset } from "../themes/presets";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls, getLocalDevAppOrigins } from "../utils/constants";
 import {
@@ -111,24 +113,37 @@ const publicPageJsonRoute = route({
 /**
  * The `<head>` defaults for a page's design version (`src/pages/page-head.ts`).
  * Version 1 is the frozen original head and ignores the viewer params. Version
- * 2 resolves the theme: the page `theme`, else the viewer's `__swarm-theme`
- * preset, else Hive, plus the page `themeTokens` on top. It is dark only for
- * `__swarm-mode=dark`, and a `?print=1` export is always light. A body with
+ * 2 resolves the theme: the page `theme`, else the org design system, else the
+ * viewer's `__swarm-theme` preset, else Hive, plus the page `themeTokens` on
+ * top. The org design system (its tokens, fonts and mode lock) applies only to
+ * a page without its own `theme`. The page is dark for `__swarm-mode=dark`, or
+ * always when the design system locks `mode: "dark"`; `mode: "light"` keeps it
+ * light. A `?print=1` export is always light. A body with
  * `COLOR_LITERAL_THRESHOLD` or more hardcoded colors also stays light: its
  * hardcoded light surfaces would get the dark-mode text color.
  */
-function pageHead(page: Page, queryParams: URLSearchParams, wantsPrint: boolean): string {
+async function pageHead(
+  page: Page,
+  queryParams: URLSearchParams,
+  wantsPrint: boolean,
+): Promise<string> {
   if (page.designVersion === 1) return PAGE_HEAD_V1;
+  const designSystem = getThemePreset(page.theme) ? null : await getActiveDesignSystem();
   const theme = resolvePageTheme({
     pageTheme: page.theme,
     viewerTheme: queryParams.get(PAGE_THEME_PARAM),
     overrides: page.themeTokens,
+    designSystem,
   });
-  const dark =
-    !wantsPrint &&
-    queryParams.get(PAGE_MODE_PARAM) === "dark" &&
-    countColorLiterals(page.body) < COLOR_LITERAL_THRESHOLD;
-  return buildPageHeadV2({ theme, mode: dark ? "dark" : "light" });
+  const mode = designSystem?.mode ?? "viewer";
+  const wantsDark =
+    mode === "dark" || (mode === "viewer" && queryParams.get(PAGE_MODE_PARAM) === "dark");
+  const dark = !wantsPrint && wantsDark && countColorLiterals(page.body) < COLOR_LITERAL_THRESHOLD;
+  return buildPageHeadV2({
+    theme,
+    mode: dark ? "dark" : "light",
+    fontsHref: designSystem?.fontsHref,
+  });
 }
 
 /** A doctype at the start of a body (`\s` also matches a BOM). */
@@ -703,7 +718,7 @@ export async function handlePagesPublic(
   const html =
     injectBrowserSdk(page.body, {
       // The viewer meta goes after the head defaults, which start with <base target>.
-      head: `${pageHead(page, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
+      head: `${await pageHead(page, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
       headFirst: feedback ? feedbackKeyGuardScript() : "",
       standardsMode: page.designVersion !== 1,
     }) +

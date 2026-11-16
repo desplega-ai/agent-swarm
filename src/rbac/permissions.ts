@@ -356,6 +356,10 @@ export const PERMISSIONS = {
     description: "Delete a page the caller does not own.",
     namespace: "page",
   },
+  "design-system.write": {
+    description: "Set or decline the org design system that restyles every page.",
+    namespace: "page",
+  },
   "objects.read": {
     description:
       "Read a board or sheet on the swarm's shared agent-fs drive through the object routes.",

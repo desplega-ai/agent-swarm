@@ -30,6 +30,7 @@ import completeTaskSrc from "./catalog/complete-task.ts" with { type: "text" };
 import compoundInsightsSrc from "./catalog/compound-insights.inline.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
+import designSystemSeedSrc from "./catalog/design-system-seed.ts" with { type: "text" };
 import dreamingApplySrc from "./catalog/dreaming-apply.ts" with { type: "text" };
 import dreamingGatherSrc from "./catalog/dreaming-gather.ts" with { type: "text" };
 import dreamingHeartbeatSrc from "./catalog/dreaming-heartbeat.ts" with { type: "text" };
@@ -141,6 +142,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Read the actual content of a URL without wading through raw HTML; readable-article / reader-mode extraction.",
     source: asText(fetchReadableSrc),
+  },
+  {
+    name: "design-system-seed",
+    description:
+      "Build the org design system from a site URL, a pasted CSS variable block or a preset, publish a preview page in the swarm look, and save it with save: true once the requester approves.",
+    intent:
+      "Seed or rebrand the org design system / page theme / brand colors and fonts from a website or shadcn CSS, with a preview before saving.",
+    source: asText(designSystemSeedSrc),
   },
   {
     name: "json-query",

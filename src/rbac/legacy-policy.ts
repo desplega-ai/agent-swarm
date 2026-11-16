@@ -348,6 +348,8 @@ export const LEGACY_POLICY = {
   "comb.presence": operatorOrUser,
   "fs.join.own": anyAuthenticated,
   "page.delete.any": leadOrResourceOwner,
+  // Any agent records the requester's answer to the first-page ask (src/tools/design-system.ts).
+  "design-system.write": anyAuthenticated,
   // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
   "objects.read": operatorOrUser,
   "objects.write": operatorOrUser,
