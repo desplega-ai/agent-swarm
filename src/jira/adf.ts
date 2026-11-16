@@ -84,6 +84,8 @@ export function extractText(adf: unknown): string {
         return;
       }
       case "orderedList": {
+        // ADF allows an `order` of 0 or more, so a zero-start list keeps its 0;
+        // only a missing or non-integer value falls back to 1.
         const order = node.attrs?.order;
         const start =
           typeof order === "number" && Number.isInteger(order) && order >= 0 ? order : 1;
