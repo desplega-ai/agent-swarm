@@ -130,7 +130,10 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
-import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
+import {
+  reportCredentialOutcomeThenFinish,
+  reportTerminalSessionWindows,
+} from "./credential-outcome-report.ts";
 import {
   type CredentialRefreshState,
   credentialFingerprint,
@@ -5979,8 +5982,18 @@ export async function checkCompletedProcesses(
           cancelledSignaled?.delete(taskId);
           // The server finished this task without the session (heartbeat sweep,
           // another writer). Its result stands: no finish call, and no credential
-          // or model outcome built from the abort this runner forced.
+          // or model outcome built from the abort this runner forced. The usage
+          // windows the session observed are provider facts, so they still go out.
           if (serverTerminalStatus) {
+            if (apiConfig) {
+              void reportTerminalSessionWindows({
+                apiUrl: apiConfig.apiUrl,
+                apiKey: apiConfig.apiKey,
+                credentialInfo,
+                serverTerminalStatus,
+                rateLimitWindows: result.rateLimitWindows,
+              });
+            }
             console.log(
               `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
             );

@@ -103,6 +103,46 @@ export async function reportKeyRateLimitWindows(
   }
 }
 
+/** Server terminal statuses whose finished session still reports its window telemetry. */
+const TELEMETRY_TERMINAL_STATUSES = new Set(["completed", "failed"]);
+
+/**
+ * Reports the window snapshot of a session whose task the server already
+ * holds as `completed` or `failed` (the agent finished the task before its
+ * session ended). The server result stands, so no outcome and no `finish`:
+ * only the provider usage the session observed. Fire-and-forget; returns the
+ * settled report so a test can await it. Never throws.
+ */
+export function reportTerminalSessionWindows(input: {
+  apiUrl: string;
+  apiKey: string;
+  credentialInfo?: { keyType: string; keySuffix: string; keyIndex: number };
+  serverTerminalStatus: string;
+  rateLimitWindows?: RateLimitWindowTelemetry;
+}): Promise<void> {
+  const { credentialInfo, rateLimitWindows } = input;
+  if (
+    !credentialInfo ||
+    !TELEMETRY_TERMINAL_STATUSES.has(input.serverTerminalStatus) ||
+    !rateLimitWindows ||
+    Object.keys(rateLimitWindows).length === 0
+  ) {
+    return Promise.resolve();
+  }
+  return reportKeyRateLimitWindows(
+    input.apiUrl,
+    input.apiKey,
+    credentialInfo.keyType,
+    credentialInfo.keySuffix,
+    credentialInfo.keyIndex,
+    rateLimitWindows,
+  ).catch((err) => {
+    console.warn(
+      `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
+}
+
 export interface CredentialOutcomeInput {
   apiUrl: string;
   apiKey: string;
