@@ -162,8 +162,7 @@ describe("exchangeAuthorizationCode", () => {
         redirectUri: testConfig.redirectUri,
       });
       const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-      const headers = init.headers as Record<string, string>;
-      expect(headers.Accept).toBe("application/json");
+      expect(new Headers(init.headers).get("accept")).toBe("application/json");
     } finally {
       fetchSpy.mockRestore();
     }

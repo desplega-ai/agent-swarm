@@ -1035,8 +1035,42 @@ describe("custom app actions", () => {
       agentId: OTHER_AGENT_ID,
       typeChecked: true,
     });
+    // A global script another agent wrote runs as that agent at invoke time.
+    const foreignGlobal = await upsertScriptByName({
+      name: `app_action_foreign_global_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope: "global",
+      scopeId: null,
+      source: "export default function run() { return { ok: true }; }",
+      description: "Foreign-written global action fixture",
+      intent: "Prove the script ownership gate for global scripts",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "object" } }),
+      agentId: LEAD_ID,
+      typeChecked: true,
+    });
 
     try {
+      const deniedGlobal = await request<{ issues: Array<{ path: string; message: string }> }>(
+        "/api/apps",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: "Foreign global wire",
+            definition: {
+              ...baseDefinition,
+              actions: { run: { kind: "script", scriptId: foreignGlobal.script.id } },
+            },
+          }),
+        },
+      );
+      expect(deniedGlobal.status).toBe(400);
+      expect(
+        deniedGlobal.body.issues.some(
+          (issue) =>
+            issue.path === "actions.run.scriptId" &&
+            issue.message.includes("only that agent or the operator"),
+        ),
+      ).toBe(true);
+
       // An agent writer referencing a foreign agent-scoped script is rejected.
       const denied = await request<{ issues: Array<{ path: string; message: string }> }>(
         "/api/apps",
@@ -1084,6 +1118,7 @@ describe("custom app actions", () => {
       expect(patched.status).toBe(200);
     } finally {
       await deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
+      await deleteScript({ name: foreignGlobal.script.name, scope: "global" });
     }
   });
 

@@ -58,7 +58,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" +
         "- WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. " +
         "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
-        "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
+        "or set verification to { format: 'hmac-sha256', header }, { format: 'hmac-sha1', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
         "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
         "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
         "verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }.\n" +
@@ -83,7 +83,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
+            "Optional trigger configurations (webhook, schedule, event). A webhook trigger accepts filter (headers and body allowlists) and preset (github, gitlab, standard-webhooks). events and eventHeader remain a deprecated alias of one filter clause. Verification formats: legacy omitted verification, hmac-sha256, hmac-sha1, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",

@@ -39,7 +39,9 @@ egress — script code never holds a raw secret (see
 Management is **lead-only** (RBAC verb `script-connection.manage`) through the
 `script-connections` MCP tool: `list`, `upsert-openapi`, `upsert-mcp`,
 `upsert-graphql`, `refresh`, `disable`, `delete`. Connections are scoped `global`
-(default), `agent`, or `repo`.
+(default), `agent`, or `repo`. The `mcp-call` and `sql-query` proxy routes run
+a `repo`-scoped connection only for a caller that holds `config.read.secrets`
+(a lead by default).
 
 `disable` keeps the connection in the registry. `delete` is permanent: it
 removes the connection, its managed credential binding, and the

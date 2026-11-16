@@ -30,6 +30,10 @@
   },
   "overrides": [
     {
+      "includes": ["src/lib/markdown/swarm-embed-cases.json"],
+      "formatter": { "enabled": false }
+    },
+    {
       "includes": ["src/components/ui/**", "src/components/kibo-ui/**"],
       "linter": {
         "rules": {

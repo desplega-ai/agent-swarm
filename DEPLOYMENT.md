@@ -258,16 +258,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.322)
+# Override the pinned Claude Code version (default: 2.1.325)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.322`
+- `CLAUDE_CODE_VERSION=2.1.325`
 - `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.167.2`
-- `OPENCODE_VERSION=2.2.7` (installs `@opencode/cli` and `@opencode/sdk`)
+- `CODEX_VERSION=0.169.0`
+- `OPENCODE_VERSION=2.3.0` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -280,6 +280,8 @@ The worker image also now bundles the Ubuntu runtime libraries Playwright's Chro
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
 Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
+
+The entrypoint also sets a system `init.templateDir` whose `pre-push` shim reaches clones outside the registered clone path (for example a `mktemp -d` checkout). The shim runs prek only when prek is installed, the checkout has a `prek.toml` or `.pre-commit-config.yaml`, and `origin` is an auto-cloned repo registered with hooks enabled. Otherwise it exits 0. `install-repo-hooks.sh` replaces the shim with prek's own hook.
 
 ### Run
 
@@ -525,7 +527,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.25. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.28. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -633,9 +635,9 @@ request cannot finish within the grace period.
 The image still registers `agent-swarm codex-hook` for `SessionStart`,
 `PostToolUse`, and `Stop` in `/etc/codex/requirements.toml` for legacy
 `codex exec` sessions. App-server sessions disable steering delivery in the
-hook to avoid duplicates. The image also registers it for `PreToolUse` (Bash
-calls only), in every session mode, to block `gh pr create|edit` when the PR body for a public repo
-carries internal identifiers. No shared app-server daemon is required; task continuity
+hook to avoid duplicates. The image also registers it for `PreToolUse` (`Bash` and
+`apply_patch` calls), in every session mode, to block `gh pr create|edit` when the PR body for a public repo
+carries internal identifiers and to report native calls to extensions with `toolSources: ["native"]`. No shared app-server daemon is required; task continuity
 uses the swarm context preamble.
 
 ---

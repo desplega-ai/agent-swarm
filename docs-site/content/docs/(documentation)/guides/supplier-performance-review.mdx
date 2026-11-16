@@ -1,0 +1,99 @@
+---
+title: 'Reviewing supplier performance across delivery, quality and service records with AI agents'
+description: "Agent Swarm collects permitted delivery, quality and service records for one supplier and period, then assembles a source-linked review packet. People decide."
+agent:
+  when: "Someone wants operations and purchasing to review a supplier's delivery, quality and service record for a period"
+---
+
+Agent Swarm can collect the permitted delivery records, quality incidents and supplier correspondence for one supplier across one review period, run deterministic count and date checks over them, and assemble a source-linked review packet for a named operations or purchasing owner, while the judgement of how that supplier performed and any action that follows stay with people. What it takes off the team is the assembly: finding the delivery, quality and service evidence in the systems each team keeps it in, and naming what is missing or disagrees before the review conversation starts.
+
+The scope is one periodic performance review during an ongoing relationship, a supplier already delivering, reviewed against the criteria the buyer set for the period. Three neighbouring jobs have their own owners. The renewal decision, whether to continue, renegotiate or replace, is worked through in [the supplier renewal decision guide](https://www.agent-swarm.dev/blog/omnia/ai-supplier-renewal-decision). Pre-onboarding security evidence is a different review, covered in [Reviewing a supplier's security evidence before onboarding with AI agents](/docs/guides/supplier-security-evidence-review). An invoice that disagrees with its purchase order is a finance question, covered in [Reviewing supplier invoice and purchase order discrepancies with AI agents](/docs/guides/ai-invoice-discrepancy-review).
+
+## When another tool fits better
+
+Two established options already cover much of this ground.
+
+**A spreadsheet, when the records come out of one system.** If one person owns a few suppliers and delivery dates, incidents and open issues can be pulled into one export, a spreadsheet that person maintains answers the question. A review a person can read in a sitting does not need a workflow, and moving a working sheet into a queue that needs a human response is a step backwards.
+
+**An existing procurement or supplier-management tool, when it already holds the scorecard.** If the company runs a formal scorecard, exchanges it with suppliers through a portal and tracks corrective actions there, that product is doing this job. Agent Swarm provides no supplier portal, no scorecard template and no supplier-facing surface.
+
+Agent Swarm fits a different shape: the evidence is scattered and several teams hold a piece of it. Delivery records sit in an ERP or a warehouse system, quality incidents in a quality tool or a ticket queue, promised dates on the purchase order, and the conversation about a late batch in email. No single team can answer the question alone, and assembling the pieces is the work. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in supplier feature, not a supplier integration and not a customer result. Connecting an ERP, warehouse, quality or email system is custom work your team sets up and tests, through [script connections](/docs/guides/script-connections) with credentials taken from the [credential broker](/docs/guides/scripts-credential-broker).
+
+<Mermaid title="Illustrative supplier performance review, from written criteria to a human response at a gate." chart={`flowchart LR
+  A["Review criteria<br/>supplier, period,<br/>records that count"] --> B["Deterministic collection<br/>(swarm-script to JSON)"]
+  B --> C["Deterministic<br/>count and date checks"]
+  C --> D["Agent writes the<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>operations or purchasing owner"}}
+  G -- "evidence holds" --> R["Owner decides any<br/>supplier action"]
+  G -- "gap or conflict" --> S["Request more records<br/>or correct the criteria"]
+`} />
+
+**1. The owner writes the review criteria.** Before anything is collected, the operations or purchasing owner states the supplier, the period, which records count as delivery evidence, which count as quality evidence, and the rule for a late delivery, for example calendar days measured against the promised date on the order, not a date rescheduled later. The criteria belong in the workflow's [governance](/docs/guides/ai-operations-governance) record, so the next review starts from the same rules.
+
+**2. Collection runs as deterministic steps.** A `swarm-script` step reaches each permitted system and emits JSON, so the same inputs produce the same records every run and no model chooses which records to open. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-first pattern.
+
+**3. Counts and dates are computed in code.** The checks count deliveries in the period, count late deliveries against the promised date, count quality incidents opened and closed inside the period, and read response dates out of the correspondence. Code computes these numbers; the agent does not. That keeps the arithmetic repeatable when someone asks how a figure was reached.
+
+**4. An agent writes the packet.** The agent turns the checked JSON and the source records into one document: what the period shows, which record each line comes from, and which records are missing or disagree. Every line links its source, so a reader can follow any count back to its system.
+
+**5. The packet is stored as a file and linked from the gate message.** It lives as a file the owner can keep, and the gate message carries a short summary plus the link to it, which is the shape the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends.
+
+**6. A person responds at a gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only on a human response. The gate carries a timeout and a fallback, and the workflow never proceeds on silence. If the packet has a gap or a conflict, the owner can request more records or correct the criteria, and the next run starts from the corrected version.
+
+## What the packet flags
+
+Five conditions are worth naming in the criteria.
+
+- **A missing record for the period.** A week with no delivery record where deliveries were expected, or a month with no quality incidents where the supplier handles a high-volume part. The packet names the record that should exist and who can confirm it.
+- **A delivery date that conflicts between two systems.** The date on the order, the date in the receiving system and the date on the carrier record do not agree. Both or all three are shown with their timestamps.
+- **An incident with no closure record.** An incident opened in the period with no recorded resolution, owner or root cause, reported as open rather than assumed closed.
+- **Correspondence that contradicts a record.** An email agreeing a replacement, a credit or a revised schedule, against a system with no matching entry. The packet shows the message and the missing record side by side.
+- **A source older than the freshness window.** A delivery export dated before the period starts, or a quality extract that has not refreshed. The packet reports the extract date so the owner knows what the numbers cover.
+
+Each of these is shown with both sources and left unresolved. A packet that silently picks one record over another hides exactly the disagreement the review exists to settle.
+
+## What stays human-owned
+
+Five decisions stay with people in every version of this workflow.
+
+- **Whether the evidence is sufficient.** Judging that a gap is immaterial, or that a late delivery has a documented cause, is a person's call with a name on it.
+- **The performance judgement.** Whether a period was acceptable, whether a trend matters and whether an explanation holds do not reduce to a count.
+- **Contacting the supplier.** Any question about a date, a defect or an open incident goes through the person who owns the relationship.
+- **Any supplier action.** A corrective plan, a volume change, a second source or a termination is a decision people make and record.
+- **Any contract or procurement decision.** Terms, penalties and commercial consequences belong to the people who own the agreement.
+
+The agent makes no procurement decision and has no path to message the supplier. The pattern is the one the HITL guide states: gate the irreversible step, let the reversible ones run. Collecting records and writing the packet are reversible. A corrective plan sent to a supplier is not.
+
+## Limitations
+
+**The packet is only as good as the records the swarm may read.** Where a system holds the delivery history and the swarm has no connection to it, the packet names the gap and the owner who can grant access. It does not infer a date, estimate a count or ask someone to paste a record into a chat.
+
+**There is no ready-made scorecard.** Agent Swarm ships no weighting, no rating and no benchmark. The counts come from your records and your checks. Two suppliers are only comparable when they were reviewed against the same criteria and the same period, and a packet states those two facts so a reader can see it.
+
+**A number in the packet is not a benchmark.** It describes your records for one supplier in one period, not how that supplier compares with the market.
+
+**Access control has a limit.** [RBAC](/docs/guides/ai-operations-governance) is on by default and restricts requests made with user tokens. Operator-key calls and agent calls are not affected, so the role model is not the only control on what a workflow can read.
+
+## Review checklist
+
+- **Sources and freshness.** Name each source, the extraction date and the freshness window, and exclude an incomplete current day from any count.
+- **Access scope.** Write down which systems the workflow may read, who granted that access and when it is reviewed.
+- **Missing evidence.** Confirm the packet names a gap and an owner rather than filling it.
+- **Review ownership.** Name the owner and a backup, and say who reads the packet before the gate.
+- **Approval.** State who decides, what the timeout is, and what happens when nobody answers. Silence is never approval.
+- **Criteria.** Keep the criteria next to the run, so a later packet can be read against its rules.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a supplier performance review is the illustrative part.
+
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, the approve and reject branches, the timeout and fallback, and the gate message.
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then an agent that synthesizes it.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [AI operations governance](/docs/guides/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and source-of-truth rules.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): how to choose between a spreadsheet, a procurement product and a shared agent platform.

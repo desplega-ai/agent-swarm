@@ -256,6 +256,7 @@ bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
 bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard (MCP and POST /api/memory/index) / root allowlist / /longterm tier
 bun run test:root -- src/tests/memory-embedding-space.test.ts   # re-embed on an embedding space change: adopt, key rotation, resume, outage
+bun run test:root -- src/tests/memory-search-reader.test.ts   # search reads in worker threads: parity, loop stays responsive, queue bound, fallback
 ```
 
 Plus the v1.5 rater suites:
@@ -274,6 +275,7 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 
 - `src/be/memory/types.ts` — interfaces.
 - `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
+- `src/be/memory/search-reader.ts` + `search-read-worker.ts` — search SELECTs run in 2 Bun workers with their own read-only connection, so a slow vec/bm25 statement never blocks the API loop. Reads inside a transaction, on a non-file DB, or after a worker fails stay on the main connection. Writes always stay on the main connection.
 - `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
 - `src/be/memory/key-paths.ts` — logical-path key pattern, the closed `/longterm` root allowlist, the lead-only roots and `tierSource`.
 - `src/be/memory/key-guard.ts` — `assertKeyWritable`: the shared key gate for MCP and HTTP writes.

@@ -782,7 +782,7 @@ export interface McpUserConfigResponse {
 
 /** `GET /api/integrations/chat/status`. Never carries secret values. */
 export interface ChatSdkAdapterStatus {
-  name: "telegram" | "slack" | "discord" | "teams";
+  name: "telegram" | "slack" | "discord" | "teams" | "rocketchat";
   configured: boolean;
   /** False when the entry carries `enabled: false`: configured and kept, not started. */
   enabled: boolean;
@@ -1835,6 +1835,10 @@ export interface WorkflowDefinition {
 export type WebhookVerification =
   | {
       format: "hmac-sha256";
+      header?: string;
+    }
+  | {
+      format: "hmac-sha1";
       header?: string;
     }
   | {
@@ -4251,6 +4255,8 @@ export interface AppPageDef {
   headerActions?: string;
   /** Sidebar layout: `false` leaves the page out of the sidebar. */
   nav?: boolean;
+  /** Page-local state: initial values, read and written at `/local/<name>`. */
+  state?: Record<string, unknown>;
 }
 
 /** One declared prop of a reusable element (`definition.elements.<name>`). */
@@ -4553,7 +4559,15 @@ export interface CodexDevicePollResponse {
 // ─── Credential pool keys (`/api/config/pool-keys`) ─────────────────────────
 
 /** From the global `api_key_status` row of the key (same `keyType` and `keySuffix`). */
-export type PoolKeyStatus = "ok" | "rejected" | "rate_limited" | "unchecked";
+export type PoolKeyStatus = "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+
+/** A provider spend limit a key hit (OpenRouter key limit, out of credits). */
+export interface SpendCap {
+  limitUsd: number | null;
+  spendUsd: number | null;
+  /** Null when the provider names no reset: the key stays benched until edited. */
+  resetsAt: string | null;
+}
 
 /** One key of a stored credential pool. Only the suffix leaves the server. */
 export interface PoolKey {
@@ -4566,6 +4580,8 @@ export interface PoolKey {
   error: string | null;
   checkedAt: string | null;
   rateLimitedUntil: string | null;
+  /** Set with `spend_capped`. Absent on an older API. */
+  spendCap?: SpendCap | null;
 }
 
 export interface PoolKeysResponse {

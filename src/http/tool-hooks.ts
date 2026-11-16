@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import type { ToolCallEvent } from "../extensions/contract";
-import { dispatchPost, dispatchPre } from "../extensions/dispatcher";
+import { dispatchPost, dispatchPre, hasNativeToolHandlers } from "../extensions/dispatcher";
 import type { RequestInfo } from "../tools/utils";
 import { scrubObject } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -64,6 +64,22 @@ const toolHookRoute = route({
   },
 });
 
+const toolHookStatusRoute = route({
+  method: "get",
+  path: "/api/tool-hooks/status",
+  pattern: ["api", "tool-hooks", "status"],
+  summary: "Whether any enabled extension takes harness-native tool calls",
+  description:
+    "Worker shims read this before each native tool call and skip `POST /api/tool-hooks` while " +
+    "`native` is false, so a swarm with no native-tool extension pays no per-call round trip. " +
+    "Shims cache the answer for a short time.",
+  tags: ["Extensions"],
+  auth: { apiKey: true },
+  responses: {
+    200: { description: "Native tool hook status", schema: z.object({ native: z.boolean() }) },
+  },
+});
+
 function header(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
   return Array.isArray(raw) ? raw[0] : raw;
@@ -76,6 +92,10 @@ export async function handleToolHooks(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (toolHookStatusRoute.match(req.method, pathSegments)) {
+    toolHookStatusRoute.respond(res, 200, { native: hasNativeToolHandlers() });
+    return true;
+  }
   if (!toolHookRoute.match(req.method, pathSegments)) return false;
   if (!myAgentId) {
     jsonError(res, "Missing X-Agent-ID header", 400);

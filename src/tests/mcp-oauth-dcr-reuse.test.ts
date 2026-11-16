@@ -110,7 +110,9 @@ describe("MCP OAuth DCR client reuse", () => {
     tokenShouldFail = "";
     asScopesSupported = [];
     process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
-    process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "false";
+    // The fetch stubs here route by URL. Allowing private hosts skips name
+    // resolution and address pinning, which mcp-outbound-fetch-guard.test.ts covers.
+    process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "true";
     process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.test";
     process.env.APP_URL = "https://dashboard.example.test";
 
@@ -153,7 +155,8 @@ describe("MCP OAuth DCR client reuse", () => {
       }
       if (href === `https://${issuerHost}/token` && init?.method === "POST") {
         capturedTokenBody = (init?.body as string) ?? "";
-        capturedTokenHeaders = (init?.headers as Record<string, string>) ?? {};
+        const authorization = new Headers(init?.headers).get("authorization");
+        capturedTokenHeaders = authorization === null ? {} : { Authorization: authorization };
         if (tokenShouldFail === "invalid_client") {
           return Response.json(
             { error: "invalid_client", error_description: "client no longer recognized" },

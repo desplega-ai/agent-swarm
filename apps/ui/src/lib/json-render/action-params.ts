@@ -37,10 +37,12 @@
  *     `undefined`) resolves to `undefined`, and an object entry holding it is
  *     dropped (no `parentTaskId` → a root task). An unresolvable `$chain` (no
  *     chain scope at all, or a key the scope does not carry) is returned as-is.
+ *   - `{ "$add": [...] }` and the other `expressions.ts` operators, over resolved operands.
  * Anything else is a literal.
  */
 
 import { getByPath } from "@json-render/core";
+import { evaluateExpression, expressionOp } from "./expressions";
 
 export interface ParamScope {
   /** The current row (Table row actions) — target of `$row`. */
@@ -112,6 +114,9 @@ export function resolveScopedValue(value: unknown, scope: ParamScope): unknown {
     const nested = getByPath(chain, value.$chain);
     return nested === undefined ? value : nested;
   }
+
+  const op = expressionOp(value);
+  if (op) return evaluateExpression(op, resolveScopedValue(value[op], scope) as unknown[]);
 
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {

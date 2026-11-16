@@ -14,7 +14,11 @@ import {
 } from "@/be/db";
 import { modelProfileRefError, scheduleProfileUpdate } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
-import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
+import {
+  changesScheduleTarget,
+  mergeScheduleTiming,
+  validateRecurringTiming,
+} from "@/be/schedules/validate";
 import { getScript } from "@/be/scripts/db";
 import { can } from "@/rbac";
 import { calculateNextRun } from "@/scheduler";
@@ -140,7 +144,8 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
     {
       title: "Update Scheduled Task",
       annotations: { idempotentHint: true },
-      description: "Update an existing scheduled task. Any registered agent can update schedules.",
+      description:
+        "Update an existing scheduled task. Any registered agent can update schedules; only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).",
       inputSchema: updateScheduleInputSchema,
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -210,6 +215,27 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       ) {
         return toolErr(
           `Schedule "${schedule.name}" defers another agent's task. Only that agent or a lead can change it.`,
+        );
+      }
+
+      // A schedule fires as its creator. Only the creator or a lead picks what it runs.
+      if (
+        changesScheduleTarget(schedule, {
+          targetType,
+          taskTemplate,
+          workflowId,
+          scriptName,
+          scriptArgs,
+        }) &&
+        !can({
+          principal: { kind: "agent", agentId: caller.id, isLead: caller.isLead },
+          verb: "schedule.target.update.any",
+          resource: { kind: "owned", ownerAgentId: schedule.createdByAgentId },
+          source: "mcp",
+        }).allow
+      ) {
+        return toolErr(
+          `Schedule "${schedule.name}" runs as the agent that created it. Only that agent or a lead can change its targetType, taskTemplate, workflowId, scriptName or scriptArgs.`,
         );
       }
 

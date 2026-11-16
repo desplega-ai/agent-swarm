@@ -97,7 +97,7 @@ export interface DbClient extends DbExecutor {
    * do not floor to 0). A retried statement counts every attempt: each one
    * occupies the driver, up to `attemptSpinMs` per BUSY attempt. Only the
    * synchronous driver blocks the main event loop during execution.
-   * The timer excludes lock waits, retry backoff, and Worker message transfer.
+   * The timer excludes FIFO lock waits, retry backoff, and Worker message transfer.
    *
    * `changes` counts only the rows the statement itself changed. Unlike
    * `run`, it excludes rows touched by foreign-key actions.

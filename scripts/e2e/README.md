@@ -51,6 +51,7 @@ This file is the authoring guide.
 | `cli.ts`, `coverage-cli.ts` | `runCli(args, options)`: the CLI as a child (`bun run src/cli.tsx`) with a temp HOME and working directory, and the command universe from `cli help`. Under `--coverage` the child is the CLI entry under `bun test`, like the API. |
 | `diff-coverage.ts`, `coverage-exemptions.txt` | The changed-lines comment: lcov union against `git diff`, and the paths it skips, each with a reason. |
 | `harness.ts` | Optional real-worker legs (`--harness`), credentials required. |
+| `scope.ts` | `bun run check:local`'s E2E step: maps the changed files to the scenarios that reach them, or asks for the full run ([ci.md](../../runbooks/ci.md#the-local-check-loop)). |
 | `scenarios/` | One file per scenario (or per tight family). `registry.ts` discovers them. |
 
 ## Writing a scenario
@@ -180,6 +181,7 @@ on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
 | Slack | Socket Mode to `@desplega.ai/slack-mock` | Full Web API mock. |
 | Chat SDK Slack | Built-in Slack off (`SLACK_DISABLE`), `CHAT_SDK_ADAPTERS.slack` in webhook mode, and the env `CHAT_SDK_API_URL_OVERRIDES.slack` port the scenario binds a second `SlackMock` to | The mock posts signed events, commands and `block_actions` to `/api/integrations/chat/slack/webhook`. `enableChatSdkSlack` flips and its `undo` restores Socket Mode. |
 | Chat SDK Telegram | `CHAT_SDK_ENABLED=true`, deployment env `CHAT_SDK_API_URL_OVERRIDES`, and adapter config with fake credentials | `platform-chat-sdk` starts a loopback Telegram API. It checks tool discovery, permissions, channel mappings, messages, and thread history. |
+| Chat SDK Rocket.Chat | `CHAT_SDK_API_URL_OVERRIDES.rocketchat` set at boot, adapter config with fake credentials | `platform-chat-sdk-rocketchat` starts a loopback Rocket.Chat REST API. It checks config validation, the webhook token, a mention becoming a chat task, the unmapped sender list, and a `chat-post` reply. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 
 `CLOUDFLARE_API_BASE_URL` is reserved for tests and cannot be stored in config.

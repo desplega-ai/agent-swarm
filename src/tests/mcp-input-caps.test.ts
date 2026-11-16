@@ -166,7 +166,12 @@ async function openSession(path: string, headers: Record<string, string>): Promi
   return init.sessionId;
 }
 
-/** POST a body with no Content-Length (chunked), so only the streaming cap can stop it. */
+/**
+ * POST `totalBytes` with no Content-Length (chunked), so only the streaming cap can stop it.
+ * The body is never ended: the server answers 413 and closes the socket as soon as the cap is
+ * crossed. Bytes still in flight at that point make the close a TCP reset that can drop the
+ * response, so callers send exactly one byte over the cap.
+ */
 function postChunked(
   path: string,
   headers: Record<string, string>,
@@ -188,25 +193,25 @@ function postChunked(
           body += chunk;
         });
         res.on("error", reject);
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body });
+          req.destroy();
+        });
       },
     );
-    // The server can answer 413 before the upload finishes. Still require its response after EPIPE.
-    req.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "EPIPE") return;
-      reject(error);
-    });
+    // An error after the response is complete is just our own teardown.
+    req.on("error", reject);
     const chunk = Buffer.alloc(64 * 1024, 0x20);
     let sent = 0;
     const pump = () => {
       while (sent < totalBytes) {
-        sent += chunk.byteLength;
-        if (!req.write(chunk)) {
+        const part = chunk.subarray(0, Math.min(chunk.byteLength, totalBytes - sent));
+        sent += part.byteLength;
+        if (!req.write(part)) {
           req.once("drain", pump);
           return;
         }
       }
-      req.end();
     };
     pump();
   });
@@ -282,7 +287,7 @@ for (const surface of surfaces) {
       const { status, body } = await postChunked(
         surface.path,
         headers,
-        MCP_MAX_REQUEST_BODY_BYTES + 128 * 1024,
+        MCP_MAX_REQUEST_BODY_BYTES + 1,
       );
       expect(status).toBe(413);
       expect(JSON.parse(body)).toEqual({

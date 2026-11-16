@@ -1384,6 +1384,10 @@ export async function handleAgentsRest(
         if (model !== undefined || profile === null) {
           await deleteSwarmConfigByKey("agent", parsed.params.id, MODEL_PROFILE_CONFIG_KEY);
         } else if (profile !== undefined) {
+          // The profile beats MODEL_OVERRIDE at claim: drop the override so the two
+          // keys cannot name different models. Before the upsert, since deleting an
+          // override clears the profile.
+          await deleteSwarmConfigByKey("agent", parsed.params.id, "MODEL_OVERRIDE");
           await upsertSwarmConfig({
             scope: "agent",
             scopeId: parsed.params.id,

@@ -401,7 +401,9 @@ One route, discriminated by `phase`:
 - The route runs `scrubObject` over the whole body at entry, so handlers, `extension_runs` rows and logs see `[REDACTED:<name>]`, never the secret.
 - A `modify` whose args contain a `[REDACTED:` marker is rejected with an `extension_runs` error row and the call continues with its original args, so a placeholder never executes.
 - Shims must also run `scrubObject` worker-side before the POST. The server scrubber knows only the API's own env values and structural patterns, not a worker's per-task credentials.
-- No harness calls the route yet. The shims, a subscriber probe, and a chain deadline ship with the first shim.
+- `GET /api/tool-hooks/status` answers `{ native: boolean }`: true while an enabled extension takes native calls. Shims cache it for 30 s and skip the POST while it is false.
+- Claude, Codex, pi and opencode all call the route. Per-harness wiring, block and rewrite support, and the fail-open rules: [harness-providers.md § Native tool interception](./harness-providers.md#native-tool-interception). The black-box proof is `scripts/e2e/scenarios/native-tool-hooks.ts`.
+- A native `post` report carries the result clipped to 64,000 characters. A body over the route's 2 MB limit is refused and that call is not intercepted.
 
 ## Version 1 boundaries
 

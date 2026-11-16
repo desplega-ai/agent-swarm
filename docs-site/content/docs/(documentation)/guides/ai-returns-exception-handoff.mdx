@@ -1,0 +1,93 @@
+---
+title: 'Preparing a disputed product return for a human decision with AI agents'
+description: "Agent Swarm gathers a disputed return's order, authorization, inspection and policy records, then hands operations a source-linked brief. People decide."
+agent:
+  when: "Someone wants support and operations to share source-linked evidence on a disputed physical return before a person decides the disposition"
+---
+
+Agent Swarm can gather the authorized records for a disputed product return, run deterministic checks against the return window and the authorization, and hand a named operations owner a source-linked brief, while the disposition, any refund or replacement and the customer message stay with people. It works once the team configures the sources and the permissions the workflow needs. What it takes off the team is the assembly: pulling the order, authorization, inspection result and policy clause from separate systems and teams, and naming the gap neither side can see.
+
+The scope is one physical product return in dispute: the customer says one thing and the inspection result or the policy says another. A delivery that arrived late ([delivery delay handoff](/docs/guides/ai-delivery-delay-handoff)), a supplier invoice that does not match its purchase order ([invoice discrepancy review](/docs/guides/ai-invoice-discrepancy-review)), a billing or payment dispute, and generic support triage are different handoffs with different owners.
+
+## When another tool fits better
+
+**The returns or RMA module in your order or ecommerce system.** When the order, the return authorization, the inspection result and the policy all live in one system, and a rule settles the case, that module closes it. A return inside its window, with an inspection outcome the policy already covers, is a rule, not a judgement.
+
+**A manual checklist.** At low volume a written list does the work: one person opens the order and the inspection record, reads the policy and records the decision.
+
+Agent Swarm fits the cross-team shape: order in one system, return authorization in another, inspection evidence with the warehouse, the policy version in a policy store, the customer thread in support. [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in returns product, ecommerce integration or customer case. It needs data access, integrations and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative returns exception flow, from a flagged dispute to a disposition a person records and a customer reply support sends." chart={`flowchart LR
+  A["Dispute flagged<br/>(customer and<br/>warehouse disagree)"] --> B["Gather authorized records<br/>(order, return authorization,<br/>receipt, inspection, policy)"]
+  B --> C["Deterministic checks<br/>swarm-script to JSON"]
+  C --> D["Agent prepares<br/>source-linked brief"]
+  D --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "approve" --> R["Person records disposition<br/>support drafts customer reply"]
+  G -- "reject" --> S["Return, hold<br/>or escalate"]
+`} />
+
+**1. A dispute is flagged.** Either support records the customer's objection, or the warehouse records an inspection outcome the customer would contest: an item that arrives used, damaged or different from what was authorized.
+
+**2. The swarm gathers the authorized records.** Configured connections pull the order and its delivery date, the return authorization with its items and quantities, the receipt or inspection evidence, and the return policy version that applied at the time of purchase. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**3. Deterministic checks run the comparison.** A `swarm-script` node compares the return date against the window measured from the order or delivery date, the items and quantities on the authorization against the items received, the inspection outcome against the policy's condition rules, and the policy version in force at purchase against the version cited in the case. It flags missing records (no receipt scan, no inspection photo, no authorization) and conflicting ones. No model does the date arithmetic or the counting. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split.
+
+**4. An agent writes the brief.** A Researcher agent turns the JSON and the source records into one document: each fact with a source link, the missing or conflicting records and who holds them, the applicable policy clause, and the named operations owner who decides.
+
+**5. A person clears the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only on a human response.
+
+**6. A person records the disposition and support replies.** Support writes and sends the customer message. Nothing reaches the customer or a payment system on its own.
+
+Two questions it answers plainly.
+
+**How can operations and support review a disputed product return with AI agents?** By doing the collection and the comparison: assembling the order, the authorization, the inspection evidence and the policy clause into one brief, and stating what the check found and what is still missing, with a link on every claim.
+
+**How can teams agree on one set of return evidence before replying to the customer?** One document, written before anyone answers: the facts and their sources, the missing records and who can supply them, the policy version that governs, and one named operations owner. Support and operations read the same brief, so the reply rests on the record rather than on whichever thread was read last.
+
+## Return cases
+
+Every case below is illustrative. No company, retailer or carrier is named.
+
+| Case | What the deterministic check compares | Evidence the agent attaches | Question, and to whom |
+| --- | --- | --- | --- |
+| Returned outside the window | The return date against the policy's window, measured from the order or delivery date the record shows | Both dates, the policy clause and the window length | "Is there a documented exception to the window?" to the operations owner. "Did the customer contact us before it closed?" to support |
+| Item differs from the authorization | SKU and quantity on the return authorization against the item and quantity recorded as received | Both line sets, the per-line difference, the receipt scan | "Was a substitute authorized?" to the operations owner. "What did the customer say they sent?" to support |
+| Condition dispute | The inspection outcome against the policy's condition rules for that product category | The inspection record or photo with its timestamp, the condition clause | "Does this condition cross the policy threshold?" to the operations owner. "What condition did the customer describe?" to support |
+| Missing evidence | The record set the team expects for a return against the records present: receipt scan, inspection record, authorization | The expected record, what is on file, who holds the missing one | "Who can supply the inspection record?" to the warehouse. "Was the receipt ever scanned?" to support |
+| Policy changed between purchase and return | The policy version in force at purchase against the version cited in the case | Both policy versions with their effective dates and the purchase date | "Which version governs this return?" to the operations owner |
+
+## Conflicting records, privacy and escalation
+
+**Sources that disagree.** When the customer's account and the inspection record contradict each other, or two policy versions state different rules, the brief reports both with links and does not pick one. It names the records and the owner who settles which governs.
+
+**Least privilege.** The brief carries only the order and contact fields the workflow may read. Inspection photos are linked, never copied into the document, and nothing else from the customer record travels with them. When a record sits behind a system the swarm cannot reach, the brief names it and the owner who can grant access. It does not fill the gap by pasting customer data into a thread, and it does not estimate a condition or a value.
+
+**Access is recorded.** Access belongs in the workflow's [governance](/docs/guides/ai-operations-governance) record: who may read the order, the inspection evidence and the contact fields, and who grants that.
+
+**Escalation when the owner does not answer.** Give the gate a timeout, and a reminder that goes to the owner before it expires. Name a backup owner who can take the decision when the first one does not. If nobody answers, the gate holds: the return stays on the aged list with its reason recorded, instead of closing quietly. The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends that fallback for a blocking approval. Silence is not a decision.
+
+## What stays human-owned
+
+Four decisions stay with people in every version.
+
+- **The disposition.** Accepting, rejecting or partially accepting a return is a person's call, and so is the reason recorded against it.
+- **Any refund, credit or replacement.** The agent has no path to a payment or a reshipment. The workflow ends at a decision a person recorded inside the system that owns it.
+- **The customer communication.** The wording, the explanation and the timing belong to the person who will answer the reply.
+- **Policy exceptions and goodwill gestures.** Waiving a window or accepting an item outside the condition rules carries a cost, so it is a commercial decision. The agent neither proposes nor applies one.
+
+The HITL guide's rule holds here: gate the irreversible steps and let the reversible ones run. Pulling records and writing a brief are reversible. Telling a customer their return is refused is not.
+
+## Building blocks
+
+Every piece below ships in agent-swarm and is documented. Pointing them at a disputed return is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback, and the gate message.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how scripts reach the order, warehouse and policy systems with the raw secret out of script source.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, a named owner per workflow, approval thresholds and source-of-truth rules.
+- [Team collaboration](/docs/features/team-collaboration): shared context across support, operations and whoever inherits the case.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): the returns module, a manual checklist or a shared agent platform.

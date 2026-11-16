@@ -15,12 +15,19 @@ import type { SwarmConfig } from "../types";
 import { CREDENTIAL_POOL_VARS, splitCredentialPool } from "../utils/credentials";
 import { checkProviderPoolKey } from "../utils/provider-key-probes";
 import { registerEnvSecrets, scrubSecrets } from "../utils/secret-scrubber";
+import { SpendCapSchema } from "./api-keys";
 import { ensureConfigAdmin, requestSecretReadScope, runConfigWriteSideEffects } from "./config";
 import { getDeploymentEnvValue } from "./core";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
-export const PoolKeyStatusSchema = z.enum(["ok", "rejected", "rate_limited", "unchecked"]);
+export const PoolKeyStatusSchema = z.enum([
+  "ok",
+  "rejected",
+  "rate_limited",
+  "spend_capped",
+  "unchecked",
+]);
 export type PoolKeyStatus = z.infer<typeof PoolKeyStatusSchema>;
 export const PoolKeySchema = z.object({
   index: z.number().int().min(0),
@@ -29,6 +36,8 @@ export const PoolKeySchema = z.object({
   error: z.string().nullable(),
   checkedAt: z.string().nullable(),
   rateLimitedUntil: z.string().nullable(),
+  /** Set with `spend_capped`: the provider spend limit the key hit. */
+  spendCap: SpendCapSchema.nullable(),
 });
 export type PoolKey = z.infer<typeof PoolKeySchema>;
 export const PoolKeysResponseSchema = z.object({
@@ -146,13 +155,23 @@ async function poolResponse(key: string): Promise<PoolKeysResponse> {
         row?.status === "rate_limited" &&
         !!row.rateLimitedUntil &&
         Date.parse(row.rateLimitedUntil) > Date.now();
+      const spendCap = limited ? (row?.spendCap ?? null) : null;
       return {
         index,
         suffix,
-        status: rejected ? "rejected" : limited ? "rate_limited" : row ? "ok" : "unchecked",
+        status: rejected
+          ? "rejected"
+          : spendCap
+            ? "spend_capped"
+            : limited
+              ? "rate_limited"
+              : row
+                ? "ok"
+                : "unchecked",
         error: rejected ? scrubSecrets(row?.lastValidationError) || null : null,
         checkedAt: rejected ? row!.lastValidationFailedAt : (row?.updatedAt ?? null),
         rateLimitedUntil: row?.rateLimitedUntil ?? null,
+        spendCap,
       };
     }),
   };

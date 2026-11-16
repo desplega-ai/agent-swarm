@@ -61,6 +61,16 @@ export function AgentModelCell({ display, liveCatalog }: AgentModelCellProps) {
               </>
             ) : null}
 
+            {display.lastUsedFromTask ? (
+              <>
+                <dt className="opacity-60">Last task ran</dt>
+                <dd className="break-all font-mono">{lastUsed?.raw}</dd>
+
+                <dt className="opacity-60">Why</dt>
+                <dd>that task set its own model, tier or profile</dd>
+              </>
+            ) : null}
+
             {display.diverged ? (
               <>
                 <dt className="opacity-60">Configured</dt>

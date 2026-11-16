@@ -1085,6 +1085,7 @@ export class OpencodeAdapter implements ProviderAdapter {
             },
             ...(billing ? { onOpenRouterResponse: (response) => billing.observe(response) } : {}),
             onContext: (event) => onContext?.(event),
+            mcpServers: Object.keys(mcp),
           }),
         ],
         log: {

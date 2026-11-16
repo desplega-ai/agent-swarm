@@ -1,3 +1,4 @@
+import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
 import {
   isCancelledError,
   type UseQueryResult,
@@ -113,6 +114,8 @@ interface Row {
   shown: DialLevel | null;
   /** No model override yet: Continue stores Optimal. */
   notApplied: boolean;
+  /** The dial context of this row: a pi agent on a subscription model stays on the subscription. */
+  context: DialContext;
 }
 
 function configValue(configs: SwarmConfig[] | undefined, key: string): SwarmConfig | undefined {
@@ -130,7 +133,7 @@ function buildRow(
   query: UseQueryResult<SwarmConfig[]>,
   intent: Intent | undefined,
   remembered: DialLevel | undefined,
-  context: DialContext,
+  baseContext: DialContext,
   tiers: TiersState,
   /** A save of this agent is in flight: the stored setting can be stale. */
   writing: boolean,
@@ -140,6 +143,7 @@ function buildRow(
   const loaded = configs !== undefined;
   const model = configValue(configs, "MODEL_OVERRIDE")?.value ?? "";
   const effort = configValue(configs, "REASONING_EFFORT_OVERRIDE")?.value ?? "";
+  const context = rowContext(harness, model, baseContext);
   const matches = harness ? dialMatches(harness, model, effort, context) : [];
   const first = matches.length > 0 ? matches[0] : undefined;
   // A model outside the dial (Custom) changes only on an explicit pick. The
@@ -174,7 +178,15 @@ function buildRow(
     applied: target ? !writing && dialSettingApplied(target, model, effort) : false,
     shown: intent?.level ?? stored ?? (notApplied ? RECOMMENDED : null),
     notApplied,
+    context,
   };
+}
+
+/** pi on a ChatGPT subscription model (`openai-codex/<id>`) gets the subscription's levels. */
+function rowContext(harness: DialHarness | null, model: string, context: DialContext): DialContext {
+  return harness === "pi" && isChatgptSubscriptionModel(model)
+    ? { ...context, chatgpt: true }
+    : context;
 }
 
 /** "High effort · $5.00 in, $25.00 out per 1M tokens" for a model. */
@@ -385,6 +397,10 @@ export function AgentModels({
       ? shownLevels[0]
       : null;
   const harnessesInUse = [...new Set(dialRows.map((row) => row.harness as DialHarness))];
+  // The tiles show pi's subscription levels when a pi agent runs on the subscription.
+  const tilesContext = dialRows.some((row) => row.context.chatgpt)
+    ? { ...context, chatgpt: true }
+    : context;
 
   // Continue stores Optimal on agents that have no model override yet, then
   // completes the step with the level every agent got.
@@ -403,7 +419,7 @@ export function AgentModels({
           }
           const results = await Promise.allSettled(
             defaults.map((row) => {
-              const setting = dialSetting(row.harness as DialHarness, RECOMMENDED, context);
+              const setting = dialSetting(row.harness as DialHarness, RECOMMENDED, row.context);
               // A tier with no model for this harness: never store a guess.
               if (!setting) {
                 const harnessName = HARNESS_LABEL[row.harness as DialHarness] ?? row.harness;
@@ -489,7 +505,6 @@ export function AgentModels({
           key={row.agent.id}
           row={row}
           save={saves[row.agent.id]}
-          context={context}
           onPick={(level) => pick([row.agent.id], level)}
         />
       ))}
@@ -513,7 +528,7 @@ export function AgentModels({
           <LevelTiles
             value={allLevel}
             harnesses={harnessesInUse}
-            context={context}
+            context={tilesContext}
             onPick={(level) =>
               pick(
                 dialRows.map((row) => row.agent.id),
@@ -606,7 +621,7 @@ function noModelNote(context: DialContext): string {
  * The price per token of each level next to Cheap (Cheap is 1), from the list
  * price of input plus output per 1M tokens, summed over the harnesses in use.
  * `null` when a level has no model or no known price. Effort is not in it:
- * two levels on one model (Codex Optimal and Max) show the same number.
+ * two levels on one model show the same number.
  */
 function relativeTokenPrices(
   harnesses: DialHarness[],
@@ -751,16 +766,14 @@ function LevelTiles({
 function AgentModelRow({
   row,
   save,
-  context,
   onPick,
 }: {
   row: Row;
   /** What this agent's `RowSave` reported. */
   save: SaveState | undefined;
-  context: DialContext;
   onPick: (level: DialLevel) => void;
 }) {
-  const { agent, harness } = row;
+  const { agent, harness, context } = row;
   const phase = save?.phase ?? "idle";
 
   const harnessLabel = agent.harnessProvider
@@ -793,7 +806,7 @@ function AgentModelRow({
       </span>
       {harness ? (
         <span className="flex w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto sm:justify-end">
-          <RowModel row={row} harness={harness} context={context} />
+          <RowModel row={row} harness={harness} />
           <span className="flex h-9 items-center gap-3">
             <SegmentedControl
               aria-label={`Level for ${agent.name}`}
@@ -837,15 +850,8 @@ function AgentModelRow({
  * model, or Optimal's model (muted) when nothing is stored yet. The tooltip
  * names the exact id, effort, and price.
  */
-function RowModel({
-  row,
-  harness,
-  context,
-}: {
-  row: Row;
-  harness: DialHarness;
-  context: DialContext;
-}) {
+function RowModel({ row, harness }: { row: Row; harness: DialHarness }) {
+  const { context } = row;
   if (row.loading || row.loadFailed) {
     return <Skeleton className="h-4 w-32" />;
   }

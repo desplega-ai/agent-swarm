@@ -9,7 +9,7 @@
  *
  * Each test runs the real hook as a subprocess against a fake API.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,9 +23,16 @@ type FakeState = {
   isLead: boolean;
   cancelledTaskId: string | null;
   shouldBlockPolling: boolean;
+  /** When set, the fake API reports native extensions and answers each tool hook with this. */
+  nativeDecision: Record<string, unknown> | null;
 };
 
-const state: FakeState = { isLead: false, cancelledTaskId: null, shouldBlockPolling: false };
+const state: FakeState = {
+  isLead: false,
+  cancelledTaskId: null,
+  shouldBlockPolling: false,
+  nativeDecision: null,
+};
 let server: ReturnType<typeof Bun.serve>;
 let projectDir: string;
 
@@ -56,6 +63,12 @@ beforeAll(async () => {
           ? [{ id: state.cancelledTaskId, task: "t", failureReason: "stop now" }]
           : [];
         return Response.json({ cancelled });
+      }
+      if (url.pathname === "/api/tool-hooks/status") {
+        return Response.json({ native: state.nativeDecision !== null });
+      }
+      if (url.pathname === "/api/tool-hooks") {
+        return Response.json(state.nativeDecision ?? { action: "continue" });
       }
       return Response.json({ ok: true });
     },
@@ -122,6 +135,10 @@ const bashTouch = {
 };
 
 describe("claude hook stdout", () => {
+  afterEach(() => {
+    state.nativeDecision = null;
+  });
+
   test(
     "blocked PreToolUse prints exactly one deny JSON object",
     async () => {
@@ -308,4 +325,92 @@ describe("claude hook stdout", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  describe("native rewrite of a Bash command", () => {
+    const leaky = `gh pr create --repo desplega-ai/agent-swarm --title x --body 'taskId = ${"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'`;
+    const room = "gh pr create --repo desplega-ai/agent-swarm --title x --body hello";
+    const rewriteTo = (command: string) => {
+      state.nativeDecision = { action: "modify", args: { command } };
+    };
+    /** A fresh TMPDIR keeps the 30 s status cache from leaking between tests. */
+    const runRewrite = async (extraEnv: Record<string, string> = {}) => {
+      const tmp = await mkdtemp(join(tmpdir(), "claude-hook-native-"));
+      try {
+        return await runHook(
+          {
+            hook_event_name: "PreToolUse",
+            tool_name: "Bash",
+            tool_input: { command: "echo safe" },
+          },
+          crypto.randomUUID(),
+          { TMPDIR: tmp, ...extraEnv },
+        );
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    };
+
+    test(
+      "a rewrite into a leaking gh pr body is blocked, not emitted",
+      async () => {
+        rewriteTo(leaky);
+        const result = await runRewrite();
+        expect(result.exitCode).toBe(2);
+        expect(result.stderr).toContain("PR body leak check");
+        expect(result.stdout.trim()).toBe("");
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS,
+    );
+
+    test(
+      "a rewrite into a gh pr create with no PR room is blocked, not emitted",
+      async () => {
+        rewriteTo(room);
+        const result = await runRewrite({ PR_ROOM_REPOS: "desplega-ai/agent-swarm" });
+        expect(result.exitCode).toBe(2);
+        expect(result.stderr).toContain("PR rooms");
+        expect(result.stdout.trim()).toBe("");
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS,
+    );
+
+    test(
+      "a safe rewrite is emitted as one updatedInput object",
+      async () => {
+        rewriteTo("echo rewritten");
+        const result = await runRewrite({ PR_ROOM_REPOS: "desplega-ai/agent-swarm" });
+        expect(result.exitCode).toBe(0);
+        const out = parseSoleJson(result.stdout) as {
+          hookSpecificOutput: { updatedInput: { command: string } };
+        };
+        expect(out.hookSpecificOutput.updatedInput).toEqual({ command: "echo rewritten" });
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS,
+    );
+
+    test(
+      "a safe rewrite keeps the loop warning in the same single object",
+      async () => {
+        rewriteTo("echo rewritten");
+        Object.assign(state, { isLead: false, cancelledTaskId: null, shouldBlockPolling: false });
+        const taskId = crypto.randomUUID();
+        const tmp = await mkdtemp(join(tmpdir(), "claude-hook-native-"));
+        let out: { hookSpecificOutput: Record<string, unknown> } | undefined;
+        try {
+          for (let i = 0; i < 14 && !out?.hookSpecificOutput.additionalContext; i++) {
+            const result = await runHook({ hook_event_name: "PreToolUse", ...bashTouch }, taskId, {
+              TMPDIR: tmp,
+            });
+            out = parseSoleJson(result.stdout) as typeof out;
+          }
+        } finally {
+          await rm(`/tmp/agent-swarm-tool-history/${taskId}.json`, { force: true });
+          await rm(tmp, { recursive: true, force: true });
+        }
+        expect(out?.hookSpecificOutput.updatedInput).toEqual({ command: "echo rewritten" });
+        expect(out?.hookSpecificOutput.additionalContext).toStartWith("Warning: ");
+      },
+      CHILD_PROCESS_TEST_BUDGET_MS * 3,
+    );
+  });
 });

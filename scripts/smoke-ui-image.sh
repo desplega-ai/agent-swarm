@@ -56,6 +56,19 @@ check "missing asset not cached" "$(header cache-control "$base/assets/missing-$
 check "source map denied" "$(status "$base/assets/index.js.map")" "404"
 check "dotfile denied" "$(status "$base/.env")" "404"
 
+embed="$base/embed/v1/swarm-object.js"
+check "embed status" "$(status "$embed")" "200"
+check "embed content type" "$(ctype "$embed")" "application/javascript"
+check "embed cors" "$(header access-control-allow-origin -H 'Origin: https://api.example.test' "$embed")" "*"
+check "embed cache" "$(header cache-control "$embed")" "no-cache"
+check "embed stylesheet" "$(status "$base/embed/v1/swarm-object.css")" "200"
+chunk=$(curl -s "$embed" | grep -oE '\./chunks/[^"]+\.js' | head -1)
+check "embed references a hashed chunk" "$([[ -n "$chunk" ]] && echo yes)" "yes"
+check "embed chunk cors" "$(header access-control-allow-origin "$base/embed/v1/${chunk#./}")" "*"
+check "embed chunk cache" "$(header cache-control "$base/embed/v1/${chunk#./}")" "public, max-age=31536000, immutable"
+check "embed missing file" "$(status "$base/embed/v1/missing-$$.js")" "404"
+check "dashboard has no cors" "$(header access-control-allow-origin "$base/")" ""
+
 check "nosniff" "$(header x-content-type-options "$base/")" "nosniff"
 check "referrer policy" "$(header referrer-policy "$base/")" "no-referrer"
 check "csp" "$(header content-security-policy "$base/")" "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"

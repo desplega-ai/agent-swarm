@@ -73,7 +73,7 @@ describe("tier seeds", () => {
       expect(profile.effort).toBeNull();
     }
     expect((await getModelProfileByName("claude-smart"))?.model).toBe("opus");
-    expect((await getModelProfileByName("codex-ultra"))?.model).toBe("gpt-5.6-sol");
+    expect((await getModelProfileByName("codex-ultra"))?.model).toBe("gpt-6-astra");
   });
 
   test("a global MODEL_TIER row overrides the seed's model; reseeding never overwrites", async () => {

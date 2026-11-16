@@ -136,6 +136,9 @@ export async function verifyWebhookRequest(
     case "hmac-sha256":
       isValid = verifyHmacSignature(secret, rawBody, signature);
       break;
+    case "hmac-sha1":
+      isValid = verifyHmacSignature(secret, rawBody, signature, "sha1");
+      break;
     case "timestamped-hmac-sha256":
       isValid = verifyTimestampedHmacSignature(secret, rawBody, signature, {
         timestampKey: verification.timestampKey,
@@ -354,21 +357,23 @@ export async function handleScheduleTrigger(
 }
 
 /**
- * Verify HMAC-SHA256 signature.
- * Supports both `sha256=<hex>` format and raw hex.
+ * Verify an HMAC signature (SHA-256 by default, SHA-1 for senders such as Vercel).
+ * Supports both `<algorithm>=<hex>` format and raw hex.
  */
 export function verifyHmacSignature(
   secret: string,
   body: string,
   providedSignature: string,
+  algorithm: "sha256" | "sha1" = "sha256",
 ): boolean {
-  const hmac = crypto.createHmac("sha256", secret);
+  const hmac = crypto.createHmac(algorithm, secret);
   hmac.update(body);
   const expectedHex = hmac.digest("hex");
 
-  // Support "sha256=<hex>" format (GitHub-style)
-  const normalizedProvided = providedSignature.startsWith("sha256=")
-    ? providedSignature.slice(7)
+  // Support "sha256=<hex>" / "sha1=<hex>" format (GitHub-style)
+  const prefix = `${algorithm}=`;
+  const normalizedProvided = providedSignature.startsWith(prefix)
+    ? providedSignature.slice(prefix.length)
     : providedSignature;
 
   // Constant-time comparison

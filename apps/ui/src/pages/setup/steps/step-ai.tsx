@@ -7,7 +7,7 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { type EnvPresenceMap, useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useModelTiers } from "@/api/hooks/use-model-tiers";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import type { ModelTierPreview, OnboardingAiMethod, SwarmConfig } from "@/api/types";
+import type { ModelTierPreview, OnboardingAiMethod, ProviderName, SwarmConfig } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
@@ -23,6 +23,8 @@ import { switchAgentsTo } from "./ai/harness-switch";
 import {
   type AiCardId,
   type AiCardProps,
+  CARD_HARNESSES,
+  CODEX_CARD_TARGETS,
   cardRollup,
   type FirstCredentialSwitch,
   firstCredentialSwitch,
@@ -58,6 +60,21 @@ function writeSwitchMark(key: string): void {
   }
 }
 
+/** The stored harness the Codex card's subscription runs on (one per API). */
+function codexHarnessKey(apiUrl: string): string {
+  return deriveStorageKey(apiUrl, "setup-codex-harness");
+}
+
+/** The stored pick, else codex (the default). */
+function readCodexHarness(key: string): ProviderName {
+  try {
+    const stored = localStorage.getItem(key);
+    return CODEX_CARD_TARGETS.find((h) => h === stored) ?? "codex";
+  } catch {
+    return "codex";
+  }
+}
+
 export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
@@ -75,6 +92,22 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const { config } = useConfig();
   const apiUrl = config.apiUrl || window.location.origin;
   const [openCard, setOpenCard] = useState<AiCardId | null>("claude");
+  const [codexHarness, setCodexHarness] = useState(() => readCodexHarness(codexHarnessKey(apiUrl)));
+  const pickCodexHarness = useCallback(
+    (harness: ProviderName) => {
+      setCodexHarness(harness);
+      try {
+        localStorage.setItem(codexHarnessKey(apiUrl), harness);
+      } catch {
+        // Storage is off: the pick holds until a reload.
+      }
+    },
+    [apiUrl],
+  );
+  const harnesses = useMemo<Record<AiCardId, readonly ProviderName[]>>(
+    () => ({ ...CARD_HARNESSES, codex: [codexHarness] }),
+    [codexHarness],
+  );
   const [deviceDone, setDeviceDone] = useState(false);
   // The card the user saved on, and the method that save completes the step with.
   const pending = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
@@ -90,16 +123,21 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     () => ({ openrouter, catalog, tiers }),
     [openrouter, catalog, tiers],
   );
+  // The Codex card's switch: pi runs the subscription's models (`openai-codex/<id>`).
+  const codexDialContext = useMemo<DialContext>(
+    () => ({ ...dialContext, chatgpt: true }),
+    [dialContext],
+  );
 
   const providers = onboarding.signals.providers;
   const rollups = useMemo(
     () => ({
       claude: cardRollup("claude", providers),
-      codex: cardRollup("codex", providers),
+      codex: cardRollup("codex", providers, harnesses.codex),
       open: cardRollup("open", providers),
       devin: cardRollup("devin", providers),
     }),
-    [providers],
+    [providers, harnesses],
   );
   const aiStep = onboarding.state.steps.ai;
   const recorded = aiStep.status === "done" ? aiStep.method : null;
@@ -134,9 +172,23 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     if (!saved && queued.current?.card === card) queued.current = null;
   }, []);
   // The switch runs from save callbacks: it reads the latest data from here.
-  const latest = useRef({ agents, rollups, dialContext, savedStateSettled });
+  const latest = useRef({
+    agents,
+    rollups,
+    dialContext,
+    codexDialContext,
+    codexHarness,
+    savedStateSettled,
+  });
   useEffect(() => {
-    latest.current = { agents, rollups, dialContext, savedStateSettled };
+    latest.current = {
+      agents,
+      rollups,
+      dialContext,
+      codexDialContext,
+      codexHarness,
+      savedStateSettled,
+    };
   });
   const [autoSwitch, setAutoSwitch] = useState<FirstCredentialSwitch | null>(null);
   const autoSwitchRunning = useRef(false);
@@ -152,10 +204,18 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     async (afterWait: boolean) => {
       const job = queued.current;
       if (!job || autoSwitchRunning.current) return;
-      const { agents, rollups, dialContext, savedStateSettled } = latest.current;
+      const { agents, rollups, savedStateSettled, codexHarness } = latest.current;
+      const codex = job.card === "codex";
+      const dialContext = codex ? latest.current.codexDialContext : latest.current.dialContext;
       // The other cards' saved state decides the switch: wait until it loads.
       if (!savedStateSettled) return;
-      const plan = firstCredentialSwitch(job.method, savedCards.current, rollups, agents);
+      const plan = firstCredentialSwitch(
+        job.method,
+        savedCards.current,
+        rollups,
+        agents,
+        codex ? codexHarness : undefined,
+      );
       // The carried model level needs the tier models: wait for them, then switch.
       if (plan && !dialContext.tiers && dialHarness(plan.target)) return;
       queued.current = null;
@@ -222,16 +282,21 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
     configs,
     agents,
     onSaved,
-    dialContext,
+    dialContext: card === "codex" ? codexDialContext : dialContext,
     reportSaved,
     autoSwitching: autoSwitch?.card === card ? autoSwitch.target : null,
+    harnesses: harnesses[card],
   });
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
       <div className="space-y-2">
         <ClaudeCard {...cardProps("claude")} />
-        <CodexCard {...cardProps("codex")} onDeviceComplete={onDeviceComplete} />
+        <CodexCard
+          {...cardProps("codex")}
+          onDeviceComplete={onDeviceComplete}
+          onHarnessChange={pickCodexHarness}
+        />
         <OpenHarnessCard {...cardProps("open")} />
         <DevinCard {...cardProps("devin")} />
         <div className="pt-2">

@@ -1,3 +1,5 @@
+// Resolves the reserved example names these tests fetch, without real DNS.
+import "./fake-dns";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";

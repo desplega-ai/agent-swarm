@@ -4,7 +4,7 @@ import { getAgentById } from "@/be/db";
 import { updateSwarmRepoChecked } from "@/be/repo-checked-update";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
+import { agentsMayMerge, RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
 
 const swarmRepoOutputShape = z.looseObject({
   id: z.string().optional(),
@@ -33,7 +33,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
     {
       title: "Update Repo",
       description:
-        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.",
+        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.",
       annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
@@ -51,7 +51,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
         guidelines: RepoGuidelinesInputSchema.nullable()
           .optional()
           .describe(
-            "Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear.",
+            "Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers), mergePolicy (per-repo merge policy record: autoMerge, agentsMayMerge, notify). Pass null to clear.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -59,7 +59,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
       }),
     },
     async ({ id, ...updates }, requestInfo) => {
-      // The comparison with the stored allowMerge, the decision and the write share one
+      // The comparison with the stored merge policy, the decision and the write share one
       // transaction, so a stale edit cannot overwrite a merge-policy change committed after it.
       const result = await updateSwarmRepoChecked(id, updates, async (existing) => {
         const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
@@ -72,8 +72,8 @@ export const registerUpdateRepoTool = (server: McpServer) => {
           source: "mcp",
         });
         if (decision.allow) return null;
-        const current = existing.guidelines?.allowMerge === true;
-        return `Only lead agents can change allowMerge (it is currently ${current}). Resend ${current} to keep it while you edit the other guidelines.`;
+        const current = agentsMayMerge(existing.guidelines);
+        return `Only lead agents can change allowMerge or mergePolicy (agents may merge: ${current}). Resend the current allowMerge and mergePolicy to keep them while you edit the other guidelines.`;
       });
 
       if (result.kind === "refused") {

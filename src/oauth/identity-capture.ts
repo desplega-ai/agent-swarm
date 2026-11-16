@@ -1,5 +1,7 @@
+import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { assertOAuthEgressUrlSafe } from "./app-validation";
+import { publicEndpointSsrfOptions } from "./mcp-wrapper";
 
 /**
  * Best-effort account identity captured after a successful token exchange.
@@ -66,7 +68,10 @@ export async function captureIdentity(input: {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IDENTITY_FETCH_TIMEOUT_MS);
       try {
-        const response = await fetch(input.userinfoUrl, {
+        // The guarded fetch also checks the resolved address, so a public name
+        // that resolves to a private one never receives the bearer.
+        const guardedFetch = createSsrfGuardedFetch(publicEndpointSsrfOptions());
+        const response = await guardedFetch(input.userinfoUrl, {
           headers: {
             authorization: `Bearer ${input.accessToken}`,
             accept: "application/json",

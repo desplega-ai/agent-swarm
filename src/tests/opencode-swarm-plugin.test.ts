@@ -123,7 +123,12 @@ describe("opencode swarm plugin", () => {
   test("heartbeats after a worker tool call", async () => {
     const { hooks } = await setup();
     requests.length = 0;
-    await hooks["tool.execute.after"]?.({ status: "completed" });
+    await hooks["tool.execute.after"]?.({
+      status: "completed",
+      tool: "shell",
+      id: "call-1",
+      input: {},
+    });
     await Bun.sleep(50);
     expect(requests).toContain("PUT /api/agents/agent-1/activity");
   });

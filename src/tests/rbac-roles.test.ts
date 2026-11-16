@@ -20,6 +20,8 @@ const REQUESTER_VERBS = [
   "comb.presence",
   "favorite.write.own",
   "fs.join.own",
+  "objects.read",
+  "objects.write",
   "session.presence",
   "session.share",
   "task.action.own",
@@ -203,6 +205,7 @@ describe("ensureRbacSeedsSynced", () => {
       "comb.presence",
       "favorite.write.own",
       "fs.join.own",
+      "objects.read",
       "session.presence",
     ]);
     for (const verb of viewerVerbs) expect(REQUESTER_VERBS).toContain(verb);

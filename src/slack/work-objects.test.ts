@@ -112,7 +112,8 @@ describe("Work Object details handler", () => {
     expect(response?.metadata).not.toHaveProperty("entities");
     expect(response?.metadata).not.toHaveProperty("app_unfurl_url");
     expect(response).not.toHaveProperty("error");
-    expect(userAllowed).toHaveBeenCalledWith(client, event.user);
+    // The event has no user_team, so isUserAllowed must read it rather than skip the team check.
+    expect(userAllowed).toHaveBeenCalledWith(client, event.user, handlers.LOOKUP_USER_TEAM);
     expect(getTask).toHaveBeenCalledWith(taskId);
   });
 

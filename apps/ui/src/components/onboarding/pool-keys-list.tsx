@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useContinueHold } from "@/hooks/use-autosave";
+import { spendCapText } from "@/lib/ai-providers";
 import { cn, formatRelativeTime, parseUTCDate } from "@/lib/utils";
 
 const CHECKING = "Checking the key…";
@@ -117,6 +118,12 @@ function keyState(key: PoolKey): { tone: KeyStatusTone; pill: string; meta: stri
       const when = key.checkedAt ? `, ${formatRelativeTime(key.checkedAt)}` : "";
       return { tone: "error", pill: "Rejected", meta: `${reason}${when}.` };
     }
+    case "spend_capped":
+      return {
+        tone: "warning",
+        pill: "Spend cap hit",
+        meta: key.spendCap ? `${spendCapText(key.spendCap)}.` : null,
+      };
     case "rate_limited":
       return {
         tone: "warning",

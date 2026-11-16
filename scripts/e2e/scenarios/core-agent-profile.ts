@@ -343,11 +343,17 @@ async function harnessAndRuntime(ctx: ScenarioContext, agentId: string): Promise
     body: { harness_provider: "claude", profile: "codex-regular" },
   });
   expectStatus(response, [400], "profile of another harness");
+  // The earlier custom model is still saved: a profile beats it at claim, so saving one drops it.
+  expect(configValue(ctx, agentId, "MODEL_OVERRIDE") !== null, "No MODEL_OVERRIDE to supersede");
   response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
     body: { harness_provider: "claude", profile: "claude-smart" },
   });
   expectStatus(response, [200], "set default profile");
   expect(configValue(ctx, agentId, "MODEL_PROFILE") === "claude-smart", "No MODEL_PROFILE row");
+  expect(
+    configValue(ctx, agentId, "MODEL_OVERRIDE") === null,
+    "MODEL_OVERRIDE survived saving a default profile",
+  );
   response = await ctx.api("PATCH", `/api/agents/${agentId}/runtime`, {
     body: { harness_provider: "claude", model: null, reasoning_effort: null, profile: null },
   });

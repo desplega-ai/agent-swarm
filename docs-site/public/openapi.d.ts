@@ -6266,357 +6266,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/config/pool-keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List credential pool suffixes and status */
-        get: {
-            parameters: {
-                query: {
-                    key: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Credential pool */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid pool variable */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Secret read permission required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Test and append keys to a credential pool */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        key: string;
-                        value: string;
-                        /** @description Base URL for the check only. Null tests the provider default. Omit to use the stored URL. */
-                        baseUrl?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Updated credential pool and checks */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                            checks: {
-                                suffix: string;
-                                /** @enum {string} */
-                                result: "verified" | "rejected" | "not_tested";
-                                httpStatus: number | null;
-                                error: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid key */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Config administration and permission to read all secrets required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Duplicate key or deployment env pool */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Provider rejected a key. Nothing was saved. */
-                422: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            error: string;
-                            checks: {
-                                suffix: string;
-                                /** @enum {string} */
-                                result: "verified" | "rejected" | "not_tested";
-                                httpStatus: number | null;
-                                error: string | null;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        /** Remove one credential pool member */
-        delete: {
-            parameters: {
-                query: {
-                    key: string;
-                    index?: number | null;
-                    suffix: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Updated credential pool */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            key: string;
-                            /** @enum {string} */
-                            source: "stored" | "env" | "none";
-                            readOnly: boolean;
-                            keys: {
-                                index: number;
-                                suffix: string;
-                                /** @enum {string} */
-                                status: "ok" | "rejected" | "rate_limited" | "unchecked";
-                                error: string | null;
-                                checkedAt: string | null;
-                                rateLimitedUntil: string | null;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Invalid pool member */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Config administration and permission to read all secrets required */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The pool changed or comes from the deployment env */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tasks/{id}/context": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get context usage history for a task */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Context snapshot history */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            snapshots: components["schemas"]["ContextSnapshot"][];
-                            summary: {
-                                compactionCount: number;
-                                peakContextPercent: number | null;
-                                peakContextTokens: number | null;
-                                contextWindowSize: number | null;
-                                snapshotCount: number;
-                            };
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Record a context usage snapshot for a task */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        eventType: "progress" | "compaction" | "completion";
-                        sessionId: string;
-                        contextUsedTokens?: number;
-                        contextTotalTokens?: number;
-                        contextPercent?: number;
-                        /** @enum {string} */
-                        compactTrigger?: "auto" | "manual" | "auto-inferred";
-                        preCompactTokens?: number;
-                        cumulativeInputTokens?: number;
-                        cumulativeOutputTokens?: number;
-                        /** @enum {string} */
-                        contextFormula?: "input-cache-output" | "input-cache-no-output" | "input-output-no-cache" | "peak-proxy" | "pi-delegated" | "harness-reported" | "unknown";
-                    };
-                };
-            };
-            responses: {
-                /** @description Snapshot recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            ok: true;
-                            /** Format: uuid */
-                            snapshotId: string;
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keys/report-usage": {
         parameters: {
             query?: never;
@@ -6716,6 +6365,12 @@ export interface paths {
                         rateLimitedUntil: string;
                         scope?: string;
                         scopeId?: string;
+                        spendCap?: {
+                            limitUsd: number | null;
+                            spendUsd: number | null;
+                            /** Format: date-time */
+                            resetsAt: string | null;
+                        };
                     };
                 };
             };
@@ -7187,6 +6842,7 @@ export interface paths {
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
                             seatBlockedIndices?: number[];
+                            spendCappedIndices: number[];
                             authFailureFence: number;
                         };
                     };
@@ -7258,6 +6914,12 @@ export interface paths {
                                 scopeId: string | null;
                                 status: string;
                                 rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
                                 lastUsedAt: string | null;
                                 lastRateLimitAt: string | null;
                                 totalUsageCount: number;
@@ -7866,6 +7528,375 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/api/config/pool-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List credential pool suffixes and status */
+        get: {
+            parameters: {
+                query: {
+                    key: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool variable */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Secret read permission required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Test and append keys to a credential pool */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        key: string;
+                        value: string;
+                        /** @description Base URL for the check only. Null tests the provider default. Omit to use the stored URL. */
+                        baseUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated credential pool and checks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid key */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration and permission to read all secrets required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Duplicate key or deployment env pool */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Provider rejected a key. Nothing was saved. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            checks: {
+                                suffix: string;
+                                /** @enum {string} */
+                                result: "verified" | "rejected" | "not_tested";
+                                httpStatus: number | null;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        /** Remove one credential pool member */
+        delete: {
+            parameters: {
+                query: {
+                    key: string;
+                    index?: number | null;
+                    suffix: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated credential pool */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string;
+                            /** @enum {string} */
+                            source: "stored" | "env" | "none";
+                            readOnly: boolean;
+                            keys: {
+                                index: number;
+                                suffix: string;
+                                /** @enum {string} */
+                                status: "ok" | "rejected" | "rate_limited" | "spend_capped" | "unchecked";
+                                error: string | null;
+                                checkedAt: string | null;
+                                rateLimitedUntil: string | null;
+                                spendCap: {
+                                    limitUsd: number | null;
+                                    spendUsd: number | null;
+                                    /** Format: date-time */
+                                    resetsAt: string | null;
+                                } | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid pool member */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Config administration and permission to read all secrets required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The pool changed or comes from the deployment env */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get context usage history for a task */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Context snapshot history */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            snapshots: components["schemas"]["ContextSnapshot"][];
+                            summary: {
+                                compactionCount: number;
+                                peakContextPercent: number | null;
+                                peakContextTokens: number | null;
+                                contextWindowSize: number | null;
+                                snapshotCount: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Record a context usage snapshot for a task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        eventType: "progress" | "compaction" | "completion";
+                        sessionId: string;
+                        contextUsedTokens?: number;
+                        contextTotalTokens?: number;
+                        contextPercent?: number;
+                        /** @enum {string} */
+                        compactTrigger?: "auto" | "manual" | "auto-inferred";
+                        preCompactTokens?: number;
+                        cumulativeInputTokens?: number;
+                        cumulativeOutputTokens?: number;
+                        /** @enum {string} */
+                        contextFormula?: "input-cache-output" | "input-cache-no-output" | "input-output-no-cache" | "peak-proxy" | "pi-delegated" | "harness-reported" | "unknown";
+                    };
+                };
+            };
+            responses: {
+                /** @description Snapshot recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            ok: true;
+                            /** Format: uuid */
+                            snapshotId: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/events": {
@@ -9134,7 +9165,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description A non-admin user token named an email other than its own */
+                /** @description The caller is not the operator key or a user, or a non-admin user token named an email other than its own */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -10055,7 +10086,7 @@ export interface paths {
                             error?: string;
                             adapters: {
                                 /** @enum {string} */
-                                name: "telegram" | "slack" | "discord" | "teams";
+                                name: "telegram" | "slack" | "discord" | "teams" | "rocketchat";
                                 configured: boolean;
                                 enabled: boolean;
                                 /** @enum {string} */
@@ -13552,6 +13583,330 @@ export interface paths {
                     };
                 };
                 /** @description agent-fs could not be read; agent-fs retries the delivery */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a board or sheet on the shared drive, or confirm it is unchanged */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description The version the caller holds. A match answers `unchanged: true` with no content */
+                    knownVersion?: number | null;
+                };
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The object with its content, or `unchanged: true` with no content */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            object: {
+                                id: string;
+                                kind: string;
+                                orgId: string;
+                                driveId: string;
+                                path: string;
+                                title: string | null;
+                                fileVersion: number | null;
+                                ownerAgentId: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                link: string | null;
+                            };
+                            version: number | null;
+                            unchanged: boolean;
+                            content?: unknown;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save a board's full Excalidraw scene, guarded by its agent-fs version */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description The Excalidraw scene */
+                        content: {
+                            [key: string]: unknown;
+                        };
+                        /** @description The version the scene was edited from */
+                        ifMatch: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            object: {
+                                id: string;
+                                kind: string;
+                                orgId: string;
+                                driveId: string;
+                                path: string;
+                                title: string | null;
+                                fileVersion: number | null;
+                                ownerAgentId: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                link: string | null;
+                            };
+                            version: number | null;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The board changed since `ifMatch`; the body carries its `version` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The scene exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/objects/{id}/sheet-ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Patch sheet cells; the server recalculates and merges concurrent edits */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Object id (`swarm.id` in the file) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        op: "setRange";
+                        range: string;
+                        values: (number | string | boolean | null)[][];
+                    } | {
+                        /** @enum {string} */
+                        op: "clearRange";
+                        range: string;
+                    } | {
+                        /** @enum {string} */
+                        op: "appendRows";
+                        tab: string;
+                        rows: (number | string | boolean | null)[][];
+                    };
+                };
+            };
+            responses: {
+                /** @description Applied: the range written and the new version */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            op: "setRange" | "clearRange" | "appendRows";
+                            range: string;
+                            version: number;
+                            changed?: number;
+                            recalculated?: number;
+                            cleared?: number;
+                        };
+                    };
+                };
+                /** @description Invalid input, or the object is not the kind this route edits */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied, a page guest, a read-only page session, or an object off the shared drive */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description No such object, or its file is gone */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Other writers changed the sheet on every retry; try again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The owner agent has no agent-fs key on the object's drive */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -19320,7 +19675,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge */
+                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -19473,7 +19828,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20867,7 +21222,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral owned by another agent */
+                /** @description Deferral or target owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21071,7 +21426,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral owned by another agent */
+                /** @description Deferral or target owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21895,6 +22250,7 @@ export interface paths {
                         harness?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx" | null;
                         totalCostUsd: number;
                         harnessCostBilled?: boolean;
+                        estimated?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
@@ -26509,6 +26865,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tool-hooks/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether any enabled extension takes harness-native tool calls
+         * @description Worker shims read this before each native tool call and skip `POST /api/tool-hooks` while `native` is false, so a swarm with no native-tool extension pays no per-call round trip. Shims cache the answer for a short time.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Native tool hook status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            native: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trackers/jira/authorize": {
         parameters: {
             query?: never;
@@ -30180,6 +30577,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Workflow run not found */
                 404: {
                     headers: {
@@ -30243,6 +30649,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Event name is reserved for provider webhooks */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30359,6 +30774,14 @@ export interface paths {
                                 /**
                                  * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                                  * @default X-Hub-Signature-256
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
                                  */
                                 header?: string;
                             } | {
@@ -30580,6 +31003,14 @@ export interface paths {
                                 /**
                                  * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                                  * @default X-Hub-Signature-256
+                                 */
+                                header?: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "hmac-sha1";
+                                /**
+                                 * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                                 * @default X-Hub-Signature
                                  */
                                 header?: string;
                             } | {
@@ -32892,13 +33323,42 @@ export interface components {
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
+        RepoMergePolicy: {
+            autoMerge?: {
+                /** @default false */
+                enabled: boolean;
+                /** @default 80 */
+                threshold: number;
+                /** @default {} */
+                baseScores: {
+                    [key: string]: number;
+                };
+                /** @default {} */
+                maxLines: {
+                    [key: string]: number;
+                };
+                /** @default [] */
+                riskyPaths: string[];
+                /** @default [] */
+                classes: string[];
+            };
+            agentsMayMerge?: boolean;
+            notify?: {
+                /** @default true */
+                dmWhenNotAutoMerging: boolean;
+                digestAt?: string;
+                timezone?: string;
+            };
+        };
         RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];
             /** @default false */
             allowMerge: boolean;
             review: string[];
+            mergePolicy?: components["schemas"]["RepoMergePolicy"];
         } | null;
         RequestComposition: {
             /** Format: uuid */
@@ -33337,6 +33797,14 @@ export interface components {
                     header: string;
                 } | {
                     /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
                     format: "timestamped-hmac-sha256";
                     /** @description Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>. */
                     header: string;
@@ -33604,6 +34072,14 @@ export interface components {
                     /**
                      * @description Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.
                      * @default X-Hub-Signature-256
+                     */
+                    header: string;
+                } | {
+                    /** @enum {string} */
+                    format: "hmac-sha1";
+                    /**
+                     * @description Header containing HMAC-SHA1 over the raw request body. Accepts sha1=<hex> or bare hex.
+                     * @default X-Hub-Signature
                      */
                     header: string;
                 } | {

@@ -61,7 +61,10 @@ export function classifyProviderError(
       return { errorClass: "model_window" };
     case "key":
       return {
-        errorClass: isCodexCreditsExhaustedMessage(text) ? "credits" : "rate_limit",
+        errorClass:
+          rateLimitOutcome.spendCap || isCodexCreditsExhaustedMessage(text)
+            ? "credits"
+            : "rate_limit",
       };
     case "none":
       break;

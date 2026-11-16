@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   assertUrlSafe,
   authMethodForStoredClient,
@@ -13,6 +13,16 @@ import {
   revokeMcpToken,
   selectDcrTokenEndpointAuthMethod,
 } from "../oauth/mcp-wrapper";
+
+// The fetch stubs here route by URL. Allowing private hosts skips name
+// resolution and address pinning, which mcp-outbound-fetch-guard.test.ts covers.
+// The SSRF guard tests below clear the flag for themselves.
+const prevAllowPrivateHosts = process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS;
+process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "true";
+afterAll(() => {
+  if (prevAllowPrivateHosts === undefined) delete process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS;
+  else process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = prevAllowPrivateHosts;
+});
 
 // ─── SSRF guard ──────────────────────────────────────────────────────────────
 
@@ -250,6 +260,12 @@ describe("buildAuthorizeUrl (PKCE S256, RFC 8707)", () => {
     expect(uWith.searchParams.get("state")).toBe(uWithout.searchParams.get("state"));
   });
 });
+
+// Fetches go out with a Headers object, so read the header case-insensitively.
+function authorizationHeaderOf(init?: RequestInit): Record<string, string> {
+  const value = new Headers(init?.headers).get("authorization");
+  return value === null ? {} : { Authorization: value };
+}
 
 // ─── Discovery (PRMD + AS metadata) ──────────────────────────────────────────
 
@@ -697,7 +713,7 @@ describe("token-endpoint client authentication is applied per the registered met
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       capturedBody = (init?.body as string) ?? "";
-      capturedHeaders = (init?.headers as Record<string, string>) ?? {};
+      capturedHeaders = authorizationHeaderOf(init);
       return new Response(JSON.stringify({ access_token: "at-1" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -941,7 +957,7 @@ describe("token-endpoint client authentication is applied per the registered met
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       capturedBody = (init?.body as string) ?? "";
-      capturedHeaders = (init?.headers as Record<string, string>) ?? {};
+      capturedHeaders = authorizationHeaderOf(init);
       return new Response(JSON.stringify({ access_token: "at-1" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -970,7 +986,7 @@ describe("token-endpoint client authentication is applied per the registered met
     let capturedBody = "";
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       capturedBody = (init?.body as string) ?? "";
-      capturedHeaders = (init?.headers as Record<string, string>) ?? {};
+      capturedHeaders = authorizationHeaderOf(init);
       return new Response(JSON.stringify({ access_token: "new-at" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

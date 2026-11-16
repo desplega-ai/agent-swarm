@@ -22,7 +22,11 @@ import {
   taskProfileError,
 } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
-import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
+import {
+  changesScheduleTarget,
+  mergeScheduleTiming,
+  validateRecurringTiming,
+} from "../be/schedules/validate";
 import { getScript } from "../be/scripts/db";
 import { can } from "../rbac";
 import { calculateNextRun, dispatchScheduleTarget } from "../scheduler/scheduler";
@@ -230,7 +234,7 @@ const updateSchedule = route({
   responses: {
     200: { description: "Schedule updated", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
-    403: { description: "Deferral owned by another agent" },
+    403: { description: "Deferral or target owned by another agent" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -249,7 +253,7 @@ const patchSchedule = route({
   responses: {
     200: { description: "Schedule patched", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
-    403: { description: "Deferral owned by another agent" },
+    403: { description: "Deferral or target owned by another agent" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
@@ -611,6 +615,27 @@ export async function handleSchedules(
         jsonError(
           res,
           `Schedule "${existing.name}" defers another agent's task. Only that agent or a lead can change it.`,
+          403,
+        );
+        return true;
+      }
+    }
+    // A schedule fires as its creator. An agent may change what it runs only
+    // as its creator or a lead, as in the patch-schedule and update-schedule tools.
+    if (changesScheduleTarget(existing, parsed.body)) {
+      const principal = await agentFirstPrincipal(req, myAgentId);
+      if (
+        principal.kind === "agent" &&
+        !can({
+          principal,
+          verb: "schedule.target.update.any",
+          resource: { kind: "owned", ownerAgentId: existing.createdByAgentId },
+          source: "http",
+        }).allow
+      ) {
+        jsonError(
+          res,
+          `Schedule "${existing.name}" runs as the agent that created it. Only that agent or a lead can change its targetType, taskTemplate, workflowId, scriptName, scriptArgs or params.`,
           403,
         );
         return true;

@@ -155,6 +155,7 @@ export interface ProviderSession {
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
   abort(reason?: string): Promise<void>;
+  finishInput?(): void;
   deliverSteering?(delivery: {
     mode: "steer" | "queue";
     text: string;
@@ -177,6 +178,7 @@ export interface ProviderSession {
 | `session.onEvent` | Register a listener. The adapter must call every registered listener for every `ProviderEvent`. |
 | `session.waitForCompletion()` | Resolve once the session ends; returns `{ exitCode, sessionId, cost, output, isError, errorCategory, errorOrigin, failureReason }`. Set `errorOrigin: "harness"` when the session ended on an exception you did not trace to the model provider (MCP or tool transport, the harness's own IPC): the runner then never moves the task to a fallback profile on that text. |
 | `session.abort()` | Cancel in flight (SIGTERM, SDK abort signal, etc.). Must be idempotent. |
+| `session.finishInput()` | Optional. Stop taking input so the session ends after its current turn and still emits its final cost report. When the task already turned terminal server-side, the runner calls it and aborts only after `RUNNER_TERMINAL_TASK_GRACE_MS` (default 45s). Without it the runner aborts at once. The Claude CLI adapter closes stdin. |
 | `session.deliverSteering()` | Optional live-input transport. Return the mode actually delivered, or an undeliverable reason so the server can promote the message to a follow-up task. |
 
 ### `ProviderSessionConfig` inputs
@@ -229,7 +231,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 | File | Transport | Auth |
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, or a gateway / Foundry / Bedrock / Vertex route ([Model Gateways](/docs/guides/provider-auth/model-gateways#claude-code-through-a-gateway-or-cloud-provider)) |
-| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono-amazon-bedrock-auth) below) — or, for `openai-codex/*` models, the shared `codex_oauth_<n>` pool (see [Codex OAuth](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)) |
+| [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / any other provider key pi-ai resolves (`FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, ...) / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono-amazon-bedrock-auth) below) — or, for `openai-codex/*` models, the shared `codex_oauth_<n>` pool (see [Codex OAuth](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`. The child starts one `codex app-server`, then bridges JSON-RPC notifications and requests to normalized events and controls over bidirectional JSONL. | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6), or a gateway route ([Model Gateways](/docs/guides/provider-auth/model-gateways#codex-through-a-gateway)) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 | [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
@@ -538,7 +540,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1794484845-g2f1e0a`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1794744038-ga74b43`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.

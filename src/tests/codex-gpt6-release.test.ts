@@ -90,10 +90,10 @@ for (const release of releases) {
 }
 
 test("release additions preserve rollout-safe defaults and aliases", () => {
-  expect(CODEX_DEFAULT_MODEL).toBe("gpt-5.6-terra");
-  expect(resolveCodexModel("sonnet")).toBe("gpt-5.6-terra");
-  expect(resolveCodexModel("haiku")).toBe("gpt-5.6-luna");
-  expect(resolveCodexModel("opus")).toBe("gpt-5.6-sol");
+  expect(CODEX_DEFAULT_MODEL).toBe("gpt-6.1-terra");
+  expect(resolveCodexModel("sonnet")).toBe("gpt-6.1-terra");
+  expect(resolveCodexModel("haiku")).toBe("gpt-6-luna");
+  expect(resolveCodexModel("opus")).toBe("gpt-6.1-sol");
 });
 
 describe("gpt-6.1-sol", () => {

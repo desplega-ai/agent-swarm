@@ -49,10 +49,10 @@ describe("the dial reads the model tiers", () => {
   test("a tier change changes the dial model with no code change", () => {
     const before = context({ tiers: tierRows() });
     const after = context({ tiers: tierRows({ "codex:smart": "gpt-next" }) });
-    expect(dialSetting("codex", "optimal", before)?.model).toBe("gpt-5.6-sol");
+    expect(dialSetting("codex", "optimal", before)?.model).toBe("gpt-6.1-sol");
     expect(dialSetting("codex", "optimal", after)?.model).toBe("gpt-next");
     // The stored model of the old tier no longer sits on the dial (Custom); the new one does.
-    expect(dialMatches("codex", "gpt-5.6-sol", "high", after)).toEqual([]);
+    expect(dialMatches("codex", "gpt-6.1-sol", "high", after)).toEqual([]);
     expect(dialMatches("codex", "gpt-next", null, after)).toEqual(["optimal"]);
   });
 
@@ -92,7 +92,7 @@ describe("the dial reads the model tiers", () => {
     // A new list with the same rows is a new cache; a changed row changes the answer.
     const changed = tierRows({ "codex:smart": "gpt-next" });
     expect(dialSetting("codex", "optimal", context({ tiers: changed }))?.model).toBe("gpt-next");
-    expect(dialSetting("codex", "optimal", a)?.model).toBe("gpt-5.6-sol");
+    expect(dialSetting("codex", "optimal", a)?.model).toBe("gpt-6.1-sol");
     expect(dialSetting("codex", "optimal", context({ tiers: null }))).toBeNull();
   });
 });
@@ -135,9 +135,34 @@ describe("Claude tier values are CLI shortnames", () => {
   });
 });
 
+describe("pi on the ChatGPT subscription", () => {
+  test("its levels are the codex tier models as openai-codex/<id>, at codex's effort", () => {
+    const ctx = context({ chatgpt: true });
+    expect(DIAL_LEVELS.map((l) => dialSetting("pi", l, ctx))).toEqual(
+      DIAL_LEVELS.map((l) => {
+        const codex = dialSetting("codex", l, ctx);
+        return {
+          harness: "pi",
+          model: `openai-codex/${codex?.model}`,
+          effort: codex?.effort,
+          custom: false,
+        };
+      }),
+    );
+    // Off the subscription, pi keeps its own tiers; other harnesses never change.
+    expect(dialSetting("pi", "optimal", context())?.model).toMatch(/^openrouter\//);
+    expect(dialSetting("opencode", "optimal", ctx)).toEqual(
+      dialSetting("opencode", "optimal", context()),
+    );
+    expect(dialMatches("pi", "openai-codex/gpt-6.1-sol", "high", ctx)).toEqual(["optimal"]);
+  });
+});
+
 describe("effort", () => {
   test("codex optimal and max can share a model and differ by effort", () => {
-    const ctx = context();
+    const ctx = context({
+      tiers: tierRows({ "codex:ultra": "gpt-5.6-sol", "codex:smart": "gpt-5.6-sol" }),
+    });
     const optimal = dialSetting("codex", "optimal", ctx);
     const max = dialSetting("codex", "max", ctx);
     expect(optimal?.model).toBe(max?.model as string);

@@ -860,6 +860,17 @@ use `window.swarmUi.renderDiff(rootEl, diffData)`:
 A full annotated-PR page using `<swarm-diff>` is bundled at
 **`examples/annotated-pr.html`**.
 
+### `<swarm-object>`: a live sheet or board
+
+Embeds a sheet or board (see the `boards-and-sheets` skill) by object id. Unlike the components above, it needs one script tag from the dashboard origin `${APP_URL}`:
+
+```html
+<script type="module" src="${APP_URL}/embed/v1/swarm-object.js"></script>
+<swarm-object object-id="<object id>"></swarm-object>
+```
+
+Optional attributes: `height` (160-1200 px), `readonly`, and for sheets `tab` and `range`. A signed-in viewer can edit, and edits save to agent-fs. A page opened with the shared swarm key is read-only. A public or password page guest sees "sign in to the swarm to view" and the embed sends no request.
+
 ## Print / PDF export
 
 Every HTML page also gets `@media print` rules in its injected head. Print is

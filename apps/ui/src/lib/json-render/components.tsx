@@ -59,6 +59,7 @@ import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { api } from "@/api/client";
 import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
 import {
   CalendarBody,
@@ -87,6 +88,7 @@ import {
   KanbanProvider,
 } from "@/components/kibo-ui/kanban";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import { ObjectEmbed } from "@/components/objects/object-embed";
 import { BetaTag } from "@/components/shared/beta-tag";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
@@ -173,6 +175,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useTheme } from "@/hooks/use-theme";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { AccordionComponent, type AccordionProps } from "./accordion";
 import { resolveScopedParams } from "./action-params";
@@ -227,6 +230,15 @@ import {
 } from "./link-cell-model";
 import { parseNumberInputValue } from "./number-input-value";
 import { PageFrameComponent } from "./page-frame";
+import {
+  CircleComponent,
+  InputComponent,
+  LineComponent,
+  PathComponent,
+  RectComponent,
+  SvgComponent,
+  SvgTextComponent,
+} from "./primitives";
 import { SchemaFormComponent } from "./schema-form";
 import { SessionThreadComponent } from "./session-thread";
 import { SmartLink } from "./smart-link";
@@ -3423,6 +3435,16 @@ function useRowActionRunner() {
   }, []);
 }
 
+/** `ObjectEmbed` in an app or JSON page: the dashboard's API fetch and theme. */
+function ObjectEmbedComponent({
+  props,
+}: {
+  props: InferComponentProps<typeof swarmCatalog, "ObjectEmbed">;
+}) {
+  const { theme } = useTheme();
+  return <ObjectEmbed {...props} fetch={api.fetchApi} theme={theme} />;
+}
+
 /** `Files` with its `onSelect` chain run with `$row` = the clicked entry. */
 function FilesComponent({ props }: { props: FilesProps }) {
   const runChain = useRowActionRunner();
@@ -4259,6 +4281,13 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SearchInput: ({ props }) => <SearchInputComponent props={props} />,
   Select: ({ props }) => <SelectFilterComponent props={props} />,
   NumberInput: ({ props }) => <NumberInputComponent props={props} />,
+  Input: ({ props, bindings }) => <InputComponent props={props} bindings={bindings} />,
+  Svg: ({ props, children }) => <SvgComponent props={props}>{children}</SvgComponent>,
+  Rect: ({ props }) => <RectComponent props={props} />,
+  Line: ({ props }) => <LineComponent props={props} />,
+  Path: ({ props }) => <PathComponent props={props} />,
+  Circle: ({ props }) => <CircleComponent props={props} />,
+  SvgText: ({ props }) => <SvgTextComponent props={props} />,
   Markdown: ({ props }) => <MarkdownBlock content={props.content} />,
   Container: ({ props, children }) => {
     const direction = props.direction ?? "column";
@@ -4383,6 +4412,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Tree: ({ props }) => <TreeComponent props={props} />,
   Files: ({ props }) => <FilesComponent props={props} />,
   File: ({ props }) => <FileView props={props} />,
+  ObjectEmbed: ({ props }) => <ObjectEmbedComponent props={props} />,
   DateRange: ({ props }) => <DateRangeComponent props={props} />,
   Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,

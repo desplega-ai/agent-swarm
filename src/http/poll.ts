@@ -28,12 +28,17 @@ import {
 } from "../be/db";
 import { checkProfileForAgent } from "../be/model-profile-check";
 import {
+  modelTierOverridesDiffer,
   parseModelTierOverridesHeader,
   recordClaimModelResolution,
   setAgentModelTierOverrides,
 } from "../be/model-tier-resolution";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
-import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
+import {
+  getRuntimeInstanceById,
+  isRuntimeInstanceFresh,
+  touchRuntimeInstance,
+} from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { type TaskModelPinFields, taskModelPin } from "../tasks/model-pin";
@@ -207,6 +212,9 @@ const pollTriggers = route({
 });
 
 // ─── Channel Activity Throttle ──────────────────────────────────────────────
+
+/** The idle-poll probe hit a write: rerun the poll under the write lock. */
+const NEEDS_WRITE = Symbol("poll-needs-write");
 
 const CHANNEL_ACTIVITY_INTERVAL_MS = 60_000; // Check at most once per 60s
 let lastChannelActivityCheckAt = 0;
@@ -390,7 +398,12 @@ export async function handlePoll(
     let runtimeDraining = false;
     let result: PollTxnResult;
     try {
-      result = await getDbClient().transaction(async () => {
+      // Runs twice at most. The probe pass (`probe: true`) runs in a read-only
+      // transaction, so an idle poll never takes the SQLite write lock; at its
+      // first would-be write it returns NEEDS_WRITE instead. Only then does the
+      // same body run again under BEGIN IMMEDIATE, where every claim and its
+      // capacity/budget check stay atomic exactly as before.
+      const pollBody = async (probe: boolean): Promise<PollTxnResult | typeof NEEDS_WRITE> => {
         const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
@@ -399,7 +412,8 @@ export async function handlePoll(
         // The worker's parsed MODEL_TIER_* env overrides ride on every poll so
         // claim-time resolution can honor them (no write when unchanged).
         if (modelTierOverrides) {
-          await setAgentModelTierOverrides(agent.id, modelTierOverrides);
+          if (!probe) await setAgentModelTierOverrides(agent.id, modelTierOverrides);
+          else if (await modelTierOverridesDiffer(agent.id, modelTierOverrides)) return NEEDS_WRITE;
         }
 
         // Extension identities authenticate to the API but never execute
@@ -413,12 +427,15 @@ export async function handlePoll(
         // live runtime identity rather than on X-Agent-ID alone, which only
         // names the logical agent. Polling is worker activity, so this also
         // refreshes liveness — it cannot revive a retired runtime, since the
-        // update only matches one that is still live.
-        if (
-          isMultiRuntimeEnabled() &&
-          !(runtimeInstanceId && (await touchRuntimeInstance(runtimeInstanceId, agent.id)))
-        ) {
-          return { trigger: null };
+        // update only matches one that is still live. The probe skips the
+        // touch while the last one is fresh (well inside the stale window).
+        if (isMultiRuntimeEnabled()) {
+          if (!runtimeInstanceId) return { trigger: null };
+          if (probe) {
+            if (!(await isRuntimeInstanceFresh(runtimeInstanceId, agent.id))) return NEEDS_WRITE;
+          } else if (!(await touchRuntimeInstance(runtimeInstanceId, agent.id))) {
+            return { trigger: null };
+          }
         }
 
         if (
@@ -448,6 +465,7 @@ export async function handlePoll(
           : [];
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
+          if (probe) return NEEDS_WRITE;
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
@@ -468,7 +486,10 @@ export async function handlePoll(
         // Check for pending tasks (assigned directly to this agent)
         // Only return a task if agent has capacity (server-side enforcement)
         if (await hasCapacity(myAgentId)) {
-          const pendingTask = await getPendingTaskForAgent(myAgentId);
+          // The probe also escalates when only an affinity-skip log row is due.
+          const pendingProbe = probe ? { skipLogDue: false } : undefined;
+          const pendingTask = await getPendingTaskForAgent(myAgentId, pendingProbe);
+          if (pendingProbe && (pendingTask || pendingProbe.skipLogDue)) return NEEDS_WRITE;
           if (pendingTask) {
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
@@ -586,8 +607,11 @@ export async function handlePoll(
         // Gated on the messaging capability: without it the read-messages /
         // post-message tools aren't registered, so an unread_mentions trigger
         // would instruct a missing tool and strand the claimed mentions.
-        const claimedChannels = hasCapability("messaging") ? await claimMentions(myAgentId) : [];
+        const claimedChannels = hasCapability("messaging")
+          ? await claimMentions(myAgentId, { dryRun: probe })
+          : [];
         if (claimedChannels.length > 0) {
+          if (probe) return NEEDS_WRITE;
           // Count what this claim took: the inbox summary no longer sees mentions already
           // moved to "processing".
           return {
@@ -662,6 +686,7 @@ export async function handlePoll(
             // refusal, and the dedup is per-(task,date) so subsequent same-day
             // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
+              if (probe) return NEEDS_WRITE;
               const candidateId = unassignedIds[0]!;
               const candidateTask = await getTaskById(candidateId);
               const admission = await canClaim(
@@ -755,7 +780,13 @@ export async function handlePoll(
 
         // No trigger found
         return { trigger: null };
-      });
+      };
+      const probed = await getDbClient().transaction(() => pollBody(true), { readOnly: true });
+      // The write pass never returns NEEDS_WRITE: every guard above is `if (probe)`.
+      result =
+        probed === NEEDS_WRITE
+          ? ((await getDbClient().transaction(() => pollBody(false))) as PollTxnResult)
+          : probed;
     } catch (error) {
       console.error("[/api/poll] Database error:", error);
       jsonError(

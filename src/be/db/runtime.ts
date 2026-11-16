@@ -18,6 +18,16 @@ let effectiveDriver: "sqlite" | "worker" = "sqlite";
 let databasePath = "";
 let customSQLite: string | undefined;
 
+function resolveCustomSQLite(): string | undefined {
+  if (process.platform === "darwin") {
+    customSQLite ??= [
+      "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+      "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+    ].find((candidate) => require("node:fs").existsSync(candidate));
+  }
+  return customSQLite;
+}
+
 export function requestedDbDriver(): "sqlite" | "worker" {
   const value = process.env.DB_DRIVER ?? "sqlite";
   if (value !== "sqlite" && value !== "worker")
@@ -35,6 +45,20 @@ export function isCurrentDbClient(client: DbClient): boolean {
 
 export function getDbDriver(): "sqlite" | "worker" {
   return effectiveDriver;
+}
+
+/** Read the current connection configuration without opening a database. */
+export async function getMemoryReadConnection(client: DbClient) {
+  if (!db || !isCurrentDbClient(client)) throw new Error("Memory store connection closed.");
+  await ready;
+  if (!db || !isCurrentDbClient(client)) throw new Error("Memory store connection closed.");
+  return {
+    identity: db,
+    file: db.filename,
+    customSQLite: resolveCustomSQLite(),
+    vecExtensionPath: sqliteVecAvailable ? resolveSqliteVecExtensionPath() : undefined,
+    sqliteVec: sqliteVecAvailable,
+  };
 }
 export async function whenDbReady(): Promise<void> {
   getDbClient();
@@ -123,10 +147,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) return db;
   databasePath = dbPath;
   if (process.platform === "darwin" && requestedDbDriver() === "worker") {
-    customSQLite ??= [
-      "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
-      "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
-    ].find((candidate) => require("node:fs").existsSync(candidate));
+    resolveCustomSQLite();
     if (customSQLite) {
       try {
         Database.setCustomSQLite(customSQLite);
@@ -415,11 +436,17 @@ export function closeDb(): Promise<void> {
     try {
       const { stopMemoryStores } =
         require("../memory/providers/sqlite-store") as typeof import("../memory/providers/sqlite-store");
+      const { stopMemorySearchReader } =
+        require("../memory/search-reader") as typeof import("../memory/search-reader");
       // Cancel future batches before closing admission. Drain admitted operations through the client.
       const populations = stopMemoryStores(dbClientInstance!);
+      const readers = stopMemorySearchReader(dbClientInstance!);
+      // Client closure can fail before the independently bounded reader shutdown settles.
+      void readers.catch(() => {});
       await dbClientInstance!.close();
       // Failed closure already reached the client's bound. Do not wait again on blocked work.
       await populations;
+      await readers;
     } finally {
       db?.close();
       db = null;

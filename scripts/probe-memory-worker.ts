@@ -6,6 +6,7 @@ import { closeDb, getDbClient, getDbDriver, initDb } from "../src/be/db";
 import type { DbClient } from "../src/be/db-client";
 import { getMemoryStore } from "../src/be/memory";
 import { SqliteMemoryStore } from "../src/be/memory/providers/sqlite-store";
+import { memorySearchReader, memorySearchReaderStats } from "../src/be/memory/search-reader";
 
 if (process.platform === "darwin") {
   const library = "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib";
@@ -468,8 +469,22 @@ try {
     const neverInitialized = new SqliteMemoryStore();
     const oldSingleton = getMemoryStore();
     await oldSingleton.whenReady();
+    await memorySearchReader.get("SELECT 1");
+    const interruptedReads = Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        memorySearchReader.get(
+          "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000000) SELECT count(*) FROM n",
+        ),
+      ),
+    );
+    await tick();
     const closing = closeDb();
     await closing;
+    for (const read of await interruptedReads) {
+      assert.equal(read.status, "rejected");
+      if (read.status === "rejected") assert.match(String(read.reason), /closed/);
+    }
+    assert.equal(await memorySearchReaderStats(), null);
     await assert.rejects(store.getHealth(), /closed/);
     await assert.rejects(pending.peek(earlier), /closed/);
     initDb(join(dir, "reopened.sqlite"));
@@ -478,6 +493,10 @@ try {
     assert.notEqual(fresh, oldSingleton);
     await fresh.whenReady();
     assert.equal((await fresh.getHealth()).counts.total, 0);
+    assert.deepEqual(await memorySearchReader.get("SELECT count(*) AS n FROM agent_memory"), {
+      n: 0,
+    });
+    await assert.rejects(memorySearchReader.get("SELECT 1", [], client), /closed/);
     await assert.rejects(
       store.store({
         agentId: null,
@@ -491,6 +510,38 @@ try {
     await closeDb();
     result.lifecycle =
       "schema error identity, pending transaction rejection, vector failure, fallback, shutdown, reopen passed";
+
+    // An idle reader that loses its closure request must fail within the shutdown bound.
+    initDb(join(dir, "lost-reader-ack.sqlite"));
+    const RealWorker = globalThis.Worker;
+    const noAckWorkers: Worker[] = [];
+    globalThis.Worker = new Proxy(RealWorker, {
+      construct(target, args) {
+        const worker = Reflect.construct(target, args) as Worker;
+        if (String(args[0]).includes("search-read-worker")) noAckWorkers.push(worker);
+        return worker;
+      },
+    });
+    try {
+      await memorySearchReader.get("SELECT 1");
+    } finally {
+      globalThis.Worker = RealWorker;
+    }
+    assert.equal(noAckWorkers.length, 2);
+    for (const worker of noAckWorkers) {
+      const postMessage = worker.postMessage.bind(worker);
+      worker.postMessage = ((message: unknown) => {
+        if ((message as { type?: string }).type === "close") return;
+        postMessage(message);
+      }) as typeof worker.postMessage;
+    }
+    const readerClosingAt = performance.now();
+    await assert.rejects(closeDb(), /Memory read worker shutdown timed out/);
+    assert.ok(performance.now() - readerClosingAt < 12_000);
+    assert.equal(await memorySearchReaderStats(), null);
+    result.readerLifecycle =
+      "active and queued reads rejected, reopen isolated, lost closure request rejected within 12 seconds";
+
     // Every DB-bearing public operation must wait individually, including error paths.
     initDb(join(dir, "ownership.sqlite"));
     const owned = new SqliteMemoryStore();

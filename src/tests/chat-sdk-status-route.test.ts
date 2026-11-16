@@ -175,7 +175,13 @@ describe("GET /api/integrations/chat/status", () => {
     expect(body.enabled).toBe(true);
     expect(body.slackClash).toBe(false);
     const byName = Object.fromEntries(body.adapters.map((a) => [a.name, a]));
-    expect(Object.keys(byName).sort()).toEqual(["discord", "slack", "teams", "telegram"]);
+    expect(Object.keys(byName).sort()).toEqual([
+      "discord",
+      "rocketchat",
+      "slack",
+      "teams",
+      "telegram",
+    ]);
 
     expect(byName.telegram).toMatchObject({
       configured: true,
@@ -201,6 +207,12 @@ describe("GET /api/integrations/chat/status", () => {
       webhookUrl: `${PUBLIC_URL}/api/integrations/chat/discord/webhook`,
     });
     expect(byName.teams).toMatchObject({ configured: false, health: "disabled", connected: false });
+    expect(byName.rocketchat).toMatchObject({
+      configured: false,
+      health: "disabled",
+      connected: false,
+      webhookUrl: `${PUBLIC_URL}/api/integrations/chat/rocketchat/webhook`,
+    });
   });
 
   test("flags the Slack clash when SLACK_DISABLE is not true", async () => {

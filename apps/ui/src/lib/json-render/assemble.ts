@@ -17,6 +17,9 @@
  *     and instance 2's input hold independent state. No `pages/<p>` segment:
  *     the same instanceKey on two pages of one app shares interaction state,
  *     deliberately consistent with the cross-page-warm global store;
+ *   - **focus ids** — an `Input`'s `props.id` and every `ui.focus` `id` aimed
+ *     at it get the same `instances/<instanceKey>/<origId>` form, so focus
+ *     never jumps to another instance's Input;
  *   - **element props** — `{"$state": "/props/<p>"}` is substituted with the
  *     consumer-supplied value (a literal, or the consumer's own binding, or
  *     the declared default);
@@ -92,6 +95,13 @@ export const UI_STATE_COMPONENTS: ReadonlySet<string> = new Set([
 
 /** Components whose `props.id` roots `/forms/<id>/…` interaction state. */
 const FORM_COMPONENTS = new Set(["Form"]);
+
+/**
+ * Components whose `props.id` is a `ui.focus` target. No store state, but the
+ * surface's focus registry is keyed by it, so two instances of one element
+ * must not register the same id (the later one would take every focus).
+ */
+const FOCUS_COMPONENTS = new Set(["Input"]);
 
 /** Condition keys `evaluateVisibility` understands (`@json-render/core`). */
 const COMPARISON_KEYS = ["eq", "neq", "gt", "gte", "lt", "lte"] as const;
@@ -234,7 +244,7 @@ export const REWRITE_COVERAGE: RewriteRule[] = [
   {
     field: "props",
     rewrites: ["state-paths", "interaction-ids", "prop-substitution", "action-app-binding"],
-    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions, Table.bulkActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — and the interaction `props.id` of Form and every UI_STATE_COMPONENTS entry (SearchInput/Select/NumberInput/Tabs/Chips/Tree/SchemaForm/SessionThread/Table)",
+    note: "deep walk: every $state/$bindState/$cond binding, absolute-path interpolations inside a $template string, `statePath`/`clearStatePath` strings, action chains nested in props (Form.onSubmit, Table.rowActions[].actions, Table.bulkActions[].actions) — including their `formId` (an interaction id, namespaced like `props.id`) and their `$app` routing marker — the interaction `props.id` of Form and every UI_STATE_COMPONENTS entry (SearchInput/Select/NumberInput/Tabs/Chips/Tree/SchemaForm/SessionThread/Table), and the `props.id` of every Input together with the `ui.focus` `id` aimed at it (Input chains are props: onInput/onPaste/onKeyDown:*)",
   },
   {
     field: "children",
@@ -244,7 +254,7 @@ export const REWRITE_COVERAGE: RewriteRule[] = [
   {
     field: "on",
     rewrites: ["state-paths", "prop-substitution", "action-app-binding"],
-    note: "event → action chain; params deep-rewritten, app-scoped steps tagged with $app",
+    note: "event → action chain; params deep-rewritten, app-scoped steps tagged with $app, `ui.focus` ids namespaced like the Input ids they target",
   },
   {
     field: "visible",
@@ -300,6 +310,8 @@ interface Scope {
   uiIds: Set<string>;
   /** `props.id`s declared inside this element that root `/forms/<id>`. */
   formIds: Set<string>;
+  /** `props.id`s of the `ui.focus` targets declared inside this element. */
+  focusIds: Set<string>;
   /** Already-emitted consumer child ids spliced at this element's slot. */
   slotChildren: string[];
   depth: number;
@@ -559,6 +571,22 @@ function rewriteActionStep(step: Record<string, unknown>, scope: Scope): void {
     step.params = rest;
   }
 
+  // `ui.focus` aims at an Input id, which an instance namespaces like a form id.
+  if (action === "ui.focus" && scope.instanceKey) {
+    const current = isPlainObject(step.params) ? step.params : undefined;
+    const id = current?.id;
+    if (typeof id === "string") {
+      if (scope.focusIds.has(id)) {
+        step.params = { ...current, id: instanceId(scope.instanceKey, id) };
+      }
+    } else if (id !== undefined && scope.focusIds.size > 0) {
+      // An expression id resolves at run time; a focus step may only target
+      // an Input of its own tree, so the instance prefix applies to it too.
+      step.params = { ...current, id: { $join: [[instanceId(scope.instanceKey, ""), id], ""] } };
+    }
+    return;
+  }
+
   if (action !== "app.mutate" || !scope.instanceKey) return;
   const current = isPlainObject(step.params) ? step.params : undefined;
   const formId = current?.formId;
@@ -610,9 +638,11 @@ function card(tone: "error" | "info", title: string, message: string): Record<st
 function collectInteractionIds(elements: Record<string, unknown>): {
   uiIds: Set<string>;
   formIds: Set<string>;
+  focusIds: Set<string>;
 } {
   const uiIds = new Set<string>();
   const formIds = new Set<string>();
+  const focusIds = new Set<string>();
   for (const node of Object.values(elements)) {
     if (!isPlainObject(node) || typeof node.type !== "string") continue;
     const props = isPlainObject(node.props) ? node.props : undefined;
@@ -620,8 +650,9 @@ function collectInteractionIds(elements: Record<string, unknown>): {
     if (!id) continue;
     if (UI_STATE_COMPONENTS.has(node.type)) uiIds.add(id);
     else if (FORM_COMPONENTS.has(node.type)) formIds.add(id);
+    else if (FOCUS_COMPONENTS.has(node.type)) focusIds.add(id);
   }
-  return { uiIds, formIds };
+  return { uiIds, formIds, focusIds };
 }
 
 interface EmitContext {
@@ -657,7 +688,9 @@ function emitNode(sourceId: string, ctx: EmitContext, state: AssemblyState): str
   if (
     ctx.scope.instanceKey &&
     typeof raw.type === "string" &&
-    (UI_STATE_COMPONENTS.has(raw.type) || FORM_COMPONENTS.has(raw.type)) &&
+    (UI_STATE_COMPONENTS.has(raw.type) ||
+      FORM_COMPONENTS.has(raw.type) ||
+      FOCUS_COMPONENTS.has(raw.type)) &&
     typeof rawProps.id === "string"
   ) {
     props.id = instanceId(ctx.scope.instanceKey, rawProps.id);
@@ -797,7 +830,7 @@ function expandRef(
     if (!Object.hasOwn(propValues, name)) propValues[name] = rewriteValue(value, ctx.scope, state);
   }
 
-  const { uiIds, formIds } = collectInteractionIds(target.elements);
+  const { uiIds, formIds, focusIds } = collectInteractionIds(target.elements);
   const mode: "pure" | "bound" = target.mode === "pure" ? "pure" : "bound";
   const scope: Scope = {
     idPrefix: `ref:${instanceKey}:`,
@@ -808,6 +841,7 @@ function expandRef(
     propValues,
     uiIds,
     formIds,
+    focusIds,
     slotChildren,
     depth: ctx.scope.depth + 1,
     stack: [...ctx.scope.stack, stackKey],
@@ -900,6 +934,7 @@ export function assemblePageSpec(
     propValues: {},
     uiIds: new Set(),
     formIds: new Set(),
+    focusIds: new Set(),
     slotChildren: [],
     depth: 0,
     stack: [],

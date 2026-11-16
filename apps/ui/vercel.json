@@ -1,8 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ignoreCommand": "sh ../../scripts/vercel-ignore.sh apps/ui packages/model-catalog src/utils/task-citations.ts src/utils/dsh-usage.ts src/be/modelsdev-cache.json src/themes",
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "rewrites": [{ "source": "/((?!assets/|embed/).*)", "destination": "/index.html" }],
   "headers": [
+    {
+      "source": "/embed/v1/(.*)",
+      "headers": [{ "key": "Access-Control-Allow-Origin", "value": "*" }]
+    },
+    {
+      "source": "/embed/v1/chunks/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
     {
       "source": "/version.json",
       "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]

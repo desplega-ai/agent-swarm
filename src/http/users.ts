@@ -860,6 +860,7 @@ const UNMAPPED_KINDS = [
   "telegram",
   "discord",
   "teams",
+  "rocketchat",
 ] as const;
 
 /**

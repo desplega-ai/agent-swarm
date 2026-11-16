@@ -1,4 +1,5 @@
 import {
+  type CellFocusedEvent,
   type CellKeyDownEvent,
   CellStyleModule,
   ClientSideRowModelModule,
@@ -304,6 +305,8 @@ export interface DataGridProps<TData> {
   cellFocus?: boolean;
   /** Grid-level cell keydown hook — see `cellFocus`. */
   onCellKeyDown?: (event: CellKeyDownEvent<TData> | FullWidthCellKeyDownEvent<TData>) => void;
+  /** The focused cell changed (a click, the arrow keys); the sheet view pastes there. */
+  onCellFocused?: (event: CellFocusedEvent<TData>) => void;
   /**
    * Column visibility from `useDataGridColumns`. Render `DataGridColumnsMenu`
    * with the same state above the grid so users can reach auto-hidden columns.
@@ -333,6 +336,7 @@ export function DataGrid<TData>({
   columnSizing = "fit",
   cellFocus,
   onCellKeyDown,
+  onCellFocused,
   columns,
 }: DataGridProps<TData>) {
   // AG Grid's edit-on-click only works when the cell can take focus. The
@@ -568,6 +572,7 @@ export function DataGrid<TData>({
         animateRows={false}
         suppressCellFocus={!(cellFocus ?? hasEditableColumn)}
         onCellKeyDown={onCellKeyDown}
+        onCellFocused={onCellFocused}
         enableCellTextSelection={enableCellTextSelection}
         ensureDomOrder={enableCellTextSelection}
         rowHeight={rowHeight}

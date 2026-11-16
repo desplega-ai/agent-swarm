@@ -348,17 +348,23 @@ export const LEGACY_POLICY = {
   "comb.presence": operatorOrUser,
   "fs.join.own": anyAuthenticated,
   "page.delete.any": leadOrResourceOwner,
+  // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
+  "objects.read": operatorOrUser,
+  "objects.write": operatorOrUser,
   "app.manage": anyAuthenticated,
   "app.use": anyAuthenticated,
   "script.global.write": leadOnly,
   "script.global.delete": leadOnly,
   "script.search": anyAuthenticated,
+  "script.run": anyAuthenticated,
   "script.api.read.secrets": leadOnly,
   "script.api.create": leadOnly,
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
   "schedule.deferral.update.any": leadOrResourceOwner,
+  // A schedule fires as its creator, so only the creator or a lead picks what it runs.
+  "schedule.target.update.any": leadOrResourceOwner,
   // Pool writes pick the image that receives a runtime token, so only humans
   // may make them. The lead may only place agents into operator-made pools.
   "runtime_pool.write": operatorOrUser,

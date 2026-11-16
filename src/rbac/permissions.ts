@@ -167,7 +167,7 @@ export const PERMISSIONS = {
   },
   "repo.merge-policy.write": {
     description:
-      "Change a repo's allowMerge guideline, which tells agents whether they may merge a PR themselves.",
+      "Change a repo's merge policy (the allowMerge guideline or the mergePolicy record), which tells agents whether they may merge a PR themselves and which PRs the swarm may auto-merge.",
     namespace: "repo",
   },
   "integration.kapso.manage": {
@@ -356,6 +356,16 @@ export const PERMISSIONS = {
     description: "Delete a page the caller does not own.",
     namespace: "page",
   },
+  "objects.read": {
+    description:
+      "Read a board or sheet on the swarm's shared agent-fs drive through the object routes.",
+    namespace: "objects",
+  },
+  "objects.write": {
+    description:
+      "Save a board or edit sheet cells on the swarm's shared agent-fs drive through the object routes.",
+    namespace: "objects",
+  },
   "app.manage": {
     description: "Create, update, delete, or roll back apps, and inspect app version history.",
     namespace: "app",
@@ -374,6 +384,10 @@ export const PERMISSIONS = {
   },
   "script.search": {
     description: "Search reusable scripts visible to the caller.",
+    namespace: "script",
+  },
+  "script.run": {
+    description: "Run a global or inline script as yourself from the user MCP.",
     namespace: "script",
   },
   "script.api.read.secrets": {
@@ -398,6 +412,11 @@ export const PERMISSIONS = {
   },
   "schedule.deferral.update.any": {
     description: "Change a defer-task schedule the caller did not create.",
+    namespace: "schedule",
+  },
+  "schedule.target.update.any": {
+    description:
+      "Change what a schedule the caller did not create runs (its target, task template, workflow, script, script args or params).",
     namespace: "schedule",
   },
   "runtime_pool.write": {

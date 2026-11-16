@@ -500,10 +500,10 @@ describe("Model Control - Priority Resolution Logic", () => {
 
   test("task.modelTier resolves using the claiming worker harness", () => {
     expect(resolveModelTier({ tier: "smol", harnessProvider: "claude" })).toBe("haiku");
-    expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-5.6-luna");
-    expect(resolveModelTier({ tier: "regular", harnessProvider: "codex" })).toBe("gpt-5.6-terra");
-    expect(resolveModelTier({ tier: "smart", harnessProvider: "codex" })).toBe("gpt-5.6-sol");
-    expect(resolveModelTier({ tier: "ultra", harnessProvider: "codex" })).toBe("gpt-5.6-sol");
+    expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-6-luna");
+    expect(resolveModelTier({ tier: "regular", harnessProvider: "codex" })).toBe("gpt-6.1-terra");
+    expect(resolveModelTier({ tier: "smart", harnessProvider: "codex" })).toBe("gpt-6.1-sol");
+    expect(resolveModelTier({ tier: "ultra", harnessProvider: "codex" })).toBe("gpt-6-astra");
     expect(resolveModelTier({ tier: "smart", harnessProvider: "opencode" })).toBe(
       "openrouter/deepseek/deepseek-v4-pro-0813",
     );

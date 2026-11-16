@@ -1,4 +1,4 @@
-import { getDbClient } from "@/be/db";
+import { memorySearchReader } from "./search-reader";
 import type { DemotionEvidence, MemoryCandidate } from "./types";
 
 type EvidenceRow = DemotionEvidence & { memoryId: string };
@@ -13,7 +13,7 @@ export async function attachDemotionEvidence(
 ): Promise<MemoryCandidate[]> {
   const ids = [...new Set(candidates.filter((c) => c.beta > c.alpha).map((c) => c.id))];
   if (ids.length === 0) return candidates;
-  const rows = await getDbClient().query<EvidenceRow>(
+  const rows = await memorySearchReader.query<EvidenceRow>(
     `SELECT memoryId,
             SUM(CASE WHEN source = 'explicit-self' AND signal > 0 THEN signal * weight ELSE 0 END) AS selfAlpha,
             SUM(CASE WHEN source = 'explicit-self' AND signal < 0 THEN -signal * weight ELSE 0 END) AS selfBeta,

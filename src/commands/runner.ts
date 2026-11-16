@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { isChatgptSubscriptionModel } from "@desplega/model-catalog";
+import { chatgptSubscriptionModel, chatgptSubscriptionTrait } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import { isGroupKey } from "../assets/key.ts";
@@ -92,6 +92,7 @@ import { getContextWindowSize } from "../utils/context-window.ts";
 import {
   CredentialAllowlistError,
   type CredentialSelection,
+  KeySpendCapError,
   ModelWindowExhaustedError,
   normalizeProviderKeyAliases,
   resolveCredentialPools,
@@ -161,6 +162,7 @@ import {
   reportAcpStatus,
   reportLatestModel,
   sendCredStatusReport,
+  taskSelectedModelForReport,
 } from "./provider-credentials.ts";
 import { classifyProviderErrorOf } from "./provider-error-class.ts";
 import {
@@ -177,6 +179,7 @@ import {
 } from "./resume-session.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
+import { type ActiveTaskRef, resolveWorktreeReaperConfig, WorktreeReaper } from "./worktree-reaper";
 
 export { buildAttachmentsSection } from "./attachments-section.ts";
 export { reportKeyRateLimitWindows } from "./credential-outcome-report.ts";
@@ -1292,6 +1295,11 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // Non-secret pool-slot count; `checkCodexCredentials` reads it from
   // process.env at boot and during the credential wait.
   CODEX_OAUTH_POOL_SLOTS_ENV,
+  // The worktree reaper reads these on every call (resolveWorktreeReaperConfig).
+  "WORKTREE_REAPER_MODE",
+  "WORKTREE_TTL_HOURS",
+  "WORKTREE_SWEEP_INTERVAL_MINUTES",
+  "WORKTREE_REAPER_EXTRA_ROOTS",
 ]);
 
 /**
@@ -2216,6 +2224,25 @@ export async function resolveCodexOAuthCredentialInfo(
   }
 }
 
+/**
+ * The one subscription-first resolver for every harness. When the harness's
+ * trait serves `model` on the ChatGPT subscription and the pool has a slot,
+ * the session runs that model on the slot; otherwise the model is unchanged
+ * and keeps its API key. An `openai-codex/<id>` model without a slot stays as
+ * is, so the adapter fails it instead of billing a key. `poolOnly`: only codex
+ * may fall back to a standalone `~/.codex/auth.json`.
+ */
+export async function resolveSubscriptionFirst(
+  harness: string,
+  model: string,
+  resolvePoolSlot: (poolOnly: boolean) => Promise<CodexOAuthCredentialInfo | null>,
+): Promise<{ model: string; oauthInfo: CodexOAuthCredentialInfo | null }> {
+  const subscriptionModel = chatgptSubscriptionModel(harness, model);
+  if (subscriptionModel === null) return { model, oauthInfo: null };
+  const oauthInfo = await resolvePoolSlot(chatgptSubscriptionTrait(harness).kind !== "native");
+  return oauthInfo ? { model: subscriptionModel, oauthInfo } : { model, oauthInfo: null };
+}
+
 /** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
 const KEY_OUTCOME_REPORT_TIMEOUT_MS = 5000;
 
@@ -2868,6 +2895,11 @@ export interface RunningTask {
   /** When the runner asked the session to abort (cancel or reconcile). */
   abortRequestedAt?: number;
   /**
+   * When reconcile found the task terminal and ended the session's input
+   * instead of aborting it, so its final cost report can still arrive.
+   */
+  terminalGraceStartedAt?: number;
+  /**
    * Terminal status the server already holds for this task, found by
    * `reconcileActiveTasks` or set by an API-drain handoff. Completion then only
    * frees the slot and leaves the server's output and failureReason alone.
@@ -2916,6 +2948,16 @@ export interface RunnerState {
    * Unset against an API that never drains.
    */
   apiDraining?: boolean;
+  /** Removes worktrees agents leave behind; unset in callers that never reap. */
+  worktreeReaper?: WorktreeReaper;
+}
+
+/** The active tasks as the worktree reaper sees them: id plus working dir. */
+export function activeTaskRefs(state: RunnerState): ActiveTaskRef[] {
+  return [...state.activeTasks.values()].map((t) => ({
+    taskId: t.taskId,
+    workingDir: t.workingDir,
+  }));
 }
 
 /** Buffer for session logs */
@@ -4620,7 +4662,9 @@ export async function spawnProviderProcess(
     ));
   } catch (err) {
     if (
-      (err instanceof ModelWindowExhaustedError || err instanceof CredentialAllowlistError) &&
+      (err instanceof ModelWindowExhaustedError ||
+        err instanceof CredentialAllowlistError ||
+        err instanceof KeySpendCapError) &&
       realTaskId
     ) {
       const reason = err.message;
@@ -4691,6 +4735,13 @@ export async function spawnProviderProcess(
     );
   }
   const taskModel = opts.resolvedModel || taskModelSelection.model || "";
+  // What the task itself selected, for the latest-model reports: the same value in the initial,
+  // result and final reports, so a tier or profile run keeps source "task" until it ends.
+  const reportTaskModel = taskSelectedModelForReport({
+    resolvedModel: opts.resolvedModel,
+    modelSource: opts.modelSource,
+    localModel: taskModelSelection.model,
+  });
   // Never start a CLI with a model from another harness family (runbooks/model-tiers.md).
   const spawnModel = guardSpawnModel({
     taskModel,
@@ -4714,60 +4765,39 @@ export async function spawnProviderProcess(
     throw new Error(spawnModel.reason);
   }
   if (spawnModel.warning) console.warn(spawnModel.warning);
-  const model = spawnModel.model;
-  // Recorded on the task at session start, like the model: what the adapter
-  // applies, not just what was asked for.
-  const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
-
-  // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
-  // can pass codexSlot through and the adapter writes token refreshes back to
-  // the correct slot key (codex_oauth_<slot>) instead of defaulting to slot 0.
-  //
-  // Always resolve for codex (not just when credentialSelections is empty) so
-  // that if the OPENAI_API_KEY credential is rate-limited we can fail over to
-  // a CODEX_OAUTH slot — even though the keyType differs.
-  let oauthSelection: CredentialSelection | undefined;
+  // Subscription first (the harness's `chatgptSubscriptionTrait`): a
+  // codex_oauth pool slot serves OpenAI models before OPENAI_API_KEY does. It
+  // is resolved BEFORE ProviderSessionConfig so `codexSlot` reaches the adapter,
+  // which refreshes back to that slot key (codex_oauth_<slot>). A gateway route
+  // uses no OAuth: no slot is picked and no auth.json is materialised.
+  const subscription = deriveDefaultRoute(adapter.name, freshEnv)
+    ? { model: spawnModel.model, oauthInfo: null }
+    : await resolveSubscriptionFirst(adapter.name, spawnModel.model, (poolOnly) =>
+        resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, { poolOnly }),
+      );
+  const model = subscription.model;
+  if (model !== spawnModel.model) {
+    console.log(`[${opts.role}] ${spawnModel.model} runs on the ChatGPT subscription as ${model}`);
+  }
+  const oauthSelection: CredentialSelection | undefined = subscription.oauthInfo?.selection;
   // True only when `oauthSelection` came from an actual `codex_oauth_<n>`
   // config-store slot — gates whether `codexSlot` is set below (see
   // `CodexOAuthCredentialInfo`).
-  let oauthIsPoolBacked = false;
-  // A gateway route uses no OAuth: no pool slot is picked, so no auth.json is
-  // materialised for a session whose traffic goes to the gateway.
-  if (adapter.name === "codex" && !deriveDefaultRoute("codex", freshEnv)) {
-    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
-    oauthSelection = oauthInfo?.selection;
-    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
-    // Both pool credentials and standalone ChatGPT auth suppress OPENAI_API_KEY
-    // in the adapter. Report the same credential that authenticates the session.
-    if (oauthSelection && realTaskId) {
-      reportKeyUsage(
-        opts.apiUrl,
-        opts.apiKey,
-        oauthSelection.keyType,
-        oauthSelection,
-        realTaskId,
-      ).catch(() => {});
-    }
-  } else if (adapter.name === "pi" && isChatgptSubscriptionModel(model)) {
-    // An `openai-codex/<id>` model runs on the same pool, with the same slot
-    // pick and usage bookkeeping. The adapter revalidates `codexSlot` through
-    // the refresh lock and hands the harness the access token only
-    // (`loadChatgptSubscriptionCredential`); no slot fails the session there.
-    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey, {
-      poolOnly: true,
-    });
-    oauthSelection = oauthInfo?.selection;
-    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
-    if (oauthSelection && realTaskId) {
-      reportKeyUsage(
-        opts.apiUrl,
-        opts.apiKey,
-        oauthSelection.keyType,
-        oauthSelection,
-        realTaskId,
-      ).catch(() => {});
-    }
+  const oauthIsPoolBacked = subscription.oauthInfo?.isPoolBacked ?? false;
+  // The subscription credential suppresses OPENAI_API_KEY in the adapter.
+  // Report the same credential that authenticates the session.
+  if (oauthSelection && realTaskId) {
+    reportKeyUsage(
+      opts.apiUrl,
+      opts.apiKey,
+      oauthSelection.keyType,
+      oauthSelection,
+      realTaskId,
+    ).catch(() => {});
   }
+  // Recorded on the task at session start, like the model: what the adapter
+  // applies, not just what was asked for.
+  const sessionEffort = effectiveReasoningEffort(adapter.name, model, reasoningEffortOverride);
 
   // Match harness authentication for both cost attribution and failure reports.
   // isPoolBacked controls slot revalidation, not whether ChatGPT auth wins.
@@ -4883,7 +4913,7 @@ export async function spawnProviderProcess(
   );
   const initialModelReport = buildLatestModelReport({
     model,
-    taskModel,
+    taskModel: reportTaskModel,
     configModel,
     taskId: realTaskId,
     harnessProvider: opts.harnessProvider,
@@ -5233,7 +5263,7 @@ export async function spawnProviderProcess(
             // final adapter-confirmed report below once the session completes.
             const latestModel = buildLatestModelReport({
               model: event.cost.model,
-              taskModel: opts.model,
+              taskModel: reportTaskModel,
               configModel,
               taskId: realTaskId,
               harnessProvider: opts.harnessProvider,
@@ -5513,7 +5543,7 @@ export async function spawnProviderProcess(
         if (result.cost?.model) {
           const finalModelReport = buildLatestModelReport({
             model: result.cost.model,
-            taskModel: opts.model,
+            taskModel: reportTaskModel,
             configModel,
             taskId: realTaskId,
             harnessProvider: opts.harnessProvider,
@@ -5605,6 +5635,20 @@ export async function spawnProviderProcess(
 export const DEFAULT_TASK_RECONCILE_INTERVAL_MS = 30_000;
 /** How long an aborted session gets to settle before the runner settles it. */
 export const ABORT_SETTLE_GRACE_MS = 10_000;
+/**
+ * How long a session whose task turned terminal server-side may finish its
+ * turn (and emit its cost report) after its input closes, before the abort.
+ */
+export const DEFAULT_TERMINAL_TASK_GRACE_MS = 45_000;
+
+/** `RUNNER_TERMINAL_TASK_GRACE_MS` (0 aborts at once), or the default when unset or invalid. */
+export function resolveTerminalTaskGraceMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env.RUNNER_TERMINAL_TASK_GRACE_MS;
+  const value = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_TERMINAL_TASK_GRACE_MS;
+}
 
 /** `RUNNER_TASK_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
 export function resolveTaskReconcileIntervalMs(
@@ -5623,6 +5667,8 @@ export interface ReconcileActiveTasksOptions {
   fetchStatus: (taskId: string) => Promise<string | null>;
   intervalMs: number;
   abortGraceMs?: number;
+  /** Grace after ending input for a server-terminal task; default `DEFAULT_TERMINAL_TASK_GRACE_MS`. */
+  terminalGraceMs?: number;
   now?: () => number;
   /** In push mode, fetch cancellation only for these tasks. Abort settlement still runs. */
   cancelTaskIds?: ReadonlySet<string>;
@@ -5705,7 +5751,10 @@ export async function handOffTasksForApiDrain(
  * never settles cannot hold an execution slot forever:
  * - a task the server cancelled gets its session aborted (every call);
  * - every `intervalMs`, a task the server already holds as terminal (for
- *   example failed by the heartbeat sweep) gets its session aborted too;
+ *   example completed by its own agent, or failed by the heartbeat sweep) gets
+ *   its session aborted too. A session with `finishInput` first gets its input
+ *   closed and `terminalGraceMs` to end its turn, so Claude can still emit the
+ *   `result` that carries its cost;
  * - a session that has not settled `abortGraceMs` after an abort is settled
  *   here, and `checkCompletedProcesses` frees the slot on its next pass.
  * Exported for tests.
@@ -5717,6 +5766,7 @@ export async function reconcileActiveTasks(
 ): Promise<void> {
   const now = opts.now ?? Date.now;
   const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
+  const terminalGraceMs = opts.terminalGraceMs ?? DEFAULT_TERMINAL_TASK_GRACE_MS;
 
   // Each task touches only its own entry (plus an add to the shared
   // cancelledSignaled set), and both API reads swallow their errors, so the
@@ -5741,19 +5791,48 @@ export async function reconcileActiveTasks(
       }
     }
 
-    if (task.abortRequestedAt === undefined && opts.checkStatus !== false) {
+    if (
+      task.abortRequestedAt === undefined &&
+      task.terminalGraceStartedAt === undefined &&
+      opts.checkStatus !== false
+    ) {
       const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
       if (now() - lastCheck >= opts.intervalMs) {
         task.lastReconcileAt = now();
         const status = await opts.fetchStatus(taskId).catch(() => null);
         if (status && isTerminalTaskStatus(status)) {
-          console.warn(
-            `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
-          );
           task.serverTerminalStatus = status;
-          requestSessionAbort(task, `server task ${status}`, now());
+          // A cancel means stop now; the other terminal states let the turn end.
+          if (task.session.finishInput && terminalGraceMs > 0 && status !== "cancelled") {
+            console.warn(
+              `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — closing its input, abort in ${terminalGraceMs}ms`,
+            );
+            task.terminalGraceStartedAt = now();
+            try {
+              task.session.finishInput();
+            } catch {
+              // The abort below still runs when the grace ends.
+            }
+          } else {
+            console.warn(
+              `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
+            );
+            requestSessionAbort(task, `server task ${status}`, now());
+          }
         }
       }
+    }
+
+    if (
+      task.terminalGraceStartedAt !== undefined &&
+      task.abortRequestedAt === undefined &&
+      task.result === null &&
+      now() - task.terminalGraceStartedAt >= terminalGraceMs
+    ) {
+      console.warn(
+        `[${role}] Task ${taskId.slice(0, 8)} session did not end ${terminalGraceMs}ms after its input closed — aborting it`,
+      );
+      requestSessionAbort(task, `server task ${task.serverTerminalStatus}`, now());
     }
 
     if (
@@ -6096,6 +6175,10 @@ export async function checkCompletedProcesses(
             if (triggerType === "task_assigned" || triggerType === "task_resumed") {
               state.tasksProcessed += 1;
             }
+            // Fire-and-forget: a large removal must never hold the loop or shutdown.
+            state.worktreeReaper
+              ?.onTaskEnded(taskId, activeTaskRefs(state))
+              .catch((err) => console.warn(`[${role}] Worktree reaper failed: ${err}`));
           }
         }
       },
@@ -6524,6 +6607,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     codexCreditsExhaustedCooldownMs: bootCooldownMs,
     modelWindowBlocks: new Map(),
   };
+  // Agents create worktrees under /workspace/personal; without it (local dev) the reaper stays off.
+  const reaperHasWorkspace = existsSync("/workspace/personal");
+  state.worktreeReaper = new WorktreeReaper({
+    ledgerPath: "/workspace/personal/.swarm/worktree-ledger.json",
+    scanRoots: ["/workspace/personal"],
+    getConfig: () =>
+      resolveWorktreeReaperConfig(
+        process.env,
+        reaperHasWorkspace && adapter.traits.hasLocalEnvironment,
+      ),
+    statusOf: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
+  });
+  const reaperFailed = (err: unknown) => console.warn(`[${role}] Worktree reaper failed: ${err}`);
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
   const cancelledSignaled = new Set<string>();
@@ -7465,7 +7561,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           continue;
         }
 
+        runningTask.workingDir = resumeCwd;
         state.activeTasks.set(task.id, runningTask);
+        state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
         console.log(
           `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
         );
@@ -7480,6 +7578,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // Continue to normal polling even if resume fails
   }
   // ========== END: Resume paused tasks ==========
+
+  // Boot sweep: finishes interrupted removals and reaps what ended while we were down.
+  state.worktreeReaper?.sweep(activeTaskRefs(state)).catch(reaperFailed);
+  let lastWorktreeSweepAt = Date.now();
+  let lastWorktreeObserveAt = 0;
 
   // ========== Lead startup self-check ==========
   if (isLead) {
@@ -7501,6 +7604,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastOrphanRecoveryAt = 0;
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
+  const terminalTaskGraceMs = resolveTerminalTaskGraceMs();
 
   while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
     const deliveryChecks = pushDelivery.checks(state.deliveryMode ?? "poll");
@@ -7580,6 +7684,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
     // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
     const now = Date.now();
+    if (state.activeTasks.size > 0 && now - lastWorktreeObserveAt >= VCS_CHECK_INTERVAL) {
+      lastWorktreeObserveAt = now;
+      state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
+    }
+    if (now - lastWorktreeSweepAt >= resolveWorktreeReaperConfig().sweepIntervalMinutes * 60_000) {
+      lastWorktreeSweepAt = now;
+      state.worktreeReaper?.sweep(activeTaskRefs(state)).catch(reaperFailed);
+    }
     for (const [taskId, task] of state.activeTasks) {
       if (vcsDetectedTasks.has(taskId)) continue;
       const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
@@ -7606,6 +7718,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
         fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
         intervalMs: taskReconcileIntervalMs,
+        terminalGraceMs: terminalTaskGraceMs,
         ...taskReconciliation(deliveryChecks),
       });
     }
@@ -8130,6 +8243,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         state.activeTasks.set(runningTask.taskId, runningTask);
+        state.worktreeReaper?.observe(activeTaskRefs(state)).catch(reaperFailed);
 
         // Pool triggers have no task id before the spawn; their session is
         // keyed on the synthetic id `spawnProviderProcess` minted.

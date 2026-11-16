@@ -8,10 +8,10 @@ import type { ModelTier, ModelTierPreview } from "@/api/types";
 export const DEFAULT_TIER_VALUES: Record<string, Record<ModelTier, string>> = {
   claude: { smol: "haiku", regular: "sonnet", smart: "opus", ultra: "fable" },
   codex: {
-    smol: "gpt-5.6-luna",
-    regular: "gpt-5.6-terra",
-    smart: "gpt-5.6-sol",
-    ultra: "gpt-5.6-sol",
+    smol: "gpt-6-luna",
+    regular: "gpt-6.1-terra",
+    smart: "gpt-6.1-sol",
+    ultra: "gpt-6-astra",
   },
   pi: {
     smol: "openrouter/deepseek/deepseek-v4.1-flash",

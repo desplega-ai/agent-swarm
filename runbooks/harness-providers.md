@@ -9,7 +9,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary, plus NaN (`nan/*`) and Helmcode (`helmcode/*`); agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) and [NaN and Helmcode](#nan-and-helmcode-pi-opencode) below |
-| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below), or the ChatGPT subscription pool (`openai-codex/*`, see [Codex OAuth § Using the pool from pi](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)) |
+| pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, NaN (`nan/*`), Helmcode (`helmcode/*`), Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below), or the ChatGPT subscription pool (`openai-codex/*`; a bare or `openai/` Codex-line GPT id moves there when the pool has a slot, see [Codex OAuth § Using the pool from pi](/docs/guides/provider-auth/codex-oauth#using-the-pool-from-pi)). Every other provider pi-ai ships a catalog for (`fireworks/*`, `deepseek/*`, `xai/*`, ...) works from that provider's own key var, recognised from pi-ai rather than listed here |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini`, `copilot`, `qwen`, `kiro` and `goose` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
@@ -18,6 +18,18 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 | Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 | fx | `fx` | `FxAdapter` | Vercel Labs' fx as an ACP server (`fx acp`) on the shared ACP client; `OPENROUTER_API_KEY`, `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` by model route. See [fx](#fx-fx) below |
+
+## Subscription-first credentials
+
+Each harness declares a `chatgptSubscriptionTrait` in `packages/model-catalog/src/chatgpt-subscription.ts`. The runner's one resolver, `resolveSubscriptionFirst`, reads it: a `codex_oauth` pool slot serves OpenAI models first, and `OPENAI_API_KEY` is the fallback only when the pool has no slot.
+
+| Trait | Harness | OpenAI model on a slot |
+|---|---|---|
+| `native` | codex | the bare id, unchanged (a standalone `~/.codex/auth.json` also counts) |
+| `prefixed` | pi | `openai-codex/<id>`; a bare or `openai/` Codex-line GPT id moves there |
+| `unsupported` | opencode, every other harness | never; `reason` says why |
+
+A new harness that can run the ChatGPT subscription adds its trait there, in the same PR as the adapter support.
 
 ## Worker API readiness
 
@@ -221,7 +233,8 @@ none: the runner fails an affected task with installation guidance when `fx` is 
   (`src/providers/mcp-loopback-proxy.ts`) per session and stops it in
   `finish()`. SSE servers are dropped with a warning. Tools are named
   `mcp_<server>_<tool>`; the swarm tool schemas exceed fx's 64 KiB
-  always-loaded budget, so fx defers them behind `capability_search`. Keep
+  always-loaded budget, so fx defers them behind `toolbox` (`search`, then
+  `run` with `arguments`; 0.0.17 rejects a direct call to a deferred tool). Keep
   that deferral on: turning it off took turn input from 89.5k to 162.8k
   tokens on the same prompt.
 - **System prompt.** ACP `systemPrompt` (append mode), capped by fx at 64 KiB.
@@ -348,7 +361,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.2-rc.2` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.2-rc.3` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -413,7 +426,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.3.1`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.4.0`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -579,6 +592,26 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models })` (`models` follows `PI_CODEMODE_MODELS`, default off, only with codemode on; the usage of a script's `models.*` calls reaches `getSessionStats()` cost, proven in `src/tests/providers/pi-cost.test.ts`), wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
+## Native tool interception
+
+Every harness reports its own built-in tool calls (bash, read, write, edit) to `POST /api/tool-hooks`, so an extension with `toolSources: ["native"]` can observe, block and rewrite them. The shared client is `src/hooks/native-tool-hooks.ts`; each harness only maps its event to a `NativeCall` and applies the decision. Server side: `src/http/tool-hooks.ts` and [runbooks/extensions.md § Native tool calls](./extensions.md#native-tool-calls).
+
+| Harness | Where | Block | Rewrite |
+| --- | --- | --- | --- |
+| `claude` | `PreToolUse` and `PostToolUse` in `src/hooks/hook.ts` | exit 2, reason on stderr | `hookSpecificOutput.updatedInput` with `permissionDecision: "allow"` |
+| `codex` | `PreToolUse` and `PostToolUse` in `src/hooks/codex-hook.ts` (image matcher `^(Bash\|apply_patch)$`) | exit 2, reason on stderr | `updatedInput` for `Bash` and `apply_patch` (verified on codex-cli 0.169.0); a rewrite of any other tool fails closed as a block whose reason carries the rewritten args |
+| `pi` | `tool_call` and `tool_result` in `src/providers/pi-mono-extension.ts` | `{ block: true, reason }` | mutate `event.input` in place |
+| `opencode` | `execute.before` and `execute.after` in `src/providers/opencode-swarm-plugin.ts` | throw | assign `event.input` |
+
+Rules every shim keeps:
+
+- Fail open. API down, a 2 s timeout or a non-2xx answer lets the call run.
+- Skip the round trip while no enabled extension takes native calls: `GET /api/tool-hooks/status` is cached 30 s (memory, plus a file under the temp dir for the per-process claude and codex hooks), and a failed read is cached 10 s. An extension enabled or disabled takes effect within 30 s.
+- Scrub args with `scrubObject` before sending. Swarm MCP tools (`mcp__*` on claude and codex, `<server>_*` on opencode, anything outside pi's built-ins) are not native: they reach extensions through the MCP path.
+- Canonical names are `bash`, `read`, `write`, `edit`; every other tool keeps its lowercased harness name (`shell` is `bash`). Claude's `file_path` is `path` in canonical args and maps back on a rewrite.
+- A claude or codex `PostToolUse` runs in a new process, so `durationMs` is 0 there; pi and opencode measure it.
+- Order: cancellation, PR guards, loop and poll checks run first and win. The extension sees the call last.
+
 ## Request composition hooks
 
 Pi and OpenCode post an exact `harness-hook` request composition manifest from the request they are about to send. The shared measurement and reporter live in `src/providers/request-composition-hook.ts`; the server merges the manifest and calibrates the token ratio (see the cost-and-context guide, section "Request composition and cache-hit ratio").
@@ -680,7 +713,7 @@ The adapter starts each thread with `ephemeral: false`. Do not switch it back to
 
 `src/hooks/codex-hook.ts` remains for legacy `codex exec` sessions. The worker image registers it for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each row delivered, then injects the rendered envelope through hook output.
 
-App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard (`src/hooks/pr-body-guard.ts`), which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for `Bash` and `apply_patch` calls. It runs the PR body leak guard (`src/hooks/pr-body-guard.ts`), which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2, then reports the call to native-tool extensions (see [Native tool interception](#native-tool-interception)).
 
 ## Per-task `outputSchema` support
 

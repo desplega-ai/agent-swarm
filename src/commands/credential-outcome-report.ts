@@ -1,4 +1,4 @@
-import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import type { RateLimitWindowTelemetry, SpendCap } from "../utils/error-tracker";
 import { modelFamilyOf } from "../utils/model-rate-limit-windows";
 import type {
   ProviderAccountTelemetry,
@@ -15,6 +15,7 @@ async function reportKeyRateLimit(
   keySuffix: string,
   keyIndex: number,
   rateLimitedUntil: string,
+  spendCap?: SpendCap,
 ): Promise<void> {
   try {
     const response = await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
@@ -28,6 +29,7 @@ async function reportKeyRateLimit(
         keySuffix,
         keyIndex,
         rateLimitedUntil,
+        ...(spendCap ? { spendCap } : {}),
       }),
       // Awaited on a key-wide outcome: a hung API must not hold the task open.
       signal: AbortSignal.timeout(10_000),
@@ -39,7 +41,7 @@ async function reportKeyRateLimit(
       return;
     }
     console.log(
-      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
+      `[credentials] Reported key ...${keySuffix} as ${spendCap ? "spend-capped" : "rate-limited"} until ${rateLimitedUntil}`,
     );
   } catch (err) {
     console.warn(
@@ -181,6 +183,7 @@ export async function reportCredentialOutcomeThenFinish(
         credentialInfo.keySuffix,
         credentialInfo.keyIndex,
         keyRateLimitedUntil,
+        outcome.kind === "key" ? outcome.spendCap : undefined,
       ).catch(() => {});
       // `finish` may resume the task on another key of the pool: the bench
       // lands first, so the resume's claim cannot draw this key again.

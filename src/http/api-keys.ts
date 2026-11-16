@@ -20,7 +20,11 @@ import {
   KeyWindowUsageLimitError,
   keyWindowUsageSchema,
 } from "../be/key-window-usage";
-import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
+import {
+  MAX_RATE_LIMIT_RESET_MS,
+  MAX_SPEND_CAP_HOLD_MS,
+  type RateLimitWindowTelemetry,
+} from "../utils/error-tracker";
 import {
   activeModelBlocks,
   isModelScopedWindow,
@@ -85,6 +89,13 @@ const reportUsage = route({
   auth: { apiKey: true },
 });
 
+/** A provider spend limit behind a key's rate limit (`SpendCap`). */
+export const SpendCapSchema = z.object({
+  limitUsd: z.number().nullable(),
+  spendUsd: z.number().nullable(),
+  resetsAt: z.string().datetime().nullable(),
+});
+
 const reportRateLimit = route({
   method: "post",
   path: "/api/keys/report-rate-limit",
@@ -98,6 +109,8 @@ const reportRateLimit = route({
     rateLimitedUntil: z.string().datetime(),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
+    /** The provider spend limit behind the rejection (OpenRouter key limit, out of credits). */
+    spendCap: SpendCapSchema.optional(),
   }),
   responses: {
     200: { description: "Key marked as rate-limited", schema: successMessageSchema },
@@ -402,6 +415,8 @@ const getAvailable = route({
         earliestModelResetAt: z.string().nullable().optional(),
         /** Indices excluded because the key's subscription plan cannot run the model. Present only when model was passed. */
         seatBlockedIndices: z.array(z.number().int()).optional(),
+        /** Rate-limited indices whose limit is a provider spend cap. */
+        spendCappedIndices: z.array(z.number().int()),
         /**
          * Server-side order of the newest auth failure on these keys. Pass it back as
          * `authFence` on `clear-rate-limit`: failures recorded after it survive the clear.
@@ -425,6 +440,8 @@ const ApiKeyStatusSchema = z.object({
   scopeId: z.string().nullable(),
   status: z.string(),
   rateLimitedUntil: z.string().nullable(),
+  /** The spend cap behind the current rate limit, or null for an ordinary one. */
+  spendCap: SpendCapSchema.nullable(),
   lastUsedAt: z.string().nullable(),
   lastRateLimitAt: z.string().nullable(),
   totalUsageCount: z.number().int(),
@@ -744,7 +761,12 @@ export async function handleApiKeys(
     const parsed = await reportRateLimit.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId } = parsed.body;
+    const { keyType, keySuffix, keyIndex, scope, scopeId, spendCap } = parsed.body;
+    // A spend cap fails admission for the whole pool, so the reporter never sets an unbounded hold.
+    const holdUntilMs = Date.now() + (spendCap ? MAX_SPEND_CAP_HOLD_MS : MAX_RATE_LIMIT_RESET_MS);
+    const rateLimitedUntil = new Date(
+      Math.min(Date.parse(parsed.body.rateLimitedUntil), holdUntilMs),
+    ).toISOString();
     try {
       await markKeyRateLimited(
         keyType,
@@ -753,10 +775,11 @@ export async function handleApiKeys(
         rateLimitedUntil,
         scope,
         scopeId ?? null,
+        spendCap ?? null,
       );
       reportRateLimit.respond(res, 200, {
         success: true,
-        message: `Key ...${keySuffix} marked as rate-limited until ${rateLimitedUntil}`,
+        message: `Key ...${keySuffix} marked as ${spendCap ? "spend-capped" : "rate-limited"} until ${rateLimitedUntil}`,
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to mark rate limit", 500);
@@ -886,6 +909,7 @@ export async function handleApiKeys(
         success: true,
         availableIndices: result.availableIndices,
         rejectedIndices: result.rejectedIndices,
+        spendCappedIndices: result.spendCappedIndices,
         totalKeys,
         authFailureFence: result.authFailureFence,
         ...(model !== undefined

@@ -13,7 +13,7 @@ import {
 export const SCRIPT_RUN_DESCRIPTION =
   "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Inline source executes without the `script-upsert` compile-time typecheck. Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`. The run ends when the script's default export resolves: a call it did not await gets 2 s more, then is stopped (native) or aborted at once (quickjs), so await every write that must land. A `Promise.race` deadline therefore bounds the run; a nested `script_run` that lost the race keeps running on the server under its own wall.";
 
-function renderRunOutput(data: unknown): string | undefined {
+export function renderRunOutput(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const body = data as {
     result?: unknown;

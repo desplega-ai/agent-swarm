@@ -390,6 +390,8 @@ const AppPageSchema = z
     headerActions: z.string().optional(),
     /** `false` leaves the page out of the sidebar. Pages with a required param never list. */
     nav: z.boolean().optional(),
+    /** Page-local state: initial JSON values, read and written at `/local/<name>`. */
+    state: z.record(AppNameSchema, z.unknown()).optional(),
   })
   .strict();
 
@@ -1082,18 +1084,31 @@ export async function parseAppDefinition(
       continue;
     }
     // Invoke-time runs the script with the OWNER's bindings, so a writer may
-    // only wire scripts it owns (or global ones). A reference the stored
+    // only wire scripts it owns (or owner-less global ones). A reference the stored
     // definition already carries at this exact path is grandfathered so
     // foreign-authored apps stay editable — the bare id is not, so an existing
     // foreign reference cannot seed a new one elsewhere.
-    if (
-      foreignScriptForWriter(elementContext, script) &&
-      grandfatheredScriptRefs.get(`actions.${name}`) !==
-        scriptRefKey(action.scriptId, action.args, undefined)
-    ) {
+    const grandfatheredRef =
+      grandfatheredScriptRefs.get(`actions.${name}`) ===
+      scriptRefKey(action.scriptId, action.args, undefined);
+    const owner = getSavedScriptOwnerAgentId(script);
+    if (foreignScriptForWriter(elementContext, script) && !grandfatheredRef) {
       issues.push({
         path: `actions.${name}.scriptId`,
         message: `script "${action.scriptId}" is agent-scoped to another agent — reference a script you own or a global script`,
+      });
+    } else if (
+      // A global script with an owning agent also runs as that owner, so the
+      // sync-source rule applies: only that agent or the operator may wire it.
+      script.scope !== "agent" &&
+      owner !== null &&
+      (elementContext.writerIsUser === true || typeof elementContext.writerAgentId === "string") &&
+      elementContext.writerAgentId !== owner &&
+      !grandfatheredRef
+    ) {
+      issues.push({
+        path: `actions.${name}.scriptId`,
+        message: `script "${action.scriptId}" runs with agent "${owner}"'s credentials — only that agent or the operator may wire or alter this action`,
       });
     }
   }
@@ -1194,7 +1209,9 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
     (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
     (path.length === 3 && path[0] === "models" && path[2] === "sources") ||
     (path.length === 3 && path[0] === "elements" && path[2] === "elements") ||
-    (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
+    (path.length === 3 &&
+      path[0] === "pages" &&
+      (path[2] === "elements" || path[2] === "params" || path[2] === "state"));
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {

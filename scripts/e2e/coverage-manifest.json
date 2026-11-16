@@ -107,14 +107,6 @@
       "reason": "worker command: launches the Claude CLI against a real model; the nightly harness legs run the worker that starts it"
     },
     {
-      "command": "hook",
-      "reason": "worker command: Claude Code hook events on stdin, fired by the harness the nightly legs spawn"
-    },
-    {
-      "command": "codex-hook",
-      "reason": "worker command: Codex hook events on stdin, fired by the harness the nightly legs spawn"
-    },
-    {
       "command": "session-summary-stdin",
       "reason": "worker command: internal session-summary helper the worker runtime calls; nightly harness legs"
     }
@@ -266,7 +258,7 @@
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
-      "scenarios": ["knowledge-apps", "knowledge-apps-large-model"]
+      "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-primitives"]
     },
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
@@ -281,13 +273,17 @@
         "audit-attribution-skills"
       ]
     },
+    "requester-hint": {
+      "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
+      "scenarios": ["requester-hint"]
+    },
     "budget-refusal": {
       "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
       "scenarios": ["core-budgets"]
     },
     "chat-sdk-tools": {
-      "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, and Telegram messages through a loopback mock.",
-      "scenarios": ["platform-chat-sdk"]
+      "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, Telegram messages through a loopback mock, and the Rocket.Chat webhook and REST round trip.",
+      "scenarios": ["platform-chat-sdk", "platform-chat-sdk-rocketchat"]
     },
     "config-roundtrip": {
       "description": "A config write is readable back and masked when secret",
@@ -300,6 +296,10 @@
     "connector-handoff": {
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]
+    },
+    "mcp-user-code-mode": {
+      "description": "Code mode on /mcp-user: script-search, script-get-types and script-run as the requesting user, with no agent identity, a recorded run, hidden run tokens, and RBAC refusals for a viewer",
+      "scenarios": ["mcp-user-code-mode"]
     },
     "mcp-user-events": {
       "description": "MCP Events webhooks on /mcp-user: events/list, subscribe with a verified local callback, signed task.completed and task.failed deliveries, a plain client unchanged, unsubscribe stops delivery",
@@ -325,6 +325,10 @@
     "extension-lead-gating": {
       "description": "Install by catalog name, enable and disable by lead tool, hook blocks and unblocks, run log, version list, owner delete",
       "scenarios": ["extensions", "platformb-extensions"]
+    },
+    "extension-native-tools": {
+      "description": "The real hook and codex-hook commands report native tool calls to an extension: sentinel blocked, rewritten, control passes, API down passes, no extension means no round trip",
+      "scenarios": ["native-tool-hooks"]
     },
     "external-script-endpoint": {
       "description": "A saved script exposed as a bearer or open HTTP endpoint and invoked from outside.",
@@ -406,6 +410,10 @@
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
     },
+    "primitive-object-http": {
+      "description": "GET /api/objects/:id (knownVersion by stat, then from the webhook-fresh row with no agent-fs call), PUT .../content for boards (keeps swarm.id, 409 carries the version) and POST .../sheet-ops as a user, the dashboard and page sessions; operator pages are read-only, password guests, foreign drives and keyless owners are refused",
+      "scenarios": ["objects-http"]
+    },
     "primitive-objects": {
       "description": "object-create/get/list/reindex and ctx.objects in both executors over an agent-fs stub, as the agent's own key; reindex prefix and dryRun scope the write-back; a sheet missing swarm.id is refused with the reindex fix; the file.changed receiver refuses unsigned, forged and oversized deliveries",
       "scenarios": ["knowledge-objects", "knowledge-objects-reindex-scope"]
@@ -423,8 +431,8 @@
       "scenarios": ["realtime-rooms", "knowledge-rooms"]
     },
     "repo-registry": {
-      "description": "Register, update, gate allowMerge, list and delete repo records over HTTP and MCP",
-      "scenarios": ["platformb-repos"]
+      "description": "Register, update, gate allowMerge and the mergePolicy record, list and delete repo records over HTTP and MCP",
+      "scenarios": ["platformb-repos", "platformb-repo-merge-policy"]
     },
     "runtime-pools-flag-off": {
       "description": "Runtime pools, controllers and the worker socket under MULTI_RUNTIME_ENABLED=false",
@@ -542,6 +550,7 @@
         "slack-http-command",
         "slack-http-interactivity",
         "slack-http-signature-retry",
+        "slack-http-cross-team-identity",
         "slack-http-restart-redelivery"
       ]
     },
@@ -561,9 +570,25 @@
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
       "scenarios": ["core-task-tools"]
     },
+    "task-defer-wake-pr-merged": {
+      "description": "defer-task wakeOn vcs.pr.merged (external-event wait, github adapter): refused with GitHub off or an unknown source, already-happened and unreadable targets rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires, a task-scoped token is refused, the 20-wait cap refuses the 21st but not a timer-only defer",
+      "scenarios": ["defer-wake-pr-merged"]
+    },
     "task-delegation": {
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
       "scenarios": ["core-task-tools"]
+    },
+    "task-details-field-contract": {
+      "description": "get-task-details keeps status, output, failureReason, attachments and the parent link reachable on an oversized task, and taskId stays the one required input",
+      "scenarios": ["task-details-field-contract"]
+    },
+    "task-details-fit": {
+      "description": "get-task-details fits an oversized response under its 9 KB budget without spilling: log rows compact, the oldest non-lifecycle rows go before any text is cut, the newest progress and lifecycle rows stay, include opts out of each step, a small response is unchanged and a script SDK call gets the full shape",
+      "scenarios": ["task-details-fit"]
+    },
+    "poll-concurrent-claim": {
+      "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
+      "scenarios": ["poll-concurrent-claim"]
     },
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
@@ -610,8 +635,13 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
-      "scenarios": ["workflow-engine-control", "workflow-engine-cancel", "workflow-webhook-filter"]
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "scenarios": [
+        "workflow-engine-control",
+        "workflow-engine-cancel",
+        "workflow-webhook-filter",
+        "workflow-webhook-hmac-sha1"
+      ]
     },
     "workflow-engine-nodes": {
       "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
@@ -630,6 +660,10 @@
     "workflow-schedules": {
       "description": "Schedule CRUD over HTTP and MCP, run-now, validation",
       "scenarios": ["workflow-schedules"]
+    },
+    "schedule-target-owner": {
+      "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
+      "scenarios": ["schedule-target-owner"]
     },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",

@@ -45,10 +45,11 @@ export function refreshCredentialQueries(
 }
 
 /** The keys of one credential pool var (suffixes and statuses). Polls with the app default. */
-export function usePoolKeys(envVar: string) {
+export function usePoolKeys(envVar: string, enabled = true) {
   return useQuery({
     queryKey: poolKeysQueryKey(envVar),
     queryFn: () => api.fetchPoolKeys(envVar),
+    enabled,
     // A persisted snapshot can be stale: confirm the list with the server.
     refetchOnMount: "always",
   });

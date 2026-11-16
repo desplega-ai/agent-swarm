@@ -315,13 +315,16 @@ const inviteMemberRoute = route({
       schema: agentFsInviteStateSchema,
     },
     400: { description: "Invalid body" },
-    403: { description: "A non-admin user token named an email other than its own" },
+    403: {
+      description:
+        "The caller is not the operator key or a user, or a non-admin user token named an email other than its own",
+    },
     500: { description: "Provisioning or invite failed" },
   },
   auth: { apiKey: true },
   // The operator key and grant-all users invite any email at any role. Other
   // users may only join with their own account email, at a role the handler
-  // derives from their grant.
+  // derives from their grant. Agent session tokens are refused.
   rbac: { permission: "fs.join.own" },
 });
 
@@ -436,13 +439,19 @@ type InviteRole = "viewer" | "editor" | "admin";
  * keep the body as sent. Any other user joins only as itself: the body email
  * must match the account email (ignoring case), the stored spelling is used,
  * and the role is `editor` when the user may change task files, else `viewer`.
+ * Every other principal (agent session tokens, guests) is refused.
  */
 async function resolveInvite(
   req: IncomingMessage,
   body: { email: string; role: InviteRole },
 ): Promise<{ email: string; role: InviteRole } | { denied: string }> {
-  const user = authUser(getRequestAuth(req));
-  if (!user || !isRbacEnabled()) return body;
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator") return body;
+  const user = authUser(auth);
+  // Agent session tokens and guests provision through /api/fs/agent-credentials, not here.
+  if (!user)
+    return { denied: "Only the operator key or a user token can invite to the shared drive" };
+  if (!isRbacEnabled()) return body;
   const grant = await getUserGrant(user.id);
   if (grant.grantsAll) return body;
   const decision = can({

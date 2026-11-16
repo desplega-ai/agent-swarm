@@ -42,6 +42,7 @@ import "./model-groups";
 import "./model-profiles";
 import "./models-catalog";
 import "./object-webhooks";
+import "./objects";
 import "./oauth-locks";
 import "./oauth-callback";
 import "./oauth-generic";

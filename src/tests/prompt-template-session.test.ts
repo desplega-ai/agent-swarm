@@ -33,6 +33,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.outputs",
   "system.agent.outputs.no_agent_fs",
   "system.agent.repository",
+  "system.agent.repository.merge_policy",
   "system.agent.role",
   "system.agent.scripts_only_mode",
   "system.agent.scripts_only_mode.slack",
@@ -125,11 +126,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 39 system and session templates in total", () => {
+  test("registers 40 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
     // 34 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(39);
+    expect(sessionSystem.length).toBe(40);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

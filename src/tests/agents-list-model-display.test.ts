@@ -56,6 +56,29 @@ describe("agents list model display", () => {
     });
   });
 
+  test("a last run whose model the task chose is not flagged as a pending change", () => {
+    const display = getAgentModelDisplay(
+      "openai-codex/gpt-6.1-sol",
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      undefined,
+      "task",
+    );
+
+    expect(display.diverged).toBe(false);
+    expect(display.lastUsedFromTask).toBe(true);
+    expect(display.primary).toBe("openai-codex/gpt-6.1-sol");
+  });
+
+  test("a last run on neither the saved model nor a task's pick still reads as next task", () => {
+    expect(
+      getAgentModelDisplay("claude-opus-4-7", "claude-sonnet-4-6", undefined, "agent_config")
+        .diverged,
+    ).toBe(true);
+    expect(
+      getAgentModelDisplay("claude-opus-4-7", "claude-sonnet-4-6", undefined, "custom").diverged,
+    ).toBe(true);
+  });
+
   test("shows configured model alone before an agent reports a last-used model", () => {
     const display = getAgentModelDisplay("claude-opus-4-7", null);
 

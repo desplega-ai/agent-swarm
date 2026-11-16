@@ -76,6 +76,29 @@ async function freePort(): Promise<number> {
   });
 }
 
+// Ports a scenario binds minutes after boot (stand-ins the SUT's env names up front). A
+// kernel-picked port sits in the ephemeral range, where any later `listen(0)` in the runner
+// can take it first ("Failed to start server. Is port N in use?"). Below the range (Linux
+// starts at 32768, macOS at 49152) only an explicit bind can.
+// shortcut: probes loopback only, so two runs sharing a host can still race; upgrade to a lock.
+const reserved = new Set<number>();
+async function reservedPort(): Promise<number> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 10_000);
+    if (reserved.has(port)) continue;
+    const free = await new Promise<boolean>((resolve) => {
+      const server = createServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+    });
+    if (free) {
+      reserved.add(port);
+      return port;
+    }
+  }
+  throw new Error("Failed to find a free reserved TCP port in 20000-29999");
+}
+
 function drain(stream: ReadableStream<Uint8Array>, writer: Bun.FileSink) {
   return (async () => {
     for await (const chunk of stream) writer.write(chunk);
@@ -213,10 +236,12 @@ export async function startSut(
   const port = await freePort();
   // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
-  const codexDevicePort = await freePort();
-  const chatSdkPort = await freePort();
+  const codexDevicePort = await reservedPort();
+  const chatSdkPort = await reservedPort();
   // Chat SDK Slack posts to a mock bound here by the scenario (slack-http.ts).
-  const chatSdkSlackPort = await freePort();
+  const chatSdkSlackPort = await reservedPort();
+  // Chat SDK Rocket.Chat posts to a mock bound here by platform-chat-sdk-rocketchat.
+  const chatSdkRocketchatPort = await reservedPort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
@@ -258,6 +283,7 @@ export async function startSut(
     CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
       telegram: `http://127.0.0.1:${chatSdkPort}`,
       slack: `http://127.0.0.1:${chatSdkSlackPort}/api/`,
+      rocketchat: `http://127.0.0.1:${chatSdkRocketchatPort}`,
     }),
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
@@ -267,6 +293,8 @@ export async function startSut(
     MCP_OAUTH_ALLOW_PRIVATE_HOSTS: "true",
     // The mcp-user-events scenario's webhook receiver listens on http://127.0.0.1.
     MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS: "true",
+    // mcp-user-code-mode watches a user run's token expire; 5 s outlasts a fast run's own calls.
+    SCRIPT_RUN_USER_TOKEN_TTL_MS: "5000",
     CODEX_OAUTH_DEVICE_BASE_URL: `http://127.0.0.1:${codexDevicePort}`,
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",

@@ -32,6 +32,13 @@ fi
 
 if [ -f "$repo_dir/.pre-commit-config.yaml" ] || [ -f "$repo_dir/prek.toml" ]; then
   if command -v prek >/dev/null 2>&1; then
+    # A clone made after boot carries the init.templateDir shim. Remove it first:
+    # prek would keep any foreign pre-push as pre-push.legacy and run hooks twice.
+    hooks_dir="$(cd "$repo_dir" && git rev-parse --git-path hooks 2>/dev/null || true)"
+    case "$hooks_dir" in /*) ;; ?*) hooks_dir="$repo_dir/$hooks_dir" ;; esac
+    if [ -n "$hooks_dir" ] && grep -qs "agent-swarm prek template shim" "$hooks_dir/pre-push"; then
+      rm -f "$hooks_dir/pre-push"
+    fi
     if (cd "$repo_dir" && prek install); then
       echo "    Installed prek git shims"
     else

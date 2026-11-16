@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v2.12.0",
+  "title": "API Reference v2.13.2",
   "description": "REST API reference for agent-swarm.dev",
   "root": true,
   "pages": [
@@ -35,6 +35,7 @@
     "metrics",
     "models",
     "oauth",
+    "objects",
     "onboarding",
     "pages",
     "poll",

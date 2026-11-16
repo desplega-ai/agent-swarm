@@ -181,6 +181,7 @@ registerTemplate({
 ## Workspace
 
 \`/workspace/personal/\` is yours. \`get-repos\` returns where a repository is cloned.
+Worktrees without unsaved work are removed after your task. To keep one: \`git worktree lock <path>\`.
 Your profile lives in the database. Edit it with \`update-profile\`: \`soulMd\`, \`identityMd\`, \`heartbeatMd\`, \`setupScript\`, \`toolsMd\`. The files in \`/workspace/\` are mirrors.
 Your setup script runs at every container start.
 \`/workspace/TOOLS.md\` holds your environment notes: repos, hosts, services, tool quirks. Read it when a task touches a repo, host, or service you have not used this session. Update it with \`update-profile\` \`toolsMd\`.
@@ -524,7 +525,7 @@ registerTemplate({
   eventType: "system.agent.tool_discovery.fx",
   header: "",
   defaultBody:
-    "Most swarm tools are deferred behind `capability_search`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool you know by that name directly. To find one, use `capability_search`.",
+    "Most swarm tools are deferred behind `toolbox`. Each one is named `mcp_swarm_<tool>`, so `store-progress` is `mcp_swarm_store-progress`. Call a tool in your tool list directly. A deferred tool fails when called directly: find it with `toolbox` `search`, then call `toolbox` with `run` set to its name and `arguments` set to its arguments.",
   variables: [],
   category: "system",
 });
@@ -609,6 +610,31 @@ registerTemplate({
     {
       name: "code_quality",
       description: "The code-quality skill pointer, or empty without MCP.",
+    },
+  ],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.repository.merge_policy",
+  header: "",
+  defaultBody: `**Merge Policy:**
+- Auto-merge: {{agents_may_merge}}{{swarm_auto_merge}}{{merge_checks}}`,
+  variables: [
+    {
+      name: "agents_may_merge",
+      description:
+        "'Allowed' or 'Not allowed (default)': the repo's mergePolicy.agentsMayMerge, else its allowMerge guideline.",
+    },
+    {
+      name: "swarm_auto_merge",
+      description:
+        "Lines for the repo's mergePolicy record (swarm auto-merge state, classes, threshold, risky paths). Empty when the repo has no record.",
+    },
+    {
+      name: "merge_checks",
+      description:
+        "The 'Before merging, verify' list from the repo's mergeChecks guideline. Empty when there are none.",
     },
   ],
   category: "system",

@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.322
+ARG CLAUDE_CODE_VERSION=2.1.325
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.167.2
+ARG CODEX_VERSION=0.169.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -182,7 +182,7 @@ ENV CODEX_PATH_OVERRIDE=/usr/bin/codex
 # scripts/check-codex-default-model.sh).
 RUN mkdir -p /home/worker/.codex && \
     printf '%s\n' \
-      'model = "gpt-5.6-terra"' \
+      'model = "gpt-6.1-terra"' \
       'approval_policy = "never"' \
       'sandbox_mode = "danger-full-access"' \
       'skip_git_repo_check = true' \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.2.7
+ARG OPENCODE_VERSION=2.3.0
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -231,7 +231,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.25
+ARG AGENT_FS_VERSION=0.18.28
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -271,10 +271,11 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 # they run without the per-hook trusted_hash review that user-level hooks.json
 # needs — codex silently skips untrusted hooks, which in a headless worker means
 # steering would never deliver. PreToolUse carries no steering (codex drops its
-# additionalContext, openai/codex#19385); it runs only the PR body leak guard,
-# which blocks `gh pr create|edit` on public repos with exit code 2. Its
-# `^Bash$` matcher keeps other tools from spawning the CLI (codex reports shell
-# and unified exec calls as Bash). Steering
+# additionalContext, openai/codex#19385); it runs the PR body leak guard, which
+# blocks `gh pr create|edit` on public repos with exit code 2, and reports native
+# calls to extensions (`POST /api/tool-hooks`). Its `^(Bash|apply_patch)$`
+# matcher keeps MCP tools from spawning the CLI (codex reports shell and unified
+# exec calls as Bash, file edits as apply_patch). Steering
 # no-ops unless STEERING_ENABLED reaches the codex env (live-reconciled by the
 # runner).
 # Root-owned on purpose: it's the admin-enforced layer (and /etc needs root).
@@ -289,7 +290,7 @@ RUN mkdir -p /etc/codex && printf '%s\n' \
   'command = "/usr/local/bin/agent-swarm codex-hook"' \
   '' \
   '[[hooks.PreToolUse]]' \
-  'matcher = "^Bash$"' \
+  'matcher = "^(Bash|apply_patch)$"' \
   '[[hooks.PreToolUse.hooks]]' \
   'type = "command"' \
   'command = "/usr/local/bin/agent-swarm codex-hook"' \
@@ -404,6 +405,8 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# pre-push shim the entrypoint puts in init.templateDir, so ad-hoc clones get prek hooks too.
+COPY --chmod=755 scripts/prek-template-pre-push.sh /usr/local/lib/agent-swarm/prek-template-pre-push
 # GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
 COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
 COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper
@@ -548,8 +551,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.2
-ARG DSH_SHA512=27bdbbaf60b8ef5c767185c68ea6740fd4f5672698403147fd89f1f22abef39a2c94ce27932e584c19db02e4edc4c856ee7858f30b8011f8e314243e2ba4b083
+ARG DSH_VERSION=0.2.2-rc.3
+ARG DSH_SHA512=4bee2851854a5ae73548230ca759a951ada5971572d28f60220a7b4c383f11aecfbaf5d59007e7ca4a921f5fe80d7541fb2e55cc49b440826e968d4b201dea46
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -564,9 +567,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794484845-g2f1e0a
-ARG AMP_SHA512_AMD64=2c0a7cc91e1fde7b9036471bc9d3ef08ed000aa3756e0009d2198638f32df00d00961bd6bdf92768a9a421f0e6c385b1225c11e321f77140cee3c22a7d8f84ad
-ARG AMP_SHA512_ARM64=86888a965cc5b4d72c4970dc0a5d64a34d9f8cc6f65d448835d7a488f40d130d5dc0cb92d00be0c4305b6612ec023ec3d9abbd0ba0f6d8b217500853d27ba801
+ARG AMP_VERSION=0.0.1794744038-ga74b43
+ARG AMP_SHA512_AMD64=6d11c38658c878ba59fc185aa2a1739c2a412e7a37cfa41ecce5d588d5d4c4e17dc93819b65bfa28a0072dcc969c23cd07c830fc2522486e959b8f05f36b7f04
+ARG AMP_SHA512_ARM64=301564f90db3774b0f0613e4e67473cdf535868f1f606467d7766134b337f0122512234a0d6b3c421a3c04b55a7381513219571c503fe288624f721b3f84e079
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -582,7 +585,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.3.1
+ARG CURSOR_SDK_VERSION=1.4.0
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -614,7 +617,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.109
+ARG COPILOT_CLI_VERSION=1.0.112
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -624,8 +627,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.27.2), so none run as root.
-ARG QWEN_CODE_VERSION=0.27.2
+# scripts are not needed for ACP (verified on 0.27.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.27.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -635,9 +638,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.59.0
-ARG GOOSE_SHA256_AMD64=a774667de6c20206a60d78d7bece2d9dda8389667e4f5c2fc8aaa758d1e81ef3
-ARG GOOSE_SHA256_ARM64=ba96b78394e3050077482bb285ff35f34613646e90b84a18b5d674b71905166e
+ARG GOOSE_VERSION=1.59.1
+ARG GOOSE_SHA256_AMD64=04c08900ab2ae78b8e2f556f1ed535a91b61c080a3ff62e9fd8b280cceb544ef
+ARG GOOSE_SHA256_ARM64=e3619b2ebf76dbbe8924561fd748220f289a34671e2757cda1cd833e44194f8e
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -655,9 +658,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.2.1
-ARG KIRO_CLI_SHA256_AMD64=2551acc2e50139aef81ae6a2d3d1f9b6e96ebf77c7475df54cc4bb8b918fd662
-ARG KIRO_CLI_SHA256_ARM64=cd1a11049594d8b6364d2be03c01e79db7526d00284a964f9882469efc193a0d
+ARG KIRO_CLI_VERSION=3.3.0
+ARG KIRO_CLI_SHA256_AMD64=b88142aa02789504ac77fdf6ee829f0f4bdc9ce2e5dd0cc73084e105003c8fc3
+ARG KIRO_CLI_SHA256_ARM64=18720f7dc5368489b167388c27c47680892032619c4f6d099cfddc17611e039e
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -696,9 +699,9 @@ RUN case "$TARGETARCH" in \
 # auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
 # by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
 # FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
-ARG FX_VERSION=0.0.16
-ARG FX_SHA512_AMD64=d5bb494d9f8fbbbf752f46db50ecb45232252dcdde30432f0b26702bed28037384f809a3facd98274a0b96501b2058cd7cea355c5b2a2a616290d84827817492
-ARG FX_SHA512_ARM64=e2fbfd4f35e979baac9a272eee6785a386df9d53990fe0722b3696adcb1c054f96a8c7771d9642c06b1b9422e2836efe5ab883f703741737cbed1900c3b7fb73
+ARG FX_VERSION=0.0.17
+ARG FX_SHA512_AMD64=8aa80856cb5d63f0b7e66809e4d56e911f0122e4c3bba7b340aa80b889ca752fe7b3b888ed958bc42ba5eb0b9669ac88e70aeae1693ba8a7e15cffb20c8830c7
+ARG FX_SHA512_ARM64=e882f68a0f56541065dc0b2d3c40460f139a4165ab3ef8f29ab925f9c8300dc69d30a4ab3a80c05923e736ca92e1045765d7e2bb88fa0699a4168961b7986aa9
 RUN case "$TARGETARCH" in \
       amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
       arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
@@ -731,7 +734,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.42.0",
+    "agent-browser": "0.43.0",
     "playwright": "1.63.0"
   },
   "overrides": {
@@ -829,6 +832,8 @@ COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypo
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+# pre-push shim the entrypoint puts in init.templateDir, so ad-hoc clones get prek hooks too.
+COPY --chmod=755 scripts/prek-template-pre-push.sh /usr/local/lib/agent-swarm/prek-template-pre-push
 # GitHub App worker auth: token helper for git, and the gh wrapper the entrypoint links in.
 COPY --chmod=755 scripts/swarm-github-token.sh /usr/local/bin/swarm-github-token
 COPY --chmod=755 scripts/gh-app-auth-wrapper.sh /usr/local/lib/agent-swarm/gh-app-auth-wrapper

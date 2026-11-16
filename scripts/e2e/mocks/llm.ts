@@ -8,13 +8,16 @@
 //     (memory embeddings).
 //   - SystemOne decisions (`/v1/systemone`) through LAYA_URL, and Cloudflare Clairic
 //     extraction through the test-only CLOUDFLARE_API_BASE_URL.
+//   - A GitHub REST stub under `/github` (GITHUB_API_URL): the App installation token and
+//     `GET /repos/:owner/:repo/pulls/:n`, answered from the PRs a scenario sets with
+//     `setGithubPull`. An unknown PR is a 404.
 //   - The telemetry sink (`POST /telemetry/v1/events`, answers 202), reached through
 //     DESPLEGA_TELEMETRY_ENDPOINT once a scenario turns telemetry on.
 //
 // Every request is journaled so scenarios can assert what the server sent. Responses
 // are deterministic by default and scriptable per scenario through the responder hooks.
 // The mock never imports from src/: scripts/check-e2e-boundary.sh forbids it.
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 
 export type MockRequest = {
   at: number;
@@ -468,6 +471,13 @@ export async function startMockLlm() {
     return { model, answers: {}, usage };
   }
 
+  /** PRs the GitHub stub reports, keyed `owner/name#n` (lowercase). */
+  const githubPulls = new Map<string, { merged: boolean; headSha: string }>();
+  // The SUT signs an App JWT with this key before asking the stub for a token.
+  const githubAppKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs1", format: "pem" })
+    .toString();
+
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -509,6 +519,22 @@ export async function startMockLlm() {
         }
         if (method === "GET" && /\/(key|auth\/key)$/.test(path)) {
           return json(200, { data: { label: "e2e", usage: 0, limit: null, is_free_tier: false } });
+        }
+        if (method === "POST" && /^\/github\/app\/installations\/\d+\/access_tokens$/.test(path)) {
+          return json(201, {
+            token: "e2e-github-installation-token",
+            expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          });
+        }
+        const pull = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
+        if (method === "GET" && pull) {
+          const known = githubPulls.get(`${pull[1]!.toLowerCase()}#${pull[2]}`);
+          if (!known) return json(404, { message: "Not Found" });
+          return json(200, {
+            state: known.merged ? "closed" : "open",
+            merged: known.merged,
+            head: { sha: known.headSha },
+          });
         }
         if (method === "POST" && path === "/telemetry/v1/events") {
           return json(202, {});
@@ -553,6 +579,11 @@ export async function startMockLlm() {
       CLOUDFLARE_API_BASE_URL: origin,
       // The telemetry sink: `POST /api/telemetry/enable` must not reach the production proxy.
       DESPLEGA_TELEMETRY_ENDPOINT: `${origin}/telemetry/v1/events`,
+      // GitHub stays off (GITHUB_DISABLE) until a scenario turns it on; then PR reads go here.
+      GITHUB_API_URL: `${origin}/github`,
+      GITHUB_APP_ID: "424242",
+      GITHUB_APP_INSTALLATION_ID: "777",
+      GITHUB_APP_PRIVATE_KEY: githubAppKey,
     } as Record<string, string>,
     requests: requests as readonly MockRequest[],
     /** Requests whose path ends with `suffix`, newest last. */
@@ -563,6 +594,13 @@ export async function startMockLlm() {
     setChatResponder(responder: ChatResponder | undefined): void {
       chatResponder = responder;
     },
+    /** Tell the GitHub stub what `GET /repos/<repo>/pulls/<number>` answers. */
+    setGithubPull(repo: string, number: number, pull: { merged: boolean; headSha?: string }): void {
+      githubPulls.set(`${repo.toLowerCase()}#${number}`, {
+        merged: pull.merged,
+        headSha: pull.headSha ?? "0".repeat(40),
+      });
+    },
     setSystemOneResponder(responder: SystemOneResponder | undefined): void {
       systemOneResponder = responder;
     },
@@ -570,6 +608,7 @@ export async function startMockLlm() {
     reset(): void {
       chatResponder = undefined;
       systemOneResponder = undefined;
+      githubPulls.clear();
     },
     async stop(): Promise<void> {
       await server.stop(true);

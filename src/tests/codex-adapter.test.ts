@@ -1541,16 +1541,16 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("")).toBe(CODEX_DEFAULT_MODEL);
   });
 
-  test("claude shortname 'opus' → gpt-5.6-sol", () => {
-    expect(resolveCodexModel("opus")).toBe("gpt-5.6-sol");
+  test("claude shortname 'opus' → gpt-6.1-sol", () => {
+    expect(resolveCodexModel("opus")).toBe("gpt-6.1-sol");
   });
 
-  test("claude shortname 'sonnet' → gpt-5.6-terra", () => {
-    expect(resolveCodexModel("sonnet")).toBe("gpt-5.6-terra");
+  test("claude shortname 'sonnet' → gpt-6.1-terra", () => {
+    expect(resolveCodexModel("sonnet")).toBe("gpt-6.1-terra");
   });
 
-  test("claude shortname 'haiku' → gpt-5.6-luna", () => {
-    expect(resolveCodexModel("haiku")).toBe("gpt-5.6-luna");
+  test("claude shortname 'haiku' → gpt-6-luna", () => {
+    expect(resolveCodexModel("haiku")).toBe("gpt-6-luna");
   });
 
   test("passthrough 'gpt-5.4-mini' → gpt-5.4-mini", () => {

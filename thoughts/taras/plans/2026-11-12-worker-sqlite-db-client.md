@@ -20,7 +20,12 @@ Move `bun:sqlite` execution off the API's main thread by implementing the existi
 
 **Execution direction, 2026-11-16:** Taras requested Codex subagents for all remaining work.
 After implementation and verification, commit the scoped changes, push the branch, and create a pull request.
-This authorization does not include merging or production rollout.
+This authorization does not include merging the pull request or production rollout.
+
+**Upstream integration, 2026-11-16:** `origin/main` advanced to `974d8c0cca` after the original implementation base.
+It adds separate memory read Workers and cached health refreshes. Preserve those features alongside this plan's readiness and transaction guarantees.
+The complete API topology therefore includes those readers in addition to the boot connection and selected runtime driver.
+Repeat final verification after integration. Earlier phase results describe their recorded source snapshots.
 
 - **Motivation**: synchronous SQLite execution blocks the API event loop. The research reports a 770 ms Worker query with 1 ms main-thread lag. Phase 0 must reproduce this result on the pinned Bun version. It is not production acceptance evidence.
 - **Related**: [research](../research/2026-11-12-async-db-and-query-engine-abstraction.md) and [dialect plan](2026-11-12-sql-dialect-lint-and-helpers.md).
@@ -456,6 +461,12 @@ Expose `whenReady()` consistently for internal bootstrap and tests. Do not decla
 ### Overview
 
 CI covers both drivers. Runbooks describe their lifecycle and limits. A separate rollout PR requires staging evidence and explicit approval.
+
+**Review status, 2026-11-16:** independent Standards and Spec reviews accepted the CI and documentation changes.
+The parent corrected one Minor timing description to distinguish FIFO waits from SQLite BUSY spin.
+Both reviews passed nine report tests and checked artifact isolation and failure propagation.
+Full acceptance verification remains pending after upstream integration. Published PR checks remain a separate final gate.
+See [Phase 4 evidence](../research/2026-11-16-worker-sqlite-phase4.md).
 
 ### Changes Required:
 

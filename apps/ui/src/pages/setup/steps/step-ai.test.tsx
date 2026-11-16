@@ -22,10 +22,13 @@ let tiers: ModelTierPreview[] | undefined;
 let presencePending = false;
 let presenceFailed = false;
 const harnessCalls: Array<[string, string]> = [];
+const runtimeCalls: Array<Record<string, unknown>> = [];
 
 mock.module("@/api/client", () => ({
   api: {
-    updateAgentRuntime: async () => {},
+    updateAgentRuntime: async (input: Record<string, unknown>) => {
+      runtimeCalls.push(input);
+    },
     setAgentHarnessProvider: async (id: string, harness: string) => {
       harnessCalls.push([id, harness]);
     },
@@ -96,6 +99,7 @@ for (const [alias, path] of [
 interface CardStubProps {
   onSaved: (method: string) => void;
   reportSaved: (card: string, saved: boolean) => void;
+  onHarnessChange?: (harness: string) => void;
 }
 
 // The cards are stubs: each reports the saved state in `savedState` (nothing
@@ -103,11 +107,13 @@ interface CardStubProps {
 // which a key save calls.
 const savedState: Record<string, boolean> = {};
 const cardOnSaved: Record<string, CardStubProps["onSaved"]> = {};
+let pickCodexHarness: CardStubProps["onHarnessChange"];
 function stubCard(card: string) {
-  return function Card({ onSaved, reportSaved }: CardStubProps) {
+  return function Card({ onSaved, reportSaved, onHarnessChange }: CardStubProps) {
     const saved = savedState[card] ?? false;
     useEffect(() => reportSaved(card, saved), [reportSaved, saved]);
     cardOnSaved[card] = onSaved;
+    if (onHarnessChange) pickCodexHarness = onHarnessChange;
     return null;
   };
 }
@@ -185,6 +191,7 @@ beforeEach(() => {
   presencePending = false;
   presenceFailed = false;
   harnessCalls.length = 0;
+  runtimeCalls.length = 0;
   document.body.innerHTML = "";
 });
 
@@ -329,6 +336,27 @@ describe("StepAi: the switch on the first credential", () => {
     await view.removeKey();
     await view.saveKey("claude", "claude_setup_token");
     expect(harnessCalls).toEqual(fleet.map((a) => [a.id, "claude"]));
+    await view.unmount();
+  });
+
+  test("a ChatGPT subscription moves the agents to Codex unless the user picks another harness", async () => {
+    const view = await mount();
+    await view.saveKey("codex", "codex_device");
+    expect(harnessCalls).toEqual(fleet.map((a) => [a.id, "codex"]));
+    expect(runtimeCalls).toEqual([]);
+    await view.unmount();
+  });
+
+  test("Pi-Mono picked for the ChatGPT subscription: agents move to pi on its Optimal model", async () => {
+    const view = await mount();
+    await act(async () => pickCodexHarness?.("pi"));
+    await view.saveKey("codex", "codex_device");
+    expect(harnessCalls).toEqual([]);
+    expect(runtimeCalls.map((c) => [c.id, c.harnessProvider, c.model])).toEqual(
+      fleet.map((a) => [a.id, "pi", "openai-codex/gpt-6.1-sol"]),
+    );
+    // The pick is kept for this API across reloads.
+    expect([...Object.values(localStorage)]).toContain("pi");
     await view.unmount();
   });
 });

@@ -115,6 +115,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
     <ProviderCard
       {...card}
       card="open"
+      spendCapPool={OR_KEY}
       icon={<OpenHarnessIcon />}
       title="Open harnesses"
       subtitle={`${harnessNames("open", "and")}. One OpenRouter key runs all three.`}

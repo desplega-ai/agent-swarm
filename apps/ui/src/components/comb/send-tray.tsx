@@ -1,8 +1,9 @@
-import { Send } from "lucide-react";
+import { Send, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAgentFsAccess, useFolderThreads } from "@/api/hooks/use-agent-fs";
 import { SendBatchDialog } from "@/components/comb/send-to-swarm";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
+import { useDismissedSends } from "@/components/comb/use-dismissed-sends";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAgentFs } from "@/contexts/agent-fs-context";
@@ -20,6 +21,9 @@ const NO_THREADS: CommentListEntry[] = [];
  * one task (like the page feedback panel, across files). It reads the
  * drive's comment list, the same cached query as the root's Open comments
  * panel. Hidden when agent-fs lacks the `comment-path-prefix` feature.
+ * Comments dismissed in the dialog (`useDismissedSends`) do not count and
+ * list apart, where they can be restored. With every comment dismissed, a
+ * muted "N dismissed" button stays, so the Dismissed list stays reachable.
  */
 export function SendTrayButton({ drive }: { drive: Drive }) {
   const { features } = useAgentFs();
@@ -32,27 +36,49 @@ export function SendTrayButton({ drive }: { drive: Drive }) {
     () => myUnsent(threads, access.userId, serviceUserId),
     [threads, access.userId, serviceUserId],
   );
+  const dismissal = useDismissedSends(drive);
+  const active = mine.filter((thread) => !dismissal.ids.has(thread.id));
+  const dismissedCount = mine.length - active.length;
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      {mine.length > 0 ? (
+      {active.length > 0 ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="sm"
-              aria-label={`Send ${mine.length} to swarm`}
+              aria-label={`Send ${active.length} to swarm`}
               className="shrink-0 gap-1.5 px-2 tabular-nums"
               onClick={() => setOpen(true)}
             >
               <Send />
               <span className="hidden sm:inline">Send</span>
-              {mine.length}
+              {active.length}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
             Send your unsent comments from every file as one task
+          </TooltipContent>
+        </Tooltip>
+      ) : dismissedCount > 0 ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Show ${dismissedCount} dismissed comments`}
+              className="shrink-0 gap-1.5 px-2 text-muted-foreground tabular-nums"
+              onClick={() => setOpen(true)}
+            >
+              <Undo2 />
+              <span className="hidden sm:inline">Dismissed</span>
+              {dismissedCount}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            Every unsent comment is dismissed. Open to restore one
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -62,6 +88,7 @@ export function SendTrayButton({ drive }: { drive: Drive }) {
           scopePath="/"
           threads={mine}
           showPaths
+          dismissal={dismissal}
           onClose={() => setOpen(false)}
         />
       ) : null}

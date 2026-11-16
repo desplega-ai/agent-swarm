@@ -21,7 +21,7 @@ import type {
  * Dockerfile.worker; bump the two together). Every ACP shape this adapter
  * relies on was measured against it.
  */
-export const FX_PINNED_VERSION = "0.0.16";
+export const FX_PINNED_VERSION = "0.0.17";
 
 /** OpenAI's Chat Completions prefix; fx appends `/chat/completions`. */
 export const FX_OPENAI_BASE_URL = "https://api.openai.com/v1";
@@ -165,7 +165,7 @@ export class FxAdapter implements ProviderAdapter {
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
-    // fx defers swarm tools behind its own `capability_search`; the prompt
+    // fx defers swarm tools behind its own `toolbox` (search/run); the prompt
     // uses the fx-specific discovery line, not the generic tool-search one.
     hasToolSearch: false,
     // `~/.claude/skills` is a native fx skill root (verified: a planted skill loaded).

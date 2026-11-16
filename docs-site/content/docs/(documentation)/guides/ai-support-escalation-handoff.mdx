@@ -60,7 +60,7 @@ An escalation packet travels further than the ticket, so what it carries matters
 
 **Personal data and secrets leave the packet before it reaches engineering.** Contact details and payment identifiers are redacted or left out, along with anything a customer pasted that looks like a credential. The engineer needs the behaviour that broke, which requires no customer identity.
 
-**Least privilege applies to readers too.** The packet is a document, so a reader sees only what the workflow released and never the helpdesk itself. Support reads the packet it produced, the engineering owner reads the sources it names, and helpdesk access stays with the people who already had it.
+**Reader access is set up separately.** Access to the packet and access to each source it links are set up separately, outside this workflow, and someone checks both before engineering reads the packet. Where the packet is stored does not restrict readers: [asset namespaces](/docs/guides/asset-namespaces) record who owns and writes an asset, not who can read it. Helpdesk access stays with the people who already had it, a split the team maintains.
 
 ## What stays human-owned
 

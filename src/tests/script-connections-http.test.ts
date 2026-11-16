@@ -1,3 +1,5 @@
+// Resolves the reserved example names these tests fetch, without real DNS.
+import "./fake-dns";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -957,9 +959,12 @@ describe("/api/script-connections HTTP", () => {
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
     const requested: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requested.push(url);
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      // A production request connects to the checked address; Host keeps the name.
+      const url = new URL(String(input));
+      const host = new Headers(init?.headers).get("host");
+      if (host) url.host = host;
+      requested.push(url.href);
       return new Response(null, {
         status: 302,
         headers: { location: "http://127.0.0.1/.well-known/oauth-authorization-server" },

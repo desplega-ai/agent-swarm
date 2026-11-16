@@ -1,15 +1,32 @@
-import type { RepoGuidelines } from "@/types";
+import { agentsMayMerge, type RepoGuidelines } from "@/types";
+
+type MergePolicyFields = Pick<RepoGuidelines, "allowMerge" | "mergePolicy">;
+
+/** Stable JSON: object keys sorted, so a reordered resend of the same record compares equal. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : v,
+  );
+}
 
 /**
- * True when writing `incoming` would change a repo's effective `allowMerge`. An omitted
- * `guidelines` leaves it alone, `null` clears it (so it reads false), and a missing flag
- * reads false. Only the lead, the operator or a user may make such a change: the flag is
- * rendered into every agent's prompt as the merge policy.
+ * True when writing `incoming` would change a repo's merge policy: its raw `allowMerge`
+ * flag (a record's `agentsMayMerge` can mask it, but other readers use it directly), its effective
+ * `agentsMayMerge` (the record's flag, else `allowMerge`) or any part of its `mergePolicy`
+ * record. An omitted `guidelines` leaves it alone and `null` clears it. A resend that drops
+ * a stored `mergePolicy` counts as a change. Only the lead, the operator or a user may make
+ * such a change: the policy is rendered into every agent's prompt and read by the merge scripts.
  */
-export function changesAllowMerge(
-  current: Pick<RepoGuidelines, "allowMerge"> | null | undefined,
-  incoming: Pick<RepoGuidelines, "allowMerge"> | null | undefined,
+export function changesMergePolicy(
+  current: MergePolicyFields | null | undefined,
+  incoming: MergePolicyFields | null | undefined,
 ): boolean {
   if (incoming === undefined) return false;
-  return (incoming?.allowMerge === true) !== (current?.allowMerge === true);
+  return (
+    (current?.allowMerge === true) !== (incoming?.allowMerge === true) ||
+    agentsMayMerge(current) !== agentsMayMerge(incoming) ||
+    canonical(current?.mergePolicy) !== canonical(incoming?.mergePolicy)
+  );
 }

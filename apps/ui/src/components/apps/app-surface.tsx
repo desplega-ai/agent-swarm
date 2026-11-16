@@ -59,13 +59,7 @@
  */
 
 import type { StateStore } from "@json-render/core";
-import {
-  ActionProvider,
-  defineRegistry,
-  Renderer,
-  StateProvider,
-  VisibilityProvider,
-} from "@json-render/react";
+import { defineRegistry, JSONUIProvider, Renderer } from "@json-render/react";
 import {
   AlertCircle,
   Check,
@@ -143,9 +137,16 @@ import {
   withChainOnError,
   withChainOnErrorHandlers,
 } from "@/lib/json-render/chain-halt";
+import { expressionDirectives } from "@/lib/json-render/expressions";
+import { FocusRegistryProvider } from "@/lib/json-render/primitives";
 import { pageHasSplitDrawer, SplitDetailRegion } from "@/lib/json-render/split-pane";
-import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
+import {
+  getAppStoreView,
+  getAppsStoreSnapshot,
+  getPageStoreView,
+} from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
+import { createFocusRegistry, createUiActionHandlers } from "@/lib/json-render/ui-actions";
 import { getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
@@ -727,6 +728,12 @@ export function AppSurface({
   // prefixed with `/apps/<app.id>` by the view. The view (and the state behind
   // it) outlives this component — remounting the same app finds it warm.
   const store = useMemo(() => getAppStoreView(app.id), [app.id]);
+  // What the renderer and the handlers see: the app view with `/local/…`
+  // scoped to the active page, so two pages' `state` never share a slot.
+  const pageStore = useMemo(
+    () => getPageStoreView(app.id, activePageName),
+    [app.id, activePageName],
+  );
 
   // ── `/route` mirror ──────────────────────────────────────────────────────
   // `/route` is the ONE slot a mount owns: the URL it was mounted at is, by
@@ -761,6 +768,18 @@ export function AppSurface({
     if (storedSignature !== routeSignature) store.set("/route", routeSlotRef.current);
     routeSyncedRef.current = { store, signature: routeSignature };
   }
+  // Page-local state (`pages.<page>.state` → `/local/<name>`, stored per page
+  // by `getPageStoreView`): never clobbered, so typed values survive navigation
+  // like forms do. Every page is seeded on the first render, before the
+  // renderer subscribes, so navigating later writes nothing mid-render.
+  for (const [page, { state }] of Object.entries(pages)) {
+    if (!state) continue;
+    const view = getPageStoreView(app.id, page);
+    for (const [name, initial] of Object.entries(state)) {
+      if (view.get(`/local/${name}`) === undefined)
+        view.set(`/local/${name}`, structuredClone(initial));
+    }
+  }
   // Layout effect, not passive: a client-side navigation must land in the
   // store before paint, or the first frame of the new page renders against the
   // PREVIOUS page's `/route`.
@@ -786,7 +805,7 @@ export function AppSurface({
     refetchModel,
     refetchQuery,
     refetchAll,
-    store,
+    store: pageStore,
     poll: pollRef.current,
     navigate,
     modeParam,
@@ -797,7 +816,7 @@ export function AppSurface({
     refetchModel,
     refetchQuery,
     refetchAll,
-    store,
+    store: pageStore,
     poll: pollRef.current,
     navigate,
     modeParam,
@@ -956,6 +975,8 @@ export function AppSurface({
   // dispatch returned; `ActionProvider` snapshots handlers at mount, so the
   // map is read through a ref.
   const handlersRef = useRef<ActionHandlerMap | null>(null);
+  // `ui.focus` targets: the Inputs this surface rendered.
+  const focusRegistryRef = useRef(createFocusRegistry());
 
   const compiled = useMemo(() => {
     // A failed chain step shows as an error toast and halts its chain; the
@@ -979,6 +1000,11 @@ export function AppSurface({
       actions: {
         ...swarmActions,
         ...toastActions,
+        ...createUiActionHandlers({
+          getStore: () => ctxRef.current.store,
+          focus: focusRegistryRef.current,
+          onError: reportStepFailure,
+        }),
         // Client-side navigation to another page of this app. Reads the
         // router through `ctxRef` — a closure over `useNavigate()` would be
         // frozen at mount, since `ActionProvider` snapshots its handlers once.
@@ -1314,11 +1340,16 @@ export function AppSurface({
         </AlertCallout>
       )}
       <AppScopeProvider value={app.id}>
-        <StateProvider store={store}>
-          <VisibilityProvider>
-            <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
-          </VisibilityProvider>
-        </StateProvider>
+        <JSONUIProvider
+          registry={compiled.registry}
+          store={pageStore}
+          handlers={compiled.handlers}
+          directives={expressionDirectives}
+        >
+          <FocusRegistryProvider value={focusRegistryRef.current}>
+            {renderedSpec}
+          </FocusRegistryProvider>
+        </JSONUIProvider>
       </AppScopeProvider>
     </JsonRenderThemeProvider>
   );
@@ -1329,36 +1360,39 @@ export function AppSurface({
     shellItems && activePage ? (
       <JsonRenderThemeProvider value={appThemeAttr ?? null}>
         <AppScopeProvider value={app.id}>
-          <StateProvider store={store}>
-            <VisibilityProvider>
-              <ActionProvider handlers={compiled.handlers}>
-                <AppShell
-                  items={shellItems}
-                  activePage={activePageName}
-                  onNavigate={(href) => navigate(href)}
-                  // The dashboard header names the app in the default view only.
-                  appName={mode === "default" ? undefined : app.name}
-                  title={activePage.title ?? activePageName}
-                  description={activePage.description}
-                  crumbs={pageCrumbs}
-                  actions={
-                    headerSpec ? (
-                      <Renderer spec={headerSpec as never} registry={compiled.registry} />
-                    ) : null
-                  }
-                  surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
-                  scrollRef={scrollRef}
-                >
-                  {actionError && (
-                    <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
-                      {actionError}
-                    </AlertCallout>
-                  )}
-                  {renderedSpec}
-                </AppShell>
-              </ActionProvider>
-            </VisibilityProvider>
-          </StateProvider>
+          <JSONUIProvider
+            registry={compiled.registry}
+            store={pageStore}
+            handlers={compiled.handlers}
+            directives={expressionDirectives}
+          >
+            <FocusRegistryProvider value={focusRegistryRef.current}>
+              <AppShell
+                items={shellItems}
+                activePage={activePageName}
+                onNavigate={(href) => navigate(href)}
+                // The dashboard header names the app in the default view only.
+                appName={mode === "default" ? undefined : app.name}
+                title={activePage.title ?? activePageName}
+                description={activePage.description}
+                crumbs={pageCrumbs}
+                actions={
+                  headerSpec ? (
+                    <Renderer spec={headerSpec as never} registry={compiled.registry} />
+                  ) : null
+                }
+                surfaceClass={mode === "default" && !appThemeAttr ? "bg-card" : "bg-background"}
+                scrollRef={scrollRef}
+              >
+                {actionError && (
+                  <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
+                    {actionError}
+                  </AlertCallout>
+                )}
+                {renderedSpec}
+              </AppShell>
+            </FocusRegistryProvider>
+          </JSONUIProvider>
         </AppScopeProvider>
       </JsonRenderThemeProvider>
     ) : null;
@@ -1371,7 +1405,7 @@ export function AppSurface({
     return (
       <div
         ref={appVersion.scopeRef}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
@@ -1388,7 +1422,7 @@ export function AppSurface({
           scrollRef.current = node;
           appVersion.scopeRef.current = node;
         }}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
@@ -1404,7 +1438,7 @@ export function AppSurface({
     return (
       <div
         ref={appVersion.scopeRef}
-        onInputCapture={appVersion.markInteraction}
+        onInput={appVersion.markInteraction}
         onClickCapture={appVersion.markInteraction}
         className="fixed inset-0 z-50 flex flex-col bg-background"
         data-testid="app-runtime"
@@ -1435,7 +1469,7 @@ export function AppSurface({
   return (
     <div
       ref={appVersion.scopeRef}
-      onInputCapture={appVersion.markInteraction}
+      onInput={appVersion.markInteraction}
       onClickCapture={appVersion.markInteraction}
       className="flex flex-col flex-1 min-h-0 gap-4"
       data-testid="app-runtime"
