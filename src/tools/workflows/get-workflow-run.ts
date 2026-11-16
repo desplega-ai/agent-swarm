@@ -43,7 +43,7 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
     "get-workflow-run",
     {
       title: "Get Workflow Run",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description: "Get details of a workflow run by ID, including all steps and their statuses.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow run ID"),

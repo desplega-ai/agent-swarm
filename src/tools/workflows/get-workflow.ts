@@ -9,7 +9,7 @@ export const registerGetWorkflowTool = (server: McpServer) => {
     "get-workflow",
     {
       title: "Get Workflow",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "Get a workflow by ID, including its definition, triggers, cooldown, input, and auto-generated edges for UI rendering.",
       inputSchema: z.object({

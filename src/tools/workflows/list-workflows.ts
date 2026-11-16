@@ -9,7 +9,7 @@ export const registerListWorkflowsTool = (server: McpServer) => {
     "list-workflows",
     {
       title: "List Workflows",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "List all automation workflows, optionally filtered by enabled status. Returns SLIM rows WITHOUT the full `definition` (DAG) — each row carries a `nodeCount` instead. To inspect or patch a workflow's nodes/triggers, call `get-workflow` by id, or pass `includeFull: true` here.",
       inputSchema: z.object({
