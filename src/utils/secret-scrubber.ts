@@ -56,8 +56,12 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * URL-decoded and URL-encoded forms.
  * v14 = pass 1 also matches a known value URL-encoded as stored, so a value
  * with a literal `%` is redacted in its `%25` form.
+ * v15 = gitleaks rules also end on `.`, `,`, `:`, `)`, `]`, `}`, `>`, `|`,
+ * `/`, `&`, `?` and `#`; pass 2 adds Stripe webhook, Groq, Tavily,
+ * LangSmith, CircleCI, Google `AQ.`, HubSpot, New Relic and Sentry DSN
+ * shapes; pass 4 redacts a PEM private key cut off before its END line.
  */
-export const SCRUBBER_RULES_VERSION = 14;
+export const SCRUBBER_RULES_VERSION = 15;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -479,6 +483,17 @@ const URL_USERINFO_RE =
 const PEM_RE =
   /(-----BEGIN [A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?-----)((?:(?!-----)[\s\S]){1,16384})(-----END [A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?-----)/g;
 const PEM_MARKER = "[REDACTED:private_key]";
+/**
+ * A PEM private key cut off before its END line (`head`, an output cap, a
+ * truncated JSON string such as a GCP service-account `private_key`). The body
+ * is base64 runs of 16+ characters split by whitespace or `\n` escapes (raw or
+ * escaped again); prose after the cut is shorter, so it survives. Runs after
+ * `PEM_RE`, so a complete block keeps its END armor, and the marker after
+ * BEGIN stops a second match. Each run needs a separator before the next, so
+ * the walk is linear.
+ */
+const PEM_TRUNCATED_RE =
+  /(-----BEGIN [A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?-----)(?:\s|\\+[nr])*[A-Za-z0-9+/=]{16,}(?:(?:\s|\\+[nr])+[A-Za-z0-9+/=]{16,})*/g;
 
 /**
  * Pass 4: credentials identified by their context (a sensitive JSON/YAML
@@ -492,6 +507,7 @@ function scrubKeyContext(text: string): string {
     out = out.replace(PEM_RE, (match, begin: string, body: string, end: string) =>
       body === PEM_MARKER ? match : `${begin}${PEM_MARKER}${end}`,
     );
+    out = out.replace(PEM_TRUNCATED_RE, (_match, begin: string) => `${begin}${PEM_MARKER}`);
   }
   if (/authorization|x-api-key/i.test(out)) {
     out = out.replace(AUTH_HEADER_RE, redactHeader).replace(API_KEY_HEADER_RE, redactHeader);
@@ -714,6 +730,67 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; lits: string[]; re: RegExp }>
       String.raw`${TB}(?:(?:prod|dev):${CONVEX_SLUG}|(?:preview|project):${CONVEX_SLUG}:${CONVEX_SLUG})(?:\||%7[Cc])(?:[A-Za-z0-9+/_-]|%2[BbFf]){20,}(?:=|%3[Dd]){0,2}`,
       "g",
     ),
+  },
+  // Shapes below follow svn-arv/redacted's engine.yml (MIT): none of them has
+  // a gitleaks rule, or its gitleaks rule needs the vendor name nearby.
+  // Stripe webhook signing secrets
+  {
+    name: "stripe_webhook_secret",
+    lits: ["whsec_"],
+    re: new RegExp(String.raw`${TB}whsec_[A-Za-z0-9]{24,}\b`, "g"),
+  },
+  // Groq API keys
+  {
+    name: "groq_key",
+    lits: ["gsk_"],
+    re: new RegExp(String.raw`${TB}gsk_[A-Za-z0-9]{40,}\b`, "g"),
+  },
+  // Tavily API keys (`tvly-` and `tvly-dev-`)
+  {
+    name: "tavily_key",
+    lits: ["tvly-"],
+    re: new RegExp(String.raw`${TB}tvly-(?:dev-)?[A-Za-z0-9]{24,}\b`, "g"),
+  },
+  // LangSmith personal tokens and service keys
+  {
+    name: "langsmith_key",
+    lits: ["lsv2_pt_", "lsv2_sk_"],
+    re: new RegExp(String.raw`${TB}lsv2_(?:pt|sk)_[A-Za-z0-9]{24,}_[A-Za-z0-9]{8,}\b`, "g"),
+  },
+  // CircleCI personal API tokens
+  {
+    name: "circleci_token",
+    lits: ["CCIPAT_"],
+    re: new RegExp(String.raw`${TB}CCIPAT_[A-Za-z0-9_]{20,}\b`, "g"),
+  },
+  // Google API keys in the newer `AQ.` form (Gemini); the dot defeats the generic rules.
+  {
+    name: "google_api_key_v2",
+    lits: ["AQ."],
+    re: new RegExp(String.raw`${TB}AQ\.[A-Za-z0-9_-]{40,}(?!\w)`, "g"),
+  },
+  // HubSpot private-app tokens: pat-<region>-<uuid>. gitleaks only matches near "hubspot".
+  {
+    name: "hubspot_key",
+    lits: ["pat-"],
+    re: new RegExp(
+      String.raw`${TB}pat-[a-z0-9]{2,3}-[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}(?!\w)`,
+      "g",
+    ),
+  },
+  // New Relic user API keys. gitleaks only matches near "newrelic".
+  {
+    name: "newrelic_key",
+    lits: ["NRAK-"],
+    re: new RegExp(String.raw`${TB}NRAK-[A-Za-z0-9]{20,}\b`, "g"),
+  },
+  // Sentry DSNs: the public key and the ingest host go, the scheme and the
+  // project id stay. The key is semi-public (it ships in browser bundles), but
+  // it lets anyone post events to the project.
+  {
+    name: "sentry_dsn",
+    lits: ["sentry.io"],
+    re: /(?<=:\/\/)[a-f0-9]{32}@[a-z0-9-]{1,63}\.ingest\.(?:[a-z]{2,8}\.)?sentry\.io(?=\/\d)/g,
   },
 ];
 
@@ -1206,8 +1283,14 @@ function scrubWithMatcher(text: string, matcher: KnownValueMatcher): ScrubbedTex
   // Pass 2: structural patterns (catches secrets we never saw in env, e.g.
   // a token pasted into a tool_result by the operator or fetched from a
   // third-party API during a task).
+  // A rule runs only when one of its literals occurs: every match holds one,
+  // in the regex's own case unless it is case-insensitive (the corpus test
+  // checks both), so a skipped rule could not have matched.
   const vendorSpans: VendorSpanCache = { spans: null };
-  for (const { name, re } of TOKEN_REGEXES) out = applyTokenRegex(out, name, re, vendorSpans);
+  for (const { name, re, lits } of TOKEN_REGEXES) {
+    if (!re.ignoreCase && !lits.some((lit) => out.includes(lit))) continue;
+    out = applyTokenRegex(out, name, re, vendorSpans);
+  }
 
   // Passes 3 and 4: values of sensitive `KEY=value` assignments (env dumps,
   // .env files, shell traces), including ones too short for pass 1, and
@@ -1437,6 +1520,7 @@ export function scrubberRulesFingerprint(): string {
         CURL_USER_RE,
         URL_USERINFO_RE,
         PEM_RE,
+        PEM_TRUNCATED_RE,
       ].map((re) => re.source),
     ]),
   );
@@ -1505,9 +1589,15 @@ export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
     return value.map((item) => scrubObject(item, seen)) as T;
   }
 
+  // Keys are scrubbed too: a map keyed by a token leaks it as a key. Two keys
+  // can redact to the same marker, so a clash gets a `#<n>` suffix instead of
+  // overwriting the earlier entry.
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = scrubObject(child, seen);
+    const scrubbed: string = scrubSecrets(key);
+    let outKey = scrubbed;
+    for (let n = 2; Object.hasOwn(out, outKey); n++) outKey = `${scrubbed}#${n}`;
+    out[outKey] = scrubObject(child, seen);
   }
   return out as T;
 }

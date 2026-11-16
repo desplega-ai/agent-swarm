@@ -62,6 +62,13 @@ describe("structural rule literals", () => {
             lits.some((lit) => lower.includes(lit)),
             `${rule.name} matched without one of its literals`,
           ).toBe(true);
+          // Pass 2 skips a case-sensitive rule unless a literal occurs in its exact case.
+          if (!rule.re.ignoreCase) {
+            expect(
+              rule.lits.some((lit) => m[0].includes(lit)),
+              `${rule.name} matched without one of its literals in its exact case`,
+            ).toBe(true);
+          }
         }
       }
       if (matches === 0) uncovered.push(rule.name);
