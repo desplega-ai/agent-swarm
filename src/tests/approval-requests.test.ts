@@ -32,10 +32,8 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import {
-  type ApprovalQuestion,
   getWorkflowApprovalUnavailableReason,
   handleApprovalRequests,
-  missingRequiredResponseIds,
 } from "../http/approval-requests";
 import type { ExecutorMeta } from "../types";
 import { postApprovalCancellationUpdates } from "../workflows/approval-notifications";
@@ -49,18 +47,6 @@ const TEST_DB_PATH = "./test-approval-requests.sqlite";
 
 // ─── Helpers ────────────────────────────────────────────────
 
-function getPathSegments(url: string): string[] {
-  const pathEnd = url.indexOf("?");
-  const path = pathEnd === -1 ? url : url.slice(0, pathEnd);
-  return path.split("/").filter(Boolean);
-}
-
-function parseQueryParams(url: string): URLSearchParams {
-  const queryIndex = url.indexOf("?");
-  if (queryIndex === -1) return new URLSearchParams();
-  return new URLSearchParams(url.slice(queryIndex + 1));
-}
-
 function makeApprovalData(overrides?: Record<string, unknown>) {
   return {
     id: crypto.randomUUID(),
@@ -69,127 +55,6 @@ function makeApprovalData(overrides?: Record<string, unknown>) {
     approvers: { policy: "any" as const },
     ...overrides,
   };
-}
-
-// ─── HTTP handler (mirrors production routes) ───────────────
-
-async function handleRequest(
-  req: { method: string; url: string },
-  body: string,
-): Promise<{ status: number; body: unknown }> {
-  const pathSegments = getPathSegments(req.url || "");
-  const queryParams = parseQueryParams(req.url || "");
-
-  // POST /api/approval-requests
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "approval-requests" &&
-    !pathSegments[2]
-  ) {
-    const data = JSON.parse(body);
-    const id = crypto.randomUUID();
-    const request = await createApprovalRequest({
-      id,
-      title: data.title,
-      questions: data.questions,
-      approvers: data.approvers,
-      workflowRunId: data.workflowRunId,
-      workflowRunStepId: data.workflowRunStepId,
-      sourceTaskId: data.sourceTaskId,
-      timeoutSeconds: data.timeoutSeconds,
-      notificationChannels: data.notifications,
-    });
-    return { status: 201, body: { approvalRequest: request } };
-  }
-
-  // GET /api/approval-requests (list)
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "approval-requests" &&
-    !pathSegments[2]
-  ) {
-    const requests = await listApprovalRequests({
-      status: queryParams.get("status") || undefined,
-      workflowRunId: queryParams.get("workflowRunId") || undefined,
-      limit: queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined,
-    });
-    return { status: 200, body: { approvalRequests: requests } };
-  }
-
-  // POST /api/approval-requests/:id/respond
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "approval-requests" &&
-    pathSegments[2] &&
-    pathSegments[3] === "respond"
-  ) {
-    const id = pathSegments[2];
-    const existing = await getApprovalRequestById(id);
-    if (!existing) return { status: 404, body: { error: "Not found" } };
-    if (existing.status !== "pending") {
-      return { status: 409, body: { error: `Already resolved: ${existing.status}` } };
-    }
-
-    const data = JSON.parse(body);
-    const questions = existing.questions as ApprovalQuestion[];
-    const missingRequired = missingRequiredResponseIds(questions, data.responses);
-    if (missingRequired.length > 0) {
-      return {
-        status: 400,
-        body: { error: `Required responses missing or invalid: ${missingRequired.join(", ")}` },
-      };
-    }
-    let status: "approved" | "rejected" = "approved";
-    for (const q of questions) {
-      if (q.type === "approval") {
-        const answer = data.responses[q.id] as { approved?: boolean } | undefined;
-        if (answer && answer.approved === false) {
-          status = "rejected";
-          break;
-        }
-      }
-    }
-
-    const updated = await resolveApprovalRequest(id, {
-      status,
-      responses: data.responses,
-      resolvedBy: data.respondedBy,
-    });
-
-    if (!updated) return { status: 409, body: { error: "Concurrent resolution" } };
-    return { status: 200, body: { approvalRequest: updated } };
-  }
-
-  // GET /api/approval-requests/:id
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "approval-requests" &&
-    pathSegments[2]
-  ) {
-    const request = await getApprovalRequestById(pathSegments[2]);
-    if (!request) return { status: 404, body: { error: "Not found" } };
-    return { status: 200, body: { approvalRequest: request } };
-  }
-
-  return { status: 404, body: { error: "Not found" } };
-}
-
-function createTestServer(): Server {
-  return createHttpServer(async (req, res) => {
-    res.setHeader("Content-Type", "application/json");
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = Buffer.concat(chunks).toString();
-    const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" }, body);
-    res.writeHead(result.status);
-    res.end(JSON.stringify(result.body));
-  });
 }
 
 function createProductionApprovalServer(): Server {
@@ -219,7 +84,7 @@ describe("Approval Requests", () => {
       await unlink(TEST_DB_PATH);
     } catch {}
     initDb(TEST_DB_PATH);
-    server = createTestServer();
+    server = createProductionApprovalServer();
     const port = await listenOnFreePort(server);
     baseUrl = `http://localhost:${port}`;
   });
@@ -978,30 +843,19 @@ describe("Approval Requests", () => {
       await updateWorkflowRun(runId, { status: "cancelled", error: "Superseded" });
       await updateWorkflowRunStep(stepId, { status: "cancelled", error: "Superseded" });
 
-      const productionServer = createProductionApprovalServer();
-      const port = await listenOnFreePort(productionServer);
-      try {
-        const response = await fetch(
-          `http://127.0.0.1:${port}/api/approval-requests/${approval.id}/respond`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ responses: { q1: { approved: true } } }),
-          },
-        );
-        expect(response.status).toBe(409);
-        expect(await response.json()).toEqual({
-          error: "Approval request already resolved with status: cancelled: Superseded",
-        });
-        expect((await getApprovalRequestById(approval.id))?.status).toBe("cancelled");
-      } finally {
-        await new Promise<void>((resolve, reject) =>
-          productionServer.close((error) => (error ? reject(error) : resolve())),
-        );
-      }
+      const response = await fetch(`${baseUrl}/api/approval-requests/${approval.id}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responses: { q1: { approved: true } } }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "Approval request already resolved with status: cancelled: Superseded",
+      });
+      expect((await getApprovalRequestById(approval.id))?.status).toBe("cancelled");
     });
 
-    test("approves a pending request", async () => {
+    test("approves a pending request as operator despite the display claim", async () => {
       const created = await createApprovalRequest(makeApprovalData());
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
@@ -1018,7 +872,7 @@ describe("Approval Requests", () => {
         approvalRequest: { status: string; resolvedBy: string };
       };
       expect(data.approvalRequest.status).toBe("approved");
-      expect(data.approvalRequest.resolvedBy).toBe("tester");
+      expect(data.approvalRequest.resolvedBy).toBe("operator");
     });
 
     test("rejects when approval question has approved: false", async () => {
@@ -1113,11 +967,8 @@ describe("Approval Requests", () => {
     });
 
     test("production route defaults required to true and validates answered optional questions", async () => {
-      const productionServer = createProductionApprovalServer();
-      const port = await listenOnFreePort(productionServer);
-      const origin = `http://127.0.0.1:${port}`;
       const post = (path: string, body: unknown) =>
-        fetch(`${origin}${path}`, {
+        fetch(`${baseUrl}${path}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -1132,42 +983,34 @@ describe("Approval Requests", () => {
         return ((await res.json()) as { approvalRequest: { id: string; questions: unknown[] } })
           .approvalRequest;
       };
-      try {
-        // A question that does not set `required` is stored as required: an empty answer is refused.
-        const lax = await create([{ id: "go", type: "approval", label: "Go?" }]);
-        expect(lax.questions).toEqual([
-          { id: "go", type: "approval", label: "Go?", required: true },
-        ]);
-        const empty = await post(`/api/approval-requests/${lax.id}/respond`, { responses: {} });
-        expect(empty.status).toBe(400);
-        expect((await getApprovalRequestById(lax.id))?.status).toBe("pending");
+      // A question that does not set `required` is stored as required: an empty answer is refused.
+      const lax = await create([{ id: "go", type: "approval", label: "Go?" }]);
+      expect(lax.questions).toEqual([{ id: "go", type: "approval", label: "Go?", required: true }]);
+      const empty = await post(`/api/approval-requests/${lax.id}/respond`, { responses: {} });
+      expect(empty.status).toBe(400);
+      expect((await getApprovalRequestById(lax.id))?.status).toBe("pending");
 
-        // An answered optional question is validated; an unanswered one is allowed.
-        const optional = await create([
-          { id: "go", type: "approval", label: "Go?" },
-          {
-            id: "color",
-            type: "single-select",
-            label: "Color",
-            required: false,
-            options: [{ value: "red", label: "Red" }],
-          },
-        ]);
-        const outOfOptions = await post(`/api/approval-requests/${optional.id}/respond`, {
-          responses: { go: { approved: true }, color: "green" },
-        });
-        expect(outOfOptions.status).toBe(400);
-        expect(((await outOfOptions.json()) as { error: string }).error).toContain("color");
-        expect((await getApprovalRequestById(optional.id))?.status).toBe("pending");
-        const unanswered = await post(`/api/approval-requests/${optional.id}/respond`, {
-          responses: { go: { approved: true }, color: "" },
-        });
-        expect(unanswered.status).toBe(200);
-      } finally {
-        await new Promise<void>((resolve, reject) =>
-          productionServer.close((error) => (error ? reject(error) : resolve())),
-        );
-      }
+      // An answered optional question is validated; an unanswered one is allowed.
+      const optional = await create([
+        { id: "go", type: "approval", label: "Go?" },
+        {
+          id: "color",
+          type: "single-select",
+          label: "Color",
+          required: false,
+          options: [{ value: "red", label: "Red" }],
+        },
+      ]);
+      const outOfOptions = await post(`/api/approval-requests/${optional.id}/respond`, {
+        responses: { go: { approved: true }, color: "green" },
+      });
+      expect(outOfOptions.status).toBe(400);
+      expect(((await outOfOptions.json()) as { error: string }).error).toContain("color");
+      expect((await getApprovalRequestById(optional.id))?.status).toBe("pending");
+      const unanswered = await post(`/api/approval-requests/${optional.id}/respond`, {
+        responses: { go: { approved: true }, color: "" },
+      });
+      expect(unanswered.status).toBe(200);
     });
   });
 
@@ -1695,26 +1538,18 @@ describe("Approval Requests", () => {
   });
 
   describe("HTTP (production handler): late answers and cancel", () => {
-    let prodServer: Server;
-    let prodUrl = "";
     let lead: { id: string };
     let owner: { id: string };
     let worker: { id: string };
 
     beforeAll(async () => {
-      prodServer = createProductionApprovalServer();
-      prodUrl = `http://127.0.0.1:${await listenOnFreePort(prodServer)}`;
       lead = await createAgent({ name: "cancel-lead", isLead: true, status: "idle" });
       owner = await createAgent({ name: "cancel-owner", isLead: false, status: "idle" });
       worker = await createAgent({ name: "cancel-other", isLead: false, status: "idle" });
     });
 
-    afterAll(async () => {
-      await new Promise<void>((resolve) => prodServer.close(() => resolve()));
-    });
-
     async function post(path: string, body: unknown, agentId?: string) {
-      const response = await fetch(`${prodUrl}${path}`, {
+      const response = await fetch(`${baseUrl}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
