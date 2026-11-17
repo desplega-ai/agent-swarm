@@ -58,7 +58,8 @@ export async function startScriptRunProcess(
   });
 
   execution.exited
-    .then(async ({ exitCode, stderr }) => {
+    .then(async ({ exitCode, stderr, terminated }) => {
+      if (terminated) return;
       const current = await getScriptRun(run.id);
       if (current && current.status === "running") {
         if (exitCode !== 0) {

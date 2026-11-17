@@ -7,12 +7,17 @@
  *
  * Overflow (R9): the strip keeps its scroll, reveals the focused tab at the
  * nearest edge, fades at an edge while more tabs sit past it, and shows the
- * "All tabs" menu. Session tabs of the main pane drag to the right edge to
- * open in the split (`split-panes.tsx`).
+ * "All tabs" menu.
+ *
+ * A tab drags (`split-panes.tsx` owns the drag): onto a tab of either strip
+ * to land before it, onto the free end of a strip to land last, or onto the
+ * other pane. An amber bar shows where it lands. A tab's move button (on
+ * hover) and its context menu (a right-click, or Shift+F10 on the focused
+ * tab) move it to the other pane too.
  */
 
-import { useDraggable } from "@dnd-kit/core";
-import { Pin, Plus, X } from "lucide-react";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { type LucideIcon, Pin, Plus, X } from "lucide-react";
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -23,18 +28,104 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isSessionTab, NEW_SESSION_TAB, OVERVIEW_TAB } from "@/lib/sessions-v2";
+import { NEW_SESSION_TAB, OVERVIEW_TAB, type PaneIndex } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { useQuietTooltip } from "../pane/quiet-focus";
 import { ReadMark, TipKey, UNREAD_TITLE } from "../sidebar/tree-row";
 import { AllTabsMenu } from "./all-tabs-menu";
 import { TabActivity, TabIcon, tabLabel, useTabInfo } from "./tab-info";
 
-/** The drag data of a tab (the split drop zone reads it). */
+/** The drag data of a tab. */
 export interface TabDragData {
   tab: string;
   title: string;
+  /** The pane the tab drags from. */
+  pane: PaneIndex;
+}
+
+/**
+ * The drop data of a place in a strip: the tab lands before `before`, or
+ * last (null). A pane's body leaves it out: the tab lands after the focused tab.
+ */
+export interface TabDropData {
+  pane: PaneIndex;
+  before?: string | null;
+}
+
+/** The amber bar that marks where a dragged tab lands. */
+function DropBar() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-y-1.5 left-0 z-10 w-0.5 rounded-full bg-primary"
+    />
+  );
+}
+
+/**
+ * The move to the other pane for one tab: `ready`, `hidden` (the tab cannot
+ * go there, as the group tab), or blocked, with the reason the button and
+ * the menu show.
+ */
+export type TabMoveState = "ready" | "hidden" | { blocked: string };
+
+/** The tabs of a strip move to the other pane. */
+export interface TabMove {
+  /** "Move to split pane", "Move to main pane". */
+  label: string;
+  icon: LucideIcon;
+  state: (tab: string) => TabMoveState;
+  onMove: (tab: string) => void;
+}
+
+/** The move button on a tab: it shows on hover. A blocked one stays visible on hover, with its reason. */
+function MoveButton({
+  move,
+  state,
+  tab,
+  onPointerOver,
+}: {
+  move: TabMove;
+  state: "ready" | { blocked: string };
+  tab: string;
+  onPointerOver: (over: boolean) => void;
+}) {
+  const Icon = move.icon;
+  const blocked = state === "ready" ? null : state.blocked;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={move.label}
+          aria-disabled={blocked ? true : undefined}
+          onPointerEnter={() => onPointerOver(true)}
+          onPointerLeave={() => onPointerOver(false)}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!blocked) move.onMove(tab);
+          }}
+          className={cn(
+            "grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0",
+            "hover:bg-muted-foreground/20 hover:text-foreground group-hover/tab:opacity-100",
+            "group-focus-visible/tab:opacity-100 aria-disabled:hover:bg-transparent aria-disabled:group-hover/tab:opacity-50",
+          )}
+        >
+          <Icon className="size-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{blocked ?? move.label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function TabItem({
@@ -42,9 +133,11 @@ function TabItem({
   view,
   id,
   panelId,
+  pane,
   selected,
   paneActive,
   draggable,
+  move,
   onFocusTab,
   onCloseTab,
   onCloseKey,
@@ -53,11 +146,14 @@ function TabItem({
   view: string | null;
   id: string;
   panelId: string;
+  pane: PaneIndex;
   selected: boolean;
   /** The pane holds the keys: its focused tab gets the amber bar. */
   paneActive: boolean;
-  /** The tab drags to the split drop zone. */
+  /** The tab drags to a new place or to the other pane. */
   draggable: boolean;
+  /** The move to the other pane, when this strip offers one. */
+  move?: TabMove;
   onFocusTab: (tab: string) => void;
   onCloseTab: (tab: string) => void;
   /** Delete or Backspace on the tab: closes it and keeps the focus in the strip. */
@@ -68,14 +164,28 @@ function TabItem({
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `tab:${id}`,
     disabled: !draggable,
-    data: { tab, title: info.title } satisfies TabDragData,
+    data: { tab, title: info.title, pane } satisfies TabDragData,
   });
-  // The tab's tooltip stays shut over its close button (that one has its own)
+  // A dragged tab dropped here lands before this tab.
+  const drop = useDroppable({
+    id: `drop:${id}`,
+    disabled: !draggable,
+    data: { pane, before: tab } satisfies TabDropData,
+  });
+  const setRefs = (node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    drop.setNodeRef(node);
+  };
+  const dropHere = drop.isOver && drop.active?.id !== `tab:${id}`;
+  // The tab's tooltip stays shut over its buttons (they have their own)
   // and on a quiet focus (the focus coming back after the split closes).
   const tip = useQuietTooltip();
-  const [overClose, setOverClose] = useState(false);
+  const [overButton, setOverButton] = useState(false);
   // The Overview is pinned: it closes with its list tab, never on its own.
   const pinned = tab === OVERVIEW_TAB;
+  const moveState = move && !pinned ? move.state(tab) : "hidden";
+  // A pick in the menu moves or closes this tab: the strip places the focus, not the menu.
+  const picked = useRef(false);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") onFocusTab(tab);
@@ -84,84 +194,136 @@ function TabItem({
     event.preventDefault();
   };
 
-  return (
-    <Tooltip open={tip.open && !overClose} onOpenChange={tip.onOpenChange}>
+  const tabElement = (
+    <Tooltip open={tip.open && !overButton} onOpenChange={tip.onOpenChange}>
       <TooltipTrigger asChild>
-        <div
-          ref={setNodeRef}
-          {...listeners}
-          role="tab"
-          id={id}
-          tabIndex={selected ? 0 : -1}
-          aria-selected={selected}
-          aria-controls={selected ? panelId : undefined}
-          aria-label={tabLabel(info, pinned)}
-          aria-keyshortcuts={pinned ? undefined : "Delete Backspace"}
-          data-selected={selected ? "" : undefined}
-          data-pane-active={paneActive ? "" : undefined}
-          onClick={() => onFocusTab(tab)}
-          onKeyDown={onKeyDown}
-          onAuxClick={(event) => {
-            if (event.button !== 1 || pinned) return;
-            event.preventDefault();
-            onCloseTab(tab);
-          }}
-          // No transitions: a tab changes at once, by pointer or by key (DESIGN.md frequency rule).
-          className={cn(
-            "group/tab relative flex h-10 max-w-60 min-w-36 shrink grow-0 basis-auto items-center gap-1.5 border-r border-border-subtle pr-1.5 pl-2.5 text-xs text-muted-foreground outline-none select-none",
-            "hover:bg-accent/70 hover:text-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset",
-            // The focused tab joins the pane below it: no bottom line, and a 2 px bar on top.
-            "data-selected:bg-background data-selected:text-foreground",
-            "data-selected:after:absolute data-selected:after:inset-x-0 data-selected:after:-bottom-px data-selected:after:h-px data-selected:after:bg-background",
-            "data-selected:before:absolute data-selected:before:inset-x-0 data-selected:before:top-0 data-selected:before:h-0.5 data-selected:before:bg-border",
-            "data-pane-active:data-selected:before:bg-primary",
-            // "New session" and the pinned Overview are short and fixed: they keep their whole label (UX review R9).
-            (tab === NEW_SESSION_TAB || pinned) && "shrink-0",
-            pinned && "min-w-0",
-            isDragging && "opacity-50",
-          )}
-        >
-          <ReadMark unread={info.unread} />
-          <TabIcon info={info} />
-          <span className={cn("min-w-0 flex-1 truncate", info.unread && UNREAD_TITLE)}>
-            {info.title}
-          </span>
-          <TabActivity activity={info.activity} />
-          {pinned ? (
-            <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
-              <Pin aria-hidden className="size-3" />
-              <span className="sr-only">Pinned</span>
+        <ContextMenuTrigger asChild>
+          <div
+            ref={setRefs}
+            {...listeners}
+            role="tab"
+            id={id}
+            tabIndex={selected ? 0 : -1}
+            aria-selected={selected}
+            aria-controls={selected ? panelId : undefined}
+            aria-label={tabLabel(info, pinned)}
+            aria-keyshortcuts={pinned ? undefined : "Delete Backspace"}
+            data-selected={selected ? "" : undefined}
+            data-pane-active={paneActive ? "" : undefined}
+            onClick={() => onFocusTab(tab)}
+            onKeyDown={onKeyDown}
+            onAuxClick={(event) => {
+              if (event.button !== 1 || pinned) return;
+              event.preventDefault();
+              onCloseTab(tab);
+            }}
+            // No transitions: a tab changes at once, by pointer or by key (DESIGN.md frequency rule).
+            className={cn(
+              "group/tab relative flex h-9 max-w-60 min-w-36 shrink grow-0 basis-auto items-center gap-1.5 border-r border-border-subtle pr-1.5 pl-2.5 text-xs text-muted-foreground outline-none select-none",
+              "hover:bg-accent/70 hover:text-foreground",
+              "focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset",
+              // The focused tab joins the pane below it: no bottom line, and a 2 px bar on top.
+              "data-selected:bg-background data-selected:text-foreground",
+              "data-selected:after:absolute data-selected:after:inset-x-0 data-selected:after:-bottom-px data-selected:after:h-px data-selected:after:bg-background",
+              "data-selected:before:absolute data-selected:before:inset-x-0 data-selected:before:top-0 data-selected:before:h-0.5 data-selected:before:bg-border",
+              "data-pane-active:data-selected:before:bg-primary",
+              // "New session" and the pinned Overview are short and fixed: they keep their whole label (UX review R9).
+              (tab === NEW_SESSION_TAB || pinned) && "shrink-0",
+              pinned && "min-w-0",
+              isDragging && "opacity-50",
+            )}
+          >
+            {dropHere ? <DropBar /> : null}
+            <ReadMark unread={info.unread} />
+            <TabIcon info={info} />
+            <span className={cn("min-w-0 flex-1 truncate", info.unread && UNREAD_TITLE)}>
+              {info.title}
             </span>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  aria-label={`Close tab ${info.title}`}
-                  onPointerEnter={() => setOverClose(true)}
-                  onPointerLeave={() => setOverClose(false)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTab(tab);
-                  }}
-                  className={cn(
-                    "grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0",
-                    "hover:bg-muted-foreground/20 hover:text-foreground group-hover/tab:opacity-100",
-                    "group-data-selected/tab:opacity-100 group-focus-visible/tab:opacity-100",
-                  )}
-                >
-                  <X className="size-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Close tab</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+            <TabActivity activity={info.activity} />
+            {move && moveState !== "hidden" ? (
+              <MoveButton move={move} state={moveState} tab={tab} onPointerOver={setOverButton} />
+            ) : null}
+            {pinned ? (
+              <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
+                <Pin aria-hidden className="size-3" />
+                <span className="sr-only">Pinned</span>
+              </span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={`Close tab ${info.title}`}
+                    onPointerEnter={() => setOverButton(true)}
+                    onPointerLeave={() => setOverButton(false)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseTab(tab);
+                    }}
+                    className={cn(
+                      "grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0",
+                      "hover:bg-muted-foreground/20 hover:text-foreground group-hover/tab:opacity-100",
+                      "group-data-selected/tab:opacity-100 group-focus-visible/tab:opacity-100",
+                    )}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Close tab</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        </ContextMenuTrigger>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm wrap-anywhere">{info.tip}</TooltipContent>
     </Tooltip>
+  );
+
+  // The pinned Overview has nothing to move or close.
+  if (pinned) return tabElement;
+  const blocked = typeof moveState === "object" ? moveState.blocked : null;
+  return (
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) picked.current = false;
+      }}
+    >
+      {tabElement}
+      <ContextMenuContent
+        onCloseAutoFocus={(event) => {
+          if (picked.current) event.preventDefault();
+        }}
+      >
+        {move && moveState !== "hidden" ? (
+          <>
+            <ContextMenuItem
+              disabled={blocked !== null}
+              onSelect={() => {
+                picked.current = true;
+                move.onMove(tab);
+              }}
+            >
+              <move.icon />
+              <span className="flex flex-col">
+                {move.label}
+                {blocked ? <span className="text-xs text-muted-foreground">{blocked}</span> : null}
+              </span>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
+        <ContextMenuItem
+          onSelect={() => {
+            picked.current = true;
+            onCloseKey(tab);
+          }}
+        >
+          <X />
+          Close tab
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -190,12 +352,14 @@ export function TabStrip({
   label,
   panelId,
   tabId,
+  pane = 0,
   paneActive,
   draggable,
   onFocusTab,
   onCloseTab,
   onNewSession,
   actions,
+  move,
 }: {
   tabs: string[];
   /** The focused tab of this pane. */
@@ -208,18 +372,28 @@ export function TabStrip({
   panelId: string;
   /** The DOM id of a tab. Unique per pane, so two panes can show the same session. */
   tabId: (tab: string) => string;
+  /** The pane of this strip: its tabs' drag and drop data name it. */
+  pane?: PaneIndex;
   paneActive: boolean;
-  /** Session tabs drag to the split drop zone. */
+  /** The tabs drag to a new place or to the other pane. The pinned Overview never does. */
   draggable: boolean;
   onFocusTab: (tab: string) => void;
   onCloseTab: (tab: string) => void;
-  /** "+": a New session tab. Off for the split pane. */
+  /** "+": a New session tab in this pane. */
   onNewSession?: () => void;
   /** Pane buttons on the right of the strip. */
   actions?: ReactNode;
+  /** The move of a tab to the other pane. */
+  move?: TabMove;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState<Overflow>(NO_OVERFLOW);
+  // The free end of the strip: a tab dropped there lands last.
+  const tail = useDroppable({
+    id: `tail:${pane}`,
+    disabled: !draggable,
+    data: { pane, before: null } satisfies TabDropData,
+  });
   // A tab closed with Delete: the focus goes to the focused tab once the strip updates.
   const refocus = useRef(false);
   const closeFromKeys = useCallback(
@@ -312,8 +486,8 @@ export function TabStrip({
 
   return (
     // No tabs on a phone (SPEC R8.5). The phone layout lands in Phase 9.
-    <div className="flex h-10 min-w-0 shrink-0 items-stretch border-b border-border bg-surface max-md:hidden">
-      <div className="flex min-w-0 flex-1 items-stretch">
+    <div className="flex h-9 min-w-0 shrink-0 items-stretch border-b border-border bg-surface max-md:hidden">
+      <div ref={tail.setNodeRef} className="flex min-w-0 flex-1 items-stretch">
         <div
           ref={listRef}
           role="tablist"
@@ -330,14 +504,21 @@ export function TabStrip({
               view={view}
               id={tabId(tab)}
               panelId={panelId}
+              pane={pane}
               selected={tab === selected}
               paneActive={paneActive}
-              draggable={draggable && isSessionTab(tab)}
+              draggable={draggable && tab !== OVERVIEW_TAB}
+              move={move}
               onFocusTab={onFocusTab}
               onCloseTab={onCloseTab}
               onCloseKey={closeFromKeys}
             />
           ))}
+          {tail.isOver ? (
+            <span role="presentation" className="relative w-0 shrink-0">
+              <DropBar />
+            </span>
+          ) : null}
         </div>
         {overflow.any ? (
           <AllTabsMenu tabs={tabs} selected={selected} view={view} onFocusTab={onFocusTab} />

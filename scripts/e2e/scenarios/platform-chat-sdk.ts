@@ -1,4 +1,4 @@
-import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import { listedMcpTools } from "../mcp";
 import type { Scenario } from "../run";
 import {
@@ -274,6 +274,183 @@ export const platformChatSdk: Scenario = {
           `${name} sends the text to the task thread`,
         );
       }
+      const defaultThreadId = `${threadId}:42`;
+      const defaultMapping = expectToolOk(
+        await callTool(lead, "register-chat-channel", {
+          adapter: "telegram",
+          channelId,
+          agentId: workerId,
+          defaultThreadId,
+        }),
+        "register a default Telegram topic",
+      );
+      expect(
+        asRecord(defaultMapping.data.mapping).defaultThreadId === defaultThreadId &&
+          JSON.parse(mappingRow()?.value ?? "null").defaultThreadId === defaultThreadId,
+        "The default topic is returned and persisted",
+      );
+      for (const invalidDefault of [
+        "slack:C123:42",
+        "telegram:991002:42",
+        threadId,
+        ...["0", "-1", "1.5", "42junk", "9007199254740992"].map((topic) => `${threadId}:${topic}`),
+      ]) {
+        expectToolError(
+          await callTool(lead, "register-chat-channel", {
+            adapter: "telegram",
+            channelId,
+            agentId: workerId,
+            defaultThreadId: invalidDefault,
+          }),
+          "invalid default topic",
+          "topic",
+        );
+      }
+      expectToolError(
+        await callTool(lead, "register-chat-channel", {
+          adapter: "slack",
+          channelId: "C123",
+          agentId: workerId,
+          defaultThreadId: "slack:C123:42",
+        }),
+        "default topics on another adapter",
+        "Telegram",
+      );
+      expect(
+        JSON.parse(mappingRow()?.value ?? "null").defaultThreadId === defaultThreadId,
+        "Rejected updates preserve the saved default",
+      );
+      for (const [connection, name, args, expectedThread, expectedTopic] of [
+        [lead, "chat-post", { adapter: "telegram", channelId: threadId }, defaultThreadId, 42],
+        [
+          lead,
+          "chat-post",
+          { adapter: "telegram", channelId: threadId, threadId: `${threadId}:43` },
+          `${threadId}:43`,
+          43,
+        ],
+        [lead, "chat-post", { adapter: "telegram", threadId }, threadId, undefined],
+        [taskConnection, "chat-reply", {}, threadId, undefined],
+      ] as const) {
+        const sent = expectToolOk(
+          await callTool(connection, name, { ...args, text: `topic ${ctx.nonce}` }),
+          "post with a configured default topic",
+        );
+        const request = calls.filter((call) => /^send(Rich)?Message$/.test(call.method)).at(-1);
+        expect(
+          sent.data.threadId === expectedThread &&
+            String(request?.body.chat_id) === channelId &&
+            request?.body.message_thread_id === expectedTopic,
+          `${name} sends to ${expectedThread} and reports that thread`,
+        );
+      }
+      for (const topic of ["0", "-1", "1.5", "42junk", "9007199254740992"]) {
+        const requestCount: number = calls.length;
+        expectToolError(
+          await callTool(lead, "chat-post", {
+            adapter: "telegram",
+            threadId: `${threadId}:${topic}`,
+            text: ctx.nonce,
+          }),
+          "invalid explicit Telegram topic",
+          "topic",
+        );
+        expect(calls.length === requestCount, "An invalid topic makes no platform request");
+      }
+      for (const invalidStored of ["telegram:991002:42", `${threadId}:0`]) {
+        expectStatus(
+          await ctx.api(
+            "PUT",
+            `/api/kv/_/integrations%3Achat%3Achannels/${encodeURIComponent(key)}`,
+            {
+              agentId: leadId,
+              body: {
+                value: { agentId: workerId, defaultThreadId: invalidStored },
+                valueType: "json",
+              },
+            },
+          ),
+          [200],
+          "inject an invalid stored default through KV",
+        );
+        const requestCount: number = calls.length;
+        expectToolError(
+          await callTool(lead, "chat-post", {
+            adapter: "telegram",
+            channelId: threadId,
+            text: ctx.nonce,
+          }),
+          "invalid stored default topic",
+          "topic",
+        );
+        expect(calls.length === requestCount, "An invalid saved default makes no platform request");
+      }
+      expectToolOk(
+        await callTool(lead, "register-chat-channel", {
+          adapter: "telegram",
+          channelId,
+          agentId: workerId,
+          defaultThreadId,
+        }),
+        "restore the default topic",
+      );
+      expectStatus(
+        await ctx.api("GET", "/api/poll", { agentId: workerId }),
+        [200],
+        "claim chat task",
+      );
+      const completedOutput = `automatic answer ${ctx.nonce}`;
+      expectStatus(
+        await ctx.api("POST", `/api/tasks/${taskId}/finish`, {
+          agentId: workerId,
+          body: { status: "completed", output: completedOutput },
+        }),
+        [200],
+        "finish the original chat task while a default topic is configured",
+      );
+      const finalRequest = () =>
+        calls.find(
+          (call) =>
+            /^send(Rich)?Message$/.test(call.method) &&
+            String(call.body.text ?? asRecord(call.body.rich_message).markdown).includes(
+              completedOutput,
+            ),
+        );
+      expect(
+        await pollUntil(() => Boolean(finalRequest()), 10_000, 50),
+        "The automatic answer posts",
+      );
+      expect(
+        String(finalRequest()?.body.chat_id) === channelId &&
+          finalRequest()?.body.message_thread_id === undefined,
+        "The automatic answer stays in the task thread instead of the default topic",
+      );
+      expectToolOk(
+        await callTool(lead, "register-chat-channel", {
+          adapter: "telegram",
+          channelId,
+          agentId: workerId,
+        }),
+        "clear the default by replacing the mapping",
+      );
+      expect(
+        JSON.parse(mappingRow()?.value ?? "null").defaultThreadId === undefined,
+        "Replacing a mapping without a default clears it",
+      );
+      const cleared = expectToolOk(
+        await callTool(lead, "chat-post", {
+          adapter: "telegram",
+          channelId: threadId,
+          text: `cleared ${ctx.nonce}`,
+        }),
+        "post after clearing the default",
+      );
+      expect(
+        cleared.data.threadId === threadId &&
+          calls.filter((call) => /^send(Rich)?Message$/.test(call.method)).at(-1)?.body
+            .message_thread_id === undefined,
+        "A channel without a default posts to the channel",
+      );
       const history = expectToolOk(
         await callTool(taskConnection, "chat-read-thread", { threadId, limit: 10 }),
         "read own Telegram thread",

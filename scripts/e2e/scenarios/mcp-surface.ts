@@ -36,6 +36,21 @@ export const mcpSurface: Scenario = {
         tools.every((tool) => tool.inputSchema),
         "An MCP tool has no inputSchema",
       );
+      // A finished task may still call read tools, which is gated on readOnlyHint.
+      // Read-named tools with a side effect are listed with the reason.
+      const readNamedWriters = new Set([
+        "get-oauth-access-token", // refreshes and stores an expired token
+        "memory-search", // records retrieval and access telemetry
+      ]);
+      const unannotatedReads = tools
+        .filter((tool) => /^(get|list)-|-(get|list|search)$/.test(tool.name))
+        .filter((tool) => !readNamedWriters.has(tool.name))
+        .filter((tool) => tool.annotations?.readOnlyHint !== true)
+        .map((tool) => tool.name);
+      expect(
+        unannotatedReads.length === 0,
+        `Read tools without readOnlyHint: ${unannotatedReads.join(", ")}`,
+      );
 
       const info = asRecord(await connection.callTool("my-agent-info", {}));
       expect(info.isError !== true, "my-agent-info returned isError");

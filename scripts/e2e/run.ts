@@ -73,7 +73,8 @@ export type ScenarioContext = {
   sutLog: () => Promise<string>;
   log: (message: string) => void;
   markThread: (label: string, channel: string, ts: string) => void;
-  restartSut: () => Promise<void>;
+  /** `env` adds variables to the restarted process only; the next restart drops them. */
+  restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
   nonce: string;
 };
 export type Scenario = {
@@ -237,12 +238,12 @@ async function bootStack(
         sut.flushLog();
         return Bun.file(sut.logPath).text();
       },
-      async restartSut() {
+      async restartSut(options) {
         const connectionCalls = slack.mock.apiCalls("apps.connections.open").length;
         // A scenario that moved Slack to HTTP mode has no socket to come back.
         const hadSocket = slack.mock.connectionCount > 0;
         db.close();
-        await restartSut(sut);
+        await restartSut(sut, options?.env);
         if (!hadSocket) return;
         const reconnected = await pollUntil(
           () => slack.mock.apiCalls("apps.connections.open").length > connectionCalls,

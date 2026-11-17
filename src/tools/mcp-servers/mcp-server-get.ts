@@ -8,7 +8,7 @@ export const registerMcpServerGetTool = (server: McpServer) => {
     "mcp-server-get",
     {
       title: "Get MCP Server",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.",
       inputSchema: z.object({

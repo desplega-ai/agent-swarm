@@ -6,7 +6,7 @@
  * The admin nudge banner and the metrics strip on top, then two columns. The
  * main column: Needs you (up to half the height, scrolling inside; one quiet
  * line when nothing waits) over the swarm activity, which takes the rest. The
- * side column: Favorites, then "Getting started" (Set up, then Get the swarm
+ * side column: "Add me to ranking" (admins, until ranked), Favorites, then "Getting started" (Set up, then Get the swarm
  * working). Once setup is complete, "Getting started" leaves and Favorites
  * lists every favorite. Breakpoints follow the page's own width (container `home`), so a
  * wide side panel narrows Home like a narrow window: from `@5xl` the strip
@@ -29,6 +29,7 @@ import {
   PostOnboardingChecklistCard,
   useSetupComplete,
 } from "@/components/checklist/post-onboarding-checklist-card";
+import { AddToRankingButton } from "@/components/dashboard/add-to-ranking-button";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { ActivityDensity } from "@/components/home/activity-density";
@@ -81,6 +82,7 @@ export function UnifiedHome() {
             </div>
           </div>
           <div className={SIDE_COLUMN}>
+            <AddToRankingButton />
             <Favorites showAll={setupComplete} />
             <PostOnboardingChecklistCard />
           </div>

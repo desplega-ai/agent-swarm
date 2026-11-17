@@ -67,12 +67,15 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
 - [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
+- [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
 - [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
 - [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
+- [Preparing unmatched bank transactions for finance review with AI agents](https://docs.agent-swarm.dev/docs/guides/agent-assisted-bank-reconciliation-review). Reference.
 - [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
 - [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
+- [Investigating a stale partner data feed with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-data-feed-freshness-review). Reference.
 - [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-onboarding-readiness). Reference.
 - [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/guides/digital-content-license-rights-review). Reference.
 - [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
@@ -80,9 +83,11 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Preparing a disputed product return for a human decision with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-returns-exception-handoff). Reference.
 - [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
 - [Coordinating a customer data access request across support, privacy and engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/privacy-data-request-handoff). Reference.
+- [Coordinating a guest accessibility request between guest support and property operations with AI agents](https://docs.agent-swarm.dev/docs/guides/guest-accessibility-request-handoff). Reference.
 - [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-performance-review). Reference.
 - [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/guides/food-supplier-ingredient-change-review). Reference.
 - [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-rfp-bid-qualification). Reference.
+- [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-offboarding-access-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.

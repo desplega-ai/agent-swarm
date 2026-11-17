@@ -65,7 +65,7 @@ describe("jira/adf — extractText", () => {
     expect(extractText(adf)).toBe("ping @557058:xyz");
   });
 
-  test("handles bullet lists", () => {
+  test("handles bullet and ordered lists", () => {
     const adf = {
       type: "doc",
       content: [
@@ -97,9 +97,27 @@ describe("jira/adf — extractText", () => {
     const out = extractText(adf);
     expect(out).toContain("- alpha");
     expect(out).toContain("- beta");
+
+    // An ordered list numbers its items; `attrs.order` sets the first number.
+    const ordered = (attrs?: Record<string, unknown>) => ({
+      type: "doc",
+      content: [
+        {
+          type: "orderedList",
+          ...(attrs ? { attrs } : {}),
+          content: ["first", "second"].map((text) => ({
+            type: "listItem",
+            content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+          })),
+        },
+      ],
+    });
+    expect(extractText(ordered())).toBe("1. first\n2. second");
+    expect(extractText(ordered({ order: 3 }))).toBe("3. first\n4. second");
+    expect(extractText(ordered({ order: 0 }))).toBe("0. first\n1. second");
   });
 
-  test("handles headings, codeBlock, blockquote, hardBreak", () => {
+  test("handles headings, codeBlock, blockquote, hardBreak and link cards", () => {
     const adf = {
       type: "doc",
       content: [
@@ -136,6 +154,28 @@ describe("jira/adf — extractText", () => {
     expect(out).toContain("line1\nline2");
     expect(out).toContain("echo hi");
     expect(out).toContain("quoted");
+
+    // Cards carry their link in attrs.url and have no content to walk, so the
+    // walker used to drop them. Block and embed cards end their own line like a
+    // paragraph; an inline card joins the line of text around it.
+    const cards = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Links: " },
+            { type: "inlineCard", attrs: { url: "https://wiki.example/pages/123" } },
+          ],
+        },
+        { type: "blockCard", attrs: { url: "https://github.com/acme/repo/pull/1" } },
+        { type: "embedCard", attrs: { url: "https://embed.example/2" } },
+        { type: "paragraph", content: [{ type: "text", text: "after" }] },
+      ],
+    };
+    expect(extractText(cards)).toBe(
+      "Links: https://wiki.example/pages/123\nhttps://github.com/acme/repo/pull/1\nhttps://embed.example/2\nafter",
+    );
   });
 
   test("descends into unknown node content rather than dropping it", () => {

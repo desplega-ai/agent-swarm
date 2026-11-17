@@ -33,7 +33,7 @@ import {
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import type { ClaudeFlagSettings } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
-import { normalizeClaudeMessage } from "./claude-session-events";
+import { ClaudeUsageAccumulator, normalizeClaudeMessage } from "./claude-session-events";
 import type {
   CostData,
   ProviderEvent,
@@ -321,6 +321,9 @@ class ClaudeSdkSession implements ProviderSession {
   /** Last value written to the context state file read by the context-bound note hook. */
   private lastContextTokens: number | undefined;
   private lastCost: CostData | undefined;
+  /** Per-message usage, the cost fallback for a session aborted before its result. */
+  private usage = new ClaudeUsageAccumulator();
+  private readonly startedAt = Date.now();
   private aborted = false;
   private abortReason = "cancelled";
   private acceptingInput = true;
@@ -361,6 +364,21 @@ class ClaudeSdkSession implements ProviderSession {
 
   waitForCompletion(): Promise<ProviderResult> {
     return this.completionPromise;
+  }
+
+  /** The result's cost, else per-message usage reported as estimated. */
+  private costOrEstimate(isError: boolean): CostData | undefined {
+    return (
+      this.lastCost ??
+      this.usage.toCost(
+        {
+          taskId: this.options.config.taskId,
+          agentId: this.options.config.agentId,
+          model: this.model,
+        },
+        { durationMs: Date.now() - this.startedAt, isError },
+      )
+    );
   }
 
   async abort(reason?: string): Promise<void> {
@@ -533,6 +551,7 @@ class ClaudeSdkSession implements ProviderSession {
       this.turnActive = true;
     }
     this.backgroundKeepalive.observe(json);
+    this.usage.observe(json, this.model);
     const normalized = normalizeClaudeMessage(json, {
       taskId: this.options.config.taskId,
       agentId: this.options.config.agentId,
@@ -682,7 +701,7 @@ class ClaudeSdkSession implements ProviderSession {
       return {
         exitCode: 130,
         sessionId: this._sessionId,
-        cost: this.lastCost,
+        cost: this.costOrEstimate(true),
         output: this.lastAssistantText || undefined,
         isError: true,
         errorCategory: "cancelled",
@@ -712,7 +731,7 @@ class ClaudeSdkSession implements ProviderSession {
     return {
       exitCode: resultIsError ? 1 : 0,
       sessionId: this._sessionId,
-      cost: this.lastCost,
+      cost: this.costOrEstimate(resultIsError),
       output:
         this.lastAssistantText ||
         (terminalResult && "result" in terminalResult ? terminalResult.result : undefined),

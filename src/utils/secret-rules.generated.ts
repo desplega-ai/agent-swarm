@@ -119,7 +119,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "adafruit-api-key",
-      "source": "(?:adafruit)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:adafruit)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "adafruit"
@@ -127,7 +127,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "adobe-client-id",
-      "source": "(?:adobe)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:adobe)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "adobe"
@@ -136,7 +136,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "adobe-client-secret",
-      "source": "\\b(p8e-(?i:[a-z0-9]{32}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(p8e-(?i:[a-z0-9]{32}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "p8e-"
@@ -153,7 +153,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "airtable-api-key",
-      "source": "(?:airtable)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{17})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:airtable)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{17})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "airtable"
@@ -169,7 +169,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "algolia-api-key",
-      "source": "(?:algolia)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:algolia)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "algolia"
@@ -177,7 +177,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "alibaba-access-key-id",
-      "source": "\\b(LTAI(?i:[a-z0-9]{20}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(LTAI(?i:[a-z0-9]{20}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "ltai"
@@ -186,7 +186,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "alibaba-secret-key",
-      "source": "(?:alibaba)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:alibaba)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "alibaba"
@@ -195,7 +195,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "anthropic-admin-api-key",
-      "source": "\\b(sk-ant-admin01-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sk-ant-admin01-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sk-ant-admin01"
@@ -203,7 +203,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "anthropic-api-key",
-      "source": "\\b(sk-ant-api03-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sk-ant-api03-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sk-ant-api03"
@@ -229,7 +229,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "asana-client-id",
-      "source": "(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "asana"
@@ -237,7 +237,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "asana-client-secret",
-      "source": "(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "asana"
@@ -245,7 +245,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "atlassian-api-token",
-      "source": "(?:(?-i:ATLASSIAN|[Aa]tlassian)|(?-i:CONFLUENCE|[Cc]onfluence)|(?-i:JIRA|[Jj]ira))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20}[a-f0-9]{4})(?:[\\x60'\"\\s;]|\\\\[nr]|$)|\\b(ATATT3[A-Za-z0-9_\\-=]{186})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:(?-i:ATLASSIAN|[Aa]tlassian)|(?-i:CONFLUENCE|[Cc]onfluence)|(?-i:JIRA|[Jj]ira))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20}[a-f0-9]{4})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)|\\b(ATATT3[A-Za-z0-9_\\-=]{186})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "atlassian",
@@ -257,7 +257,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "authress-service-client-access-key",
-      "source": "\\b((?:sc|ext|scauth|authress)_(?i:[a-z0-9]{5,30}\\.[a-z0-9]{4,6}\\.(?-i:acc)[_-][a-z0-9-]{10,32}\\.[a-z0-9+/_=-]{30,120}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((?:sc|ext|scauth|authress)_(?i:[a-z0-9]{5,30}\\.[a-z0-9]{4,6}\\.(?-i:acc)[_-][a-z0-9-]{10,32}\\.[a-z0-9+/_=-]{30,120}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sc_",
@@ -294,7 +294,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "aws-amazon-bedrock-api-key-long-lived",
-      "source": "\\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "absk"
@@ -321,7 +321,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "beamer-api-token",
-      "source": "(?:beamer)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(b_[a-z0-9=_\\-]{44})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:beamer)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(b_[a-z0-9=_\\-]{44})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "beamer"
@@ -329,7 +329,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "bitbucket-client-id",
-      "source": "(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "bitbucket"
@@ -337,7 +337,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "bitbucket-client-secret",
-      "source": "(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "bitbucket"
@@ -345,7 +345,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "bittrex-access-key",
-      "source": "(?:bittrex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:bittrex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "bittrex"
@@ -353,7 +353,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "bittrex-secret-key",
-      "source": "(?:bittrex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:bittrex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "bittrex"
@@ -361,7 +361,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "cisco-meraki-api-key",
-      "source": "(?i:(?:(?-i:[Mm]eraki|MERAKI))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?i:(?:(?-i:[Mm]eraki|MERAKI))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "meraki"
@@ -388,7 +388,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "cloudflare-api-key",
-      "source": "(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "cloudflare"
@@ -397,7 +397,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "cloudflare-global-api-key",
-      "source": "(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{37})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{37})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "cloudflare"
@@ -406,7 +406,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "cloudflare-origin-ca-key",
-      "source": "\\b(v1\\.0-[a-f0-9]{24}-[a-f0-9]{146})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(v1\\.0-[a-f0-9]{24}-[a-f0-9]{146})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "cloudflare",
@@ -416,7 +416,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "codecov-access-token",
-      "source": "(?:codecov)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:codecov)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "codecov"
@@ -424,7 +424,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "cohere-api-token",
-      "source": "(?i:(?:cohere|CO_API_KEY)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?i:(?:cohere|CO_API_KEY)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "cohere",
@@ -434,7 +434,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "coinbase-access-token",
-      "source": "(?:coinbase)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:coinbase)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "coinbase"
@@ -442,7 +442,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "confluent-access-token",
-      "source": "(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "confluent"
@@ -450,7 +450,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "confluent-secret-key",
-      "source": "(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "confluent"
@@ -458,7 +458,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "contentful-delivery-api-token",
-      "source": "(?:contentful)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{43})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:contentful)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{43})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "contentful"
@@ -466,7 +466,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "databricks-api-token",
-      "source": "\\b(dapi[a-f0-9]{32}(?:-\\d)?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(dapi[a-f0-9]{32}(?:-\\d)?)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "dapi"
@@ -475,7 +475,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "datadog-access-token",
-      "source": "(?:datadog)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:datadog)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "datadog"
@@ -483,7 +483,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "defined-networking-api-token",
-      "source": "(?:dnkey)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(dnkey-[a-z0-9=_\\-]{26}-[a-z0-9=_\\-]{52})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:dnkey)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(dnkey-[a-z0-9=_\\-]{26}-[a-z0-9=_\\-]{52})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "dnkey"
@@ -491,7 +491,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "digitalocean-access-token",
-      "source": "\\b(doo_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(doo_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "doo_v1_"
@@ -500,7 +500,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "digitalocean-pat",
-      "source": "\\b(dop_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(dop_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "dop_v1_"
@@ -509,7 +509,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "digitalocean-refresh-token",
-      "source": "\\b(dor_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(dor_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "dor_v1_"
@@ -517,7 +517,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "discord-api-token",
-      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "discord"
@@ -525,7 +525,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "discord-client-id",
-      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{18})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{18})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "discord"
@@ -534,7 +534,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "discord-client-secret",
-      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "discord"
@@ -552,7 +552,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "droneci-access-token",
-      "source": "(?:droneci)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:droneci)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "droneci"
@@ -560,7 +560,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "dropbox-api-token",
-      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{15})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{15})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "dropbox"
@@ -568,7 +568,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "dropbox-long-lived-api-token",
-      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{11}(AAAAAAAAAA)[a-z0-9\\-_=]{43})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{11}(AAAAAAAAAA)[a-z0-9\\-_=]{43})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "dropbox"
@@ -576,7 +576,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "dropbox-short-lived-api-token",
-      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sl\\.[a-z0-9\\-=_]{135})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sl\\.[a-z0-9\\-=_]{135})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "dropbox"
@@ -620,7 +620,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "etsy-access-token",
-      "source": "(?:(?-i:ETSY|[Ee]tsy))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:(?-i:ETSY|[Ee]tsy))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "etsy"
@@ -629,7 +629,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "facebook-access-token",
-      "source": "\\b(\\d{15,16}(\\||%)[0-9a-z\\-_]{27,40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(\\d{15,16}(\\||%)[0-9a-z\\-_]{27,40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "facebook"
@@ -638,7 +638,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "facebook-page-access-token",
-      "source": "\\b(EAA[MC](?i:[a-z0-9]{100,}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(EAA[MC](?i:[a-z0-9]{100,}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "eaam",
@@ -648,7 +648,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "facebook-secret",
-      "source": "(?:facebook)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:facebook)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "facebook"
@@ -657,7 +657,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "fastly-api-token",
-      "source": "(?:fastly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:fastly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "fastly"
@@ -665,7 +665,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "finicity-api-token",
-      "source": "(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "finicity"
@@ -673,7 +673,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "finicity-client-secret",
-      "source": "(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "finicity"
@@ -681,7 +681,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "finnhub-access-token",
-      "source": "(?:finnhub)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:finnhub)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "finnhub"
@@ -689,7 +689,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "flickr-access-token",
-      "source": "(?:flickr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:flickr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "flickr"
@@ -724,7 +724,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "flyio-access-token",
-      "source": "\\b((?:fo1_[\\w-]{43}|fm1[ar]_[a-zA-Z0-9+\\/]{100,}={0,3}|fm2_[a-zA-Z0-9+\\/]{100,}={0,3}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((?:fo1_[\\w-]{43}|fm1[ar]_[a-zA-Z0-9+\\/]{100,}={0,3}|fm2_[a-zA-Z0-9+\\/]{100,}={0,3}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "fo1_",
@@ -743,7 +743,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "freshbooks-access-token",
-      "source": "(?:freshbooks)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:freshbooks)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "freshbooks"
@@ -751,7 +751,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "gcp-api-key",
-      "source": "\\b(AIza[\\w-]{35})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(AIza[\\w-]{35})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "aiza"
@@ -941,7 +941,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "gitter-access-token",
-      "source": "(?:gitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:gitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "gitter"
@@ -949,7 +949,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "gocardless-api-token",
-      "source": "(?:gocardless)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(live_[a-z0-9\\-_=]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:gocardless)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(live_[a-z0-9\\-_=]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "live_",
@@ -958,7 +958,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "grafana-api-key",
-      "source": "\\b(eyJrIjoi[A-Za-z0-9]{70,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(eyJrIjoi[A-Za-z0-9]{70,400}={0,3})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "eyjrijoi"
@@ -967,7 +967,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "grafana-cloud-api-token",
-      "source": "\\b(glc_[A-Za-z0-9+/]{32,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(glc_[A-Za-z0-9+/]{32,400}={0,3})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "glc_"
@@ -976,7 +976,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "grafana-service-account-token",
-      "source": "\\b(glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "glsa_"
@@ -1003,7 +1003,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "heroku-api-key",
-      "source": "(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "heroku"
@@ -1011,7 +1011,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "heroku-api-key-v2",
-      "source": "\\b((HRKU-AA[0-9a-zA-Z_-]{58}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((HRKU-AA[0-9a-zA-Z_-]{58}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "hrku-aa"
@@ -1020,7 +1020,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "hubspot-api-key",
-      "source": "(?:hubspot)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:hubspot)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "hubspot"
@@ -1028,7 +1028,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "huggingface-access-token",
-      "source": "\\b(hf_(?i:[a-z]{34}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(hf_(?i:[a-z]{34}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "hf_"
@@ -1037,7 +1037,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "huggingface-organization-api-token",
-      "source": "\\b(api_org_(?i:[a-z]{34}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(api_org_(?i:[a-z]{34}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "api_org_"
@@ -1046,7 +1046,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "infracost-api-token",
-      "source": "\\b(ico-[a-zA-Z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(ico-[a-zA-Z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "ico-"
@@ -1055,7 +1055,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "intercom-api-key",
-      "source": "(?:intercom)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{60})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:intercom)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{60})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "intercom"
@@ -1063,7 +1063,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "intra42-client-secret",
-      "source": "\\b(s-s4t2(?:ud|af)-(?i:[abcdef0123456789]{64}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(s-s4t2(?:ud|af)-(?i:[abcdef0123456789]{64}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "intra",
@@ -1074,7 +1074,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "jfrog-api-key",
-      "source": "(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{73})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{73})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "jfrog",
@@ -1085,7 +1085,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "jfrog-identity-token",
-      "source": "(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "jfrog",
@@ -1096,7 +1096,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "jwt",
-      "source": "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "ey"
@@ -1115,7 +1115,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "kraken-access-token",
-      "source": "(?:kraken)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9\\/=_\\+\\-]{80,90})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:kraken)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9\\/=_\\+\\-]{80,90})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "kraken"
@@ -1123,7 +1123,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "kucoin-access-token",
-      "source": "(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{24})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "kucoin"
@@ -1131,7 +1131,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "kucoin-secret-key",
-      "source": "(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "kucoin"
@@ -1139,7 +1139,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "launchdarkly-access-token",
-      "source": "(?:launchdarkly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:launchdarkly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "launchdarkly"
@@ -1156,7 +1156,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "linear-client-secret",
-      "source": "(?:linear)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:linear)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "linear"
@@ -1165,7 +1165,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "linkedin-client-id",
-      "source": "(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{14})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{14})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "linkedin",
@@ -1176,7 +1176,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "linkedin-client-secret",
-      "source": "(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "linkedin",
@@ -1187,7 +1187,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "lob-api-key",
-      "source": "(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((live|test)_[a-f0-9]{35})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((live|test)_[a-f0-9]{35})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "test_",
@@ -1196,7 +1196,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "lob-pub-api-key",
-      "source": "(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((test|live)_pub_[a-f0-9]{31})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((test|live)_pub_[a-f0-9]{31})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "test_pub",
@@ -1206,7 +1206,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "looker-client-id",
-      "source": "(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "looker"
@@ -1214,7 +1214,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "looker-client-secret",
-      "source": "(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "looker"
@@ -1222,7 +1222,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mailchimp-api-key",
-      "source": "(?:MailchimpSDK.initialize|mailchimp)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}-us\\d\\d)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:MailchimpSDK.initialize|mailchimp)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}-us\\d\\d)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mailchimp"
@@ -1230,7 +1230,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mailgun-private-api-token",
-      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(key-[a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(key-[a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mailgun"
@@ -1238,7 +1238,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mailgun-pub-key",
-      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pubkey-[a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pubkey-[a-f0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mailgun"
@@ -1246,7 +1246,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mailgun-signing-key",
-      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-h0-9]{32}-[a-h0-9]{8}-[a-h0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-h0-9]{32}-[a-h0-9]{8}-[a-h0-9]{8})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mailgun"
@@ -1254,7 +1254,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mapbox-api-token",
-      "source": "(?:mapbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk\\.[a-z0-9]{60}\\.[a-z0-9]{22})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:mapbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk\\.[a-z0-9]{60}\\.[a-z0-9]{22})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mapbox"
@@ -1262,7 +1262,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "mattermost-access-token",
-      "source": "(?:mattermost)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{26})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:mattermost)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{26})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "mattermost"
@@ -1270,7 +1270,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "maxmind-license-key",
-      "source": "\\b([A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b([A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "_mmk"
@@ -1279,7 +1279,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "messagebird-api-token",
-      "source": "(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "messagebird",
@@ -1289,7 +1289,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "messagebird-client-id",
-      "source": "(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "messagebird",
@@ -1309,7 +1309,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "netlify-access-token",
-      "source": "(?:netlify)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40,46})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:netlify)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40,46})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "netlify"
@@ -1317,7 +1317,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "new-relic-browser-api-token",
-      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRJS-[a-f0-9]{19})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRJS-[a-f0-9]{19})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "nrjs-"
@@ -1325,7 +1325,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "new-relic-insert-key",
-      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRII-[a-z0-9-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRII-[a-z0-9-]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "nrii-"
@@ -1333,7 +1333,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "new-relic-user-api-id",
-      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "new-relic",
@@ -1343,7 +1343,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "new-relic-user-api-key",
-      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRAK-[a-z0-9]{27})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRAK-[a-z0-9]{27})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "nrak"
@@ -1351,7 +1351,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "notion-api-token",
-      "source": "\\b(ntn_[0-9]{11}[A-Za-z0-9]{32}[A-Za-z0-9]{3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(ntn_[0-9]{11}[A-Za-z0-9]{32}[A-Za-z0-9]{3})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "ntn_"
@@ -1360,7 +1360,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "npm-access-token",
-      "source": "\\b(npm_[a-z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(npm_[a-z0-9]{36})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "npm_"
@@ -1369,7 +1369,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "nytimes-access-token",
-      "source": "(?:nytimes|new-york-times,|newyorktimes)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:nytimes|new-york-times,|newyorktimes)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "nytimes",
@@ -1379,7 +1379,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "octopus-deploy-api-key",
-      "source": "\\b(API-[A-Z0-9]{26})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(API-[A-Z0-9]{26})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "api-"
@@ -1388,7 +1388,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "okta-access-token",
-      "source": "(?i:(?:(?-i:[Oo]kta|OKTA))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(00[\\w=\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?i:(?:(?-i:[Oo]kta|OKTA))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(00[\\w=\\-]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "okta"
@@ -1397,7 +1397,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "openai-api-key",
-      "source": "\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "t3blbkfj"
@@ -1424,7 +1424,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "plaid-api-token",
-      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(access-(?:sandbox|development|production)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(access-(?:sandbox|development|production)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "plaid"
@@ -1432,7 +1432,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "plaid-client-id",
-      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "plaid"
@@ -1441,7 +1441,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "plaid-secret-key",
-      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "plaid"
@@ -1450,7 +1450,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "planetscale-api-token",
-      "source": "\\b(pscale_tkn_(?i:[\\w=\\.-]{32,64}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(pscale_tkn_(?i:[\\w=\\.-]{32,64}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "pscale_tkn_"
@@ -1459,7 +1459,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "planetscale-oauth-token",
-      "source": "\\b(pscale_oauth_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(pscale_oauth_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "pscale_oauth_"
@@ -1468,7 +1468,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "planetscale-password",
-      "source": "\\b(pscale_pw_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(pscale_pw_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "pscale_pw_"
@@ -1477,7 +1477,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "postman-api-token",
-      "source": "\\b(PMAK-(?i:[a-f0-9]{24}\\-[a-f0-9]{34}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(PMAK-(?i:[a-f0-9]{24}\\-[a-f0-9]{34}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "pmak-"
@@ -1486,7 +1486,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "prefect-api-token",
-      "source": "\\b(pnu_[a-zA-Z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(pnu_[a-zA-Z0-9]{36})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "pnu_"
@@ -1495,7 +1495,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "privateai-api-token",
-      "source": "(?i:(?:private[_-]?ai)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?i:(?:private[_-]?ai)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "privateai",
@@ -1506,7 +1506,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "pulumi-api-token",
-      "source": "\\b(pul-[a-f0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(pul-[a-f0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "pul-"
@@ -1524,7 +1524,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "rapidapi-access-token",
-      "source": "(?:rapidapi)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{50})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:rapidapi)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{50})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "rapidapi"
@@ -1532,7 +1532,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "readme-api-token",
-      "source": "\\b(rdme_[a-z0-9]{70})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(rdme_[a-z0-9]{70})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "rdme_"
@@ -1541,7 +1541,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "rubygems-api-token",
-      "source": "\\b(rubygems_[a-f0-9]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(rubygems_[a-f0-9]{48})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "rubygems_"
@@ -1550,7 +1550,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "scalingo-api-token",
-      "source": "\\b(tk-us-[\\w-]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(tk-us-[\\w-]{48})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "tk-us-"
@@ -1559,7 +1559,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sendbird-access-id",
-      "source": "(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sendbird"
@@ -1567,7 +1567,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sendbird-access-token",
-      "source": "(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sendbird"
@@ -1575,7 +1575,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sendgrid-api-token",
-      "source": "\\b(SG\\.(?i:[a-z0-9=_\\-\\.]{66}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(SG\\.(?i:[a-z0-9=_\\-\\.]{66}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sg."
@@ -1584,7 +1584,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sendinblue-api-token",
-      "source": "\\b(xkeysib-[a-f0-9]{64}\\-(?i:[a-z0-9]{16}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(xkeysib-[a-f0-9]{64}\\-(?i:[a-z0-9]{16}))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "xkeysib-"
@@ -1593,7 +1593,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sentry-access-token",
-      "source": "(?:sentry)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:sentry)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sentry"
@@ -1611,7 +1611,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sentry-user-token",
-      "source": "\\b(sntryu_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sntryu_[a-f0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sntryu_"
@@ -1620,7 +1620,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "settlemint-application-access-token",
-      "source": "\\b(sm_aat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sm_aat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sm_aat"
@@ -1629,7 +1629,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "settlemint-personal-access-token",
-      "source": "\\b(sm_pat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sm_pat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sm_pat"
@@ -1638,7 +1638,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "settlemint-service-access-token",
-      "source": "\\b(sm_sat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(sm_sat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sm_sat"
@@ -1647,7 +1647,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "shippo-api-token",
-      "source": "\\b(shippo_(?:live|test)_[a-fA-F0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(shippo_(?:live|test)_[a-fA-F0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "shippo_"
@@ -1692,7 +1692,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sidekiq-secret",
-      "source": "(?:BUNDLE_ENTERPRISE__CONTRIBSYS__COM|BUNDLE_GEMS__CONTRIBSYS__COM)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{8}:[a-f0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:BUNDLE_ENTERPRISE__CONTRIBSYS__COM|BUNDLE_GEMS__CONTRIBSYS__COM)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{8}:[a-f0-9]{8})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "bundle_enterprise__contribsys__com",
@@ -1794,7 +1794,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "snyk-api-token",
-      "source": "(?:snyk[_.-]?(?:(?:api|oauth)[_.-]?)?(?:key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:snyk[_.-]?(?:(?:api|oauth)[_.-]?)?(?:key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "snyk"
@@ -1802,7 +1802,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sonar-api-token",
-      "source": "(?:sonar[_.-]?(login|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:squ_|sqp_|sqa_)?[a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:sonar[_.-]?(login|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:squ_|sqp_|sqa_)?[a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sonar"
@@ -1811,7 +1811,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sourcegraph-access-token",
-      "source": "\\b(\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40})\\b)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40})\\b)(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sgp_",
@@ -1821,7 +1821,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "square-access-token",
-      "source": "\\b((?:EAAA|sq0atp-)[\\w-]{22,60})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((?:EAAA|sq0atp-)[\\w-]{22,60})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sq0atp-",
@@ -1831,7 +1831,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "squarespace-access-token",
-      "source": "(?:squarespace)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:squarespace)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "squarespace"
@@ -1839,7 +1839,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "stripe-access-token",
-      "source": "\\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sk_test",
@@ -1853,7 +1853,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sumologic-access-id",
-      "source": "(?i:(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(su[a-zA-Z0-9]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?i:(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(su[a-zA-Z0-9]{12})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "sumo"
@@ -1862,7 +1862,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sumologic-access-token",
-      "source": "(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sumo"
@@ -1871,7 +1871,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "telegram-bot-api-token",
-      "source": "(?:telegr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{5,16}:(?-i:A)[a-z0-9_\\-]{34})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:telegr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{5,16}:(?-i:A)[a-z0-9_\\-]{34})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "telegr"
@@ -1879,7 +1879,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "travisci-access-token",
-      "source": "(?:travis)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{22})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:travis)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{22})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "travis"
@@ -1896,7 +1896,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitch-api-token",
-      "source": "(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitch"
@@ -1904,7 +1904,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitter-access-secret",
-      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{45})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{45})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitter"
@@ -1912,7 +1912,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitter-access-token",
-      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{15,25}-[a-zA-Z0-9]{20,40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{15,25}-[a-zA-Z0-9]{20,40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitter"
@@ -1920,7 +1920,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitter-api-key",
-      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitter"
@@ -1928,7 +1928,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitter-api-secret",
-      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{50})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{50})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitter"
@@ -1936,7 +1936,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "twitter-bearer-token",
-      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(A{22}[a-zA-Z0-9%]{80,100})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(A{22}[a-zA-Z0-9%]{80,100})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "twitter"
@@ -1944,7 +1944,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "typeform-api-token",
-      "source": "(?:typeform)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(tfp_[a-z0-9\\-_\\.=]{59})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:typeform)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(tfp_[a-z0-9\\-_\\.=]{59})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "tfp_"
@@ -1952,7 +1952,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "vault-batch-token",
-      "source": "\\b(hvb\\.[\\w-]{138,300})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(hvb\\.[\\w-]{138,300})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "hvb."
@@ -1961,7 +1961,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "vault-service-token",
-      "source": "\\b((?:hvs\\.[\\w-]{90,120}|s\\.(?i:[a-z0-9]{24})))(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b((?:hvs\\.[\\w-]{90,120}|s\\.(?i:[a-z0-9]{24})))(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "",
       "keywords": [
         "hvs.",
@@ -1983,7 +1983,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "yandex-access-token",
-      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(t1\\.[A-Z0-9a-z_-]+[=]{0,2}\\.[A-Z0-9a-z_-]{86}[=]{0,2})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(t1\\.[A-Z0-9a-z_-]+[=]{0,2}\\.[A-Z0-9a-z_-]{86}[=]{0,2})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "yandex"
@@ -1991,7 +1991,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "yandex-api-key",
-      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(AQVN[A-Za-z0-9_\\-]{35,38})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(AQVN[A-Za-z0-9_\\-]{35,38})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "yandex"
@@ -1999,7 +1999,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "yandex-aws-access-token",
-      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(YC[a-zA-Z0-9_\\-]{38})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(YC[a-zA-Z0-9_\\-]{38})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "yandex"
@@ -2007,7 +2007,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "zendesk-secret-key",
-      "source": "(?:zendesk)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "(?:zendesk)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;.,:)\\]}>|/&?#]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "zendesk"

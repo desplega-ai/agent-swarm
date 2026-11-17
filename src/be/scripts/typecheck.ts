@@ -418,8 +418,8 @@ export interface BoardsNamespace {
 export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
-  memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
-  memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
+  memory_get(args: { memoryId?: string; id?: string; intent: string }): Promise<unknown>;
+  memory_rate(args: { id?: string; memoryId?: string; useful: boolean; note?: string; taskId?: string; referencesSource?: string }): Promise<unknown>;
   // --- tasks ---
   task_list(args?: Record<string, unknown>): Promise<unknown>;
   task_get(args: { taskId: string }): Promise<unknown>;
@@ -579,7 +579,7 @@ export interface SwarmSdk {
   chat_reply(args: { text?: string; card?: unknown }): Promise<unknown>;
   chat_post(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; threadId?: string; channelId?: string; text?: string; card?: unknown }): Promise<unknown>;
   chat_openDm(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; userId: string }): Promise<unknown>;
-  chat_registerChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; channelId: string; agentId?: string; workflowId?: string; name?: string }): Promise<unknown>;
+  chat_registerChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; channelId: string; agentId?: string; workflowId?: string; name?: string; defaultThreadId?: string }): Promise<unknown>;
   chat_unregisterChannel(args: { adapter: "telegram" | "slack" | "discord" | "teams" | "rocketchat"; channelId: string }): Promise<unknown>;
 
   // --- write: messaging (internal) ---
@@ -716,6 +716,8 @@ export interface SwarmSdk {
   }): Promise<unknown>;
   page_create(args: Record<string, unknown>): Promise<unknown>;
   page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;
+  designSystem_get(args?: Record<string, never>): Promise<unknown>;
+  designSystem_set(args: Record<string, unknown>): Promise<unknown>;
   metric_create(args: Record<string, unknown>): Promise<unknown>;
 
   // --- human input ---

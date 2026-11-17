@@ -203,13 +203,9 @@ export function parseGithubShorthand(
   const ref = /^([\w.-]+)\/([\w.-]+)#(\d{1,9})$/.exec(text);
   if (ref) {
     const [, owner = "", repo = "", n = ""] = ref;
-    return githubLink(
-      "ref",
-      owner,
-      repo,
-      { number: Number(n) },
-      `${base}/${owner}/${repo}/issues/${n}`,
-    );
+    const number = Number(n);
+    if (number === 0) return null;
+    return githubLink("ref", owner, repo, { number }, `${base}/${owner}/${repo}/issues/${n}`);
   }
   const commit = /^([\w.-]+)\/([\w.-]+)@([0-9a-f]{7,40})$/i.exec(text);
   if (commit) {

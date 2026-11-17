@@ -9,7 +9,7 @@ export const registerSkillGetTool = (server: McpServer) => {
     "skill-get",
     {
       title: "Get Skill",
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: true },
       description:
         "Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global. In swarm scope the ownerless skill wins, then your own, then the only agent-owned one; when several other agents own that name, it errors with their IDs: pass skillId instead.",
       inputSchema: z.object({

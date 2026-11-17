@@ -2114,7 +2114,8 @@ export const SessionCostSchema = z
     //                      had no matching pricing rows; totalCostUsd is whatever
     //                      the worker submitted (often 0).
     //   'estimated'      — the API priced fallback token counts at an assumed
-    //                      model (amp with a failed thread export).
+    //                      model (amp with a failed thread export), or summed
+    //                      per-message usage (claude killed before its result).
     costSource: SessionCostSourceSchema.default("harness"),
     kind: SessionCostKindSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
@@ -3329,6 +3330,71 @@ export const PageThemeTokensInputSchema = z.strictObject({
   css: z.string().optional(),
 });
 export type PageThemeTokensInput = z.infer<typeof PageThemeTokensInputSchema>;
+
+// The org design system (KV `design-system` / `org`, src/themes/design-system.ts).
+// It restyles every designVersion 2 page that sets no `theme`.
+export const DesignSystemStatusSchema = z.enum(["active", "declined"]);
+export const DesignSystemModeSchema = z.enum(["viewer", "light", "dark"]);
+export const DesignSystemSourceSchema = z.object({
+  kind: z.enum(["manual", "website", "brand-kit", "preset"]),
+  ref: z.string().max(2048).optional(),
+  extractedAt: z.string().max(64).optional(),
+});
+export const DesignSystemLogoSchema = z.object({
+  url: z.string().min(1).max(2048),
+  alt: z.string().min(1).max(200),
+});
+
+export const DesignSystemSchema = z
+  .object({
+    v: z.literal(1),
+    status: DesignSystemStatusSchema,
+    basePreset: z.string(),
+    tokens: PageThemeTokensSchema,
+    fontsHref: z.string().optional(),
+    logo: DesignSystemLogoSchema.optional(),
+    mode: DesignSystemModeSchema,
+    chartPalette: z.array(z.string()).optional(),
+    source: DesignSystemSourceSchema,
+    updatedBy: z.string().nullable(),
+    updatedByAgentId: z.string().optional(),
+    updatedAt: z.string(),
+  })
+  .openapi("DesignSystem");
+export type DesignSystem = z.infer<typeof DesignSystemSchema>;
+
+export const DesignSystemInputSchema = z.strictObject({
+  status: DesignSystemStatusSchema.optional().describe(
+    '"active" (default) saves the design system. "declined" records that the requester does not want one, so agents stop asking. A declined record keeps only `source`.',
+  ),
+  basePreset: z
+    .string()
+    .optional()
+    .describe("Preset id the tokens apply on top of, for example hive or paper. Default hive."),
+  themeTokens: PageThemeTokensInputSchema.optional().describe(
+    'Token overrides on top of the base preset, in the same formats as create_page themeTokens: { light, dark } maps, or { format: "css", css } with a shadcn, tweakcn or Tailwind v4 variable block.',
+  ),
+  fontsHref: z
+    .string()
+    .max(2048)
+    .optional()
+    .describe(
+      "Google Fonts stylesheet URL (https://fonts.googleapis.com/...) that loads the fonts the tokens name.",
+    ),
+  logo: DesignSystemLogoSchema.optional().describe("https logo URL and its alt text."),
+  mode: DesignSystemModeSchema.optional().describe(
+    '"viewer" (default) follows the viewer\'s light or dark mode. "light" or "dark" locks every page to that mode.',
+  ),
+  chartPalette: z
+    .array(z.string())
+    .max(12)
+    .optional()
+    .describe("Ordered chart series colors, as CSS color values."),
+  source: DesignSystemSourceSchema.optional().describe(
+    "Where the design system came from. Default { kind: manual }.",
+  ),
+});
+export type DesignSystemInput = z.infer<typeof DesignSystemInputSchema>;
 
 // PageSnapshot captures the mutable content fields frozen per-version in
 // page_versions.snapshot. Omits id / agentId / slug / timestamps (these are

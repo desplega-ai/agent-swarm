@@ -406,6 +406,10 @@
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
       "scenarios": ["knowledge-pages"]
     },
+    "org-design-system": {
+      "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
+      "scenarios": ["design-system"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
@@ -464,15 +468,15 @@
     },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
-      "scenarios": ["script-runs-durable"]
+      "scenarios": ["script-runs-durable", "script-run-storage"]
     },
     "script-saved-lifecycle": {
       "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",
       "scenarios": ["script-saved-lifecycle"]
     },
     "script-sdk-calls": {
-      "description": "A script drives ctx.swarm (kv, agent, tasks, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
-      "scenarios": ["script-sdk-calls"]
+      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
+      "scenarios": ["script-sdk-calls", "script-memory-rate"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
@@ -566,6 +570,10 @@
       "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
       "scenarios": ["core-task-controls"]
     },
+    "task-terminal-fence": {
+      "description": "A session whose task was superseded is refused send-task and slack-reply, and keeps store-progress and read-only tools",
+      "scenarios": ["core-terminal-task-fence"]
+    },
     "task-defer-wake": {
       "description": "defer-task completes the task, books a schedule, the scheduler wakes the worker with a child task",
       "scenarios": ["core-task-tools"]
@@ -627,20 +635,21 @@
       "scenarios": ["platform-users-access"]
     },
     "workflow-approvals": {
-      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards",
-      "scenarios": ["workflow-approvals"]
+      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards, inline Slack approval buttons",
+      "scenarios": ["workflow-approvals", "slack-approval-buttons"]
     },
     "workflow-definitions": {
       "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs",
+      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
-        "workflow-webhook-hmac-sha1"
+        "workflow-webhook-hmac-sha1",
+        "workflow-agent-task-crash-window"
       ]
     },
     "workflow-engine-nodes": {

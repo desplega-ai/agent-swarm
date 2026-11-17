@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -106,8 +106,28 @@ describe("assertNotEmptyDatabase", () => {
 
 describe("compiled binary — the exact failure mode this incident shipped in", () => {
   const workDir = mkdtempSync(join(tmpdir(), "migration-bunfs-"));
-  const fixtureBinary = join(workDir, "compiled-migrations-boot");
+  const fixtureBinary = join(
+    workDir,
+    `compiled-migrations-boot${process.platform === "win32" ? ".exe" : ""}`,
+  );
   const fixtureSrc = join(import.meta.dir, "fixtures", "compiled-migrations-boot.ts");
+  const apiBinary = join(
+    workDir,
+    `compiled-source-schema-boot${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  const apiFixtureSrc = join(import.meta.dir, "fixtures", "compiled-source-schema-boot.ts");
+  const legacyDir = join(workDir, "legacy-migrations");
+  const emptyDir = join(workDir, "empty-migrations");
+
+  beforeAll(async () => {
+    mkdirSync(legacyDir);
+    mkdirSync(emptyDir);
+    for (const file of readdirSync(REPO_MIGRATIONS_DIR)) {
+      if (file.endsWith(".sql") && Number.parseInt(file, 10) < 342) {
+        await Bun.write(join(legacyDir, file), Bun.file(join(REPO_MIGRATIONS_DIR, file)));
+      }
+    }
+  });
 
   afterAll(() => {
     rmSync(workDir, { recursive: true, force: true });
@@ -116,13 +136,28 @@ describe("compiled binary — the exact failure mode this incident shipped in", 
   test(
     "builds",
     async () => {
-      const result = await runChild(
-        ["bun", "build", fixtureSrc, "--compile", "--outfile", fixtureBinary],
-        { timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS },
-      );
-      expectChildOk(result, "bun build --compile of the migrations fixture");
+      for (const [source, binary] of [
+        [fixtureSrc, fixtureBinary],
+        [apiFixtureSrc, apiBinary],
+      ]) {
+        const result = await runChild(
+          [
+            "bun",
+            "build",
+            source,
+            "--compile",
+            "--outfile",
+            binary,
+            // Exercise the Linux API image's virtual path on Windows too, where
+            // Bun otherwise uses B:\\~BUN\\root instead of /$bunfs/root.
+            ...(process.platform === "win32" ? ["--define", 'import.meta.dir="/$bunfs/root"'] : []),
+          ],
+          { timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS },
+        );
+        expectChildOk(result, "bun build --compile of the migrations fixture");
+      }
     },
-    CHILD_PROCESS_TEST_BUDGET_MS + 5_000,
+    CHILD_PROCESS_TEST_BUDGET_MS * 2 + 5_000,
   );
 
   test(
@@ -163,5 +198,90 @@ describe("compiled binary — the exact failure mode this incident shipped in", 
       expect(parsed.error).toContain("no tables yet");
     },
     CHILD_PROCESS_TEST_BUDGET_MS + 5_000,
+  );
+
+  test.each(["omitted", "empty", "unset", "missing table", "missing hash column"])(
+    "refuses a legacy database before runtime reads when migration 342 is %s",
+    async (mode) => {
+      const dbPath = join(workDir, `legacy-${mode}.sqlite`);
+      // The standalone runner can prepare historical schemas. Actual API boot
+      // must reject them before handing a handle to its source readers.
+      expectChildOk(
+        await runChild([fixtureBinary, dbPath], {
+          env: { ...process.env, MIGRATIONS_DIR: legacyDir },
+          timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS,
+        }),
+        "prepare pre-342 database",
+      );
+      if (mode === "missing table" || mode === "missing hash column") {
+        const legacy = new Database(dbPath);
+        try {
+          legacy.run(
+            mode === "missing table"
+              ? "ALTER TABLE script_runs ADD COLUMN sourceHash TEXT"
+              : "CREATE TABLE script_run_sources (hash TEXT PRIMARY KEY, source TEXT NOT NULL)",
+          );
+        } finally {
+          legacy.close(true);
+        }
+      }
+      const env = { ...process.env };
+      if (mode === "unset") delete env.MIGRATIONS_DIR;
+      else env.MIGRATIONS_DIR = mode === "empty" ? emptyDir : legacyDir;
+
+      const result = await runChild([apiBinary, dbPath], {
+        env,
+        timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS,
+      });
+      expectChildOk(result, "compiled fixture with incomplete migrations");
+      const parsed = JSON.parse(result.stdout.trim());
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toContain("342_script_run_sources.sql");
+      expect(parsed.error).toContain("MIGRATIONS_DIR");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS * 2 + 5_000,
+  );
+
+  test.each(["omitted", "empty", "unset"])(
+    "reuses and backfills an upgraded database when migration 342 is %s",
+    async (mode) => {
+      const dbPath = join(workDir, `upgraded-${mode}.sqlite`);
+      const seeded = await runChild([apiBinary, dbPath], {
+        env: { ...process.env, MIGRATIONS_DIR: REPO_MIGRATIONS_DIR },
+        timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS,
+      });
+      expectChildOk(seeded, "prepare upgraded database");
+      expect(JSON.parse(seeded.stdout.trim()).ok).toBe(true);
+      const source = "export default () => '雪';\n";
+      const legacy = new Database(dbPath);
+      try {
+        legacy.run("INSERT INTO script_runs (id, agentId, source) VALUES ('legacy', 'agent', ?)", [
+          source,
+        ]);
+      } finally {
+        legacy.close(true);
+      }
+      const env = { ...process.env };
+      if (mode === "unset") delete env.MIGRATIONS_DIR;
+      else env.MIGRATIONS_DIR = mode === "empty" ? emptyDir : legacyDir;
+
+      const result = await runChild([apiBinary, dbPath], {
+        env,
+        timeoutMs: CHILD_PROCESS_TEST_BUDGET_MS,
+      });
+      expectChildOk(result, "compiled fixture reusing upgraded source schema");
+      expect(JSON.parse(result.stdout.trim()).ok).toBe(true);
+      const reopened = new Database(dbPath);
+      const storedSource = reopened.prepare(`SELECT r.source AS legacySource, s.source
+        FROM script_runs r LEFT JOIN script_run_sources s ON s.hash = r.sourceHash
+        WHERE r.id = 'legacy'`);
+      try {
+        expect(storedSource.get()).toEqual({ legacySource: "", source });
+      } finally {
+        storedSource.finalize();
+        reopened.close(true);
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS * 2 + 5_000,
   );
 });

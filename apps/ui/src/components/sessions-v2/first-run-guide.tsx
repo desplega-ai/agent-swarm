@@ -150,7 +150,7 @@ const STEPS = [
   },
   {
     title: "Tabs and split",
-    body: "A click opens a session in the current tab. A middle-click or T opens a new tab. Drag a tab to the right edge, or press V, to split the view.",
+    body: "A click opens a session in a tab. A middle-click or T opens a new tab. Drag a tab to the right half, or press V, to split the view. Tabs drag between the two panes. A file or page link opens in the other pane.",
   },
   {
     title: "Done and Later",

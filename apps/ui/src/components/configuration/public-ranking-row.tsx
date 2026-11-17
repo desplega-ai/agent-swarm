@@ -46,7 +46,6 @@ export function PublicRankingRow() {
   const [category, setCategory] = useState<string>("engineering");
   const [subcategory, setSubcategory] = useState<string>(NO_SUBCATEGORY);
   const [description, setDescription] = useState("");
-  const [sourceCodeUrl, setSourceCodeUrl] = useState("");
 
   // Prefill the form from the stored listing.
   const listing = state?.listing;
@@ -55,7 +54,6 @@ export function PublicRankingRow() {
     setCategory(listing.category);
     setSubcategory(listing.subcategory ?? NO_SUBCATEGORY);
     setDescription(listing.description ?? "");
-    setSourceCodeUrl(listing.sourceCodeUrl ?? "");
   }, [listing]);
 
   const subcategories: readonly string[] =
@@ -67,7 +65,6 @@ export function PublicRankingRow() {
         category,
         subcategory: subcategory === NO_SUBCATEGORY ? null : subcategory,
         description: description.trim() || null,
-        sourceCodeUrl: sourceCodeUrl.trim() || null,
       },
       {
         onSuccess: () =>
@@ -204,19 +201,6 @@ export function PublicRankingRow() {
                 disabled={pending}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="QA and release automation for our web apps"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ranking-source" className="text-xs">
-                Source code URL (optional)
-              </Label>
-              <Input
-                id="ranking-source"
-                maxLength={200}
-                value={sourceCodeUrl}
-                disabled={pending}
-                onChange={(event) => setSourceCodeUrl(event.target.value)}
-                placeholder="https://github.com/example/agents"
               />
             </div>
           </div>

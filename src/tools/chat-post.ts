@@ -18,7 +18,7 @@ export const registerChatPostTool = (server: McpServer) => {
     {
       title: "Post to a chat thread or channel",
       description:
-        "Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.",
+        "Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread or Telegram topic, or channelId to use its registered default topic (otherwise the channel). Ids carry the adapter prefix, such as telegram:12345 or telegram:-100123:42 for topic 42. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.",
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         adapter: z.enum(CHAT_SDK_ADAPTER_NAMES).describe("Chat SDK adapter name."),
@@ -26,12 +26,16 @@ export const registerChatPostTool = (server: McpServer) => {
           .string()
           .min(1)
           .optional()
-          .describe("Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100."),
+          .describe(
+            "Full SDK thread id, such as telegram:12345, telegram:-100123:42 (positive integer topic id), or slack:C123:1700000000.000100. Overrides the channel default.",
+          ),
         channelId: z
           .string()
           .min(1)
           .optional()
-          .describe("Full SDK channel id, such as slack:C123. Ignored when threadId is set."),
+          .describe(
+            "Full SDK channel id, such as telegram:-100123 or slack:C123. Uses its registered default Telegram topic when set. Ignored when threadId is set.",
+          ),
         text: z
           .string()
           .min(1)

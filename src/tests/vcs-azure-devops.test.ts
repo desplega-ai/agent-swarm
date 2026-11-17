@@ -13,8 +13,10 @@ describe("Azure Repos URL helpers", () => {
       "https://dev.azure.com/org/project/_git/repo",
       "https://org@dev.azure.com/org/project/_git/repo",
       "git@ssh.dev.azure.com:v3/org/project/repo",
+      "ssh://git@ssh.dev.azure.com/v3/org/project/repo",
       "https://fabrikam.visualstudio.com/DefaultCollection/_git/Fabrikam",
       "https://dev.azure.com/github-mirror/project/_git/repo",
+      "dev.azure.com/org/project/_git/repo",
     ]) {
       expect(isAzureDevOpsUrl(url)).toBe(true);
       expect(detectVcsProvider(url)).toBe("azure-devops");
@@ -22,6 +24,14 @@ describe("Azure Repos URL helpers", () => {
     expect(detectVcsProvider("desplega-ai/agent-swarm")).toBe("github");
     expect(detectVcsProvider("https://gitlab.com/group/project")).toBe("gitlab");
     expect(isAzureDevOpsUrl("https://example.com/dev.azure.com.html")).toBe(false);
+    // Only the host counts: a `dev.azure.com` path segment on another host is not Azure.
+    expect(isAzureDevOpsUrl("https://notdev.azure.com/org/project/_git/repo")).toBe(false);
+    expect(isAzureDevOpsUrl("https://dev.azure.com.evil.com/org/project/_git/repo")).toBe(false);
+    expect(isAzureDevOpsUrl("https://x.dev.azure.com/org/project/_git/repo")).toBe(false);
+    expect(isAzureDevOpsUrl("https://github.com/acme/dev.azure.com/tree/main")).toBe(false);
+    expect(isAzureDevOpsUrl("git@github.com:acme/dev.azure.com.git")).toBe(false);
+    expect(isAzureDevOpsUrl("https://code.example.com/acme/dev.azure.com/repo")).toBe(false);
+    expect(detectVcsProvider("git@github.com:acme/dev.azure.com.git")).toBe("github");
   });
 
   test("canonicalizes clone URLs to one https form", () => {

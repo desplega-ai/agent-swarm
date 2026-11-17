@@ -114,6 +114,17 @@ describe("System One tab", () => {
     await view.cleanup();
   });
 
+  test("a search finds a known model that is not the host's default", async () => {
+    serve([]);
+    const view = await mount(<SystemOneTab search="pplx-decider" onSetUp={() => {}} />);
+    await settle();
+    expect(document.body.querySelectorAll('ul[aria-label="System One hosts"] > li').length).toBe(1);
+    const row = rowOf("Jev via OpenRouter").textContent ?? "";
+    expect(row).toContain("~typesafe/jev-latest+12 more");
+    expect(row).toContain("~perplexity/pplx-decider-latest");
+    await view.cleanup();
+  });
+
   test("an unknown stored default falls back like the server", () => {
     expect(
       systemOneDefault([configRow("SYSTEM_ONE_DEFAULT_PROVIDER", "jev")] as never, "decide"),

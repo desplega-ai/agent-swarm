@@ -8,6 +8,7 @@
 import { combPathForLink } from "./comb/links";
 import type { DrivePath } from "./comb/paths";
 import { pageFrameQuery } from "./page-query";
+import { ASSET_TAB_PREFIX } from "./sessions-v2";
 import { parseSwarmLink, type SwarmLinkOrigins } from "./swarm-links";
 
 export type LinkPreviewTarget =
@@ -55,6 +56,46 @@ export function linkPreviewTarget(
     return { kind: "page", id: link.id, query, href };
   }
   return null;
+}
+
+/** Text as base64url: safe in a path segment and in the comma list of `?tabs=`. */
+function toBase64Url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(value: string): string | null {
+  try {
+    const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+    return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The sessions tab of a preview target (`isAssetTab`): `asset:task:<id>`
+ * for a task, else `asset:link:<the link as written, in base64url>`. The
+ * tab keeps the link, so a reload or a shared URL opens the same asset.
+ */
+export function assetTabId(target: LinkPreviewTarget): string {
+  return target.kind === "task"
+    ? `${ASSET_TAB_PREFIX}task:${target.taskId}`
+    : `${ASSET_TAB_PREFIX}link:${toBase64Url(target.href)}`;
+}
+
+/** The preview target of an asset tab, or null when the id names none. */
+export function assetTabTarget(tab: string, origins: SwarmLinkOrigins): LinkPreviewTarget | null {
+  if (!tab.startsWith(ASSET_TAB_PREFIX)) return null;
+  const rest = tab.slice(ASSET_TAB_PREFIX.length);
+  if (rest.startsWith("task:")) {
+    const taskId = rest.slice("task:".length);
+    return taskId ? { kind: "task", taskId } : null;
+  }
+  if (!rest.startsWith("link:")) return null;
+  return linkPreviewTarget(fromBase64Url(rest.slice("link:".length)), origins);
 }
 
 /**

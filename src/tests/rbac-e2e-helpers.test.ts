@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { closeSync, openSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -105,17 +105,23 @@ test("startOnFreePort retries only PortInUseError, up to its attempt bound", asy
 });
 
 test(
-  "spawnSwarmServer starts again on a new port when its first port is taken",
+  "spawnSwarmServer retries when another HTTP server answers on its first port",
   async () => {
     const dir = await makeScratchDir();
-    const holder = createServer();
+    const holder = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
     const heldPort = await listenOnFreePort(holder);
+    const logPath = join(dir, "server.log");
+    // A reused log can contain a previous boot on the same port.
+    await Bun.write(logPath, `MCP HTTP server running on http://localhost:${heldPort}/mcp\n`);
     let server: SwarmServer | undefined;
     try {
       const offered: number[] = [];
       server = await spawnSwarmServer({
         dbPath: join(dir, "test.sqlite"),
-        logPath: join(dir, "server.log"),
+        logPath,
         getPort: async () => {
           const port = offered.length === 0 ? heldPort : await getFreePort();
           offered.push(port);

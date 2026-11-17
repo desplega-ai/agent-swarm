@@ -46,6 +46,7 @@ export const BUILTIN_ROLES = [
       "fs.join.own",
       "objects.read",
       "objects.write",
+      "page.launch",
     ],
   },
   {
@@ -61,6 +62,7 @@ export const BUILTIN_ROLES = [
       "comb.presence",
       "fs.join.own",
       "objects.read",
+      "page.launch",
     ],
   },
   {

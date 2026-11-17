@@ -362,12 +362,38 @@ color literals.
 The API picks the preset of a designVersion 2 page in this order:
 
 1. The page's `theme`, when it is set.
-2. The viewer's dashboard preset, when the page opens inside the dashboard.
-3. `hive`.
+2. The org design system's base preset, when the org has one (see below).
+3. The viewer's dashboard preset, when the page opens inside the dashboard.
+4. `hive`.
 
-Then the page's `themeTokens` apply on top of the preset. The mode (light or
-dark) always comes from the viewer. `create_page`, `POST /api/pages`, and
-`PUT /api/pages/:id` accept both fields.
+Then the org design system tokens apply on top of the preset, and the page's
+`themeTokens` on top of those. A page with its own `theme` ignores the org
+design system completely: its tokens, fonts and mode lock. The mode (light or
+dark) comes from the viewer unless the design system locks it.
+`create_page`, `POST /api/pages`, and `PUT /api/pages/:id` accept both fields.
+
+### The org design system: ask once
+
+One design system per org restyles every page without a `theme`. Read it with
+`design-system-get`. Its `status` is `none`, `declined`, `active` or `invalid`.
+
+When `create_page` says the org has no design system yet, ship the page as it
+is and ask the requester once, in the same reply that hands over the page:
+"Want every page in your brand? Send a site URL, a preset name or a CSS
+variable block." Then:
+
+1. Run the `design-system-seed` script with one of `url`, `preset` or `css`
+   (plus `logo` and `mode` if they gave them). It publishes a preview page and
+   saves nothing.
+2. Send the preview link. Save only after the requester says yes: run the
+   script again with `save: true`, or call `design-system-set` with its
+   `saveInput`.
+3. If they say no, call `design-system-set` with `status: "declined"`. Nobody
+   asks again.
+
+Never set the design system without the requester's yes, and never ask when
+the status is `declined` or `active`. The `design-system` KV namespace is
+reserved: write it only through `design-system-set` or `PUT /api/design-system`.
 
 ### `theme`: a preset id
 
@@ -465,8 +491,8 @@ To use another font, load it from Google Fonts in your page `<head>`. Then set
 
 ## Dark mode
 
-Inside the dashboard, a designVersion 2 page follows the viewer's mode. In dark
-mode, the injected head adds the `dark` class to `<html>`, and the tokens
+Inside the dashboard, a designVersion 2 page follows the viewer's mode, unless
+the org design system locks `mode` to `light` or `dark`. In dark mode, the injected head adds the `dark` class to `<html>`, and the tokens
 switch to their dark values. A page built on tokens needs no extra dark-mode
 code.
 

@@ -291,6 +291,40 @@ describe("secret corpus", () => {
     }
   });
 
+  test("redacts a positive followed by punctuation or a URL delimiter", () => {
+    // gitleaks ends most rules on a quote, whitespace or `;`. Prose, CSV and
+    // URLs put `.`, `,`, `)`, `/` or `&` there, which left 149 rules blind.
+    const delimiters = [".", ",", ":", ")", "]", "}", ">", "|", "/", "&", "?", "#"];
+    const misses: string[] = [];
+    for (const p of positives) {
+      if (p.text !== `the response included ${p.secret} in its body`) continue;
+      const texts = [
+        ...delimiters.map((d) => `key ${p.secret}${d} next`),
+        `GET /x?q=${p.secret}&page=2`,
+        `id,${p.secret},2026`,
+        `(${p.secret})`,
+      ];
+      for (const text of texts) {
+        if (scrubSecrets(text).includes(p.secret)) {
+          misses.push(`${p.name}: ${text.replace(p.secret, "<secret>")}`);
+        }
+      }
+    }
+    expect(misses).toEqual([]);
+  });
+
+  test("the widened boundary keeps the delimiter and still stops mid-token", () => {
+    const stripe = ["sk", "live", randomToken(24)].join("_");
+    expect(scrubSecrets(`The key is ${stripe}.`)).toBe(
+      "The key is [REDACTED:gitleaks:stripe-access-token].",
+    );
+    expect(scrubSecrets(`GET /x?q=${stripe}&page=2`)).toBe(
+      "GET /x?q=[REDACTED:gitleaks:stripe-access-token]&page=2",
+    );
+    // An identifier character after the token is still not a boundary.
+    expect(scrubSecrets(`${stripe}_y`)).toBe(`${stripe}_y`);
+  });
+
   test("leaves every negative untouched", () => {
     const changed = buildNegatives().filter((text) => scrubSecrets(text) !== text);
     expect(changed).toEqual([]);
