@@ -204,11 +204,11 @@ export const AI_PROVIDERS: AiProvider[] = [
       "Billed per token. Claude Code uses it when no subscription token is set. Agents rotate across the keys.",
     steps: [
       { text: "Create a key at [console.anthropic.com](https://console.anthropic.com)." },
-      { text: "Paste it below. It starts with `sk-ant-api03-`." },
+      { text: "Paste it below. It starts with `sk-ant-`." },
     ],
     docs: HARNESS_GUIDE,
     fields: [
-      { key: "ANTHROPIC_API_KEY", label: "API key", kind: "pool", placeholder: "sk-ant-api03-..." },
+      { key: "ANTHROPIC_API_KEY", label: "API key", kind: "pool", placeholder: "sk-ant-..." },
     ],
   },
   {
