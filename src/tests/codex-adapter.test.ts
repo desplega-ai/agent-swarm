@@ -1300,6 +1300,7 @@ describe("CodexSession event mapping", () => {
   });
 
   test("abort() resolves the session with cancelled result", async () => {
+    const ready = Promise.withResolvers<void>();
     let release!: () => void;
     let interrupted = false;
     const fakeThread = {
@@ -1310,6 +1311,7 @@ describe("CodexSession event mapping", () => {
           yield { type: "turn.started" };
           await new Promise<void>((resolve) => {
             release = resolve;
+            ready.resolve();
           });
           if (interrupted) {
             const err = new Error("aborted");
@@ -1342,7 +1344,7 @@ describe("CodexSession event mapping", () => {
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await ready.promise;
     await session.abort();
     const result = await session.waitForCompletion();
 
@@ -2585,55 +2587,6 @@ describe("CodexSession — rate-limit error preservation", () => {
       "authentication_failed",
     );
     expect(result.isError).toBe(true);
-  });
-
-  test("AbortError still settles as cancelled even when terminalError is absent (regression guard)", async () => {
-    let release!: () => void;
-    let interrupted = false;
-    const fakeThread = {
-      id: null,
-      runStreamed: async (_input: string) => {
-        async function* generate(): AsyncGenerator<ThreadEvent> {
-          yield { type: "thread.started", thread_id: "thread-abort-guard" };
-          yield { type: "turn.started" };
-          await new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          if (interrupted) {
-            const err = new Error("aborted");
-            err.name = "AbortError";
-            throw err;
-          }
-        }
-        return { events: generate() };
-      },
-      async steer() {},
-      async interrupt() {
-        interrupted = true;
-        release?.();
-      },
-      async close() {},
-    };
-    const adapter = new CodexAdapter({
-      bypassSubprocess: true,
-      threadFactory: () => fakeThread as never,
-    });
-    const config = testConfig({
-      logFile: join(tmpLogDir, "abort-guard.log"),
-      cwd: "",
-      taskId: "",
-      apiUrl: "",
-      apiKey: "",
-    });
-    const session = await adapter.createSession(config);
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await session.abort();
-    const result = await session.waitForCompletion();
-
-    expect(result.failureReason).toBe("cancelled");
-    expect(result.exitCode).toBe(130);
   });
 
   test("real unexpected exception (no terminalError) still falls through to outer catch", async () => {
