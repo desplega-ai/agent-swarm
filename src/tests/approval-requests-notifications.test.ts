@@ -1,4 +1,14 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 
@@ -21,6 +31,7 @@ import {
 } from "../be/db";
 import { handleApprovalRequests } from "../http/approval-requests";
 import { resetExternalChannelStateForTesting } from "../slack/external-channel";
+import * as approvalNotifications from "../workflows/approval-notifications";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-approval-requests-notifications.sqlite";
@@ -30,9 +41,15 @@ let baseUrl = "";
 let leadId = "";
 let workerId = "";
 let originalBlockExternalChannels: string | undefined;
+let dispatch: ReturnType<
+  typeof spyOn<typeof approvalNotifications, "dispatchApprovalNotifications">
+>;
 
-function postRequest(body: Record<string, unknown>, agentId: string | null): Promise<Response> {
-  return fetch(`${baseUrl}/api/approval-requests`, {
+async function postRequest(
+  body: Record<string, unknown>,
+  agentId: string | null,
+): Promise<Response> {
+  const response = await fetch(`${baseUrl}/api/approval-requests`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -45,6 +62,8 @@ function postRequest(body: Record<string, unknown>, agentId: string | null): Pro
       ...body,
     }),
   });
+  await Promise.all(dispatch.mock.results.map((result) => result.value));
+  return response;
 }
 
 async function createRequest(body: Record<string, unknown>, agentId = leadId): Promise<string> {
@@ -52,13 +71,6 @@ async function createRequest(body: Record<string, unknown>, agentId = leadId): P
   expect(res.status).toBe(201);
   const json = (await res.json()) as { approvalRequest: { id: string } };
   return json.approvalRequest.id;
-}
-
-async function waitFor(check: () => Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 100; i++) {
-    if (await check()) return;
-    await Bun.sleep(10);
-  }
 }
 
 describe("POST /api/approval-requests notifications", () => {
@@ -96,6 +108,7 @@ describe("POST /api/approval-requests notifications", () => {
   });
 
   beforeEach(() => {
+    dispatch = spyOn(approvalNotifications, "dispatchApprovalNotifications");
     originalBlockExternalChannels = process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
     postMessage.mockClear();
     conversationsInfo.mockClear();
@@ -103,11 +116,17 @@ describe("POST /api/approval-requests notifications", () => {
     delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
   });
 
-  afterEach(() => {
-    if (originalBlockExternalChannels === undefined) {
-      delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
-    } else {
-      process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = originalBlockExternalChannels;
+  afterEach(async () => {
+    try {
+      await Promise.allSettled(dispatch.mock.results.map((result) => result.value));
+    } finally {
+      dispatch.mockRestore();
+      if (originalBlockExternalChannels === undefined) {
+        delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
+      } else {
+        process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = originalBlockExternalChannels;
+      }
+      resetExternalChannelStateForTesting();
     }
   });
 
@@ -118,12 +137,7 @@ describe("POST /api/approval-requests notifications", () => {
       notifications: [{ channel: "slack", target: "C123" }],
     });
 
-    await waitFor(async () => {
-      const row = await getApprovalRequestById(id);
-      const channels = row?.notificationChannels as Array<{ messageTs?: string }> | null;
-      return Boolean(channels?.[0]?.messageTs);
-    });
-
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledTimes(1);
     const args = postMessage.mock.calls[0]![0];
     expect(args.channel).toBe("C123");
@@ -143,9 +157,8 @@ describe("POST /api/approval-requests notifications", () => {
 
   test("posts nothing without notifications", async () => {
     const id = await createRequest({});
-    await Bun.sleep(50);
-
     expect(postMessage).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(0);
     expect((await getApprovalRequestById(id))?.notificationChannels).toBeNull();
   });
 
@@ -153,7 +166,7 @@ describe("POST /api/approval-requests notifications", () => {
     const id = await createRequest({
       notifications: [{ channel: "email", target: "ops@example.com" }],
     });
-    await Bun.sleep(50);
+    expect(dispatch).toHaveBeenCalledTimes(1);
 
     expect(postMessage).not.toHaveBeenCalled();
     expect((await getApprovalRequestById(id))?.notificationChannels).toEqual([
@@ -172,6 +185,7 @@ describe("POST /api/approval-requests notifications", () => {
       expect(res.status).toBe(403);
       expect((await listApprovalRequests()).length).toBe(before);
     }
+    expect(dispatch).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();
   });
 
@@ -180,6 +194,7 @@ describe("POST /api/approval-requests notifications", () => {
       { notifications: [{ channel: "email", target: "ops@example.com" }] },
       workerId,
     );
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   test("skips a channel shared with another org when the external-channel block is on", async () => {
@@ -187,8 +202,7 @@ describe("POST /api/approval-requests notifications", () => {
     conversationsInfo.mockImplementationOnce(async () => ({ channel: { is_ext_shared: true } }));
 
     const id = await createRequest({ notifications: [{ channel: "slack", target: "CEXT" }] });
-    await waitFor(async () => conversationsInfo.mock.calls.length > 0);
-    await Bun.sleep(50);
+    expect(dispatch).toHaveBeenCalledTimes(1);
 
     expect(conversationsInfo).toHaveBeenCalledWith({ channel: "CEXT" });
     expect(postMessage).not.toHaveBeenCalled();
