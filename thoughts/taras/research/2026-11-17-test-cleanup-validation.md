@@ -90,7 +90,15 @@ C22 first passed 53 affected checks and two mutation controls with clock and tim
 Independent review rejected the added maintenance cost. A smaller real-clock version remains under validation.
 C10 also failed this unchanged guard in merge-group run 44125275220, measuring 364.037399ms.
 GitHub check annotations identify the exact failure at db-client-busy-retry.test.ts:102.
-No queue retry was requested after either failure.
+PR #3277 later merged a zero-spin fixture with a 200ms ceiling as 7d5ad4e75d396bebb57e460f40f7c72432531a6d.
+C15 and C10 returned to queue validation after that change. C15 merged.
+C10 run 44131652948 failed the zero-spin guard: executionMs 201.530818ms against the new 200ms ceiling.
+Check 134210204331 identifies db-client-busy-retry.test.ts:113. No further queue retry was requested.
+The C22 candidate targets an additional contract: failed BUSY attempts contribute to executionMs, which controls retention batch sizing.
+Its first real-clock revision passed 53 affected checks and rejected both accounting mutants.
+It also rejected omitted failed-attempt cost when 80ms of successful-attempt overhead masked the simpler proposed assertion.
+A caller pause of 250ms still masked the backoff-inclusion mutant. The evidence does not claim universal accounting precision.
+The candidate predates PR #3277. Rebase, current-main controls, and renewed review remain pending.
 
 ## Slack readiness repair
 
@@ -107,3 +115,13 @@ C21 reduced the affected Codex suites from 126 to 123 tests. Parent check:local 
 Seven controls failed retained guards. Missing poll abort still times out, and afterEach restores console.log.
 Removing name-only AbortError classification survives both versions because both explicitly call abort. This remains a coverage limit.
 Scoped test typechecking reports 13 unchanged baseline errors. The configured root typecheck passes.
+
+## Codex pool consolidation
+
+C23 removes the copied selection algorithm and exercises the exported resolver instead.
+Baseline 17 tests passed. Candidate 13 tests passed, with seven detected regression controls.
+The baseline missed exhaustion, refresh-token leakage, missing credential files, and incorrect file contents.
+Parent check:local passed. Five unchanged filesystem cases also passed with 16 assertions.
+Scoped type diagnostics decreased from ten to four existing errors. Configured root typechecking passed.
+The candidate retains nonzero-slot persistence forwarding and uses task-owned credential homes.
+Availability results containing only unconfigured slots, failed fetches, and non-ok responses remain uncovered branches.

@@ -210,7 +210,7 @@ Controlled worker boot failure now fails promptly with peak 0 instead of waiting
 
 ### C10: Slack rendering
 
-State: PR https://github.com/desplega-ai/agent-swarm/pull/3274 passed PR checks, then left the merge queue after run 44125275220 failed Run Tests (2/8). The unchanged DB timing guard measured 364.037399ms against its 300ms ceiling. C22 must resolve this before another queue attempt. Independent review passed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
+State: PR https://github.com/desplega-ai/agent-swarm/pull/3274 passed PR checks, then left the merge queue after run 44125275220 failed Run Tests (2/8). The unchanged DB timing guard measured 364.037399ms against its 300ms ceiling. After PR #3277 changed that fixture, C10 returned to queue validation. Run 44131652948 then failed the replacement 200ms ceiling at 201.530818ms. No further queue retry was requested. Independent review passed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
 Candidates: three repeated delivery tests, substring checks following exact equality, and payload key lists that reject harmless additions.
 Retain recovery stop-before-update order, native Markdown, truncation, child-before-conclusion delivery, visibility, caption limits, and stale UI-spec fixtures.
 All five controls failed: answer replacement, finalized-child repetition, early conclusions, unwanted Markdown conversion, and missing recovery updates.
@@ -232,7 +232,7 @@ No deletion justified. No mocks or fixtures require removal. This audit does not
 
 ### C12: MCP enabled-tool selection
 
-State: implemented and independently reviewed. Removed two repeated server registrations, +0/-2 lines. All 17 tests pass with 26 assertions.
+State: landed through PR #3285 as 98ca0e707f3f1666801e7965fb3ce3d21bf583b4. Independent review passed. Removed two repeated server registrations, +0/-2 lines. All 17 tests pass with 26 assertions.
 Read parser, server allowlist resolution and pruning, capability and scripts-only selection, MCP session option resolution, and configuration injection.
 Retain parser formats, invalid config refusal, deployment fallback, capability override, scripts-only override, full-surface bypass, warnings, and per-agent session reload.
 The HTTP helper delegates to real handleMcp. It does not copy routing logic. It omits core authentication, so it does not establish authentication coverage.
@@ -269,7 +269,7 @@ These gaps do not justify replacing the compact suite or deleting distinct routi
 
 ### C15: Sandbox startup isolation follow-up
 
-State: PR https://github.com/desplega-ai/agent-swarm/pull/3269 passed PR checks, then left the merge queue after an unrelated DB timing failure. C22 must resolve that failure before another queue attempt. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
+State: landed through PR https://github.com/desplega-ai/agent-swarm/pull/3269 as 6a41ba92ae243ba181b1f1253a4d0ac77f123abf. An earlier queue attempt failed the unrelated database timing fixture. PR #3277 repaired that fixture before the successful queue run. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
 Production and existing sandbox tests were read first. A controlled startup file confirms the C08 production defect independently.
 With BASH_ENV pointing at a task-owned file that exits 37, inline mode executes it and exits 37. Spawn mode exits 0.
 Adding --noprofile --norc -p to the inline command exits 0, forwards stdin, and produces no stderr.
@@ -391,7 +391,8 @@ Candidate skips redundant flag writes and restarts after required config changes
 Final diff +33/-22, net +11, all for dispatch readiness. Existing skipped-task assertions remain unchanged. No retry was added.
 Paired baseline, revised, delayed-socket, and restored runs passed without reruns. Removing override barriers under delayed reconnect failed both existing attempts.
 Independent review found no correctness blocker. Legacy caller and first full-shard writer passed without retries. All 16 legacy PNGs remained valid.
-Parent check:local passed all 35 affected scenarios: zero failures, skips, or flaky results, with 553 HTTP calls. PR #3278 is submitted with auto-merge requested.
+Parent check:local passed all 35 affected scenarios: zero failures, skips, or flaky results, with 553 HTTP calls.
+PR #3278 merged as ae52a1c0a487516c9b923cf1179f90c5ea194696.
 Earlier unrelated config writes can still leave a reload pending on the helper skip path. This limitation predates the repair.
 
 ### C21: Remaining Codex provider audit
@@ -404,30 +405,80 @@ Preserve transport, subprocess, SQLite locking, device lease, storage recovery, 
 Weak guards: last-call-wins checks only defined values, PKCE omits SHA256 relation, refresh overlap uses sleep, and app-server shutdown asserts a one-second ceiling.
 Unexpected auth/network resolution and copied ratings conversion remain fixture risks. No live provider or runtime audit evidence yet.
 Cancellation cleanup changes only codex-adapter and codex-swarm-events: final +14/-104 lines, 126 to 123 cases.
-PR #3281 is submitted with auto-merge requested. Parent check:local passed in 12 seconds, including all 123 affected cases.
+PR #3281 merged as 5bd1ab40da5449f1278e367df2a8b3ed815a2ab7.
+Parent check:local passed in 12 seconds, including all 123 affected cases.
 Seven controls failed. Removing name-only AbortError classification survived both original and candidate, because explicit abort state covers that branch.
 Independent review found no lost guard. A refinement restores console.log from afterEach even when the abort event never arrives.
 Scoped test typechecking reports the same 13 errors on baseline and candidate. The configured root typecheck passes.
 
-### C22: DB busy timing flake
+### C22: DB timing ceilings and failed-attempt accounting
 
 C15 merge-group run 44123585250 failed only Run Tests (2/8). The unchanged db-client-busy-retry guard measured executionMs 371.386837 against a 300ms ceiling.
-PR checks passed. The merge queue removed C15 for failed_checks. Do not count that PR as landed.
+PR checks passed. The merge queue removed that attempt for failed_checks. C15 landed later.
 An isolated repair must preserve real contention and detect backoff incorrectly included in execution time. Merely raising the ceiling or adding retries is not acceptable.
 The first candidate added 71 and removed 15 lines, with three spies. Its two accounting mutants failed, and 53 affected checks passed.
 Independent review found no correctness defect, but rejected the maintenance cost of global clock and timer spies.
-A smaller real-clock alternative is under validation. No retry of the queue was requested after this failure.
+A smaller real-clock candidate added 48 and removed 15 lines against the old fixture.
+It detects complete omission of failed-attempt costs, including when successful-attempt overhead masks the simpler comparison.
+It has no global clock or timer spies. A caller pause can still mask backoff inclusion, and partial undercounts remain unproven.
+Independent review then identified base drift. PR #3277 already replaced the old fixture with a zero-spin client and a 200ms ceiling.
+That PR merged as 7d5ad4e75d396bebb57e460f40f7c72432531a6d and removed the original nonzero-spin fixture.
+C15 and C10 returned to normal queue validation after that merge. C15 subsequently landed.
+C10 run 44131652948 failed the new zero-spin test: executionMs 201.530818ms against its 200ms ceiling.
+Check 134210204331 identifies db-client-busy-retry.test.ts:113. This directly reproduces the remaining ceiling flake.
+The candidate requires a fresh baseline, controls, and review against current main.
+Its justification is removal of the reproduced timing ceiling, counted failed-attempt cost, and observed contention.
+The retention batch sizer consumes executionMs. Omitted failed-attempt cost can therefore understate event-loop blocking.
 
 ### C23: Codex pool selection
 
-Implementation is in progress in an isolated worktree. Remove copied slot selection only after the exported resolver protects its contracts.
-Preserve exhaustion, availability, sparse slot identity, actual credential files, blank refresh tokens, and nonzero-slot persistence forwarding.
-No deletion or runtime result is claimed yet.
+PR #3286 merged as 048178fb7407778046bd8d23750d91f3db8569b1. Diff +40/-232 lines, net -192, across two existing test files.
+Removed the copied slot-selection algorithm and its scenarios. Existing resolver cases now read actual credential files.
+Retained guards cover exhaustion, availability, sparse slot identity, selected metadata, blank refresh tokens, and nonzero-slot persistence forwarding.
+Baseline 17 cases passed. The candidate passed 13 cases, with no new test call sites. All seven controls failed.
+The baseline missed exhaustion, refresh-token leakage, missing files, and incorrect file contents. Those controls justify resolver growth.
+Independent review found no blockers. Parent check:local passed, and five unchanged filesystem cases passed with 16 assertions.
+Scoped type diagnostics decreased from ten to four existing errors. Configured root typechecking passed.
+Availability with only unconfigured IDs, failed fetches, and non-ok responses remain uncovered branches. No live provider ran.
+
+### C24: Heartbeat audit and obsolete checklist parsing
+
+All 13 heartbeat-prefixed suites received complete static assertion review, plus extensions-heartbeat and the core-session-data scenario.
+Production review covered sweep orchestration, receipts, gate execution, expiry, recovery, rerouting, and probe cancellation.
+Some auxiliary production reads followed the initial test read. Transitive broker, runtime, workflow, and database implementations remain partial.
+The strongest candidate removes historical previous-checklist prompt-parser variants. Production reads receipts containing full task IDs instead.
+Preserve current multiline failure titles, receipt validation, and actual SQL selection of previous checklists.
+The isolated candidate changes only heartbeat-jev-gate.test.ts: +10/-196 lines, net -186.
+It removes nine historical variants and unused fixture plumbing. No new test call site was added.
+Baseline 43 cases passed. The final candidate passed 35 cases, with formatting, allowlist, and patch checks passing.
+Ignoring receipts caused five failures. Suppression by creation time caused seven failures.
+Malformed-array acceptance initially survived. A mixed string/number row in the existing table now detects it.
+All original malformed-input cases remain. Independent review found no blockers in that candidate.
+Review identified a hollow generated-heading case and a duplicate no-receipt case. Their deletion and a retained multiline control are in progress.
+Parent validation and final review remain pending. No typecheck or full suite ran during initial candidate preparation.
+The failure-query mock still copies filtering. Competing completed-checklist selection and shared-prefix ID collisions remain unproven.
+Further candidates include repeated basic stall cases, checklist rendering, and reboot task-type exclusions.
+Preserve full-sweep dispatch, workflow ownership, tracker ownership, live-session protection, boot epochs, and interrupted-write recovery separately.
+The concurrency case uses nested awaits and proves sequential idempotency, not overlapping sweeps.
+The startup timer remains active after heartbeat stops. It can reach a closed or replaced database in lifecycle tests.
+Gate setup can await an unresolved readiness signal after its deadline. The fake gate context also reproduces SQL filtering.
+Reroute rollback and actual process-restart recovery remain unproven. No unused external fixture was found.
+
+### C25: Approval audit, partial
+
+The complete approval-card-resolution test received static review against notification rendering and dispatch production.
+Supporting approval database details were read afterward. No edits, tests, or controls ran.
+Two duplicate candidates remain: the final stored-channel case and the separate rejected/operator header case.
+Preserve cancellation entry points, failed-delivery claim release, deduplication, quorum silence, late delivery, and legacy versus current DM routing.
+Fixed negative waits and call-recording readiness do not prove completion of persistence work.
+The run-cancellation fixture contains one request despite its broader title. The DM message fake persists between cases.
+The config-question helper received a full production read. Its test received partial inspection before all ingress production was read.
+That suite and the other approval files remain unaudited. No deletion recommendation applies to their bodies yet.
 
 ## Resume order
 
-1. Resolve C22, then return C15 and any related failed queue entries to the queue. Land C08 after its production dependency.
-2. Complete queued C20 and C21, remaining C12, and the isolated C23 implementation.
+1. Diagnose the later C10 queue failure. C15 landed, so C08 can proceed against its merged dependency.
+2. Validate C22 against current main. Complete C24 review and parent validation.
 3. Update the landed ledger and reconcile its inventory against merged main.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
@@ -446,11 +497,17 @@ C16: PR #3275 merged. Test diff +1/-47. Removed mock-only no-op and repeated ser
 C17 storage slice: PR #3276 merged. Test diff +89/-328. Removed duplicate fixtures and repaired access-time and rollback guards.
 C18 migration slice: PR #3272 merged. Test diff +44/-120. Replaced copied merge algorithms with production behavior.
 C19: PR #3273 merged. Test diff +0/-139. Two duplicate example suites removed, with all fixtures retained.
+C20: PR #3278 merged. Test diff +33/-22. Config changes now await restart and socket readiness before dispatch.
+C21 cancellation slice: PR #3281 merged. Test diff +14/-104. Duplicate cancellation cases consolidated around explicit readiness and abort events.
+C12: PR #3285 merged. Test diff +0/-2. Removed repeated server registrations while preserving parser and selection contracts.
+C15: PR #3269 merged. Test/helper diff +31/-23, production +1/-0. Both sandbox modes now suppress Bash startup files.
+C23: PR #3286 merged. Test diff +40/-232. Production resolver checks replace copied pool selection.
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
 
-- Test-line policy merged in PR #3254. Campaign ledger merged through PR #3270 as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
+- Test-line policy merged in PR #3254. Initial ledger PR #3270 merged as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
+- Ledger wave 5 merged through PR #3284 as cbd5f90e7ca96edefef0af7f07fe2bed6c6c7733.
 - Live provider, Linux sandbox, Docker, and browser boundaries require distinct evidence.
 - Broad app-shell failure did not reproduce alone. QuickJS readiness failure reproduced under controlled boot delay. Its repair merged in PR #3266.
 - Reviewer noted an existing missing fable alias guard. This slice did not delete that contract.
@@ -981,8 +1038,8 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/app-row-tools.test.ts | pending | |
 | src/tests/approval-auto-cancellation-migration.test.ts | pending | |
 | src/tests/approval-cancellation-migration.test.ts | pending | |
-| src/tests/approval-card-resolution.test.ts | pending | |
-| src/tests/approval-config-question.test.ts | pending | |
+| src/tests/approval-card-resolution.test.ts | partial audit | C25: full test read, supporting database reads followed tests, no controls |
+| src/tests/approval-config-question.test.ts | partial audit | C25: helper read, incomplete ingress comparison and test inspection |
 | src/tests/approval-requests-notifications.test.ts | pending | |
 | src/tests/approval-requests.test.ts | pending | |
 | src/tests/approval-respond-auth.test.ts | pending | |
@@ -1110,7 +1167,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/claude-worker-parity.test.ts | pending | |
 | src/tests/codex-adapter-otel.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-adapter-pool-auth-revalidate.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-adapter.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
+| src/tests/codex-adapter.test.ts | static audit complete | C21: cancellation landed through PR #3281 |
 | src/tests/codex-app-server.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-auth-failure.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-credential-pools.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
@@ -1121,7 +1178,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/codex-oauth-adapter.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-auth-json-fs.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-auth-timestamps.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-oauth-credential-info.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-credential-info.test.ts | landed | C23: PR #3286, production resolver and persistence contracts retained |
 | src/tests/codex-oauth-device.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-env-keys.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-keep-warm.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
@@ -1129,14 +1186,14 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/codex-oauth-refresh-lock.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-storage.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-pool.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-pool.test.ts | landed | C23: PR #3286, production resolver and persistence contracts retained |
 | src/tests/codex-rate-limit-parse.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-rate-limits.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-rollouts.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-skill-resolver.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-steering-hook.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-subprocess-steering.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-swarm-events.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
+| src/tests/codex-swarm-events.test.ts | static audit complete | C21: cancellation landed through PR #3281 |
 | src/tests/comb-config-guard.test.ts | pending | |
 | src/tests/comb-default.test.ts | pending | |
 | src/tests/comb-links.test.ts | pending | |
@@ -1179,7 +1236,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/cursor-adapter.test.ts | pending | |
 | src/tests/db-agents.test.ts | pending | |
 | src/tests/db-capacity.test.ts | pending | |
-| src/tests/db-client-busy-retry.test.ts | partial audit, repair in progress | C22: queue failure and smaller timing repair under validation |
+| src/tests/db-client-busy-retry.test.ts | partial audit, candidate rebase | C22: zero-spin ceiling also failed in queue, revised accounting controls pending on current main |
 | src/tests/db-client.test.ts | pending | |
 | src/tests/db-extraction-contract.test.ts | pending | |
 | src/tests/db-queries-oauth.test.ts | pending | |
@@ -1234,7 +1291,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/e2e-visuals-verify-pr.test.ts | pending | |
 | src/tests/egress-guard.test.ts | pending | |
 | src/tests/empty-output-schema.test.ts | pending | |
-| src/tests/enabled-tools.test.ts | implemented, reviewed | C12: two repeated registrations removed |
+| src/tests/enabled-tools.test.ts | landed | C12: PR #3285, two repeated registrations removed |
 | src/tests/ensure-token.test.ts | pending | |
 | src/tests/entrypoint-api-readiness.test.ts | pending | |
 | src/tests/entrypoint-chown-no-follow.test.ts | audited, retained | C06. GNU tooling verified. Linux container boundary pending. |
@@ -1317,19 +1374,19 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/harness-model-support.test.ts | pending | |
 | src/tests/harness-provider-resolution.test.ts | pending | |
 | src/tests/harness-version.test.ts | pending | |
-| src/tests/heartbeat-checklist-config.test.ts | pending | |
-| src/tests/heartbeat-checklist.test.ts | pending | |
-| src/tests/heartbeat-expiry.test.ts | pending | |
-| src/tests/heartbeat-jev-gate-credentials.test.ts | pending | |
-| src/tests/heartbeat-jev-gate.test.ts | pending | |
-| src/tests/heartbeat-orphan-resume.test.ts | pending | |
-| src/tests/heartbeat-reboot-live.test.ts | pending | |
-| src/tests/heartbeat-reroute-decision.test.ts | pending | |
-| src/tests/heartbeat-script-runner-probe.test.ts | pending | |
-| src/tests/heartbeat-stall-cas.test.ts | pending | |
-| src/tests/heartbeat-stall-thresholds.test.ts | pending | |
-| src/tests/heartbeat-supersede-resume.test.ts | pending | |
-| src/tests/heartbeat.test.ts | pending | |
+| src/tests/heartbeat-checklist-config.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-checklist.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-expiry.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-jev-gate-credentials.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-jev-gate.test.ts | first review passed, refinements in progress | C24: initial +10/-196, 35 cases pass, three controls detected |
+| src/tests/heartbeat-orphan-resume.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-reboot-live.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-reroute-decision.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-script-runner-probe.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-stall-cas.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-stall-thresholds.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-supersede-resume.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/helper-credentials.test.ts | pending | |
 | src/tests/hook-mcp-config.test.ts | pending | |
 | src/tests/hook-ping-me-order.test.ts | pending | |
@@ -1691,7 +1748,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/runtime-supervisor-failures.test.ts | pending | |
 | src/tests/runtime-supervisor.test.ts | pending | |
 | src/tests/runtime-token-auth.test.ts | pending | |
-| src/tests/sandboxed-process.test.ts | implemented, reviewed | C15: startup isolation in both modes |
+| src/tests/sandboxed-process.test.ts | landed | C15: PR #3269, startup isolation in both modes |
 | src/tests/savings-calibration-api.test.ts | pending | |
 | src/tests/savings-calibration.test.ts | pending | |
 | src/tests/savings-compound.test.ts | pending | |
@@ -2209,7 +2266,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-delegation-late-child.ts | pending | |
 | scripts/e2e/scenarios/slack-failed-task.ts | pending | |
 | scripts/e2e/scenarios/slack-follow-up.ts | pending | |
-| scripts/e2e/scenarios/slack-helpers.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
+| scripts/e2e/scenarios/slack-helpers.ts | landed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-http-command.ts | pending | |
 | scripts/e2e/scenarios/slack-http-cross-team-identity.ts | pending | |
 | scripts/e2e/scenarios/slack-http-helpers.ts | pending | |
@@ -2224,7 +2281,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-relay-restart.ts | pending | |
 | scripts/e2e/scenarios/slack-reply-card.ts | pending | |
 | scripts/e2e/scenarios/slack-session-mirror.ts | pending | |
-| scripts/e2e/scenarios/slack-skipped-task.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
+| scripts/e2e/scenarios/slack-skipped-task.ts | landed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-task-output-citations.ts | pending | |
 | scripts/e2e/scenarios/slack-task-output-ui-spec.ts | pending | |
 | scripts/e2e/scenarios/slack-task-tree-toggle.ts | pending | |
