@@ -1372,6 +1372,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Start Docker build timer
         id: docker-timer
@@ -1469,6 +1472,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build Docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
