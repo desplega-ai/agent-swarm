@@ -15,9 +15,9 @@ Pending inventory rows do not imply an audit. Reconcile this inventory against m
 
 Taras requested coverage and CI timing tracking alongside deletion totals.
 See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
-The current checkpoint contains 1553 net test lines and 81 cases removed across 22 merged changes.
-Paired C22, C24, and C25 card measurements lost no covered production lines within their recorded scopes.
-C25 cards landed in PR #3299. The reviewed HTTP slice in PR #3301 remains outside the merged totals.
+The current checkpoint contains 1778 net test lines and 84 cases removed across 27 merged changes.
+The published C22, C24, and C25 coverage pairs lost no covered production lines within their recorded scopes.
+C25 cards, HTTP, fallback, executor, index, and follow-up slices landed in PRs #3299, #3301, #3304, #3305, #3306, and #3307.
 Complete post-cleanup coverage and controlled CI savings remain unmeasured.
 
 ## Budget
@@ -535,21 +535,46 @@ Paired parent coverage gained 29 production route lines and lost none across 751
 Five failing controls cover filtering before limit, required and optional validation, and identity through both affected suites.
 The approval harness uses an operator fallback without request authentication. The separate auth suite resolves credentials but bypasses full-server admission.
 One baseline returned 404 instead of 409. Its response body and listener were not captured, so its cause remains an open observation.
-Subsequent passes do not prove a repair. PR #3301 awaits queue validation.
+Subsequent passes do not prove a repair. PR #3301 merged as 5a79d5be5594563fe5434084351884aea7c7266d.
 Preserve filter-before-limit, text-only answers, rejection reasons, cancelled-request refusal, defaults, and optional-answer validation.
 Other candidates include empty assertions, unused executor input, reconstructed follow-up predicates, and copied tool fallback logic.
 Replace those simulations only after the real entry point preserves their meaningful behavior. Keep parent metadata inheritance separately.
-Executor creation fixtures omit the workflow run. Production therefore creates cancelled requests while the tests only check an async marker.
-A separate candidate repairs those fixtures with a live run, a running step, pending status, and correlated request identity.
-Its first +59/-40 candidate retains 86 cases. Four controls fail, and paired coverage gains eight lines with no losses.
-Independent review confirmed correctness but identified repeated assertions and duplicated setup. Those refinements remain pending.
-Another candidate removes the copied source-task fallback case: -30 lines and one case, with unchanged measured production coverage.
+The original executor creation fixtures omitted the workflow run and passed despite creating cancelled approval rows.
+PR #3305 repairs those fixtures with a live run, a running step, pending status, and correlated request identity.
+The review-requested refinement removes repeated assertions and reuses setup: +50/-49 lines, with 87 cases reduced to 86.
+Four controls fail, and paired coverage gains eight lines with no losses. Parent check:local and composed fallback validation passed.
+PR #3305 merged as ae4bcaab8cfd30a9856041109c0f79dfa6bdb485.
+PR #3304 removes the copied source-task fallback case: -30 lines and one case, with unchanged measured production coverage.
 The original case missed a disabled production fallback. The retained MCP scenario failed both attempts, then passed after restoration.
-Its parent check:local passed. Independent review found no lost guards. Neither candidate contributes to merged totals.
+Its parent check:local passed. Independent review found no lost guards.
+PR #3304 merged as f9a8fc75b0bfdf629f76f16d5397a646921936ba. Both slices now contribute to merged totals.
+The fallback scenario depends on connectMcp omitting the source-task header. It does not prove header precedence.
+PR #3306 strengthens migration 166's index definition and complete-row checks: +8/-19 lines, with the existing case retained.
+All four controls survive the baseline and fail the candidate. Parent check:local and both migration tests passed.
+Paired coverage is unchanged across 153 production files and 31215 locations. SQL itself is not instrumented.
+Independent review approved the exact normalized DDL assertion. Equivalent SQL spelling can require an explicit assertion update.
+PR #3306 merged as c4ab35afe10f324b4f15ecb103499d53ab1a62db.
+The follow-up candidate now replaces copied predicates with accepted HTTP answers and a global task-set observation.
+It reuses existing helpers after review: +44/-64 lines, with 85 current-main cases reduced to 84.
+Eight behavior controls fail. The redundant source-free early guard survives because the later lookup also prevents creation.
+The final current-main coverage pair gains two handler lines and loses none across 752 files and 114945 locations.
+The earlier pair lost six timing-threshold logging lines. That result remains recorded and is not treated as a retry failure.
+Independent review found no lost guards. The parent completed helper reuse and repeated all controls, coverage, and check:local.
+PR #3307 merged as 9a61e25bbd125a9bc10c622a58382430478cb0f2 and contributes to merged totals.
+Notification synchronization is published as PR #3308: +41/-27 lines, with all six cases and every existing assertion retained.
+It awaits CI and merge validation. Independent review found no blockers.
+The call-through spy observes dispatch completion and replaces silent polling and fixed sleeps.
+Four behavior controls fail as expected. Delayed unwanted email posting passes the baseline but fails the candidate.
+Paired coverage matches across 778 production files and 116221 locations. Parent check:local passed.
+This slice does not establish that the HTTP response precedes Slack completion. A hung dispatch can still time out teardown.
+A separate reviewed deletion candidate removes two list and expiry cases, with 18 deleted lines and no additions.
+The retained sweep guard detects NULL-deadline inclusion. The removed loop also detects that mutation, so detection is redundant.
+The request suite loses six selector lines, but the retained sweep suite covers them. Their union loses no covered location.
+The candidate remains unpublished and outside merged totals.
 Preserve authentication and quorum cases, stale-lease ownership, actionable-workflow conditions, cancellation triggers, and actual timeout recovery.
 Preserve sweep rollback controls. Notification failures, request latency, and asynchronous dispatch completion need separate observations.
 Polling helpers can silently expire. Token expiry, timeout tolerances, and environment restoration also need bounded repairs.
-Migration 140 reconstructs a historical table while retaining later migration records. Migration 166 lacks exact index-predicate assertions.
+Migration 140 reconstructs a historical table while retaining later migration records. Migration 166 now checks its exact index predicate.
 Keep migration reconstruction and additive-index behavior separate. Neither fixture proves a complete historical upgrade.
 
 ### C26: Approval dashboard audit
@@ -575,8 +600,8 @@ Neither audit ran mutation controls. The UI audit did not run a browser or compl
 
 ## Resume order
 
-1. Complete C25 HTTP queue validation in PR #3301. The card slice and prior checkpoints have landed.
-2. Remove redundant executor assertions and publish the reviewed copied fallback deletion.
+1. Complete CI and merge validation of notification synchronization in PR #3308.
+2. Integrate the reviewed list and expiry deletion candidate onto current main and validate its composition.
 3. Validate the bounded C26 candidates and continue remaining approval repairs. Reconcile inventory after merges.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
@@ -605,6 +630,11 @@ C15: PR #3269 merged. Test/helper diff +31/-23, production +1/-0. Both sandbox m
 C23: PR #3286 merged. Test diff +40/-232. Production resolver checks replace copied pool selection.
 C24: PR #3294 merged. Test diff +9/-241. Removed obsolete prompt-parser cases while retaining receipt and multiline-title guards.
 C25 cards: PR #3299 merged. Test diff +2/-17. Two duplicate cases consolidated with no measured production coverage loss.
+C25 HTTP: PR #3301 merged. Test diff +43/-208. Production handler replaces copied logic, with all 87 cases retained.
+C25 fallback: PR #3304 merged. Test diff +0/-30. Real MCP fallback coverage replaces the copied predicate case.
+C25 executor: PR #3305 merged. Test diff +50/-49. Actionable fixtures detect cancelled creation and incorrect correlation.
+C25 index: PR #3306 merged. Test diff +8/-19. Exact index and complete row checks detect four previously missed regressions.
+C25 follow-up: PR #3307 merged. Test diff +44/-64. Real HTTP answers replace copied predicates and Slack metadata simulation.
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
@@ -1143,12 +1173,12 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/api-keys-validation.test.ts | pending | |
 | src/tests/app-action-run-tool.test.ts | pending | |
 | src/tests/app-row-tools.test.ts | pending | |
-| src/tests/approval-auto-cancellation-migration.test.ts | test audit complete, production partial | C25: additive-index and selective replay limits, no runtime controls |
+| src/tests/approval-auto-cancellation-migration.test.ts | landed | C25 PR #3306: +8/-19, four controls, selective replay and uninstrumented SQL limits |
 | src/tests/approval-cancellation-migration.test.ts | test audit complete, production partial | C25: table reconstruction and field preservation, no runtime controls |
 | src/tests/approval-card-resolution.test.ts | landed | C25 PR #3299: +2/-17, 20 cases, four controls, zero lost measured production lines |
 | src/tests/approval-config-question.test.ts | test audit complete, production partial | C25: all 702 lines reviewed, direct normalization and answer paths compared, preserve separate secret and ingress contracts |
-| src/tests/approval-requests-notifications.test.ts | test audit complete, production partial | C25: retain Slack persistence and external-channel refusal, timing gaps recorded |
-| src/tests/approval-requests.test.ts | test audit complete, production partial | C25 PR #3301 reviewed and queued, executor and fallback candidates under review, preserve transaction boundaries |
+| src/tests/approval-requests-notifications.test.ts | test audit complete, production partial | C25: PR #3308 reviewed, CI/merge pending; observed dispatch completion, latency limit recorded |
+| src/tests/approval-requests.test.ts | test audit complete, production partial | C25 PRs #3301, #3304, #3305, #3307 landed; reviewed list/expiry deletion pending, preserve transaction boundaries |
 | src/tests/approval-respond-auth.test.ts | test audit complete, production partial | C25: preserve principals, attribution, quorum, and concurrency, full-server admission remains separate |
 | src/tests/approval-sweeps.test.ts | test audit complete, production partial | C25: preserve rollback, recovery routing, deadlines, and cascade, no runtime controls |
 | src/tests/apps-action-parent-task.test.ts | static audit complete | C18: controls and consolidation pending |
