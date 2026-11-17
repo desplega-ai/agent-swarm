@@ -9,6 +9,13 @@ Read production before judging tests. Preserve distinct platform and integration
 A completed row needs contract reasoning, validation evidence, and a landed PR or a precise blocker.
 Pending inventory rows do not imply an audit. Reconcile this inventory against main after each merge.
 
+## Measurements
+
+Taras requested coverage and CI timing tracking alongside deletion totals.
+See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
+The first checkpoint contains 1153 net test lines and 61 cases removed across 17 merged changes.
+Complete post-cleanup coverage and controlled CI savings remain unmeasured.
+
 ## Budget
 
 Taras requested a budget after the inventory found no existing policy.
