@@ -169,8 +169,32 @@ Parent check:local passed after rebase onto main at 498e8d3542. The implementati
 Five controls failed. Parent paired coverage measured 751 files and 114917 fixed line locations, with 29 gained and zero lost production lines.
 Independent review found no lost guards. Full-server admission remains outside these handler harnesses.
 A baseline 404 instead of 409 remains unexplained. Subsequent passes do not establish a repair.
-The executor fixture and copied fallback candidates passed their scoped checks and controls.
-Independent review accepted the fallback deletion. It confirmed executor correctness but requested removal of repeated assertions and duplicated setup.
+PR #3301 merged as 5a79d5be5594563fe5434084351884aea7c7266d.
+The executor fixture and copied fallback slices passed their scoped checks and controls.
+Independent review accepted the fallback deletion. The parent removed repeated executor assertions and duplicated setup before publication.
+PR #3304 merged as f9a8fc75b0bfdf629f76f16d5397a646921936ba: -30 lines and one case.
+Its retained MCP scenario detects disabled fallback. Paired approval-suite coverage loses no production lines.
+PR #3305 merged as ae4bcaab8cfd30a9856041109c0f79dfa6bdb485: +50/-49 lines and one consolidated case.
+All four executor controls fail the refined candidate. Cancelled creation and incorrect correlation pass on the baseline.
+Its paired coverage gains eight production lines and loses none. Rebased check:local passed with 86 cases and 275 assertions.
+Both patches also passed a combined run with 85 cases and 274 assertions.
+PR #3306 merged as c4ab35afe10f324b4f15ecb103499d53ab1a62db: +8/-19 lines, with the same migration case retained.
+The wrong index column, wrong status filter, missing expiry filter, and overwritten-title controls all survive the baseline and fail the candidate.
+Independent review found no blocker. Parent check:local passed. Both migration cases passed with 12 assertions.
+The exact normalized DDL assertion can reject equivalent SQL spelling. Migration SQL itself has no LCOV instrumentation.
+The paired loaded production scope has 153 files and 31215 locations, with identical 9554 covered locations.
+These handler, executor, and migration fixtures do not establish live Slack, full-server admission, workflow resumption, or reopen durability.
+
+The follow-up candidate uses main c4ab35afe10f324b4f15ecb103499d53ab1a62db and changes only approval-requests.test.ts.
+After review, it reuses HTTP and workflow fixtures: +44/-64 lines, with 85 cases reduced to 84.
+Baseline and candidate pass with 274 and 275 assertions. Both pass 55 adjacent cases with 176 assertions.
+Eight behavior controls fail the candidate. Five pass on the baseline. The redundant source-free early guard survives both.
+Current-main LCOV gains two handler lines and loses none across 752 files and 114945 locations.
+An earlier candidate pair lost six timing-dependent logging locations. Those logs remain part of the evidence.
+The later pair follows actual test refinements and a changed baseline. It is not a coverage retry.
+Parent check:local passed in 22 seconds, including root typechecking and all 84 affected cases. E2E skipped because no executable path changed.
+The allowlist and whitespace checks passed. Production remains unchanged. PR #3307 merged as 9a61e25bbd125a9bc10c622a58382430478cb0f2.
+Notification synchronization is a separate bounded implementation, with no result claimed yet.
 The seven-file approval dashboard audit ran no tests or controls. Its two bounded recommendations remain unimplemented.
 
 Two new main files remain unchanged after audit. The pre-push selector passed four cases and 39 assertions.
@@ -179,3 +203,16 @@ These two checks ran without mutation controls. No browser or complete UI subsys
 
 C10 merged as 7be110da2c264e6ba3e68879818f7ad0d168c5bd after C22 removed the reproduced timing ceiling.
 C24 merged as 5ee2b27ad8ffc9d089a7f59ffce89396a95b2673. The coverage checkpoint merged through PR #3295 as 36a09fbd30ed871c2b47627942441324b8aae323.
+
+## C25 notification synchronization and list/expiry review
+
+PR #3308 retains six cases and all old assertions. Its test diff is +41/-27 lines.
+Parent check:local passed. Four behavior controls fail, and the delayed unwanted-email control catches a baseline false pass.
+Coverage matches across 778 production files and 116221 locations. Independent review found no blockers.
+CI and merge validation remain pending. Response latency and dispatch hangs remain separate limits.
+
+The unpublished list/expiry candidate deletes 18 lines and two cases. Both affected suites passed: 114 baseline and 112 candidate cases.
+Three controls fail on both versions. The NULL control fails twice on baseline and once on candidate.
+The deleted expiry loop detects that regression, but the retained sweep guard also detects it.
+Requests alone lose six selector lines. The two-suite union retains all 26274 covered locations out of 115005 across 753 production files.
+Independent review approved the deletion. Integration onto current main remains pending.

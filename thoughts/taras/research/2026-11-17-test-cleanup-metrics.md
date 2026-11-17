@@ -5,20 +5,18 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 22 merged cleanup changes, verified through GitHub.
-Merge status checkpoint: 2026-11-17 at 19:55 BCN.
+The current checkpoint includes 27 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: 2026-11-17 at 20:39 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 22 merged changes | 494 | 2047 | 1553 | 81 | 3 |
-| Pending C25 HTTP only | 43 | 208 | 165 | 0 | 0 |
-| Combined, if C25 HTTP lands unchanged | 537 | 2255 | 1718 | 81 | 3 |
+| 27 merged changes | 639 | 2417 | 1778 | 84 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299.
-Pending means implemented and reviewed, not merged. C25 HTTP is PR #3301.
-Executor fixture refinements and the reviewed copied fallback candidate remain unpublished and outside these totals.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307.
+The latest five slices contribute +145/-370 lines and three removed cases.
+Notification synchronization and the reviewed list/expiry candidate remain outside merged totals.
 The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
@@ -62,8 +60,9 @@ No complete post-cleanup coverage comparison exists yet. The historical referenc
 
 ## Paired coverage checkpoint, 2026-11-17
 
-The four published-slice pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
-The scope excludes src/tests. Each pair uses one changed test file, with the existing coverage configuration and preload.
+The published-slice pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
+The scope excludes tests. Each pair names its test selection.
+Newer pairs use a copy of the existing coverage configuration, the existing preload, and a network guard.
 
 | Slice | Source base | Cases before / after | Loaded production files | Covered lines before / after | Instrumented lines | Lost covered lines |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -71,6 +70,10 @@ The scope excludes src/tests. Each pair uses one changed test file, with the exi
 | C24, PR #3294 | b2ae0d76bf | 43 / 33 | 744 | 24544 / 24544 | 113518 | 0 |
 | C25 cards, PR #3299 | 4731627d06 | 22 / 20 | 224 | 11733 / 11740 | 40097 | 0 |
 | C25 HTTP, PR #3301 | 36a09fbd30 | 87 / 87 | 751 | 25302 / 25331 | 114917 | 0 |
+| C25 fallback, PR #3304 | 498e8d3542 | 87 / 86 | 751 | 25302 / 25302 | 114917 | 0 |
+| C25 executor, PR #3305 | 36a09fbd30 | 87 / 86 | 777 | 25739 / 25747 | 116193 | 0 |
+| C25 index, PR #3306 | 43e3e5027b | 2 / 2 | 153 | 9554 / 9554 | 31215 | 0 |
+| C25 follow-up, PR #3307 | c4ab35afe1 | 85 / 84 | 752 | 25357 / 25359 | 114945 | 0 |
 
 The comparisons also checked source locations. No pair changed its instrumented line total or loaded production file set.
 C24 retained every covered source location. Its four regression controls also failed as expected.
@@ -80,8 +83,11 @@ C25 preserves coverage in approval notifications, both measured storage modules,
 Its seven additional scrubber hits are incidental and do not establish stronger regression coverage.
 Four controls failed retained assertions. The absent-channelId fallback remains untested before and after consolidation.
 C25 HTTP gains 29 lines in the real approval route. Its five controls provide behavior evidence beyond those line counts.
-Unpublished executor and fallback candidates also have paired evidence. Review accepted the fallback deletion and requested smaller executor coverage.
-The executor scope includes packages and uses a different denominator, so do not sum their coverage counts.
+The fallback pair uses the approval suite. Its real MCP control runs separately through workflow-approvals.
+The executor scope includes packages and uses a different denominator, so do not sum these coverage counts.
+Executor gains cover actionable creation and the normal async return path. All four controls fail after removing repeated assertions.
+The index pair runs both approval migration tests. SQL is not instrumented, so four migration controls provide the useful evidence.
+The index definition and complete row assertions detect all four regressions that the baseline missed.
 The artifacts contain no branch records. These scoped results do not establish repository-wide coverage equality.
 Coverage-instrumented durations are not performance measurements.
 
