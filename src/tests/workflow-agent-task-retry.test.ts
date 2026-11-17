@@ -292,7 +292,6 @@ describe("agent-task node.retry on task failure", () => {
     teardownResumeListener?.();
     try {
       await failTask(first.id, "superseded_workflow_task");
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
@@ -429,7 +428,6 @@ describe("implicit retry for a superseded task on a node without retry", () => {
     teardownResumeListener?.();
     try {
       await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
@@ -478,7 +476,6 @@ describe("a cut the workflow carries on without", () => {
     teardownResumeListener?.();
     try {
       await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
