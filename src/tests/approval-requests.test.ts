@@ -1365,40 +1365,6 @@ describe("Approval Requests", () => {
       expect(resolved!.sourceTaskId).toBe(sourceTask.id);
     });
 
-    test("follow-up task inherits Slack metadata from source task via parentTaskId", async () => {
-      const agent = await createAgent({
-        name: "test-slack-inherit-agent",
-        isLead: false,
-        status: "idle",
-      });
-      const sourceTask = await createTaskExtended("source task", {
-        agentId: agent.id,
-        source: "mcp",
-        slackChannelId: "C_FOLLOW_UP",
-        slackThreadTs: "9999999999.000000",
-        slackUserId: "U_FOLLOW_UP",
-      });
-
-      // Simulate what the respond handler does: create follow-up with parentTaskId
-      const followUp = await createTaskExtended("follow-up task text", {
-        agentId: sourceTask.agentId ?? undefined,
-        parentTaskId: sourceTask.id,
-        source: "system",
-        taskType: "hitl-follow-up",
-        tags: ["hitl", "follow-up"],
-        // Explicit Slack metadata (as the handler now does)
-        slackChannelId: sourceTask.slackChannelId ?? undefined,
-        slackThreadTs: sourceTask.slackThreadTs ?? undefined,
-        slackUserId: sourceTask.slackUserId ?? undefined,
-      });
-
-      expect(followUp.slackChannelId).toBe("C_FOLLOW_UP");
-      expect(followUp.slackThreadTs).toBe("9999999999.000000");
-      expect(followUp.slackUserId).toBe("U_FOLLOW_UP");
-      expect(followUp.parentTaskId).toBe(sourceTask.id);
-      expect(followUp.taskType).toBe("hitl-follow-up");
-    });
-
     test("follow-up task inherits Slack metadata even without explicit pass (auto-inheritance)", async () => {
       const agent = await createAgent({
         name: "test-auto-inherit-agent",
@@ -1424,31 +1390,6 @@ describe("Approval Requests", () => {
       expect(followUp.slackChannelId).toBe("C_AUTO");
       expect(followUp.slackThreadTs).toBe("1111111111.000000");
       expect(followUp.slackUserId).toBe("U_AUTO");
-    });
-
-    test("no follow-up for workflow-linked requests (workflowRunId set)", async () => {
-      const approvalData = makeApprovalData({
-        sourceTaskId: crypto.randomUUID(),
-        workflowRunId: crypto.randomUUID(),
-        workflowRunStepId: crypto.randomUUID(),
-      });
-      const approval = await createApprovalRequest(approvalData);
-
-      // The condition in the handler is: !updated.workflowRunId && updated.sourceTaskId
-      // With workflowRunId set, this should be false
-      expect(approval.workflowRunId).toBeTruthy();
-      expect(approval.sourceTaskId).toBeTruthy();
-      // The handler would NOT create a follow-up task here
-      expect(!approval.workflowRunId && approval.sourceTaskId).toBe(false);
-    });
-
-    test("no follow-up when sourceTaskId is missing", async () => {
-      const approvalData = makeApprovalData(); // no sourceTaskId
-      const approval = await createApprovalRequest(approvalData);
-
-      expect(approval.sourceTaskId).toBeNull();
-      // The handler condition would be false
-      expect(!approval.workflowRunId && approval.sourceTaskId).toBeFalsy();
     });
   });
 
@@ -1541,8 +1482,8 @@ describe("Approval Requests", () => {
     }
 
     async function followUps(parentTaskId: string) {
-      return getDbClient().query<{ task: string }>(
-        "SELECT task FROM agent_tasks WHERE taskType = 'hitl-follow-up' AND parentTaskId = ?",
+      return getDbClient().query<{ id: string; task: string }>(
+        "SELECT id, task FROM agent_tasks WHERE taskType = 'hitl-follow-up' AND parentTaskId = ?",
         [parentTaskId],
       );
     }
@@ -1564,17 +1505,51 @@ describe("Approval Requests", () => {
 
     const approve = { responses: { q1: { approved: true } } };
 
+    async function followUpIds() {
+      return getDbClient().query(
+        "SELECT id FROM agent_tasks WHERE taskType = 'hitl-follow-up' ORDER BY id",
+      );
+    }
+
+    test("no follow-up for workflow-linked requests (workflowRunId set)", async () => {
+      const { approvalId } = await makeRun("waiting", await sourceTask());
+      const before = await followUpIds();
+      const res = await post(`/api/approval-requests/${approvalId}/respond`, approve);
+      expect(res.status).toBe(200);
+      expect(res.body.approvalRequest.status).toBe("approved");
+      expect(await followUpIds()).toEqual(before);
+    });
+
+    test("no follow-up when sourceTaskId is missing", async () => {
+      const approval = await createApprovalRequest(makeApprovalData());
+      expect(approval.sourceTaskId).toBeNull();
+      const before = await followUpIds();
+      const res = await post(`/api/approval-requests/${approval.id}/respond`, approve);
+      expect(res.status).toBe(200);
+      expect(res.body.approvalRequest.status).toBe("approved");
+      expect(await followUpIds()).toEqual(before);
+    });
+
     test("a respond on a standalone request still creates the hitl.follow_up task", async () => {
       const taskId = await sourceTask();
+      await getDbClient().run(
+        "UPDATE agent_tasks SET slackChannelId = ?, slackThreadTs = ?, slackUserId = ? WHERE id = ?",
+        ["C_FOLLOW_UP", "9999999999.000000", "U_FOLLOW_UP", taskId],
+      );
       const data = makeApprovalData({ sourceTaskId: taskId });
       await createApprovalRequest(data);
 
       const res = await post(`/api/approval-requests/${data.id}/respond`, approve);
 
       expect(res.status).toBe(200);
+      expect(res.body.approvalRequest.status).toBe("approved");
       const tasks = await followUps(taskId);
       expect(tasks).toHaveLength(1);
       expect(tasks[0]!.task).toContain("Human responded to your approval request");
+      const followUp = (await getTaskById(tasks[0]!.id))!;
+      expect(followUp.slackChannelId).toBe("C_FOLLOW_UP");
+      expect(followUp.slackThreadTs).toBe("9999999999.000000");
+      expect(followUp.slackUserId).toBe("U_FOLLOW_UP");
     });
 
     test("a respond still creates the hitl.follow_up task after the source task completes", async () => {
@@ -1705,7 +1680,7 @@ describe("Approval Requests", () => {
       expect(await followUps(taskId)).toHaveLength(0);
     });
 
-    async function makeRun(status: "waiting" | "cancelled" | "completed") {
+    async function makeRun(status: "waiting" | "cancelled" | "completed", sourceTaskId?: string) {
       const workflow = await createWorkflow({
         name: `approval-cancel-${crypto.randomUUID()}`,
         definition: { nodes: [] },
@@ -1719,10 +1694,15 @@ describe("Approval Requests", () => {
         nodeId: "approval",
         nodeType: "human-in-the-loop",
       });
-      await updateWorkflowRunStep(stepId, { status: "waiting" });
       const approval = await createApprovalRequest(
-        makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId }),
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: stepId,
+          sourceTaskId,
+          requireActionableWorkflow: true,
+        }),
       );
+      await updateWorkflowRunStep(stepId, { status: "waiting" });
       await updateWorkflowRun(runId, { status });
       return { runId, stepId, approvalId: approval.id };
     }
