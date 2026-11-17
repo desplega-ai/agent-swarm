@@ -32,6 +32,7 @@ import { CLAUDE_CREDENTIALS_HINT, validateClaudeCredentials } from "../utils/cre
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import {
   parseStderrForErrors,
+  RATE_LIMIT_WINDOWS_EVENT,
   redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
@@ -1293,6 +1294,10 @@ class ClaudeSession implements ProviderSession {
       for (const event of normalized.events) this.emit(event);
 
       trackErrorFromJson(json, this.errorTracker);
+      if (json.type === "rate_limit_event") {
+        const windows = this.errorTracker.getRateLimitWindows();
+        if (windows) this.emit({ type: "custom", name: RATE_LIMIT_WINDOWS_EVENT, data: windows });
+      }
     } catch {
       // Not JSON — ignore
     }

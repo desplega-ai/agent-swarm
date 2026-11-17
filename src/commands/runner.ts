@@ -97,7 +97,11 @@ import {
   normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
-import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
+import {
+  RATE_LIMIT_WINDOWS_EVENT,
+  type RateLimitWindowTelemetry,
+  resolveCodexCreditsExhaustedCooldownMs,
+} from "../utils/error-tracker.ts";
 import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
@@ -130,7 +134,12 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
-import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
+import {
+  createWindowStreamReporter,
+  reportCredentialOutcomeThenFinish,
+  reportKeyRateLimitWindows,
+  reportTerminalSessionWindows,
+} from "./credential-outcome-report.ts";
 import {
   type CredentialRefreshState,
   credentialFingerprint,
@@ -4494,6 +4503,10 @@ function providerEventAttributes(event: ProviderEvent): Attributes {
         "agentswarm.context.total_tokens": event.contextTotalTokens,
       };
     case "custom":
+      // A window snapshot can carry seat billing fields: keep it off the span.
+      if (event.name === RATE_LIMIT_WINDOWS_EVENT) {
+        return { "agentswarm.provider.event_name": event.name };
+      }
       return {
         "agentswarm.provider.event_name": event.name,
         "agentswarm.provider.event_data_preview": telemetryPreview(event.data),
@@ -5068,10 +5081,33 @@ export async function spawnProviderProcess(
     }
   }
 
+  // Mid-session window snapshots, throttled: the pool view stays fresh while a
+  // long session runs, and a crash loses less than the whole session.
+  const streamWindows =
+    credentialInfo && opts.apiUrl
+      ? createWindowStreamReporter({
+          post: (windows) =>
+            reportKeyRateLimitWindows(
+              opts.apiUrl,
+              opts.apiKey,
+              credentialInfo.keyType,
+              credentialInfo.keySuffix,
+              credentialInfo.keyIndex,
+              windows,
+              false,
+            ),
+        })
+      : undefined;
+
   session.onEvent((event) =>
     withSpanContext(sessionSpan, () => {
       sessionSpan.addEvent(`provider.${event.type}`, providerEventAttributes(event));
       switch (event.type) {
+        case "custom":
+          if (event.name === RATE_LIMIT_WINDOWS_EVENT && streamWindows) {
+            streamWindows(event.data as RateLimitWindowTelemetry);
+          }
+          break;
         case "session_init":
           providerSessionId = event.sessionId;
           pendingHarnessVariant = event.harnessVariant;
@@ -5979,8 +6015,18 @@ export async function checkCompletedProcesses(
           cancelledSignaled?.delete(taskId);
           // The server finished this task without the session (heartbeat sweep,
           // another writer). Its result stands: no finish call, and no credential
-          // or model outcome built from the abort this runner forced.
+          // or model outcome built from the abort this runner forced. The usage
+          // windows the session observed are provider facts, so they still go out.
           if (serverTerminalStatus) {
+            if (apiConfig) {
+              void reportTerminalSessionWindows({
+                apiUrl: apiConfig.apiUrl,
+                apiKey: apiConfig.apiKey,
+                credentialInfo,
+                serverTerminalStatus,
+                rateLimitWindows: result.rateLimitWindows,
+              });
+            }
             console.log(
               `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
             );

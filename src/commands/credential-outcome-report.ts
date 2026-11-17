@@ -103,6 +103,102 @@ export async function reportKeyRateLimitWindows(
   }
 }
 
+/** Server terminal statuses whose finished session still reports its window telemetry. */
+const TELEMETRY_TERMINAL_STATUSES = new Set(["completed", "failed"]);
+
+/**
+ * Reports the window snapshot of a session whose task the server already
+ * holds as `completed` or `failed` (the agent finished the task before its
+ * session ended). The server result stands, so no outcome and no `finish`:
+ * only the provider usage the session observed. Fire-and-forget; returns the
+ * settled report so a test can await it. Never throws.
+ */
+export function reportTerminalSessionWindows(input: {
+  apiUrl: string;
+  apiKey: string;
+  credentialInfo?: { keyType: string; keySuffix: string; keyIndex: number };
+  serverTerminalStatus: string;
+  rateLimitWindows?: RateLimitWindowTelemetry;
+}): Promise<void> {
+  const { credentialInfo, rateLimitWindows } = input;
+  if (
+    !credentialInfo ||
+    !TELEMETRY_TERMINAL_STATUSES.has(input.serverTerminalStatus) ||
+    !rateLimitWindows ||
+    Object.keys(rateLimitWindows).length === 0
+  ) {
+    return Promise.resolve();
+  }
+  return reportKeyRateLimitWindows(
+    input.apiUrl,
+    input.apiKey,
+    credentialInfo.keyType,
+    credentialInfo.keySuffix,
+    credentialInfo.keyIndex,
+    rateLimitWindows,
+  ).catch((err) => {
+    console.warn(
+      `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
+}
+
+/**
+ * Throttles mid-session window reports. A snapshot goes out when it carries a
+ * window the last report did not, when any window's utilization moved by
+ * `minDeltaPoints` percentage points or more, or when `minIntervalMs` passed.
+ * `post` is fire-and-forget: a rejection is logged, never thrown, and a
+ * failed report does not count as sent.
+ */
+export function createWindowStreamReporter(opts: {
+  post: (windows: RateLimitWindowTelemetry) => Promise<void>;
+  minDeltaPoints?: number;
+  minIntervalMs?: number;
+  now?: () => number;
+}): (windows: RateLimitWindowTelemetry) => void {
+  const minDelta = (opts.minDeltaPoints ?? 5) / 100;
+  const minIntervalMs = opts.minIntervalMs ?? 60_000;
+  const now = opts.now ?? Date.now;
+  let lastSentAt: number | undefined;
+  let lastSent: Record<string, number | undefined> = {};
+
+  const due = (windows: RateLimitWindowTelemetry, at: number): boolean => {
+    if (lastSentAt === undefined || at - lastSentAt >= minIntervalMs) return true;
+    return Object.entries(windows).some(([key, window]) => {
+      if (!(key in lastSent)) return true;
+      const before = lastSent[key];
+      const after = window.utilization;
+      if (before === undefined || after === undefined) return before !== after;
+      return Math.abs(after - before) >= minDelta - 1e-9;
+    });
+  };
+
+  return (windows) => {
+    if (Object.keys(windows).length === 0) return;
+    const at = now();
+    if (!due(windows, at)) return;
+    const previous = { sentAt: lastSentAt, sent: lastSent };
+    lastSentAt = at;
+    lastSent = Object.fromEntries(Object.entries(windows).map(([k, w]) => [k, w.utilization]));
+    let report: Promise<void>;
+    try {
+      report = opts.post(windows);
+    } catch (err) {
+      report = Promise.reject(err);
+    }
+    report.catch((err) => {
+      // Retry on the next event rather than wait out the interval.
+      if (lastSentAt === at) {
+        lastSentAt = previous.sentAt;
+        lastSent = previous.sent;
+      }
+      console.warn(
+        `[credential] Failed to stream rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  };
+}
+
 export interface CredentialOutcomeInput {
   apiUrl: string;
   apiKey: string;

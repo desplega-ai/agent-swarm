@@ -21260,6 +21260,19 @@
                     },
                     "authFailureFence": {
                       "type": "integer"
+                    },
+                    "keyUsage": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "activeSessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   },
                   "required": [
@@ -21267,7 +21280,9 @@
                     "availableIndices",
                     "totalKeys",
                     "spendCappedIndices",
-                    "authFailureFence"
+                    "authFailureFence",
+                    "keyUsage",
+                    "activeSessions"
                   ]
                 }
               }

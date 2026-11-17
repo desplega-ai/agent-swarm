@@ -5,8 +5,11 @@ import {
   currentQuotaWindows,
   formatPeriod,
   planDisplay,
+  QUOTA_STALE_MS,
+  quotaIsStale,
   quotaRemaining,
   quotaResetIn,
+  quotaWarning,
   usageCreditsLabel,
 } from "./provider-quota";
 
@@ -411,5 +414,35 @@ describe("compact quota values", () => {
     expect(quotaResetIn(NOW + 500, NOW)).toBe("1m");
     expect(quotaResetIn(NOW + 90 * 60_000, NOW)).toBe("1h 30m");
     expect(quotaResetIn(NOW + 75 * 3_600_000, NOW)).toBe("3d 3h");
+  });
+});
+
+describe("quota staleness and warning", () => {
+  test("a window observed more than 15 minutes ago is stale", () => {
+    expect(QUOTA_STALE_MS).toBe(15 * 60_000);
+    expect(quotaIsStale({ observedAt: iso(NOW - 14 * 60_000) }, NOW)).toBe(false);
+    expect(quotaIsStale({ observedAt: iso(NOW - 15 * 60_000) }, NOW)).toBe(false);
+    expect(quotaIsStale({ observedAt: iso(NOW - 15 * 60_000 - 1) }, NOW)).toBe(true);
+    expect(quotaIsStale({ observedAt: iso(NOW - 70 * 60_000) }, NOW)).toBe(true);
+    expect(quotaIsStale({ observedAt: "not a date" }, NOW)).toBe(true);
+  });
+
+  test("a rejected window warns as rate limited until its reset", () => {
+    expect(quotaWarning({ limited: true, resetsAtMs: NOW + H, overageStatus: "rejected" })).toEqual(
+      { kind: "limited", untilMs: NOW + H },
+    );
+    expect(quotaWarning({ limited: true, resetsAtMs: null })).toEqual({
+      kind: "limited",
+      untilMs: null,
+    });
+  });
+
+  test("disabled usage credits warn on their own", () => {
+    expect(
+      quotaWarning({ limited: false, resetsAtMs: NOW + H, overageStatus: "rejected" }),
+    ).toEqual({ kind: "overage-rejected" });
+    expect(quotaWarning({ limited: false, resetsAtMs: NOW + H, overageStatus: "allowed" })).toBe(
+      null,
+    );
   });
 });
