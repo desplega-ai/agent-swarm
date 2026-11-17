@@ -10,6 +10,8 @@ Sheets are spreadsheets with live formulas. Boards are Excalidraw diagrams. Both
 | A diagram or plan someone will move around (flow, architecture, rollout, mind map) | a board (`ctx.boards`) |
 | A static table the reader only reads once | a Markdown table in your reply or report |
 | A person asked for an Excel file, or sent one | a sheet, plus `importXlsx` / `exportXlsx` |
+| A designed report or snapshot to share by URL | a page (the `pages` skill); embed the sheet or board in it |
+| Records with queries, filters or action buttons | an app (the `apps` skill); embed the sheet or board in it |
 
 ## How to call
 
@@ -160,7 +162,7 @@ export default async function (args, ctx) {
 
 ## Embed in an app or a page
 
-An app shows a live, editable sheet or board with `{ "type": "ObjectEmbed", "props": { "objectId": "<object id>" } }`. A page shows it with this snippet, where `${APP_URL}` is the dashboard origin:
+An app (the `apps` skill) shows a live, editable sheet or board with `{ "type": "ObjectEmbed", "props": { "objectId": "<object id>" } }`. A page (the `pages` skill) shows it with this snippet, where `${APP_URL}` is the dashboard origin:
 
 ```html
 <script type="module" src="${APP_URL}/embed/v1/swarm-object.js"></script>
