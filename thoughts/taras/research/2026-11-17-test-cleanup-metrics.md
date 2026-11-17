@@ -5,24 +5,24 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The first checkpoint includes 17 merged cleanup changes, verified through GitHub.
+The current checkpoint includes 18 merged cleanup changes, verified through GitHub.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 17 merged changes | 384 | 1537 | 1153 | 61 | 3 |
-| Pending C08, C10, C22, C24 only | 108 | 493 | 385 | 18 | 0 |
-| Combined, if all four land unchanged | 492 | 2030 | 1538 | 79 | 3 |
+| 18 merged changes | 430 | 1615 | 1185 | 66 | 3 |
+| Pending C10, C22, C24 only | 62 | 415 | 353 | 13 | 0 |
+| Combined, if all three land unchanged | 492 | 2030 | 1538 | 79 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269.
-Pending means implemented and reviewed, not merged. C08 is PR #3291. C10 is PR #3274.
-C22 and C24 remain candidate patches at this checkpoint.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291.
+Pending means implemented and reviewed, not merged. C10 is PR #3274, C22 is PR #3293, and C24 is PR #3294.
 
 ## Forecast, not an acceptance target
 
-The inventory has 1613 current test files. Of these, 171 received at least partial audit work and 1442 remain pending.
-Straight extrapolation from current reductions gives about 10900 net lines and 575 cases removed across the whole campaign.
+The reconciled inventory has 1615 current test files. Of these, 173 received at least partial audit work and 1442 remain pending.
+Two files appeared on main after the initial inventory. Both remain pending. Three campaign-deleted rows remain as historical records.
+The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
 This extrapolation is weak. The inspected files are not a random sample, and partial audits are not completed cleanup.
 
 Planning ranges for the complete campaign, including work already merged:
@@ -56,6 +56,28 @@ Root, package, API E2E, and UI E2E coverage remain separate until their source s
 The next nightly run, [44016125613](https://github.com/desplega-ai/agent-swarm/actions/runs/44016125613), failed its test step.
 It started on 2026-11-17 at 05:17 BCN. Do not treat any partial artifact from it as a successful replacement baseline.
 No complete post-cleanup coverage comparison exists yet. The historical reference predates unrelated production changes too.
+
+## Paired coverage checkpoint, 2026-11-17
+
+Both pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
+The scope excludes src/tests. Each pair uses one changed test file, with the existing coverage configuration and preload.
+
+| Slice | Source base | Cases before / after | Loaded production files | Covered lines before / after | Instrumented lines | Lost covered lines |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| C22, PR #3293 | 37d3a1bc85 | 18 / 18 | 152 | 10033 / 10216 | 31196 | 0 |
+| C24, PR #3294 | b2ae0d76bf | 43 / 33 | 744 | 24544 / 24544 | 113518 | 0 |
+
+The comparisons also checked source locations. Neither pair changed its instrumented line locations or loaded production file set.
+C24 retained every covered source location. Its four regression controls also failed as expected.
+C22 gained nine slow-statement warning lines and 174 scrubber lines because logging depends on timing.
+Do not count those 183 lines as new regression coverage. Its accounting controls provide the behavioral evidence.
+Neither artifact contains branch records. These scoped results do not establish repository-wide coverage equality.
+Coverage-instrumented durations are not performance measurements.
+
+One parent C22 attempt overlapped coverage and ordinary tests against the same fixture database.
+That ordinary run produced seven lock failures. Both overlapping runs were discarded.
+Sequential coverage and check:local runs then passed. Never run these fixture consumers concurrently.
+The earlier implementation run also had one unrelated sibling timing failure, recorded in the validation ledger.
 
 ## CI timing reference
 
@@ -96,3 +118,27 @@ For example, PR #3291 reports a 51% root wall-time reduction against main while 
 
 After each merged batch, append a dated checkpoint with PRs, cumulative reductions, coverage artifacts, timing samples, and unresolved limitations.
 Keep missing coverage or timing evidence explicitly unmeasured. The campaign is not complete while its coverage comparison remains unresolved.
+
+## Local validation selection
+
+PR #3287 changes local pre-push and check:local selection. It selects nearby tests and lints changed files.
+PR #3292 documents that behavior. Both are present in the parent branch based on main at 59e73f06a1.
+The reported 427-to-39-second comparison belongs to #3287's hook change, not this cleanup campaign.
+Merge-queue CI still runs the full suite. Keep local selection savings separate from cleanup timing comparisons.
+Use PRE_PUSH_FULL=1 when full local validation is required. Coverage comparisons must name their actual test selection.
+
+## Paired artifact identity
+
+Local LCOV artifacts use /tmp/test-cleanup-c22-coverage and /tmp/test-cleanup-c24-coverage, with before and after subdirectories.
+These hashes identify the compared files. Temporary paths are not durable download links.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| C22 before | 24b97445becf22ad5eba31673dd57005f5759f5f6ea1cde5d77f6b3df79d7258 |
+| C22 after | b16aa6b59c7e2f94c406a243c01ca72f4d9b5939c6671e588e41286d0e76d074 |
+| C24 before | 6bbdfac58f86f51737fc6cbb0f1634f39a69eaa73b8c9d9d7043bbd9afbca659 |
+| C24 after | eeb11d60ed09fea2f27e4434ec69265c043b659906d346c56fbceef4d3a648c4 |
+
+Each run uses bun test with a copy of bunfig.coverage.toml, an absolute preload path, and a separate coverageDir.
+The environment contains PATH, DESPLEGA_TELEMETRY_ENV=test, and SWARM_TEST_TEMPLATE_CACHE=0. Run each fixture consumer sequentially.
+The selected files are src/tests/db-client-busy-retry.test.ts and src/tests/heartbeat-jev-gate.test.ts, respectively.

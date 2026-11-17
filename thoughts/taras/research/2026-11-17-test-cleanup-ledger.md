@@ -6,6 +6,8 @@ Status: active. Baseline: 20c45be1a9. No releases.
 
 Audit every tracked test subsystem, plus its fixtures, mocks, helpers, and runner configuration.
 Read production before judging tests. Preserve distinct platform and integration contracts.
+Default changes affect tests, specs, fixtures, test helpers, and documentation.
+Taras permits concrete production-defect exceptions when identified explicitly and isolated in separate PRs. C15 is the existing exception.
 A completed row needs contract reasoning, validation evidence, and a landed PR or a precise blocker.
 Pending inventory rows do not imply an audit. Reconcile this inventory against main after each merge.
 
@@ -13,7 +15,8 @@ Pending inventory rows do not imply an audit. Reconcile this inventory against m
 
 Taras requested coverage and CI timing tracking alongside deletion totals.
 See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
-The first checkpoint contains 1153 net test lines and 61 cases removed across 17 merged changes.
+The current checkpoint contains 1185 net test lines and 66 cases removed across 18 merged changes.
+Paired C22 and C24 coverage measurements lost no covered production lines within their recorded scopes.
 Complete post-cleanup coverage and controlled CI savings remain unmeasured.
 
 ## Budget
@@ -190,16 +193,17 @@ The optional-taskId persistence check overlaps DB mapping coverage but also guar
 
 ### C08: Native script stderr diagnosis
 
-State: implemented and independently reviewed. Diff +46/-78 lines. Cases decreased from 89 to 84, with no new calls.
+State: landed through PR #3291 as b2ae0d76bf. Independent review passed. Diff +46/-78 lines. Cases decreased from 89 to 84, with no new calls.
 The script returned exitCode 0 and Bash startup stderr from /Users/taras/.bashrc attempting to source /.turso/env.
-Inline sandbox mode uses plain bash -c before env -i. Spawn mode already uses --noprofile --norc -p.
+The original inline sandbox used plain bash -c before env -i. Spawn mode already used --noprofile --norc -p.
 A shell probe with open stdin reproduced the warning. The protective flags removed it.
 Retain the clean-stderr assertion. This is a production environment-isolation defect, not obsolete test coverage.
-Follow-up: isolate an inline-wrapper fix with a controlled startup-file regression check, outside test-only cleanup slices.
+C15 isolated and merged the inline-wrapper fix with controlled startup-file checks, outside this test-only slice.
 Removed four fabricated executor cases and one repeated classifier case. All 15 distinct classifier inputs remain.
 Corrected three child-process budgets. Scenario assertions compare fields and reject extra keys. The stderr guard now reports scrubbed evidence.
 Affected units: 84 passed, 276 assertions. Nine classifier mutations failed. E2E typecheck, boundary checks, allowlist, Biome, and diff checks passed.
-The unchanged wrapper still caused E2E failure during this slice. C15 subsequently made script-inline-run pass with 30 HTTP calls.
+The original wrapper caused E2E failure during preparation. After C15 merged, parent validation passed 84 unit cases and script-inline-run with 30 HTTP calls.
+Parent check:local and E2E typechecking passed before C08 landed. Paired C08 line coverage remains unmeasured.
 
 ### C09: QuickJS pool timing
 
@@ -433,7 +437,16 @@ That PR merged as 7d5ad4e75d396bebb57e460f40f7c72432531a6d and removed the origi
 C15 and C10 returned to normal queue validation after that merge. C15 subsequently landed.
 C10 run 44131652948 failed the new zero-spin test: executionMs 201.530818ms against its 200ms ceiling.
 Check 134210204331 identifies db-client-busy-retry.test.ts:113. This directly reproduces the remaining ceiling flake.
-The candidate requires a fresh baseline, controls, and review against current main.
+The final candidate targets d67d322570, which includes PR #3277. PR #3293 contains only the existing busy-retry test file.
+Its diff is +48/-26 lines, net +22. All 18 existing test calls remain. Independent review found no blockers.
+Fresh baseline checks passed 53 cases. The candidate busy suite passed 18 cases.
+The combined candidate run had 52 passes and one unrelated db-client.test.ts timer-gap failure at 218.9ms against 150ms.
+Its isolated diagnostic passed, but the combined run remains recorded as failed. No sibling test changed.
+Controls rejected included backoff and omitted failed-attempt costs, including an 80ms successful-overhead masking variant.
+Correct accounting with that overhead passed. Parent check:local subsequently passed all 18 selected cases.
+Paired coverage lost no source lines. Timing-dependent warning and scrubber coverage increased, without a claim of new regression coverage.
+A parent overlap between two fixture consumers caused invalid lock failures. Sequential reruns passed, as recorded in the measurements document.
+A caller pause can hide backoff inclusion. Partial undercounts and the recorder dependency remain limits. Linux queue validation remains pending.
 Its justification is removal of the reproduced timing ceiling, counted failed-attempt cost, and observed contention.
 The retention batch sizer consumes executionMs. Omitted failed-attempt cost can therefore understate event-loop blocking.
 
@@ -455,14 +468,15 @@ Production review covered sweep orchestration, receipts, gate execution, expiry,
 Some auxiliary production reads followed the initial test read. Transitive broker, runtime, workflow, and database implementations remain partial.
 The strongest candidate removes historical previous-checklist prompt-parser variants. Production reads receipts containing full task IDs instead.
 Preserve current multiline failure titles, receipt validation, and actual SQL selection of previous checklists.
-The isolated candidate changes only heartbeat-jev-gate.test.ts: +10/-196 lines, net -186.
-It removes nine historical variants and unused fixture plumbing. No new test call site was added.
-Baseline 43 cases passed. The final candidate passed 35 cases, with formatting, allowlist, and patch checks passing.
-Ignoring receipts caused five failures. Suppression by creation time caused seven failures.
-Malformed-array acceptance initially survived. A mixed string/number row in the existing table now detects it.
-All original malformed-input cases remain. Independent review found no blockers in that candidate.
-Review identified a hollow generated-heading case and a duplicate no-receipt case. Their deletion and a retained multiline control are in progress.
-Parent validation and final review remain pending. No typecheck or full suite ran during initial candidate preparation.
+PR #3294 changes only heartbeat-jev-gate.test.ts: +9/-241 lines, net -232.
+It removes nine historical variants, two hollow or redundant cases, and unused fixture plumbing. No new test call site was added.
+Baseline 43 cases passed. The final candidate passed 33 cases, with formatting, allowlist, and patch checks passing.
+Ignoring receipts caused four failures. Suppression by creation time caused seven failures.
+Malformed-array acceptance initially survived. A mixed string/number row in the existing table now detects it with one failure.
+All original malformed-input cases remain. A single-line regex control failed the retained multiline total assertion.
+Final independent review found no blockers. Parent check:local passed with 33 cases and configured root typechecking.
+Paired coverage retained every covered source location across 744 loaded production files, with a fixed 113518-line denominator.
+The pair does not establish branch coverage or full-suite coverage. The full suite and separate producer suite were not run locally.
 The failure-query mock still copies filtering. Competing completed-checklist selection and shared-prefix ID collisions remain unproven.
 Further candidates include repeated basic stall cases, checklist rendering, and reboot task-type exclusions.
 Preserve full-sweep dispatch, workflow ownership, tracker ownership, live-session protection, boot epochs, and interrupted-write recovery separately.
@@ -484,9 +498,9 @@ That suite and the other approval files remain unaudited. No deletion recommenda
 
 ## Resume order
 
-1. Diagnose the later C10 queue failure. C15 landed, so C08 can proceed against its merged dependency.
-2. Validate C22 against current main. Complete C24 review and parent validation.
-3. Update the landed ledger and reconcile its inventory against merged main.
+1. Complete C22 queue validation, then return C10 to the queue once against that merged repair.
+2. Complete C24 queue validation and publish the coverage checkpoint. C08 has landed.
+3. Reconcile the ledger and inventory after merges. Keep scoped coverage separate from the pending full-suite comparison.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
 
@@ -498,6 +512,7 @@ C03: PR #3258 merged. Test diff +42/-94. Exact retry limits and fixture isolatio
 C04: PR #3255 merged. Test diff +1/-1. Browser query/hash forwarding retained without the OAuth race.
 C05: PR #3257 merged. Test diff +2/-2. Canonical fixture paths preserve 21 reaper guards.
 C07: PR #3259 merged. Test diff +59/-314. Copied HTTP layer removed after real-handler coverage retained its contracts.
+C08: PR #3291 merged. Test diff +46/-78. Removed fabricated executor cases and duplicate classifiers while preserving 15 distinct inputs.
 C09: PR #3266 merged. Test diff +9/-7. Actual request readiness replaces the premature cutoff. All seven guards remain.
 C14: PR #3271 merged. Test diff +17/-32. Literal expectations and discriminating fixtures replace weak oracles.
 C16: PR #3275 merged. Test diff +1/-47. Removed mock-only no-op and repeated service-name checks.
@@ -515,6 +530,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 
 - Test-line policy merged in PR #3254. Initial ledger PR #3270 merged as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
 - Ledger wave 5 merged through PR #3284 as cbd5f90e7ca96edefef0af7f07fe2bed6c6c7733.
+- Ledger wave 6 merged through PR #3290 as 37d3a1bc856a45ca240fff1fb0163d6eefdc069f.
 - Live provider, Linux sandbox, Docker, and browser boundaries require distinct evidence.
 - Broad app-shell failure did not reproduce alone. QuickJS readiness failure reproduced under controlled boot delay. Its repair merged in PR #3266.
 - Reviewer noted an existing missing fable alias guard. This slice did not delete that contract.
@@ -816,6 +832,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/lib/composer-drafts.test.ts | pending | |
 | apps/ui/src/lib/composer-mentions.test.ts | pending | |
 | apps/ui/src/lib/composer-paste.test.ts | pending | |
+| apps/ui/src/lib/config.test.tsx | pending | Added on main after the initial inventory |
 | apps/ui/src/lib/configuration-values.test.tsx | pending | |
 | apps/ui/src/lib/connection-url-params.test.ts | pending | |
 | apps/ui/src/lib/context-display.test.tsx | pending | |
@@ -1243,7 +1260,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/cursor-adapter.test.ts | pending | |
 | src/tests/db-agents.test.ts | pending | |
 | src/tests/db-capacity.test.ts | pending | |
-| src/tests/db-client-busy-retry.test.ts | partial audit, candidate rebase | C22: zero-spin ceiling also failed in queue, revised accounting controls pending on current main |
+| src/tests/db-client-busy-retry.test.ts | validated, reviewed | C22 PR #3293: +48/-26, 18 cases, accounting controls detected, scoped coverage loses no lines, queue pending |
 | src/tests/db-client.test.ts | pending | |
 | src/tests/db-extraction-contract.test.ts | pending | |
 | src/tests/db-queries-oauth.test.ts | pending | |
@@ -1385,7 +1402,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/heartbeat-checklist.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/heartbeat-expiry.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/heartbeat-jev-gate-credentials.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
-| src/tests/heartbeat-jev-gate.test.ts | first review passed, refinements in progress | C24: initial +10/-196, 35 cases pass, three controls detected |
+| src/tests/heartbeat-jev-gate.test.ts | validated, reviewed | C24 PR #3294: +9/-241, 33 cases, four controls detected, scoped source coverage identical, queue pending |
 | src/tests/heartbeat-orphan-resume.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/heartbeat-reboot-live.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/heartbeat-reroute-decision.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
@@ -1620,6 +1637,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/pool-session-logs.test.ts | audited and tested | C07. Idempotency consolidated, isolation and late arrivals retained. PR #3259. |
 | src/tests/pr-body-leaks.test.ts | pending | |
 | src/tests/pr-room-guard.test.ts | pending | |
+| src/tests/pre-push-affected-tests.test.ts | pending | Added on main after the initial inventory |
 | src/tests/preload-env.test.ts | pending | |
 | src/tests/pricing-refresh.test.ts | pending | |
 | src/tests/pricing-routes.test.ts | pending | |
@@ -1780,13 +1798,13 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/script-connections-mcp.test.ts | pending | |
 | src/tests/script-connections-sql.test.ts | pending | |
 | src/tests/script-connections.test.ts | pending | |
-| src/tests/script-executor-conformance.test.ts | pending | |
+| src/tests/script-executor-conformance.test.ts | landed | C08 PR #3291: real executors retained, fabricated cases removed, distinct classifier inputs retained |
 | src/tests/script-executor-quickjs-pool.test.ts | landed | C09: PR #3266, readiness and full-run peak |
 | src/tests/script-executor-quickjs.test.ts | pending | |
 | src/tests/script-executor-registry.test.ts | pending | |
 | src/tests/script-host-validated-args-native.test.ts | pending | |
 | src/tests/script-native-sandbox-identity.test.ts | pending | |
-| src/tests/script-native-startup.test.ts | pending | |
+| src/tests/script-native-startup.test.ts | landed | C08 PR #3291: duplicate classifier removed, budgets derived from executor limits |
 | src/tests/script-native-unawaited-drain.test.ts | pending | |
 | src/tests/script-per-script-executor.test.ts | pending | |
 | src/tests/script-run-config-scope.test.ts | pending | |
@@ -2249,7 +2267,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/script-connections.ts | pending | |
 | scripts/e2e/scenarios/script-credential-bindings.ts | pending | |
 | scripts/e2e/scenarios/script-helpers.ts | pending | |
-| scripts/e2e/scenarios/script-inline-run.ts | pending | |
+| scripts/e2e/scenarios/script-inline-run.ts | landed | C08 PR #3291: field checks preserve shape, stderr guard retained, scenario passes after C15 |
 | scripts/e2e/scenarios/script-kv.ts | pending | |
 | scripts/e2e/scenarios/script-limits.ts | pending | |
 | scripts/e2e/scenarios/script-memory-rate.ts | static audit complete | C17: retain transport and authorization contracts |

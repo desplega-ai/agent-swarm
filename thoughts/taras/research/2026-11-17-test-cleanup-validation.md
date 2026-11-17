@@ -125,3 +125,27 @@ Parent check:local passed. Five unchanged filesystem cases also passed with 16 a
 Scoped type diagnostics decreased from ten to four existing errors. Configured root typechecking passed.
 The candidate retains nonzero-slot persistence forwarding and uses task-owned credential homes.
 Availability results containing only unconfigured slots, failed fetches, and non-ok responses remain uncovered branches.
+
+## C22 and C24 parent coverage checkpoint
+
+C22 PR #3293 changes one existing test, +48/-26 lines. Baseline affected checks passed 53 cases.
+The candidate busy suite passed 18 cases. Its combined implementation run had 52 passes and one unchanged sibling timing failure.
+The sibling timer-gap assertion received 218.9ms against a 150ms ceiling. An isolated diagnostic pass does not make the combined run green.
+Fresh controls reject backoff inclusion and omitted failed-attempt costs, including successful-overhead masking.
+Parent check:local passed 18 selected cases after sequential fixture execution.
+An earlier parent overlap between coverage and ordinary tests caused seven fixture-lock failures. Both overlapping runs were discarded.
+
+C24 PR #3294 changes one test file, +9/-241 lines. Baseline 43 cases and candidate 33 cases passed.
+Receipt, creation-time, malformed-array, and multiline-regex controls failed at the retained assertions.
+Parent check:local passed with 33 cases and configured root typechecking.
+
+Paired production line coverage, on identical source within each pair:
+
+| Slice | Covered before | Covered after | Instrumented lines | Lost covered lines |
+| --- | ---: | ---: | ---: | ---: |
+| C22 | 10033 | 10216 | 31196 | 0 |
+| C24 | 24544 | 24544 | 113518 | 0 |
+
+C22 increases come from timing-dependent logging. C24 preserves the exact covered source locations.
+Both pairs ran on macOS with Bun 1.4.4. Neither proves branch coverage, Linux behavior, or whole-repository coverage.
+See the measurements document for source bases, scopes, historical coverage, and timing limitations.
