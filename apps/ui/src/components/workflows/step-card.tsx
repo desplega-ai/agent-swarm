@@ -1200,7 +1200,7 @@ function CollapsibleOutput({ label, data }: { label: string; data: unknown }) {
 
 // --- Raw JSON Toggle ---
 
-function RawJsonToggle({ data }: { data: unknown }) {
+export function RawJsonToggle({ data }: { data: unknown }) {
   const [showRaw, setShowRaw] = useState(false);
 
   return (
@@ -1218,7 +1218,7 @@ function RawJsonToggle({ data }: { data: unknown }) {
       </button>
       {showRaw && (
         <pre className="mt-1 whitespace-pre-wrap text-xs font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground max-h-[300px] overflow-y-auto">
-          {typeof data === "string" ? data : JSON.stringify(data, null, 2)}
+          {typeof data === "string" ? data : (JSON.stringify(data, null, 2) ?? "No output")}
         </pre>
       )}
     </div>

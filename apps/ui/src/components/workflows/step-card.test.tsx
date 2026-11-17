@@ -1,6 +1,7 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { act, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import type { WorkflowRunStep } from "../../api/types";
@@ -33,11 +34,53 @@ mock.module("@/lib/config", () => require("../../lib/config"));
 const {
   AttemptHistory,
   HitlOutput,
+  RawJsonToggle,
   StepCard,
   SubWorkflowOutput,
   SystemOneExtractionOutput,
   SystemOneOutput,
 } = await import("./step-card");
+
+describe("RawJsonToggle", () => {
+  beforeAll(() => {
+    GlobalRegistrator.register();
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  });
+
+  afterAll(async () => {
+    await GlobalRegistrator.unregister();
+  });
+
+  test.each([
+    ["absent output", undefined, "No output"],
+    ["string output", "hello\nworld", "hello\nworld"],
+    ["object output", { answer: 42 }, '{\n  "answer": 42\n}'],
+    ["null output", null, "null"],
+    ["empty string output", "", ""],
+    ["false output", false, "false"],
+    ["zero output", 0, "0"],
+  ])("shows %s when opened and removes it when closed", async (_label, data, expected) => {
+    const { createRoot } = await import("react-dom/client");
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<RawJsonToggle data={data} />));
+      const button = host.querySelector("button");
+      expect(button?.textContent).toBe("Show raw JSON");
+      expect(host.querySelector("pre")).toBeNull();
+
+      await act(async () => button?.click());
+      expect(button?.textContent).toBe("Hide raw JSON");
+      expect(host.querySelector("pre")?.textContent).toBe(expected);
+
+      await act(async () => button?.click());
+      expect(button?.textContent).toBe("Show raw JSON");
+      expect(host.querySelector("pre")).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+});
 
 function step(status: string): WorkflowRunStep {
   return {
