@@ -314,9 +314,10 @@
       "scenarios": ["script-credential-bindings"]
     },
     "credential-pool": {
-      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
+      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side and its pace ranking, pool-key config routes and Codex accounts.",
       "scenarios": [
         "platform-keys",
+        "platform-key-pace",
         "key-window-usage",
         "platform-pool-keys",
         "platform-codex-accounts"
@@ -575,6 +576,10 @@
     "task-controls": {
       "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
       "scenarios": ["core-task-controls"]
+    },
+    "task-status-kind": {
+      "description": "Every terminal write records why the task ended in statusKind (agent, error, cascade, runner, user, graceful_shutdown), and status filters still match every kind",
+      "scenarios": ["core-task-status-kind"]
     },
     "task-terminal-fence": {
       "description": "A session whose task was superseded is refused send-task and slack-reply, and keeps store-progress and read-only tools",

@@ -6870,6 +6870,9 @@ export interface paths {
                             spendCappedIndices: number[];
                             authFailureFence: number;
                             keyUsage: number[];
+                            keyPace: number[];
+                            /** @enum {string} */
+                            selectionStrategy: "pace" | "usage";
                             activeSessions: number[];
                         };
                     };
@@ -16071,6 +16074,8 @@ export interface paths {
             parameters: {
                 query?: {
                     status?: string;
+                    /** @description Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts. */
+                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                     agentId?: string;
                     scheduleId?: string;
                     workflowRunId?: string;
@@ -16156,6 +16161,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                             }[] | {
@@ -17118,6 +17128,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                                 workflowRunId?: string;
@@ -23628,6 +23643,11 @@ export interface paths {
                                     lastUpdatedAt: string;
                                     /** Format: date-time */
                                     finishedAt?: string;
+                                    /**
+                                     * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                     * @enum {string}
+                                     */
+                                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                     peakContextPercent?: number;
                                     totalCostUsd?: number;
                                 };
@@ -32561,6 +32581,11 @@ export interface components {
             finishedAt?: string;
             /** Format: date-time */
             notifiedAt?: string;
+            /**
+             * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+             * @enum {string}
+             */
+            statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
             failureReason?: string;
             output?: string;
             progress?: string;

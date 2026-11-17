@@ -256,7 +256,7 @@ export async function handleMergeRequest(
       const tasks = await findActiveTasksByVcs(repo, mr.iid, "gitlab");
       for (const task of tasks.filter((t) => isScopedTask(t, "mr", mrContextKey))) {
         console.log(`[GitLab] Cancelling task ${task.id} — ${reason}`);
-        await failTask(task.id, reason);
+        await failTask(task.id, reason, { statusKind: "external" });
       }
       return { created: false };
     }
@@ -374,7 +374,7 @@ export async function handleIssue(
       );
       if (existingTask) {
         console.log(`[GitLab] Cancelling task ${existingTask.id} — issue closed`);
-        await failTask(existingTask.id, "Issue was closed");
+        await failTask(existingTask.id, "Issue was closed", { statusKind: "external" });
       }
       return { created: false };
     }
