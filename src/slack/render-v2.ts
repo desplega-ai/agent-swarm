@@ -1234,7 +1234,10 @@ async function classifyLeadFollowUp(
  */
 async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): Promise<void> {
   if (!task.slackChannelId || !task.slackThreadTs) return;
-  if (await getSlackOutcomeMessage(task.id)) return;
+  // A bound card is a stream Slack already holds; it keeps its own bounded
+  // recovery. A pending one has no bound message, so it is settled here.
+  const card = await getSlackOutcomeMessage(task.id);
+  if (card && !isPendingSlackMessage(card)) return;
   await reserveSlackMessage({
     contextKey:
       task.contextKey ??
@@ -1264,7 +1267,13 @@ async function mayPostLeadFollowUpCard(
   if (task.source !== "system" || !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "")) {
     return true;
   }
-  if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) return false;
+  if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) {
+    // A reservation left by a failed delivery would keep the thread open.
+    if (await getSlackOutcomeMessage(task.id)) {
+      await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
+    }
+    return false;
+  }
   const askId = ownerAskId.get(task.id);
   const ownerAsk = askId ? threadTasks.find((candidate) => candidate.id === askId) : undefined;
   if (
@@ -2200,7 +2209,12 @@ async function processSlackThread(
     const card = await getSlackOutcomeMessage(task.id);
     if (card && isSettledSlackMessage(card)) continue;
     if (await isAnsweredByDeferralCard(task, tasks)) continue;
-    if (!card && !(await mayPostLeadFollowUpCard(task, tasks, ownerAskId, delegationActivatedAt))) {
+    // A pending card has no bound Slack message, so its retry would create
+    // the first one: it passes the same gate as a new card.
+    if (
+      (!card || isPendingSlackMessage(card)) &&
+      !(await mayPostLeadFollowUpCard(task, tasks, ownerAskId, delegationActivatedAt))
+    ) {
       continue;
     }
     const deferByClosure =

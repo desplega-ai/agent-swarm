@@ -305,5 +305,87 @@ export const slackLeadFollowUpCard: Scenario = {
       settled?.delivery_abandoned_at != null && settled.finalized_at === null,
       `The external follow-up's card is not settled as abandoned: ${JSON.stringify(settled)}`,
     );
+
+    // 6. Recovery of a reservation whose delivery failed. A restart drops the
+    // retry backoff, so both cards are retried from the persisted row. The one
+    // without a reply posts once; the one the Lead answered with slack-reply
+    // posts nothing and is settled so the thread closes.
+    const failDelivery = async (ask: DelegatedAsk, output: string) => {
+      ctx.slack.injectFault({ method: "chat.startStream", error: "internal_error" });
+      ctx.slack.injectFault({ method: "chat.postMessage", error: "internal_error" });
+      await finish(ctx, ask.leadId, ask.followUpId, { status: "completed", output });
+      const failed = await pollUntil(
+        () =>
+          (ctx.db.get<{ delivery_attempts: number }>(
+            "SELECT delivery_attempts FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+            [ask.followUpId],
+          )?.delivery_attempts ?? 0) > 0,
+        15_000,
+      );
+      expect(failed, `The ${ask.followUpId} delivery never failed into a pending reservation`);
+    };
+    const recoveredOutput = `follow-up review recovered ${ctx.nonce}`;
+    const suppressedOutput = `follow-up review suppressed ${ctx.nonce}`;
+    // The Lead holds one task at a time, so each follow-up finishes before the
+    // next ask. Both land inside the 30s retry backoff.
+    const recovered = await delegatedAsk(ctx, GENERAL, workerId, "recovered");
+    await failDelivery(recovered, recoveredOutput);
+    const suppressed = await delegatedAsk(ctx, GENERAL, workerId, "suppressed");
+    await failDelivery(suppressed, suppressedOutput);
+    const lateReply = `late hand reply ${ctx.nonce}`;
+    const lateConn = await ctx.connectMcp(suppressed.leadId);
+    try {
+      expectToolOk(
+        await callTool(lateConn, "slack-reply", {
+          taskId: suppressed.followUpId,
+          message: lateReply,
+        }),
+        "slack-reply after a failed follow-up delivery",
+      );
+    } finally {
+      await lateConn.close();
+    }
+    const suppressedThread = () =>
+      ctx.slack.messages(GENERAL).filter((message) => message.thread_ts === suppressed.threadTs);
+    const replyLanded = await pollUntil(
+      () => suppressedThread().some((message) => JSON.stringify(message).includes(lateReply)),
+      15_000,
+    );
+    expect(replyLanded, "The late slack-reply never reached the thread");
+    const beforeRestart = new Set(suppressedThread().map((message) => message.ts));
+    await ctx.restartSut();
+    const recoveredPosted = await pollUntil(
+      () => threadMessages(ctx, GENERAL, recovered.threadTs, recoveredOutput).length > 0,
+      30_000,
+    );
+    expect(recoveredPosted, "The failed Lead follow-up card was not recovered after a restart");
+    const recoveredCopies = threadMessages(ctx, GENERAL, recovered.threadTs, recoveredOutput);
+    expect(
+      recoveredCopies.length === 1,
+      `The recovered follow-up posted ${recoveredCopies.length} times, expected 1`,
+    );
+    expectFinalizedCard(ctx, recovered.followUpId, recovered.threadTs, "recovered follow-up");
+    type CardRow = { delivery_abandoned_at: string | null; finalized_at: string | null };
+    const suppressedCard = () =>
+      ctx.db.get<CardRow>(
+        "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+        [suppressed.followUpId],
+      );
+    await pollUntil(() => {
+      const card = suppressedCard();
+      return card?.delivery_abandoned_at != null || card?.finalized_at != null;
+    }, 30_000);
+    // Any new message counts: with slackReplySent=1 the card body is a
+    // "<Lead> completed" line, not the output.
+    const extra = suppressedThread().filter((message) => !beforeRestart.has(message.ts));
+    expect(
+      extra.length === 0,
+      `The replied follow-up posted after slackReplySent=1: ${JSON.stringify(extra)}`,
+    );
+    const suppressedRow = suppressedCard();
+    expect(
+      suppressedRow?.delivery_abandoned_at != null && suppressedRow.finalized_at === null,
+      `The replied follow-up's pending card is not settled as abandoned: ${JSON.stringify(suppressedRow)}`,
+    );
   },
 };
