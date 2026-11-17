@@ -15,7 +15,7 @@ Pending inventory rows do not imply an audit. Reconcile this inventory against m
 
 Taras requested coverage and CI timing tracking alongside deletion totals.
 See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
-The current checkpoint contains 1185 net test lines and 66 cases removed across 18 merged changes.
+The current checkpoint contains 1163 net test lines and 66 cases removed across 19 merged changes.
 Paired C22 and C24 coverage measurements lost no covered production lines within their recorded scopes.
 Complete post-cleanup coverage and controlled CI savings remain unmeasured.
 
@@ -446,7 +446,9 @@ Controls rejected included backoff and omitted failed-attempt costs, including a
 Correct accounting with that overhead passed. Parent check:local subsequently passed all 18 selected cases.
 Paired coverage lost no source lines. Timing-dependent warning and scrubber coverage increased, without a claim of new regression coverage.
 A parent overlap between two fixture consumers caused invalid lock failures. Sequential reruns passed, as recorded in the measurements document.
-A caller pause can hide backoff inclusion. Partial undercounts and the recorder dependency remain limits. Linux queue validation remains pending.
+A caller pause can hide backoff inclusion. Partial undercounts and the recorder dependency remain limits.
+PR #3293 merged as bbbc5b029192574bd4b2c145acb8f1b0a8b71534. Its required merge validation completed before landing.
+C10 returned to the merge queue once after this repair reached main. Its source diff remains unchanged.
 Its justification is removal of the reproduced timing ceiling, counted failed-attempt cost, and observed contention.
 The retention batch sizer consumes executionMs. Omitted failed-attempt cost can therefore understate event-loop blocking.
 
@@ -493,12 +495,24 @@ Two duplicate candidates remain: the final stored-channel case and the separate 
 Preserve cancellation entry points, failed-delivery claim release, deduplication, quorum silence, late delivery, and legacy versus current DM routing.
 Fixed negative waits and call-recording readiness do not prove completion of persistence work.
 The run-cancellation fixture contains one request despite its broader title. The DM message fake persists between cases.
-The config-question helper received a full production read. Its test received partial inspection before all ingress production was read.
-That suite and the other approval files remain unaudited. No deletion recommendation applies to their bodies yet.
+The config-question helper and all 702 lines of its test now have a complete read.
+The helper, HTTP normalization and answer transaction, MCP creation, and HITL executor were compared with the assertions.
+Supporting authentication, config storage, workflow resume, and notification internals remain partial. This is not a complete subsystem audit.
+No whole-test deletion is justified in the config-question suite. The three creation entry points protect separate normalization wiring.
+Retain secret downgrade refusal, API-only key hiding, plain option validation, rejection without writes, and the user/agent authorization checks.
+Retain standalone secret scanning, its positive text control, and workflow output/context scanning as separate boundaries.
+The metadata test claims envPath preservation but sets and checks only description. Rename it or supply a discriminating envPath fixture.
+The keep test checks the unchanged timestamp, not the stored value or write count. Same-tick rewrites could evade that check.
+The reload spy proves one invocation, not post-commit ordering. No injected failure proves rollback after an earlier config write.
+No case removes a kept key between validation and the transaction, or resolves the request after a config write begins.
+The scanner skips unreadable columns. Its positive control proves two important paths, but not exhaustive scanning of every possible column.
+The local HTTP server resolves credentials and calls the handler. It does not exercise every full-server admission layer.
+The event listener and Slack module mock remain installed for the file's process. Workflow readiness uses a bounded polling loop.
+No tests or controls ran during this static continuation. No production or test source changed.
 
 ## Resume order
 
-1. Complete C22 queue validation, then return C10 to the queue once against that merged repair.
+1. Complete C10 queue validation against the merged C22 repair. The unchanged Slack diff was queued once after C22 landed.
 2. Complete C24 queue validation and publish the coverage checkpoint. C08 has landed.
 3. Reconcile the ledger and inventory after merges. Keep scoped coverage separate from the pending full-suite comparison.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
@@ -521,6 +535,7 @@ C18 migration slice: PR #3272 merged. Test diff +44/-120. Replaced copied merge 
 C19: PR #3273 merged. Test diff +0/-139. Two duplicate example suites removed, with all fixtures retained.
 C20: PR #3278 merged. Test diff +33/-22. Config changes now await restart and socket readiness before dispatch.
 C21 cancellation slice: PR #3281 merged. Test diff +14/-104. Duplicate cancellation cases consolidated around explicit readiness and abort events.
+C22: PR #3293 merged. Test diff +48/-26. Real contention replaces a timing ceiling and protects failed-attempt accounting.
 C12: PR #3285 merged. Test diff +0/-2. Removed repeated server registrations while preserving parser and selection contracts.
 C15: PR #3269 merged. Test/helper diff +31/-23, production +1/-0. Both sandbox modes now suppress Bash startup files.
 C23: PR #3286 merged. Test diff +40/-232. Production resolver checks replace copied pool selection.
@@ -1063,7 +1078,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/approval-auto-cancellation-migration.test.ts | pending | |
 | src/tests/approval-cancellation-migration.test.ts | pending | |
 | src/tests/approval-card-resolution.test.ts | partial audit | C25: full test read, supporting database reads followed tests, no controls |
-| src/tests/approval-config-question.test.ts | partial audit | C25: helper read, incomplete ingress comparison and test inspection |
+| src/tests/approval-config-question.test.ts | test audit complete, production partial | C25: all 702 lines reviewed, direct normalization and answer paths compared, preserve separate secret and ingress contracts |
 | src/tests/approval-requests-notifications.test.ts | pending | |
 | src/tests/approval-requests.test.ts | pending | |
 | src/tests/approval-respond-auth.test.ts | pending | |
@@ -1260,7 +1275,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/cursor-adapter.test.ts | pending | |
 | src/tests/db-agents.test.ts | pending | |
 | src/tests/db-capacity.test.ts | pending | |
-| src/tests/db-client-busy-retry.test.ts | validated, reviewed | C22 PR #3293: +48/-26, 18 cases, accounting controls detected, scoped coverage loses no lines, queue pending |
+| src/tests/db-client-busy-retry.test.ts | landed | C22 PR #3293: +48/-26, 18 cases, accounting controls detected, scoped coverage loses no lines |
 | src/tests/db-client.test.ts | pending | |
 | src/tests/db-extraction-contract.test.ts | pending | |
 | src/tests/db-queries-oauth.test.ts | pending | |

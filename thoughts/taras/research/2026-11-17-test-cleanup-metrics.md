@@ -5,18 +5,19 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 18 merged cleanup changes, verified through GitHub.
+The current checkpoint includes 19 merged cleanup changes, verified through GitHub.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 18 merged changes | 430 | 1615 | 1185 | 66 | 3 |
-| Pending C10, C22, C24 only | 62 | 415 | 353 | 13 | 0 |
-| Combined, if all three land unchanged | 492 | 2030 | 1538 | 79 | 3 |
+| 19 merged changes | 478 | 1641 | 1163 | 66 | 3 |
+| Pending C10 and C24 only | 14 | 389 | 375 | 13 | 0 |
+| Combined, if both land unchanged | 492 | 2030 | 1538 | 79 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291.
-Pending means implemented and reviewed, not merged. C10 is PR #3274, C22 is PR #3293, and C24 is PR #3294.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293.
+Pending means implemented and reviewed, not merged. C10 is PR #3274 and C24 is PR #3294.
+The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
 
