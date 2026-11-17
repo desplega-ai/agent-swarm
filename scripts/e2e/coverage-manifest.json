@@ -543,12 +543,13 @@
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, and the flag-off repro",
+      "description": "Delegated child results, failed and late children, the flag-off repro, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
-        "slack-delegation-late-child"
+        "slack-delegation-late-child",
+        "slack-delegation-band-entry"
       ]
     },
     "slack-http-native": {
