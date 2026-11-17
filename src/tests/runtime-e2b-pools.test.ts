@@ -698,7 +698,13 @@ test("socket grace terminates a busy paused runtime before task recovery", async
     fake.runtimes.delete(handle.externalId);
   });
   try {
-    await socketGrace(runtime, async () => (await getTaskById(task.id))?.status === "superseded");
+    // Recovery supersedes the task before asynchronously clearing its active session.
+    await socketGrace(
+      runtime,
+      async () =>
+        (await getTaskById(task.id))?.status === "superseded" &&
+        (await getActiveSessionForTask(task.id)) === null,
+    );
     expect(fake.terminated).toEqual([runtime.externalHandle!.externalId]);
     expect(fake.resumed).toHaveLength(0);
     expect(await getActiveSessionForTask(task.id)).toBeNull();

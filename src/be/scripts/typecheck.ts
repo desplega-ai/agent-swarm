@@ -418,7 +418,7 @@ export interface BoardsNamespace {
 export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
-  memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
+  memory_get(args: { memoryId?: string; id?: string; intent: string }): Promise<unknown>;
   memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
   // --- tasks ---
   task_list(args?: Record<string, unknown>): Promise<unknown>;

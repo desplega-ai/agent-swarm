@@ -79,8 +79,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "memory_search":
       return { method: "POST", path: "/api/memory/search", body };
     case "memory_get": {
-      const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
-      if (!memoryId) throw new Error("memory_get requires string `memoryId`");
+      if (body.memoryId && body.id && body.memoryId !== body.id) {
+        throw new Error("memoryId and id must identify the same memory; supply only one.");
+      }
+      const memoryId = body.memoryId ?? body.id;
+      if (typeof memoryId !== "string" || !memoryId) {
+        throw new Error("Supply memoryId (or its alias id) from memory-search.");
+      }
       const getIntent = typeof body.intent === "string" ? body.intent : "script-sdk";
       return {
         method: "GET",
