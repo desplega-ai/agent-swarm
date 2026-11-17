@@ -20,6 +20,7 @@ import {
   type ExternalEventAdapter,
   getExternalEventAdapter,
   matchKeyOf,
+  toConfirmResult,
 } from "@/event-waits";
 import {
   MAX_PENDING_EVENT_WAITS_PER_AGENT,
@@ -77,8 +78,11 @@ async function admitExternalWait(
   }
   if (adapter.confirm) {
     try {
-      if (await adapter.confirm(event, match)) {
-        return { error: `${target} already happened; read its result instead of deferring.` };
+      const already = toConfirmResult(await adapter.confirm(event, match));
+      if (already.happened) {
+        return {
+          error: `${target} already happened${already.detail ? ` (${already.detail})` : ""}; read its result instead of deferring.`,
+        };
       }
     } catch (error) {
       return {
