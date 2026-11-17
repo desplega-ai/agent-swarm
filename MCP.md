@@ -161,6 +161,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-upsert](#app-upsert)
   - [create_page](#create_page)
   - [delete-page](#delete-page)
+  - [design-system-get](#design-system-get)
+  - [design-system-set](#design-system-set)
 - [Metrics Tools](#metrics-tools)
   - [create_metric](#create_metric)
 - [KV Tools](#kv-tools)
@@ -2032,6 +2034,22 @@ Permanently delete one page by pageId, or by slug in the caller's page namespace
 |-----------|------|----------|---------|-------------|
 | `pageId` | `string` | No | - | Page ID to delete. |
 | `slug` | `string` | No | - | Page slug to delete from the caller's own (agentId, slug) namespace. Alternative to pageId. |
+
+### design-system-get
+
+**Get the org design system**
+
+Returns the org design system that restyles every HTML page without its own theme. status is "none" (nobody asked yet), "declined" (the requester said no; do not ask again), "active", or "invalid" (the stored record fails validation and pages ignore it). previous is the value the last design-system-set replaced, for a one-step undo.
+
+*No parameters*
+
+### design-system-set
+
+**Set the org design system**
+
+Saves the org design system: a base preset plus token overrides, fonts, logo, mode lock and chart palette. Every HTML page without its own theme picks it up on its next view. Save only what the requester approved, after they saw a preview (the design-system-seed script builds one). To record a "no", pass status "declined". dryRun: true validates and returns the normalized record without saving. The replaced value is kept as previous (see design-system-get).
+
+See the [input schema](https://github.com/desplega-ai/agent-swarm/blob/main/src/tools/design-system.ts) for parameters.
 
 ## Metrics Tools
 

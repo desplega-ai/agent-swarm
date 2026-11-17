@@ -8,6 +8,11 @@ const RESERVED_FAMILIES = new Map([
   ["apps", "namespace is reserved for swarm apps; use the app row endpoints"],
   // step-9: Comb's "Send to swarm" claims (`comb:sent`).
   ["comb", "namespace is reserved for Comb; use POST /api/comb/review-batches"],
+  // The org design system (src/themes/design-system.ts): writes must pass its token checks.
+  [
+    "design-system",
+    "namespace is reserved for the org design system; use design-system-set or PUT /api/design-system",
+  ],
   ["heartbeat-checklist", "namespace is reserved for heartbeat checklist receipts"],
   ["worker", "namespace is reserved for worker nudges"],
   // Durable dedupe for SLACK_BLOCK_EXTERNAL_CHANNELS alerts (src/slack/external-channel.ts).

@@ -28,6 +28,7 @@ import { resolveTaskAuditUserId, resolveTaskGroupKey } from "@/be/audit-user";
 import { fileCallerSessionIntoGroup } from "@/be/caller-session-group";
 import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
 import { getPageEditCounter } from "@/be/db/page-versions";
+import { getDesignSystem } from "@/be/design-system";
 import { classAttributeValues, countColorLiterals } from "@/pages/color-literals";
 import { snapshotPage } from "@/pages/version";
 import { readThemeFields } from "@/themes/page-fields";
@@ -175,6 +176,7 @@ export const registerCreatePageTool = (server: McpServer) => {
         colorLiteralCount: z.number().optional(),
         usesDesignSystem: z.boolean().optional(),
         lightOnlyColors: z.boolean().optional(),
+        designSystemStatus: z.string().optional(),
         movedSessionRootId: z.string().optional(),
       }),
     },
@@ -303,6 +305,7 @@ export const registerCreatePageTool = (server: McpServer) => {
                 Boolean(input.themeTokens) ||
                 bodyUsesDesignSystem(fresh.body),
               lightOnlyColors: hasLightOnlyColors(fresh.themeTokens),
+              designSystemStatus: (await getDesignSystem()).current.status,
               ...(fresh.designVersion >= 2
                 ? { colorLiteralCount: countColorLiterals(fresh.body) }
                 : {}),

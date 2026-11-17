@@ -111,6 +111,13 @@ const FONT_LINKS = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">`;
 
+function fontLinks(href: string): string {
+  const escaped = href.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+  return `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="${escaped}" rel="stylesheet">`;
+}
+
 /**
  * The Tailwind source. Theme and utilities only: Preflight stays off, so the
  * element defaults below survive. `inline reference` maps each token utility
@@ -748,15 +755,18 @@ ${TONE_RULES}
 export function buildPageHeadV2({
   theme,
   mode,
+  fontsHref,
 }: {
   theme: ResolvedPageTheme;
   mode: "light" | "dark";
+  /** The org design system's Google Fonts stylesheet, already checked to be on fonts.googleapis.com. */
+  fontsHref?: string;
 }): string {
   return [
     '<base target="_blank">',
     IN_PAGE_LINK_SCRIPT,
     "<style>@layer properties, theme, base, components, utilities;</style>",
-    FONT_LINKS,
+    fontsHref ? fontLinks(fontsHref) : FONT_LINKS,
     `<style id="swarm-theme">\n${renderPageThemeCss(theme)}\n</style>`,
     `<style id="swarm-design">\n${PAGE_DESIGN_CSS}\n</style>`,
     TAILWIND_SOURCE_SCRIPT,

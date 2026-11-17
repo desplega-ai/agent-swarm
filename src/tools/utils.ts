@@ -405,10 +405,14 @@ const createPageNudge = (r: SwarmToolResult): string | undefined => {
         usesDesignSystem?: unknown;
         lightOnlyColors?: unknown;
         colorLiteralCount?: unknown;
+        designSystemStatus?: unknown;
       }
     | undefined;
   const count = data?.colorLiteralCount;
   const sentences = [
+    data?.designSystemStatus === "none"
+      ? "This org has no design system yet, so the page uses the default look. Ask the requester once for a site URL, a preset or a CSS block, build a preview with the design-system-seed script, and save it with design-system-set after they approve; if they say no, call design-system-set with status declined so nobody asks again."
+      : undefined,
     data?.designVersion === 1 && data.usesDesignSystem === true
       ? "This page is on designVersion 1 (the original look), so design system classes, tokens and themes have no effect. Pass designVersion: 2."
       : undefined,

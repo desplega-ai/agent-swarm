@@ -716,6 +716,8 @@ export interface SwarmSdk {
   }): Promise<unknown>;
   page_create(args: Record<string, unknown>): Promise<unknown>;
   page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;
+  designSystem_get(args?: Record<string, never>): Promise<unknown>;
+  designSystem_set(args: Record<string, unknown>): Promise<unknown>;
   metric_create(args: Record<string, unknown>): Promise<unknown>;
 
   // --- human input ---
