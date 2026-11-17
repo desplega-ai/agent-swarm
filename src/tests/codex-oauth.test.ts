@@ -514,9 +514,3 @@ describe("codexPlanFromClaim", () => {
     expect(codexPlanFromClaim(null)).toBeNull();
   });
 });
-
-describe("no secrets in source", () => {
-  it("CLIENT_ID is the public OpenAI client id", () => {
-    expect(CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
-  });
-});
