@@ -1229,7 +1229,8 @@ async function isSlackLeadFollowUp(
  * No card when the Lead already answered with `slack-reply` (it would repeat
  * that answer), when the delegation child pass owns the card, or when Slack
  * does not confirm the channel is internal: a Slack Connect channel is a
- * customer's, and posting there needs a person's explicit yes.
+ * customer's, and posting there needs a person's explicit yes. An external
+ * verdict settles the card as abandoned so the thread can close.
  */
 async function mayPostLeadFollowUpCard(
   task: AgentTask,
@@ -1252,8 +1253,24 @@ async function mayPostLeadFollowUpCard(
     return false;
   }
   const app = getSlackApp();
-  if (!app || !task.slackChannelId) return false;
-  return (await getChannelExternality(app.client, task.slackChannelId)) === "internal";
+  if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
+  const externality = await getChannelExternality(app.client, task.slackChannelId);
+  if (externality === "external") {
+    // Settle the card as abandoned without posting anything, so the thread
+    // stops counting it as pending outcome work. "unknown" retries next tick.
+    await reserveSlackMessage({
+      contextKey:
+        task.contextKey ??
+        slackContextKey({ channelId: task.slackChannelId, threadTs: task.slackThreadTs }),
+      channelId: task.slackChannelId,
+      threadTs: task.slackThreadTs,
+      kind: "outcome",
+      taskId: task.id,
+    });
+    await abandonSlackOutcomeDelivery(task.id, "external_channel: Lead follow-up not posted");
+    return false;
+  }
+  return externality === "internal";
 }
 
 /**

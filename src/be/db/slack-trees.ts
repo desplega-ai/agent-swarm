@@ -145,6 +145,7 @@ export type SlackOutcomeWindow = {
  */
 const SLACK_LEAD_FOLLOW_UP_SQL = `(task.source = 'system'
   AND task.taskType IN ('follow-up', 'resume') AND task.slackReplySent = 0
+  AND task.status IN ('completed', 'failed', 'cancelled')
   AND EXISTS (SELECT 1 FROM agents lead WHERE lead.id = task.agentId AND lead.isLead = 1))`;
 
 /**

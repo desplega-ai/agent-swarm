@@ -171,14 +171,13 @@ export const slackLeadFollowUpCard: Scenario = {
     await claim(ctx, workerId, plainId);
     await finish(ctx, workerId, plainId, { status: "completed", output: "plain worker done" });
     type FollowUpRow = { id: string; agentId: string; slackChannelId: string | null };
-    let plain: FollowUpRow | null = null;
-    await pollUntil(() => {
-      plain = ctx.db.get<FollowUpRow>(
+    const readPlain = () =>
+      ctx.db.get<FollowUpRow>(
         "SELECT id, agentId, slackChannelId FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
         [plainId],
       );
-      return plain !== null;
-    }, 15_000);
+    await pollUntil(() => readPlain() !== null, 15_000);
+    const plain = readPlain();
     if (!plain) throw new Error(`No Lead follow-up for plain worker task ${plainId}`);
     expect(plain.slackChannelId === null, "The plain follow-up inherited a Slack channel");
     await claim(ctx, plain.agentId, plain.id);
@@ -251,5 +250,17 @@ export const slackLeadFollowUpCard: Scenario = {
       .apiCalls("conversations.info")
       .some((call) => call.args.channel === externalId && call.error === faultCode);
     expect(consulted, `The external-channel gate never classified ${externalId} via Slack`);
+    // The skipped card is settled, so the thread stops owing outcome work.
+    const settled = ctx.db.get<{
+      delivery_abandoned_at: string | null;
+      finalized_at: string | null;
+    }>(
+      "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+      [external.followUpId],
+    );
+    expect(
+      settled?.delivery_abandoned_at != null && settled.finalized_at === null,
+      `The external follow-up's card is not settled as abandoned: ${JSON.stringify(settled)}`,
+    );
   },
 };
