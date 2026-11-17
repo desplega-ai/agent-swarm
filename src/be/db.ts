@@ -14284,6 +14284,9 @@ export async function countKv(namespace: string, opts: { prefix?: string }): Pro
 // ─── Script Runs ────────────────────────────────────────────────────────────
 
 type ScriptRunRow = {
+  objectScriptId: string | null;
+  objectId: string | null;
+  objectMethod: string | null;
   id: string;
   agentId: string;
   scriptName: string | null;
@@ -14328,6 +14331,9 @@ function parseJsonColumn(value: string | null): unknown | undefined {
 
 function rowToScriptRun(row: ScriptRunRow): ScriptRun {
   return {
+    objectScriptId: row.objectScriptId ?? undefined,
+    objectId: row.objectId ?? undefined,
+    objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,

@@ -614,10 +614,17 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
       obj.state = await obj.migrate(obj.state, durable.storedCodeVersion);
     }
     const method = durable.method;
+    let prototype = mod.default.prototype;
+    let descriptor;
+    while (Object.getPrototypeOf(prototype)?.constructor?.__swarmDurable) {
+      descriptor = Object.getOwnPropertyDescriptor(prototype, method);
+      if (descriptor) break;
+      prototype = Object.getPrototypeOf(prototype);
+    }
     if (
       method.startsWith("_") ||
       ${JSON.stringify([...DURABLE_OBJECT_RESERVED_METHODS])}.includes(method) ||
-      typeof Object.getOwnPropertyDescriptor(mod.default.prototype, method)?.value !== "function"
+      typeof descriptor?.value !== "function"
     ) {
       throw new Error('DurableObject method "' + method + '" is not callable');
     }
@@ -625,7 +632,7 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
       __swarmDurable: 1,
       result: (await obj[method](args, globalThis.__swarm_ctx)) ?? null,
       state: obj.state,
-      destroyed: obj._destroyed,
+      destroyed: Boolean(obj._destroyed),
       idleTtlSec: mod.default.idleTtlSec ?? null,
     };
   }

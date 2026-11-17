@@ -68,13 +68,21 @@ export function extractScriptSignature(source: string): ScriptSignature {
     if (parseDiagnostics && parseDiagnostics.length > 0) return FALLBACK_SIGNATURE;
 
     const durableNames = new Set<string>();
+    const durableNamespaces = new Set<string>();
+    const classes = new Map<string, ts.ClassDeclaration>();
     for (const statement of sourceFile.statements) {
+      if (ts.isClassDeclaration(statement) && statement.name) {
+        classes.set(statement.name.text, statement);
+      }
       if (
         ts.isImportDeclaration(statement) &&
         ts.isStringLiteral(statement.moduleSpecifier) &&
         statement.moduleSpecifier.text === "swarm-sdk"
       ) {
         const bindings = statement.importClause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          durableNamespaces.add(bindings.name.text);
+        }
         if (bindings && ts.isNamedImports(bindings)) {
           for (const binding of bindings.elements) {
             if ((binding.propertyName ?? binding.name).text === "DurableObject") {
@@ -86,36 +94,67 @@ export function extractScriptSignature(source: string): ScriptSignature {
     }
 
     for (const statement of sourceFile.statements) {
-      if (
-        ts.isClassDeclaration(statement) &&
-        isExportDefault(statement) &&
-        statement.heritageClauses?.some(
-          (clause) =>
-            clause.token === ts.SyntaxKind.ExtendsKeyword &&
-            clause.types.some(
-              (type) => ts.isIdentifier(type.expression) && durableNames.has(type.expression.text),
-            ),
-        )
-      ) {
+      const exportedClass =
+        ts.isClassDeclaration(statement) && isExportDefault(statement)
+          ? statement
+          : ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)
+            ? classes.get(statement.expression.text)
+            : undefined;
+      const lineage: ts.ClassDeclaration[] = [];
+      let current = exportedClass;
+      let durable = false;
+      while (current && !lineage.includes(current)) {
+        lineage.push(current);
+        const base = current.heritageClauses?.find(
+          (clause) => clause.token === ts.SyntaxKind.ExtendsKeyword,
+        )?.types[0]?.expression;
+        if (
+          base &&
+          ((ts.isIdentifier(base) && durableNames.has(base.text)) ||
+            (ts.isPropertyAccessExpression(base) &&
+              ts.isIdentifier(base.expression) &&
+              durableNamespaces.has(base.expression.text) &&
+              base.name.text === "DurableObject"))
+        ) {
+          durable = true;
+          break;
+        }
+        current = base && ts.isIdentifier(base) ? classes.get(base.text) : undefined;
+      }
+      if (durable && exportedClass) {
         const methods: Record<string, MethodSignature> = Object.create(null);
-        for (const member of statement.members) {
-          if (
-            !ts.isMethodDeclaration(member) ||
-            member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword) ||
-            !(ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
-          ) {
-            continue;
+        const seen = new Set<string>();
+        for (const declaration of lineage) {
+          for (const member of declaration.members) {
+            if (
+              (ts.canHaveModifiers(member) &&
+                ts
+                  .getModifiers(member)
+                  ?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)) ||
+              !member.name ||
+              !(ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
+            ) {
+              continue;
+            }
+            const name = member.name.text;
+            if (seen.has(name)) continue;
+            seen.add(name);
+            if (
+              !ts.isMethodDeclaration(member) ||
+              name.startsWith("_") ||
+              DURABLE_OBJECT_RESERVED_METHODS.has(name)
+            ) {
+              continue;
+            }
+            methods[name] = fromFunctionLike(member, sourceFile);
           }
-          const name = member.name.text;
-          if (name.startsWith("_") || DURABLE_OBJECT_RESERVED_METHODS.has(name)) continue;
-          methods[name] = fromFunctionLike(member, sourceFile);
         }
         return {
           kind: "durable",
           methods,
           argsType: "unknown",
           resultType: "unknown",
-          description: getJsDocDescription(statement, sourceFile),
+          description: getJsDocDescription(exportedClass, sourceFile),
         };
       }
       if (ts.isFunctionDeclaration(statement) && isExportDefault(statement)) {

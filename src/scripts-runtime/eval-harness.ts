@@ -187,10 +187,17 @@ try {
       obj.state = await obj.migrate(obj.state, durable.storedCodeVersion);
     }
     const method = durable.method;
+    let prototype = mod.default.prototype;
+    let descriptor: PropertyDescriptor | undefined;
+    while (Object.getPrototypeOf(prototype)?.constructor?.__swarmDurable) {
+      descriptor = Object.getOwnPropertyDescriptor(prototype, method);
+      if (descriptor) break;
+      prototype = Object.getPrototypeOf(prototype);
+    }
     if (
       method.startsWith("_") ||
       DURABLE_OBJECT_RESERVED_METHODS.has(method) ||
-      typeof Object.getOwnPropertyDescriptor(mod.default.prototype, method)?.value !== "function"
+      typeof descriptor?.value !== "function"
     ) {
       throw new Error(`DurableObject method "${method}" is not callable`);
     }
@@ -198,7 +205,7 @@ try {
       __swarmDurable: 1,
       result: (await obj[method](validatedArgs, ctx)) ?? null,
       state: obj.state,
-      destroyed: obj._destroyed,
+      destroyed: Boolean(obj._destroyed),
       idleTtlSec: mod.default.idleTtlSec ?? null,
     };
   } else {

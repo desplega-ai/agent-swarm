@@ -33641,6 +33641,9 @@ export interface components {
             estTokens: number;
         };
         ScriptRun: {
+            objectScriptId?: string;
+            objectId?: string;
+            objectMethod?: string;
             /** Format: uuid */
             id: string;
             agentId: string;
@@ -36915,6 +36918,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         runs: {
+                            objectScriptId?: string;
+                            objectId?: string;
+                            objectMethod?: string;
                             /** Format: uuid */
                             id: string;
                             agentId: string;

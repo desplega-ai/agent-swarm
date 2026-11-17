@@ -331,16 +331,16 @@ Deliverable: the API-side module `src/be/scripts/durable.ts`, the `durable` KV f
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migration ordinal is valid: `bash scripts/check-migration-conflicts.sh`
-- [ ] Fresh DB boots: `rm -f /tmp/do-pr1-fresh.sqlite && DATABASE_PATH=/tmp/do-pr1-fresh.sqlite PORT=3399 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http 2>&1 | grep -iE "migrat|listening" | tail -5`
-- [ ] Existing DB upgrades. **Before** adding the migration file, create a pre-migration DB: `rm -f /tmp/do-pr1-existing.sqlite && DATABASE_PATH=/tmp/do-pr1-existing.sqlite PORT=3398 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http >/dev/null 2>&1; true`. After adding it, boot the same file again: `DATABASE_PATH=/tmp/do-pr1-existing.sqlite PORT=3398 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http 2>&1 | grep -iE "migrat|listening" | tail -5`. Then check `sqlite3 /tmp/do-pr1-existing.sqlite "PRAGMA table_info(session_tokens)" | grep objectChain`.
-- [ ] Columns exist: `sqlite3 /tmp/do-pr1-fresh.sqlite "PRAGMA table_info(session_tokens)" | grep -E "objectChain|depth" && sqlite3 /tmp/do-pr1-fresh.sqlite "PRAGMA table_info(script_runs)" | grep -E "objectId|objectMethod|objectScriptId"`
-- [ ] Types and lint: `bun run tsc:check:tsc && bun run lint`
-- [ ] Async-seam checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh`
-- [ ] KV and script scenarios still pass: `bun run e2e --only script-kv,script-saved-lifecycle,script-inline-run`
+- [x] Migration ordinal is valid: `bash scripts/check-migration-conflicts.sh`
+- [x] Fresh DB boots: `rm -f /tmp/do-pr1-fresh.sqlite && DATABASE_PATH=/tmp/do-pr1-fresh.sqlite PORT=3399 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http 2>&1 | grep -iE "migrat|listening" | tail -5`
+- [x] Existing DB upgrades. **Before** adding the migration file, create a pre-migration DB: `rm -f /tmp/do-pr1-existing.sqlite && DATABASE_PATH=/tmp/do-pr1-existing.sqlite PORT=3398 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http >/dev/null 2>&1; true`. After adding it, boot the same file again: `DATABASE_PATH=/tmp/do-pr1-existing.sqlite PORT=3398 DESPLEGA_TELEMETRY_ENV=test timeout 25 bun run start:http 2>&1 | grep -iE "migrat|listening" | tail -5`. Then check `sqlite3 /tmp/do-pr1-existing.sqlite "PRAGMA table_info(session_tokens)" | grep objectChain`.
+- [x] Columns exist: `sqlite3 /tmp/do-pr1-fresh.sqlite "PRAGMA table_info(session_tokens)" | grep -E "objectChain|depth" && sqlite3 /tmp/do-pr1-fresh.sqlite "PRAGMA table_info(script_runs)" | grep -E "objectId|objectMethod|objectScriptId"`
+- [x] Types and lint: `bun run tsc:check:tsc && bun run lint`
+- [x] Async-seam checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh`
+- [x] KV and script scenarios still pass: `bun run e2e --only script-kv,script-saved-lifecycle,script-inline-run`
 
 #### Automated QA:
-- [ ] Extend `script-kv` or `script-durable-objects` (whichever has no dependency on Phase 3): `kv_set` / `kv_delete` / `kv_incr` on namespace `durable:<nonce>` are refused on both MCP and HTTP, and `kv_get` on it is allowed. Run: `bun run e2e --only script-durable-objects,script-kv`.
+- [x] Extend `script-kv` or `script-durable-objects` (whichever has no dependency on Phase 3): `kv_set` / `kv_delete` / `kv_incr` on namespace `durable:<nonce>` are refused on both MCP and HTTP, and `kv_get` on it is allowed. Run: `bun run e2e --only script-durable-objects,script-kv`.
 
 #### Manual Verification:
 - [ ] None.

@@ -4575,6 +4575,15 @@
       "ScriptRun": {
         "type": "object",
         "properties": {
+          "objectScriptId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "objectMethod": {
+            "type": "string"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -55585,6 +55594,15 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "objectScriptId": {
+                            "type": "string"
+                          },
+                          "objectId": {
+                            "type": "string"
+                          },
+                          "objectMethod": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string",
                             "format": "uuid"
