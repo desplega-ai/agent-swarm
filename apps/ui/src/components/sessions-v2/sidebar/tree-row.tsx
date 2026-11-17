@@ -47,6 +47,13 @@ export function TreeRow({
   );
 }
 
+/**
+ * The indent of a session row and of the rows that end its list ("Show 10
+ * more", "View all"): the read mark and the checkbox sit in the parent row's
+ * icon column, one level out, so the titles start under the parent's label.
+ */
+export const SESSION_ROW_INDENT = "pl-[calc(var(--lv)*14px-8px)]";
+
 /** A control inside a row keeps the focus on the tree, so the list keys keep working. */
 export const keepTreeFocus = (event: MouseEvent) => event.preventDefault();
 

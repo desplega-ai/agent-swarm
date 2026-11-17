@@ -15,15 +15,20 @@ export function SectionHeader({
   label,
   count,
   action,
+  touch,
 }: {
   label: string;
   count: number;
   action?: ReactNode;
+  /** The phone tree: its icon column starts further in. */
+  touch?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "mx-1.5 mt-3 flex h-7 items-center gap-1.5 pl-3 font-mono text-meta text-muted-foreground",
+        "mx-1.5 mt-3 flex h-7 items-center gap-1.5 font-mono text-meta text-muted-foreground",
+        // The words start at the left edge of the rows' icon column.
+        touch ? "pl-2.5" : "pl-1.5",
         // The action lines up with the row actions under it.
         action ? "pr-1.5" : "pr-2",
       )}
@@ -71,9 +76,12 @@ function SourceHeaderView({
       aria-expanded={row.open}
       aria-label={sourceRowLabel(row)}
       onClick={(event) => onRowClick(row.key, event)}
-      className="mt-3 h-7 pr-2 pl-3 font-mono text-meta text-muted-foreground"
+      className="mt-3 h-7 pr-2 font-mono text-meta text-muted-foreground"
     >
-      <TaskSourceMark source={row.source} />
+      {/* The logo sits in the rows' icon column, and the name in their label column. */}
+      <span className="grid size-4 shrink-0 place-items-center">
+        <TaskSourceMark source={row.source} />
+      </span>
       <span className="min-w-0 flex-1 truncate tracking-widest uppercase">{row.label}</span>
       <span className="shrink-0 tabular-nums">{row.counts.total}</span>
     </TreeRowFrame>
@@ -107,10 +115,13 @@ export function TreeSection({
   section,
   describedBy,
   action,
+  touch,
   children,
 }: {
   section: NonNullable<TreeSegment["section"]>;
   describedBy?: string;
+  /** The phone tree. */
+  touch?: boolean;
   /** A control at the right end of the header. */
   action?: ReactNode;
   children: ReactNode;
@@ -123,7 +134,7 @@ export function TreeSection({
       aria-label={`${section.label}, ${section.count} ${unit}${section.count === 1 ? "" : "s"}`}
       aria-describedby={describedBy}
     >
-      <SectionHeader label={section.label} count={section.count} action={action} />
+      <SectionHeader label={section.label} count={section.count} action={action} touch={touch} />
       {children}
     </div>
   );

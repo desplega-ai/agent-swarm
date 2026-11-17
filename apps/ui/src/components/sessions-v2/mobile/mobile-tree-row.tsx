@@ -391,11 +391,14 @@ function MobileSourceRowView({
       aria-label={sourceRowLabel(row)}
       onClick={(event) => onRowClick(row.key, event)}
       className={cn(
-        "mx-1.5 mt-3 flex min-h-11 items-center gap-1.5 rounded-sm pr-2 pl-3 font-mono text-meta text-muted-foreground active:bg-accent",
+        // The logo sits in the rows' icon column, and the name in their label column.
+        "mx-1.5 mt-3 flex min-h-11 items-center gap-3 rounded-sm pr-2.5 pl-2.5 font-mono text-meta text-muted-foreground active:bg-accent",
         TOUCH_ROW,
       )}
     >
-      <TaskSourceMark source={row.source} />
+      <span className="grid size-5 shrink-0 place-items-center">
+        <TaskSourceMark source={row.source} />
+      </span>
       <span className="min-w-0 flex-1 truncate tracking-widest uppercase">{row.label}</span>
       <span className="shrink-0 tabular-nums">{row.counts.total}</span>
     </div>
