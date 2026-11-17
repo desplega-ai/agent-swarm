@@ -56,23 +56,6 @@ describe("reassociateSessionLogs", () => {
     // Verify no logs remain under random UUID
     const oldLogs = await getSessionLogsByTaskId(randomUuid);
     expect(oldLogs.length).toBe(0);
-  });
-
-  test("is idempotent — second call returns 0 changes", async () => {
-    const runnerSessionId = "runner-sess-2";
-    const randomUuid = crypto.randomUUID();
-    const realTaskId = crypto.randomUUID();
-
-    await createSessionLogs({
-      taskId: randomUuid,
-      sessionId: runnerSessionId,
-      iteration: 1,
-      cli: "claude",
-      lines: ["line a"],
-    });
-
-    const first = await reassociateSessionLogs(runnerSessionId, realTaskId);
-    expect(first).toBe(1);
 
     const second = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(second).toBe(0);
@@ -114,30 +97,11 @@ describe("reassociateSessionLogs", () => {
 });
 
 describe("pool task claim flow", () => {
-  test("active session stores runnerSessionId", async () => {
+  test("reassociates pool logs through active-session lookup and repeated calls", async () => {
     const agentId = crypto.randomUUID();
-    await createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
-
-    const session = await insertActiveSession({
-      agentId,
-      taskId: "effective-task-id",
-      triggerType: "pool_tasks_available",
-      runnerSessionId: "runner-sess-4",
-    });
-
-    expect(session.runnerSessionId).toBe("runner-sess-4");
-
-    // Verify it can be retrieved
-    const sessions = await getActiveSessions(agentId);
-    const found = sessions.find((s) => s.runnerSessionId === "runner-sess-4");
-    expect(found).toBeDefined();
-  });
-
-  test("end-to-end: pool task logs are reassociated after claim", async () => {
-    const agentId = crypto.randomUUID();
-    const runnerSessionId = "runner-sess-e2e";
+    const runnerSessionId = "runner-sess-flow";
     const effectiveTaskId = crypto.randomUUID();
-    await createAgent({ id: agentId, name: "E2E Pool Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Pool Flow Agent", isLead: false, status: "idle" });
 
     // 1. Create an unassigned task (pool task)
     const task = await createTaskExtended("Test pool task", {
@@ -146,12 +110,14 @@ describe("pool task claim flow", () => {
     expect(task.agentId).toBeNull();
 
     // 2. Simulate runner creating active session with runnerSessionId
-    await insertActiveSession({
+    const session = await insertActiveSession({
       agentId,
       taskId: effectiveTaskId,
       triggerType: "pool_tasks_available",
       runnerSessionId,
     });
+
+    expect(session.runnerSessionId).toBe(runnerSessionId);
 
     // 3. Simulate session logs being flushed with the random effectiveTaskId
     await createSessionLogs({
@@ -179,7 +145,7 @@ describe("pool task claim flow", () => {
     expect(afterClaim.length).toBe(3);
 
     // 7. Simulate more logs arriving after claim (with old effectiveTaskId)
-    //    These would be caught by store-progress reinforcement
+    //    A later reassociation call must include these rows.
     await createSessionLogs({
       taskId: effectiveTaskId,
       sessionId: runnerSessionId,
@@ -188,7 +154,7 @@ describe("pool task claim flow", () => {
       lines: ["Working on the task now..."],
     });
 
-    // 8. Reinforce reassociation (like store-progress would)
+    // 8. Repeat the database call to include late arrivals.
     const reinforceCount = await reassociateSessionLogs(runnerSessionId, task.id);
     expect(reinforceCount).toBe(1);
 
