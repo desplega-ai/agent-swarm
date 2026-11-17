@@ -5,18 +5,18 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 27 merged cleanup changes, verified through GitHub.
-Merge status checkpoint: 2026-11-17 at 20:39 BCN.
+The current checkpoint includes 28 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: 2026-11-17 at 21:01 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 27 merged changes | 639 | 2417 | 1778 | 84 | 3 |
+| 28 merged changes | 639 | 2435 | 1796 | 86 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307.
-The latest five slices contribute +145/-370 lines and three removed cases.
-Notification synchronization and the reviewed list/expiry candidate remain outside merged totals.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310.
+PR #3310 adds 18 deleted lines and two removed cases to the preceding 27-change checkpoint.
+Notification synchronization #3308, dashboard consolidation #3311, and memory rating #3313 remain outside merged totals.
 The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
@@ -62,7 +62,7 @@ No complete post-cleanup coverage comparison exists yet. The historical referenc
 
 The published-slice pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
 The scope excludes tests. Each pair names its test selection.
-Newer pairs use a copy of the existing coverage configuration, the existing preload, and a network guard.
+Each pair records its configuration and preload. Newer pairs add network isolation, and their coverage scopes remain separate.
 
 | Slice | Source base | Cases before / after | Loaded production files | Covered lines before / after | Instrumented lines | Lost covered lines |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -74,6 +74,10 @@ Newer pairs use a copy of the existing coverage configuration, the existing prel
 | C25 executor, PR #3305 | 36a09fbd30 | 87 / 86 | 777 | 25739 / 25747 | 116193 | 0 |
 | C25 index, PR #3306 | 43e3e5027b | 2 / 2 | 153 | 9554 / 9554 | 31215 | 0 |
 | C25 follow-up, PR #3307 | c4ab35afe1 | 85 / 84 | 752 | 25357 / 25359 | 114945 | 0 |
+| C25 list/expiry, PR #3310, two-suite union | c4ab35afe1 | 114 / 112 | 753 | 26274 / 26274 | 115005 | 0 |
+| C25 notifications, PR #3308, open | c4ab35afe1 | 6 / 6 | 778 | 23923 / 23923 | 116221 | 0 |
+| C26 dashboard, PR #3311, open | 9a61e25bbd | 58 / 57 | 49 | 1478 / 1478 | 6258 | 0 |
+| C27 rating, PR #3313, open | 9a61e25bbd | 47 / 45 | 744 | 23056 / 23056 | 113212 | 0 |
 
 The comparisons also checked source locations. No pair changed its instrumented line total or loaded production file set.
 C24 retained every covered source location. Its four regression controls also failed as expected.
@@ -88,6 +92,9 @@ The executor scope includes packages and uses a different denominator, so do not
 Executor gains cover actionable creation and the normal async return path. All four controls fail after removing repeated assertions.
 The index pair runs both approval migration tests. SQL is not instrumented, so four migration controls provide the useful evidence.
 The index definition and complete row assertions detect all four regressions that the baseline missed.
+The list/expiry request suite alone loses six selector lines. The retained sweep suite covers all six, so the two-suite union loses none.
+C26 measures dashboard source only. C27 measures the test process and excludes its API child. Do not sum these denominators.
+Two original C27 controls failed to parse. Valid replacements now fail their intended event-array assertions.
 The artifacts contain no branch records. These scoped results do not establish repository-wide coverage equality.
 Coverage-instrumented durations are not performance measurements.
 
