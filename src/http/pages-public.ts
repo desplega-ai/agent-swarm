@@ -23,7 +23,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getPage, incrementPageViewCount } from "../be/db";
+import { getKv, getPage, incrementPageViewCount } from "../be/db";
 import { getActiveDesignSystem } from "../be/design-system";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
@@ -32,6 +32,8 @@ import {
   feedbackOverlayScripts,
   isPageFeedbackRequested,
 } from "../pages/feedback-overlay";
+import { renderKitDocument } from "../pages/kit/render";
+import { DashboardDataSchema, PageKitSchema } from "../pages/kit/schema";
 import {
   buildPageHeadV2,
   PAGE_HEAD_V1,
@@ -124,6 +126,7 @@ const publicPageJsonRoute = route({
  */
 async function pageHead(
   page: Page,
+  body: string,
   queryParams: URLSearchParams,
   wantsPrint: boolean,
 ): Promise<string> {
@@ -138,12 +141,37 @@ async function pageHead(
   const mode = designSystem?.mode ?? "viewer";
   const wantsDark =
     mode === "dark" || (mode === "viewer" && queryParams.get(PAGE_MODE_PARAM) === "dark");
-  const dark = !wantsPrint && wantsDark && countColorLiterals(page.body) < COLOR_LITERAL_THRESHOLD;
+  const dark = !wantsPrint && wantsDark && countColorLiterals(body) < COLOR_LITERAL_THRESHOLD;
   return buildPageHeadV2({
     theme,
     mode: dark ? "dark" : "light",
     fontsHref: designSystem?.fontsHref,
   });
+}
+
+/**
+ * The HTML a page serves. A kit page renders from its stored spec on every
+ * read, so a kit renderer fix restyles it; a dashboard with a `data` slot
+ * merges the KV value at that key, read from the page owner's own namespace
+ * (`task:agent:<agentId>`), over its slots. A spec or data value that no longer
+ * validates falls back: the spec to the stored body, the data to the spec.
+ */
+async function pageHtmlBody(page: Page): Promise<string> {
+  if (!page.kit) return page.body;
+  const parsed = PageKitSchema.safeParse(page.kit);
+  if (!parsed.success) return page.body;
+  const kit = parsed.data;
+  let dashboardData: ReturnType<typeof DashboardDataSchema.parse> | undefined;
+  if (kit.template === "dashboard" && kit.slots.data) {
+    try {
+      const entry = await getKv(`task:agent:${page.agentId}`, kit.slots.data.key);
+      const data = DashboardDataSchema.safeParse(entry?.value);
+      if (data.success) dashboardData = data.data;
+    } catch {
+      // A KV read failure serves the spec as written.
+    }
+  }
+  return renderKitDocument(kit, { title: page.title, dashboardData });
 }
 
 /** A doctype at the start of a body (`\s` also matches a BOM). */
@@ -715,10 +743,11 @@ export async function handlePagesPublic(
   // `?__swarm-feedback` is on (the overlay hides itself in print).
   // The feedback key guard goes first in <head> so it runs before page scripts.
   const feedback = isPageFeedbackRequested(queryParams);
+  const body = await pageHtmlBody(page);
   const html =
-    injectBrowserSdk(page.body, {
+    injectBrowserSdk(body, {
       // The viewer meta goes after the head defaults, which start with <base target>.
-      head: `${await pageHead(page, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
+      head: `${await pageHead(page, body, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
       headFirst: feedback ? feedbackKeyGuardScript() : "",
       standardsMode: page.designVersion !== 1,
     }) +

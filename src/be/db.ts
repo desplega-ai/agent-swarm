@@ -143,6 +143,7 @@ import {
   isTerminalTaskStatus,
   type ModelTier,
   OPEN_TASK_STATUSES,
+  PageKitStoredSchema,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
 } from "../types";
@@ -8676,7 +8677,19 @@ type PageRow = {
   theme: string | null;
   theme_tokens: string | null;
   design_version: number;
+  kit: string | null;
 };
+
+/** Stored `kit` JSON, or null when the column is empty, is not JSON, or has the wrong shape. */
+function parsePageKit(raw: string | null): Page["kit"] {
+  if (!raw) return null;
+  try {
+    const parsed = PageKitStoredSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 function rowToPage(row: PageRow): Page {
   return {
@@ -8696,6 +8709,7 @@ function rowToPage(row: PageRow): Page {
     theme: row.theme ?? null,
     themeTokens: parsePageThemeTokens(row.theme_tokens),
     designVersion: typeof row.design_version === "number" ? row.design_version : 1,
+    kit: parsePageKit(row.kit ?? null),
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -8717,13 +8731,15 @@ export async function createPage(data: {
   themeTokens?: Page["themeTokens"];
   /** Defaults to 2 (the swarm design system). Rows inserted outside this function default to 1. */
   designVersion?: number;
+  /** The page kit spec, already validated; `body` holds its rendered HTML. */
+  kit?: Page["kit"];
 }): Promise<Page> {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
   const row = await getDbClient().get<PageRow>(
-    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version, kit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
@@ -8739,6 +8755,7 @@ export async function createPage(data: {
       data.theme ?? null,
       data.themeTokens ? JSON.stringify(data.themeTokens) : null,
       data.designVersion ?? 2,
+      data.kit ? JSON.stringify(data.kit) : null,
     ],
   );
   if (!row) throw new Error("Failed to create page");
@@ -8930,6 +8947,8 @@ export async function updatePage(
     /** undefined keeps the stored value, null clears it. */
     themeTokens?: Page["themeTokens"];
     designVersion?: number;
+    /** undefined keeps the stored spec unless `body` is set; null clears it. */
+    kit?: Page["kit"];
   },
 ): Promise<Page | null> {
   const updates: string[] = [];
@@ -8981,6 +9000,12 @@ export async function updatePage(
   if (data.designVersion !== undefined) {
     updates.push("design_version = ?");
     params.push(data.designVersion);
+  }
+  // A kit page renders from its spec, so a body written without a spec must
+  // drop the spec, or the next read would serve the old kit instead.
+  if (data.kit !== undefined || data.body !== undefined) {
+    updates.push("kit = ?");
+    params.push(data.kit ? JSON.stringify(data.kit) : null);
   }
   if (updates.length === 0) return getPage(id);
   updates.push("updatedAt = ?");

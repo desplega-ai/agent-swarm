@@ -1,0 +1,190 @@
+{
+  "template": "one-pager",
+  "slots": {
+    "header": {
+      "type": "Header",
+      "props": {
+        "eyebrow": "Trial result · Deliveries",
+        "title": "Booked loading bays cut van waiting time by 31%",
+        "lede": "For six weeks, drivers at the Eastfield store booked a 15-minute loading slot instead of queueing. We recommend the same change at the four busiest stores."
+      }
+    },
+    "metrics": {
+      "type": "Metrics",
+      "props": {
+        "items": [
+          {
+            "label": "Wait per van",
+            "value": "11",
+            "unit": "min",
+            "delta": "−5 min",
+            "tone": "success",
+            "compare": "vs 16 min before the trial"
+          },
+          {
+            "label": "On-time departures",
+            "value": "94%",
+            "delta": "+6 pts",
+            "tone": "success",
+            "compare": "vs 88% before"
+          },
+          {
+            "label": "Deliveries per shift",
+            "value": "23",
+            "delta": "+2",
+            "tone": "success",
+            "compare": "vs 21 before"
+          },
+          {
+            "label": "Driver rating",
+            "value": "4.4",
+            "unit": "/ 5",
+            "delta": "+0.8",
+            "tone": "success",
+            "compare": "vs 3.6 in the January survey"
+          }
+        ]
+      }
+    },
+    "sections": [
+      {
+        "type": "Section",
+        "props": {
+          "layout": "aside"
+        },
+        "children": [
+          {
+            "type": "Chart",
+            "props": {
+              "title": "Average wait per van, by week",
+              "chart": {
+                "type": "line",
+                "unit": "min",
+                "categories": [
+                  "−4",
+                  "−3",
+                  "−2",
+                  "−1",
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "5",
+                  "6"
+                ],
+                "xLabel": "Week of trial (negative weeks are before the start)",
+                "series": [
+                  {
+                    "name": "Eastfield, booked slots",
+                    "values": [
+                      16,
+                      17,
+                      15,
+                      16,
+                      14,
+                      12,
+                      11,
+                      11,
+                      10,
+                      11
+                    ]
+                  },
+                  {
+                    "name": "Westgate, queue as before",
+                    "role": "baseline",
+                    "values": [
+                      15,
+                      16,
+                      16,
+                      15,
+                      16,
+                      15,
+                      16,
+                      17,
+                      15,
+                      16
+                    ]
+                  }
+                ],
+                "yMin": 8
+              },
+              "note": "Source: dock sensor logs. Westgate is a store of similar size that kept the queue. The axis starts at 8 min."
+            }
+          },
+          {
+            "type": "Text",
+            "props": {
+              "content": "> “I used to plan my break around the queue. Now I know when I load.”\n\nDriver, Eastfield, week 4"
+            }
+          },
+          {
+            "type": "Fields",
+            "children": [
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Trial",
+                  "value": "2 Feb to 13 Mar 2026"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Vans",
+                  "value": "14"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Slots",
+                  "value": "15 min, booked in the driver app"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Compared with",
+                  "value": "Westgate, same weeks"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Measured by",
+                  "value": "Dock sensors, every van"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "layout": "split"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "### What it costs\n\nOne tablet at the loading dock and two hours of setup per store. The booking feature is already in the driver app."
+            }
+          },
+          {
+            "type": "Text",
+            "props": {
+              "content": "### Next step\n\nRoll out to Northgate, Riverside, Hollins and Westgate in April. Measure the same four numbers for six weeks."
+            }
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "type": "Text",
+      "props": {
+        "content": "Prepared by Kofi Mensah, logistics. Data: dock sensor logs and the driver app."
+      }
+    }
+  }
+}

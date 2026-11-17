@@ -12,6 +12,11 @@
  * the title slugifies to empty (e.g. all symbols), fall back to the
  * generated page id.
  *
+ * Page kit: `kit` (`{ template, slots }`) replaces `body` for the 4 fixed
+ * templates. The spec is validated strictly, stored, and rendered on every
+ * read (`src/pages/kit/`); `body` keeps the rendered HTML. A later write with
+ * a `body` and no `kit` turns the page back into free HTML.
+ *
  * Design fields: `theme`, `themeTokens` and `designVersion` set how an HTML
  * page is styled. A new page gets designVersion 2. On an upsert, an omitted
  * field keeps the stored value, and `null` clears `theme` / `themeTokens`.
@@ -30,6 +35,8 @@ import { createPage, getPage, getPageBySlug, updatePage } from "@/be/db";
 import { getPageEditCounter } from "@/be/db/page-versions";
 import { getDesignSystem } from "@/be/design-system";
 import { classAttributeValues, countColorLiterals } from "@/pages/color-literals";
+import { renderKitDocument } from "@/pages/kit/render";
+import { formatKitIssues, KIT_TEMPLATES, type PageKit, PageKitSchema } from "@/pages/kit/schema";
 import { snapshotPage } from "@/pages/version";
 import { readThemeFields } from "@/themes/page-fields";
 import { PAGE_THEME_COLOR_TOKENS } from "@/themes/tokens";
@@ -88,6 +95,9 @@ export const registerCreatePageTool = (server: McpServer) => {
       title: "Create or update a page",
       description:
         "Stores an HTML or JSON page in the swarm and returns shareable URLs. " +
+        "For a report, one-pager, dashboard or deck, pass `kit` instead of `body`: " +
+        "you fill the template slots and the server renders the layout, charts " +
+        "and styling (the pages skill has the slot reference and examples). " +
         "Calls are upsert-by-(agent, slug): if you previously created a page " +
         "with the same slug, its prior state is snapshotted and the row is " +
         "updated. Use this for static reports, dashboards, or JSON action " +
@@ -116,11 +126,21 @@ export const registerCreatePageTool = (server: McpServer) => {
         body: z
           .string()
           .min(1)
+          .optional()
           .describe(
-            "Full page body (HTML document, SVG image, or JSON-render spec, per contentType).",
+            "Full page body (HTML document, SVG image, or JSON-render spec, per contentType). Required unless you pass kit.",
           ),
-        contentType: PageContentTypeSchema.describe(
-          "'text/html' and 'image/svg+xml' render directly at /p/:id; 'application/json' is rendered by the SPA.",
+        kit: z
+          .object({
+            template: z.enum(KIT_TEMPLATES),
+            slots: z.record(z.string(), z.unknown()),
+          })
+          .optional()
+          .describe(
+            "Page kit spec { template, slots }: report, one-pager, dashboard or deck. Use it instead of body for those page kinds. The server validates the slots (the error lists each bad path), renders the page on every read with the theme or org design system, and stores the rendered HTML as the body. Slot reference: the pages skill.",
+          ),
+        contentType: PageContentTypeSchema.optional().describe(
+          "'text/html' and 'image/svg+xml' render directly at /p/:id; 'application/json' is rendered by the SPA. Required with body; a kit page is always text/html.",
         ),
         authMode: PageAuthModeSchema.default("authed").describe(
           "'authed' — requires page-session cookie (default); 'public' — no gate and must be explicit; 'password' — requires key.",
@@ -177,6 +197,9 @@ export const registerCreatePageTool = (server: McpServer) => {
         usesDesignSystem: z.boolean().optional(),
         lightOnlyColors: z.boolean().optional(),
         designSystemStatus: z.string().optional(),
+        kitTemplate: z.string().optional(),
+        kitIssues: z.array(z.string()).optional(),
+        dataNamespace: z.string().optional(),
         movedSessionRootId: z.string().optional(),
       }),
     },
@@ -188,6 +211,30 @@ export const registerCreatePageTool = (server: McpServer) => {
 
       const themeFields = readThemeFields(input);
       if ("error" in themeFields) return toolErr(themeFields.error);
+
+      // A page is either free content (body + contentType) or a kit spec.
+      let kit: PageKit | undefined;
+      if (input.kit !== undefined) {
+        if (input.body !== undefined) return toolErr("Pass either body or kit, not both.");
+        if (input.contentType !== undefined && input.contentType !== "text/html")
+          return toolErr("A kit page is always text/html; drop contentType or pass text/html.");
+        if (input.designVersion === 1)
+          return toolErr("A kit page needs designVersion 2; drop designVersion.");
+        const parsed = PageKitSchema.safeParse(input.kit);
+        if (!parsed.success) {
+          const issues = formatKitIssues(parsed.error);
+          return toolErr(`The ${input.kit.template} kit spec is invalid. Fix these slots:`, {
+            details: issues.join("\n"),
+            data: { yourAgentId: requestInfo.agentId, kitIssues: issues },
+          });
+        }
+        kit = parsed.data;
+      } else if (input.body === undefined || input.contentType === undefined) {
+        return toolErr("Pass body with contentType, or kit.");
+      }
+      const body = kit ? renderKitDocument(kit, { title: input.title }) : (input.body ?? "");
+      const contentType = kit ? "text/html" : (input.contentType ?? "text/html");
+      const designVersion = kit ? 2 : input.designVersion;
 
       const slug = input.slug ?? slugify(input.title);
       const finalSlug = slug || "page"; // Fallback if title slugifies to empty.
@@ -240,15 +287,17 @@ export const registerCreatePageTool = (server: McpServer) => {
           key: assetKey,
           title: input.title,
           description: input.description,
-          contentType: input.contentType,
+          contentType,
           authMode: input.authMode,
           passwordHash: passwordHash ?? null,
-          body: input.body,
+          body,
           needsCredentials: needsCredentialsNames ?? null,
           // Omitted design fields keep the stored values.
           theme: themeFields.theme,
           themeTokens: themeFields.themeTokens,
-          designVersion: input.designVersion,
+          designVersion,
+          // A body write without a kit clears the stored spec.
+          kit: kit ?? null,
         });
         if (!updated) {
           const msg = `Failed to update existing page ${existing.id}.`;
@@ -265,14 +314,15 @@ export const registerCreatePageTool = (server: McpServer) => {
             slug: finalSlug,
             title: input.title,
             description: input.description,
-            contentType: input.contentType,
+            contentType,
             authMode: input.authMode,
             passwordHash,
-            body: input.body,
+            body,
             needsCredentials: needsCredentialsNames,
             theme: themeFields.theme,
             themeTokens: themeFields.themeTokens,
-            designVersion: input.designVersion,
+            designVersion,
+            kit: kit ?? null,
           });
           id = created.id;
         } catch (err) {
@@ -301,6 +351,7 @@ export const registerCreatePageTool = (server: McpServer) => {
         fresh.contentType === "text/html"
           ? {
               usesDesignSystem:
+                Boolean(kit) ||
                 typeof input.theme === "string" ||
                 Boolean(input.themeTokens) ||
                 bodyUsesDesignSystem(fresh.body),
@@ -331,6 +382,9 @@ export const registerCreatePageTool = (server: McpServer) => {
         {
           details:
             `API: ${apiUrl}\n  App: ${appUrl}` +
+            (kit?.template === "dashboard" && kit.slots.data
+              ? `\n  Dashboard data: kv-set key "${kit.slots.data.key}" in namespace task:agent:${requestInfo.agentId}`
+              : "") +
             (ignored.length > 0 ? `\n  Ignored theme tokens: ${ignored.join(", ")}` : ""),
           data: {
             yourAgentId: requestInfo.agentId,
@@ -342,6 +396,10 @@ export const registerCreatePageTool = (server: McpServer) => {
             designVersion: fresh.designVersion,
             ...(ignored.length > 0 ? { ignoredTokens: ignored } : {}),
             ...designFlags,
+            ...(kit ? { kitTemplate: kit.template } : {}),
+            ...(kit?.template === "dashboard" && kit.slots.data
+              ? { dataNamespace: `task:agent:${requestInfo.agentId}` }
+              : {}),
             ...(movedSessionRootId ? { movedSessionRootId } : {}),
           },
         },

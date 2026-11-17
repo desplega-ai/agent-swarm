@@ -1,0 +1,301 @@
+{
+  "template": "report",
+  "slots": {
+    "header": {
+      "type": "Header",
+      "props": {
+        "eyebrow": "Incident review · INC-0412",
+        "title": "Checkout was down for 47 minutes on 9 March",
+        "lede": "A TLS certificate on the payments proxy expired. Customers could browse but not pay, and 1,184 checkouts failed.",
+        "meta": [
+          {
+            "label": "Author",
+            "value": "Rosa Okafor"
+          },
+          {
+            "label": "Reviewed",
+            "value": "12 March 2026"
+          },
+          {
+            "label": "Status",
+            "value": "Final"
+          }
+        ]
+      }
+    },
+    "summary": {
+      "type": "Callout",
+      "props": {
+        "tone": "warning",
+        "title": "Summary",
+        "content": "The certificate had no automatic renewal, and its expiry reminders went to a mailbox nobody reads. Renewal is now automatic for all 14 certificates. Expiry alerts page the on-call engineer 21 days ahead."
+      }
+    },
+    "metrics": {
+      "type": "Metrics",
+      "props": {
+        "items": [
+          {
+            "label": "Failed checkouts",
+            "value": "1,184",
+            "compare": "vs 9 on a typical Monday morning"
+          },
+          {
+            "label": "Time to detect",
+            "value": "6",
+            "unit": "min",
+            "delta": "+1 min",
+            "tone": "warning",
+            "compare": "over the 5 min target"
+          },
+          {
+            "label": "Time to restore",
+            "value": "47",
+            "unit": "min",
+            "delta": "+17 min",
+            "tone": "error",
+            "compare": "over the 30 min target"
+          },
+          {
+            "label": "Orders recovered",
+            "value": "71%",
+            "compare": "840 of 1,184 paid within a day"
+          }
+        ]
+      }
+    },
+    "sections": [
+      {
+        "type": "Section",
+        "props": {
+          "title": "Timeline"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Incident timeline, 9 March 2026, CET",
+              "headers": [
+                "Time",
+                "Elapsed",
+                "Event"
+              ],
+              "rows": [
+                [
+                  "09:12",
+                  "0 min",
+                  "Certificate on `pay-proxy-2` expires. Checkout calls start to fail with TLS errors."
+                ],
+                [
+                  "09:18",
+                  "+6 min",
+                  "Error-rate alert fires. The on-call engineer is paged."
+                ],
+                [
+                  "09:26",
+                  "+14 min",
+                  "First diagnosis blames the payment provider. Their status page shows no fault."
+                ],
+                [
+                  "09:41",
+                  "+29 min",
+                  "Engineer finds the expired certificate in the proxy logs."
+                ],
+                [
+                  "09:52",
+                  "+40 min",
+                  "New certificate issued and deployed to both proxies."
+                ],
+                [
+                  "09:59",
+                  "+47 min",
+                  "Error rate back under 0.1%. Incident closed."
+                ]
+              ],
+              "align": [
+                "left",
+                "right",
+                "left"
+              ]
+            }
+          },
+          {
+            "type": "Text",
+            "props": {
+              "style": "muted",
+              "content": "All times are CET. Sources: proxy logs, alerting and the incident channel."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "Root cause"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "The payments proxy holds its own TLS certificate, separate from the main site. It was issued by hand in March 2025 with a one-year lifetime and was never added to the automatic renewal job.\n\nReminders were sent 30, 14 and 3 days before expiry. All three went to the `infra-alerts` mailbox, which was set up for a team that was merged in 2025.\n\nDiagnosis took 23 minutes because the error surfaced as a payment failure. The first responder checked the payment provider before the proxy."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "What worked and what did not",
+          "layout": "split"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "### Worked\n\n- The error-rate alert fired within 6 minutes.\n- The fix was live 11 minutes after diagnosis.\n- Support had a banner on the site by 09:30."
+            }
+          },
+          {
+            "type": "Text",
+            "props": {
+              "content": "### Did not work\n\n- Expiry reminders had no owner.\n- The runbook for payment errors did not mention the proxy.\n- Both proxies shared one certificate, so both failed together."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "Actions"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Follow-up actions",
+              "headers": [
+                "Action",
+                "Owner",
+                "Due",
+                "Status"
+              ],
+              "rows": [
+                [
+                  "Add all 14 certificates to automatic renewal",
+                  "D. Varga",
+                  "13 Mar",
+                  {
+                    "badge": "Done",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Page on-call 21 days before any certificate expires",
+                  "D. Varga",
+                  "13 Mar",
+                  {
+                    "badge": "Done",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Add a proxy check to the payment-error runbook",
+                  "R. Okafor",
+                  "20 Mar",
+                  {
+                    "badge": "In progress",
+                    "tone": "active"
+                  }
+                ],
+                [
+                  "Issue a separate certificate for each proxy",
+                  "M. Lindqvist",
+                  "3 Apr",
+                  {
+                    "badge": "Planned",
+                    "tone": "neutral"
+                  }
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "aside": [
+      {
+        "type": "Fields",
+        "props": {
+          "title": "Incident facts"
+        },
+        "children": [
+          {
+            "type": "Field",
+            "props": {
+              "label": "Severity",
+              "value": "SEV-2"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Duration",
+              "value": "47 minutes"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Started",
+              "value": "9 March, 09:12 CET"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Resolved",
+              "value": "9 March, 09:59 CET"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Services",
+              "value": "Checkout, payments proxy"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Incident lead",
+              "value": "Rosa Okafor"
+            }
+          },
+          {
+            "type": "Field",
+            "props": {
+              "label": "Customer notice",
+              "value": "Sent 9 March, 11:30"
+            }
+          }
+        ]
+      }
+    ],
+    "appendix": [
+      {
+        "type": "Details",
+        "props": {
+          "summary": "Alert payload at 09:18",
+          "code": {
+            "alert": "checkout_error_rate",
+            "threshold": "2% over 5 min",
+            "observed": "64%",
+            "firedAt": "2026-03-09T09:18:04+01:00",
+            "service": "checkout",
+            "upstream": "pay-proxy-2"
+          }
+        }
+      }
+    ]
+  }
+}

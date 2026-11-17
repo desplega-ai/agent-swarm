@@ -414,6 +414,10 @@
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
       "scenarios": ["design-system"]
     },
+    "page-kit": {
+      "description": "create_page with a kit spec for every template, rejected slots, render on read with the dashboard KV data slot, and a body write that drops the spec",
+      "scenarios": ["page-kit"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
