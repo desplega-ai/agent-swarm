@@ -166,6 +166,27 @@ bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest
 14. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
 15. **Test spawnSync boundary violation.** A test called `Bun.spawnSync` / `spawnSync` / `execSync` / `execFileSync` (`scripts/check-test-spawn-sync.sh`). A blocked event loop cannot time a hung child out. Use `runChild()` / `expectChildOk()` from `src/tests/test-proc.ts` and pass `CHILD_PROCESS_TEST_BUDGET_MS` as the test's timeout argument.
 
+## Measuring CI cost and feedback time
+
+`bun scripts/ci-baseline.ts` reads one workflow's runs and jobs from the GitHub API and prints
+four numbers. Run it before and after a CI change, on windows of the same length.
+
+```bash
+bun scripts/ci-baseline.ts                                   # Merge Gate, last 7 days
+bun scripts/ci-baseline.ts --since 2026-11-10T00:00:00Z --until 2026-11-17T00:00:00Z
+bun scripts/ci-baseline.ts --workflow docker-and-deploy.yml --gate-job ""
+```
+
+| Number | What it tells you |
+|---|---|
+| runner-min per run, by job | Compute cost. The jobs at the top are the ones worth making smaller. |
+| verdict p50 and p90 | Feedback time: run created to the `Merge Gate` job done. The "last job" list names the critical path. |
+| job queue wait, peak concurrent jobs | Runner allocation. A peak near 60 is the plan's job cap: more jobs per run then wait longer. |
+| merge-queue flakes | Failed queue entries whose pull request later merged with no new push. Each one costs a full gate run and delays its pull request. |
+
+A change that lowers one number can raise another: more shards shorten the verdict and add
+runner time and jobs. Read all four.
+
 ## Bun version
 
 `package.json` `packageManager` is the single source of truth. Bump it, then `bun run check:bun-version` tells you which Dockerfile pins to update; run `bun install --frozen-lockfile` on the new runtime to confirm it still accepts `bun.lock` (a lockfile-format change would surface here) and commit everything together. CI and the Docker images run exactly that version. `engines.bun` stays at the runtime floor the shipped CLI needs (`>=1.3.12`, text imports); `bun test --timings` / `--update-timings` and `bun pm licenses` are 1.4-only and only run in CI.
