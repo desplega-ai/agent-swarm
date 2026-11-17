@@ -37,33 +37,48 @@ function AdminAddToRanking() {
   // The key the Settings row uses, so a profile save there refreshes this too.
   const { data: state } = useRanking(`${stored("SWARM_ORG_NAME")}|${stored("SWARM_ORG_WEBSITE")}`);
   const profile = useCompanyProfile();
-  const [open, setOpen] = useState(false);
+  // Props are taken when the dialog opens: saving a new name or website changes
+  // the ranking key, and `state` is undefined while that refetches. The dialog
+  // stays mounted through it, so its pending and error state survive.
+  const [dialog, setDialog] = useState<Omit<DialogProps, "onClose" | "save"> | null>(null);
 
-  if (!state || state.enabled || !profile.loaded) return null;
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <Trophy />
-        Add me to ranking
-      </Button>
-      {open ? (
-        <AddToRankingDialog
-          onClose={() => setOpen(false)}
-          telemetryOn={state.telemetryOn}
-          listing={state.listing}
-          save={profile.save}
-          // The resolved identity (a stored row or the env), else the admin's work domain.
-          initialName={
-            (state.missing.includes("SWARM_ORG_NAME") ? null : state.name) ??
-            profile.suggestedName ??
-            ""
+      {state && !state.enabled && profile.loaded ? (
+        <Button
+          variant="outline"
+          onClick={() =>
+            setDialog({
+              telemetryOn: state.telemetryOn,
+              listing: state.listing,
+              // The resolved identity (a stored row or the env), else the admin's work domain.
+              initialName:
+                (state.missing.includes("SWARM_ORG_NAME") ? null : state.name) ??
+                profile.suggestedName ??
+                "",
+              initialWebsite: state.domain ?? profile.suggestedWebsite ?? "",
+            })
           }
-          initialWebsite={state.domain ?? profile.suggestedWebsite ?? ""}
-        />
+        >
+          <Trophy />
+          Add me to ranking
+        </Button>
+      ) : null}
+      {dialog ? (
+        <AddToRankingDialog {...dialog} onClose={() => setDialog(null)} save={profile.save} />
       ) : null}
     </>
   );
 }
+
+type DialogProps = {
+  onClose: () => void;
+  save: ReturnType<typeof useCompanyProfile>["save"];
+  telemetryOn: boolean;
+  listing: { category: string; subcategory: string | null; description: string | null } | null;
+  initialName: string;
+  initialWebsite: string;
+};
 
 function AddToRankingDialog({
   onClose,
@@ -72,14 +87,7 @@ function AddToRankingDialog({
   listing,
   initialName,
   initialWebsite,
-}: {
-  onClose: () => void;
-  save: ReturnType<typeof useCompanyProfile>["save"];
-  telemetryOn: boolean;
-  listing: { category: string; subcategory: string | null; description: string | null } | null;
-  initialName: string;
-  initialWebsite: string;
-}) {
+}: DialogProps) {
   const enableTelemetry = useEnableTelemetry();
   const optIn = useRankingOptIn();
   const [name, setName] = useState(initialName);
@@ -103,7 +111,8 @@ function AddToRankingDialog({
     try {
       // The ranking's own fields live in Settings, so the profile write reports that surface.
       await save({ name, website }, "settings");
-      if (!telemetryOn) await enableTelemetry.mutateAsync("banner");
+      // A retry after a failed opt-in skips a second enable (each one reloads integrations).
+      if (!telemetryOn && !enableTelemetry.isSuccess) await enableTelemetry.mutateAsync("banner");
       await optIn.mutateAsync({
         category: listing?.category ?? "engineering",
         subcategory: listing?.subcategory ?? null,
