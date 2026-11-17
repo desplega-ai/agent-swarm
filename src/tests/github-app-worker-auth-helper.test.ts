@@ -31,9 +31,13 @@ const API_KEY = "example-worker-api-key";
 const AGENT_ID = "0b0b0b0b-0000-4000-8000-000000000001";
 const APP_TOKEN = "ghs_fixtureAppToken0000000000000000"; // gitleaks:allow (synthetic)
 const PAT = "ghp_fixtureStaticPat000000000000000000"; // gitleaks:allow (synthetic)
+/** A repo the wrapper hands the helper through its env; a plain owner/name, not a secret. */
+const ENV_REPO = "spanishkangaroo/recadame";
 
 let mode: "ok" | "unconfigured" = "ok";
 let calls = 0;
+/** Bodies the API received, in order: proves which repo (if any) the helper named. */
+let payloads: string[] = [];
 let server: ReturnType<typeof Bun.serve>;
 const tempDirs: string[] = [];
 
@@ -41,11 +45,12 @@ beforeAll(() => {
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       if (req.method !== "POST" || url.pathname !== "/api/github/installation-token") {
         return new Response("not found", { status: 404 });
       }
+      payloads.push(await req.text());
       calls++;
       if (
         req.headers.get("authorization") !== `Bearer ${API_KEY}` ||
@@ -69,6 +74,7 @@ afterAll(() => {
 afterEach(() => {
   mode = "ok";
   calls = 0;
+  payloads = [];
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -171,6 +177,79 @@ describe("swarm-github-token", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  test(
+    "names the repo so the API mints that repository's installation",
+    async () => {
+      const { env } = sandbox();
+
+      expect(
+        expectChildOk(
+          await helper(env, ["--repo", "clovellyapps/audb"]),
+          "--repo mode",
+        ).stdout.trim(),
+      ).toBe(APP_TOKEN);
+      // git hands the helper `url=` when it was given one, `host=` + `path=` otherwise.
+      const byUrl = expectChildOk(
+        await helper(
+          env,
+          ["git-credential", "get"],
+          "protocol=https\nhost=github.com\nurl=https://github.com/clovellyapps/audb.git\n\n",
+        ),
+        "credential get (url)",
+      );
+      expect(byUrl.stdout).toBe(`username=x-access-token\npassword=${APP_TOKEN}\n`);
+      expectChildOk(
+        await helper(
+          env,
+          ["git-credential", "get"],
+          "protocol=https\nhost=github.com\npath=clovellyapps/audb.git\n\n",
+        ),
+        "credential get (path)",
+      );
+      // The wrapper's channel: the repo travels in the env, never in argv.
+      expectChildOk(await helper({ ...env, SWARM_GITHUB_TOKEN_REPO: ENV_REPO }), "env repo");
+      // No repo named: the deployment-wide GITHUB_APP_INSTALLATION_ID, byte for byte.
+      expectChildOk(await helper(env), "no repo");
+      // A value that is not `owner/name` never reaches the API, and never gets the
+      // deployment-wide installation's token: the PAT answers instead.
+      const unsafe = expectChildOk(
+        await helper({ ...env, GITHUB_TOKEN: PAT }, ["--repo", "not a repo"]),
+        "unsafe repo",
+      );
+      expect(unsafe.stdout.trim()).toBe(PAT);
+
+      const expected = [
+        '{"repo":"clovellyapps/audb"}',
+        '{"repo":"clovellyapps/audb"}',
+        '{"repo":"clovellyapps/audb"}',
+        `{"repo":"${ENV_REPO}"}`,
+        "{}",
+      ];
+      expect(payloads).toEqual(expected);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "git-lfs requests (`owner/name.git/info/lfs`) name the same repo as git",
+    async () => {
+      const { env } = sandbox();
+      const pat = { ...env, GITHUB_TOKEN: PAT };
+      // With credential.useHttpPath, git-lfs asks for the LFS endpoint path; the
+      // repo is its first two segments, so LFS gets the App token like git does.
+      for (const request of [
+        "protocol=https\nhost=github.com\npath=o/r.git/info/lfs\n\n",
+        "protocol=https\nhost=github.com\nurl=https://github.com/o/r.git/info/lfs\n\n",
+        "protocol=https\nhost=github.com\npath=/o/r/info/lfs/objects/batch\n\n",
+      ]) {
+        const get = expectChildOk(await helper(pat, ["git-credential", "get"], request), request);
+        expect(get.stdout).toBe(`username=x-access-token\npassword=${APP_TOKEN}\n`);
+      }
+      expect(payloads).toEqual(['{"repo":"o/r"}', '{"repo":"o/r"}', '{"repo":"o/r"}']);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
 
 describe("gh-app-auth-wrapper", () => {
@@ -201,6 +280,68 @@ describe("gh-app-auth-wrapper", () => {
         "ghes",
       );
       expect(ghes.stdout.trim()).toBe(`args=api user GH_TOKEN= GH_ENTERPRISE_TOKEN=${APP_TOKEN}`);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "passes the repo from --repo, -R, GH_REPO, a gh api path or the origin remote",
+    async () => {
+      const { home, env } = sandbox();
+      const realGh = join(home, "real-gh");
+      writeFileSync(realGh, "#!/bin/sh\necho ok\n");
+      chmodSync(realGh, 0o755);
+      const tokenBin = join(home, "swarm-github-token");
+      writeFileSync(tokenBin, `#!/bin/sh\nexec bash ${HELPER} "$@"\n`);
+      chmodSync(tokenBin, 0o755);
+      const wrapperEnv = { ...env, SWARM_REAL_GH: realGh, SWARM_GITHUB_TOKEN_BIN: tokenBin };
+
+      // A repo whose origin remote is the target, for the cwd case.
+      const repoDir = join(home, "checkout");
+      mkdirSync(repoDir);
+      expectChildOk(await runChild(["git", "init", "-q"], { env, cwd: repoDir }), "git init");
+      expectChildOk(
+        await runChild(
+          ["git", "remote", "add", "origin", "https://github.com/clovellyapps/audb.git"],
+          { env, cwd: repoDir },
+        ),
+        "git remote add",
+      );
+
+      const cases: [string, string[], Record<string, string>, string][] = [
+        ["--repo", ["pr", "view", "--repo", "clovellyapps/audb"], {}, home],
+        ["-R", ["issue", "list", "-R", "clovellyapps/audb"], {}, home],
+        ["--repo=", ["pr", "view", "--repo=clovellyapps/audb"], {}, home],
+        ["GH_REPO", ["pr", "view"], { GH_REPO: "clovellyapps/audb" }, home],
+        ["gh api path", ["api", "repos/clovellyapps/audb/issues/1"], {}, home],
+        ["origin remote", ["pr", "view"], {}, repoDir],
+        // An explicit flag or gh api path beats GH_REPO, as it does in gh.
+        ["-R over GH_REPO", ["pr", "view", "-R", "clovellyapps/audb"], { GH_REPO: "x/y" }, home],
+        [
+          "api path over GH_REPO",
+          ["api", "repos/clovellyapps/audb/pulls"],
+          { GH_REPO: "x/y" },
+          home,
+        ],
+        ["HOST/OWNER/REPO", ["pr", "view", "--repo", "github.com/clovellyapps/audb"], {}, home],
+      ];
+      for (const [label, args, extraEnv, cwd] of cases) {
+        expectChildOk(
+          await runChild(["bash", WRAPPER, ...args], {
+            env: { ...wrapperEnv, ...extraEnv },
+            cwd,
+          }),
+          label,
+        );
+      }
+      expect(payloads).toEqual(cases.map(() => '{"repo":"clovellyapps/audb"}'));
+
+      // No flag, no env, no remote: the deployment-wide fallback, unchanged.
+      expectChildOk(
+        await runChild(["bash", WRAPPER, "pr", "view"], { env: wrapperEnv, cwd: home }),
+        "no repo",
+      );
+      expect(payloads.at(-1)).toBe("{}");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -280,6 +421,10 @@ describe("docker-entrypoint.sh: GitHub App worker auth", () => {
         "credential fill",
       );
       expect(fill.stdout).toContain(`password=${APP_TOKEN}`);
+      // Real git hands the helper the repo path only with useHttpPath, so the
+      // API is asked for that repository's installation, not the default one.
+      expect(run.gitconfig).toContain("useHttpPath = true");
+      expect(payloads.at(-1)).toBe('{"repo":"o/r"}');
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -292,6 +437,7 @@ describe("docker-entrypoint.sh: GitHub App worker auth", () => {
       expect(run.result.stdout).toContain(`GH_HOST=ghe.test GH_ENTERPRISE_TOKEN=${PAT}`);
       expect(run.gitconfig).toContain('[credential "https://ghe.test"]');
       expect(run.gitconfig).toContain(`helper = !${run.tokenBin} git-credential`);
+      expect(run.gitconfig).toContain("useHttpPath = true");
       expect(run.gitconfig).not.toContain(PAT);
       expect(run.linked).not.toBeNull();
     },

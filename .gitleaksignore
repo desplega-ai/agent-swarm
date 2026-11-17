@@ -16,6 +16,9 @@ d3278a2a25c12bcea63157ff4d8b561ed7862a40:apps/ui/src/lib/configuration-catalog.t
 547b03544b0c1ab68297aabadf3ce7c4ce442c49:src/tests/db-client.test.ts:generic-api-key:467
 # Fake agent-fs key in a credential-store test fixture, not a secret. The current line carries an inline gitleaks:allow.
 d0396a54a36d4d6983a5af2135037fb85774d934:apps/ui/src/lib/agent-fs/credential-store.test.ts:generic-api-key:137
+# Synthetic owner/name repo fixture passed as SWARM_GITHUB_TOKEN_REPO in a worker-auth
+# helper test (PR history); the current line reads it from a constant.
+c6efdd08c3daf399235ef6ab83bb11f8611aefa9:src/tests/github-app-worker-auth-helper.test.ts:generic-api-key:210
 # Model id claude-haiku-4-5-20251001 in commit 6bc88e589 (the removed Claude quota probe docs), not a secret.
 # The merge-gate scans every commit in the PR range, so this stays while that commit is in the branch history.
 6bc88e5891f63cc0b35461ad6081588e52ed5030:docs-site/content/docs/(documentation)/ui/configuration.mdx:generic-api-key:87

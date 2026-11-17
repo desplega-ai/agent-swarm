@@ -346,6 +346,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "github-app-worker-tokens": {
+      "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
+      "scenarios": ["github-installation-token-repos"]
+    },
     "improvements": {
       "description": "An agent drafts an improvement over MCP and REST, an agent approve is refused, the operator approves and the proxy receives only install_id, text and email, the kill switch refuses writes",
       "scenarios": ["core-improvements"]

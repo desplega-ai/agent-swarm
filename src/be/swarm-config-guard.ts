@@ -82,6 +82,8 @@ const RESERVED_KEYS = new Set([
   "GITHUB_API_URL",
   // Picks which App installation workers get tokens for; a config writer must not choose it.
   "GITHUB_APP_INSTALLATION_ID",
+  // Owners whose repos get a token for their own installation; same reason.
+  "GITHUB_APP_REPO_OWNERS",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
