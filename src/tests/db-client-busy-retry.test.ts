@@ -87,19 +87,30 @@ describe("db-client SQLITE_BUSY retry", () => {
 
   test("runTimed excludes the async backoff sleeps a bridged statement waited out", async () => {
     // The retry path releases the FIFO lock and sleeps between attempts, so
-    // nothing is executing for most of the bridge. Only the driver attempts
-    // count: each is capped at attemptSpinMs (25ms) by the short busy_timeout,
-    // and the attempt count is capped at backoffMs.length + 1 (6), so
-    // executionMs cannot structurally exceed ~150ms however long the hold is.
+    // nothing is executing for most of the bridge. A zero busy_timeout makes
+    // every BUSY attempt fail in microseconds, so executionMs is driver work
+    // only and stays far below the >=387ms of sleeps. A non-zero spin made
+    // this load-sensitive: SQLite's busy handler oversleeps on a loaded
+    // runner, and six 25ms spins summed past the bound.
+    // Backoff mins (0.5x jitter) sum to 587ms, past the 400ms hold, so the
+    // last attempt lands after the release instead of racing it.
+    const zeroSpinClient = createBunSqliteClient(() => main, {
+      maxWaitMs: 2_000,
+      backoffMs: [25, 50, 100, 200, 400, 400],
+      attemptSpinMs: 0,
+      finalAttemptSpinMs: 0,
+    });
     const released = holdWriteLock(400);
     const startedAt = performance.now();
-    const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["bridged-timed"]);
+    const timed = await zeroSpinClient.runTimed("INSERT INTO items (name) VALUES (?)", [
+      "bridged-timed",
+    ]);
     const wallMs = performance.now() - startedAt;
     await released;
 
     expect(timed.changes).toBe(1);
     expect(wallMs).toBeGreaterThan(400);
-    expect(timed.executionMs).toBeLessThan(300);
+    expect(timed.executionMs).toBeLessThan(200);
     expect(timed.executionMs).toBeLessThan(wallMs);
   });
 
