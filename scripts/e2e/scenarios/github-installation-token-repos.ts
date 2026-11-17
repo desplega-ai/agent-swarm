@@ -141,7 +141,12 @@ export const githubInstallationTokenRepos: Scenario = {
           `${repo} is refused as unregistered, got ${refused.text}`,
         );
       }
-      expect(lookups.length === 0 && mints.length === 0, "a refused repo reaches GitHub not at all");
+      // Counted through a call: `expect` is an assertion, so a bare `.length` read stays narrowed.
+      const calls = () => ({ lookups: lookups.length, mints: mints.length });
+      expect(
+        calls().lookups === 0 && calls().mints === 0,
+        "a refused repo reaches GitHub not at all",
+      );
 
       // GitHub answers with an installation that belongs to an unlisted account, or with no
       // installation: nothing minted. The "no" is cached, so repeating the request does not
@@ -151,8 +156,8 @@ export const githubInstallationTokenRepos: Scenario = {
         for (const attempt of [1, 2, 3]) {
           expectStatus(await mint(repo), [502], `${repo}, attempt ${attempt}`);
         }
-        expect(mints.length === 0, `no token for ${repo}, got mints=${mints}`);
-        expect(lookups.length === 1, `${repo} is looked up once, got ${lookups.length}`);
+        expect(calls().mints === 0, `no token for ${repo}, got mints=${mints}`);
+        expect(calls().lookups === 1, `${repo} is looked up once, got ${lookups.length}`);
       }
 
       // No repo: the fixed installation, unchanged.
