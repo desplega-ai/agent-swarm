@@ -105,11 +105,7 @@ export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
           </Button>
         </TabsContent>
         <TabsContent value="key">
-          {field(
-            "key",
-            "sk-ant-api03-...",
-            "Billed per token. Create a key at console.anthropic.com.",
-          )}
+          {field("key", "sk-ant-...", "Billed per token. Create a key at console.anthropic.com.")}
         </TabsContent>
       </Tabs>
     </ProviderCard>

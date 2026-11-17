@@ -277,7 +277,6 @@ export interface RankingForm {
   category: string;
   subcategory: string | null;
   description: string | null;
-  sourceCodeUrl: string | null;
 }
 
 export interface RankingOptIn {

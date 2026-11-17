@@ -16,6 +16,9 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
 mock.module("@/hooks/use-config", () => ({
   useConfig: () => ({ config: { apiUrl: "http://api" }, pendingConnection: null }),
 }));
+mock.module("@/components/dashboard/add-to-ranking-button", () => ({
+  AddToRankingButton: stub("ranking"),
+}));
 mock.module("@/components/dashboard/dashboard-nudges", () => ({ DashboardNudges: stub("nudges") }));
 mock.module("@/components/home/needs-you", () => ({ NeedsYou: stub("needs-you") }));
 mock.module("@/components/home/favorites", () => ({ Favorites: stub("favorites") }));
@@ -51,13 +54,14 @@ function widgets(html: string): string[] {
   return [...html.matchAll(/data-widget="([^"]+)"/g)].map((m) => m[1]);
 }
 
-test("nudges and metrics on top; main column: Needs you, activity; side: Favorites, Getting started", () => {
+test("nudges and metrics on top; main column: Needs you, activity; side: ranking, Favorites, Getting started", () => {
   const html = render();
   expect(widgets(html)).toEqual([
     "nudges",
     "metrics",
     "needs-you",
     "density",
+    "ranking",
     "favorites",
     "checklist",
   ]);

@@ -24,7 +24,9 @@ import {
   getPageVersions,
   initDb,
 } from "../be/db";
+import { saveDesignSystem } from "../be/design-system";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
+import { buildDesignSystem } from "../themes/design-system";
 import { registerCreatePageTool } from "../tools/create-page";
 
 const TEST_DB_PATH = "./test-create-page-tool.sqlite";
@@ -58,6 +60,9 @@ describe("create_page MCP tool", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
+    // A declined design system keeps the first-page ask out of the nudge assertions below
+    // (the ask itself is covered by the design-system E2E scenario).
+    await saveDesignSystem(buildDesignSystem({ status: "declined" }, { userId: null }).record);
     // The tool reads MCP_BASE_URL / APP_URL when building share URLs.
     delete process.env.PUBLIC_MCP_BASE_URL;
     process.env.MCP_BASE_URL = "http://test-api:9999";

@@ -217,7 +217,12 @@ export function MobileTreeBody({
     >
       {segments.map(({ section, rows }) =>
         section ? (
-          <TreeSection key={section.key} section={section} describedBy={describedBy(section.key)}>
+          <TreeSection
+            key={section.key}
+            touch
+            section={section}
+            describedBy={describedBy(section.key)}
+          >
             {rows.map(renderPhoneRow)}
           </TreeSection>
         ) : (

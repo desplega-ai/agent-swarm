@@ -6889,6 +6889,8 @@ export interface paths {
                             seatBlockedIndices?: number[];
                             spendCappedIndices: number[];
                             authFailureFence: number;
+                            keyUsage: number[];
+                            activeSessions: number[];
                         };
                     };
                 };
@@ -7938,6 +7940,134 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/design-system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the org design system */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The org design system and the value it replaced */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "none" | "invalid" | "active" | "declined";
+                            designSystem: components["schemas"]["DesignSystem"];
+                            invalidReason?: string;
+                            previous: components["schemas"]["DesignSystem"];
+                        };
+                    };
+                };
+            };
+        };
+        /** Set or decline the org design system */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description "active" (default) saves the design system. "declined" records that the requester does not want one, so agents stop asking. A declined record keeps only `source`.
+                         * @enum {string}
+                         */
+                        status?: "active" | "declined";
+                        /** @description Preset id the tokens apply on top of, for example hive or paper. Default hive. */
+                        basePreset?: string;
+                        /** @description Token overrides on top of the base preset, in the same formats as create_page themeTokens: { light, dark } maps, or { format: "css", css } with a shadcn, tweakcn or Tailwind v4 variable block. */
+                        themeTokens?: {
+                            /** @enum {string} */
+                            format?: "tokens" | "css";
+                            light?: {
+                                [key: string]: string;
+                            };
+                            dark?: {
+                                [key: string]: string;
+                            };
+                            css?: string;
+                        };
+                        /** @description Google Fonts stylesheet URL (https://fonts.googleapis.com/...) that loads the fonts the tokens name. */
+                        fontsHref?: string;
+                        /** @description https logo URL and its alt text. */
+                        logo?: {
+                            url: string;
+                            alt: string;
+                        };
+                        /**
+                         * @description "viewer" (default) follows the viewer's light or dark mode. "light" or "dark" locks every page to that mode.
+                         * @enum {string}
+                         */
+                        mode?: "viewer" | "light" | "dark";
+                        /** @description Ordered chart series colors, as CSS color values. */
+                        chartPalette?: string[];
+                        /** @description Where the design system came from. Default { kind: manual }. */
+                        source?: {
+                            /** @enum {string} */
+                            kind: "manual" | "website" | "brand-kit" | "preset";
+                            ref?: string;
+                            extractedAt?: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description The saved, normalized design system */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            designSystem: components["schemas"]["DesignSystem"];
+                            ignoredTokens: string[];
+                        };
+                    };
+                };
+                /** @description Invalid design system */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -9560,7 +9690,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a GitHub App installation token for worker git and gh
-         * @description Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.
+         * @description Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`) whose owner is listed in the deployment env `GITHUB_APP_REPO_OWNERS`, the API resolves that repository's App installation with the App JWT and mints for it; the repository must also be registered in `swarm_repos` on the configured GitHub host (403 otherwise). Any other call mints for the installation in `GITHUB_APP_INSTALLATION_ID`, so single-installation deployments are unchanged and a caller never picks an installation the operator did not list. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.
          */
         post: {
             parameters: {
@@ -9571,7 +9701,9 @@ export interface paths {
             };
             requestBody?: {
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": {
+                        repo?: string;
+                    };
                 };
             };
             responses: {
@@ -9587,7 +9719,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Caller is not a registered agent */
+                /** @description Caller is not a registered agent, or the repo of a listed owner is not registered in the swarm */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -9605,7 +9737,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description GitHub refused or failed to mint the token */
+                /** @description GitHub refused or failed to mint the token, or the repo has no App installation */
                 502: {
                     headers: {
                         [name: string]: unknown;
@@ -17875,7 +18007,7 @@ export interface paths {
                                 body?: string;
                                 needsCredentials?: string[];
                                 theme?: string | null;
-                                themeTokens?: components["schemas"]["PageThemeTokens"];
+                                themeTokens?: components["schemas"]["PageThemeTokens"] | null;
                                 designVersion?: number;
                                 /** @default 0 */
                                 viewCount: number;
@@ -32831,6 +32963,39 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        DesignSystem: {
+            /** @enum {number} */
+            v: 1;
+            /** @enum {string} */
+            status: "active" | "declined";
+            basePreset: string;
+            tokens: components["schemas"]["PageThemeTokens"];
+            fontsHref?: string;
+            logo?: {
+                url: string;
+                alt: string;
+            };
+            /** @enum {string} */
+            mode: "viewer" | "light" | "dark";
+            chartPalette?: string[];
+            source: {
+                /** @enum {string} */
+                kind: "manual" | "website" | "brand-kit" | "preset";
+                ref?: string;
+                extractedAt?: string;
+            };
+            updatedBy: string | null;
+            updatedByAgentId?: string;
+            updatedAt: string;
+        } | null;
+        PageThemeTokens: {
+            light: {
+                [key: string]: string;
+            };
+            dark: {
+                [key: string]: string;
+            };
+        };
         SwarmEvent: {
             /** Format: uuid */
             id: string;
@@ -33243,14 +33408,6 @@ export interface components {
             language?: string;
             verbosity?: string;
         };
-        PageThemeTokens: {
-            light: {
-                [key: string]: string;
-            };
-            dark: {
-                [key: string]: string;
-            };
-        } | null;
         Page: {
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
@@ -33267,7 +33424,7 @@ export interface components {
             body: string;
             needsCredentials?: string[];
             theme: string | null;
-            themeTokens: components["schemas"]["PageThemeTokens"];
+            themeTokens: components["schemas"]["PageThemeTokens"] | null;
             designVersion: number;
             /** @default 0 */
             viewCount: number;
@@ -33294,7 +33451,7 @@ export interface components {
             body: string;
             needsCredentials?: string[];
             theme?: string | null;
-            themeTokens?: components["schemas"]["PageThemeTokens"];
+            themeTokens?: components["schemas"]["PageThemeTokens"] | null;
             designVersion?: number;
         };
         PromptTemplateResponse: components["schemas"]["PromptTemplate"] & {

@@ -58,7 +58,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MODELSDEV_CACHE_PATH` | — | Override path to the vendored `modelsdev-cache.json` pricing/model snapshot, checked before the built-in candidate paths. Only needed for non-standard deployment layouts; boot-time pricing fallback only (live updates are owned by the pricing-refresh job). |
 | `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
 | `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
-| `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
+| `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms). Accepted range: 1–2,147,483,647. A non-integer, non-positive or out-of-range value falls back to `10000` at boot, and `PUT /api/config` rejects it. |
 | `FOLLOW_UP_GATE_MODE` | `off` | Follow-up gate for scheduled runs. `off` registers nothing. `shadow` runs the verifier script after each gated run's follow-up is created and records a `task_follow_up_gate_shadow` agent log row; the follow-up is never skipped or delayed. Config writes reject any other value. See [UI configuration](/docs/ui/configuration). |
 | `FOLLOW_UP_GATE_SCHEDULE_IDS` | — | Comma-separated schedule UUIDs whose runs the follow-up gate evaluates. Empty evaluates nothing. |
 | `FOLLOW_UP_GATE_VERIFIER_SCRIPT` | — | Name of the global script the follow-up gate runs as the Lead with `{ taskId }` (60-second timeout). |
@@ -384,6 +384,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_APP_INSTALLATION_ID` | API server. Installation whose tokens workers use for `git` and `gh` instead of `GITHUB_TOKEN` (needs `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`). Unset: workers use `GITHUB_TOKEN`. Deployment env only |
+| `GITHUB_APP_REPO_OWNERS` | API server. Comma-separated GitHub owners (user or org logins) whose registered repos get a token for their own App installation. Other repos get `GITHUB_APP_INSTALLATION_ID`. Unset: one installation, as before. Deployment env only |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
 | `GITHUB_URL` | GitHub Enterprise Server web base, e.g. `https://ghe.example.com` (default `https://github.com`). Set on the API and every worker. Deployment env only. See [GitHub Enterprise Server](/docs/integrations/github#github-enterprise-server) |
 | `GITHUB_API_URL` | GitHub REST base override (default derived from `GITHUB_URL`, `<GITHUB_URL>/api/v3` on GHES). Deployment env only |
@@ -638,7 +639,7 @@ CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
 ANTHROPIC_API_KEY=sk-key1,sk-key2
 ```
 
-When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
+When a session is spawned, the runner splits the credential value by commas and selects an available key: among the keys within 0.10 of the lowest current usage, the one with the fewest running sessions (ties at random). Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
 
 On the pi and opencode harnesses, `OPENROUTER_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`) and `HELMCODE_API_KEY` pool the same way: each task gets one key, picked by the model's provider prefix. On opencode the picked key is handed to the provider config, so an `OPENROUTER_API_KEY` pool works there too.
 

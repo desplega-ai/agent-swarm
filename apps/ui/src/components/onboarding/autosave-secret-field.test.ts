@@ -71,6 +71,19 @@ describe("checkSecret", () => {
     });
   });
 
+  test("an Anthropic API key may carry any sk-ant- prefix", () => {
+    const rule = KEY_RULES.anthropicKey;
+    expect(checkSecret(`sk-ant-api03-${"a".repeat(100)}`, rule).valid).toBe(true);
+    // A service-account key, which does not start sk-ant-api03-.
+    expect(checkSecret(`sk-ant-srv-${"b".repeat(100)}`, rule).valid).toBe(true);
+    expect(checkSecret(`sk-proj-${"c".repeat(100)}`, rule)).toEqual({
+      valid: false,
+      problem: "Starts with sk-ant-",
+      problemNow: true,
+    });
+    expect(checkSecret("", rule)).toEqual({ valid: false, problem: null, problemNow: false });
+  });
+
   test("a pool lets the last key be typed, but not a key before a comma", () => {
     const rule = KEY_RULES.claudeToken;
     // "sk-" is the start of the prefix: still typing.

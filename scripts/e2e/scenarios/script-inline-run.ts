@@ -8,6 +8,7 @@ import {
   runScript,
   structured,
   toolText,
+  upsertScript,
   withMcp,
 } from "./script-helpers";
 
@@ -24,6 +25,80 @@ export const scriptInlineRun: Scenario = {
   order: 400,
   async run(ctx) {
     const agentId = await registerAgent(ctx, "inline");
+    const memoryContent = `Memory alias regression ${ctx.nonce}`;
+    const memoryId = await withMcp(ctx, agentId, async (connection) => {
+      const stored = structured(
+        await callToolOk(connection, "memory-store", {
+          content: memoryContent,
+          name: `Script memory alias ${ctx.nonce}`,
+          scope: "agent",
+        }),
+      );
+      const ids = stored.memoryIds;
+      expect(Array.isArray(ids) && typeof ids[0] === "string", "memory-store returned no id");
+      return String(ids[0]);
+    });
+    const aliasSource = `import type { ScriptContext } from "swarm-sdk";
+export default async function (args: { memoryId: string }, ctx: ScriptContext) {
+  const memoryId = args.memoryId;
+  const intent = "alias regression";
+  const canonical = await ctx.swarm.memory_get({ memoryId, intent });
+  const alias = await ctx.swarm.memory_get({ id: memoryId, intent });
+  const matching = await ctx.swarm.memory_get({ memoryId, id: memoryId, intent });
+  let conflict = "";
+  try {
+    await ctx.swarm.memory_get({ memoryId, id: "00000000-0000-4000-8000-000000000000", intent });
+  } catch (error) {
+    conflict = error instanceof Error ? error.message : String(error);
+  }
+  let missing = "";
+  try {
+    await ctx.swarm.memory_get({ intent });
+  } catch (error) {
+    missing = error instanceof Error ? error.message : String(error);
+  }
+  return { canonical, alias, matching, conflict, missing };
+}`;
+    const aliasName = `e2e-memory-alias-${ctx.nonce}`;
+    await upsertScript(ctx, agentId, {
+      name: aliasName,
+      source: aliasSource,
+      intent: "typecheck memory_get aliases",
+    });
+    const conflictMessage = "memoryId and id must identify the same memory; supply only one.";
+    await withMcp(ctx, agentId, async (connection) => {
+      const conflict = await callToolErr(connection, "memory-get", {
+        memoryId,
+        id: "00000000-0000-4000-8000-000000000000",
+        intent: "verify MCP conflict error",
+      });
+      expect(toolText(conflict).includes(conflictMessage), "MCP conflict error changed");
+    });
+    for (const executor of ["native", "quickjs"]) {
+      const aliasRun = await runScript(ctx, agentId, {
+        name: aliasName,
+        args: { memoryId },
+        executor,
+        intent: "verify memory_get aliases",
+      });
+      expectRunOk(aliasRun, `memory_get aliases (${executor})`);
+      const aliases = asRecord(aliasRun.result);
+      for (const key of ["canonical", "alias", "matching"]) {
+        const read = asRecord(aliases[key]);
+        const memory = asRecord(asRecord(read.data).memory);
+        expect(read.success === true && read.status === 200, `${executor}: ${key} read failed`);
+        expect(
+          memory.id === memoryId && memory.content === memoryContent,
+          `${executor}: ${key} returned the wrong memory`,
+        );
+      }
+      expect(aliases.conflict === conflictMessage, `${executor}: conflict error differs from MCP`);
+      expect(
+        aliases.missing === "Supply memoryId (or its alias id) from memory-search.",
+        `${executor}: missing identifier error`,
+      );
+    }
+
     const marker = `inline-${ctx.nonce}`;
     const intent = `e2e inline double ${ctx.nonce}`;
 

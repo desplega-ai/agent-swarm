@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import {
   clearVolatileSecretsForTesting,
@@ -118,7 +118,7 @@ describe("scrubSecrets — env-based replacement", () => {
       version: SCRUBBER_RULES_VERSION,
       keyVars: [...openAICompatibleKeyVars()].sort(),
     }).toEqual({
-      version: 14,
+      version: 15,
       keyVars: ["AI_GATEWAY_API_KEY", "HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
     });
   });
@@ -415,6 +415,47 @@ describe("scrubObject", () => {
     });
   });
 
+  test("scrubs object keys, and two keys that redact alike both survive", () => {
+    const a = ["ghp", randomToken(36)].join("_");
+    const b = ["ghp", randomToken(36)].join("_");
+    const out = scrubObject({ [a]: "first", nested: { [b]: "second" }, [b]: "third", plain: 1 });
+    expect(out).toEqual({
+      "[REDACTED:github_token]": "first",
+      nested: { "[REDACTED:github_token]": "second" },
+      "[REDACTED:github_token]#2": "third",
+      plain: 1,
+    });
+  });
+
+  test("key clashes skip a literal suffixed key and keep every entry", () => {
+    const tokens = Array.from({ length: 2000 }, () => ["ghp", randomToken(36)].join("_"));
+    const input: Record<string, number> = { [tokens[0] as string]: 0 };
+    input["[REDACTED:github_token]#3"] = -1;
+    tokens.slice(1).forEach((token, i) => {
+      input[token] = i + 1;
+    });
+    // Cost guard: count the clash probes. A rescan from `#2` on every clash
+    // costs ~N^2/2 (about 2M here); the per-marker next-suffix cache keeps it
+    // near 2N. The lower bound proves the spy still sees the probe path.
+    const hasOwn = spyOn(Object, "hasOwn");
+    let out: Record<string, number>;
+    let probes: number;
+    try {
+      out = scrubObject(input);
+      probes = hasOwn.mock.calls.length;
+    } finally {
+      hasOwn.mockRestore();
+    }
+    expect(probes).toBeGreaterThanOrEqual(2001);
+    expect(probes).toBeLessThanOrEqual(4 * 2001);
+    expect(Object.keys(out)).toHaveLength(2001);
+    expect(out["[REDACTED:github_token]"]).toBe(0);
+    expect(out["[REDACTED:github_token]#2"]).toBe(1);
+    expect(out["[REDACTED:github_token]#3"]).toBe(-1);
+    expect(out["[REDACTED:github_token]#4"]).toBe(2);
+    expect(out["[REDACTED:github_token]#2001"]).toBe(1999);
+  });
+
   test("handles circular references without recursing forever", () => {
     const value: Record<string, unknown> = { a: "ok" };
     value.self = value;
@@ -677,6 +718,9 @@ describe("scrubSecrets — env dumps and escaped forms", () => {
 });
 
 // Every credential below is built at runtime; nothing secret-shaped is a literal.
+// The BEGIN line is joined at runtime too, so repo secret scanners never pair it with a later END.
+const PEM_BEGIN = ["-----BEGIN", "PRIVATE KEY-----"].join(" ");
+
 function pemBlock(label: string): string {
   const body = Array.from({ length: 5 }, () => randomToken(64)).join("\n");
   return `-----BEGIN ${label}PRIVATE KEY-----\n${body}\n-----END ${label}PRIVATE KEY-----`;
@@ -755,6 +799,20 @@ function probeCases(): ProbeCase[] {
       client_email: "bot@x.example",
     }),
     '{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----[REDACTED:private_key]-----END PRIVATE KEY-----\\n","client_email":"bot@x.example"}',
+  );
+  const cut = pemBlock("").split("\n").slice(0, 3).join("\n");
+  add(
+    "PEM cut off before its END line",
+    cut.split("\n")[1] ?? "",
+    `${cut}\n[truncated 40 lines]`,
+    `${PEM_BEGIN}[REDACTED:private_key]\n[truncated 40 lines]`,
+  );
+  const gcpCut = JSON.stringify({ type: "service_account", private_key: `${pemBlock("")}\n` });
+  add(
+    "GCP service-account JSON cut off inside private_key",
+    gcpCut.split("\\n")[1] ?? "",
+    gcpCut.slice(0, 190),
+    `{"type":"service_account","private_key":"${PEM_BEGIN}[REDACTED:private_key]`,
   );
   s = `${randomToken(30)}.${randomToken(20)}`;
   add(
@@ -933,6 +991,8 @@ describe("scrubSecrets — over-redaction guards", () => {
     () => {
       const inputs = [
         `-----BEGIN RSA PRIVATE KEY-----${"A".repeat(200_000)}`,
+        `${PEM_BEGIN}${`${"A".repeat(15)}\n`.repeat(12_000)}`,
+        `${PEM_BEGIN}${`\\n${"A".repeat(15)}`.repeat(11_000)}`,
         "-----BEGIN RSA PRIVATE KEY-----\n".repeat(6_000),
         `"password": "${"\\\\".repeat(100_000)}`,
         `\\"password\\": \\"${"\\\\".repeat(100_000)}`,

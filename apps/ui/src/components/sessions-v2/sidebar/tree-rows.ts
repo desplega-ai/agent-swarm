@@ -109,7 +109,7 @@ export type TreeRow =
       note?: string;
     })
   | (RowBase & { type: "loading"; parentKey: string })
-  /** "New group" at the end of My groups. */
+  /** "New group": the icon in the My groups heading (a row on the phone). */
   | (RowBase & { type: "add" })
   /** "Show N hidden" / "Hide N hidden" after the groups: shows or hides the hidden groups. */
   | (RowBase & { type: "hidden"; count: number; open: boolean })
@@ -309,13 +309,57 @@ export function isGroupListId(container: ContainerId): boolean {
   return container.startsWith("groups:");
 }
 
+/** Sections that leave the tree while empty (`buildTreeRows`). */
+const HIDE_WHEN_EMPTY = new Set<SessionSection>(["inbox", "working", "later"]);
+
+/** Lists whose rows keep their order across polls (`keepRowOrder`). */
+export const KEEP_ORDER_CONTAINERS: ReadonlySet<ContainerId> = new Set(["inbox", "working"]);
+
+/**
+ * A polled list in the order it showed before (the server lists the newest
+ * activity first, so progress alone would move rows):
+ *
+ * - A session in both pages keeps its place, with its new data.
+ * - A new session that the server lists after every kept one is older. It
+ *   came in from below (a longer page, or rows above it left), so it goes
+ *   at the end and the rows above it stay where they are.
+ * - Any other new session entered the list: it goes on top.
+ * - The page says which sessions show: a session it no longer holds goes.
+ *   The page is the newest `SIDEBAR_LIST_LIMIT` of the list, so activity
+ *   past it can push the least active session out, at any place in the
+ *   kept order. "View all" still lists it.
+ *
+ * Returns `next` itself when the order is the server's.
+ */
+export function keepRowOrder(
+  previous: SessionsListResponse,
+  next: SessionsListResponse,
+): SessionsListResponse {
+  const serverAt = new Map(next.sessions.map((session, i) => [session.root.id, i]));
+  const fresh = new Map(next.sessions.map((session) => [session.root.id, session]));
+  const known = new Set(previous.sessions.map((session) => session.root.id));
+  const lastKept = Math.max(-1, ...previous.sessions.map((s) => serverAt.get(s.root.id) ?? -1));
+  const entered = next.sessions.filter((session) => !known.has(session.root.id));
+  const top = entered.filter((session) => (serverAt.get(session.root.id) ?? 0) < lastKept);
+  const tail = entered.filter((session) => (serverAt.get(session.root.id) ?? 0) > lastKept);
+  const kept = previous.sessions.flatMap((old) => {
+    const now = fresh.get(old.root.id);
+    return now ? [now] : [];
+  });
+  const sessions = [...top, ...kept, ...tail];
+  return sessions.every((session, i) => session === next.sessions[i])
+    ? next
+    : { ...next, sessions };
+}
+
 /** The session list of the Starred section. */
 export const STARRED_CONTAINER = "starred";
 
 /**
  * The sidebar as one flat row list (SPEC R4, R5, R6): Inbox, Working,
  * Starred, then the groups (My groups, Shared with me, one section per source, No group), then
- * Later and Done, so ongoing work sits right under the Inbox. `containers` names the lists to
+ * Later and Done, so ongoing work sits right under the Inbox. Inbox, Working, and Later show
+ * only while they hold sessions. `containers` names the lists to
  * load: open lists with sessions only, so a poll never loads a folded one.
  * Run it once with no lists to learn `containers`, then again with them.
  */
@@ -383,6 +427,11 @@ export function buildTreeRows({
 
   const box = (id: SessionSection, counts: SessionSectionCounts, flat: boolean) => {
     const open = isOpen(id);
+    // Inbox, Working, and Later leave the tree while they hold nothing: no
+    // session counted, or an open list that loaded none. A list that loads
+    // or failed keeps its row and its state.
+    const drained = open && lists.get(id)?.data?.sessions.length === 0;
+    if (HIDE_WHEN_EMPTY.has(id) && (counts.total === 0 || drained)) return;
     const key = `box:${id}`;
     rows.push({ type: "box", key, level: 0, id, counts, open });
     if (open) fill(id, key, counts.total, 1, flat, id);
@@ -426,8 +475,8 @@ export function buildTreeRows({
   };
 
   box("inbox", tree.inbox, true);
-  // Working: running sessions with nothing to answer, out of the Inbox. Hidden while empty.
-  if (tree.working && tree.working.total > 0) box("working", tree.working, true);
+  // Working: running sessions with nothing to answer, out of the Inbox.
+  if (tree.working) box("working", tree.working, true);
 
   // Starred sessions, in any read state and from any list (the star is per user).
   const starredSessions = starred?.data?.sessions ?? [];
@@ -461,6 +510,16 @@ export function buildTreeRows({
     label: "My groups",
     count: groups.myGroupsTotal,
   });
+  // "New group" comes first: the desktop draws it in the heading, so the keys
+  // reach it in the order it shows. A new top-level group's name field sits
+  // under it, where the new group will list (newest first). With no groups
+  // yet, the first-run invite shows there instead.
+  rows.push({ type: "add", key: "add:group", level: 0 });
+  if (creating === "shared/") {
+    rows.push({ type: "create", key: "create:shared/", level: 0, parent: "shared/" });
+  } else if (groups.myGroups.length === 0) {
+    rows.push({ type: "empty", key: "empty:groups", level: 0, kind: "groups", parentKey: mine });
+  }
   const groupNode = (node: GroupNode, level: number, readOnly = false) => {
     const open = isOpen(node.key);
     const key = `group:${node.key}`;
@@ -494,17 +553,6 @@ export function buildTreeRows({
     fill(node.key, key, node.own.total, level + 1, false, emptyKind);
   };
   for (const node of arrange(groups.myGroups)) groupNode(node, 0);
-  // The name field of a new top-level group, else "New group" (after the
-  // first-run invite when there are no groups yet). "New group" is a row the
-  // keys reach, so the invite holds text only.
-  if (creating === "shared/") {
-    rows.push({ type: "create", key: "create:shared/", level: 0, parent: "shared/" });
-  } else {
-    if (groups.myGroups.length === 0) {
-      rows.push({ type: "empty", key: "empty:groups", level: 0, kind: "groups", parentKey: mine });
-    }
-    rows.push({ type: "add", key: "add:group", level: 0 });
-  }
 
   // Shared with me: other people's personal groups, one node per owner.
   if (groups.sharedWithMe.length > 0) {

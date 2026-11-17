@@ -346,6 +346,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "github-app-worker-tokens": {
+      "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
+      "scenarios": ["github-installation-token-repos"]
+    },
     "improvements": {
       "description": "An agent drafts an improvement over MCP and REST, an agent approve is refused, the operator approves and the proxy receives only install_id, text and email, the kill switch refuses writes",
       "scenarios": ["core-improvements"]
@@ -405,6 +409,10 @@
     "page-publishing": {
       "description": "create page, serve public/authed/password, version history, feedback task, delete",
       "scenarios": ["knowledge-pages"]
+    },
+    "org-design-system": {
+      "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
+      "scenarios": ["design-system"]
     },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
@@ -471,8 +479,8 @@
       "scenarios": ["script-saved-lifecycle"]
     },
     "script-sdk-calls": {
-      "description": "A script drives ctx.swarm (kv, agent, tasks, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
-      "scenarios": ["script-sdk-calls"]
+      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
+      "scenarios": ["script-sdk-calls", "script-memory-rate"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",

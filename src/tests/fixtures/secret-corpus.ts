@@ -93,6 +93,37 @@ export function buildPositives(): CorpusPositive[] {
     ),
     positive("xai", join("xai", "-", rand(ALNUM, 80))),
 
+    // Shapes from svn-arv/redacted's benchmark that no pass caught.
+    positive("stripe webhook secret", join("whsec", "_", rand(ALNUM, 32))),
+    positive("groq", join("gsk", "_", rand(ALNUM, 52))),
+    positive("tavily", join("tvly", "-", rand(ALNUM, 32))),
+    positive("tavily dev", join("tvly", "-dev-", rand(ALNUM, 32))),
+    positive("langsmith personal token", join("lsv2", "_pt_", rand(HEX, 32), "_", rand(HEX, 10))),
+    positive("langsmith service key", join("lsv2", "_sk_", rand(HEX, 32), "_", rand(HEX, 10))),
+    positive("circleci", join("CCIPAT", "_", rand(ALNUM, 22), "_", rand(HEX, 40))),
+    positive("google api key v2", join("AQ", ".", rand(URLSAFE, 53))),
+    positive(
+      "hubspot private app",
+      join(
+        "pat",
+        "-na1-",
+        rand(HEX, 8),
+        "-",
+        rand(HEX, 4),
+        "-",
+        rand(HEX, 4),
+        "-",
+        rand(HEX, 4),
+        "-",
+        rand(HEX, 12),
+      ),
+    ),
+    positive("new relic without keyword", join("NRAK", "-", rand(UPPER_ALNUM, 27))),
+    positive("sentry dsn key", rand(HEX, 32), {
+      context: (s) =>
+        `Sentry.init({ dsn: "https://${s}@o${rand(DIGITS, 6)}.ingest.us.sentry.io/${rand(DIGITS, 7)}" })`,
+    }),
+
     // Providers we integrate with.
     positive("github classic pat", join("ghp", "_", rand(ALNUM, 36))),
     positive("github fine-grained pat", join("github", "_pat_", rand(ALNUM, 82))),
@@ -148,9 +179,9 @@ export function buildPositives(): CorpusPositive[] {
       context: (s) => `mailgun: ${s}`,
       gitleaksRule: "mailgun-private-api-token",
     }),
+    // Pass 2's newrelic_key takes it first; the keyword context still redacts.
     positive("new relic", join("NRAK", "-", rand(UPPER_ALNUM, 27)), {
       context: (s) => `newrelic = ${s}`,
-      gitleaksRule: "new-relic-user-api-key",
     }),
     positive("vault service token", join("hvs", ".", rand(ALNUM, 96)), {
       gitleaksRule: "vault-service-token",
@@ -315,6 +346,17 @@ export function buildNegatives(): string[] {
     "ntn_ prefix belongs to Notion",
     "fo1_ prefix belongs to Fly.io",
     "the stripe dashboard shows sk_live_ keys masked",
+    "https://docs.sentry.io/platforms/javascript/configuration/options/#dsn",
+    "https://o123.ingest.us.sentry.io/api/123/envelope/",
+    "whsec_ prefix marks a Stripe webhook secret",
+    "gsk_ is the Groq key prefix",
+    "tvly-dev keys are rate limited",
+    "lsv2_pt_ tokens belong to LangSmith",
+    "CCIPAT_ is a CircleCI token prefix",
+    "AQ. is the prefix of a newer Gemini key",
+    "pat-na1 is the HubSpot US region",
+    "NRAK-1234 is a ticket id",
+    "-----BEGIN PRIVATE KEY----- marks a PEM key, see docs",
   );
   return out;
 }

@@ -271,6 +271,25 @@ export function stripKeyPrefix(source: string): string {
   return out;
 }
 
+/** gitleaks' trailing boundary, tuned for source files: a quote, whitespace, `;`, a `\n`/`\r` escape or the end. */
+export const UPSTREAM_TRAILING_BOUNDARY = String.raw`(?:[\x60'"\s;]|\\[nr]|$)`;
+/**
+ * The same boundary plus the punctuation tool output and prose put after a
+ * token: `.`, `,`, `:`, `)`, `]`, `}`, `>`, `|`, and the URL delimiters `/`,
+ * `&`, `?`, `#`. The secret is a capture group, so the delimiter is never
+ * redacted. A secret class that already holds `.` or `/` backtracks to give
+ * it back, so its secret is unchanged.
+ */
+export const WIDE_TRAILING_BOUNDARY = String.raw`(?:[\x60'"\s;.,:)\]}>|/&?#]|\\[nr]|$)`;
+
+/**
+ * Swap every gitleaks trailing boundary for `WIDE_TRAILING_BOUNDARY`. A rule
+ * built from alternatives (atlassian-api-token) carries one per branch.
+ */
+export function widenTrailingBoundary(source: string): string {
+  return source.replaceAll(UPSTREAM_TRAILING_BOUNDARY, WIDE_TRAILING_BOUNDARY);
+}
+
 interface GitleaksAllowlist {
   regexTarget?: string;
   regexes?: string[];
@@ -369,7 +388,10 @@ export function generate(text: string): string {
       upstream = upstream.replace(cut.drop, "");
     }
     const converted = convertGoRegex(upstream);
-    const regex = { source: stripKeyPrefix(converted.source), flags: converted.flags };
+    const regex = {
+      source: widenTrailingBoundary(stripKeyPrefix(converted.source)),
+      flags: converted.flags,
+    };
     const ruleRe = new RegExp(regex.source, `${regex.flags}g`);
     const allowlists = (rule.allowlists ?? [])
       .filter((list) => list.regexes?.length || list.stopwords?.length)

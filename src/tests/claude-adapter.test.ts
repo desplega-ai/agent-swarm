@@ -372,6 +372,41 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     }
   });
 
+  test("each rate_limit_event emits the merged window snapshot as a custom event", async () => {
+    const event = (utilization: number) =>
+      JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed",
+          resetsAt: 1794841800,
+          rateLimitType: "five_hour",
+          unifiedWindows: {
+            five_hour: { utilization, resetsAt: 1794841800, status: "allowed" },
+            seven_day: { utilization: 0.11, resetsAt: 1795248000, status: "allowed" },
+          },
+        },
+      });
+    spawnSpy.mockImplementation((() =>
+      makeStreamingFakeProc([
+        event(0.52),
+        event(0.53),
+        assistantLine([{ type: "text", text: "done" }]),
+      ])) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const snapshots: Array<Record<string, { utilization?: number }>> = [];
+    session.onEvent((e) => {
+      if (e.type === "custom" && e.name === "rate_limit_windows") {
+        snapshots.push(e.data as Record<string, { utilization?: number }>);
+      }
+    });
+    await session.waitForCompletion();
+
+    expect(snapshots.map((s) => s.five_hour?.utilization)).toEqual([0.52, 0.53]);
+    expect(snapshots[1]?.seven_day?.utilization).toBe(0.11);
+  });
+
   test("tool_use-only, thinking-only, and empty-text turns are skipped, not captured", async () => {
     const lines = [
       assistantLine([{ type: "text", text: "Real answer" }]),

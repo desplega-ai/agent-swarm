@@ -219,6 +219,8 @@ export const SDK_TOOL_NAME_MAP = {
   app_upsert: "app-upsert",
   page_create: "create_page",
   page_delete: "delete-page", // destructive
+  designSystem_get: "design-system-get",
+  designSystem_set: "design-system-set",
   metric_create: "create_metric",
 
   // ── human input ──
