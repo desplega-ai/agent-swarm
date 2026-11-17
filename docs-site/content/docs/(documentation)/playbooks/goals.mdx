@@ -1,0 +1,211 @@
+---
+title: Goals
+description: Give the swarm an objective and a check a script can decide, and let it iterate until the check passes. Standing goals re-check on a timer and reopen when the metric regresses. Built from one Swarm App, two scripts and a scheduled workflow, with our own Goals app as the worked example.
+agent:
+  when: "Someone wants the swarm to keep working toward a measurable target until a check passes, or to hold a metric and reopen work when it regresses"
+---
+
+**State the objective. Write the check. The swarm iterates until the check passes, and reopens when it stops passing.**
+
+A task ends when an agent says it is done. A goal ends when a check says it is done. That one change moves the judgment from the agent doing the work to something the agent cannot argue with: a SQL query, a script, a pull request's state, or a scored question.
+
+This playbook shows how we built our own Goals app on Agent Swarm, and how you can build the same loop in your swarm. Nothing in it needs a code change: it uses a [Swarm App](/docs/apps), [scripts](/docs/guides/scripts-runtime), a [workflow](/docs/concepts/workflows) and a [schedule](/docs/concepts/scheduling).
+
+## The loop
+
+Every goal runs the same three steps.
+
+1. **Objective.** What should be true, in one sentence a worker can act on. "API p95 under 300 ms on the 10 busiest routes."
+2. **Check.** A function that returns met or not met, with a reason. The check runs outside the agent's turn, so the worker cannot mark its own homework.
+3. **Iterate.** While the check fails, dispatch one more unit of work with the objective, the last reason and the iteration number in the brief. Wait for it to settle, wait a cooldown, check again.
+
+<Mermaid title="The goal loop: check, dispatch one iteration while the check fails, cool down, check again. A met standing goal holds and re-checks; a miss reopens it." chart={`flowchart LR
+  C["check"] -- "met" --> M{"standing goal?"}
+  M -- "no" --> D["met<br/>done"]
+  M -- "yes" --> H["holding<br/>re-check every hold interval"]
+  H -- "still met" --> H
+  H -- "miss" --> R["reopen<br/>fresh budget"]
+  R --> W
+  C -- "not met" --> B{"budget, iterations,<br/>streak OK?"}
+  B -- "yes" --> W["dispatch one iteration<br/>objective + last reason"]
+  B -- "no" --> P["needs a human"]
+  W --> S["work settles<br/>cooldown"]
+  S --> C
+`} />
+
+The loop has three exits besides success, and each one asks a person instead of burning money: the budget runs out, the iterations run out, or the check returns the same reason three times in a row (the work is stuck).
+
+## Define a goal
+
+A goal is a row with these fields.
+
+| Field | What it holds | Example |
+|---|---|---|
+| Objective | The target, as a brief a worker can act on | "10 open good-first-issues, each with repro steps and acceptance criteria" |
+| Check kind and spec | How to decide met, as JSON | `{"scriptName": "goal-check-good-first-issues", "args": {"min": 10}}` |
+| Work mode | What one iteration is | `task`, `rpi`, `workflow` or `none` |
+| Owner and model tier | Who does the work and on which tier | An agent id, or empty for the task pool; `smol` to `ultra` |
+| Cooldown | Minutes between a settled iteration and the next check | `1440` for daily |
+| Budget | Max iterations and max spend per episode, plus a weekly cap | 5 iterations, $40, $20 per week |
+| Hold interval | For a standing goal: how often to re-check once met | `1440` |
+| Approved actions | Steps the requester pre-approved that would otherwise wait for a person | "File new issues on our public repo" |
+
+### Write a check a script can decide
+
+The check is the part to get right. It must be cheap, deterministic, and impossible for the worker to satisfy by claiming success.
+
+| Kind | Spec | Met when |
+|---|---|---|
+| `sql` | `{"sql": "SELECT count(*) ...", "op": ">=", "threshold": 1}` | The first column of the first row compares true. Read-only. |
+| `script` | `{"scriptName": "...", "args": {}}` | The script returns `{ met: true }`. This is the plug-in point for any API: observability, analytics, search console, CI. |
+| `pr` | `{"repo": "owner/name", "require": "merged"}` | The PR is merged, or approved at head with every check green. Without a number, it reads the PR URL from the last work output and pins it. |
+| `jev` | `{"question": "...", "threshold": 0.7}` | A scored yes/no question over the objective and the last output passes the threshold. Use it only when no metric exists. |
+| `subgoals` | `{}` | Every child goal is met. |
+| `manual` | `{}` | A person says so. |
+
+A script check returns more than a boolean:
+
+```ts
+return {
+  met: false,
+  reason: "3/10 routes at or over 300 ms: POST /api/db-query 412 ms (29,834 calls), ...",
+  score: 412,          // worst p95, so progress is visible between iterations
+  evidenceOk: true,    // false when the check could not read enough data
+};
+```
+
+Two rules keep a check honest.
+
+- **Return the reason a worker can act on.** The reason goes straight into the next brief. "3 routes too slow, worst POST /api/db-query 412 ms" leads to a fix. "not met" leads to guessing.
+- **Fail closed on thin evidence.** If the check read fewer routes, runs or issues than it should, it returns `evidenceOk: false` and `met: false`. A check that passes because its data source was empty is the most expensive bug in this loop.
+
+Before trusting a check, run it twice with thresholds that must pass and must fail (for example 100,000 ms and 1 ms). If both come back as expected and the evidence count is right, the check is wired.
+
+## Architecture
+
+We built the Goals app from four existing primitives. The tick is a script, not a workflow loop, so pausing, resuming and cooling down are row flips.
+
+<Mermaid title="Goals architecture: a schedule runs the driver workflow, whose script reads due goals from the app's tables, runs checks, and dispatches tasks, multi-step chains or workflows. People use the app UI." chart={`flowchart TB
+  SCH["schedule<br/>every 10 min"] --> WF["driver workflow<br/>one script node"]
+  WF --> TICK["goal-tick script"]
+  APP["Swarm App<br/>goals, events, needs-a-human"] <--> TICK
+  TICK --> CHK["checks<br/>sql, script, pr, jev, subgoals"]
+  CHK --> EXT["APIs: observability,<br/>GitHub, analytics"]
+  TICK --> WORK["work<br/>task, research-plan-implement chain,<br/>workflow"]
+  WORK --> AG["worker agents"]
+  UI["app UI<br/>new goal, edit, pause,<br/>answer"] --> ACT["goal-actions script"]
+  ACT --> APP
+`} />
+
+| Piece | Built from | Job |
+|---|---|---|
+| Goals table, event timeline, needs-a-human queue | A [Swarm App](/docs/apps) with its own tables and UI | One row per goal, one event per check, dispatch, hold or reopen, one row per question to a person |
+| `goal-tick` | A [script](/docs/guides/scripts-runtime) | The loop: settle finished work, run due checks, dispatch the next iteration |
+| `goal-actions` | A script called from the app's buttons | Create, edit, pause, resume, cancel, add a sub-goal, answer a question |
+| Driver | A [workflow](/docs/concepts/workflows) with one `swarm-script` node, started by a [schedule](/docs/concepts/scheduling) | Runs the tick every 10 minutes. No agent turn per tick, so an idle goal costs nothing. |
+| Checks | One script per metric | Read an external system and return `{met, reason, score, evidenceOk}` |
+
+## One iteration
+
+Each tick walks every `active`, `cooldown` or `holding` goal through the same steps.
+
+<Mermaid title="One tick for one goal: skip while work is in flight, record the cost of settled work, run the check when due, then mark met, hold, ask a person, or dispatch the next iteration." chart={`sequenceDiagram
+  participant S as Schedule
+  participant T as goal-tick
+  participant A as Goals app
+  participant C as Check
+  participant W as Worker
+  S->>T: run (every 10 min)
+  T->>A: load due goals
+  alt work still in flight
+    T-->>A: skip
+  else work settled
+    T->>A: add cost, store last output, set next check
+  end
+  T->>C: run check (when due)
+  C-->>T: met, reason, score, evidenceOk
+  T->>A: write check event
+  alt met
+    T->>A: status met, or holding for a standing goal
+  else not met and over budget or stuck
+    T->>A: needs a human
+  else not met
+    T->>W: dispatch iteration N with objective and last reason
+    W-->>A: output, cost (settles on a later tick)
+  end
+`} />
+
+The brief for each iteration carries the goal id, the objective, the done-condition, the last check reason and the iteration count. It also carries the rules: never merge, never post publicly or to a customer, never pay. A worker whose next step needs one of those ends its output with a line `GATED: <what>`, and the goal waits for a person. A step the objective itself forbids is skipped, not gated.
+
+Iteration tasks never wake the lead and never post to chat. They are tagged with the goal id, so their cost rolls up to the goal.
+
+### Work modes
+
+- **task**: one task per iteration, to the owner or the pool.
+- **rpi**: a research, plan, implement chain of three tasks linked with `dependsOn`. It ends in one PR, never merged by the goal.
+- **workflow**: start a workflow with the goal fields as input and wait for the run.
+- **none**: no work, only checks. Use it for a parent goal, or a goal that waits on the outside world.
+
+A goal that needs several PRs is a parent with a `subgoals` check and work `none`. Each child owns one PR with a `pr` check. The parent is met when the last child is.
+
+## Catch regressions
+
+Most useful goals are invariants, not one-off targets. Latency, flaky tests and a healthy issue backlog all drift back. A goal with a hold interval handles that.
+
+- **Met** becomes **holding**. No agent work runs while a goal holds; only the check re-runs, every hold interval.
+- **A miss reopens the goal** as a new episode, with iterations and per-episode spend reset. The normal loop dispatches the fix.
+- **A weekly cap** limits spend across episodes, so a goal that keeps regressing cannot run up an unbounded bill.
+- **Three reopens in seven days** asks a person: the fix is not sticking, and more iterations will not help.
+
+A **forever** goal runs every cooldown with no iteration or lifetime budget limit, under its weekly cap only. Instead of asking a person, it backs off for one period when it gets stuck. Only a `GATED` step asks.
+
+## Worked example: our own goals
+
+We started the Goals app with three goals on our own repository and API. All three use `script` checks.
+
+| Goal | Check | Work | What happened |
+|---|---|---|---|
+| API p95 under 300 ms on the 10 busiest routes | Query the tracing backend for server spans over 24 h, group by route, rank by call count, compare each p95 to 300 ms | `rpi`, one route per iteration | Met on the first check: worst route 258 ms. It went straight to **holding** and now re-checks daily. If a release pushes a route over 300 ms, the goal reopens and dispatches a fix. |
+| At most 1 flaky failure in the last 30 merge-queue runs | Read the last 30 CI runs, classify a failure as flaky when the same head later passed, name the failing test from the job log | `task`, one flaky test per iteration: a root-cause PR, taken through automated review, never merged by the goal | Baseline: 7 flakes. Each iteration picked the top flaky test and opened a fix PR for a person to merge. It now runs **forever**, daily, under a $10 weekly cap. |
+| 10 open good-first-issues with repro and acceptance criteria | Search open issues with the label, count those with a repro section, an acceptance section and no open linked PR | `task`, at most 3 issues per iteration | Baseline: 0 of 3 labelled issues qualified. Iterations fixed our own issues first, then filed new ones grounded in a file and line. Filing public issues is an **approved action** on this goal, so it does not wait for a person. |
+
+Lessons from running them:
+
+- **Write the check first and prove it.** Each check got a must-pass and a must-fail control and an evidence count before its goal started. The latency check refuses to pass unless it read 10 routes with traffic.
+- **One unit of work per iteration.** "One route", "one flaky test", "three issues". Small iterations settle fast, cost little, and give the check something to measure.
+- **Approve the objective's own actions up front.** Early on, the issues goal stopped to ask permission for filing issues, the very thing its objective asked for. Listing it under approved actions fixed that.
+- **A parent goal still needs a small budget.** A `subgoals` parent with work `none` spends nothing, but a zero budget reads as exhausted on the first check. Give it $1.
+- **Two ticks at once can double-dispatch.** A manual "run tick now" racing the schedule is rare at a 10-minute cadence. A short lease in KV storage removes it.
+
+## Build it in your swarm
+
+1. **App.** Create a [Swarm App](/docs/apps/build-an-app) with three tables: goals (the fields above plus status, iteration, spend, next check, episode), events (goal, kind, verdict, reason, score, time) and questions (goal, why, question, answer). Add a board, a goal page with its event timeline, and a needs-a-human tab.
+2. **Checks.** Write one script per metric that returns `{met, reason, score, evidenceOk}`. Store API keys as [script connections](/docs/guides/script-connections) or config, never in the script.
+3. **Tick.** Write the `goal-tick` script: for each due goal, settle finished work (read its cost), run the check, write an event, then mark met, hold, open a question, or dispatch. Tag every dispatched task with the goal id and turn off lead follow-ups.
+4. **Actions.** Write a script for the app's buttons: create, edit, pause, resume, cancel, answer. Every change writes an event.
+5. **Driver.** Create a workflow with one `swarm-script` node that runs the tick, and a schedule that starts it every 10 minutes.
+6. **First goal.** Pick a metric you already watch. Write its check, run the controls, set a small budget, and start it.
+
+<Callout type="info">
+**Goal-shaped work** is a metric or invariant a script can decide, that takes several iterations, or that can regress. A one-off fix is a task. A target you check once a quarter is a report.
+</Callout>
+
+## Guardrails
+
+| Risk | What stops it |
+|---|---|
+| A worker declares victory | The check runs outside the worker's turn and decides met. The worker never writes status. |
+| A check passes on empty data | `evidenceOk` must be true for `met` to count. Controls run before the goal starts. |
+| Runaway spend | Per-episode budget, max iterations and a weekly cap. Over any limit, a person decides. |
+| Work that does not converge | The same reason three checks running asks a person; a forever goal backs off a period instead. |
+| A fix that does not stick | Three reopens in seven days asks a person. |
+| Merges, public posts, payments | Never automatic. The worker ends with `GATED:` and the goal waits, unless the requester listed the action under approved actions. Merges always wait. |
+| Noise for the team | Iteration tasks never wake the lead or post to chat. A person hears about a goal only when it needs a decision. |
+
+## Related
+
+- [Software Factory](/docs/playbooks/software-factory): the stations a goal can drive. A goal is the work order; the factory's workflows do the work.
+- [Linear Delivery Loop](/docs/playbooks/linear-delivery-loop): another tick-driven loop, which moves each Linear issue one step at a time to a merged PR.
+- [PR Review](/docs/playbooks/pr-review): a cheap review pass for the PRs that goal iterations open.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates): how a workflow waits for a person.
+- [Scripts runtime](/docs/guides/scripts-runtime) and [Swarm Apps](/docs/apps): the two primitives the Goals app is built from.
