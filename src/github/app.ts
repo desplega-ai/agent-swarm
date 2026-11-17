@@ -11,10 +11,13 @@ let privateKey: string | null = null;
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
 // Repo -> installation cache, so a worker's every git/gh call does not cost a
-// `GET /repos/{owner}/{repo}/installation`. Positive results only: an
-// installation added later works without restarting the API.
+// `GET /repos/{owner}/{repo}/installation`. A "no installation" answer is kept
+// for a minute only: a registered repo that GitHub refuses cannot turn each mint
+// request into an App JWT plus a GitHub call, and an installation added later
+// still works without restarting the API.
 const INSTALLATION_CACHE_TTL_MS = 10 * 60_000;
-const installationCache = new Map<string, { id: number; expiresAt: number }>();
+const NO_INSTALLATION_CACHE_TTL_MS = 60_000;
+const installationCache = new Map<string, { id: number | null; expiresAt: number }>();
 
 /** Raw PEM (with literal `\\n` escapes) or base64-encoded PEM. */
 function decodePrivateKey(raw: string): string {
@@ -367,6 +370,10 @@ async function resolveInstallationId(
   const jwt = await generateAppJWT(creds);
   if (!jwt) return null;
 
+  const refuse = (): null => {
+    installationCache.set(repo, { id: null, expiresAt: Date.now() + NO_INSTALLATION_CACHE_TTL_MS });
+    return null;
+  };
   try {
     const response = await fetch(githubApiUrl(`/repos/${repo}/installation`), {
       headers: {
@@ -377,14 +384,14 @@ async function resolveInstallationId(
     });
     if (response.status !== 200) {
       console.log(`[GitHub] No installation for ${repo}: ${response.status}`);
-      return null;
+      return refuse();
     }
     const data = (await response.json()) as { id?: unknown; account?: { login?: unknown } };
-    if (typeof data.id !== "number") return null;
+    if (typeof data.id !== "number") return refuse();
     const account = typeof data.account?.login === "string" ? data.account.login.toLowerCase() : "";
     if (!owners.has(account)) {
       console.log(`[GitHub] Installation for ${repo} belongs to an owner that is not allowed`);
-      return null;
+      return refuse();
     }
     installationCache.set(repo, {
       id: data.id,

@@ -93,6 +93,7 @@ export const githubInstallationTokenRepos: Scenario = {
       await register(`http://${host}/${ALLOWED}/App.git`, "allowed-app");
       await register(`http://${host}/${OTHER}/app`, "other-app");
       await register(`http://${host}/${ALLOWED}/moved`, "allowed-moved");
+      await register(`http://${host}/${ALLOWED}/missing`, "allowed-missing");
       // Another host whose path ends in a listed owner's repo is not that repo.
       await register(`https://git.example.test/${ALLOWED}/spoof`, "allowed-spoof");
 
@@ -142,11 +143,17 @@ export const githubInstallationTokenRepos: Scenario = {
       }
       expect(lookups.length === 0 && mints.length === 0, "a refused repo reaches GitHub not at all");
 
-      // GitHub answers with an installation that belongs to an unlisted account: nothing minted.
-      reset();
-      const moved = await mint(`${ALLOWED}/moved`);
-      expectStatus(moved, [502], "installation of an unlisted account");
-      expect(mints.length === 0, `no token for an unlisted account, got mints=${mints}`);
+      // GitHub answers with an installation that belongs to an unlisted account, or with no
+      // installation: nothing minted. The "no" is cached, so repeating the request does not
+      // cost another App JWT and GitHub call.
+      for (const repo of [`${ALLOWED}/moved`, `${ALLOWED}/missing`]) {
+        reset();
+        for (const attempt of [1, 2, 3]) {
+          expectStatus(await mint(repo), [502], `${repo}, attempt ${attempt}`);
+        }
+        expect(mints.length === 0, `no token for ${repo}, got mints=${mints}`);
+        expect(lookups.length === 1, `${repo} is looked up once, got ${lookups.length}`);
+      }
 
       // No repo: the fixed installation, unchanged.
       reset();
