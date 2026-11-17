@@ -1473,7 +1473,12 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = await cancelTask(parsed.params.id, reason, { statusKind: "user" });
+    // Who cancelled comes from the resolved principal, never the body: an agent
+    // (X-Agent-ID, including ctx.swarm.task_cancel) records `agent`, as MCP
+    // cancel-task does; the dashboard and operator record `user`.
+    const cancelledTask = await cancelTask(parsed.params.id, reason, {
+      statusKind: principal.kind === "agent" ? "agent" : "user",
+    });
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;

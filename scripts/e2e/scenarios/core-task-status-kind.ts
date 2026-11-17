@@ -9,8 +9,15 @@ import {
   expectToolOk,
   listOf,
   readTask,
+  registerLead,
   registerWorker,
+  retireAgent,
 } from "./core-helpers";
+import { expectRunOk, runScript } from "./script-helpers";
+
+const SCRIPT_CANCEL = `export default async function (args: { taskId: string }, ctx: any) {
+  return await ctx.swarm.task_cancel({ taskId: args.taskId });
+}`;
 
 async function expectKind(
   ctx: ScenarioContext,
@@ -36,6 +43,7 @@ export const coreTaskStatusKind: Scenario = {
   order: 228,
   async run(ctx) {
     const agentId = await registerWorker(ctx, "status-kind");
+    const leadId = await registerLead(ctx, "status-kind");
     const conn = await ctx.connectMcp(agentId);
     const cleanup: string[] = [];
     const start = async (label: string, extra: Record<string, unknown> = {}) => {
@@ -99,14 +107,41 @@ export const coreTaskStatusKind: Scenario = {
       if (typeof resumeId === "string") cleanup.push(resumeId);
       await expectKind(ctx, superseded, "superseded", "graceful_shutdown");
 
-      // A person cancelled it from the dashboard API.
+      // A person cancelled it from the dashboard API. A body kind cannot override
+      // the server's attribution.
       const userCancelled = await start("user-cancelled");
       expectStatus(
-        await ctx.api("POST", `/api/tasks/${userCancelled}/cancel`, { body: { reason: "nope" } }),
+        await ctx.api("POST", `/api/tasks/${userCancelled}/cancel`, {
+          body: { reason: "nope", statusKind: "agent" },
+        }),
         [200],
         "cancel from the API",
       );
       await expectKind(ctx, userCancelled, "cancelled", "user");
+
+      // An agent cancelled it over REST (X-Agent-ID), even with a spoofed body kind.
+      const agentRestCancelled = await start("agent-rest-cancelled");
+      expectStatus(
+        await ctx.api("POST", `/api/tasks/${agentRestCancelled}/cancel`, {
+          agentId: leadId,
+          body: { reason: "agent chose to cancel", statusKind: "external" },
+        }),
+        [200],
+        "lead cancels over REST",
+      );
+      await expectKind(ctx, agentRestCancelled, "cancelled", "agent");
+
+      // An agent's script cancelled it: ctx.swarm.task_cancel routes to the same REST path.
+      const scriptCancelled = await start("agent-script-cancelled");
+      expectRunOk(
+        await runScript(ctx, leadId, {
+          source: SCRIPT_CANCEL,
+          args: { taskId: scriptCancelled },
+          intent: `e2e status kind cancel ${ctx.nonce}`,
+        }),
+        "lead cancels from a script",
+      );
+      await expectKind(ctx, scriptCancelled, "cancelled", "agent");
 
       // Back-compat: the status filter, in SQL and over HTTP, still matches every kind.
       const failedIds = [agentFailed, errored, dependent];
@@ -153,6 +188,7 @@ export const coreTaskStatusKind: Scenario = {
     } finally {
       await conn.close();
       for (const id of cleanup) await cancelQuietly(ctx, id);
+      await retireAgent(ctx, leadId);
     }
   },
 };
