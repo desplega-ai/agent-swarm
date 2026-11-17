@@ -169,6 +169,7 @@ async function recordProvisionFailure(
       const failed = await failTask(
         row.id,
         `provisioning failed after ${attempts} attempts: ${error}`,
+        { statusKind: "error" },
       );
       if (!failed) continue;
       await tx.run(

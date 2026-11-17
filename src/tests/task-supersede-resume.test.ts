@@ -87,6 +87,7 @@ describe("Task Supersede + Resume", () => {
         resumeTaskId: null,
       });
       expect(result?.status).toBe("superseded");
+      expect(result?.statusKind).toBe("graceful_shutdown");
       expect(result?.finishedAt).toBeTruthy();
 
       const log = (await getLogsByTaskId(task.id)).find((l) => l.eventType === "task_superseded");

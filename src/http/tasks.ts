@@ -97,6 +97,7 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
   splitLegacyModelAlias,
   TaskAttachmentSchema,
+  TaskStatusKindSchema,
 } from "../types";
 import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
@@ -172,6 +173,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
+  statusKind: true,
   peakContextPercent: true,
   totalCostUsd: true,
 });
@@ -270,6 +272,9 @@ const listTasks = route({
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
     status: z.string().optional(),
+    statusKind: TaskStatusKindSchema.optional().describe(
+      "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts.",
+    ),
     agentId: z.string().optional(),
     scheduleId: z.string().optional(),
     /** Only tasks of this workflow run (indexed; independent of fleet size). */
@@ -1095,6 +1100,7 @@ export async function handleTasks(
     });
     const filters = {
       status,
+      statusKind: parsed.query.statusKind,
       agentId: parsed.query.agentId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       workflowRunId: parsed.query.workflowRunId,
@@ -1466,7 +1472,7 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = await cancelTask(parsed.params.id, reason);
+    const cancelledTask = await cancelTask(parsed.params.id, reason, { statusKind: "user" });
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -1957,21 +1963,25 @@ export async function handleTasks(
           const result = await completeTask(
             parsed.params.id,
             parsed.body.output || "Completed by runner wrapper (no explicit output)",
+            { statusKind: "runner" },
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
           }
           updatedTask = result;
         } else if (parsed.body.status === "skipped") {
-          const result = await skipTask(parsed.params.id, skipReason!);
+          const result = await skipTask(parsed.params.id, skipReason!, { statusKind: "runner" });
           if (!result) {
             return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
+          // The runner posts `failed` for a crash, a non-zero exit, a provider
+          // error or an output-schema parse failure: none is the agent's call.
           const result = await failTask(
             parsed.params.id,
             parsed.body.failureReason || "Process exited without explicit completion",
+            { statusKind: "error" },
           );
           if (!result) {
             return { error: "Failed to mark task as failed", status: 500 };
@@ -2402,7 +2412,9 @@ export async function handleTasks(
     // `task.failed`. Once it queues the step's retry it moves the task to
     // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
-      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON, {
+        statusKind: "error",
+      });
       if (task.agentId) {
         await updateAgentStatusFromCapacity(task.agentId);
       }

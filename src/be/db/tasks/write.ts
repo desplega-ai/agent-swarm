@@ -12,8 +12,13 @@ import type {
   ReasoningEffort,
   RuntimePool,
   TaskAttachment,
+  TaskStatusKindFor,
 } from "../../../types";
-import { isTerminalTaskStatus, SUPERSEDED_WORKFLOW_TASK_REASON } from "../../../types";
+import {
+  isTaskStatusKindFor,
+  isTerminalTaskStatus,
+  SUPERSEDED_WORKFLOW_TASK_REASON,
+} from "../../../types";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { publishWorkerNudge } from "../../worker-nudges";
@@ -462,7 +467,12 @@ export async function setTaskTitleIfUnset(
 export async function completeTask(
   id: string,
   output?: string,
-  options?: { addTags?: string[]; deferredAt?: string },
+  options?: {
+    addTags?: string[];
+    deferredAt?: string;
+    /** Why it completed; see TASK_STATUS_KINDS. Omitted stores NULL (unknown). */
+    statusKind?: TaskStatusKindFor<"completed">;
+  },
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -482,9 +492,9 @@ export async function completeTask(
     // await between the guard read above and this write lets a racing
     // terminal transition (e.g. heartbeat failTask) land first.
     let completed = await getDbClient().get<AgentTaskRow>(
-      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      `UPDATE agent_tasks SET status = ?, statusKind = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-      ["completed", finishedAt, id],
+      ["completed", options?.statusKind ?? null, finishedAt, id],
     );
     if (!completed) return null;
 
@@ -598,6 +608,12 @@ export async function failTask(
      * then cascades whatever is left.
      */
     cascadeDependents?: boolean;
+    /**
+     * Why it failed: `agent` when the agent chose to, `error` when the system
+     * gave up on the run, `cascade` / `external` otherwise. See
+     * TASK_STATUS_KINDS. Omitted stores NULL (unknown).
+     */
+    statusKind?: TaskStatusKindFor<"failed">;
   } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
@@ -615,10 +631,11 @@ export async function failTask(
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `UPDATE agent_tasks SET status = 'failed', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          AND (? IS NULL OR lastUpdatedAt = ?) RETURNING *`,
     [
+      opts.statusKind ?? null,
       scrubbedReason,
       finishedAt,
       id,
@@ -737,7 +754,11 @@ export async function overwriteTerminalTaskResultText(
 export async function cancelTask(
   id: string,
   reason?: string,
-  options: { cascadeDependents?: boolean } = {},
+  options: {
+    cascadeDependents?: boolean;
+    /** Who cancelled it; see TASK_STATUS_KINDS. Omitted stores NULL (unknown). */
+    statusKind?: TaskStatusKindFor<"cancelled">;
+  } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -752,9 +773,9 @@ export async function cancelTask(
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `UPDATE agent_tasks SET status = 'cancelled', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-    [cancelReason, finishedAt, id],
+    [options.statusKind ?? null, cancelReason, finishedAt, id],
   );
 
   if (row && oldTask) {
@@ -860,7 +881,11 @@ export async function cancelTask(
  * `task.skipped`, which defer-task waits and workflow resume listen for; the
  * Slack, chat, Jira and Linear outbound paths do not, so a skip notifies no one.
  */
-export async function skipTask(id: string, reason: string): Promise<AgentTask | null> {
+export async function skipTask(
+  id: string,
+  reason: string,
+  opts: { statusKind?: TaskStatusKindFor<"skipped"> } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
   if (isTerminalTaskStatus(oldTask.status)) return null;
@@ -870,9 +895,9 @@ export async function skipTask(id: string, reason: string): Promise<AgentTask | 
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'skipped', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `UPDATE agent_tasks SET status = 'skipped', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-    [skipReason, finishedAt, id],
+    [opts.statusKind ?? null, skipReason, finishedAt, id],
   );
   if (!row) return null;
 
@@ -937,6 +962,8 @@ export async function supersedeTask(
     resumeTaskId: string | null;
     /** Compare-and-swap on the observed `lastUpdatedAt`; see `failTask`. */
     expectedLastUpdatedAt?: string;
+    /** Defaults to `reason` when it is a resume reason; a free-form reason stores NULL. */
+    statusKind?: TaskStatusKindFor<"superseded">;
   },
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
@@ -951,12 +978,19 @@ export async function supersedeTask(
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks
        SET status = 'superseded',
+           statusKind = ?,
            finishedAt = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
          AND (? IS NULL OR lastUpdatedAt = ?)
        RETURNING *`,
-    [finishedAt, id, args.expectedLastUpdatedAt ?? null, args.expectedLastUpdatedAt ?? null],
+    [
+      args.statusKind ?? (isTaskStatusKindFor("superseded", args.reason) ? args.reason : null),
+      finishedAt,
+      id,
+      args.expectedLastUpdatedAt ?? null,
+      args.expectedLastUpdatedAt ?? null,
+    ],
   );
 
   if (row && oldTask) {
@@ -1030,6 +1064,7 @@ export async function markWorkflowStepTaskSuperseded(id: string): Promise<boolea
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks
        SET status = 'superseded',
+           statusKind = 'workflow_retry',
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'failed' AND failureReason = ?
        RETURNING *`,

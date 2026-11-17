@@ -774,7 +774,7 @@ export async function handleIssueUpdate(
   if (swarmStatus === "cancelled") {
     const task = await getTaskById(sync.swarmId);
     if (task && !isTerminalTaskStatus(task.status)) {
-      await cancelTask(sync.swarmId, `Linear issue cancelled`);
+      await cancelTask(sync.swarmId, `Linear issue cancelled`, { statusKind: "external" });
       console.log(
         `[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${data.identifier ?? issueId} cancelled)`,
       );
@@ -812,7 +812,7 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
 
   const task = await getTaskById(sync.swarmId);
   if (task && !isTerminalTaskStatus(task.status)) {
-    await cancelTask(sync.swarmId, "Linear issue deleted");
+    await cancelTask(sync.swarmId, "Linear issue deleted", { statusKind: "external" });
     console.log(`[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${issueId} deleted)`);
   }
 }
@@ -853,7 +853,9 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     if (existing) {
       const existingTask = await getTaskById(existing.swarmId);
       if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
-        await cancelTask(existing.swarmId, "Stopped by user from Linear");
+        await cancelTask(existing.swarmId, "Stopped by user from Linear", {
+          statusKind: "user",
+        });
         console.log(`[Linear Sync] Cancelled task ${existing.swarmId} (stop signal from Linear)`);
       }
     }

@@ -118,6 +118,7 @@ describe("cascadeFailDependents", () => {
 
     const childAfter = await getTaskById(child.id);
     expect(childAfter!.status).toBe("failed");
+    expect(childAfter!.statusKind).toBe("cascade");
     expect(childAfter!.failureReason).toContain("Blocked dependency");
     expect(childAfter!.failureReason).toContain("was failed");
   });

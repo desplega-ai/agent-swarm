@@ -9,7 +9,12 @@ import {
   toolOk,
 } from "@/tools/utils";
 import type { AgentTask, AgentTaskSummary } from "@/types";
-import { AgentTaskStatusSchema, AssetKeySchema } from "@/types";
+import {
+  AgentTaskStatusSchema,
+  AssetKeySchema,
+  TASK_STATUS_KINDS,
+  TaskStatusKindSchema,
+} from "@/types";
 
 const TaskSummarySchema = z.looseObject({
   id: z.string().optional(),
@@ -20,6 +25,8 @@ const TaskSummarySchema = z.looseObject({
   task: z.string().optional(),
   taskPreview: z.string().optional(),
   status: AgentTaskStatusSchema.optional(),
+  // Plain string, not the enum: a kind added later must not fail validation.
+  statusKind: z.string().optional(),
   taskType: z.string().optional(),
   tags: z.array(z.string()).optional(),
   priority: z.number().optional(),
@@ -34,6 +41,13 @@ const TaskSummarySchema = z.looseObject({
 export const getTasksInputSchema = z.object({
   status: AgentTaskStatusSchema.optional().describe(
     "Filter by task status (unassigned, offered, pending, in_progress, completed, failed).",
+  ),
+  statusKind: TaskStatusKindSchema.optional().describe(
+    `Filter by why the task ended. Pair with status, e.g. status 'failed' + statusKind 'error' (crash, rate limit, exit code) vs 'agent' (the agent chose to fail). Kinds per status: ${Object.entries(
+      TASK_STATUS_KINDS,
+    )
+      .map(([status, kinds]) => `${status}: ${kinds.join(", ")}`)
+      .join("; ")}.`,
   ),
   mineOnly: z.boolean().optional().describe("Only return tasks assigned to you."),
   unassigned: z.boolean().optional().describe("Only return unassigned tasks in the pool."),
@@ -108,6 +122,7 @@ function renderTaskSummaries(
     task?: string;
     taskPreview?: string;
     status?: string;
+    statusKind?: string;
     priority?: number;
   }>,
 ): string {
@@ -118,7 +133,7 @@ function renderTaskSummaries(
   const rows = tasks.map((task) => {
     const cells = [
       task.id,
-      task.status,
+      task.statusKind ? `${task.status} (${task.statusKind})` : task.status,
       task.priority,
       task.agentId,
       task.taskPreview ?? task.task,
@@ -132,6 +147,7 @@ export async function getTasksHandler(
   ctx: ToolCtx,
   {
     status,
+    statusKind,
     mineOnly,
     unassigned,
     offeredToMe,
@@ -154,6 +170,7 @@ export async function getTasksHandler(
   // agent-specific shortcuts like mineOnly/offeredToMe.
   const taskFilters = {
     status,
+    statusKind,
     agentId: ctx.kind === "owner" && mineOnly ? (agentId ?? undefined) : undefined,
     unassigned: ctx.kind === "owner" ? unassigned : undefined,
     offeredTo: ctx.kind === "owner" && offeredToMe ? (agentId ?? undefined) : undefined,
@@ -182,6 +199,7 @@ export async function getTasksHandler(
     agentId: t.agentId,
     ...(includeFull ? { task: t.task } : { taskPreview: t.task }),
     status: t.status,
+    statusKind: t.statusKind,
     taskType: t.taskType,
     tags: t.tags,
     priority: t.priority,
@@ -196,6 +214,7 @@ export async function getTasksHandler(
   // Build filter description for message
   const filters: string[] = [];
   if (status) filters.push(`status='${status}'`);
+  if (statusKind) filters.push(`statusKind='${statusKind}'`);
   if (ctx.kind === "owner" && mineOnly) filters.push("mine only");
   if (ctx.kind === "owner" && unassigned) filters.push("unassigned");
   if (ctx.kind === "owner" && offeredToMe) filters.push("offered to me");

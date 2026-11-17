@@ -184,6 +184,7 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
+    expect(stored?.statusKind).toBe("deferred");
     expect(stored?.deferredAt).toBeTruthy();
     // Human-facing output for a time-based defer: when it comes back, nothing
     // else. No requestedByUserId is set here, so it falls back to UTC and
