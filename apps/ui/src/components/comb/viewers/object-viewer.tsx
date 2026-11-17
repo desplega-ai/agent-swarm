@@ -49,9 +49,11 @@ export default function ObjectViewer({ file, stat }: ViewerProps) {
         />
       </div>
       <div ref={body}>
-        {view === "source" ? (
-          <TextViewer file={file} stat={stat} />
-        ) : (
+        {view === "source" ? <TextViewer file={file} stat={stat} /> : null}
+        {/* Hidden, not unmounted, under Source: the board's unmount cancels its
+            pending autosave and a sheet's open cell edit, and a remount reloads
+            the saved scene. Skipped so comments anchor on the source alone. */}
+        <div hidden={view === "source"} data-comb-skip={view === "source" ? "" : undefined}>
           <TextGate file={file} stat={stat}>
             {(text) => (
               <ObjectBody
@@ -62,7 +64,7 @@ export default function ObjectViewer({ file, stat }: ViewerProps) {
               />
             )}
           </TextGate>
-        )}
+        </div>
       </div>
     </div>
   );
