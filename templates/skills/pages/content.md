@@ -27,6 +27,13 @@ every page should use.
 Rule of thumb: if the content is a snapshot (you can write the full HTML/JSON
 in a single call), use pages. If it needs stored data and actions, use apps.
 
+### When to use a sheet or board instead
+
+A tracker or grid people keep editing (budget, comparison, status list) is a
+sheet. A plan, diagram or map to think through is a board. Both are editable
+agent-fs files; see the `boards-and-sheets` skill. To show one inside a page,
+embed it with `<swarm-object>` (section below).
+
 Do **not** use pages for:
 
 - In-flight progress notes: use `store-progress.progress`

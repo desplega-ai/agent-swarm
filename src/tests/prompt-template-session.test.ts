@@ -314,6 +314,7 @@ describe("Session templates: MUST pointers", () => {
     expect(result.text).toContain(
       "a `card` on `slack-reply` or `chat-reply` (max 1 table of 100 rows, 2 charts), not a file or Page. Bigger or document-shaped: agent-fs.",
     );
+    expect(result.text).toContain("See the `boards-and-sheets` skill.");
     expect(result.unresolved).toEqual([]);
   });
 
@@ -321,6 +322,8 @@ describe("Session templates: MUST pointers", () => {
     const result = resolveTemplate("system.agent.outputs.no_agent_fs", {});
     expect(result.text).toContain("make a Page only when the requester asks for one");
     expect(result.text).not.toContain("drive path");
+    // Sheets and boards are agent-fs files, so this variant does not route to them.
+    expect(result.text).not.toContain("boards-and-sheets");
     expect(result.text).toContain("Bigger or document-shaped: a Markdown attachment.");
   });
 });
