@@ -1439,12 +1439,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -1570,7 +1570,7 @@ export interface paths {
                         /** @description Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped. */
                         notifications?: {
                             /** @enum {string} */
-                            channel: "slack" | "email" | "telegram";
+                            channel: "slack" | "email" | "telegram" | "discord" | "teams";
                             target: string;
                         }[];
                     };
@@ -1679,12 +1679,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -1854,12 +1854,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -2034,12 +2034,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -2232,12 +2232,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;

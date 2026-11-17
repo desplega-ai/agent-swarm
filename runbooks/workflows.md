@@ -263,6 +263,19 @@ Who may answer (`POST /api/approval-requests/{id}/respond`, permission `approval
   when no users are listed). Until then the request stays `pending` and each answer is kept in
   `approvals`. A responder answers once.
 
+Chat SDK approval notifications support `telegram`, `discord` and `teams`. Set `target` to
+an SDK thread id (`discord:<guild>:<channel>[:<thread>]` or
+`teams:<base64url conversation>:<base64url serviceUrl>[:<type>]`). Telegram also accepts a bare
+chat id. Teams service URLs must pass the existing Bot Framework host allowlist.
+
+A single approval, boolean or short single-select question offers answer buttons and an
+"Open in UI" link. Deny rejects immediately without a reason. Text, multiple questions and
+other complex inputs use the dashboard. Clickers must have a linked platform identity,
+`approval.respond`, and match the request's approver list. Creating notifications over REST,
+or writing a workflow that sends them, requires `integration.chat.post`.
+Cards update in place on every terminal resolution, including a dashboard answer, cancellation
+or timeout. The per-card claim prevents duplicate updates.
+
 Rendering limits:
 
 - The dashboard approval page lists every question as its own card. No cap beyond the 100-question

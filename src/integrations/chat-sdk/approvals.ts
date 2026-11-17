@@ -26,8 +26,8 @@ export const CHAT_APPROVAL_ACTION_PREFIX = "ha:";
 
 /**
  * The pending approval card. A simple request gets answer buttons; choices
- * that need typed text (a text answer) stay on the dashboard, since Telegram
- * has no modals. Deny on Telegram rejects without a reason.
+ * that need typed text (a text answer) stay on the dashboard. Telegram, Discord and Teams
+ * share the button-only flow; Deny rejects without a reason.
  */
 export function buildChatApprovalCard(input: {
   requestId: string;

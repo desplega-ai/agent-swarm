@@ -1,4 +1,5 @@
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../../utils/secret-scrubber";
+import { isChatApprovalChannel } from "../../workflows/approval-inline";
 import { normalizeDate, normalizeDateRequired } from "../date-utils";
 import { breaksJsonValidity } from "../scrub-json";
 import { getDbClient } from "./runtime";
@@ -215,7 +216,7 @@ export async function listUndeliveredCancelledApprovalRequestIds(
 
 /**
  * Every terminal transition passes through here: once it commits, edit each
- * request's Slack and Telegram cards to show the outcome. Fire and forget; a Slack failure
+ * request's Slack and Chat SDK cards to show the outcome. Fire and forget; a Slack failure
  * never touches the resolution.
  */
 export function scheduleApprovalCardUpdates(
@@ -229,7 +230,8 @@ export function scheduleApprovalCardUpdates(
         messageId?: string;
       }> | null
     )?.some(
-      (n) => (n.channel === "slack" && n.messageTs) || (n.channel === "telegram" && n.messageId),
+      (n) =>
+        (n.channel === "slack" && n.messageTs) || (isChatApprovalChannel(n.channel) && n.messageId),
     ),
   );
   if (posted.length === 0) return;
@@ -238,7 +240,7 @@ export function scheduleApprovalCardUpdates(
       .then(({ updateResolvedApprovalCards }) => updateResolvedApprovalCards(posted))
       .catch((err) =>
         console.error(
-          "[HITL] Slack card update not run:",
+          "[HITL] Approval card update not run:",
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       ),

@@ -4,6 +4,11 @@
  * same choices and stores the same response the dashboard would.
  */
 
+/** Chat SDK transports that can post and update an approval card. */
+export function isChatApprovalChannel(channel: string | undefined): boolean {
+  return channel === "telegram" || channel === "discord" || channel === "teams";
+}
+
 export interface ApprovalQuestionLike {
   id?: string;
   type?: string;

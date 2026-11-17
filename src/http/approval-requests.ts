@@ -37,6 +37,7 @@ import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { cancelApprovalRequest } from "../workflows/approval-cancel";
+import { isChatApprovalChannel } from "../workflows/approval-inline";
 import {
   createApprovalFollowUpTask,
   dispatchApprovalNotifications,
@@ -103,13 +104,13 @@ const ApproversSchema = z.object({
 type ApproversShape = z.infer<typeof ApproversSchema>;
 
 const NotificationChannelSchema = z.object({
-  channel: z.enum(["slack", "email", "telegram"]),
+  channel: z.enum(["slack", "email", "telegram", "discord", "teams"]),
   target: z.string(),
   // Added post-creation by workflows/executors/human-in-the-loop.ts once the
   // notification message is sent (see `updateApprovalRequestNotifications`).
   messageTs: z.string().optional(),
-  threadId: z.string().optional().describe("Telegram: the Chat SDK thread the card was posted in."),
-  messageId: z.string().optional().describe("Telegram: the card's message id."),
+  threadId: z.string().optional().describe("Chat SDK: the thread the card was posted in."),
+  messageId: z.string().optional().describe("Chat SDK: the card's message id."),
 });
 type NotificationChannelShape = z.infer<typeof NotificationChannelSchema>;
 
@@ -406,7 +407,7 @@ const createRoute = route({
     notifications: z
       .array(
         z.object({
-          channel: z.enum(["slack", "email", "telegram"]),
+          channel: z.enum(["slack", "email", "telegram", "discord", "teams"]),
           target: z.string(),
         }),
       )
@@ -899,10 +900,12 @@ export async function handleApprovalRequests(
         return true;
       }
     }
-    if (parsed.body.notifications?.some((notification) => notification.channel === "telegram")) {
+    if (
+      parsed.body.notifications?.some((notification) => isChatApprovalChannel(notification.channel))
+    ) {
       const { principal } = await approvalCallerPrincipal(req);
       if (!can({ principal, verb: "integration.chat.post", source: "http" }).allow) {
-        jsonError(res, TELEGRAM_NOTIFICATION_REFUSED, 403);
+        jsonError(res, CHAT_NOTIFICATION_REFUSED, 403);
         return true;
       }
     }
@@ -996,8 +999,8 @@ export async function handleApprovalRequests(
   return false;
 }
 
-const TELEGRAM_NOTIFICATION_REFUSED =
-  "Telegram notifications require lead privileges (integration.chat.post). Create the request without them, or ask the lead to post the link.";
+const CHAT_NOTIFICATION_REFUSED =
+  "Chat notifications require lead privileges (integration.chat.post). Create the request without them, or ask the lead to post the link.";
 
 const SLACK_NOTIFICATION_REFUSED =
   "Slack notifications require lead privileges (integration.slack.post). Create the request without them, or ask the lead to post the link.";

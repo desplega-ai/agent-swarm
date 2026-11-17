@@ -25,7 +25,7 @@ import {
 import { TERMINAL_TASK_STATUSES } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import type { ApprovalQuestionLike } from "./approval-inline";
+import { type ApprovalQuestionLike, isChatApprovalChannel } from "./approval-inline";
 
 /** Slack Block Kit caps a section block's text at 3000 characters. */
 const SLACK_SECTION_TEXT_LIMIT = 3000;
@@ -75,7 +75,7 @@ function formatTimeout(seconds: number): string {
 }
 
 export interface ApprovalNotificationChannel {
-  channel: "slack" | "email" | "telegram";
+  channel: "slack" | "email" | "telegram" | "discord" | "teams";
   target: string;
 }
 
@@ -126,16 +126,17 @@ export async function dispatchApprovalNotifications(
       continue;
     }
 
-    if (notification.channel === "telegram") {
+    if (isChatApprovalChannel(notification.channel)) {
       try {
         const { postChatMessage } = await import("../integrations/chat-sdk/outbound");
         const { buildChatApprovalCard } = await import("../integrations/chat-sdk/approvals");
-        // A bare chat id is the chat's main thread; `telegram:<chat>:<topic>` names a forum topic.
-        const threadId = notification.target.startsWith("telegram:")
-          ? notification.target
-          : `telegram:${notification.target}`;
+        // Telegram also accepts a bare chat id. Discord and Teams use full SDK thread ids.
+        const threadId =
+          notification.channel === "telegram" && !notification.target.startsWith("telegram:")
+            ? `telegram:${notification.target}`
+            : notification.target;
         const posted = await postChatMessage({
-          adapter: "telegram",
+          adapter: notification.channel,
           threadId,
           text: [],
           card: buildChatApprovalCard({
@@ -156,7 +157,7 @@ export async function dispatchApprovalNotifications(
         }
       } catch (err) {
         console.error(
-          `[HITL] Failed to send Telegram notification to ${notification.target}:`,
+          `[HITL] Failed to send ${notification.channel} notification to ${notification.target}:`,
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         );
       }
@@ -526,7 +527,7 @@ export async function updateResolvedApprovalCards(
 }
 
 /**
- * Edit each resolved request's Chat SDK card (Telegram) in place, under the
+ * Edit each resolved request's Chat SDK card in place, under the
  * same one-claim-per-card rule as the Slack cards. Never throws.
  */
 async function updateResolvedChatApprovalCards(
@@ -534,7 +535,7 @@ async function updateResolvedChatApprovalCards(
 ): Promise<void> {
   for (const approval of approvals) {
     const cards = ((approval.notificationChannels ?? []) as ApprovalSlackEntry[]).filter(
-      (n) => n.channel === "telegram" && n.threadId && n.messageId,
+      (n) => isChatApprovalChannel(n.channel) && n.threadId && n.messageId,
     );
     for (const card of cards) {
       const key = `card:${card.threadId}:${card.messageId}`;

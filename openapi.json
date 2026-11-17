@@ -9761,7 +9761,9 @@
                           "enum": [
                             "slack",
                             "email",
-                            "telegram"
+                            "telegram",
+                            "discord",
+                            "teams"
                           ]
                         },
                         "target": {
@@ -10142,7 +10144,9 @@
                                 "enum": [
                                   "slack",
                                   "email",
-                                  "telegram"
+                                  "telegram",
+                                  "discord",
+                                  "teams"
                                 ]
                               },
                               "target": {
@@ -10153,11 +10157,11 @@
                               },
                               "threadId": {
                                 "type": "string",
-                                "description": "Telegram: the Chat SDK thread the card was posted in."
+                                "description": "Chat SDK: the thread the card was posted in."
                               },
                               "messageId": {
                                 "type": "string",
-                                "description": "Telegram: the card's message id."
+                                "description": "Chat SDK: the card's message id."
                               }
                             },
                             "required": [
@@ -10671,7 +10675,9 @@
                                       "enum": [
                                         "slack",
                                         "email",
-                                        "telegram"
+                                        "telegram",
+                                        "discord",
+                                        "teams"
                                       ]
                                     },
                                     "target": {
@@ -10682,11 +10688,11 @@
                                     },
                                     "threadId": {
                                       "type": "string",
-                                      "description": "Telegram: the Chat SDK thread the card was posted in."
+                                      "description": "Chat SDK: the thread the card was posted in."
                                     },
                                     "messageId": {
                                       "type": "string",
-                                      "description": "Telegram: the card's message id."
+                                      "description": "Chat SDK: the card's message id."
                                     }
                                   },
                                   "required": [
@@ -11271,7 +11277,9 @@
                                 "enum": [
                                   "slack",
                                   "email",
-                                  "telegram"
+                                  "telegram",
+                                  "discord",
+                                  "teams"
                                 ]
                               },
                               "target": {
@@ -11282,11 +11290,11 @@
                               },
                               "threadId": {
                                 "type": "string",
-                                "description": "Telegram: the Chat SDK thread the card was posted in."
+                                "description": "Chat SDK: the thread the card was posted in."
                               },
                               "messageId": {
                                 "type": "string",
-                                "description": "Telegram: the card's message id."
+                                "description": "Chat SDK: the card's message id."
                               }
                             },
                             "required": [
@@ -11780,7 +11788,9 @@
                                 "enum": [
                                   "slack",
                                   "email",
-                                  "telegram"
+                                  "telegram",
+                                  "discord",
+                                  "teams"
                                 ]
                               },
                               "target": {
@@ -11791,11 +11801,11 @@
                               },
                               "threadId": {
                                 "type": "string",
-                                "description": "Telegram: the Chat SDK thread the card was posted in."
+                                "description": "Chat SDK: the thread the card was posted in."
                               },
                               "messageId": {
                                 "type": "string",
-                                "description": "Telegram: the card's message id."
+                                "description": "Chat SDK: the card's message id."
                               }
                             },
                             "required": [
@@ -12311,7 +12321,9 @@
                                 "enum": [
                                   "slack",
                                   "email",
-                                  "telegram"
+                                  "telegram",
+                                  "discord",
+                                  "teams"
                                 ]
                               },
                               "target": {
@@ -12322,11 +12334,11 @@
                               },
                               "threadId": {
                                 "type": "string",
-                                "description": "Telegram: the Chat SDK thread the card was posted in."
+                                "description": "Chat SDK: the thread the card was posted in."
                               },
                               "messageId": {
                                 "type": "string",
-                                "description": "Telegram: the card's message id."
+                                "description": "Chat SDK: the card's message id."
                               }
                             },
                             "required": [
