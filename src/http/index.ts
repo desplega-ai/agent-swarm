@@ -94,6 +94,7 @@ import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
+import { handleDesignSystem } from "./design-system";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
@@ -434,6 +435,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePagesPublic(req, res, pathSegments, queryParams),
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),
+        () => handleDesignSystem(req, res, pathSegments, queryParams, myAgentId),
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
@@ -921,14 +923,16 @@ httpServer
     // Reconcile durable script workflow subprocesses
     await startScriptRunSupervisor(getMcpBaseUrl());
 
-    // Start scheduler (if enabled)
+    // Start scheduler (if enabled). The interval is read post-hydration, like
+    // heartbeat below, and parsed so an unusable value keeps the 10s default (#3169).
     if (hasCapability("scheduling")) {
-      const { startScheduler } = await import("../scheduler");
+      const { parseSchedulerIntervalMs, startScheduler } = await import("../scheduler");
       const { getExecutorRegistry } = await import("../workflows");
-      const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
-      startScheduler(getExecutorRegistry(), intervalMs, {
-        runId: globalState.__runId!,
-      });
+      startScheduler(
+        getExecutorRegistry(),
+        parseSchedulerIntervalMs(process.env.SCHEDULER_INTERVAL_MS),
+        { runId: globalState.__runId! },
+      );
     }
 
     // Start heartbeat triage (unless disabled). Read post-hydration (this block

@@ -48,6 +48,7 @@ import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
+import { registerDesignSystemTools } from "./tools/design-system";
 import { registerExtensionActivateVersionTool } from "./tools/extension-activate-version";
 import { registerExtensionCatalogTool } from "./tools/extension-catalog";
 import { registerExtensionDeleteTool } from "./tools/extension-delete";
@@ -693,6 +694,7 @@ export async function createServer(
     registerAppUpsertTool(server);
     registerCreatePageTool(server);
     registerDeletePageTool(server);
+    registerDesignSystemTools(server);
   }
 
   // Metrics capability - time-series metrics (DB-backed, for dashboards).

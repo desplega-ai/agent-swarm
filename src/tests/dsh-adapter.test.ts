@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkProviderCredentials } from "../commands/provider-credentials";
 import { createProviderAdapter } from "../providers";
-import { checkDshCredentials, DshAdapter } from "../providers/dsh-adapter";
+import { checkDshCredentials, DshAdapter, stderrFlushLength } from "../providers/dsh-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { getModelAwareCredentialVars } from "../utils/credentials";
@@ -13,6 +13,7 @@ import {
   DEFAULT_OPENROUTER_BASE_URL,
   OPENROUTER_APP_ATTRIBUTION_HEADERS,
 } from "../utils/openrouter-base-url";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -40,6 +41,18 @@ if (mode === "abort") { setInterval(() => {}, 1000); }
 else if (mode === "mcp-fail") {
   console.error("dsh: warning: 1 entry did not activate\\nswarm-mcp (@deepseek-ai/dsh-mcp-client): Error: mcp-client(agent-swarm): initial connection or tool synchronization failed");
   setInterval(() => {}, 1000);
+}
+else if (mode === "split-stderr") {
+  // A token split across two stderr writes, then a PEM block written one line at a time.
+  const value = process.env.DSH_TEST_SPLIT_VALUE;
+  process.stderr.write("dsh: upstream echoed " + value.slice(0, 12));
+  await Bun.sleep(30);
+  process.stderr.write(value.slice(12) + " and failed\\n");
+  for (const line of process.env.DSH_TEST_PEM.split("\\n")) {
+    await Bun.sleep(5);
+    process.stderr.write(line + "\\n");
+  }
+  process.exitCode = 3;
 }
 else {
   if (mode === "usage") {
@@ -411,6 +424,45 @@ describe("dsh harness", () => {
       expect(await Bun.file(invocation.patchPath).exists()).toBe(false);
     });
   }
+
+  test("scrubs stderr per line, so a token split across chunks is still redacted", async () => {
+    const config = await fixture("split-stderr");
+    const token = ["ghp", randomToken(36)].join("_");
+    const body = [randomToken(64), randomToken(64), randomToken(20)];
+    // Armor lines are joined at runtime so repo secret scanners never see a BEGIN/END pair.
+    const [begin, end] = ["BEGIN", "END"].map((word) =>
+      ["-----", word, " PRIVATE KEY-----"].join(""),
+    );
+    const pem = [begin, ...body, end].join("\n");
+    config.env = { ...config.env, DSH_TEST_SPLIT_VALUE: token, DSH_TEST_PEM: pem };
+    const session = await new DshAdapter().createSession(config);
+    const events: ProviderEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    const result = await session.waitForCompletion();
+    expect(result.isError).toBe(true);
+    const wire = JSON.stringify({ result, events });
+    for (const secret of [token, token.slice(0, 12), token.slice(12), ...body]) {
+      expect(wire).not.toContain(secret);
+    }
+    const stderr = events.flatMap((event) => (event.type === "raw_stderr" ? [event.content] : []));
+    expect(stderr.join("")).toContain("dsh: upstream echoed [REDACTED:github_token] and failed\n");
+    expect(stderr.join("")).toContain(`${begin}[REDACTED:private_key]${end}\n`);
+  });
+
+  test("stderrFlushLength holds a partial line and an open private-key block", () => {
+    expect(stderrFlushLength("no newline yet")).toBe(0);
+    expect(stderrFlushLength("one\ntwo")).toBe(4);
+    const [begin, end] = ["BEGIN", "END"].map((word) =>
+      ["-----", word, " RSA PRIVATE KEY-----"].join(""),
+    );
+    expect(stderrFlushLength(`log line\n${begin}\nAAAA\n`)).toBe(9);
+    expect(stderrFlushLength(`${begin}\nAAAA\n${end}\nnext`)).toBe(begin.length + 1 + 5 + 30);
+    // A public certificate is not held.
+    expect(stderrFlushLength("-----BEGIN CERTIFICATE-----\nAAAA\n")).toBe(33);
+    // Past the hold cap everything goes; the scrubber's truncated-PEM rule covers the cut block.
+    const big = `${begin}\n${"A".repeat(70_000)}`;
+    expect(stderrFlushLength(big)).toBe(big.length);
+  });
 
   test("abort terminates a running process and removes its patch", async () => {
     const config = await fixture("abort");

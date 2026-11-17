@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpRequesterUserId } from "../be/audit-user";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import {
   countAllPages,
   countPagesByAgent,
@@ -22,8 +21,10 @@ import {
 import { getPageEditCounter } from "../be/db/page-versions";
 import { snapshotPage } from "../pages/version";
 import { resolveTemplate } from "../prompts/resolver";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 // Side-effect import: registers `task.page.feedback`.
 import "../prompts/session-templates";
+import { can } from "../rbac";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { readThemeFields } from "../themes/page-fields";
 import { THEME_PRESET_IDS } from "../themes/presets";
@@ -41,6 +42,7 @@ import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { isLocalDevPageRequest, pageSessionSetCookies } from "../utils/page-session";
 import { authUser, getRequestAuth, isOperatorAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
+import { resolveRequestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { resolveTaskRequester } from "./tasks";
 import {
@@ -229,9 +231,11 @@ const launchPageRoute = route({
   summary: "Launch a page session (issues HttpOnly cookie)",
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
+  rbac: { permission: "page.launch" },
   responses: {
     204: { description: "Cookie issued" },
     400: { description: "Launch not supported for this page (e.g. password mode)" },
+    403: { description: "Caller may not open pages" },
     404: { description: "Page not found" },
   },
 });
@@ -629,10 +633,7 @@ export async function handlePages(
 
     try {
       const key = parsed.body.key
-        ? await authorizeAssetKeyWrite(
-            parsed.body.key,
-            await resolveHttpRequesterUserId(req, myAgentId),
-          )
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key)
         : undefined;
       const page = await createPage({
         key,
@@ -876,10 +877,7 @@ export async function handlePages(
     let key: string | undefined;
     if (parsed.body.key !== undefined) {
       try {
-        key = await authorizeAssetKeyWrite(
-          parsed.body.key,
-          await resolveHttpRequesterUserId(req, myAgentId),
-        );
+        key = await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -1030,6 +1028,19 @@ export async function handlePages(
   if (launchPageRoute.match(req.method, pathSegments)) {
     const parsed = await launchPageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    // Role grants were checked at admission; this refuses guest and controller sessions.
+    const principal = await resolveRequestPrincipal(req, myAgentId, {
+      unauthenticatedFallback: "operator",
+    });
+    const decision = principal
+      ? can({ principal, verb: "page.launch", resource: { kind: "none" }, source: "http" })
+      : { allow: false as const, reason: "no authenticated principal" };
+    if (!decision.allow) {
+      applyLaunchCors(req, res);
+      jsonError(res, decision.reason, 403);
+      return true;
+    }
 
     const page = await getPage(parsed.params.id);
     if (!page) {

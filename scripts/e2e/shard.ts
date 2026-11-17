@@ -4,13 +4,15 @@ import type { ScenarioResult } from "./report";
 
 /**
  * Fixed shard bands by scenario `order`, not by timing: shard 1 runs order < 130, shard 2
- * runs 130 up to 140, shard 3 runs 140 on. The cuts follow the Slack renderer flags, which
- * scenarios flip for the rest of a process: SLACK_RENDER_V2 turns on at 130
- * (slack-delegation-flag-off-repro asserts delegation is still off) and
- * SLACK_RENDER_V2_DELEGATION at 140 (slack-delegation-child-result). Moving a cut means
+ * runs 130 up to 140, shard 3 runs 140 up to 190, shard 4 runs 190 on. The cuts follow the
+ * Slack renderer flags, which scenarios flip for the rest of a process: SLACK_RENDER_V2
+ * turns on at 130 (slack-delegation-flag-off-repro asserts delegation is still off) and
+ * SLACK_RENDER_V2_DELEGATION at 140 (slack-delegation-child-result). The cut at 190 is for
+ * balance: slack-delegation-band-entry (190) sets both flags again, so the scenarios after
+ * it run in the state they had when they shared a process with shard 3. Moving a cut means
  * checking that no band starts in a flag state its first scenario does not set itself.
  */
-export const SHARD_CUTS: readonly number[] = [130, 140];
+export const SHARD_CUTS: readonly number[] = [130, 140, 190];
 export const SHARD_COUNT = SHARD_CUTS.length + 1;
 
 export type Shard = { index: number; total: number };

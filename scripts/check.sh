@@ -169,21 +169,21 @@ else
   case "$scope" in
     skip) step "e2e contract: the diff reaches neither the API nor the runner, skipped" ;;
     full)
-      # CI's three shards, side by side: each boots its own API on free ports.
-      step "e2e contract (full suite, 3 shards in parallel)"
+      # CI's four shards, side by side: each boots its own API on free ports.
+      step "e2e contract (full suite, 4 shards in parallel)"
       e2e_logs=$(mktemp -d)
       pids=()
-      for shard in 1 2 3; do
-        bun run e2e --shard "$shard/3" >"$e2e_logs/shard-$shard.log" 2>&1 &
+      for shard in 1 2 3 4; do
+        bun run e2e --shard "$shard/4" >"$e2e_logs/shard-$shard.log" 2>&1 &
         pids+=($!)
       done
       e2e_failed=0
-      for shard in 1 2 3; do
+      for shard in 1 2 3 4; do
         if wait "${pids[$((shard - 1))]}"; then
-          printf 'shard %s/3: %s\n' "$shard" "$(grep -E ' passed, ' "$e2e_logs/shard-$shard.log" | tail -1)"
+          printf 'shard %s/4: %s\n' "$shard" "$(grep -E ' passed, ' "$e2e_logs/shard-$shard.log" | tail -1)"
         else
           e2e_failed=1
-          printf '\nshard %s/3 failed, last lines of %s:\n' "$shard" "$e2e_logs/shard-$shard.log"
+          printf '\nshard %s/4 failed, last lines of %s:\n' "$shard" "$e2e_logs/shard-$shard.log"
           tail -60 "$e2e_logs/shard-$shard.log"
         fi
       done

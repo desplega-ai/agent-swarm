@@ -422,6 +422,60 @@ export const objectsHttp: Scenario = {
         "a page save names the page and the user",
       );
 
+      // A viewer opens an authed page and reads through it, but every write stays refused.
+      const viewerUser = await ctx.api("POST", "/api/users", {
+        body: { name: `Objects read-only ${ctx.nonce}`, status: "active" },
+      });
+      expectStatus(viewerUser, [200], "create a viewer");
+      const viewerId = asString(asRecord(asRecord(viewerUser.json).user).id, "viewer id");
+      expectStatus(
+        await ctx.api("PUT", `/api/users/${viewerId}/roles`, { body: { roles: ["viewer"] } }),
+        [200],
+        "make the user a viewer",
+      );
+      const viewerMinted = await ctx.api("POST", `/api/users/${viewerId}/mcp-tokens`, {
+        body: { label: `objhttp viewer ${ctx.nonce}` },
+      });
+      expectStatus(viewerMinted, [200], "mint a viewer token");
+      const asViewer = {
+        apiKey: asString(asRecord(viewerMinted.json).plaintext, "viewer token"),
+      } as const;
+      launch = await ctx.api("POST", `/api/pages/${authed}/launch`, asViewer);
+      expectStatus(launch, [204], "viewer launch");
+      const viewerSession = viaPage(authed, cookiePair(launch.headers));
+      response = await ctx.api("GET", `/@swarm/api/objects/${boardId}`, viewerSession);
+      expectStatus(response, [200], "a viewer page session reads");
+      const viewerBoardVersion = Number(asRecord(response.json).version);
+      from = stub.seen.length;
+      for (const [who, auth] of [
+        ["a viewer page session", { ...viewerSession, prefix: "/@swarm" }],
+        ["a viewer bearer", { ...asViewer, prefix: "" }],
+      ] as const) {
+        const { prefix, ...opts } = auth;
+        expectStatus(
+          await ctx.api("POST", `${prefix}/api/objects/${sheetId}/sheet-ops`, {
+            ...opts,
+            body: { op: "setRange", range: "F1", values: [[1]] },
+          }),
+          [403],
+          `${who} cannot edit a sheet`,
+        );
+        expectStatus(
+          await ctx.api("PUT", `${prefix}/api/objects/${boardId}/content`, {
+            ...opts,
+            body: { content: { ...stock, elements: [] }, ifMatch: viewerBoardVersion },
+          }),
+          [403],
+          `${who} cannot save a board`,
+        );
+      }
+      expectStatus(
+        await ctx.api("PUT", `/api/pages/${authed}`, { ...asViewer, body: { title: "viewer" } }),
+        [403],
+        "a viewer cannot edit a page",
+      );
+      expect(writesSince(from).length === 0, "no viewer write reached agent-fs");
+
       // The served page tells the <swarm-object> embed who is viewing, from the same cookie.
       const viewerMeta = (html: string) =>
         /<meta name="swarm-viewer" content="([a-z]+)">/.exec(html)?.[1] ?? "missing";

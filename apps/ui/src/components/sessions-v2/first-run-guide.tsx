@@ -150,7 +150,7 @@ const STEPS = [
   },
   {
     title: "Tabs and split",
-    body: "A click opens a session in the current tab. A middle-click or T opens a new tab. Drag a tab to the right edge, or press V, to split the view.",
+    body: "A click opens a session in a tab. A middle-click or T opens a new tab. Drag a tab to the right half, or press V, to split the view. Tabs drag between the two panes. A file or page link opens in the other pane.",
   },
   {
     title: "Done and Later",
@@ -176,7 +176,7 @@ const PHONE_STEPS = [
   },
   {
     title: "Search and the Legacy view",
-    body: "Tap the search field for chips such as with: and is:unread. The ⋯ menu at the top opens the Legacy view and this guide.",
+    body: "Tap the search icon for chips such as with: and is:unread. The ⋯ menu at the top opens the Legacy view and this guide.",
   },
 ];
 

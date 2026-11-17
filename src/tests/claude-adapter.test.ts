@@ -372,6 +372,41 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     }
   });
 
+  test("each rate_limit_event emits the merged window snapshot as a custom event", async () => {
+    const event = (utilization: number) =>
+      JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed",
+          resetsAt: 1794841800,
+          rateLimitType: "five_hour",
+          unifiedWindows: {
+            five_hour: { utilization, resetsAt: 1794841800, status: "allowed" },
+            seven_day: { utilization: 0.11, resetsAt: 1795248000, status: "allowed" },
+          },
+        },
+      });
+    spawnSpy.mockImplementation((() =>
+      makeStreamingFakeProc([
+        event(0.52),
+        event(0.53),
+        assistantLine([{ type: "text", text: "done" }]),
+      ])) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const snapshots: Array<Record<string, { utilization?: number }>> = [];
+    session.onEvent((e) => {
+      if (e.type === "custom" && e.name === "rate_limit_windows") {
+        snapshots.push(e.data as Record<string, { utilization?: number }>);
+      }
+    });
+    await session.waitForCompletion();
+
+    expect(snapshots.map((s) => s.five_hour?.utilization)).toEqual([0.52, 0.53]);
+    expect(snapshots[1]?.seven_day?.utilization).toBe(0.11);
+  });
+
   test("tool_use-only, thinking-only, and empty-text turns are skipped, not captured", async () => {
     const lines = [
       assistantLine([{ type: "text", text: "Real answer" }]),
@@ -424,6 +459,121 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     const result = await session.waitForCompletion();
 
     expect(result.output).toBeUndefined();
+  });
+
+  test("a session that ends without a result reports per-message usage as an estimated cost", async () => {
+    const usageA = {
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 50,
+      cache_creation: { ephemeral_5m_input_tokens: 20, ephemeral_1h_input_tokens: 30 },
+    };
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" }),
+      // One API message split over two lines: its usage counts once.
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", model: "claude-sonnet-5-5", content: [], usage: usageA },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", model: "claude-sonnet-5-5", content: [], usage: usageA },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg-b",
+          model: "claude-sonnet-5-5",
+          content: [],
+          usage: { input_tokens: 1, output_tokens: 7, cache_read_input_tokens: 200 },
+        },
+      }),
+      // A subagent on another model is billed too.
+      JSON.stringify({
+        type: "assistant",
+        parent_tool_use_id: "tool-1",
+        message: {
+          id: "msg-c",
+          model: "claude-haiku-4-5",
+          content: [],
+          usage: { input_tokens: 3, output_tokens: 4 },
+        },
+      }),
+      // Claude's local error message carries zero usage and is dropped.
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "msg-d",
+          model: "<synthetic>",
+          content: [],
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0,
+      estimated: true,
+      provider: "claude",
+      numTurns: null,
+      inputTokens: 14,
+      outputTokens: 16,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 50,
+      cacheWrite5mTokens: 20,
+      cacheWrite1hTokens: 30,
+      models: [
+        {
+          model: "claude-sonnet-5-5",
+          inputTokens: 11,
+          outputTokens: 12,
+          cacheReadTokens: 300,
+          cacheWriteTokens: 50,
+        },
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 3,
+          outputTokens: 4,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    });
+  });
+
+  test("the result event's cost wins over the per-message estimate", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "msg-a", content: [], usage: { input_tokens: 10, output_tokens: 5 } },
+      }),
+      JSON.stringify({ type: "result", total_cost_usd: 0.01, duration_ms: 100, num_turns: 1 }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost?.totalCostUsd).toBe(0.01);
+    expect(result.cost?.estimated).toBeUndefined();
+  });
+
+  test("a session with no usage at all reports no cost", async () => {
+    const lines = [JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" })];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter(async () => {});
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toBeUndefined();
   });
 
   test("result cost includes Claude cache TTL split and complete per-model usage", async () => {

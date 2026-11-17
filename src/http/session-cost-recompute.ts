@@ -33,6 +33,8 @@ interface SessionCostRecomputeInput {
   harnessCostUsd: number;
   /** `harnessCostUsd` is the provider's bill, not a token estimate. */
   harnessCostBilled?: boolean;
+  /** The token counts are a fallback sum, so a priced row is tagged `estimated`. */
+  estimated?: boolean;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -278,7 +280,7 @@ export async function recomputeSessionCost(
 
   return {
     totalCostUsd: pricedCostUsd + sessionFeesUsd,
-    costSource: "pricing-table",
+    costSource: input.estimated ? "estimated" : "pricing-table",
     modelBreakdown: modelUsageEntries ? pricedModels : undefined,
   };
 }

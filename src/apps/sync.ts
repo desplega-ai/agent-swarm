@@ -764,6 +764,7 @@ function reconcile(args: {
 
 /** In-process single-flight guard, keyed `<appId>:<model>:<source>`. */
 const inFlight = new Map<string, Promise<SyncPassResult>>();
+const SYNC_PASS_CONCURRENCY = 3;
 
 function passBase(args: {
   model: string;
@@ -935,7 +936,8 @@ function noPairIssue(input: { model?: string; source?: string }): AppValidationI
 }
 
 /**
- * Run every `(model x source)` pair the input selects, sequentially. Each pass
+ * Run every `(model x source)` pair the input selects, up to
+ * `SYNC_PASS_CONCURRENCY` at a time. Each pass
  * pulls outside the per-(app, model) mutation lock and reconciles inside it.
  */
 export async function runAppSync(input: {
@@ -977,9 +979,22 @@ export async function runAppSync(input: {
     return { ok: false, passes: [], issues: [noPairIssue(input)] };
   }
 
-  const passes: SyncPassResult[] = [];
-  for (const pair of pairs) {
-    passes.push(await runPass({ appId: app.id, ...pair, invokedBy: input.invokedBy }));
-  }
+  // Passes pull outside the per-(app, model) lock and reconcile inside it, so
+  // they overlap safely; results stay in `pairs` order.
+  // shortcut: fixed limit of 3 script subprocesses per sync call, make it
+  // configurable if one app's passes need more or fewer.
+  const passes: SyncPassResult[] = new Array(pairs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < pairs.length) {
+      const i = next++;
+      passes[i] = await runPass({
+        appId: app.id,
+        ...(pairs[i] as (typeof pairs)[number]),
+        invokedBy: input.invokedBy,
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(SYNC_PASS_CONCURRENCY, pairs.length) }, worker));
   return { ok: passes.every((pass) => pass.error === undefined), passes };
 }

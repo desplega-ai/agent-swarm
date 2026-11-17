@@ -23,8 +23,12 @@ import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { MAX_ACTIVE_CAPABILITY_DISPATCHES } from "../script-workflows/executor";
-import { pauseScriptRunProcess } from "../script-workflows/supervisor";
+import {
+  localProcessScriptExecutor,
+  MAX_ACTIVE_CAPABILITY_DISPATCHES,
+  type ScriptExecutionResult,
+} from "../script-workflows/executor";
+import { pauseScriptRunProcess, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
@@ -465,32 +469,62 @@ describe("script workflow runtime", () => {
   );
 
   spawnTest(
-    "pausing aborts host polling without journaling or overwriting paused status",
+    "pausing and shutdown abort host polling while preserving resumable state and journal",
     async () => {
       holdAgentTaskResponses = true;
-      const created = await api("/api/script-runs", {
-        method: "POST",
-        body: JSON.stringify({
-          source: `
+      let executionExit: Promise<ScriptExecutionResult> | undefined;
+      const originalStart = localProcessScriptExecutor.start;
+      const startSpy = spyOn(localProcessScriptExecutor, "start").mockImplementation(
+        async (input) => {
+          const execution = await originalStart.call(localProcessScriptExecutor, input);
+          executionExit = execution.exited;
+          return execution;
+        },
+      );
+      try {
+        for (const [index, status] of (["paused", "running"] as const).entries()) {
+          const created = await api("/api/script-runs", {
+            method: "POST",
+            body: JSON.stringify({
+              source: `
           export default async function main(_args, ctx) {
+            await ctx.step.swarmScript("before-stop", {
+              source: "export default () => 7;",
+            });
             return await ctx.step.agentTask("paused-step", { task: "stay pending" });
           }
         `,
-          background: true,
-        }),
-      });
-      const { id } = (await created.json()) as { id: string };
-      await waitUntil(() => agentTaskRequestCount === 1, "Agent task poll did not start");
+              background: true,
+            }),
+          });
+          const { id } = (await created.json()) as { id: string };
+          await waitUntil(
+            () => agentTaskRequestCount === index + 1,
+            "Agent task poll did not start",
+          );
+          const beforeStop = await listScriptRunJournalSteps(id);
+          expect(beforeStop).toHaveLength(1);
+          expect(beforeStop[0]?.stepKey).toBe("before-stop");
+          expect(beforeStop[0]?.status).toBe("completed");
 
-      await pauseScriptRunProcess(id);
-      await waitUntil(
-        () => agentTaskClosedCount === 1,
-        "Host-side agent task poll was not aborted",
-      );
-      await Bun.sleep(250);
+          if (status === "paused") await pauseScriptRunProcess(id);
+          else await stopScriptRunSupervisor();
+          await waitUntil(
+            () => agentTaskClosedCount === index + 1,
+            "Host-side agent task poll was not aborted",
+          );
+          expect(executionExit).toBeDefined();
+          await executionExit;
 
-      expect((await getScriptRun(id))?.status).toBe("paused");
-      expect(await listScriptRunJournalSteps(id)).toHaveLength(0);
+          const run = await getScriptRun(id);
+          expect(run?.status).toBe(status);
+          expect(run?.error).toBeUndefined();
+          expect(run?.finishedAt).toBeUndefined();
+          expect(await listScriptRunJournalSteps(id)).toEqual(beforeStop);
+        }
+      } finally {
+        startSpy.mockRestore();
+      }
     },
   );
 

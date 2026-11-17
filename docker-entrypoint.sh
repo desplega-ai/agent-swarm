@@ -508,6 +508,9 @@ if [ -n "$GITHUB_TOKEN" ] || [ -n "$GITHUB_APP_AUTH" ]; then
         if [ -n "$GITHUB_APP_AUTH" ]; then
             git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
                 "!$SWARM_GITHUB_TOKEN_BIN git-credential"
+            # git passes the repo path to the helper only with useHttpPath; the
+            # helper needs it to ask for that repository's installation.
+            git config --global "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.useHttpPath" true
         else
             git config --global --replace-all "credential.${GITHUB_WEB_URL%%://*}://${GITHUB_HOST_BARE}.helper" \
                 '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN}"; }; f'
@@ -516,6 +519,7 @@ if [ -n "$GITHUB_TOKEN" ] || [ -n "$GITHUB_APP_AUTH" ]; then
     elif [ -n "$GITHUB_APP_AUTH" ]; then
         git config --global --replace-all "credential.https://github.com.helper" \
             "!$SWARM_GITHUB_TOKEN_BIN git-credential"
+        git config --global "credential.https://github.com.useHttpPath" true
     else
         # gh CLI will automatically use GITHUB_TOKEN env var for API calls
         # Just need to configure git to use gh as credential helper

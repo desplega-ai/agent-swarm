@@ -253,8 +253,9 @@ const validEmail = (value: string) => (EMAIL_RE.test(value) ? null : "Use an ema
 const validDigits = (value: string) => (/^\d+$/.test(value) ? null : "Use the numeric App ID.");
 
 /**
- * Socket mode only: HTTP mode is not implemented, so it is not offered here.
- * Every token save also stores `SLACK_MODE=socket`, which repairs a stale `http`.
+ * This setup flow configures Socket Mode with bot and app-level tokens.
+ * Every token save selects `SLACK_MODE=socket`. Signed HTTP delivery can be
+ * configured on the Integrations and Configuration pages with a signing secret.
  */
 const SLACK_SOCKET_MODE = [{ key: "SLACK_MODE", value: "socket" }];
 

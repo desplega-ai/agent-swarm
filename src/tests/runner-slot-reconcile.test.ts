@@ -12,10 +12,12 @@ import {
   type ApiConfig,
   checkCompletedProcesses,
   DEFAULT_TASK_RECONCILE_INTERVAL_MS,
+  DEFAULT_TERMINAL_TASK_GRACE_MS,
   type RunnerState,
   type RunningTask,
   reconcileActiveTasks,
   resolveTaskReconcileIntervalMs,
+  resolveTerminalTaskGraceMs,
 } from "../commands/runner";
 import type { ProviderResult, ProviderSession } from "../providers/types";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
@@ -194,6 +196,106 @@ describe("reconcileActiveTasks: a session that never settles", () => {
 
     expect(state.activeTasks.size).toBe(1);
     expect(session.abortReasons).toEqual([]);
+  });
+});
+
+describe("reconcileActiveTasks: a server-terminal task whose session can finish its input", () => {
+  /** Like Claude: `finishInput` closes stdin; `endsTurn` says whether the turn then ends. */
+  function finishableSetup(startedAt: number, endsTurn: boolean) {
+    const ctx = setup(startedAt);
+    const finishCalls: number[] = [];
+    ctx.session.finishInput = () => {
+      finishCalls.push(finishCalls.length);
+      if (!endsTurn) return;
+      ctx.task.result = {
+        exitCode: 0,
+        isError: false,
+        sessionId: "sess-hung",
+        cost: {
+          sessionId: "runner-session",
+          taskId: ctx.taskId,
+          agentId: crypto.randomUUID(),
+          totalCostUsd: 0.42,
+          durationMs: 1_000,
+          numTurns: 3,
+          model: "claude-sonnet-5-5",
+          isError: false,
+          provider: "claude",
+        },
+      };
+    };
+    return { ...ctx, finishCalls };
+  }
+
+  test("closes input instead of aborting, so the session's result and cost still land", async () => {
+    const startedAt = 6_000_000;
+    const { session, task, state, finishCalls } = finishableSetup(startedAt, true);
+    const apiConfig: ApiConfig = { apiUrl, apiKey: "test-key", agentId: crypto.randomUUID() };
+
+    await runUntilFree(state, startedAt, {
+      serverStatus: () => "completed",
+      apiConfig,
+      maxMs: 5 * 60_000,
+    });
+
+    expect(state.activeTasks.size).toBe(0);
+    expect(finishCalls).toHaveLength(1);
+    expect(session.abortReasons).toEqual([]);
+    expect(task.serverTerminalStatus).toBe("completed");
+    expect(requests).toContain("POST /api/session-costs");
+    expect(requests.some((r) => r.endsWith("/finish"))).toBe(false);
+  });
+
+  test("a session still running when the grace ends is aborted, then force-settled", async () => {
+    const startedAt = 7_000_000;
+    const { session, task, state, finishCalls } = finishableSetup(startedAt, false);
+
+    const { elapsedMs, statusReads } = await runUntilFree(state, startedAt, {
+      serverStatus: () => "completed",
+      maxMs: 5 * 60_000,
+    });
+
+    expect(state.activeTasks.size).toBe(0);
+    expect(finishCalls).toHaveLength(1);
+    expect(statusReads).toBe(1);
+    expect(session.abortReasons).toEqual(["server task completed"]);
+    expect(elapsedMs).toBeGreaterThanOrEqual(INTERVAL_MS + DEFAULT_TERMINAL_TASK_GRACE_MS);
+    expect(elapsedMs).toBeLessThanOrEqual(
+      INTERVAL_MS + DEFAULT_TERMINAL_TASK_GRACE_MS + ABORT_SETTLE_GRACE_MS + 2 * TICK_MS,
+    );
+    expect(task.result?.failureReason).toContain("runner exited without result");
+  });
+
+  test("a cancelled task is aborted at once, without the grace", async () => {
+    const startedAt = 8_000_000;
+    const { session, state, finishCalls } = finishableSetup(startedAt, true);
+
+    const { elapsedMs } = await runUntilFree(state, startedAt, {
+      serverStatus: () => "cancelled",
+      maxMs: 5 * 60_000,
+    });
+
+    expect(state.activeTasks.size).toBe(0);
+    expect(finishCalls).toHaveLength(0);
+    expect(session.abortReasons).toEqual(["server task cancelled"]);
+    expect(elapsedMs).toBeLessThanOrEqual(INTERVAL_MS + ABORT_SETTLE_GRACE_MS + 2 * TICK_MS);
+  });
+});
+
+describe("resolveTerminalTaskGraceMs", () => {
+  test("reads RUNNER_TERMINAL_TASK_GRACE_MS, accepts 0, and falls back on unset or invalid values", () => {
+    expect(resolveTerminalTaskGraceMs({ RUNNER_TERMINAL_TASK_GRACE_MS: "60000" })).toBe(60_000);
+    expect(resolveTerminalTaskGraceMs({ RUNNER_TERMINAL_TASK_GRACE_MS: "0" })).toBe(0);
+    expect(resolveTerminalTaskGraceMs({})).toBe(DEFAULT_TERMINAL_TASK_GRACE_MS);
+    expect(resolveTerminalTaskGraceMs({ RUNNER_TERMINAL_TASK_GRACE_MS: "" })).toBe(
+      DEFAULT_TERMINAL_TASK_GRACE_MS,
+    );
+    expect(resolveTerminalTaskGraceMs({ RUNNER_TERMINAL_TASK_GRACE_MS: "-1" })).toBe(
+      DEFAULT_TERMINAL_TASK_GRACE_MS,
+    );
+    expect(resolveTerminalTaskGraceMs({ RUNNER_TERMINAL_TASK_GRACE_MS: "soon" })).toBe(
+      DEFAULT_TERMINAL_TASK_GRACE_MS,
+    );
   });
 });
 

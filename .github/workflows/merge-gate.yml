@@ -38,6 +38,8 @@ jobs:
       ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
       e2e: ${{ steps.check.outputs.e2e }}
+      test_scope: ${{ steps.test-scope.outputs.scope }}
+      test_base: ${{ steps.test-scope.outputs.base }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,6 +64,8 @@ jobs:
 
       - name: Compute per-domain change flags
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           # --no-renames: with rename detection on (git's default), a move
@@ -77,12 +81,13 @@ jobs:
           # Always re-run everything if the merge-gate workflow itself changed.
           GATE_CHANGED=$(echo "$CHANGED" | grep -E '^\.github/workflows/merge-gate\.yml$' || true)
 
+          # match <pattern> [file list]: the list defaults to every changed file.
           match() {
-            local pattern="$1"
+            local pattern="$1" files="${2-$CHANGED}"
             if [ -n "$GATE_CHANGED" ]; then
               echo "true"; return
             fi
-            if echo "$CHANGED" | grep -E "$pattern" > /dev/null; then
+            if echo "$files" | grep -E "$pattern" > /dev/null; then
               echo "true"
             else
               echo "false"
@@ -136,7 +141,8 @@ jobs:
           # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
           # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
           # and apps/evals/ feeds the evals-service image.
-          DOCKER=$(match '^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
+          DOCKER_INPUTS='^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)'
+          DOCKER=$(match "$DOCKER_INPUTS")
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
@@ -148,7 +154,25 @@ jobs:
           UI_E2E=$(match '^(apps/ui/|packages/ui-e2e/|scripts/e2e/|src/http/|src/be/|bun\.lock|package\.json$|bunfig\.toml$|\.github/workflows/ui-e2e(-shards|-report)?\.yml$)')
 
           # dashboard image: everything Dockerfile.ui copies, plus its smoke test.
-          UI_IMAGE=$(match '^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)')
+          UI_IMAGE_INPUTS='^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)'
+          UI_IMAGE=$(match "$UI_IMAGE_INPUTS")
+
+          # A pull request builds images only when its diff touches what assembles one:
+          # Dockerfiles, entrypoints, manifests, the lockfile and the directories an image
+          # copies. A diff of application source alone (src/, scripts/e2e/) builds none
+          # here. Lint, tests and E2E check that source on the pull request, and the merge
+          # queue uses the full lists above, so every image builds before the change lands.
+          # In the 14 days to 2026-11-16, Docker Build Test failed in 1 of 1,007 pull
+          # request runs and Dashboard Image in none.
+          # Dashboard Image keeps the src/ directories apps/ui imports;
+          # src/tests/merge-gate-detect-changes.test.ts fails when that list goes stale.
+          if [ "${EVENT_NAME:-}" = "pull_request" ]; then
+            DOCKER=$(match "$DOCKER_INPUTS" "$(echo "$CHANGED" | grep -vE '^(src/|scripts/e2e/)' || true)")
+            UI_IMAGE=$(match "$UI_IMAGE_INPUTS" "$(echo "$CHANGED" | grep -vE '^src/' || true)")
+            if [ "$UI_IMAGE" = "false" ]; then
+              UI_IMAGE=$(match '^src/(utils|themes|telemetry-contract|commands/onboard)/')
+            fi
+          fi
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
@@ -168,6 +192,43 @@ jobs:
             echo "${key}=${v}" >> $GITHUB_OUTPUT
             echo "${key}=${v}"
           done
+
+      # Unit-test scope for the Run Tests shards. Pull requests run only the test files whose
+      # import graph reaches a changed file (`bun test --changed=<base>`). The merge queue
+      # runs the full suite, so a dependency the import graph cannot see (a file a test
+      # reads at runtime) still cannot reach main untested. The full suite also runs on a
+      # PR that touches an input every test loads outside the import graph: migrations
+      # (the preload's DB template), templates/ (seeders), the preload and its preload-only
+      # helpers (hang-watchdog*.ts; `--changed` ignores preload imports), bunfig.toml,
+      # tsconfig.json, bun.lock, a package.json change beyond the version, or this
+      # workflow. scripts/pre-push-tests.sh uses the same list, minus this workflow.
+      # src/tests/merge-gate-detect-changes.test.ts runs this step.
+      - name: Compute unit-test scope
+        id: test-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "scope=full ($EVENT_NAME)"
+            exit 0
+          fi
+          # The pull_request checkout is the merge commit; its first parent is the base tip,
+          # so HEAD^1..HEAD is exactly this PR's change.
+          base=$(git rev-parse HEAD^1)
+          CHANGED=$(git diff --no-renames --name-only "$base" HEAD)
+          scope=changed
+          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
+            scope=full
+          elif echo "$CHANGED" | grep -qx 'package.json' &&
+            git diff -U0 "$base" HEAD -- package.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' |
+              grep -qvE '^[+-][[:space:]]*"version":'; then
+            scope=full
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "scope=$scope base=$base"
 
   lint-and-typecheck:
     name: Lint and Type Check
@@ -643,10 +704,10 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  # Three shards, one runner each: its own API process, DB file, ports and mocks. Bands
+  # Four shards, one runner each: its own API process, DB file, ports and mocks. Bands
   # are fixed by scenario order (SHARD_CUTS in scripts/e2e/shard.ts), not timing.
   e2e-contract-shard:
-    name: E2E Contract (shard ${{ matrix.shard }}/3)
+    name: E2E Contract (shard ${{ matrix.shard }}/4)
     needs: detect-changes
     # PRs skip the suite when they touch nothing it loads. merge_group (and any
     # other event) always runs it.
@@ -658,7 +719,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -685,7 +746,7 @@ jobs:
       # --coverage writes one lcov per API process (PRs for the changed-lines comment, the merge
       # queue for the coverage-on-main trend in the tracker); a coverage problem never fails it.
       - name: Run E2E contract shard
-        run: bun run e2e --shard ${{ matrix.shard }}/3 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --shard ${{ matrix.shard }}/4 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -744,7 +805,7 @@ jobs:
 
       # merge.ts imports no package, so no install. A missing shard file fails the merge.
       - name: Merge shards (strict coverage gate)
-        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json
+        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json e2e-shards/e2e-shard-4.json
 
       - name: Add E2E job summary
         if: always()
@@ -900,7 +961,7 @@ jobs:
           fi
 
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
+    name: Run Tests (${{ matrix.shard }}/8)
     needs: [detect-changes, restore-timings]
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
@@ -912,7 +973,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
     # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
     services:
@@ -931,6 +992,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit plus its parents: `--changed` diffs against the first parent.
+          fetch-depth: 2
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -955,11 +1019,16 @@ jobs:
         # (it's a separate bun package with its own deps + its own CI test step in
         # the lint-and-typecheck job). --parallel=4 runs each test file in its own
         # worker process (implies --isolate), 4 at a time per runner; the restored
-        # per-file durations balance files across the 4 shards by total time.
+        # per-file durations balance files across the 8 shards by total time.
         # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
         # bunfig.toml no longer sets a global retry.
+        # TEST_SCOPE=changed (pull requests, see detect-changes) adds --changed=<base>:
+        # the shards split only the affected files, and a shard with none runs nothing.
+        # A base git cannot resolve fails the step; it never runs zero tests silently.
         env:
           SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+          TEST_SCOPE: ${{ needs.detect-changes.outputs.test_scope }}
+          TEST_BASE: ${{ needs.detect-changes.outputs.test_base }}
         run: |
           start=$(date +%s%3N)
           set +e
@@ -969,8 +1038,15 @@ jobs:
           # skip every later step, so sample memory into this step's log instead.
           ( while sleep 30; do echo "[mem $(date +%T)] $(free -m | awk 'NR==2{print "used " $3 " / " $2 " MiB, avail " $7}')"; done ) &
           sampler=$!
+          scope_args=()
+          if [ "$TEST_SCOPE" = "changed" ]; then
+            scope_args=("--changed=$TEST_BASE")
+          elif [ "$TEST_SCOPE" != "full" ]; then
+            echo "::error::unknown test scope '$TEST_SCOPE'"; exit 1
+          fi
+          echo "test scope: $TEST_SCOPE ${TEST_BASE:-}"
           # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/4 \
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/8 "${scope_args[@]}" \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
@@ -1030,7 +1106,7 @@ jobs:
           set -euo pipefail
           if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
           bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
-            --shard ${{ matrix.shard }}/4 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --shard ${{ matrix.shard }}/8 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
           echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
 
@@ -1078,16 +1154,17 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:8}, job:("test (\($idx)/8)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   # Merge the per-shard durations into one cache entry for the next run. Only
-  # after a fully green test matrix, so a crashed shard never poisons the split.
+  # after a fully green full-suite matrix: a crashed shard, or a --changed run that
+  # timed only some files, would poison the split.
   save-timings:
     name: Save test timings
-    needs: test
-    if: needs.test.result == 'success'
+    needs: [detect-changes, test]
+    if: needs.test.result == 'success' && needs.detect-changes.outputs.test_scope == 'full'
     runs-on: ubuntu-latest
     # No checkout. Same-run artifact download and cache save use the runner
     # token, not GITHUB_TOKEN.
@@ -1317,6 +1394,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Start Docker build timer
         id: docker-timer
@@ -1414,6 +1494,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build Docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -1454,7 +1537,9 @@ jobs:
   ui-lint:
     name: UI Lint and Type Check
     needs: detect-changes
-    if: needs.detect-changes.outputs.ui == 'true'
+    # Also whenever UI E2E runs: its shards skip `tsc -b` and rely on this job for it.
+    # apps/ui imports from src/, so an API change can break the dashboard's types.
+    if: needs.detect-changes.outputs.ui == 'true' || needs.detect-changes.outputs.ui_e2e == 'true'
     runs-on: ubuntu-latest
     # Checkout only; GITHUB_TOKEN needs nothing else.
     permissions:

@@ -248,10 +248,12 @@ function UiSpecActionButton({
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // On the task and session pages the spawned task opens in the split screen;
-  // elsewhere (no preview scope) Open navigates to its page.
-  const openPreview = useOptionalContextPanel()?.openPreview;
-  const inScope = useLinkPreviewScope() !== null;
+  // On the task page the spawned task opens in the side panel, and in the
+  // sessions view as a tab (the scope's `open`). Elsewhere (no preview scope)
+  // Open navigates to its page.
+  const panelOpen = useOptionalContextPanel()?.openPreview;
+  const scope = useLinkPreviewScope();
+  const openPreview = scope ? (scope.open ?? panelOpen) : undefined;
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const run = async () => {
     setState("running");
@@ -273,7 +275,7 @@ function UiSpecActionButton({
               action: {
                 label: "Open",
                 onClick: () =>
-                  inScope && openPreview
+                  openPreview
                     ? openPreview({ kind: "task", taskId: spawned })
                     : navigate(`/tasks/${spawned}`),
               },

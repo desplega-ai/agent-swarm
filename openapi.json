@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.2",
+    "version": "2.13.4",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -1927,6 +1927,137 @@
           "createdAt"
         ]
       },
+      "DesignSystem": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "v": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "declined"
+            ]
+          },
+          "basePreset": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/PageThemeTokens"
+          },
+          "fontsHref": {
+            "type": "string"
+          },
+          "logo": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "alt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "url",
+              "alt"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "viewer",
+              "light",
+              "dark"
+            ]
+          },
+          "chartPalette": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "website",
+                  "brand-kit",
+                  "preset"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "extractedAt": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "updatedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedByAgentId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "v",
+          "status",
+          "basePreset",
+          "tokens",
+          "mode",
+          "source",
+          "updatedBy",
+          "updatedAt"
+        ]
+      },
+      "PageThemeTokens": {
+        "type": "object",
+        "properties": {
+          "light": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "dark": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "light",
+          "dark"
+        ]
+      },
       "SwarmEvent": {
         "type": "object",
         "properties": {
@@ -3640,30 +3771,6 @@
           }
         }
       },
-      "PageThemeTokens": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "light": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "dark": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "light",
-          "dark"
-        ]
-      },
       "Page": {
         "type": "object",
         "properties": {
@@ -3723,7 +3830,14 @@
             ]
           },
           "themeTokens": {
-            "$ref": "#/components/schemas/PageThemeTokens"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageThemeTokens"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "designVersion": {
             "type": "integer",
@@ -3835,7 +3949,14 @@
             ]
           },
           "themeTokens": {
-            "$ref": "#/components/schemas/PageThemeTokens"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageThemeTokens"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "designVersion": {
             "type": "integer",
@@ -15812,6 +15933,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -16316,6 +16453,22 @@
                                     },
                                     "respondedAt": {
                                       "type": "string"
+                                    },
+                                    "via": {
+                                      "type": "object",
+                                      "properties": {
+                                        "channel": {
+                                          "type": "string"
+                                        },
+                                        "platformUserId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "channel",
+                                        "platformUserId"
+                                      ],
+                                      "description": "Set when the answer came from a chat button: the channel and the platform user."
                                     }
                                   },
                                   "required": [
@@ -16891,6 +17044,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -17375,6 +17544,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -17881,6 +18066,22 @@
                               },
                               "respondedAt": {
                                 "type": "string"
+                              },
+                              "via": {
+                                "type": "object",
+                                "properties": {
+                                  "channel": {
+                                    "type": "string"
+                                  },
+                                  "platformUserId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "channel",
+                                  "platformUserId"
+                                ],
+                                "description": "Set when the answer came from a chat button: the channel and the platform user."
                               }
                             },
                             "required": [
@@ -21059,6 +21260,19 @@
                     },
                     "authFailureFence": {
                       "type": "integer"
+                    },
+                    "keyUsage": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "activeSessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   },
                   "required": [
@@ -21066,7 +21280,9 @@
                     "availableIndices",
                     "totalKeys",
                     "spendCappedIndices",
-                    "authFailureFence"
+                    "authFailureFence",
+                    "keyUsage",
+                    "activeSessions"
                   ]
                 }
               }
@@ -23457,6 +23673,235 @@
           },
           "404": {
             "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/design-system": {
+      "get": {
+        "summary": "Get the org design system",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The org design system and the value it replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "invalid",
+                        "active",
+                        "declined"
+                      ]
+                    },
+                    "designSystem": {
+                      "$ref": "#/components/schemas/DesignSystem"
+                    },
+                    "invalidReason": {
+                      "type": "string"
+                    },
+                    "previous": {
+                      "$ref": "#/components/schemas/DesignSystem"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "designSystem",
+                    "previous"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set or decline the org design system",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "declined"
+                    ],
+                    "description": "\"active\" (default) saves the design system. \"declined\" records that the requester does not want one, so agents stop asking. A declined record keeps only `source`."
+                  },
+                  "basePreset": {
+                    "type": "string",
+                    "description": "Preset id the tokens apply on top of, for example hive or paper. Default hive."
+                  },
+                  "themeTokens": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "tokens",
+                          "css"
+                        ]
+                      },
+                      "light": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "dark": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "css": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Token overrides on top of the base preset, in the same formats as create_page themeTokens: { light, dark } maps, or { format: \"css\", css } with a shadcn, tweakcn or Tailwind v4 variable block."
+                  },
+                  "fontsHref": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "Google Fonts stylesheet URL (https://fonts.googleapis.com/...) that loads the fonts the tokens name."
+                  },
+                  "logo": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "alt": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "url",
+                      "alt"
+                    ],
+                    "description": "https logo URL and its alt text."
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "viewer",
+                      "light",
+                      "dark"
+                    ],
+                    "description": "\"viewer\" (default) follows the viewer's light or dark mode. \"light\" or \"dark\" locks every page to that mode."
+                  },
+                  "chartPalette": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 12,
+                    "description": "Ordered chart series colors, as CSS color values."
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "manual",
+                          "website",
+                          "brand-kit",
+                          "preset"
+                        ]
+                      },
+                      "ref": {
+                        "type": "string",
+                        "maxLength": 2048
+                      },
+                      "extractedAt": {
+                        "type": "string",
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "description": "Where the design system came from. Default { kind: manual }."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved, normalized design system",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "designSystem": {
+                      "$ref": "#/components/schemas/DesignSystem"
+                    },
+                    "ignoredTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "designSystem",
+                    "ignoredTokens"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid design system",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied",
             "content": {
               "application/json": {
                 "schema": {
@@ -26641,7 +27086,7 @@
     "/api/github/installation-token": {
       "post": {
         "summary": "Mint a GitHub App installation token for worker git and gh",
-        "description": "Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.",
+        "description": "Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`) whose owner is listed in the deployment env `GITHUB_APP_REPO_OWNERS`, the API resolves that repository's App installation with the App JWT and mints for it; the repository must also be registered in `swarm_repos` on the configured GitHub host (403 otherwise). Any other call mints for the installation in `GITHUB_APP_INSTALLATION_ID`, so single-installation deployments are unchanged and a caller never picks an installation the operator did not list. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.",
         "tags": [
           "GitHub"
         ],
@@ -26655,7 +27100,13 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                  }
+                }
               }
             }
           }
@@ -26684,7 +27135,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a registered agent",
+            "description": "Caller is not a registered agent, or the repo of a listed owner is not registered in the swarm",
             "content": {
               "application/json": {
                 "schema": {
@@ -26704,7 +27155,7 @@
             }
           },
           "502": {
-            "description": "GitHub refused or failed to mint the token",
+            "description": "GitHub refused or failed to mint the token, or the repo has no App installation",
             "content": {
               "application/json": {
                 "schema": {
@@ -42707,7 +43158,14 @@
                             ]
                           },
                           "themeTokens": {
-                            "$ref": "#/components/schemas/PageThemeTokens"
+                            "anyOf": [
+                              {
+                                "$ref": "#/components/schemas/PageThemeTokens"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "designVersion": {
                             "type": "integer",
@@ -43177,6 +43635,16 @@
           },
           "400": {
             "description": "Launch not supported for this page (e.g. password mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not open pages",
             "content": {
               "application/json": {
                 "schema": {
@@ -56241,6 +56709,9 @@
                     "type": "number"
                   },
                   "harnessCostBilled": {
+                    "type": "boolean"
+                  },
+                  "estimated": {
                     "type": "boolean"
                   },
                   "taskId": {

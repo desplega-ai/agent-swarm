@@ -74,6 +74,7 @@ import { TreeDialogs, useTreeDialogs } from "./tree-dialogs";
 import {
   type ContainerId,
   foldId,
+  isGroupListId,
   isMyGroupRow,
   isNavRow,
   type NavRow,
@@ -117,8 +118,10 @@ interface SessionTreeProps {
   ref: Ref<SessionTreeHandle>;
   /** The phone list screen: touch rows, swipe, long-press, and sheets. */
   phone?: boolean;
-  /** The phone search mode turned on or off. */
-  onSearchMode?: (on: boolean) => void;
+  /** The phone list screen's actions, after the filter in the top row. */
+  phoneActions?: ReactNode;
+  /** `/` calls it before it focuses the search: the shell shows a collapsed sidebar. */
+  onReveal?: () => void;
 }
 
 /** What the tree asks of the pane area (plan Phase 8). */
@@ -150,7 +153,8 @@ export function SessionTree({
   paneCommands,
   ref,
   phone = false,
-  onSearchMode,
+  phoneActions,
+  onReveal,
 }: SessionTreeProps) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -683,6 +687,7 @@ export function SessionTree({
             cursor={row.key === cursorRow?.key}
             label={row.type === "more" ? `Show ${row.count} more` : `View all ${row.total}`}
             all={row.type === "all"}
+            guide={isGroupListId(row.container)}
             onClick={(event) => onRowClick(row.key, event)}
           />
         );
@@ -803,23 +808,27 @@ export function SessionTree({
           onBlur={cursor.onBlur}
           onPointerDown={onTreePointerDown}
           className={cn(
-            "group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none transition-opacity",
+            // The list scrolls down only: a row that is too wide clips, it never adds a sideways scroll.
+            "group/tree min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pt-1.5 pb-4 outline-none transition-opacity",
             !search.active && updating && "opacity-60",
           )}
         >
-          {segmentsOf(rows).map(({ section, rows: segmentRows }) =>
-            section ? (
+          {segmentsOf(rows).map(({ section, rows: segmentRows }) => {
+            if (!section) return segmentRows.map(renderRow);
+            // "New group" leads My groups: it shows as the icon in the heading.
+            const [first, ...rest] = segmentRows;
+            const add = first?.type === "add" ? first : null;
+            return (
               <TreeSection
                 key={section.key}
                 section={section}
                 describedBy={describedBy(section.key)}
+                action={add ? renderRow(add) : undefined}
               >
-                {segmentRows.map(renderRow)}
+                {(add ? rest : segmentRows).map(renderRow)}
               </TreeSection>
-            ) : (
-              segmentRows.map(renderRow)
-            ),
-          )}
+            );
+          })}
         </div>
         {createPortal(
           <DragOverlay dropAnimation={null}>
@@ -887,17 +896,20 @@ export function SessionTree({
         inputRef={searchRef}
         phone={phone}
         groups={targets}
-        onSearchMode={onSearchMode}
+        onReveal={onReveal}
         onLeave={() => {
           focusTree();
           if (searching) cursor.moveTo(0);
         }}
         action={
-          <FilterMenu
-            sources={myGroups.treeQuery.data?.sources ?? []}
-            canShow={me !== null}
-            phone={phone}
-          />
+          <>
+            <FilterMenu
+              sources={myGroups.treeQuery.data?.sources ?? []}
+              canShow={me !== null}
+              phone={phone}
+            />
+            {phoneActions}
+          </>
         }
       />
       {body}

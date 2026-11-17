@@ -284,13 +284,17 @@ describe("script SDK allowlist", () => {
     expect(mcpToolNameForSdkMethod("kv_del")).toBe("kv-delete");
   });
 
-  test("task_storeProgress forwards force to the finish endpoint", async () => {
-    let requestBody: Record<string, unknown> | undefined;
+  test("task_storeProgress forwards the whole completion payload to the store-progress tool", async () => {
+    let request: { method: string; path: string; body: Record<string, unknown> } | undefined;
     const httpServer = Bun.serve({
       port: 0,
       async fetch(req) {
-        requestBody = (await req.json()) as Record<string, unknown>;
-        return Response.json({ success: true, alreadyFinished: true });
+        request = {
+          method: req.method,
+          path: new URL(req.url).pathname,
+          body: (await req.json()) as Record<string, unknown>,
+        };
+        return Response.json({ success: true, message: "Task marked as completed." });
       },
     });
     const config = new SwarmConfig({
@@ -304,17 +308,26 @@ describe("script SDK allowlist", () => {
     const sdk = createSwarmSdk(config);
 
     try {
-      await sdk.task_storeProgress({
-        taskId: "task-1",
+      const args = {
+        taskId: "5f0f0f0f-1111-4111-8111-111111111111",
         status: "completed",
-        output: "corrected",
+        output: "Shipped it [citation:1]",
+        attachments: [
+          { kind: "url", url: "https://example.com/report.md", name: "report.md", isPrimary: true },
+        ],
+        citations: [
+          { index: 1, kind: "url", ref: "https://example.com/report.md", label: "Report" },
+        ],
+        learning: "When a script finishes a task, send the artifacts with it.",
+        persistMemory: true,
         force: true,
-      });
-      expect(requestBody).toEqual({
-        status: "completed",
-        output: "corrected",
-        force: true,
-      });
+      };
+      await sdk.task_storeProgress(args);
+      // No REST shortcut: the tool receives the caller's payload verbatim, so a
+      // completion field cannot be dropped by a stale body list here.
+      expect(request?.method).toBe("POST");
+      expect(request?.path).toBe("/api/mcp-bridge");
+      expect(request?.body).toEqual({ tool: "store-progress", args });
     } finally {
       httpServer.stop(true);
     }

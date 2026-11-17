@@ -11,6 +11,7 @@ import { isAgentReachable } from "@/be/runtime-pools/reachability";
 import { chatSdkContextKey } from "@/tasks/context-key";
 import type { Agent, RoutingReason } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { assertTelegramTopicThreadId } from "./telegram-thread";
 
 /** KV namespace of the channel-to-agent/workflow mapping, written by `register-chat-channel`. */
 export const CHAT_CHANNELS_NAMESPACE = "integrations:chat:channels";
@@ -18,6 +19,7 @@ export const CHAT_CHANNELS_NAMESPACE = "integrations:chat:channels";
 export interface ChatChannelMapping {
   agentId?: string;
   workflowId?: string;
+  defaultThreadId?: string;
   name?: string;
   createdAt?: string;
 }
@@ -66,6 +68,12 @@ export async function putChatChannelMapping(
   mapping: ChatChannelMapping,
 ): Promise<string> {
   const key = chatChannelKey(adapter, channelId);
+  if (mapping.defaultThreadId !== undefined) {
+    if (adapter !== "telegram") {
+      throw new Error("Default topics are supported only for Telegram channels.");
+    }
+    assertTelegramTopicThreadId(mapping.defaultThreadId, key);
+  }
   await upsertKv({
     namespace: CHAT_CHANNELS_NAMESPACE,
     key,

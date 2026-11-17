@@ -52,16 +52,15 @@ async function main(): Promise<void> {
     // Coverage maps the bundle back to apps/ui/src, so that build needs sourcemaps. bun run
     // appends the flag to the script's last command, `vite build`.
     const coverage = process.env.UI_E2E_COVERAGE === "1" ? ["--sourcemap"] : [];
-    const buildExit = await run(
-      ["bun", "run", "build", ...coverage],
-      resolve(repoRoot, "apps/ui"),
-      {
-        ...process.env,
-        VITE_API_URL: "",
-        VITE_API_KEY: "",
-        VITE_DEMO_MODE: "",
-      },
-    );
+    // UI_E2E_SKIP_TYPECHECK=1 (the CI shards) builds the bundle without `tsc -b`: Merge Gate's
+    // UI Lint and Type Check job runs it once, in parallel, whenever the shards run.
+    const script = process.env.UI_E2E_SKIP_TYPECHECK === "1" ? "build:bundle" : "build";
+    const buildExit = await run(["bun", "run", script, ...coverage], resolve(repoRoot, "apps/ui"), {
+      ...process.env,
+      VITE_API_URL: "",
+      VITE_API_KEY: "",
+      VITE_DEMO_MODE: "",
+    });
     if (buildExit !== 0) process.exit(buildExit);
   }
 

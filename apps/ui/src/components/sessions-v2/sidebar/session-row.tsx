@@ -36,6 +36,7 @@ import {
   NeedsYouBadge,
   ReadMark,
   rowPropsEqual,
+  SESSION_ROW_INDENT,
   TipKey,
   TreeRow,
   UNREAD_TITLE,
@@ -53,8 +54,25 @@ export function activityOf(session: SessionListItem): Activity {
 }
 
 /** The activity mark of a row. Running turns slowly, as everywhere (Taras, 2026-10-22). */
+/**
+ * In a narrow sidebar row (a nested row, or a small sidebar) "Needs you"
+ * turns into its amber dot, as on a tab, so the title keeps its room and
+ * the row never grows past the sidebar. Outside a `@container/row` the
+ * words always show.
+ */
 export function ActivityMark({ activity }: { activity: Activity }) {
-  if (activity === "needs") return <NeedsYouBadge>Needs you</NeedsYouBadge>;
+  if (activity === "needs") {
+    return (
+      <>
+        <NeedsYouBadge className="@max-[17rem]/row:hidden">Needs you</NeedsYouBadge>
+        <span
+          role="img"
+          aria-label="Needs you"
+          className="hidden size-[7px] shrink-0 rounded-full bg-status-active @max-[17rem]/row:block"
+        />
+      </>
+    );
+  }
   if (activity === "running") {
     return <TaskStatusIcon variant="active" label="Running" className="size-3.5" />;
   }
@@ -291,6 +309,7 @@ function SessionRowView({
           id={domId}
           level={level}
           cursor={cursor}
+          guide={false}
           aria-selected={selected}
           aria-label={rowLabel(session, me, title, group, nowDate)}
           data-open={open ? "true" : undefined}
@@ -298,7 +317,12 @@ function SessionRowView({
           onAuxClick={(event) => onRowAuxClick(rowKey, event)}
           onContextMenu={(event) => onRowContextMenu(rowKey, event)}
           className={cn(
-            "h-[26px] text-data",
+            // The row is a size container: its marks give way when it is narrow.
+            "@container/row h-[26px] text-data",
+            // The read mark and the checkbox sit in the parent row's icon
+            // column, one level out, and the title starts right after them,
+            // under the parent's label.
+            level > 0 && SESSION_ROW_INDENT,
             "data-[open=true]:bg-accent data-[open=true]:[--avatar-ring:var(--color-accent)]",
             // The open session's marker sits inside the row (UX review R9).
             "data-[open=true]:after:absolute data-[open=true]:after:inset-y-1.5 data-[open=true]:after:left-0 data-[open=true]:after:w-0.5 data-[open=true]:after:rounded-full data-[open=true]:after:bg-primary",
@@ -354,26 +378,32 @@ function SessionRowView({
             <MatchedTitle title={title} words={highlight} />
           </span>
           {/* In the 320 px sidebar the title keeps its room: an activity mark or
-              a wake time hides the group label (UX review R9). */}
+              a wake time hides the group label (UX review R9). A very narrow
+              row drops the group label and the people too. */}
           {group && !activity && !wake ? (
-            <span className="max-w-16 shrink truncate text-meta text-muted-foreground">
+            <span className="max-w-16 shrink truncate text-meta text-muted-foreground @max-[12rem]/row:hidden">
               {group}
             </span>
           ) : null}
           {others.length > 0 ? (
-            <AvatarStack
-              decorative
-              size="xs"
-              max={1}
-              peers={others.map((person) => ({
-                id: person.id,
-                name: person.name,
-                color: peerColor(person.id),
-                doing: "",
-              }))}
-            />
+            <span className="flex shrink-0 items-center @max-[12rem]/row:hidden">
+              <AvatarStack
+                decorative
+                size="xs"
+                max={1}
+                peers={others.map((person) => ({
+                  id: person.id,
+                  name: person.name,
+                  color: peerColor(person.id),
+                  doing: "",
+                }))}
+              />
+            </span>
           ) : session.shared ? (
-            <Users aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            <Users
+              aria-hidden
+              className="size-3 shrink-0 text-muted-foreground @max-[12rem]/row:hidden"
+            />
           ) : null}
           {activity ? (
             <span className="flex shrink-0 items-center">

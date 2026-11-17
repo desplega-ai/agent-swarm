@@ -1,6 +1,13 @@
 #!/usr/bin/env bun
 
 import pkg from "../../package.json";
+// Side-effect import, FIRST: the Stop hook is the claude session-summary path,
+// and this file is also a standalone entry (`bun src/hooks/hook.ts`) that does
+// not pass through `src/cli.tsx`. A compiled worker binary resolves pi-ai's
+// lazy Bedrock import only when the module has been wired statically, so without
+// this the summarizer silently could not use Bedrock. No-op when running from
+// node_modules.
+import "../utils/internal-ai/register-bedrock.ts";
 import {
   buildRatingsFromLlm,
   dedupeRetrievalsForRater,

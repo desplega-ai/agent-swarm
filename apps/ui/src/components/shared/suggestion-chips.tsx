@@ -45,7 +45,14 @@ export function SuggestionChips({
   return (
     <div className={cn("flex flex-wrap items-center justify-center gap-2", className)}>
       {suggestions.map((suggestion) => (
-        <ChipButton key={suggestion} onClick={() => onPick(suggestion)} disabled={disabled}>
+        <ChipButton
+          key={suggestion}
+          onClick={() => onPick(suggestion)}
+          disabled={disabled}
+          // A touch screen: a 36 px chip with 14 px text, and a 44 px tap area
+          // (the 8 px gap keeps the areas of two chips apart).
+          className="hit-area [--hit-size:44px] pointer-coarse:min-h-9 pointer-coarse:px-4 pointer-coarse:text-sm"
+        >
           {suggestion}
         </ChipButton>
       ))}

@@ -17,6 +17,7 @@ import {
   groupStarKey,
   isMyGroupRow,
   isNavRow,
+  keepRowOrder,
   type ListState,
   listSelectState,
   listSessionIds,
@@ -84,22 +85,22 @@ const keys = (rows: { key: string }[]) => rows.map((row) => row.key);
 describe("buildTreeRows", () => {
   test("sections come in order, and only open lists with sessions load", () => {
     const { rows, containers } = build(
-      tree([group("shared/a/", 2)], { inbox: counts(3), later: counts(0), noGroup: counts(1) }),
+      tree([group("shared/a/", 2)], { inbox: counts(3), later: counts(1), noGroup: counts(1) }),
     );
     // Inbox, then the groups (ongoing work), then Later and Done.
     expect(keys(rows)).toEqual([
       "box:inbox",
       "loading:inbox",
       "section:mine",
-      "group:shared/a/",
       "add:group",
+      "group:shared/a/",
       "box:nogroup",
       "box:later",
-      "empty:later",
+      "loading:later",
       "box:done",
     ]);
-    // Later is open but empty, No group and the group are folded.
-    expect(containers).toEqual(["inbox"]);
+    // No group and the group are folded.
+    expect(containers).toEqual(["inbox", "later"]);
   });
 
   test("10 rows, then Show 10 more once, then View all N", () => {
@@ -128,20 +129,35 @@ describe("buildTreeRows", () => {
     expect(ten.some((row) => row.type === "more" || row.type === "all")).toBe(false);
   });
 
-  test("an empty list, a failed load, and an emptied list each show their state", () => {
-    const empty = build(tree()).rows.find((row) => row.key === "empty:inbox");
-    expect(empty).toMatchObject({ type: "empty", kind: "inbox", parentKey: "box:inbox" });
+  test("Inbox, Working, and Later leave the tree while empty; Done and No group stay", () => {
+    const boxes = (rows: TreeRow[]) => rows.flatMap((row) => (row.type === "box" ? [row.id] : []));
+    expect(boxes(build(tree()).rows)).toEqual(["nogroup", "done"]);
+    expect(build(tree()).rows.some((row) => row.key === "empty:done")).toBe(false);
+
+    // The tree still counts 2, but Done just took both: the loaded list is empty.
+    const drained = build(tree([], { inbox: counts(2), later: counts(1) }), {
+      lists: { inbox: { data: page(0), failed: false }, later: { data: page(0), failed: false } },
+    }).rows;
+    expect(boxes(drained)).toEqual(["nogroup", "done"]);
+
+    // A folded section has no list to read: its counts keep it.
+    const folded = build(tree([], { inbox: counts(2) }), {
+      open: { inbox: false },
+      lists: { inbox: { data: page(0), failed: false } },
+    }).rows;
+    expect(boxes(folded)).toContain("inbox");
+  });
+
+  test("a section that loads or failed keeps its row and its state", () => {
+    const loading = build(tree([], { inbox: counts(2) })).rows;
+    expect(loading.find((row) => row.key === "loading:inbox")).toMatchObject({
+      parentKey: "box:inbox",
+    });
 
     const failed = build(tree([], { inbox: counts(2) }), {
       lists: { inbox: { failed: true } },
     }).rows.find((row) => row.key === "empty:inbox");
     expect(failed).toMatchObject({ kind: "failed", parentKey: "box:inbox" });
-
-    // The tree still counts 2, but Done just took both: the list is empty.
-    const drained = build(tree([], { inbox: counts(2) }), {
-      lists: { inbox: { data: page(0), failed: false } },
-    }).rows.find((row) => row.key === "empty:inbox");
-    expect(drained).toMatchObject({ kind: "inbox" });
   });
 
   test("an open group lists its subgroups, then its own sessions; a parent holds no state", () => {
@@ -150,14 +166,14 @@ describe("buildTreeRows", () => {
       open: { inbox: false, later: false, "shared/a/": true, "shared/x/": true },
       lists: { "shared/a/": { data: page(1), failed: false } },
     });
-    expect(keys(rows).slice(1, -3)).toEqual([
+    expect(keys(rows).slice(0, -2)).toEqual([
       "section:mine",
+      "add:group",
       "group:shared/a/",
       "group:shared/a/b/",
       "s:shared/a/:s0",
       "group:shared/x/",
       "empty:shared/x/",
-      "add:group",
     ]);
     expect(containers).toEqual(["shared/a/"]);
     expect(rows.find((row) => row.key === "group:shared/a/b/")?.level).toBe(1);
@@ -166,15 +182,12 @@ describe("buildTreeRows", () => {
   test("no groups: the My groups empty state describes its section", () => {
     const row = build(tree()).rows.find((r) => r.key === "empty:groups");
     expect(row).toMatchObject({ kind: "groups", parentKey: "section:mine" });
-    // "New group" stays a row the keys reach, after the invite.
+    // "New group" (the heading icon) stays a row the keys reach, before the invite.
     const all = keys(build(tree()).rows);
-    expect(all.slice(all.indexOf("empty:groups"), all.indexOf("empty:groups") + 2)).toEqual([
-      "empty:groups",
-      "add:group",
-    ]);
+    expect(all.slice(0, 3)).toEqual(["section:mine", "add:group", "empty:groups"]);
   });
 
-  test("a new group's name field takes the place of New group, or sits under its parent", () => {
+  test("a new group's name field shows under New group, or under its parent", () => {
     const t = tree([group("shared/a/", 1)]);
     const top = (creating: string) =>
       keys(
@@ -186,9 +199,19 @@ describe("buildTreeRows", () => {
           lists: new Map(),
           creating,
         }).rows,
-      ).slice(-6, -3);
-    expect(top("shared/")).toEqual(["section:mine", "group:shared/a/", "create:shared/"]);
-    expect(top("shared/a/")).toEqual(["group:shared/a/", "create:shared/a/", "add:group"]);
+      ).slice(0, 4);
+    expect(top("shared/")).toEqual([
+      "section:mine",
+      "add:group",
+      "create:shared/",
+      "group:shared/a/",
+    ]);
+    expect(top("shared/a/")).toEqual([
+      "section:mine",
+      "add:group",
+      "group:shared/a/",
+      "create:shared/a/",
+    ]);
     // With no groups yet, the field replaces the first-run invite.
     const none = buildTreeRows({
       tree: tree(),
@@ -199,7 +222,7 @@ describe("buildTreeRows", () => {
       creating: "shared/",
     }).rows;
     expect(none.some((r) => r.key === "empty:groups")).toBe(false);
-    expect(none.at(-4)?.type).toBe("create");
+    expect(none[2]?.type).toBe("create");
   });
 
   test("a group that lives only in this browser invites a move", () => {
@@ -238,13 +261,7 @@ describe("buildTreeRows", () => {
 
   test("sections, empty states, and loading rows are not cursor stops", () => {
     const { rows } = build(tree([], { inbox: counts(1) }));
-    expect(rows.filter(isNavRow).map((row) => row.type)).toEqual([
-      "box",
-      "add",
-      "box",
-      "box",
-      "box",
-    ]);
+    expect(rows.filter(isNavRow).map((row) => row.type)).toEqual(["box", "add", "box", "box"]);
   });
 
   test("foldIds lists every section, group, and owner the tree can show", () => {
@@ -279,10 +296,10 @@ describe("source sections (sources Phase 5)", () => {
 
   test("sections follow Shared with me in source order, folded by default", () => {
     const { rows, containers } = build(t, { open: { inbox: false, later: false } });
-    expect(keys(rows).slice(1, -3)).toEqual([
+    expect(keys(rows).slice(0, -2)).toEqual([
       "section:mine",
-      "group:shared/a/",
       "add:group",
+      "group:shared/a/",
       "section:shared",
       "owner:lena",
       "source:slack",
@@ -311,7 +328,6 @@ describe("source sections (sources Phase 5)", () => {
       "group:shared/slack/d0dm000001/",
       "source:telegram",
       "box:nogroup",
-      "box:later",
       "box:done",
     ]);
     expect(slack[1]).toMatchObject({ type: "group", level: 1, readOnly: true, open: true });
@@ -475,10 +491,10 @@ describe("resource sections", () => {
     const { rows } = build(t, {
       open: { inbox: false, later: false, "source:page": true },
     });
-    expect(keys(rows).slice(1, -3)).toEqual([
+    expect(keys(rows).slice(0, -2)).toEqual([
       "section:mine",
-      "group:shared/a/",
       "add:group",
+      "group:shared/a/",
       "source:slack",
       "source:page",
       "group:shared/page:p1/",
@@ -628,11 +644,95 @@ describe("sidebar stars, hidden groups, source paging, and Working", () => {
       open: closed,
       starred: { data: page(2), failed: false },
     });
+    // The empty Inbox is hidden: Starred leads the tree.
     const at = rows.findIndex((row) => row.key === "section:starred");
-    expect(at).toBe(1);
+    expect(at).toBe(0);
     expect(rows.slice(at + 1, at + 3).map((row) => row.key)).toEqual([
       "s:starred:s0",
       "s:starred:s1",
+    ]);
+  });
+});
+
+describe("keepRowOrder (Inbox and Working across polls)", () => {
+  /** A page of `ids` in server order, out of `total` sessions in the list. */
+  const list = (ids: string[], total = ids.length): SessionsListResponse => ({
+    sessions: ids.map(session),
+    total,
+    limit: 20,
+    offset: 0,
+  });
+  const ids = (response: SessionsListResponse) => response.sessions.map((s) => s.root.id);
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from }, (_, i) => `s${from + i}`);
+
+  test("a session that reports progress keeps its row", () => {
+    // The server puts the newest activity first: c moved to the top.
+    expect(ids(keepRowOrder(list(["a", "b", "c"]), list(["c", "a", "b"])))).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  test("a session that enters the list goes on top; one that leaves is gone", () => {
+    expect(ids(keepRowOrder(list(["a", "b", "c"]), list(["e", "c", "d", "a"])))).toEqual([
+      "e",
+      "d",
+      "a",
+      "c",
+    ]);
+  });
+
+  test("older rows from a longer page go after the shown rows, which keep their order", () => {
+    // 10 shown, s3 moved up by progress since. The longer page brings s10..s19.
+    const shown = ["s3", ...range(0, 3), ...range(4, 10)];
+    const longer = keepRowOrder(list(shown, 30), list(range(0, 20), 30));
+    expect(ids(longer).slice(0, 10)).toEqual(shown);
+    expect(ids(longer).slice(10)).toEqual(range(10, 20));
+  });
+
+  test("a row that slides up into the page after a Done goes last, not on top", () => {
+    // a left the list (the total dropped), so d, the next older row, is in the page now.
+    expect(ids(keepRowOrder(list(["a", "b", "c"], 5), list(["b", "c", "d"], 4)))).toEqual([
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  test("the page decides which sessions show: one it no longer holds goes", () => {
+    // a showed first, then x (past the page) had activity and pushed a out.
+    // The page does not say whether a left or was pushed out, so a goes.
+    // x enters on top; b and c keep their order and take the new page's data.
+    const next = list(["x", "b", "c"], 5);
+    const kept = keepRowOrder(list(["a", "b", "c"], 5), next);
+    expect(ids(kept)).toEqual(["x", "b", "c"]);
+    expect(kept.sessions[1]).toBe(next.sessions[1]);
+  });
+
+  test("a row missing from a page that holds the whole list left it", () => {
+    expect(ids(keepRowOrder(list(["a", "b", "c"]), list(["x", "b", "c"])))).toEqual([
+      "x",
+      "b",
+      "c",
+    ]);
+  });
+
+  test("the server's order comes back as the same page", () => {
+    const next = list(["a", "b"]);
+    expect(keepRowOrder(list(["a", "b"]), next)).toBe(next);
+  });
+
+  test("the kept order builds the Inbox rows", () => {
+    const kept = keepRowOrder(list(["s0", "s1", "s2"]), list(["s2", "s0", "s1"]));
+    const { rows } = build(tree([], { inbox: counts(3) }), {
+      lists: { inbox: { data: kept, failed: false } },
+    });
+    expect(keys(rows.filter((row) => row.type === "session"))).toEqual([
+      "s:inbox:s0",
+      "s:inbox:s1",
+      "s:inbox:s2",
     ]);
   });
 });

@@ -1,6 +1,13 @@
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  cancelQuietly,
+  claimTask,
+  createAssignedTask,
+  registerWorker,
+  retireAgent,
+} from "./core-helpers";
+import {
   cleanupStack,
   fakeJwt,
   jsonResponse,
@@ -46,6 +53,8 @@ async function available(ctx: ScenarioContext, query: string) {
     earliestModelResetAt?: string | null;
     seatBlockedIndices?: number[];
     spendCappedIndices: number[];
+    keyUsage: number[];
+    activeSessions: number[];
   };
 }
 
@@ -179,6 +188,28 @@ export const platformKeys: Scenario = {
       `/api/keys/status?keyType=${keyType}&scope=agent&scopeId=none`,
     );
     expect(asRecords(scoped.json, "keys").length === 0, "the scope filter hides global keys");
+
+    // ── running sessions per key ─────────────────────────────────────────────
+    // The pending task above also carries suffixA; only in_progress tasks count.
+    const worker = await registerWorker(ctx, "keys-sessions");
+    const running = await createAssignedTask(ctx, worker, `key session ${ctx.nonce}`);
+    await claimTask(ctx, worker, running);
+    await report(ctx, "report-usage", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      taskId: running,
+    });
+    const bySuffix = await available(
+      ctx,
+      `keyType=${keyType}&totalKeys=2&keySuffixes=${suffixA},${suffixB}`,
+    );
+    expect(
+      bySuffix.activeSessions.join() === "1,0",
+      "activeSessions counts the in_progress task on each pool position",
+    );
+    await cancelQuietly(ctx, running);
+    await retireAgent(ctx, worker);
 
     // ── rate limit, clear, expiry ────────────────────────────────────────────
     await report(ctx, "report-rate-limit", {
@@ -607,6 +638,14 @@ export const platformKeys: Scenario = {
       "other families are unaffected",
     );
     expect(
+      forHaiku.keyUsage.join() === "0.4,0",
+      "available ranks keys by live 5h/7d usage, model windows aside, unobserved as 0",
+    );
+    expect(
+      forOpus.keyUsage.join() === "0.4,0",
+      "keyUsage covers every pool position, also a model-blocked one",
+    );
+    expect(
       (await available(ctx, `keyType=${keyType}&totalKeys=2`)).modelBlockedIndices === undefined,
       "model fields are only present when a model is asked for",
     );
@@ -967,7 +1006,8 @@ export const platformPoolKeys: Scenario = {
         "keys",
       );
       expect(
-        cappedPool[0]?.status === "spend_capped" && asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
+        cappedPool[0]?.status === "spend_capped" &&
+          asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
         "the pool view shows the spend cap",
       );
       await report(ctx, "clear-rate-limit", { keyType: NAN_KEY, keySuffix: goodSuffix });

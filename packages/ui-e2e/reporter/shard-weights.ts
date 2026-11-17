@@ -16,10 +16,13 @@ const weights = new Map<string, number>();
 for (const entry of readdirSync(summaries, { withFileTypes: true, recursive: true })) {
   if (!entry.isFile() || entry.name !== "summary.json") continue;
   const summary = JSON.parse(readFileSync(join(entry.parentPath, entry.name), "utf8")) as {
-    results?: Array<{ file: string; durationMs: number }>;
+    results?: Array<{ file: string; specFile?: string; durationMs: number }>;
   };
   for (const result of summary.results ?? []) {
-    weights.set(result.file, (weights.get(result.file) ?? 0) + result.durationMs / 1000);
+    // The shard planner packs spec files. A test defined in a shared helper
+    // (overflow-checks.ts) counts toward the spec file that registered it.
+    const file = result.specFile ?? result.file;
+    weights.set(file, (weights.get(file) ?? 0) + result.durationMs / 1000);
   }
 }
 

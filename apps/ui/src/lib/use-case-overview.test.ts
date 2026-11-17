@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScheduledTask } from "../api/types";
 import type { LsEntry } from "./agent-fs/types";
-import { isSessionTab, OVERVIEW_TAB, parseGroupPane, urlTabs } from "./sessions-v2";
+import { isSessionTab, OVERVIEW_TAB, parseGroupPane, urlPanes } from "./sessions-v2";
 import {
   cadenceWords,
   canHaveOverview,
@@ -68,13 +68,13 @@ describe("which groups get an Overview", () => {
     expect(parseGroupPane("overview")).toBe("overview");
     expect(parseGroupPane("list")).toBe("list");
     expect(parseGroupPane("grid")).toBeNull();
-    const { tabs, split } = urlTabs(`view,${OVERVIEW_TAB},s1`, {
+    const { tabs, split } = urlPanes(`view,${OVERVIEW_TAB},s1`, {
       focused: "view",
       view: "shared/po-qa/",
       split: OVERVIEW_TAB,
     });
     expect(tabs).toEqual(["view", "s1"]);
-    expect(split).toBeNull();
+    expect(split).toEqual([]);
   });
 });
 

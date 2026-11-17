@@ -4416,6 +4416,91 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     expect(String(conclusionStream?.payload.markdown_text)).toContain(getTaskLink(child.id));
   });
 
+  test("a negative settle window falls back to the default, so a just-terminal closure still waits it out", async () => {
+    process.env.SLACK_CONCLUSION_SETTLE_SEC = "-1";
+    const lead = await createAgent({ name: "Negative Settle Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({
+      name: "Negative Settle Worker",
+      isLead: false,
+      status: "idle",
+    });
+    const { channelId, threadTs } = uniqueSlackAddress("C_NEGATIVE_SETTLE");
+    const ask = await createTaskExtended("negative settle ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    const child = await createTaskExtended("settle child work", {
+      agentId: worker.id,
+      source: "mcp",
+      parentTaskId: ask.id,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(child.id);
+    await completeTask(child.id, "Child result body.");
+    calls.length = 0;
+
+    // Tick 1: the child gets its own card; the ask is still open, so no conclusion.
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(child.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+
+    // Every member is terminal but the closure has been quiet for 2s only. A
+    // negative settle window must not read as "already quiet long enough".
+    await completeTask(ask.id, "Ask completed.");
+    await backdateLastUpdated([ask.id, child.id], 2);
+    calls.length = 0;
+
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+
+    // The fallback is the documented 10s, so 30s of quiet does conclude.
+    await backdateLastUpdated([ask.id, child.id], 30);
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(ask.id))?.conclusionKind).toBe("complete");
+  });
+
+  test("a negative timeout falls back to the default, so a fresh unfinished closure is not timed out at once", async () => {
+    process.env.SLACK_CONCLUSION_TIMEOUT_MIN = "-1";
+    const lead = await createAgent({ name: "Negative Timeout Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({
+      name: "Negative Timeout Worker",
+      isLead: false,
+      status: "idle",
+    });
+    const { channelId, threadTs } = uniqueSlackAddress("C_NEGATIVE_TIMEOUT");
+    const ask = await createTaskExtended("negative timeout ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    const child = await createTaskExtended("still running work", {
+      agentId: worker.id,
+      source: "mcp",
+      parentTaskId: ask.id,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(child.id);
+    await completeTask(ask.id, "Ask done; the child never finished.");
+    await backdateLastUpdated([ask.id, child.id], 2);
+    calls.length = 0;
+
+    // 2s of idle is nowhere near the 240min fallback, so no timeout card.
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+
+    // Past the documented 240min default the closure does conclude as timed out.
+    await backdateLastUpdated([ask.id, child.id], 260 * 60);
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(ask.id))?.conclusionKind).toBe("timeout");
+  });
+
   test("a stale in-progress ask times out without a completed outcome", async () => {
     process.env.SLACK_CONCLUSION_TIMEOUT_MIN = "1";
     const lead = await createAgent({ name: "Stale Ask Lead", isLead: true, status: "idle" });

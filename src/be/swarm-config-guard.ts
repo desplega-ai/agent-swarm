@@ -82,6 +82,8 @@ const RESERVED_KEYS = new Set([
   "GITHUB_API_URL",
   // Picks which App installation workers get tokens for; a config writer must not choose it.
   "GITHUB_APP_INSTALLATION_ID",
+  // Owners whose repos get a token for their own installation; same reason.
+  "GITHUB_APP_REPO_OWNERS",
 ]);
 
 // Config keys the API server owns for its own use and must NEVER hand out over
@@ -213,6 +215,18 @@ export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 }
  * takes over, so every accepted value still changes when a slot refreshes.
  */
 export const CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS_BOUNDS = { min: 1, max: 216 } as const;
+
+/**
+ * Bounds for the scheduler polling interval (`SCHEDULER_INTERVAL_MS`).
+ *
+ * `src/scheduler/scheduler.ts` parses the boot value against exactly these
+ * bounds at call time and falls back to its 10-second default outside them, and
+ * VALIDATED_KEYS rejects out-of-range writes with the same numbers, so the config
+ * API cannot accept a tick the scheduler would silently replace. The 2^31-1 ms
+ * ceiling is the largest delay a 32-bit timer honours: `setInterval` clamps a
+ * larger one to 1 ms, the tight loop a non-positive delay already causes (#3169).
+ */
+export const SCHEDULER_INTERVAL_MS_BOUNDS = { min: 1, max: 2_147_483_647 } as const;
 
 /**
  * Decision hosts `SYSTEM_ONE_DEFAULT_PROVIDER` may name: `SYSTEM_ONE_PROVIDER_IDS`
@@ -694,7 +708,6 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "RBAC_AUDIT_RETENTION_DAYS",
       "WORKFLOW_MAX_ITERATIONS",
       "WORKFLOW_MAX_STEPS_PER_RUN",
-      "SCHEDULER_INTERVAL_MS",
       "EXTENSION_HANDLER_TIMEOUT_MS",
       "EXTENSION_MAX_CONSECUTIVE_FAILURES",
       "RUNTIME_STALE_THRESHOLD_MIN",
@@ -723,6 +736,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ["APPS_JSON_COLUMN_MAX_BYTES"],
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
+  ),
+  // The scheduler tick is bounded at both ends, and src/scheduler/scheduler.ts
+  // parses the boot value against the same range: a delay above the timer ceiling
+  // fires after 1 ms, so accepting it would leave the scheduler polling at full
+  // speed while the saved value claimed otherwise.
+  ...boundedIntegerValidators(
+    ["SCHEDULER_INTERVAL_MS"],
+    SCHEDULER_INTERVAL_MS_BOUNDS.min,
+    SCHEDULER_INTERVAL_MS_BOUNDS.max,
   ),
   // Worker worktree reaper (src/commands/worktree-reaper.ts clamps to the same ranges).
   ...enumValidator("WORKTREE_REAPER_MODE", ["off", "dry-run", "on"]),

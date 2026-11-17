@@ -1473,10 +1473,12 @@ spawnDescribe("pass snapshot consistency", () => {
     await updateApp(appId, { definition: await parsed(definitionWith(newScript.id)) });
     const result = await run;
 
-    expect(result.ok).toBe(true);
+    // Passes overlap, so pass "b" may snapshot the pre-edit definition. Either
+    // outcome is safe; the invariant is that drifted data never commits.
     const bRows = await rowsOf(appId, "b");
-    expect(bRows).toHaveLength(1);
-    expect(bRows[0]?.title).toBe("from-new");
+    expect(bRows.map((row) => row.title)).not.toContain("from-old");
+    if (result.ok) expect(bRows[0]?.title).toBe("from-new");
+    else expect(result.passes[1]?.error).toBeDefined();
   });
 });
 

@@ -82,7 +82,7 @@ export const DB_RETENTION_TABLES = [
     maxBatchSize: 100,
   },
   {
-    // Every inline script run stores its full source, args and output. Only
+    // Inline runs store args and output; source is shared by content hash. Only
     // terminal runs are eligible: a running or paused durable run must survive
     // to be resumed. Runs with an idempotencyKey are kept, so a retried launch
     // still gets its 409 instead of executing twice. The status filter, the

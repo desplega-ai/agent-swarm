@@ -14,6 +14,8 @@ export interface ApprovalVote {
   responses: Record<string, unknown>;
   claimedRespondedBy?: string;
   respondedAt: string;
+  /** Set when the answer came from a chat button: the channel and the clicking platform user. */
+  via?: { channel: string; platformUserId: string };
 }
 
 export interface ApprovalRequestListFilters {

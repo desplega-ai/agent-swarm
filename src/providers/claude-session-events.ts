@@ -49,7 +49,7 @@ export type ClaudeProtocolMessage = {
   num_turns?: number;
   is_error?: boolean;
   parent_tool_use_id?: string | null;
-  message?: { content?: ClaudeContentBlock[]; usage?: ClaudeUsage };
+  message?: { id?: string; model?: string; content?: ClaudeContentBlock[]; usage?: ClaudeUsage };
 };
 
 export type NormalizedClaudeMessage = {
@@ -143,6 +143,81 @@ function costFromResult(
     isError: json.is_error || json.subtype !== "success",
     provider: "claude",
   };
+}
+
+/**
+ * Sums the usage of every assistant message so a session that ends without a
+ * `result` event (killed after its task turned terminal) still reports cost.
+ * Claude splits one API message across stream lines that share `message.id`
+ * and repeat its usage, so the last usage seen per id wins. Subagent messages
+ * are billed too, so they count.
+ */
+export class ClaudeUsageAccumulator {
+  private readonly byMessage = new Map<string, { model: string; usage: ClaudeUsage }>();
+  private unnamed = 0;
+
+  observe(json: ClaudeProtocolMessage, fallbackModel: string): void {
+    if (json.type !== "assistant" || !json.message?.usage) return;
+    const id = json.message.id || `unnamed-${this.unnamed++}`;
+    const model = json.message.model || fallbackModel;
+    this.byMessage.set(id, { model, usage: json.message.usage });
+  }
+
+  /** Estimated cost for the session, or undefined when no message carried usage. */
+  toCost(
+    state: Pick<ClaudeMessageState, "taskId" | "agentId" | "model">,
+    opts: { durationMs: number; isError: boolean },
+  ): CostData | undefined {
+    const perModel = new Map<string, NonNullable<CostData["models"]>[number]>();
+    let cacheWrite5mTokens = 0;
+    let cacheWrite1hTokens = 0;
+    let thinkingTokens = 0;
+    for (const { model, usage } of this.byMessage.values()) {
+      const entry = perModel.get(model) ?? {
+        model,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      };
+      entry.inputTokens += tokenCount(usage.input_tokens) ?? 0;
+      entry.outputTokens += tokenCount(usage.output_tokens) ?? 0;
+      entry.cacheReadTokens += tokenCount(usage.cache_read_input_tokens) ?? 0;
+      entry.cacheWriteTokens += tokenCount(usage.cache_creation_input_tokens) ?? 0;
+      perModel.set(model, entry);
+      cacheWrite5mTokens += tokenCount(usage.cache_creation?.ephemeral_5m_input_tokens) ?? 0;
+      cacheWrite1hTokens += tokenCount(usage.cache_creation?.ephemeral_1h_input_tokens) ?? 0;
+      thinkingTokens += tokenCount(usage.output_tokens_details?.thinking_tokens) ?? 0;
+    }
+    // Claude's local error messages (model "<synthetic>") carry all-zero usage.
+    const models = [...perModel.values()].filter(
+      (m) => m.inputTokens + m.outputTokens + m.cacheReadTokens + m.cacheWriteTokens > 0,
+    );
+    if (models.length === 0) return undefined;
+    const sum = (key: "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens") =>
+      models.reduce((total, m) => total + m[key], 0);
+    return {
+      sessionId: "",
+      taskId: state.taskId,
+      agentId: state.agentId,
+      totalCostUsd: 0,
+      estimated: true,
+      inputTokens: sum("inputTokens"),
+      outputTokens: sum("outputTokens"),
+      cacheReadTokens: sum("cacheReadTokens"),
+      cacheWriteTokens: sum("cacheWriteTokens"),
+      ...(cacheWrite5mTokens + cacheWrite1hTokens > 0
+        ? { cacheWrite5mTokens, cacheWrite1hTokens }
+        : {}),
+      thinkingTokens,
+      models,
+      durationMs: opts.durationMs,
+      numTurns: null,
+      model: state.model,
+      isError: opts.isError,
+      provider: "claude",
+    };
+  }
 }
 
 export function normalizeClaudeMessage(

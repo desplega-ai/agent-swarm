@@ -21,6 +21,7 @@ ALLOWLIST=(
   src/be/db/runtime.ts                          # singleton lifecycle + async client seam owner
   src/be/db-client.ts                           # the seam implementation
   src/be/migrations/runner.ts                   # boot: SQL migrations
+  src/be/migrations/script-run-sources.ts       # boot: bounded source deduplication backfill
   src/be/oauth-encryption-backfill.ts           # boot: one-time backfill
   src/be/connection-bindings-blob-migration.ts  # boot: one-time migration
   src/be/seed-pricing.ts                        # boot: seeder

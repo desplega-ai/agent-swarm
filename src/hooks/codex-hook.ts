@@ -25,7 +25,7 @@
  *
  * Native tool calls (Bash, apply_patch) also go to `POST /api/tool-hooks`
  * (`native-tool-hooks.ts`), so an extension with `toolSources: ["native"]`
- * can observe, block (exit 2) or rewrite a Bash command (`updatedInput`).
+ * can observe, block (exit 2) or rewrite a Bash command or an apply_patch patch (`updatedInput`).
  *
  * One-shot guarantee: a message is included in hook output only after its
  * `/delivered` POST succeeded, so a message is injected at most once. A
@@ -220,6 +220,12 @@ function nativeTargetOf(config: CodexHookConfig | null): NativeHookTarget | unde
   };
 }
 
+/**
+ * Codex tools whose `hookSpecificOutput.updatedInput` rewrite a real codex-cli 0.169.0 run applied
+ * (the rewritten patch, not the original, landed on disk). Re-check on a codex upgrade.
+ */
+const CODEX_REWRITABLE_TOOLS = new Set(["bash", "apply_patch"]);
+
 export type CodexNativePre =
   | { action: "continue" }
   | { action: "block"; reason: string }
@@ -238,9 +244,14 @@ export async function codexNativePre(
   if (msg.hook_event_name !== "PreToolUse" || !call || !target) return { action: "continue" };
   const decision = await runNativePre(target, call, fetchImpl);
   if (decision.action === "block") return decision;
-  // shortcut: only a Bash rewrite is applied; codex's rewrite support for apply_patch payloads is
-  // unverified, so that modify is dropped. Upgrade once a codex run proves updatedInput there.
-  if (decision.action === "modify" && call.tool === "bash") {
+  if (decision.action === "modify") {
+    // A rewrite codex was never seen to apply fails closed, so it is never silently dropped.
+    if (!CODEX_REWRITABLE_TOOLS.has(call.tool)) {
+      return {
+        action: "block",
+        reason: `An extension rewrote this ${call.nativeTool} call, but codex cannot apply the rewrite in place. Retry with these arguments: ${JSON.stringify(decision.args)}`,
+      };
+    }
     // The rewrite is input the PreToolUse guards never saw: check the final command too.
     const reason = await codexPreToolUseBlock(
       { ...msg, tool_input: decision.args },

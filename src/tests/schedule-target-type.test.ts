@@ -163,7 +163,10 @@ type ScheduleScriptRunRow = {
 
 async function scriptRunsFor(scriptName: string): Promise<ScheduleScriptRunRow[]> {
   return getDbClient().query<ScheduleScriptRunRow>(
-    "SELECT agentId, scriptName, source, kind, status, output, error, finishedAt FROM script_runs WHERE scriptName = ?",
+    `SELECT r.agentId, r.scriptName, COALESCE(s.source, r.source) AS source,
+            r.kind, r.status, r.output, r.error, r.finishedAt
+       FROM script_runs r LEFT JOIN script_run_sources s ON s.hash = r.sourceHash
+      WHERE r.scriptName = ?`,
     [scriptName],
   );
 }

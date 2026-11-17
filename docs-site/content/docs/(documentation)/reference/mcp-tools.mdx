@@ -877,7 +877,7 @@ HTML pages use the swarm design system when `designVersion` is 2, the default fo
 - The `swarm-*` primitive classes, such as `swarm-panel`, `swarm-metric`, `swarm-badge`, and `swarm-table`.
 - Tailwind v4 utilities that map to the tokens, such as `bg-card` and `text-muted-foreground`. Tailwind Preflight stays off.
 
-Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `themeTokens` takes a token map, or a CSS variable block with `format: "css"` (shadcn, tweakcn, or a Tailwind v4 `@theme` block). Inside the dashboard, a version 2 page follows the viewer's light or dark mode. It also follows the viewer's preset when the page sets no `theme`. Use tokens, not hardcoded colors. Print is always light. Pages created before version 2 keep `designVersion` 1: the old head with the Tailwind v3 Play CDN and the `--swarm-*` tokens. Pass `designVersion: 2` when you rewrite one.
+Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `themeTokens` takes a token map, or a CSS variable block with `format: "css"` (shadcn, tweakcn, or a Tailwind v4 `@theme` block). Inside the dashboard, a version 2 page follows the viewer's light or dark mode. A page without a `theme` takes the org design system (see `design-system-set`) when the org has one, else the viewer's preset. Use tokens, not hardcoded colors. Print is always light. Pages created before version 2 keep `designVersion` 1: the old head with the Tailwind v3 Play CDN and the `--swarm-*` tokens. Pass `designVersion: 2` when you rewrite one.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -904,6 +904,28 @@ Delete a previously created page and its version history.
 |-----------|------|----------|-------------|
 | `id` | string | No | Page ID to delete |
 | `slug` | string | No | Slug to delete (resolved within the calling agent's pages) |
+
+### design-system-get
+
+Read the org design system. `status` is `none`, `declined`, `active`, or `invalid` (the stored record fails validation, so pages ignore it). `previous` holds the value the last write replaced. Also `GET /api/design-system`.
+
+### design-system-set
+
+Save the org design system that restyles every HTML page without its own `theme`. Also `PUT /api/design-system`. Needs `design-system.write`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | enum | No | `active` (default) or `declined`. A declined record stops the first-page ask |
+| `basePreset` | string | No | Preset the tokens apply on top of. Default `hive` |
+| `themeTokens` | object | No | Same formats as `create_page` `themeTokens` |
+| `fontsHref` | string | No | Google Fonts stylesheet URL (`https://fonts.googleapis.com/...`) |
+| `logo` | object | No | `{ url, alt }`, https only |
+| `mode` | enum | No | `viewer` (default), `light`, or `dark`: locks every page to that mode |
+| `chartPalette` | string[] | No | Up to 12 chart series colors |
+| `source` | object | No | `{ kind: manual \| website \| brand-kit \| preset, ref? }` |
+| `dryRun` | boolean | No | Validate and return the normalized record without saving |
+
+The `design-system-seed` script builds a preview page from a site URL, a CSS block, or a preset, and saves with `save: true`.
 
 ## App Tools
 

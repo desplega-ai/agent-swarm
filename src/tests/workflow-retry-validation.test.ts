@@ -170,8 +170,8 @@ afterAll(async () => {
 
 // ─── Tests ───────────────────────────────────────────────────
 
-describe("Retry Poller — Validation on Retry", () => {
-  test("retry succeeds but validation fails → another retry is scheduled", async () => {
+describe("Workflow validation and retries", () => {
+  test("validation failure on retry exhausts the retry policy", async () => {
     validateCallCount = 0;
     validateAlwaysPass = false;
 
@@ -205,9 +205,7 @@ describe("Retry Poller — Validation on Retry", () => {
     expect(step1.status).toBe("failed");
     expect(step1.nextRetryAt).toBeTruthy();
     // Validation was called during the initial execution
-    expect(validateCallCount).toBeGreaterThanOrEqual(1);
-
-    const validationCountAfterInitial = validateCallCount;
+    expect(validateCallCount).toBe(1);
 
     // Run the poller until the run fails (validation always fails, retries exhausted)
     startRetryPoller(registry, 10);
@@ -217,48 +215,10 @@ describe("Retry Poller — Validation on Retry", () => {
       stopRetryPoller();
     }
 
-    // Validation should have been called again during the retry
-    expect(validateCallCount).toBeGreaterThan(validationCountAfterInitial);
-  });
-
-  test("retry succeeds and validation passes → step checkpointed, run completes", async () => {
-    validateCallCount = 0;
-    // First call: fail, subsequent calls: pass
-    // We use the validateAlwaysPass flag to simulate this
-    validateAlwaysPass = false;
-
-    // Node produces value=100 (>50, so validation passes)
-    const workflow = await makeWorkflow({
-      nodes: [
-        {
-          id: "n1",
-          type: "number-gen",
-          config: { value: 100 },
-          // Add a node-level retry to force initial failure via a trick:
-          // We'll use the engine's normal path but manually mark the step
-          // for retry to test the poller's validation path.
-          validation: {
-            executor: "validate",
-            config: { prompt: "Is result > 50?" },
-            mustPass: true,
-            retry: {
-              strategy: "static",
-              maxRetries: 3,
-              baseDelayMs: 10,
-              maxDelayMs: 10,
-            },
-          },
-        },
-      ],
-    });
-
-    // Execute — value=100, so validation passes on first try, run completes
-    const runId = await startWorkflowExecution(workflow, {}, registry);
-
-    // Should complete immediately since validation passes
-    const run = await getWorkflowRun(runId);
-    expect(run!.status).toBe("completed");
-    expect(validateCallCount).toBeGreaterThanOrEqual(1);
+    const [exhausted] = await getWorkflowRunStepsByRunId(runId);
+    expect(exhausted?.retryCount).toBe(2);
+    expect(exhausted?.nextRetryAt).toBeUndefined();
+    expect(validateCallCount).toBe(3);
   });
 
   test('retried script-like node routes to "pass" once validation passes', async () => {
@@ -305,7 +265,7 @@ describe("Retry Poller — Validation on Retry", () => {
     expect(nodeIds).not.toContain("on-fail");
   });
 
-  test("validation halt on retry → step and run marked failed", async () => {
+  test("initial mandatory validation failure fails the step and run without retry", async () => {
     validateCallCount = 0;
     validateAlwaysPass = false;
 

@@ -9,28 +9,34 @@
  *   session's detail screen.
  * - `/sessions/new`: the New session screen. `?seed=` and `?prefill=` links
  *   land here too.
+ * - `?asset=<tab>` on any of them: the asset screen (a file, a page, or a
+ *   task that a link opened), over the screen the link is in. A desktop URL
+ *   whose focused tab is an asset (`/sessions/asset:…`) shows it too.
  *
  * Pushed screens cover the screen and the app header. They slide in from
  * the right in 300 ms and back out in 250 ms on the swift curve, and only
  * fade under reduced motion. A back gesture that already played the
  * browser's own page swipe (iOS, `hasUAVisualTransition`) skips the slide.
  * The list stays mounted under them, so back returns to the same scroll
- * position. No tabs, no split, no status bar. The pushed screens follow the
+ * position. No tabs and no split. The pushed screens follow the
  * visual viewport, so the composer stays above the on-screen keyboard.
  */
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { LinkPreviewOpener } from "@/components/link-preview/link-preview-state";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { assetTabId, type LinkPreviewTarget } from "@/lib/link-preview";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import { NEW_SESSION_TAB, parseView } from "@/lib/sessions-v2";
+import { isAssetTab, NEW_SESSION_TAB, parseView } from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { FirstRunGuide, useFirstRunGuide } from "../first-run-guide";
 import { NewSessionTab } from "../new-session-tab";
 import type { SessionTreeHandle } from "../sidebar/session-tree";
+import { AssetTab } from "../tabs/asset-tab";
 import { MobileDetailScreen } from "./mobile-detail-screen";
 import { MobileGroupScreen } from "./mobile-group-screen";
 import { MobileListScreen } from "./mobile-list-screen";
@@ -66,22 +72,33 @@ interface PushCustom {
   instant: boolean;
 }
 
+/** A keyboard takes this much height or more. Browser bars take less. */
+const KEYBOARD_MIN_HEIGHT = 200;
+
 /**
- * The visual viewport box: the pushed screens fill it, so an open keyboard
- * shrinks them and the composer stays in view (iOS does not resize `dvh`).
+ * The visual viewport box while the on-screen keyboard is open, else null.
+ * A pushed screen fills that box, so the keyboard shrinks it and the
+ * composer stays in view (iOS does not resize `dvh` for the keyboard).
+ *
+ * With no keyboard the screen uses plain CSS (the top edge and `dvh`), as
+ * the app shell does. The offset of the visual viewport is not used then:
+ * browsers that hide their bars on scroll (Brave on iOS) report an offset
+ * while the page still starts at the top, which moved the screen down and
+ * showed the list above it.
  */
-function useVisualViewport() {
-  const [box, setBox] = useState<{ top: number; height: number; keyboard: boolean } | null>(null);
+function useKeyboardViewport() {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    const update = () =>
-      setBox({
-        top: viewport.offsetTop,
-        height: viewport.height,
-        // A keyboard takes far more than the browser bars do.
-        keyboard: window.innerHeight - viewport.height > 120,
+    const update = () => {
+      const keyboard = window.innerHeight - viewport.height > KEYBOARD_MIN_HEIGHT;
+      setBox((prev) => {
+        if (!keyboard) return null;
+        if (prev && prev.top === viewport.offsetTop && prev.height === viewport.height) return prev;
+        return { top: viewport.offsetTop, height: viewport.height };
       });
+    };
     update();
     viewport.addEventListener("resize", update);
     viewport.addEventListener("scroll", update);
@@ -117,7 +134,7 @@ function PushedScreen({
   custom: PushCustom;
   children: ReactNode;
 }) {
-  const viewport = useVisualViewport();
+  const keyboard = useKeyboardViewport();
   const ref = useRef<HTMLElement>(null);
   // A push moves the focus to the new screen (the list under it goes inert).
   useEffect(() => {
@@ -133,9 +150,13 @@ function PushedScreen({
       initial="initial"
       animate="animate"
       exit="exit"
-      data-keyboard={viewport?.keyboard ? "open" : undefined}
-      style={viewport ? { top: viewport.top, height: viewport.height } : { top: 0, bottom: 0 }}
-      className="group/screen fixed inset-x-0 z-40 flex flex-col bg-background shadow-xl outline-none"
+      data-keyboard={keyboard ? "open" : undefined}
+      style={keyboard ? { top: keyboard.top, height: keyboard.height } : undefined}
+      // `touch-manipulation`: a double tap does not zoom the page in.
+      // `overscroll-contain`: a scroll at the end of the screen does not move the page under it.
+      // `after:`: the screen's fill goes on below it, so the list does not show
+      // between the screen and the keyboard (under the bars iOS floats there).
+      className="group/screen fixed inset-x-0 top-0 z-40 flex h-dvh touch-manipulation flex-col overscroll-contain bg-background shadow-xl outline-none after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-screen after:bg-background"
     >
       {children}
     </motion.section>
@@ -189,7 +210,11 @@ export function MobileSessions({
   const view = parseView(searchParams.get("view"));
   const q = readStringParam(searchParams, "q");
   const isNew = rootTaskId === NEW_SESSION_TAB;
-  const sessionId = rootTaskId && !isNew ? rootTaskId : null;
+  // The asset screen: `?asset=`, or a desktop URL whose focused tab is an asset.
+  const routeAsset = rootTaskId && isAssetTab(rootTaskId) ? rootTaskId : null;
+  const assetParam = readStringParam(searchParams, "asset");
+  const asset = routeAsset ?? (isAssetTab(assetParam) ? assetParam : null);
+  const sessionId = rootTaskId && !isNew && !routeAsset ? rootTaskId : null;
   const pushed = (location.state as PushState | null)?.phonePush === true;
 
   /** A URL in this stack. The desktop tabs and split do not apply here. */
@@ -198,6 +223,8 @@ export function MobileSessions({
       const params = new URLSearchParams(searchParams);
       params.delete("tabs");
       params.delete("split");
+      params.delete("splitFocus");
+      params.delete("asset");
       // A seed or a template prefill belongs to the New session screen only:
       // carried back to the list, it would send the user to that screen again.
       if (path !== `/sessions/${NEW_SESSION_TAB}`) {
@@ -233,11 +260,23 @@ export function MobileSessions({
     setStartIn(group);
     push(href(`/sessions/${NEW_SESSION_TAB}`, null));
   };
+  /** A link in a screen: its file, page, or task opens as the asset screen over it. */
+  const openAsset = (target: LinkPreviewTarget) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("asset", assetTabId(target));
+    push(`${routeAsset ? "/sessions" : location.pathname}?${params.toString()}`);
+  };
   /** Back: to the entry this view pushed, else up one screen (a deep link). */
   const back = () => {
     setInstant(false);
     if (pushed) void navigate(-1);
-    else void navigate(href("/sessions", rootTaskId ? view : null), { replace: true });
+    else if (asset && !routeAsset) {
+      // A deep link to an asset: back shows the screen under it.
+      const params = new URLSearchParams(searchParams);
+      params.delete("asset");
+      const qs = params.toString();
+      void navigate(`${location.pathname}${qs ? `?${qs}` : ""}`, { replace: true });
+    } else void navigate(href("/sessions", rootTaskId ? view : null), { replace: true });
   };
 
   const top = sessionId ? "detail" : isNew ? "new" : null;
@@ -250,71 +289,81 @@ export function MobileSessions({
 
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={300}>
-      <div className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden", MAIN_BLEED)}>
-        <MobileListScreen
-          covered={groupView !== null || top !== null}
-          focused={sessionId ?? ""}
-          query={q}
-          setQuery={(next) => setParam("q", next)}
-          openSession={openSession}
-          newSession={newSession}
-          setView={openView}
-          onViewChange={onViewChange}
-          showGuide={() => guide.open(0)}
-          treeRef={treeRef}
-        />
-        <AnimatePresence initial={false} custom={custom}>
-          {groupView ? (
-            <PushedScreen key="group" label="Group" custom={custom}>
-              <MobileGroupScreen
-                view={groupView}
-                covered={top !== null}
-                onBack={back}
-                onOpen={openSession}
-                onMove={move}
-              />
-            </PushedScreen>
-          ) : null}
-        </AnimatePresence>
-        <AnimatePresence initial={false} custom={custom}>
-          {top ? (
-            // One screen for both: Send turns the New session screen into the session.
-            <PushedScreen
-              key="top"
-              label={top === "new" ? "New session" : "Session"}
-              custom={custom}
-            >
-              {sessionId ? (
-                <MobileDetailScreen
-                  key={sessionId}
-                  rootTaskId={sessionId}
+      <LinkPreviewOpener open={openAsset}>
+        <div className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden", MAIN_BLEED)}>
+          <MobileListScreen
+            covered={groupView !== null || top !== null || asset !== null}
+            focused={sessionId ?? ""}
+            query={q}
+            setQuery={(next) => setParam("q", next)}
+            openSession={openSession}
+            newSession={newSession}
+            setView={openView}
+            onViewChange={onViewChange}
+            showGuide={() => guide.open(0)}
+            treeRef={treeRef}
+          />
+          <AnimatePresence initial={false} custom={custom}>
+            {groupView ? (
+              <PushedScreen key="group" label="Group" custom={custom}>
+                <MobileGroupScreen
+                  view={groupView}
+                  covered={top !== null || asset !== null}
                   onBack={back}
+                  onOpen={openSession}
                   onMove={move}
                 />
-              ) : (
-                <>
-                  <MobileTopBar onBack={back} backLabel="Cancel">
-                    <h1 className="truncate text-base font-semibold">New session</h1>
-                  </MobileTopBar>
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <NewSessionTab
-                      touch
-                      startIn={startIn}
-                      onStarted={(id) =>
-                        void navigate(href(`/sessions/${encodeURIComponent(id)}`, null), {
-                          replace: true,
-                          state: { phonePush: pushed } satisfies PushState,
-                        })
-                      }
-                    />
-                  </div>
-                </>
-              )}
-            </PushedScreen>
-          ) : null}
-        </AnimatePresence>
-        <FirstRunGuide phone state={guide.state} onStep={guide.setStep} onClose={guide.close} />
-      </div>
+              </PushedScreen>
+            ) : null}
+          </AnimatePresence>
+          <AnimatePresence initial={false} custom={custom}>
+            {top ? (
+              // One screen for both: Send turns the New session screen into the session.
+              <PushedScreen
+                key="top"
+                label={top === "new" ? "New session" : "Session"}
+                custom={custom}
+              >
+                {sessionId ? (
+                  <MobileDetailScreen
+                    key={sessionId}
+                    rootTaskId={sessionId}
+                    onBack={back}
+                    onMove={move}
+                  />
+                ) : (
+                  <>
+                    <MobileTopBar onBack={back} backLabel="Cancel">
+                      <h1 className="truncate text-base font-semibold">New session</h1>
+                    </MobileTopBar>
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <NewSessionTab
+                        touch
+                        startIn={startIn}
+                        onStarted={(id) =>
+                          void navigate(href(`/sessions/${encodeURIComponent(id)}`, null), {
+                            replace: true,
+                            state: { phonePush: pushed } satisfies PushState,
+                          })
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+              </PushedScreen>
+            ) : null}
+          </AnimatePresence>
+          <AnimatePresence initial={false} custom={custom}>
+            {asset ? (
+              // The phone has no tabs and no split: an asset is one more screen.
+              <PushedScreen key="asset" label="Preview" custom={custom}>
+                <AssetTab key={asset} tab={asset} onBack={back} />
+              </PushedScreen>
+            ) : null}
+          </AnimatePresence>
+          <FirstRunGuide phone state={guide.state} onStep={guide.setStep} onClose={guide.close} />
+        </div>
+      </LinkPreviewOpener>
     </TooltipProvider>
   );
 }
