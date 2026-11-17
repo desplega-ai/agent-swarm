@@ -194,8 +194,8 @@ An earlier candidate pair lost six timing-dependent logging locations. Those log
 The later pair follows actual test refinements and a changed baseline. It is not a coverage retry.
 Parent check:local passed in 22 seconds, including root typechecking and all 84 affected cases. E2E skipped because no executable path changed.
 The allowlist and whitespace checks passed. Production remains unchanged. PR #3307 merged as 9a61e25bbd125a9bc10c622a58382430478cb0f2.
-Notification synchronization is a separate bounded implementation, with no result claimed yet.
-The seven-file approval dashboard audit ran no tests or controls. Its two bounded recommendations remain unimplemented.
+Notification synchronization is documented below as PR #3308.
+The initial dashboard audit ran no tests. Its subsequent C26 implementation and validation appear below.
 
 Two new main files remain unchanged after audit. The pre-push selector passed four cases and 39 assertions.
 Saved UI configuration passed 25 cases and 110 assertions with deployment settings explicitly cleared.
@@ -209,10 +209,30 @@ C24 merged as 5ee2b27ad8ffc9d089a7f59ffce89396a95b2673. The coverage checkpoint 
 PR #3308 retains six cases and all old assertions. Its test diff is +41/-27 lines.
 Parent check:local passed. Four behavior controls fail, and the delayed unwanted-email control catches a baseline false pass.
 Coverage matches across 778 production files and 116221 locations. Independent review found no blockers.
-CI and merge validation remain pending. Response latency and dispatch hangs remain separate limits.
+PR checks passed, but merge-queue run 44161166221 failed job 134315202045 on the unchanged link-preview-sheet test.
+The Re-run button did not render before line 146. No toast behavior assertion ran. Diagnosis is active, with no requested queue retry.
+Response latency and dispatch hangs remain separate limits.
 
-The unpublished list/expiry candidate deletes 18 lines and two cases. Both affected suites passed: 114 baseline and 112 candidate cases.
+PR #3310 deletes 18 lines and two cases. Both affected suites passed: 114 baseline and 112 candidate cases.
 Three controls fail on both versions. The NULL control fails twice on baseline and once on candidate.
 The deleted expiry loop detects that regression, but the retained sweep guard also detects it.
 Requests alone lose six selector lines. The two-suite union retains all 26274 covered locations out of 115005 across 753 production files.
-Independent review approved the deletion. Integration onto current main remains pending.
+Independent review approved the deletion. Current-main composition passed 111 affected cases and check:local.
+PR #3310 merged as 503dfe00995a4fd05ecbf2c1a0fef652d6038498.
+
+## C26 dashboard and C27 rating checkpoint
+
+C26 #3311 changes two test files, +2/-7 lines. Seven isolated files pass 58 baseline and 57 candidate cases.
+Three controls fail both versions. Paired dashboard coverage matches across 49 files and 6258 locations.
+Independent review approved the patch. Parent root and UI TypeScript checks, check:local, allowlist, and whitespace checks pass.
+The standalone baseline log lacks an exit code, but each baseline coverage process records exit 0.
+Browser claims rely on parent observation and retained screenshots, not a complete command transcript.
+The screenshots show the same unchanged production source. No approval or external submission occurred. Owned services stopped.
+
+C27 #3313 changes one test file, +33/-149 lines. Its canonical parent pair passes 63 baseline and 61 candidate cases.
+Parent verification uses a checkout-local frozen installation and blocks external network access during the pair.
+The original request-task and request-model controls failed to parse. Independent review rejected those results.
+Valid replacements now fail the selected test at toEqual. Other reviewed controls remain recorded separately.
+Paired LCOV matches across 744 files and 113212 locations, excluding the API child.
+Parent check:local, allowlist, whitespace, and pre-push checks pass. The existing disabled-hook gap remains unresolved.
+Neither slice changes production code or establishes full-suite CI savings. Both PRs remain outside merged totals at this checkpoint.
