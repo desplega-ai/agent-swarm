@@ -107,7 +107,12 @@ if (import.meta.main) {
               "--timeout",
               "10000",
             ],
-            { stdout: logHandle.fd, stderr: logHandle.fd },
+            // ROOT_COVERAGE_RUN lets timing budgets skip under instrumentation.
+            {
+              stdout: logHandle.fd,
+              stderr: logHandle.fd,
+              env: { ...process.env, ROOT_COVERAGE_RUN: "1" },
+            },
           );
           const status = await child.exited;
           await logHandle.close();
