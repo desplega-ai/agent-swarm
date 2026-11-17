@@ -93,8 +93,15 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       };
     }
     case "memory_rate": {
+      if (body.id && body.memoryId && body.id !== body.memoryId) {
+        throw new Error("id and memoryId must identify the same memory; supply only one.");
+      }
+      const memoryId = body.id ?? body.memoryId;
+      if (typeof memoryId !== "string" || !memoryId) {
+        throw new Error("Supply id (or its alias memoryId) from memory-search.");
+      }
       const event = {
-        memoryId: body.id,
+        memoryId,
         signal: body.useful === false ? -1 : 1,
         weight: 1,
         source: "explicit-self",
