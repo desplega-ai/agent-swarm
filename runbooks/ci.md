@@ -100,6 +100,8 @@ Selected scenarios bring their `needs`. Every scoped run still boots the whole A
 
 "Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure and prints the wall time of every step that ran. It does not scan for secrets; the prek pre-push hooks own that.
 
+The pre-push hook and step 6 are a fast smoke check, not the full suite. A CI or merge-queue test failure in a file they never ran is expected, not a hook bug: fix that test on the PR and push again, without bypassing the hooks. Use `PRE_PUSH_FULL=1` only to reproduce a CI failure locally or when you touch shared test infrastructure.
+
 In Claude Code, the repo's `.claude/settings.json` also runs `biome format --write` on each edited file in that scope (`scripts/claude-format-on-edit.sh`). The hook always exits 0, so it never blocks an edit.
 
 ## The full local pre-push command
