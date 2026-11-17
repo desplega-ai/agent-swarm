@@ -118,8 +118,8 @@ interface SessionTreeProps {
   ref: Ref<SessionTreeHandle>;
   /** The phone list screen: touch rows, swipe, long-press, and sheets. */
   phone?: boolean;
-  /** The phone search mode turned on or off. */
-  onSearchMode?: (on: boolean) => void;
+  /** The phone list screen's actions, after the filter in the top row. */
+  phoneActions?: ReactNode;
   /** `/` calls it before it focuses the search: the shell shows a collapsed sidebar. */
   onReveal?: () => void;
 }
@@ -153,7 +153,7 @@ export function SessionTree({
   paneCommands,
   ref,
   phone = false,
-  onSearchMode,
+  phoneActions,
   onReveal,
 }: SessionTreeProps) {
   const { userId } = useCurrentUser();
@@ -896,18 +896,20 @@ export function SessionTree({
         inputRef={searchRef}
         phone={phone}
         groups={targets}
-        onSearchMode={onSearchMode}
         onReveal={onReveal}
         onLeave={() => {
           focusTree();
           if (searching) cursor.moveTo(0);
         }}
         action={
-          <FilterMenu
-            sources={myGroups.treeQuery.data?.sources ?? []}
-            canShow={me !== null}
-            phone={phone}
-          />
+          <>
+            <FilterMenu
+              sources={myGroups.treeQuery.data?.sources ?? []}
+              canShow={me !== null}
+              phone={phone}
+            />
+            {phoneActions}
+          </>
         }
       />
       {body}

@@ -5,8 +5,10 @@
  * `SegmentedControl` filter (All, Unread, Running, Needs you), and a search
  * box scoped to the list (`ListFilterBar`). Below `md` the phone group
  * screen draws the rows (`phoneList`, `MobileList` rows with swipe and
- * long-press), with 44 px controls. A row click, or Enter on a row, opens
- * the session in a tab next to this one.
+ * long-press), and the title, the search, and the filter go in its top bar
+ * as one row (`phoneBar`): the search is an icon that opens the field, and
+ * the filter is a button that opens a bottom sheet. A row click, or Enter
+ * on a row, opens the session in a tab next to this one.
  *
  * The page, the filter, and the search live per connection, user, and list
  * for the page session (outside the component), so a trip to a session and
@@ -21,7 +23,9 @@ import type {
   FullWidthCellKeyDownEvent,
   RowClickedEvent,
 } from "ag-grid-community";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { ChevronDown, Search } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { useSessionLabels } from "@/api/hooks/use-session-tree";
 import { sessionsQueryOptions } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
@@ -31,7 +35,9 @@ import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { ListPager, resolveListPage } from "@/components/shared/list-pager";
+import { SearchBox } from "@/components/shared/search-box";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
+import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
@@ -46,6 +52,7 @@ import { sidebarListParams, userName } from "@/lib/sessions-v2";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "./group-crumb-icon";
 import { GroupTabStar } from "./group-tab-star";
+import { ActionSheet, ActionSheetCheck } from "./mobile/action-sheet";
 import { ActivityMark, activityOf, shortAgo } from "./sidebar/session-row";
 import { ReadMark, UNREAD_TITLE } from "./sidebar/tree-row";
 import { sectionTab } from "./tabs/tab-info";
@@ -87,6 +94,49 @@ interface GroupTabProps {
   className?: string;
   /** The rows below `md` (the phone group screen). */
   phoneList?: PhoneGroupList;
+  /**
+   * The phone group screen's top bar. Set (also to null, before it mounts):
+   * the title, the search, and the filter show there as one row.
+   */
+  phoneBar?: HTMLElement | null;
+}
+
+/** The name of a list (a section or a group) for the people who read it. */
+function useListTitle(view: string) {
+  const { userId } = useCurrentUser();
+  const { data: users } = useUsers();
+  const labels = useSessionLabels();
+  const section = sectionTab(view);
+  return {
+    section,
+    title: section?.title ?? groupCrumb(view, userId ?? null, (id) => userName(users, id), labels),
+  };
+}
+
+/** The title of a list: its icon, its name, its session count, and the star of a group. */
+export function GroupTitle({ view, count }: { view: string; count?: number }) {
+  const { section, title } = useListTitle(view);
+  const SectionIcon = section?.icon;
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
+        {SectionIcon ? (
+          <SectionIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <GroupCrumbIcon
+            groupKey={view}
+            noGroup={false}
+            className="size-4 text-muted-foreground"
+          />
+        )}
+        <span className="truncate">{title}</span>
+        <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
+          {count ?? ""}
+        </span>
+      </h2>
+      <GroupTabStar groupKey={section ? null : view} />
+    </div>
+  );
 }
 
 export function GroupTab(props: GroupTabProps) {
@@ -103,6 +153,7 @@ function GroupList({
   onOpen,
   className,
   phoneList,
+  phoneBar,
 }: GroupTabProps & { listKey: string }) {
   const { userId } = useCurrentUser();
   const me = userId ?? null;
@@ -124,9 +175,11 @@ function GroupList({
     setState((prev) => (prev.q === query ? prev : { ...prev, q: query, page: 0 }));
   }, [query]);
 
-  const section = sectionTab(view);
-  const title = section?.title ?? groupCrumb(view, me, nameOf, labels);
-  const SectionIcon = section?.icon;
+  const { section, title } = useListTitle(view);
+  // The phone top bar: the search icon opened the field, and the filter sheet.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   // Later and Done never hold an unread session: a session that wakes or gets news goes back to the Inbox.
   const noUnread = view === "later" || view === "done";
 
@@ -272,62 +325,144 @@ function GroupList({
     [me, users, labels],
   );
 
+  const setFilter = (next: Filter) => setState((prev) => ({ ...prev, filter: next, page: 0 }));
+  const options: { value: Filter; label: string; disabled?: boolean; tooltip?: string }[] = [
+    { value: "all", label: "All" },
+    {
+      value: "unread",
+      label: "Unread",
+      disabled: noUnread,
+      tooltip: noUnread ? `Sessions in ${title} are never unread.` : undefined,
+    },
+    { value: "running", label: "Running" },
+    { value: "needs", label: "Needs you" },
+  ];
+  const filterLabel = options.find((option) => option.value === filter)?.label ?? "All";
+  const searchPlaceholder = `Search ${section ? title : "this group"}`;
+  const count = list.data ? total : undefined;
+  // Search mode on a phone: the icon opened the field, or it holds text.
+  const searching = searchOpen || text !== "";
+
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col gap-3 px-5 pt-4 pb-3", className)}>
-      <div className="flex min-w-0 items-center gap-1">
-        <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
-          {SectionIcon ? (
-            <SectionIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <GroupCrumbIcon
-              groupKey={view}
-              noGroup={false}
-              className="size-4 text-muted-foreground"
+      {phoneBar === undefined ? (
+        <>
+          <GroupTitle view={view} count={count} />
+          <ListFilterBar
+            searchValue={text}
+            onSearchChange={setText}
+            searchPlaceholder={searchPlaceholder}
+            // A narrow pane: the filter wraps under the field before the placeholder cuts.
+            searchClassName="w-full min-w-48 sm:max-w-sm sm:flex-1"
+          >
+            <SegmentedControl<Filter>
+              aria-label="Show"
+              value={filter}
+              onValueChange={setFilter}
+              options={options}
             />
-          )}
-          <span className="truncate">{title}</span>
-          <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
-            {list.data ? total : ""}
-          </span>
-        </h2>
-        <GroupTabStar groupKey={section ? null : view} />
-      </div>
-      <ListFilterBar
-        searchValue={text}
-        onSearchChange={setText}
-        searchPlaceholder={`Search ${section ? title : "this group"}`}
-        // A phone: a 44 px field with 16 px text (iOS does not zoom in). A narrow
-        // pane: the filter wraps under the field before the placeholder cuts.
-        searchClassName={
-          phone
-            ? "w-full [&_input]:h-11 [&_input]:text-base"
-            : "w-full min-w-48 sm:max-w-sm sm:flex-1"
-        }
-      >
-        <SegmentedControl<Filter>
-          aria-label="Show"
-          // A phone: 44 px options (the frame adds its 2 px inset and 1 px border).
-          className={phone ? "h-12.5 [&_[role=radio]]:min-w-11" : undefined}
-          value={filter}
-          onValueChange={(next) => setState((prev) => ({ ...prev, filter: next, page: 0 }))}
-          options={[
-            { value: "all", label: "All" },
-            {
-              value: "unread",
-              label: "Unread",
-              disabled: noUnread,
-              tooltip: noUnread ? `Sessions in ${title} are never unread.` : undefined,
-            },
-            { value: "running", label: "Running" },
-            { value: "needs", label: "Needs you" },
-          ]}
-        />
-        {phone ? null : (
-          <div className="ml-auto">
-            <DataGridColumnsMenu state={gridColumns} />
-          </div>
-        )}
-      </ListFilterBar>
+            <div className="ml-auto">
+              <DataGridColumnsMenu state={gridColumns} />
+            </div>
+          </ListFilterBar>
+        </>
+      ) : (
+        <>
+          {phoneBar
+            ? createPortal(
+                searching ? (
+                  <search
+                    className="flex min-w-0 flex-1 items-center gap-1"
+                    // The field kept its text and takes the focus again: an emptied field stays.
+                    onFocus={(event) => {
+                      if (event.target === searchRef.current) setSearchOpen(true);
+                    }}
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                        setSearchOpen(false);
+                    }}
+                  >
+                    <SearchBox
+                      value={text}
+                      onChange={setText}
+                      placeholder={searchPlaceholder}
+                      inputRef={searchRef}
+                      clearable
+                      // A 44 px field with 16 px text (iOS does not zoom in), and a
+                      // 44 px tap area on the 28 px clear button.
+                      className="flex-1 [&_button]:after:absolute [&_button]:after:-inset-2 [&_input]:h-11 [&_input]:rounded-lg [&_input]:bg-muted/60 [&_input]:text-base"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-11 px-2 text-base text-primary"
+                      onClick={() => {
+                        setText("");
+                        setSearchOpen(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </search>
+                ) : (
+                  <>
+                    <div className="flex min-w-0 flex-1">
+                      <GroupTitle view={view} count={count} />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={searchPlaceholder}
+                      // The field shows first, so it takes the focus in the same tap
+                      // (iOS opens the keyboard only from the tap itself).
+                      onClick={() => {
+                        flushSync(() => setSearchOpen(true));
+                        searchRef.current?.focus();
+                      }}
+                      className="size-11 shrink-0"
+                    >
+                      <Search className="size-5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-haspopup="dialog"
+                      aria-label={`Show: ${filterLabel}`}
+                      onClick={() => setFilterOpen(true)}
+                      className={cn(
+                        "h-11 shrink-0 gap-1 px-2 text-base font-medium",
+                        filter === "all" ? "text-muted-foreground" : "text-primary",
+                      )}
+                    >
+                      {filterLabel}
+                      <ChevronDown aria-hidden className="size-4" />
+                    </Button>
+                  </>
+                ),
+                phoneBar,
+              )
+            : null}
+          <ActionSheet open={filterOpen} onOpenChange={setFilterOpen} title="Show">
+            <div role="radiogroup" aria-label="Show" className="flex flex-col">
+              {options.map((option) => (
+                <ActionSheetCheck
+                  key={option.value}
+                  role="radio"
+                  checked={filter === option.value}
+                  disabled={option.disabled}
+                  label={option.label}
+                  hint={option.tooltip}
+                  onSelect={() => {
+                    setFilter(option.value);
+                    setFilterOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          </ActionSheet>
+        </>
+      )}
       {phone ? (
         (phoneList?.(rows, { loading: list.isPending, label: title }) ?? null)
       ) : (

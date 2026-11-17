@@ -4,9 +4,11 @@
  * the Inbox included; a source never seen before starts unticked. Both
  * choices are stored in this browser (`lib/sessions-show.ts`). The icon shows
  * a dot while the filter differs from the default (Mine, `comb` and `ui` on).
+ * On a phone the same choices open as a bottom sheet, like every other menu there.
  */
 
-import { ListFilter } from "lucide-react";
+import { ListFilter, RotateCcw } from "lucide-react";
+import { useState } from "react";
 import { useAllUsersScope } from "@/api/hooks/use-all-users-scope";
 import { TaskSourceMark, taskSourceLabel } from "@/components/shared/task-source-mark";
 import { Button } from "@/components/ui/button";
@@ -30,6 +32,13 @@ import {
   useSessionsShownSources,
 } from "@/lib/sessions-show";
 import { cn } from "@/lib/utils";
+import {
+  ActionSheet,
+  ActionSheetCheck,
+  ActionSheetItem,
+  ActionSheetNote,
+  ActionSheetSeparator,
+} from "../mobile/action-sheet";
 
 const SHOW_OPTIONS = [
   { value: "mine", label: "Mine", hint: "Sessions you started, and sessions shared with you" },
@@ -48,7 +57,7 @@ export function FilterMenu({
   sources: readonly { source: string; total: number }[];
   /** Mine / All needs a picked user: with none, every session shows. */
   canShow: boolean;
-  /** The phone search row: a 44 px button. */
+  /** The phone list screen: a 44 px button that opens a bottom sheet. */
   phone?: boolean;
 }) {
   const [show, setShow] = useSessionsShow();
@@ -65,6 +74,83 @@ export function FilterMenu({
   const toggle = (source: string, on: boolean) =>
     setShown(on ? [...shown, source] : shown.filter((s) => s !== source));
   const label = active ? "Filter sessions, filtered" : "Filter sessions";
+  const reset = () => {
+    setShow("mine");
+    setShown(DEFAULT_SHOWN_SOURCES);
+    if (allUsers.enabled) allUsers.setEnabled(false);
+  };
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  if (phone) {
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          aria-haspopup="dialog"
+          onClick={() => setSheetOpen(true)}
+          className="relative size-11 shrink-0"
+        >
+          <ListFilter className="size-5" />
+          {active ? (
+            <span aria-hidden className="absolute top-2 right-2 size-1.5 rounded-full bg-primary" />
+          ) : null}
+        </Button>
+        <ActionSheet open={sheetOpen} onOpenChange={setSheetOpen} title="Filter sessions">
+          {canShow ? (
+            <>
+              <ActionSheetNote>Show</ActionSheetNote>
+              <div role="radiogroup" aria-label="Show" className="flex flex-col">
+                {SHOW_OPTIONS.map((option) => (
+                  <ActionSheetCheck
+                    key={option.value}
+                    role="radio"
+                    checked={show === option.value}
+                    onSelect={() => setShow(option.value)}
+                    label={option.label}
+                    hint={option.hint}
+                  />
+                ))}
+              </div>
+              {allUsers.available ? (
+                <ActionSheetCheck
+                  role="checkbox"
+                  checked={allUsers.enabled}
+                  onSelect={() => allUsers.setEnabled(!allUsers.enabled)}
+                  label="All users"
+                  hint="Admins: Mine and All for every user, read-only"
+                />
+              ) : null}
+            </>
+          ) : null}
+          {rows.length > 0 ? (
+            <>
+              {canShow ? <ActionSheetSeparator /> : null}
+              <ActionSheetNote>Sources</ActionSheetNote>
+              {rows.map(({ source, total }) => (
+                <ActionSheetCheck
+                  key={source}
+                  role="checkbox"
+                  checked={shown.includes(source)}
+                  onSelect={() => toggle(source, !shown.includes(source))}
+                  lead={<TaskSourceMark source={source} />}
+                  label={taskSourceLabel(source)}
+                  detail={total}
+                />
+              ))}
+            </>
+          ) : null}
+          {active ? (
+            <>
+              <ActionSheetSeparator />
+              <ActionSheetItem icon={RotateCcw} label="Reset filter" onSelect={reset} />
+            </>
+          ) : null}
+        </ActionSheet>
+      </>
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -75,13 +161,9 @@ export function FilterMenu({
               variant="ghost"
               size="icon-sm"
               aria-label={label}
-              className={cn(
-                "relative shrink-0 text-muted-foreground",
-                phone && "size-11",
-                active && "text-foreground",
-              )}
+              className={cn("relative shrink-0 text-muted-foreground", active && "text-foreground")}
             >
-              <ListFilter className={phone ? "size-5" : "size-4"} />
+              <ListFilter className="size-4" />
               {active ? (
                 <span
                   aria-hidden
@@ -155,15 +237,7 @@ export function FilterMenu({
         {active ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => {
-                setShow("mine");
-                setShown(DEFAULT_SHOWN_SOURCES);
-                if (allUsers.enabled) allUsers.setEnabled(false);
-              }}
-            >
-              Reset filter
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={reset}>Reset filter</DropdownMenuItem>
           </>
         ) : null}
       </DropdownMenuContent>
