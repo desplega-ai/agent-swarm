@@ -5,8 +5,10 @@ import {
   currentQuotaWindows,
   formatPeriod,
   planDisplay,
+  QUOTA_PACE_TOLERANCE,
   QUOTA_STALE_MS,
   quotaIsStale,
+  quotaPace,
   quotaRemaining,
   quotaResetIn,
   quotaWarning,
@@ -444,5 +446,59 @@ describe("quota staleness and warning", () => {
     expect(quotaWarning({ limited: false, resetsAtMs: NOW + H, overageStatus: "allowed" })).toBe(
       null,
     );
+  });
+});
+
+describe("quota pace", () => {
+  const WEEK = 10080;
+  // Reset 4.2 days out: 40% of a 7-day window has passed.
+  const weekly = (percent: number | null) => ({
+    percent,
+    durationMins: WEEK,
+    resetsAtMs: NOW + 4.2 * 24 * H,
+  });
+
+  test("use above even pace is an overage, below it a shortage", () => {
+    expect(quotaPace(weekly(52), NOW)).toMatchObject({
+      expected: 40,
+      delta: 12,
+      status: "overage",
+      label: "Overage +12%",
+    });
+    expect(quotaPace(weekly(20), NOW)).toMatchObject({
+      delta: -20,
+      status: "shortage",
+      label: "Shortage -20%",
+    });
+    expect(quotaPace(weekly(52), NOW)?.tip).toContain("run out before the reset");
+    expect(quotaPace(weekly(20), NOW)?.tip).toContain("go unused by the reset");
+  });
+
+  test("use within the tolerance band is on pace, at both edges", () => {
+    expect(QUOTA_PACE_TOLERANCE).toBe(5);
+    for (const percent of [35, 40, 45]) {
+      expect(quotaPace(weekly(percent), NOW)).toMatchObject({
+        status: "on-pace",
+        label: "On pace",
+      });
+    }
+    expect(quotaPace(weekly(46), NOW)?.status).toBe("overage");
+    expect(quotaPace(weekly(34), NOW)?.status).toBe("shortage");
+  });
+
+  test("elapsed share clamps when the reset is further out than one window", () => {
+    expect(
+      quotaPace({ percent: 0, durationMins: 300, resetsAtMs: NOW + 9 * H }, NOW),
+    ).toMatchObject({ expected: 0, status: "on-pace" });
+    expect(quotaPace({ percent: 99, durationMins: 300, resetsAtMs: NOW }, NOW)).toMatchObject({
+      expected: 100,
+      status: "on-pace",
+    });
+  });
+
+  test("an unknown length, reset or use has no pace", () => {
+    expect(quotaPace(weekly(null), NOW)).toBe(null);
+    expect(quotaPace({ percent: 50, durationMins: null, resetsAtMs: NOW + H }, NOW)).toBe(null);
+    expect(quotaPace({ percent: 50, durationMins: WEEK, resetsAtMs: null }, NOW)).toBe(null);
   });
 });

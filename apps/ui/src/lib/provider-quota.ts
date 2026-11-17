@@ -89,6 +89,59 @@ export function quotaResetIn(resetsAtMs: number, nowMs: number): string {
   return `${Math.floor(hours / 24)}d${hours % 24 ? ` ${hours % 24}h` : ""}`;
 }
 
+/** Use within this many percentage points of even use reads as on pace. */
+export const QUOTA_PACE_TOLERANCE = 5;
+
+export interface QuotaPace {
+  /** Whole percent of the window elapsed: the use that spreads the quota evenly to the reset. */
+  expected: number;
+  /** Used minus expected, in percentage points. */
+  delta: number;
+  /** Shortage: quota will go unused by the reset. Overage: on track to run out before it. */
+  status: "shortage" | "on-pace" | "overage";
+  /** "Overage +12%", "Shortage -20%" or "On pace". */
+  label: string;
+  /** One-sentence explanation for a tooltip. */
+  tip: string;
+}
+
+/**
+ * Actual use against even use, where the window started one length before
+ * its reset. Null when the use, the window length or the reset is unknown.
+ */
+export function quotaPace(
+  window: Pick<QuotaWindow, "percent" | "durationMins" | "resetsAtMs">,
+  nowMs: number,
+): QuotaPace | null {
+  const { percent, durationMins, resetsAtMs } = window;
+  if (percent === null || resetsAtMs === null || !durationMins || durationMins <= 0) return null;
+  const elapsed = 1 - (resetsAtMs - nowMs) / (durationMins * MINUTE_MS);
+  const expected = Math.round(Math.min(1, Math.max(0, elapsed)) * 100);
+  const delta = percent - expected;
+  const status =
+    delta > QUOTA_PACE_TOLERANCE
+      ? "overage"
+      : delta < -QUOTA_PACE_TOLERANCE
+        ? "shortage"
+        : "on-pace";
+  const passed = `${expected}% of the window has passed and ${percent}% is used`;
+  return {
+    expected,
+    delta,
+    status,
+    label:
+      status === "on-pace"
+        ? "On pace"
+        : `${status === "overage" ? "Overage" : "Shortage"} ${delta > 0 ? "+" : ""}${delta}%`,
+    tip:
+      status === "overage"
+        ? `${passed}: on track to run out before the reset.`
+        : status === "shortage"
+          ? `${passed}: at this pace, quota will go unused by the reset.`
+          : `${passed}: within ${QUOTA_PACE_TOLERANCE} points of even use.`,
+  };
+}
+
 export interface QuotaWindow {
   /** The `rateLimitWindows` key, for example `seven_day` or `codex:codex:primary`. */
   key: string;

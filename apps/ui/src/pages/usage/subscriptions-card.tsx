@@ -4,7 +4,7 @@ import { type ReactNode, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApiKeyStatuses, useSubscriptionPlans } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, UsageSummaryByCredentialRow } from "@/api/types";
-import { KeyQuotaDetails, QuotaBar } from "@/components/providers/key-quota-details";
+import { KeyQuotaDetails, PACE_TONE, QuotaBar } from "@/components/providers/key-quota-details";
 import { PlanPicker } from "@/components/shared/plan-picker";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,7 @@ import {
   type QuotaWindow,
   quotaIsHigh,
   quotaLabel,
+  quotaPace,
   quotaRemaining,
   quotaResetIn,
 } from "@/lib/provider-quota";
@@ -481,14 +482,16 @@ function SubscriptionCard({
 }
 
 /**
- * One limit window: label, remaining share and reset countdown, with the bar
- * between them on wide cards and on its own line on narrow ones.
+ * One limit window: label, pace, remaining share and reset countdown, with the
+ * bar between them on wide cards and on its own line on narrow ones. The tick
+ * on the bar marks even use, so a fill past it is a shortage, short of it an overage.
  */
 function WindowMeter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) {
   const label = quotaLabel(window);
   const warning = window.limited || window.overageStatus === "rejected";
+  const pace = quotaPace(window, nowMs);
   return (
-    <span className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-xs @xl:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_9rem]">
+    <span className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-xs @xl:grid-cols-[minmax(0,8rem)_minmax(0,1fr)_15rem]">
       <span className="flex min-w-0 items-center gap-1 text-left text-foreground/70">
         <span className="truncate" title={label}>
           {label}
@@ -501,6 +504,11 @@ function WindowMeter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) 
         ) : null}
       </span>
       <span className="inline-flex items-center justify-end gap-2 tabular-nums @xl:col-start-3">
+        {pace ? (
+          <span className={PACE_TONE[pace.status]} title={pace.tip}>
+            {pace.label}
+          </span>
+        ) : null}
         <span className={cn(quotaIsHigh(window.percent) && "text-status-warning-strong")}>
           {window.percent === null ? "Use not reported" : `${quotaRemaining(window.percent)}% left`}
         </span>
@@ -517,6 +525,7 @@ function WindowMeter({ window, nowMs }: { window: QuotaWindow; nowMs: number }) 
       {window.percent === null ? null : (
         <QuotaBar
           percent={window.percent}
+          expected={pace?.expected}
           className="col-span-2 h-1.5 @xl:col-span-1 @xl:col-start-2 @xl:row-start-1"
         />
       )}
