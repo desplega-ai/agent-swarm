@@ -38,7 +38,7 @@ import {
 import type { ExecutorMeta } from "../types";
 import { postApprovalCancellationUpdates } from "../workflows/approval-notifications";
 import { checkpointStepWaiting } from "../workflows/checkpoint";
-import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
+import type { ExecutorDependencies } from "../workflows/executors/base";
 import { HumanInTheLoopExecutor } from "../workflows/executors/human-in-the-loop";
 import { cancelWorkflowRunStep } from "../workflows/resume";
 import { listenOnFreePort } from "./test-net";
@@ -1034,23 +1034,29 @@ describe("Approval Requests", () => {
       dryRun: false,
     };
 
-    function _executorInput(
-      config: Record<string, unknown>,
-      context: Record<string, unknown> = {},
-    ): ExecutorInput {
-      return { config, context, meta: mockMeta };
+    async function liveMeta(): Promise<ExecutorMeta> {
+      const workflow = await createWorkflow({
+        name: `hitl-executor-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: mockMeta.nodeId,
+        nodeType: "human-in-the-loop",
+      });
+      return { ...mockMeta, workflowId: workflow.id, runId, stepId };
     }
 
-    test("has correct type and mode", () => {
+    test("creates approval request and returns async marker", async () => {
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const executor = new HumanInTheLoopExecutor(mockDeps);
       expect(executor.type).toBe("human-in-the-loop");
       expect(executor.mode).toBe("async");
-    });
-
-    test("creates approval request and returns async marker", async () => {
-      const stepId = crypto.randomUUID();
-      const meta = { ...mockMeta, stepId };
-      const executor = new HumanInTheLoopExecutor(mockDeps);
 
       const result = await executor.run({
         config: {
@@ -1065,29 +1071,18 @@ describe("Approval Requests", () => {
       expect(result.status).toBe("success");
       expect((result as any).async).toBe(true);
       expect((result as any).waitFor).toBe("approval.resolved");
-      expect((result as any).correlationId).toBeTruthy();
 
-      // Verify the request was created in DB
       const created = await getApprovalRequestByStepId(stepId);
-      expect(created).not.toBeNull();
+      expect(created?.status).toBe("pending");
+      expect((result as any).correlationId).toBe(created!.id);
+      expect(created!.workflowRunId).toBe(meta.runId);
       expect(created!.title).toBe("Deploy approval");
       expect(created!.workflowRunStepId).toBe(stepId);
     });
 
     test("creates a terminal approval when cancellation wins the creation race", async () => {
-      const workflow = await createWorkflow({
-        name: `approval-create-race-${crypto.randomUUID()}`,
-        definition: { nodes: [] },
-      });
-      const runId = crypto.randomUUID();
-      const stepId = crypto.randomUUID();
-      await createWorkflowRun({ id: runId, workflowId: workflow.id });
-      await createWorkflowRunStep({
-        id: stepId,
-        runId,
-        nodeId: "approval",
-        nodeType: "human-in-the-loop",
-      });
+      const meta = await liveMeta();
+      const { runId, stepId } = meta;
       await updateWorkflowRun(runId, { status: "cancelled", error: "Superseded" });
       await updateWorkflowRunStep(stepId, { status: "cancelled", error: "Superseded" });
 
@@ -1102,7 +1097,7 @@ describe("Approval Requests", () => {
           approvers: { policy: "any" },
         },
         context: {},
-        meta: { ...mockMeta, runId, stepId },
+        meta,
       });
 
       expect(result.status).toBe("success");
@@ -1116,8 +1111,8 @@ describe("Approval Requests", () => {
         name: "HITL Requester",
         email: "hitl-requester@example.com",
       });
-      const stepId = crypto.randomUUID();
-      const meta = { ...mockMeta, stepId, requestedByUserId: requester.id };
+      const meta = { ...(await liveMeta()), requestedByUserId: requester.id };
+      const { stepId } = meta;
       const executor = new HumanInTheLoopExecutor(mockDeps);
 
       await executor.run({
@@ -1135,8 +1130,8 @@ describe("Approval Requests", () => {
     });
 
     test("leaves createdBy unset when the workflow run carries no requester", async () => {
-      const stepId = crypto.randomUUID();
-      const meta = { ...mockMeta, stepId };
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const executor = new HumanInTheLoopExecutor(mockDeps);
 
       await executor.run({
@@ -1154,7 +1149,8 @@ describe("Approval Requests", () => {
     });
 
     test("idempotency: returns async marker for pending existing request", async () => {
-      const stepId = crypto.randomUUID();
+      const meta = await liveMeta();
+      const { stepId } = meta;
       // Pre-create an approval request for this step
       const existingId = crypto.randomUUID();
       await createApprovalRequest({
@@ -1162,7 +1158,7 @@ describe("Approval Requests", () => {
         title: "Pre-existing",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
         approvers: { policy: "any" },
-        workflowRunId: mockMeta.runId,
+        workflowRunId: meta.runId,
         workflowRunStepId: stepId,
       });
 
@@ -1174,23 +1170,25 @@ describe("Approval Requests", () => {
           approvers: { policy: "any" },
         },
         context: {},
-        meta: { ...mockMeta, stepId },
+        meta,
       });
 
       expect(result.status).toBe("success");
       expect((result as any).async).toBe(true);
+      expect((result as any).waitFor).toBe("approval.resolved");
       expect((result as any).correlationId).toBe(existingId);
     });
 
     test("idempotency: returns resolved result for completed request", async () => {
-      const stepId = crypto.randomUUID();
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const existingId = crypto.randomUUID();
       await createApprovalRequest({
         id: existingId,
         title: "Already resolved",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
         approvers: { policy: "any" },
-        workflowRunId: mockMeta.runId,
+        workflowRunId: meta.runId,
         workflowRunStepId: stepId,
       });
       await resolveApprovalRequest(existingId, {
@@ -1206,7 +1204,7 @@ describe("Approval Requests", () => {
           approvers: { policy: "any" },
         },
         context: {},
-        meta: { ...mockMeta, stepId },
+        meta,
       });
 
       expect(result.status).toBe("success");
@@ -1218,17 +1216,18 @@ describe("Approval Requests", () => {
     });
 
     test("idempotency: fails instead of routing a cancelled request as approved", async () => {
-      const stepId = crypto.randomUUID();
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const existingId = crypto.randomUUID();
       await createApprovalRequest({
         id: existingId,
         title: "Cancelled request",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
         approvers: { policy: "any" },
-        workflowRunId: mockMeta.runId,
+        workflowRunId: meta.runId,
         workflowRunStepId: stepId,
       });
-      await cancelPendingApprovalRequestsForRun(mockMeta.runId, "Run superseded");
+      await cancelPendingApprovalRequestsForRun(meta.runId, "Run superseded");
 
       const executor = new HumanInTheLoopExecutor(mockDeps);
       const result = await executor.run({
@@ -1238,7 +1237,7 @@ describe("Approval Requests", () => {
           approvers: { policy: "any" },
         },
         context: {},
-        meta: { ...mockMeta, stepId },
+        meta,
       });
 
       expect(result).toEqual({
@@ -1248,14 +1247,15 @@ describe("Approval Requests", () => {
     });
 
     test("idempotency: returns rejected result with correct nextPort", async () => {
-      const stepId = crypto.randomUUID();
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const existingId = crypto.randomUUID();
       await createApprovalRequest({
         id: existingId,
         title: "Rejected request",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
         approvers: { policy: "any" },
-        workflowRunId: mockMeta.runId,
+        workflowRunId: meta.runId,
         workflowRunStepId: stepId,
       });
       await resolveApprovalRequest(existingId, {
@@ -1271,7 +1271,7 @@ describe("Approval Requests", () => {
           approvers: { policy: "any" },
         },
         context: {},
-        meta: { ...mockMeta, stepId },
+        meta,
       });
 
       expect(result.status).toBe("success");
@@ -1280,7 +1280,8 @@ describe("Approval Requests", () => {
     });
 
     test("stores timeout config in request", async () => {
-      const stepId = crypto.randomUUID();
+      const meta = await liveMeta();
+      const { stepId } = meta;
       const executor = new HumanInTheLoopExecutor(mockDeps);
 
       await executor.run({
@@ -1291,7 +1292,7 @@ describe("Approval Requests", () => {
           timeout: { seconds: 7200, action: "reject" },
         },
         context: {},
-        meta: { ...mockMeta, stepId },
+        meta,
       });
 
       const created = await getApprovalRequestByStepId(stepId);
