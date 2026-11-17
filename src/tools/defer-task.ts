@@ -548,6 +548,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
           const completed = await completeTask(taskId, terminalOutput, {
             addTags: ["deferred"],
             deferredAt: new Date().toISOString(),
+            statusKind: "deferred",
           });
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task

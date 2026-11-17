@@ -3793,7 +3793,7 @@ export async function cascadeFailDependents(
     if (seen.has(dep.id)) continue;
 
     const reason = `Blocked dependency ${parentId.slice(0, 8)} was ${parentStatus}`;
-    const failed = await failTask(dep.id, reason);
+    const failed = await failTask(dep.id, reason, { statusKind: "cascade" });
     if (failed) {
       results.push({
         taskId: failed.id,
@@ -7490,9 +7490,10 @@ export async function failPendingResumeIfUnclaimed(
   const now = new Date().toISOString();
   const scrubbedReason = scrubSecrets(failureReason);
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+    `UPDATE agent_tasks SET status = ?, statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
        WHERE id = ? AND status = 'pending' RETURNING *`,
-    [status, scrubbedReason, now, now, taskId],
+    // The resume budget ran out (failed) or the reaper escalated the pin (cancelled).
+    [status, status === "failed" ? "error" : "system", scrubbedReason, now, now, taskId],
   );
 
   if (row) {

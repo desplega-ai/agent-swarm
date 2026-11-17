@@ -491,6 +491,8 @@ export interface AgentTask {
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt?: string;
+  /** Why a terminal task ended, e.g. `failed` + `agent` vs `failed` + `error`. Absent on older rows. */
+  statusKind?: string;
   failureReason?: string;
   output?: string;
   progress?: string;

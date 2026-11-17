@@ -314,6 +314,7 @@ describe("cascade cancel", () => {
       }
     }
     expect((await getTaskById(task!.id))?.status).toBe("cancelled");
+    expect((await getTaskById(task!.id))?.statusKind).toBe("workflow");
     // A cancelled task is never handed to a worker.
     expect(await startTask(task!.id)).toBeNull();
   });

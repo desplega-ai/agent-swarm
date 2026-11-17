@@ -146,6 +146,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `keyPrefix` | string | No | Filter by namespace subtree |
 | `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
 | `status` | string | No | Filter by status |
+| `statusKind` | string | No | Why the task ended, e.g. `error` vs `agent` for `failed` tasks. See [status kind](/docs/concepts/task-lifecycle#status-kind) |
 | `limit` | number | No | Max tasks to return (default: 25) |
 
 ### send-task

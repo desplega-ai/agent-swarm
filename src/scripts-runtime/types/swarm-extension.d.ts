@@ -8,6 +8,7 @@ declare module "swarm-extension" {
       | "chat"
       | "workflow"
       | "schedule"
+      | "system"
       | "slack"
       | "agentmail"
       | "mcp"
@@ -17,7 +18,6 @@ declare module "swarm-extension" {
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
-      | "system"
       | "linear"
       | "jira"
       | "comb"
@@ -159,6 +159,7 @@ declare module "swarm-extension" {
       | "chat"
       | "workflow"
       | "schedule"
+      | "system"
       | "slack"
       | "agentmail"
       | "mcp"
@@ -168,7 +169,6 @@ declare module "swarm-extension" {
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
-      | "system"
       | "linear"
       | "jira"
       | "comb";
@@ -198,6 +198,23 @@ declare module "swarm-extension" {
     rejectionReason?: string | undefined;
     finishedAt?: string | undefined;
     notifiedAt?: string | undefined;
+    statusKind?:
+      | "error"
+      | "workflow"
+      | "external"
+      | "agent"
+      | "runner"
+      | "deferred"
+      | "cascade"
+      | "user"
+      | "system"
+      | "graceful_shutdown"
+      | "context_limits"
+      | "manual_supersede"
+      | "crash_recovery"
+      | "provider_fallback"
+      | "workflow_retry"
+      | undefined;
     failureReason?: string | undefined;
     output?: string | undefined;
     progress?: string | undefined;
