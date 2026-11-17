@@ -118,8 +118,14 @@ describe("scrubSecrets — env-based replacement", () => {
       version: SCRUBBER_RULES_VERSION,
       keyVars: [...openAICompatibleKeyVars()].sort(),
     }).toEqual({
-      version: 15,
-      keyVars: ["AI_GATEWAY_API_KEY", "HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
+      version: 16,
+      keyVars: [
+        "AI_GATEWAY_API_KEY",
+        "HELMCODE_API_KEY",
+        "HELMCODE_API_NAN",
+        "NAN_API_KEY",
+        "ZHIPU_API_KEY",
+      ],
     });
   });
 

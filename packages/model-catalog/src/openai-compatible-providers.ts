@@ -240,6 +240,84 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
       },
     ],
   },
+  "zai-coding-plan": {
+    id: "zai-coding-plan",
+    displayName: "Z.ai Coding Plan",
+    description:
+      "Z.ai's GLM models (GLM-5.3-Flash, GLM-5.3 and more) for the pi and opencode harnesses, billed to a flat-rate coding plan.",
+    // The GLM Coding Plan's OpenAI-compatible endpoint:
+    // docs.z.ai/devpack/quick-start#openai-chat-completions
+    baseUrl: "https://api.z.ai/api/coding/paas/v4",
+    baseUrlLocked: true,
+    docsUrl: "https://docs.z.ai/devpack/quick-start",
+    envVar: "ZHIPU_API_KEY",
+    aliasEnvVars: [],
+    keyNote:
+      "Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.",
+    catalog: "models.dev",
+    npm: "@ai-sdk/openai-compatible",
+    // GLM Coding Plan ids as models.dev's `zai-coding-plan` section lists
+    // them, GLM-5.3-Flash first (the plan's everyday workhorse). Video and
+    // PDF input modes are dropped: pi and opencode only take text and image.
+    // `glm-4.7` and older ids are the previous generation, out of scope.
+    models: [
+      {
+        id: "glm-5.3-flash",
+        name: "GLM-5.3-Flash",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_IMAGE,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+        family: "glm-flash",
+        reasoningEfforts: ["low", "high", "max"],
+      },
+      {
+        id: "glm-5.3",
+        name: "GLM-5.3",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+        family: "glm",
+        reasoningEfforts: ["low", "high", "max"],
+      },
+      {
+        id: "glm-5.3-highspeed",
+        name: "GLM-5.3 Highspeed",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+        family: "glm",
+        reasoningEfforts: ["low", "high", "max"],
+      },
+      {
+        id: "glm-5.2",
+        name: "GLM-5.2",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+        family: "glm",
+        reasoningEfforts: ["high", "max"],
+      },
+      {
+        id: "glm-5.2-highspeed",
+        name: "GLM-5.2 Highspeed",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: DEVELOPER_ROLE,
+        family: "glm",
+        reasoningEfforts: ["high", "max"],
+      },
+    ],
+  },
   vercel: {
     id: "vercel",
     displayName: "Vercel AI Gateway",

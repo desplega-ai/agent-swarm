@@ -231,6 +231,7 @@ opencode checks credentials in this priority order:
 | **OpenAI API key** | `OPENAI_API_KEY` | Direct OpenAI API billing |
 | **NaN API key** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Helmcode API key** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
+| **Z.ai API key** | `ZHIPU_API_KEY` | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
 | **Auth file** | `~/.local/share/opencode/auth.json` | Native opencode CLI auth file |
 
 At least one credential source is required. The Docker entrypoint validates this on startup.
@@ -291,6 +292,7 @@ pi-mono supports several authentication methods depending on which model provide
 | **Google** | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
 | **NaN** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Helmcode** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
+| **Z.ai** | `ZHIPU_API_KEY` | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
 | **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
 
 At least one of these must be available. The Docker entrypoint validates this on startup. When `MODEL_OVERRIDE` starts with a provider prefix, only the matching key is required; when it's unset, any one of `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` suffices.
@@ -417,6 +419,24 @@ NaN and Helmcode are entries in one registry: `packages/model-catalog/src/openai
 The new key var is a secret-scrubber rule change: bump `SCRUBBER_RULES_VERSION` in `src/utils/secret-scrubber.ts` and its pin in `src/tests/secret-scrubber.test.ts`, which fails until you do.
 
 Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the AI providers card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
+
+---
+
+## Z.ai Coding Plan
+
+[Z.ai's GLM Coding Plan](https://docs.z.ai/devpack/quick-start) is a flat-rate subscription whose GLM models run on the **pi** and **opencode** harnesses through Z.ai's OpenAI-compatible endpoint. The `claude` and `codex` harnesses reject `zai-coding-plan/*` models with the usual harness mismatch error.
+
+| | |
+|----------|---------|
+| Env var | `ZHIPU_API_KEY` |
+| Base URL | `https://api.z.ai/api/coding/paas/v4` (fixed; no override) |
+| Models | `zai-coding-plan/glm-5.3-flash` (the everyday default), `zai-coding-plan/glm-5.3`, `zai-coding-plan/glm-5.3-highspeed`, `zai-coding-plan/glm-5.2`, `zai-coding-plan/glm-5.2-highspeed` |
+
+- **Entering keys**: use the Z.ai Coding Plan card on the dashboard Connect → AI providers page, or set `ZHIPU_API_KEY` on the worker. A key saved on the dashboard needs no restart.
+- **Key kind**: Z.ai keys are product-specific. Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.
+- **Catalog**: models.dev lists the plan (`zai-coding-plan` section); the picker shows its tool-calling chat models.
+- **Pricing**: plan billing is flat. Sessions record per-token costs priced from the models.dev rates, so the row is an estimate of pay-as-you-go equivalence, tagged `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
+- **Default harness**: when `HARNESS_PROVIDER` is unset and a Z.ai key is the worker's only LLM credential, the worker defaults to `pi`. Set `MODEL_OVERRIDE=zai-coding-plan/glm-5.3-flash` on those agents, or retarget the tier config keys (`MODEL_TIER_PI_*`, `MODEL_TIER_OPENCODE_*`) as in the NaN and Helmcode section above.
 
 ---
 
