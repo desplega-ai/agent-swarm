@@ -314,9 +314,10 @@
       "scenarios": ["script-credential-bindings"]
     },
     "credential-pool": {
-      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
+      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side and its pace ranking, pool-key config routes and Codex accounts.",
       "scenarios": [
         "platform-keys",
+        "platform-key-pace",
         "key-window-usage",
         "platform-pool-keys",
         "platform-codex-accounts"
