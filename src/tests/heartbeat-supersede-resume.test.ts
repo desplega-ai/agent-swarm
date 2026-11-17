@@ -43,12 +43,12 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     } catch {
       // File doesn't exist
     }
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const path of [TEST_DB_PATH, `${TEST_DB_PATH}-wal`, `${TEST_DB_PATH}-shm`]) {
       try {
         await unlink(path);

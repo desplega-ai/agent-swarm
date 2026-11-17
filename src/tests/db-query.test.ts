@@ -60,8 +60,8 @@ describe("db-query input compatibility", () => {
   });
 });
 
-test("in-memory fallback queries a read-only snapshot", () => {
-  closeDb();
+test("in-memory fallback queries a read-only snapshot", async () => {
+  await closeDb();
   const db = initDb(":memory:");
   try {
     db.run("CREATE TABLE snapshot_guard (id INTEGER PRIMARY KEY)");
@@ -83,7 +83,7 @@ test("in-memory fallback queries a read-only snapshot", () => {
       total: 2,
     });
   } finally {
-    closeDb();
+    await closeDb();
   }
 });
 
@@ -207,14 +207,14 @@ describe("db-query bounded execution (Fix 1)", () => {
   beforeAll(async () => {
     boundedTestGlobals.__savedDbQueryBoundedTemplate = boundedTestGlobals.__testMigrationTemplate;
     boundedTestGlobals.__testMigrationTemplate = undefined;
-    closeDb();
+    await closeDb();
     await removeBoundedTestDb();
     initDb(BOUNDED_TEST_DB_PATH);
   });
 
   afterAll(async () => {
     resetDbQueryWorkerPoolForTests();
-    closeDb();
+    await closeDb();
     boundedTestGlobals.__testMigrationTemplate = boundedTestGlobals.__savedDbQueryBoundedTemplate;
     boundedTestGlobals.__savedDbQueryBoundedTemplate = undefined;
     await removeBoundedTestDb();

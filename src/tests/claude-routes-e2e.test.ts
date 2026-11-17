@@ -194,8 +194,8 @@ describe.skipIf(!CLAUDE_BINARY)("claude routes e2e (real CLI, fake endpoints)", 
     initDb(TEST_DB_PATH);
   });
 
-  afterAll(() => {
-    closeDb();
+  afterAll(async () => {
+    await closeDb();
     for (const path of [TEST_DB_PATH, `${TEST_DB_PATH}-wal`, `${TEST_DB_PATH}-shm`]) {
       rmSync(path, { force: true });
     }

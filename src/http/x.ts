@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { recordInlineScriptRun } from "../be/db";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptMcpConnectionDescriptorsAsync,
 } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
@@ -262,8 +262,8 @@ export async function handleX(
     failedBindings: credentials.failedBindings,
     userConfig: credentials.userConfig,
     agentFs: credentials.agentFs,
-    apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
+    apiConnections: await getScriptApiConnectionDescriptorsAsync({ agentId: endpoint.agentId }),
+    mcpConnections: await getScriptMcpConnectionDescriptorsAsync({ agentId: endpoint.agentId }),
   });
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;

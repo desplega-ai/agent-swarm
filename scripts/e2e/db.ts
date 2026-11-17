@@ -9,6 +9,26 @@ export type ReadOnlyDb = {
   close: () => void;
 };
 
+/** Build an isolated legacy fixture. Public APIs correctly refuse reserved keys. */
+export async function writeLegacyDriverFixture(source: string, target: string): Promise<void> {
+  const sourceDb = new Database(source, { readonly: true });
+  let fixture: Database | undefined;
+  try {
+    sourceDb.run("VACUUM INTO ?", [target]);
+    fixture = new Database(target, { create: false });
+    // Deliberately invalid ciphertext proves exclusion occurs before decryption.
+    fixture.run(
+      `INSERT INTO swarm_config
+      (id, scope, scopeId, key, value, isSecret, encrypted, exportToEnv, createdAt, lastUpdatedAt)
+      VALUES (?, 'global', NULL, 'DB_DRIVER', 'invalid-legacy-ciphertext', 1, 1, 1, datetime('now'), datetime('now'))`,
+      [crypto.randomUUID()],
+    );
+  } finally {
+    fixture?.close();
+    sourceDb.close();
+  }
+}
+
 export function openReadOnlyDb(path: string): ReadOnlyDb {
   // Opened on first use: the file only exists once the SUT booted and ran its
   // migrations.

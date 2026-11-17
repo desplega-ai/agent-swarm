@@ -83,7 +83,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server.close();
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

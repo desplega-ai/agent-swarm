@@ -33,7 +33,7 @@ describe("extension loader", () => {
 
   afterAll(async () => {
     await cleanExtensionTmpRoot();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

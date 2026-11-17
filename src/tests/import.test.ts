@@ -64,7 +64,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   teardownResumeListener?.();
-  closeDb();
+  await closeDb();
   await removePackages();
   for (const suffix of ["", "-wal", "-shm"])
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});

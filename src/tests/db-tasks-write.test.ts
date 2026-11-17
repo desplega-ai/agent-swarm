@@ -12,7 +12,7 @@ async function flush(): Promise<void> {
 }
 
 beforeEach(async () => {
-  db.closeDb();
+  await db.closeDb();
   db.initDb(":memory:");
   await db.createAgent({ id: agentId, name: "Write fixtures", isLead: false, status: "idle" });
   events = [];
@@ -23,7 +23,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await flush();
   taskEventSpy.mockRestore();
-  db.closeDb();
+  await db.closeDb();
 });
 
 async function fixture() {

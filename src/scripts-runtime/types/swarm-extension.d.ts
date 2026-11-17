@@ -5,7 +5,6 @@ declare module "swarm-extension" {
     agentId?: string | null | undefined;
     creatorAgentId?: string | undefined;
     source?:
-      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -21,6 +20,7 @@ declare module "swarm-extension" {
       | "linear"
       | "jira"
       | "comb"
+      | "chat"
       | undefined;
     routingReason?:
       | "skill"
@@ -73,7 +73,7 @@ declare module "swarm-extension" {
     parentTaskId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
+    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
     profile?: string | undefined;
     fallbackHops?:
       | {
@@ -118,18 +118,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
+            | "claude"
             | "codex"
             | "pi"
-            | "opencode"
-            | "claude"
+            | "devin"
             | "claude-managed"
+            | "opencode"
+            | "acp"
+            | "dsh"
+            | "amp"
+            | "cursor"
             | "grok"
             | "fx"
-            | "dsh"
-            | "cursor"
-            | "amp"
-            | "devin"
-            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -156,7 +156,6 @@ declare module "swarm-extension" {
       | "cancelled"
       | "superseded";
     source:
-      | "chat"
       | "workflow"
       | "schedule"
       | "slack"
@@ -171,7 +170,8 @@ declare module "swarm-extension" {
       | "system"
       | "linear"
       | "jira"
-      | "comb";
+      | "comb"
+      | "chat";
     tags: string[];
     priority: number;
     dependsOn: string[];
@@ -240,11 +240,11 @@ declare module "swarm-extension" {
     claudeSessionId?: string | undefined;
     model?: string | undefined;
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
-    effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
+    effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
     resolvedModel?: string | undefined;
     modelSource?: string | undefined;
     modelAlias?: string | undefined;
-    resolvedEffort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
+    resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | undefined;
     profile?: string | undefined;
     resolvedProfile?: string | undefined;
     fallbackHops?:
@@ -286,18 +286,18 @@ declare module "swarm-extension" {
     requestedByUserId?: string | undefined;
     swarmVersion?: string | undefined;
     provider?:
+      | "claude"
       | "codex"
       | "pi"
-      | "opencode"
-      | "claude"
+      | "devin"
       | "claude-managed"
+      | "opencode"
+      | "acp"
+      | "dsh"
+      | "amp"
+      | "cursor"
       | "grok"
       | "fx"
-      | "dsh"
-      | "cursor"
-      | "amp"
-      | "devin"
-      | "acp"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -309,18 +309,18 @@ declare module "swarm-extension" {
           sourceAgentId?: string | undefined;
           role?: string | undefined;
           harnessProvider?:
+            | "claude"
             | "codex"
             | "pi"
-            | "opencode"
-            | "claude"
+            | "devin"
             | "claude-managed"
+            | "opencode"
+            | "acp"
+            | "dsh"
+            | "amp"
+            | "cursor"
             | "grok"
             | "fx"
-            | "dsh"
-            | "cursor"
-            | "amp"
-            | "devin"
-            | "acp"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -344,7 +344,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui" | "app-page";
+  export type SteeringSource = "script" | "slack" | "mcp" | "api" | "ui" | "chat" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;
@@ -353,7 +353,7 @@ declare module "swarm-extension" {
     sourceTaskId: string | undefined;
     auditSourceTaskId: string | undefined;
     contextKey: string | undefined;
-    callOrigin: "native" | "mcp" | "extension" | "script-sdk";
+    callOrigin: "mcp" | "native" | "extension" | "script-sdk";
     harness?: string | undefined;
   };
 

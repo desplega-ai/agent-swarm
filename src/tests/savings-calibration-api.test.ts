@@ -120,7 +120,7 @@ describe("savings calibration API", () => {
 
   afterAll(async () => {
     server?.close();
-    closeDb();
+    await closeDb();
     testGlobals.__testMigrationTemplate = testGlobals.__savedCalibrationTemplate;
     testGlobals.__savedCalibrationTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);

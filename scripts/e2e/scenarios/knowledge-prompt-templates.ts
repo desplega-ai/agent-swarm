@@ -22,6 +22,13 @@ export const knowledgePromptTemplates: Scenario = {
     const session = await ctx.connectMcp(agent);
     const cleanup: string[] = [];
     try {
+      const stats = await ctx.api("GET", "/api/stats");
+      expectStatus(stats, [200], "authenticated driver stats");
+      expect(
+        asRecord(stats.json).dbDriver === (ctx.sutEnv.DB_DRIVER ?? "sqlite"),
+        "effective database driver",
+      );
+
       // ── Registry ────────────────────────────────────────────────────────────────────────────
       let response = await ctx.api("GET", "/api/prompt-templates/events");
       expectStatus(response, [200], "list template events");
@@ -125,6 +132,46 @@ export const knowledgePromptTemplates: Scenario = {
       expect(asRecord(response.json).rendered === "plain", "unregistered preview renders the body");
       response = await ctx.api("POST", "/api/prompt-templates/preview", { body: {} });
       expectStatus(response, [400], "preview without eventType");
+
+      // Concurrent renders must retain all nested and repeated reference tokens.
+      const prefix = `e2e.refs.${ctx.nonce}`;
+      for (const [name, body] of [
+        ["parent", `{{@template[${prefix}.child]}}/{{@template[${prefix}.child]}}`],
+        ["child", `[{{@template[${prefix}.leaf]}}]`],
+        ["leaf", "{{marker}}"],
+      ]) {
+        const stored = await ctx.api("PUT", "/api/prompt-templates", {
+          body: { eventType: `${prefix}.${name}`, scope: "agent", scopeId: agent, body },
+        });
+        expectStatus(stored, [200], "store a reference fixture");
+        cleanup.push(asString(asRecord(asRecord(stored.json).template).id, "reference template id"));
+      }
+      const renders = await Promise.all(
+        Array.from({ length: 12 }, (_, index) =>
+          ctx.api("POST", "/api/prompt-templates/render", {
+            body: {
+              eventType: `${prefix}.parent`,
+              agentId: agent,
+              variables: { marker: String(index) },
+            },
+          }),
+        ),
+      );
+      for (const [index, render] of renders.entries()) {
+        expectStatus(render, [200], "render concurrent references");
+        const result = asRecord(render.json);
+        expect(
+          result.text === `[${index}]/[${index}]`,
+          "all nested references use their render variables",
+        );
+        const segments = asRecords(result, "segments");
+        expect(
+          segments.length === 3 &&
+            segments.reduce((sum, segment) => sum + Number(segment.chars), 0) ===
+              String(result.text).length,
+          "reference segments cover the rendered text",
+        );
+      }
 
       // ── Agent-scope override: create, resolve, render, update, checkout ────────────────────
       response = await ctx.api("PUT", "/api/prompt-templates", {

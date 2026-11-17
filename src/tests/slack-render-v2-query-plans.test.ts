@@ -103,8 +103,8 @@ describe("slack render-v2 watcher queries", () => {
     );
   });
 
-  afterEach(() => {
-    closeDb();
+  afterEach(async () => {
+    await closeDb();
   });
 
   test("the tree sweep tests thread tasks in the covering index, not task rows", async () => {
@@ -153,7 +153,7 @@ describe("slack render-v2 watcher queries", () => {
         const globals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
         const original = globals.__testMigrationTemplate;
         globals.__testMigrationTemplate = getDb().serialize();
-        closeDb();
+        await closeDb();
         try {
           initDb(":memory:");
         } finally {
@@ -422,8 +422,8 @@ describe("slack render-v2 tree closed_at", () => {
     leadId = (await createAgent({ name: "Close Lead", isLead: true, status: "idle" })).id;
   });
 
-  afterEach(() => {
-    closeDb();
+  afterEach(async () => {
+    await closeDb();
   });
 
   test("the sweep reads only open trees through the partial index", async () => {

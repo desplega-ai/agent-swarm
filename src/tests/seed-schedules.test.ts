@@ -127,7 +127,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   if (ORIGINAL_SEED_AUTOMATIONS_ENABLED === undefined) {
     delete process.env.SEED_AUTOMATIONS_ENABLED;

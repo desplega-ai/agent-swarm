@@ -163,7 +163,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   if (previousApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
   else process.env.AGENT_SWARM_API_KEY = previousApiKey;
   for (const suffix of ["", "-wal", "-shm"]) {

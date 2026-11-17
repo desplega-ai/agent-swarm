@@ -23,14 +23,14 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   // Restore the env var so subsequent test files in the same Bun process
   // (e.g. slack-thread-followups.test.ts) see the default behavior.
   // Bun runs test files in a single process when ordering puts this file
   // first, so without this cleanup the flag leaks and breaks tests that
   // rely on the default `false` value.
   delete process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
-  closeDb();
+  await closeDb();
   try {
     unlinkSync(TEST_DB_PATH);
     unlinkSync(`${TEST_DB_PATH}-wal`);

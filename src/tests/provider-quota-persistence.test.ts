@@ -19,7 +19,7 @@ beforeAll(() => {
   initDb(path);
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   rmSync(fixtureCodexHome, { recursive: true, force: true });
   for (const suffix of ["", "-wal", "-shm"])
     await Bun.file(path + suffix)

@@ -20,7 +20,7 @@ type DbResolverFn = (
   eventType: string,
   agentId?: string,
   repoId?: string,
-) => { skip: true } | { template: { id: string; body: string; scope: string } } | null;
+) => Promise<{ skip: true } | { template: { id: string; body: string; scope: string } } | null>;
 
 let dbResolverFn: DbResolverFn | null = null;
 
@@ -78,8 +78,7 @@ let httpResolverConfig: HttpResolverConfig | null = null;
 
 /**
  * Configure the resolver to use HTTP mode (for Docker workers).
- * Once configured, all resolveTemplate() calls go through the API server
- * instead of direct DB access.
+ * Once configured, resolveTemplateAsync() calls use the API server.
  */
 export function configureHttpResolver(apiUrl: string, apiKey: string): void {
   httpResolverConfig = { apiUrl, apiKey };
@@ -160,32 +159,16 @@ export function resolveTemplateFromCode(
 const MAX_TEMPLATE_REF_DEPTH = 3;
 const TEMPLATE_REF_REGEX = /\{\{@template\[([^\]]+)\]\}\}/g;
 
-/**
- * Resolve an event template to its final interpolated text.
- *
- * In HTTP mode (workers): delegates to the API server's /render endpoint.
- * In DB mode (API server): does direct DB resolution.
- */
+/** Resolve code defaults synchronously. Runtime overrides require resolveTemplateAsync(). */
 export function resolveTemplate(
   eventType: string,
   variables: Record<string, unknown>,
-  options: ResolveOptions = {},
+  _options: ResolveOptions = {},
 ): ResolveResult {
-  // HTTP mode: delegate to API server (workers call this path)
-  if (httpResolverConfig) {
-    // Return a synchronous fallback immediately, then the caller should use resolveTemplateAsync.
-    // For backward compat with sync callers, use code defaults as sync fallback.
-    // Callers that need HTTP resolution must use resolveTemplateAsync().
-    return resolveTemplateFromCode(eventType, variables);
-  }
-
-  return resolveTemplateViaDb(eventType, variables, options);
+  return resolveTemplateFromCode(eventType, variables);
 }
 
-/**
- * Async version of resolveTemplate — required for HTTP mode (workers).
- * Falls back to sync DB mode when HTTP is not configured.
- */
+/** Resolve runtime overrides through the configured DB or HTTP resolver. */
 export async function resolveTemplateAsync(
   eventType: string,
   variables: Record<string, unknown>,
@@ -201,17 +184,17 @@ export async function resolveTemplateAsync(
 /**
  * DB-mode resolution (API server path). Direct DB access.
  */
-function resolveTemplateViaDb(
+async function resolveTemplateViaDb(
   eventType: string,
   variables: Record<string, unknown>,
   options: ResolveOptions,
-): ResolveResult {
+): Promise<ResolveResult> {
   const definition = getTemplateDefinition(eventType);
   const header = definition?.header ?? "";
   const defaultBody = definition?.defaultBody ?? "";
 
   // DB resolution: scope chain lookup
-  const dbResult = dbResolverFn?.(eventType, options.agentId, options.repoId) ?? null;
+  const dbResult = (await dbResolverFn?.(eventType, options.agentId, options.repoId)) ?? null;
 
   // skip_event
   if (dbResult && "skip" in dbResult) {
@@ -233,7 +216,7 @@ function resolveTemplateViaDb(
 
   // Expand {{@template[id]}} references in body
   const expandedRefs: ExpandedRef[] = [];
-  body = expandTemplateRefs(body, variables, options, new Set(), 0, expandedRefs);
+  body = await expandTemplateRefs(body, variables, options, new Set(), 0, expandedRefs);
 
   // Compose header + body
   const composed = header ? `${header}\n\n${body}` : body;
@@ -277,7 +260,7 @@ function measureSegments(
  * Recursively expand {{@template[id]}} references in a string.
  * Only used in DB mode (API server). HTTP mode handles expansion server-side.
  */
-function expandTemplateRefs(
+async function expandTemplateRefs(
   text: string,
   variables: Record<string, unknown>,
   options: ResolveOptions,
@@ -285,18 +268,26 @@ function expandTemplateRefs(
   depth: number,
   /** Collects each top-level reference with its fully expanded body. */
   expandedRefs?: ExpandedRef[],
-): string {
+): Promise<string> {
   if (depth > MAX_TEMPLATE_REF_DEPTH) {
     return text;
   }
 
-  return text.replace(TEMPLATE_REF_REGEX, (fullMatch, referencedId: string) => {
+  let result = "";
+  let cursor = 0;
+  // Each expansion owns its iterator, including across recursive and concurrent awaits.
+  for (const match of text.matchAll(TEMPLATE_REF_REGEX)) {
+    const fullMatch = match[0];
+    const referencedId = match[1]!;
+    result += text.slice(cursor, match.index);
+    cursor = match.index + fullMatch.length;
     // Cycle detection
     if (visited.has(referencedId)) {
       console.warn(
         `[prompt-resolver] Cycle detected for template reference "${referencedId}", leaving token as-is`,
       );
-      return fullMatch;
+      result += fullMatch;
+      continue;
     }
 
     // Depth check (we're about to recurse into depth + 1)
@@ -304,17 +295,20 @@ function expandTemplateRefs(
       console.warn(
         `[prompt-resolver] Max template reference depth (${MAX_TEMPLATE_REF_DEPTH}) exceeded for "${referencedId}", leaving token as-is`,
       );
-      return fullMatch;
+      result += fullMatch;
+      continue;
     }
 
     // Resolve the referenced template
     const refDef = getTemplateDefinition(referencedId);
     const refDefaultBody = refDef?.defaultBody ?? "";
-    const refDbResult = dbResolverFn?.(referencedId, options.agentId, options.repoId) ?? null;
+    const refDbResult =
+      (await dbResolverFn?.(referencedId, options.agentId, options.repoId)) ?? null;
 
     // If referenced template is skipped, leave token as-is
     if (refDbResult && "skip" in refDbResult) {
-      return fullMatch;
+      result += fullMatch;
+      continue;
     }
 
     const refBody =
@@ -322,14 +316,16 @@ function expandTemplateRefs(
 
     // If we got nothing, leave token as-is
     if (!refBody) {
-      return fullMatch;
+      result += fullMatch;
+      continue;
     }
 
     // Recursively expand nested refs in the referenced body
     const newVisited = new Set(visited);
     newVisited.add(referencedId);
-    const expanded = expandTemplateRefs(refBody, variables, options, newVisited, depth + 1);
+    const expanded = await expandTemplateRefs(refBody, variables, options, newVisited, depth + 1);
     expandedRefs?.push({ templateId: referencedId, body: expanded });
-    return expanded;
-  });
+    result += expanded;
+  }
+  return result + text.slice(cursor);
 }

@@ -94,7 +94,7 @@ describe("POST /api/tool-hooks", () => {
   afterAll(async () => {
     server.close();
     await stopExtensionRuntime();
-    closeDb();
+    await closeDb();
     delete process.env[ENV_SECRET_NAME];
     refreshSecretScrubberCache();
     await removeDbFiles();

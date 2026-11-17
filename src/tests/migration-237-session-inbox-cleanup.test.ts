@@ -8,8 +8,8 @@ const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
 beforeAll(() => {
   initDb(":memory:");
 });
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 async function root(requestedByUserId: string | undefined, activity: string, status = "completed") {

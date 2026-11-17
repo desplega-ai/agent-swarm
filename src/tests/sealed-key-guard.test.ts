@@ -35,8 +35,8 @@ let dir: string;
 let dbPath: string;
 let keyFile: string;
 
-beforeEach(() => {
-  closeDb();
+beforeEach(async () => {
+  await closeDb();
   savedTemplate = templateGlobals.__testMigrationTemplate;
   templateGlobals.__testMigrationTemplate = undefined;
   savedKey = process.env.SECRETS_ENCRYPTION_KEY;
@@ -49,8 +49,8 @@ beforeEach(() => {
   keyFile = join(dir, ".encryption-key");
 });
 
-afterEach(() => {
-  closeDb();
+afterEach(async () => {
+  await closeDb();
   templateGlobals.__testMigrationTemplate = savedTemplate;
   if (savedKey !== undefined) process.env.SECRETS_ENCRYPTION_KEY = savedKey;
   if (savedKeyFile !== undefined) process.env.SECRETS_ENCRYPTION_KEY_FILE = savedKeyFile;
@@ -60,8 +60,8 @@ afterEach(() => {
 });
 
 /** Close, forget the cached key, and delete the generated key file. */
-function restartWithoutKey(): void {
-  closeDb();
+async function restartWithoutKey(): Promise<void> {
+  await closeDb();
   __resetEncryptionKeyForTests();
   rmSync(keyFile, { force: true });
 }
@@ -79,10 +79,10 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     );
   });
 
-  test("control: a DB with no encrypted data boots and generates a key", () => {
+  test("control: a DB with no encrypted data boots and generates a key", async () => {
     initDb(dbPath);
     expect(existsSync(keyFile)).toBe(true);
-    restartWithoutKey();
+    await restartWithoutKey();
     initDb(dbPath);
     expect(existsSync(keyFile)).toBe(true);
   });
@@ -99,7 +99,7 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     });
     expect(await getScriptRunExecutionArgs(id)).toEqual({ n: 7 });
 
-    restartWithoutKey();
+    await restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
     expect(existsSync(keyFile)).toBe(false);
   });
@@ -114,7 +114,7 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     await createWorkflowRun({ id: runId, workflowId: workflow.id });
     await updateWorkflowRun(runId, { context: { trigger: { n: 7 } } });
 
-    restartWithoutKey();
+    await restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
     expect(existsSync(keyFile)).toBe(false);
   });
@@ -134,7 +134,7 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     });
     expect(resolved?.status).toBe("approved");
 
-    restartWithoutKey();
+    await restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
     expect(existsSync(keyFile)).toBe(false);
   });
@@ -159,7 +159,7 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     // Leave the journal result as the only sealed value (pre-sealing args shape).
     await getDbClient().run("UPDATE script_runs SET args = 'null' WHERE id = ?", [runId]);
 
-    restartWithoutKey();
+    await restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
     expect(existsSync(keyFile)).toBe(false);
   });

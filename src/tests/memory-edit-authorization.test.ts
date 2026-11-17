@@ -30,10 +30,10 @@ beforeAll(async () => {
   }
 });
 
-afterAll(() => {
+afterAll(async () => {
   embed.mockRestore();
   embedBatch.mockRestore();
-  closeDb();
+  await closeDb();
 });
 
 async function httpCall(caller: string, route: string, body: unknown) {

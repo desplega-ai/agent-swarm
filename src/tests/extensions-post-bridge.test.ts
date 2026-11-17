@@ -97,7 +97,7 @@ describe("extension post bridge: new events", () => {
       await loaded.dispose();
     }
     await cleanExtensionTmpRoot();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

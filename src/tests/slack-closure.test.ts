@@ -14,13 +14,13 @@ async function removeDbFiles() {
 }
 
 beforeEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

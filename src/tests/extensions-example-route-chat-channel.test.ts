@@ -70,7 +70,7 @@ describe("extension Chat SDK channel routing", () => {
   afterAll(async () => {
     await harness.stop();
     await stopExtensionRuntime();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

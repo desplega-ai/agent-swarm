@@ -1,9 +1,10 @@
-import { getDb, getDbClient, isSqliteVecAvailable } from "@/be/db";
+import { getDbClient, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
-import { isInTransaction } from "../../db-client";
+import { getDbConnectionIdentity, isCurrentDbClient } from "../../db/runtime";
+import { type DbClient, type DbExecutor, type DbParam, isInTransaction } from "../../db-client";
 import { currentLoopPath, withLoopPath } from "../../event-loop-lag";
 import {
   EMBEDDING_DIMENSIONS,
@@ -64,10 +65,8 @@ export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
   WHERE rowid > ? ORDER BY rowid LIMIT ?`;
 /** How long search reuses one health result. Stale by at most this long. */
 export const SEARCH_HEALTH_TTL_MS = 60_000;
-/** Off-loop health refreshes a search retries when writes invalidate them, before it counts in-process. */
 const SEARCH_HEALTH_MAX_REFRESHES = 3;
-/** An off-loop health refresh, for the DB and generation it started under. */
-type SearchHealthRefresh = { db: unknown; generation: number; promise: Promise<MemoryHealth> };
+type SearchHealthRefresh = { db: DbClient; generation: number; promise: Promise<MemoryHealth> };
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
@@ -210,56 +209,171 @@ function computeExpiresAt(source: AgentMemorySource, key: string | null): string
   return new Date(Date.now() + ttlDays * 86400000).toISOString();
 }
 
+// The database lifecycle cancels every store bound to its client, including test instances.
+const stores = new Set<SqliteMemoryStore>();
+
+export function stopMemoryStores(client: DbClient): Promise<unknown> {
+  const pending: Promise<unknown>[] = [];
+  for (const store of stores) {
+    if (store.ownsClient(client)) pending.push(store.stop());
+  }
+  return Promise.allSettled(pending);
+}
+
 export class SqliteMemoryStore implements MemoryStore {
   private vecInitialized = false;
   private ftsInitialized = false;
   private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
   private searchHealthCache: { health: MemoryHealth; db: unknown; at: number } | null = null;
-  /** The newest refresh. An older one may still run; its result is checked, not shared. */
   private searchHealthRefresh: SearchHealthRefresh | null = null;
-  /**
-   * Bumped when the cache is dropped. A refresh that started under an older
-   * generation is neither stored nor returned to a search waiting on it.
-   */
   private searchHealthGeneration = 0;
+  private readonly healthRefreshes = new Set<Promise<MemoryHealth>>();
+  private readonly healthAbort = new AbortController();
 
-  constructor() {
-    this.ensureVecTable();
-    this.ensureFtsTable();
+  private readonly connection = getDbConnectionIdentity();
+  private client: DbClient | null = null;
+  private readiness: Promise<void> | null = null;
+  private rejectReadiness: ((error: Error) => void) | null = null;
+  private schemaReady = false;
+  private stopped = false;
+  private vecPopulate: Promise<void> | null = null;
+  private vecPopulated = false;
+  private ftsPopulated = false;
+  private vecFailure: unknown = null;
+  private readonly vecWriteFailures = new Map<string, unknown>();
+  private ftsFailure: unknown = null;
+
+  ownsClient(client: DbClient): boolean {
+    return this.client === null || this.client === client;
   }
 
-  private ensureFtsTable(): void {
-    if (this.ftsInitialized) return;
-    const db = getDb();
-    try {
-      db.run(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-          memory_id UNINDEXED,
-          name,
-          content,
-          tokenize='porter unicode61'
-        )
-      `);
-      this.ftsInitialized = true;
-      this.ftsPopulate = this.populateFtsTable().catch((err) => {
-        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
-      });
-    } catch (err) {
-      this.ftsInitialized = false;
-      console.error("[memory-fts] Failed to initialize memory_fts:", (err as Error).message);
+  stop(): Promise<unknown> {
+    this.stopped = true;
+    this.healthAbort.abort();
+    this.rejectReadiness?.(new Error("Memory store connection closed."));
+    this.rejectReadiness = null;
+    this.dropSearchHealth();
+    stores.delete(this);
+    return Promise.allSettled([
+      this.readiness,
+      this.vecPopulate,
+      this.ftsPopulate,
+      ...this.healthRefreshes,
+    ]);
+  }
+
+  private db(): DbClient {
+    if (this.stopped || !this.client || !isCurrentDbClient(this.client)) {
+      throw new Error(
+        "Memory store connection closed. Obtain a new store after database initialization.",
+      );
     }
+    return this.client;
+  }
+
+  private searchDb() {
+    const client = this.db();
+    return {
+      query: <T>(sql: string, params: DbParam[] = []) =>
+        memorySearchReader.query<T>(sql, params, client),
+      get: <T>(sql: string, params: DbParam[] = []) =>
+        memorySearchReader.get<T>(sql, params, client),
+    };
+  }
+
+  async whenReady(): Promise<void> {
+    if (this.stopped || (this.connection && this.connection !== getDbConnectionIdentity())) {
+      throw new Error("Memory store connection closed.");
+    }
+    // Pending initialization can also be queued behind this caller's lock.
+    if (!this.schemaReady && isInTransaction()) {
+      throw new Error("Await memoryStore.whenReady() before starting a database transaction.");
+    }
+    if (!this.readiness) {
+      const client = getDbClient();
+      stores.add(this);
+      this.readiness = new Promise<void>((resolve, reject) => {
+        this.rejectReadiness = reject;
+        // The hook clears transaction context and is drained by client shutdown.
+        client.afterCommit(async () => {
+          try {
+            this.client = client;
+            await this.initialize();
+            this.db();
+            this.schemaReady = true;
+            // whenReady cannot start inside a transaction. Each population yields first.
+            this.vecPopulate = this.populateVecTable()
+              .then(() => {
+                this.vecPopulated = true;
+                this.dropSearchHealth();
+              })
+              .catch((error) => {
+                this.vecFailure = error;
+                this.dropSearchHealth();
+              });
+            this.ftsPopulate = this.populateFtsTable()
+              .then(() => {
+                this.ftsPopulated = true;
+                this.dropSearchHealth();
+              })
+              .catch((error) => {
+                this.ftsFailure = error;
+                this.dropSearchHealth();
+              });
+            resolve();
+          } catch (error) {
+            reject(error);
+          } finally {
+            this.rejectReadiness = null;
+          }
+        });
+      });
+    }
+    await this.readiness;
+    this.db();
+  }
+
+  private async initialize(): Promise<void> {
+    const client = this.db();
+    // Await actual Worker capability before treating optional vector absence as degradation.
+    await client.get("SELECT 1");
+    await client.transaction(async (tx) => {
+      this.db();
+      if (isSqliteVecAvailable()) {
+        const schema = await this.getVecTableSchema();
+        if (schema && !schema.includes("distance_metric=cosine")) {
+          await tx.run("DROP TABLE memory_vec");
+        }
+        await tx.run(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
+          memory_id TEXT PRIMARY KEY,
+          embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine
+        )`);
+        this.vecInitialized = true;
+      }
+      await tx.run(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+        memory_id UNINDEXED, name, content, tokenize='porter unicode61'
+      )`);
+      // IF NOT EXISTS also accepts an ordinary table with the same columns.
+      const fts = await tx.get<{ type: string }>(
+        "SELECT type FROM pragma_table_list WHERE schema = 'main' AND name = 'memory_fts'",
+      );
+      if (fts?.type !== "virtual") {
+        throw new Error("Memory index must use an FTS5 virtual table.");
+      }
+      await tx.get(
+        "SELECT memory_id, name, content, rank FROM memory_fts WHERE memory_fts MATCH ? LIMIT 1",
+        ['"memoryschemavalidation"'],
+      );
+      this.ftsInitialized = true;
+    });
   }
 
   private async getFtsTableSchema(): Promise<string | null> {
-    try {
-      const row = await getDbClient().get<{ sql: string | null }>(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'",
-      );
-      return row?.sql ?? null;
-    } catch {
-      return null;
-    }
+    const row = await this.db().get<{ sql: string | null }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'",
+    );
+    return row?.sql ?? null;
   }
 
   /**
@@ -274,7 +388,8 @@ export class SqliteMemoryStore implements MemoryStore {
    * a write that commits its memory and FTS rows together cannot be doubled.
    */
   private async populateFtsTable(): Promise<void> {
-    const client = getDbClient();
+    const client = this.db();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const startedAt = performance.now();
     const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -282,20 +397,25 @@ export class SqliteMemoryStore implements MemoryStore {
     const indexed = new Set<string>();
     let removed = 0;
     for (let after = 0; ; ) {
-      const rows = await client.query<{ rowid: number; memoryId: string | null; orphan: number }>(
-        FTS_SCAN_BATCH_SQL,
-        [after, FTS_SCAN_BATCH_SIZE],
-      );
+      this.db();
+      const rows = await client.transaction(async (tx) => {
+        this.db();
+        const batch = await tx.query<{ rowid: number; memoryId: string | null; orphan: number }>(
+          FTS_SCAN_BATCH_SQL,
+          [after, FTS_SCAN_BATCH_SIZE],
+        );
+        const orphans = batch.filter((row) => row.orphan).map((row) => row.rowid);
+        if (orphans.length > 0) {
+          await tx.run(
+            `DELETE FROM memory_fts WHERE rowid IN (${orphans.map(() => "?").join(",")})`,
+            orphans,
+          );
+          removed += orphans.length;
+        }
+        return batch;
+      });
       if (rows.length === 0) break;
       after = rows[rows.length - 1]!.rowid;
-      const orphans = rows.filter((row) => row.orphan).map((row) => row.rowid);
-      if (orphans.length > 0) {
-        await client.run(
-          `DELETE FROM memory_fts WHERE rowid IN (${orphans.map(() => "?").join(",")})`,
-          orphans,
-        );
-        removed += orphans.length;
-      }
       for (const row of rows) if (!row.orphan && row.memoryId) indexed.add(row.memoryId);
       await yieldLoop();
     }
@@ -305,6 +425,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const missing: { id: string }[] = [];
     for (let after = 0; ; ) {
+      this.db();
       const rows = await client.query<{ rowid: number; id: string }>(MEMORY_ID_BATCH_SQL, [
         after,
         FTS_SCAN_BATCH_SIZE,
@@ -318,6 +439,7 @@ export class SqliteMemoryStore implements MemoryStore {
     for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
       const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
       const placeholders = ids.map(() => "?").join(",");
+      this.db();
       await client.run(
         `INSERT INTO memory_fts(memory_id, name, content)
          SELECT m.id, m.name, m.content
@@ -334,16 +456,29 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   /** Resolves once the boot-time FTS backfill has finished (or failed). */
-  whenFtsPopulated(): Promise<void> {
-    return this.ftsPopulate ?? Promise.resolve();
+  async whenFtsPopulated(): Promise<void> {
+    await this.whenReady();
+    if (!this.ftsPopulated && isInTransaction())
+      throw new Error("Await FTS population before starting a database transaction.");
+    await this.ftsPopulate;
+    this.db();
+    if (this.ftsFailure) throw this.ftsFailure;
+  }
+
+  async whenVecPopulated(): Promise<void> {
+    await this.whenReady();
+    if (!this.vecPopulated && isInTransaction())
+      throw new Error("Await vector population before starting a database transaction.");
+    await this.vecPopulate;
+    this.db();
+    if (this.vecFailure) throw this.vecFailure;
   }
 
   /**
-   * Delete and insert run in one transaction (a SAVEPOINT inside a caller's),
-   * so a backfill insert cannot land between them, and a failure rolls back
-   * only the FTS write. `freshId`: the caller inserted the memory row under a
-   * new id in the same transaction, so no FTS row can exist for it and the
-   * delete, a full memory_fts scan (memory_id is UNINDEXED), is skipped.
+   * Delete and insert share one transaction, or a SAVEPOINT inside the caller's transaction.
+   * Failure propagates so source changes also roll back.
+   * With freshId, the caller inserted a new source row in the same transaction.
+   * No FTS row exists yet, so skip the full scan needed for its unindexed ID.
    */
   private async syncFtsRow(
     memoryId: string,
@@ -352,18 +487,15 @@ export class SqliteMemoryStore implements MemoryStore {
     freshId = false,
   ): Promise<void> {
     if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
-    try {
-      await getDbClient().transaction(async (tx) => {
-        if (!freshId) await tx.run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
-        await tx.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
-          memoryId,
-          name,
-          content,
-        ]);
-      });
-    } catch (err) {
-      console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
-    }
+    await this.db().transaction(async (tx) => {
+      if (!freshId) await tx.run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+      await tx.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
+        memoryId,
+        name,
+        content,
+      ]);
+      this.noteVecWrite();
+    });
   }
 
   private async deleteFtsRows(ids: string[]): Promise<void> {
@@ -373,140 +505,80 @@ export class SqliteMemoryStore implements MemoryStore {
     // "no such table: memory_fts". Mirrors the vec guard in purgeByIds.
     if (ids.length === 0 || !(await this.getFtsTableSchema())) return;
     const placeholders = ids.map(() => "?").join(",");
-    await getDbClient().run(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`, ids);
+    await this.db().run(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`, ids);
+    this.noteVecWrite();
+    for (const id of ids) this.vecWriteFailures.delete(id);
   }
 
-  private ensureVecTable(): void {
-    if (this.vecInitialized) return;
-
-    if (!isSqliteVecAvailable()) {
-      console.warn("[memory-vec] sqlite-vec extension_loaded=false; retrieval_mode=fallback");
-      return;
-    }
-
-    const db = getDb();
-    try {
-      console.log(
-        `[memory-vec] sqlite-vec extension_loaded=true vector_dimensions=${EMBEDDING_DIMENSIONS}`,
-      );
-
-      const existingSchema = this.getVecTableSchema();
-      if (existingSchema && !existingSchema.includes("distance_metric=cosine")) {
-        console.warn(
-          "[memory-vec] Existing memory_vec table is missing cosine distance metric; rebuilding from agent_memory",
-        );
-        db.run("DROP TABLE memory_vec");
-      }
-
-      db.run(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0(
-          memory_id TEXT PRIMARY KEY,
-          embedding float[${EMBEDDING_DIMENSIONS}] distance_metric=cosine
-        )
-      `);
-
-      const healthBefore = this.getHealthCounts();
-      if (healthBefore.missingFromVec > 0 || healthBefore.extraInVec > 0) {
-        this.populateVecTable(healthBefore.memoryVec);
-      } else {
-        console.log(
-          `[memory-vec] populate skipped attempted=0 inserted=0 memory_vec=${healthBefore.memoryVec} valid_embedding=${healthBefore.validEmbedding}`,
-        );
-      }
-
-      this.vecInitialized = true;
-    } catch (err) {
-      this.vecInitialized = false;
-      console.error("[memory-vec] Failed to initialize memory_vec:", (err as Error).message);
-    }
+  private async getVecTableSchema(): Promise<string | null> {
+    const row = await this.db().get<{ sql: string | null }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec'",
+    );
+    return row?.sql ?? null;
   }
 
-  private getVecTableSchema(): string | null {
-    try {
-      return (
-        getDb()
-          .prepare<{ sql: string | null }, []>(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec'",
-          )
-          .get()?.sql ?? null
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  private getVecCount(): number {
-    if (!this.getVecTableSchema()) return 0;
+  /** Runtime mutations must see schema changes on their transaction's connection. */
+  private async hasVecTable(tx: DbExecutor): Promise<boolean> {
     return (
-      getDb().prepare<{ count: number }, []>("SELECT COUNT(*) as count FROM memory_vec").get()
-        ?.count ?? 0
+      (await tx.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec'")) !==
+      null
     );
   }
 
-  private populateVecTable(beforeCount: number): void {
-    const db = getDb();
-    const deletedExtra = db
-      .prepare(
-        `DELETE FROM memory_vec
-         WHERE memory_id NOT IN (SELECT id FROM agent_memory)`,
-      )
-      .run();
-    if (deletedExtra.changes > 0) {
-      console.warn(`[memory-vec] removed_extra_rows count=${deletedExtra.changes}`);
-    }
-
-    const rows = db
-      .prepare<{ id: string; embedding: Buffer }, []>(
-        "SELECT id, embedding FROM agent_memory WHERE embedding IS NOT NULL",
-      )
-      .all();
-    const deleteVec = db.prepare("DELETE FROM memory_vec WHERE memory_id = ?");
-    const insertVec = db.prepare("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)");
-
-    let attempted = 0;
-    let inserted = 0;
-    let skippedInvalidDimensions = 0;
-    let failed = 0;
-
-    for (const row of rows) {
-      const embeddingBuffer = this.toVecBuffer(row.embedding);
-      if (!embeddingBuffer) {
-        skippedInvalidDimensions++;
-        continue;
-      }
-
-      attempted++;
-      try {
-        deleteVec.run(row.id);
-        insertVec.run(row.id, embeddingBuffer);
-        inserted++;
-      } catch (err) {
-        failed++;
-        console.error(
-          `[memory-vec] populate failed memory_id=${row.id}: ${(err as Error).message}`,
-        );
-      }
-    }
-
-    const afterCount = this.getVecCount();
-    this.dropSearchHealth();
-    this.lastPopulate = {
-      attempted,
-      inserted,
-      skippedInvalidDimensions,
-      failed,
+  private async populateVecTable(): Promise<void> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const client = this.db();
+    if (!this.vecInitialized) return;
+    const beforeCount =
+      (await client.get<{ count: number }>("SELECT COUNT(*) as count FROM memory_vec"))?.count ?? 0;
+    await client.run(`DELETE FROM memory_vec WHERE memory_id NOT IN (SELECT id FROM agent_memory)`);
+    const stats = {
+      attempted: 0,
+      inserted: 0,
+      skippedInvalidDimensions: 0,
+      failed: 0,
       beforeCount,
-      afterCount,
+      afterCount: beforeCount,
     };
-
-    console.log(
-      `[memory-vec] populate attempted=${attempted} inserted=${inserted} skipped_invalid_dimensions=${skippedInvalidDimensions} failed=${failed} before_count=${beforeCount} after_count=${afterCount}`,
-    );
-
-    if (failed > 0 || afterCount < attempted) {
-      console.error(
-        `[memory-vec] populate incomplete attempted=${attempted} after_count=${afterCount} failed=${failed}`,
-      );
+    this.lastPopulate = stats;
+    try {
+      for (let after = ""; ; ) {
+        this.db();
+        const next = await client.transaction(async (tx) => {
+          this.db();
+          // Read current embeddings under the same lock as index writes.
+          const rows = await tx.query<{ id: string; embedding: Buffer | null }>(
+            "SELECT id, embedding FROM agent_memory WHERE id > ? ORDER BY id LIMIT 500",
+            [after],
+          );
+          for (const row of rows) {
+            await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [row.id]);
+            if (!row.embedding) continue;
+            const buffer = this.toVecBuffer(row.embedding);
+            if (!buffer) {
+              stats.skippedInvalidDimensions++;
+              continue;
+            }
+            stats.attempted++;
+            await tx.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
+              row.id,
+              buffer,
+            ]);
+            stats.inserted++;
+          }
+          this.noteVecWrite();
+          return rows.at(-1)?.id;
+        });
+        if (!next) break;
+        after = next;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      stats.afterCount =
+        (await this.db().get<{ count: number }>("SELECT COUNT(*) as count FROM memory_vec"))
+          ?.count ?? 0;
+    } catch (error) {
+      stats.failed++;
+      throw error;
     }
   }
 
@@ -520,6 +592,7 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async store(input: MemoryInput): Promise<AgentMemory> {
+    await this.whenReady();
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const key = input.key ?? `${input.scope}/${input.source}/${id}`;
@@ -532,7 +605,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const contentHash = contentSha256(content);
     const version = 1;
 
-    const row = await getDbClient().transaction(async (tx) => {
+    const row = await this.db().transaction(async (tx) => {
       const inserted = await tx.get<AgentMemoryRow>(
         `INSERT INTO agent_memory (id, agentId, scope, key, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, updatedAt, accessedAt, expiresAt, accessCount, embeddingModel, contextKey, contentHash, version)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
@@ -589,8 +662,9 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
+    await this.whenReady();
     const results: AgentMemory[] = [];
-    await getDbClient().transaction(async () => {
+    await this.db().transaction(async () => {
       for (const input of inputs) {
         results.push(await this.store(input));
       }
@@ -602,8 +676,9 @@ export class SqliteMemoryStore implements MemoryStore {
     document: MemoryDocumentRef,
     inputs: MemoryInput[],
   ): Promise<AgentMemory[]> {
+    await this.whenReady();
     const results: AgentMemory[] = [];
-    await getDbClient().transaction(async (tx) => {
+    await this.db().transaction(async (tx) => {
       // Only this owner's rows of this source, in this scope, under this key.
       // Another source holding the key is left alone and the insert fails.
       const rows = await tx.query<{ id: string }>(
@@ -625,7 +700,8 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async get(id: string): Promise<AgentMemory | null> {
-    const db = getDbClient();
+    await this.whenReady();
+    const db = this.db();
     const row = await db.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
     if (!row) return null;
 
@@ -639,7 +715,8 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async peek(id: string): Promise<AgentMemory | null> {
-    const row = await getDbClient().get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [
+    await this.whenReady();
+    const row = await this.db().get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [
       id,
     ]);
     if (!row) return null;
@@ -651,6 +728,7 @@ export class SqliteMemoryStore implements MemoryStore {
     agentId: string,
     options: MemorySearchOptions = {},
   ): Promise<MemoryCandidate[]> {
+    await this.whenReady();
     // Nested breadcrumb: the stall line keeps the caller and names the search.
     return withLoopPath(`${currentLoopPath()} > memory.search`, () =>
       this.searchInLoopPath(embedding, agentId, options),
@@ -685,11 +763,22 @@ export class SqliteMemoryStore implements MemoryStore {
       });
     }
 
+    // Keyword-only searches require the complete FTS index. Semantic searches
+    // can use source embeddings while either population continues.
+    if (
+      options.queryText &&
+      embedding.length !== EMBEDDING_DIMENSIONS &&
+      !this.ftsPopulated &&
+      !this.ftsFailure
+    ) {
+      await this.whenFtsPopulated();
+    }
     const health = await this.searchHealth();
     if (
       isHybridSearchEnabled() &&
       options.queryText &&
-      this.ftsInitialized &&
+      this.ftsPopulated &&
+      !this.ftsFailure &&
       (await this.getFtsTableSchema()) &&
       health.retrievalMode === "vec" &&
       embedding.length === EMBEDDING_DIMENSIONS
@@ -724,7 +813,12 @@ export class SqliteMemoryStore implements MemoryStore {
       });
     }
 
-    if (options.queryText && this.ftsInitialized && (await this.getFtsTableSchema())) {
+    if (
+      options.queryText &&
+      this.ftsPopulated &&
+      !this.ftsFailure &&
+      (await this.getFtsTableSchema())
+    ) {
       console.log(
         `[memory-search] retrieval_path=fts scope=${scope} limit=${limit} reason=${embedding.length !== EMBEDDING_DIMENSIONS ? "query_dimension_mismatch" : health.reasons.join("|") || "vec_unavailable"}`,
       );
@@ -825,7 +919,7 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     const missing = ids.filter((id) => !cosines.has(id));
     if (missing.length === 0) return;
-    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer | null }>(
+    const rows = await this.searchDb().query<{ id: string; embedding: Buffer | null }>(
       `SELECT id, embedding FROM agent_memory WHERE id IN (${missing.map(() => "?").join(",")})`,
       missing,
     );
@@ -872,7 +966,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     try {
       const sqlLimit = armFetchLimit(limit);
-      const rows = await memorySearchReader.query<AgentMemoryRow & { rank: number }>(
+      const rows = await this.searchDb().query<AgentMemoryRow & { rank: number }>(
         `SELECT m.*, bm25(memory_fts) AS rank
          FROM memory_fts
          JOIN agent_memory m ON m.id = memory_fts.memory_id
@@ -957,7 +1051,7 @@ export class SqliteMemoryStore implements MemoryStore {
     conditions.push("v.k = ?");
     params.push(knnLimit);
 
-    const rows = await memorySearchReader.query<AgentMemoryRow & { distance: number }>(
+    const rows = await this.searchDb().query<AgentMemoryRow & { distance: number }>(
       `SELECT m.*, v.distance
        FROM memory_vec v
        JOIN agent_memory m ON m.id = v.memory_id
@@ -1033,7 +1127,7 @@ export class SqliteMemoryStore implements MemoryStore {
     );
     if (top.length === 0) return [];
 
-    const rows = await memorySearchReader.query<AgentMemoryRow>(
+    const rows = await this.searchDb().query<AgentMemoryRow>(
       `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
       top.map((hit) => hit.id),
     );
@@ -1055,7 +1149,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const db = memorySearchReader;
+    const db = this.searchDb();
     const counted = await db.get<{ n: number }>(
       `SELECT COUNT(*) AS n FROM (SELECT 1 ${capped})`,
       cappedParams,
@@ -1086,7 +1180,7 @@ export class SqliteMemoryStore implements MemoryStore {
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer }>(
+    const rows = await this.searchDb().query<{ id: string; embedding: Buffer }>(
       `SELECT id, embedding ${capped}`,
       cappedParams,
     );
@@ -1136,13 +1230,18 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const rows = await memorySearchReader.query<AgentMemoryRow>(
+    const rows = await this.searchDb().query<AgentMemoryRow>(
       `SELECT * FROM agent_memory ${whereClause}`,
       params,
     );
 
     const candidates: MemoryCandidate[] = [];
-    for (const row of rows) {
+    for (let index = 0; index < rows.length; index++) {
+      if (index > 0 && index % 500 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        this.db();
+      }
+      const row = rows[index]!;
       if (!row.embedding) continue;
       const emb = deserializeEmbedding(row.embedding);
       if (emb.length !== queryEmbedding.length) continue;
@@ -1246,11 +1345,12 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async list(agentId: string, options: MemoryListOptions = {}): Promise<AgentMemory[]> {
+    await this.whenReady();
     const { limit = 20, offset = 0 } = options;
     const { whereClause, params } = this.buildListWhereClause(agentId, options);
     const queryParams = [...params, limit, offset];
 
-    const rows = await getDbClient().query<AgentMemoryRow>(
+    const rows = await this.db().query<AgentMemoryRow>(
       `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
       queryParams,
     );
@@ -1259,8 +1359,9 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async count(agentId: string, options: MemoryListOptions = {}): Promise<number> {
+    await this.whenReady();
     const { whereClause, params } = this.buildListWhereClause(agentId, options);
-    const row = await getDbClient().get<{ count: number }>(
+    const row = await this.db().get<{ count: number }>(
       `SELECT COUNT(*) AS count FROM agent_memory ${whereClause}`,
       params,
     );
@@ -1273,6 +1374,7 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async edit(input: MemoryEditInput): Promise<MemoryEditResult> {
+    await this.whenReady();
     if (!input.id && !(input.key && input.scope)) {
       throw new Error("memory edit requires either id or key+scope");
     }
@@ -1281,7 +1383,7 @@ export class SqliteMemoryStore implements MemoryStore {
     // optimistic-lock check all run INSIDE the transaction: once every read is
     // awaited, a concurrent edit could otherwise commit between the version
     // read and the UPDATE and silently win.
-    const { result, ftsContent } = await getDbClient().transaction(async (tx) => {
+    const { result } = await this.db().transaction(async (tx) => {
       const row = input.id
         ? await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [input.id])
         : await tx.get<AgentMemoryRow>(
@@ -1424,6 +1526,8 @@ export class SqliteMemoryStore implements MemoryStore {
         );
       }
 
+      this.noteVecWrite();
+      if (contentChanged) await this.syncFtsRow(row.id, row.name, nextContent);
       return {
         result: {
           memory: rowToAgentMemory({
@@ -1444,17 +1548,14 @@ export class SqliteMemoryStore implements MemoryStore {
       };
     });
 
-    if (ftsContent !== null) {
-      await this.syncFtsRow(result.memory.id, result.memory.name, ftsContent);
-    }
-
     return result;
   }
 
   async listForCuration(
     agentId?: string,
   ): Promise<{ id: string; source: string; name: string; createdAt: string }[]> {
-    const db = getDbClient();
+    await this.whenReady();
+    const db = this.db();
     const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
     // A /longterm key is protected whatever its source (see tierSource).
     const notLongterm = `coalesce(key, '') != '${LONGTERM_ROOT}' AND substr(coalesce(key, ''), 1, ${LONGTERM_ROOT.length + 1}) != '${LONGTERM_ROOT}/'`;
@@ -1474,7 +1575,8 @@ export class SqliteMemoryStore implements MemoryStore {
   async listForReembedding(options?: {
     agentId?: string;
   }): Promise<{ id: string; content: string }[]> {
-    const db = getDbClient();
+    await this.whenReady();
+    const db = this.db();
     if (options?.agentId) {
       return db.query<{ id: string; content: string }>(
         "SELECT id, content FROM agent_memory WHERE agentId = ?",
@@ -1486,16 +1588,17 @@ export class SqliteMemoryStore implements MemoryStore {
 
   private async purgeByIds(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    if (this.vecInitialized && this.getVecTableSchema()) {
+    if (this.vecInitialized && (await this.hasVecTable(this.db()))) {
       const placeholders = ids.map(() => "?").join(",");
-      await getDbClient().run(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`, ids);
+      await this.db().run(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`, ids);
       this.noteVecWrite();
     }
     await this.deleteFtsRows(ids);
   }
 
   async delete(id: string): Promise<boolean> {
-    return getDbClient().transaction(async (tx) => {
+    await this.whenReady();
+    return this.db().transaction(async (tx) => {
       const row = await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
       if (!row) return false;
       // Explicit keys identify a document. Legacy generated keys identify only a row.
@@ -1514,24 +1617,24 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {
-    const db = getDbClient();
-
-    const ids = await db.query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE sourcePath = ? AND agentId = ?",
-      [sourcePath, agentId],
-    );
-
-    await this.purgeByIds(ids.map((r) => r.id));
-
-    const result = await db.run("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?", [
-      sourcePath,
-      agentId,
-    ]);
-    return ids.length || result.changes;
+    await this.whenReady();
+    return this.db().transaction(async (tx) => {
+      const ids = await tx.query<{ id: string }>(
+        "SELECT id FROM agent_memory WHERE sourcePath = ? AND agentId = ?",
+        [sourcePath, agentId],
+      );
+      await this.purgeByIds(ids.map((r) => r.id));
+      const result = await tx.run("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?", [
+        sourcePath,
+        agentId,
+      ]);
+      return result.changes;
+    });
   }
 
   async purgeExpired(): Promise<number> {
-    const db = getDbClient();
+    await this.whenReady();
+    const db = this.db();
 
     const expiredIds = await db.query<{ id: string }>(
       "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
@@ -1574,10 +1677,11 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
+    await this.whenReady();
     const buffer = serializeEmbedding(embedding);
     // One transaction: a delete or replaceDocument queued behind this write
     // cannot land between the row UPDATE and the vec insert and orphan it.
-    await getDbClient().transaction(async (tx) => {
+    await this.db().transaction(async (tx) => {
       const updated = await tx.run(
         "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
         [buffer, model, id],
@@ -1585,24 +1689,28 @@ export class SqliteMemoryStore implements MemoryStore {
       // The row was deleted (or replaced) while its embedding was in flight:
       // a vec row now would point at nothing.
       if (updated.changes === 0) return;
+      this.noteVecWrite();
 
-      if (this.vecInitialized && this.getVecTableSchema()) {
-        const vecBuffer = this.toVecBuffer(embedding);
-        if (!vecBuffer) {
-          console.warn(
-            `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${EMBEDDING_DIMENSIONS}`,
-          );
-          return;
-        }
+      if (this.vecInitialized && (await this.hasVecTable(tx))) {
         try {
           await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+          const vecBuffer = this.toVecBuffer(embedding);
+          if (!vecBuffer) {
+            console.warn(
+              `[memory-vec] update skipped memory_id=${id} reason=invalid_dimensions dimensions=${embedding.length} expected=${EMBEDDING_DIMENSIONS}`,
+            );
+            return;
+          }
+
           await tx.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
             id,
             vecBuffer,
           ]);
+          this.vecWriteFailures.delete(id);
           this.noteVecWrite();
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
+          this.vecWriteFailures.set(id, err);
           // The row now misses from memory_vec: search must see the fallback.
           this.invalidateSearchHealth();
         }
@@ -1611,11 +1719,14 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async clearEmbedding(id: string): Promise<void> {
-    await getDbClient().transaction(async (tx) => {
+    await this.whenReady();
+    await this.db().transaction(async (tx) => {
       await tx.run("UPDATE agent_memory SET embedding = NULL, embeddingModel = NULL WHERE id = ?", [
         id,
       ]);
-      if (this.vecInitialized && this.getVecTableSchema()) {
+      this.vecWriteFailures.delete(id);
+      this.noteVecWrite();
+      if (this.vecInitialized && (await this.hasVecTable(tx))) {
         await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
         this.noteVecWrite();
       }
@@ -1627,8 +1738,9 @@ export class SqliteMemoryStore implements MemoryStore {
     before: MemoryScrubFields,
     after: MemoryScrubFields,
   ): Promise<boolean> {
+    await this.whenReady();
     const contentChanged = after.content !== before.content;
-    return getDbClient().transaction(async (tx) => {
+    return this.db().transaction(async (tx) => {
       // Compare-and-set: the sweep scrubbed `before` outside the write lock, so
       // skip the row if a concurrent write moved it since.
       const result = await tx.run(
@@ -1653,7 +1765,7 @@ export class SqliteMemoryStore implements MemoryStore {
       if (result.changes === 0) return false;
       // The vector embeds the old (secret-bearing) content. Drop it; the
       // re-embed backfill picks the row up via `embedding IS NULL`.
-      if (contentChanged && this.vecInitialized && this.getVecTableSchema()) {
+      if (contentChanged && this.vecInitialized && (await this.hasVecTable(tx))) {
         await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
         this.noteVecWrite();
       }
@@ -1665,7 +1777,8 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async getStats(agentId: string): Promise<MemoryStats> {
-    const db = getDbClient();
+    await this.whenReady();
+    const db = this.db();
 
     const total = await db.get<{ count: number }>(
       "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
@@ -1707,16 +1820,18 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
-  /**
-   * The same eight counts as getHealthCounts(), as one statement on a read
-   * worker so the scans block that thread and not the API event loop. One
-   * statement keeps the other worker free for searches while it runs.
-   */
-  private async getHealthCountsOffLoop(): Promise<MemoryHealth["counts"]> {
-    const tableUsable = this.getVecTableSchema() !== null && isSqliteVecAvailable();
+  private async getHealthCountsOffLoop(): Promise<{
+    counts: MemoryHealth["counts"];
+    schema: string | null;
+  }> {
+    // Schema readiness established the table. A concurrent schema change rejects this read.
+    const tableUsable = this.vecInitialized && isSqliteVecAvailable();
     const valid = `embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`;
-    const row = await memorySearchReader.get<Record<keyof MemoryHealth["counts"], number>>(
+    const row = await this.searchDb().get<
+      Record<keyof MemoryHealth["counts"], number> & { schema: string | null }
+    >(
       `SELECT
+         (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec') AS schema,
          (SELECT COUNT(*) FROM agent_memory) AS total,
          (SELECT COUNT(*) FROM agent_memory WHERE embedding IS NOT NULL) AS withEmbedding,
          (SELECT COUNT(*) FROM agent_memory WHERE ${valid}) AS validEmbedding,
@@ -1741,42 +1856,45 @@ export class SqliteMemoryStore implements MemoryStore {
     );
     if (!row) throw new Error("health counts returned no row");
     return {
-      total: row.total,
-      withEmbedding: row.withEmbedding,
-      validEmbedding: row.validEmbedding,
-      invalidEmbedding: row.invalidEmbedding,
-      searchable: row.searchable,
-      memoryVec: row.memoryVec,
-      missingFromVec: row.missingFromVec,
-      extraInVec: row.extraInVec,
+      schema: row.schema,
+      counts: {
+        total: row.total,
+        withEmbedding: row.withEmbedding,
+        validEmbedding: row.validEmbedding,
+        invalidEmbedding: row.invalidEmbedding,
+        searchable: row.searchable,
+        memoryVec: row.memoryVec,
+        missingFromVec: row.missingFromVec,
+        extraInVec: row.extraInVec,
+      },
     };
   }
 
-  private getHealthCounts(): MemoryHealth["counts"] {
-    const db = getDb();
-    const tableExists = this.getVecTableSchema() !== null;
+  private async getHealthCounts(): Promise<MemoryHealth["counts"]> {
+    const db = this.db();
+    const tableExists = (await this.getVecTableSchema()) !== null;
     const tableUsable = tableExists && isSqliteVecAvailable();
-    const count = (sql: string) => db.prepare<{ count: number }, []>(sql).get()?.count ?? 0;
-    const validEmbedding = count(
+    const count = async (sql: string) => (await db.get<{ count: number }>(sql))?.count ?? 0;
+    const validEmbedding = await count(
       `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`,
     );
 
     return {
-      total: count("SELECT COUNT(*) as count FROM agent_memory"),
-      withEmbedding: count(
+      total: await count("SELECT COUNT(*) as count FROM agent_memory"),
+      withEmbedding: await count(
         "SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL",
       ),
       validEmbedding,
-      invalidEmbedding: count(
+      invalidEmbedding: await count(
         `SELECT COUNT(*) as count FROM agent_memory WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
       ),
-      searchable: count(
+      searchable: await count(
         `SELECT COUNT(*) as count FROM agent_memory
          WHERE embedding IS NOT NULL
            AND length(embedding) = ${VECTOR_BYTES}
            AND (expiresAt IS NULL OR expiresAt > datetime('now'))`,
       ),
-      memoryVec: tableUsable ? count("SELECT COUNT(*) as count FROM memory_vec") : 0,
+      memoryVec: tableUsable ? await count("SELECT COUNT(*) as count FROM memory_vec") : 0,
       // Valid rows minus the valid rows memory_vec holds. memory_vec.memory_id
       // is its primary key, so the join counts each memory at most once. The
       // CROSS JOIN pins memory_vec as the outer loop: an agent_memory-driven
@@ -1784,16 +1902,16 @@ export class SqliteMemoryStore implements MemoryStore {
       // seconds at 57k memories; this side is a primary-key lookup per vec row.
       missingFromVec: tableUsable
         ? validEmbedding -
-          count(
+          (await count(
             `SELECT COUNT(*) as count
              FROM memory_vec v
              CROSS JOIN agent_memory m ON m.id = v.memory_id
              WHERE m.embedding IS NOT NULL
                AND length(m.embedding) = ${VECTOR_BYTES}`,
-          )
+          ))
         : validEmbedding,
       extraInVec: tableUsable
-        ? count(
+        ? await count(
             `SELECT COUNT(*) as count
              FROM memory_vec v
              LEFT JOIN agent_memory m ON m.id = v.memory_id
@@ -1803,41 +1921,27 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
-  /**
-   * getHealth() for the search path. The counts scan agent_memory and
-   * memory_vec (about 0.8 s at 63k memories), so search never runs them on the
-   * event loop: one read worker computes them, search reuses one result per
-   * window, and an expired "vec" result is served while a refresh runs in the
-   * background. The health endpoint keeps calling getHealth() for fresh counts.
-   */
+  /** Reuse search health while one read worker refreshes an expired vector result. */
   private async searchHealth(): Promise<MemoryHealth> {
-    const db = getDb();
+    const db = this.db();
+    // A transaction must count its own writes, even when a shared cache exists.
+    if (isInTransaction()) return this.getHealth();
     const cached = this.searchHealthCache;
-    const inTransaction = isInTransaction();
-    // The db check drops a result that outlived a DB swap (tests reinit it).
     if (cached && cached.db === db) {
       if (Date.now() - cached.at < SEARCH_HEALTH_TTL_MS) return cached.health;
-      // A stale "vec" is at worst one refresh old; a stale fallback is
-      // awaited so a repaired index is seen on the next search.
-      if (cached.health.retrievalMode === "vec" && !inTransaction) {
-        if (!this.searchHealthRefresh) this.startSearchHealthRefresh(db).promise.catch(() => {});
+      if (cached.health.retrievalMode === "vec") {
+        if (!this.searchHealthRefresh) {
+          void this.startSearchHealthRefresh(db).promise.catch(() => {});
+        }
         return cached.health;
       }
     }
-    // A transaction must see its own writes, which may still roll back, and
-    // its search reads run in-process anyway: count there, share and store nothing.
-    if (inTransaction) return this.getHealth();
     return this.currentSearchHealth();
   }
 
-  /**
-   * A health result that no write invalidated before it returns. Searches
-   * share one refresh per DB and generation; one a write overtook is retried,
-   * for every search waiting on it.
-   */
   private async currentSearchHealth(): Promise<MemoryHealth> {
     for (let attempt = 0; attempt < SEARCH_HEALTH_MAX_REFRESHES; attempt++) {
-      const db = getDb();
+      const db = this.db();
       const generation = this.searchHealthGeneration;
       const inFlight = this.searchHealthRefresh;
       const refresh =
@@ -1845,77 +1949,89 @@ export class SqliteMemoryStore implements MemoryStore {
           ? inFlight
           : this.startSearchHealthRefresh(db);
       const health = await refresh.promise;
-      if (getDb() === db && this.searchHealthGeneration === generation) return health;
+      if (this.db() === db && this.searchHealthGeneration === generation) return health;
     }
-    // Writes kept overtaking the off-loop counts. In-process, no write can
-    // land between the count and the return.
-    const health = this.getHealth();
-    this.searchHealthCache = { health, db: getDb(), at: Date.now() };
-    return health;
+    // A read transaction provides a consistent fallback when writes repeatedly invalidate counts.
+    return this.getHealth();
   }
 
-  private startSearchHealthRefresh(db: unknown): SearchHealthRefresh {
+  private startSearchHealthRefresh(db: DbClient): SearchHealthRefresh {
     const generation = this.searchHealthGeneration;
-    const promise = (async () => {
-      let health: MemoryHealth;
+    const work = (async () => {
       try {
-        health = this.healthFromCounts(await this.getHealthCountsOffLoop());
-      } catch (err) {
-        console.warn("[memory-search] health counts failed:", (err as Error).message);
-        health = this.getHealth();
+        const { counts, schema } = await this.getHealthCountsOffLoop();
+        this.db();
+        return this.healthFromCounts(counts, schema);
+      } catch (error) {
+        this.db();
+        console.warn("[memory-search] health counts failed:", (error as Error).message);
+        return this.getHealth();
       }
-      // A DB swap or a vec write mid-refresh invalidated this result.
-      if (getDb() === db && generation === this.searchHealthGeneration)
-        this.searchHealthCache = { health, db, at: Date.now() };
-      return health;
-    })().finally(() => {
-      // A newer refresh may have replaced this one: leave it in place.
-      if (this.searchHealthRefresh === entry) this.searchHealthRefresh = null;
+    })();
+    let onStop!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onStop = () => reject(new Error("Memory store connection closed."));
+      this.healthAbort.signal.addEventListener("abort", onStop, { once: true });
+      if (this.healthAbort.signal.aborted) onStop();
     });
+    const promise = Promise.race([work, cancelled])
+      .then((health) => {
+        if (this.db() === db && generation === this.searchHealthGeneration) {
+          this.searchHealthCache = { health, db, at: Date.now() };
+        }
+        return health;
+      })
+      .finally(() => {
+        this.healthAbort.signal.removeEventListener("abort", onStop);
+        this.healthRefreshes.delete(promise);
+        if (this.searchHealthRefresh === entry) this.searchHealthRefresh = null;
+      });
     const entry: SearchHealthRefresh = { db, generation, promise };
     this.searchHealthRefresh = entry;
+    this.healthRefreshes.add(promise);
     return entry;
   }
 
-  /**
-   * A vec write can heal a cached fallback (first vector, backfilled row), so
-   * it drops one. A cached "vec" stays: dropping it on every write would
-   * recount on the next search, and a stale "vec" is at worst one TTL old.
-   */
+  /** Keep a cached vector mode, but make every refresh that preceded a write obsolete. */
   private noteVecWrite(): void {
-    if (this.searchHealthCache?.health.retrievalMode !== "vec") this.invalidateSearchHealth();
+    this.invalidateSearchHealth(true);
   }
 
-  /**
-   * Drop now, so no refresh in flight is stored or returned, and again once
-   * the writing transaction commits: a refresh that starts before the commit
-   * reads the snapshot without this write.
-   */
-  private invalidateSearchHealth(): void {
-    this.dropSearchHealth();
-    if (isInTransaction()) getDbClient().afterCommit(() => this.dropSearchHealth());
+  private invalidateSearchHealth(keepVec = false): void {
+    this.dropSearchHealth(keepVec);
+    if (isInTransaction()) this.db().afterCommit(() => this.dropSearchHealth(keepVec));
   }
 
-  private dropSearchHealth(): void {
-    this.searchHealthCache = null;
+  private dropSearchHealth(keepVec = false): void {
+    if (!keepVec || this.searchHealthCache?.health.retrievalMode !== "vec")
+      this.searchHealthCache = null;
     this.searchHealthGeneration++;
   }
 
-  getHealth(): MemoryHealth {
-    return this.healthFromCounts(this.getHealthCounts());
+  async getHealth(): Promise<MemoryHealth> {
+    await this.whenReady();
+    return this.db().transaction(
+      async () => {
+        const schema = await this.getVecTableSchema();
+        return this.healthFromCounts(await this.getHealthCounts(), schema);
+      },
+      { readOnly: true },
+    );
   }
 
-  private healthFromCounts(counts: MemoryHealth["counts"]): MemoryHealth {
-    const schema = this.getVecTableSchema();
+  private healthFromCounts(counts: MemoryHealth["counts"], schema: string | null): MemoryHealth {
     const reasons: string[] = [];
-
+    if (!this.vecPopulated) reasons.push("memory_vec_populating");
+    if (!this.ftsPopulated) reasons.push("memory_fts_populating");
+    if (this.vecFailure) reasons.push("memory_vec_population_failed");
+    if (this.vecWriteFailures.size > 0) reasons.push("memory_vec_write_failed");
+    if (this.ftsFailure) reasons.push("memory_fts_population_failed");
     if (!isSqliteVecAvailable()) reasons.push("sqlite_vec_extension_unavailable");
     if (!schema) reasons.push("memory_vec_table_missing");
     if (!this.vecInitialized) reasons.push("memory_vec_not_initialized");
     if (counts.memoryVec === 0) reasons.push("memory_vec_empty");
     if (counts.missingFromVec > 0) reasons.push("memory_vec_missing_embeddings");
     if (counts.extraInVec > 0) reasons.push("memory_vec_extra_rows");
-
     return {
       sqliteVec: {
         extensionLoaded: isSqliteVecAvailable(),

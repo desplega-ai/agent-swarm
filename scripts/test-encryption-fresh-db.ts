@@ -37,7 +37,7 @@ console.log(`[test] Initialized fresh DB at ${DB_PATH}`);
 
 if (!existsSync(KEY_PATH)) {
   console.error(`[test] FAIL: expected ${KEY_PATH} to be auto-generated but it is missing`);
-  closeDb();
+  await closeDb();
   cleanupFiles();
   process.exit(1);
 }
@@ -59,13 +59,13 @@ const rawRow = getDb()
 
 if (!rawRow || rawRow.encrypted !== 1) {
   console.error(`[test] FAIL: expected encrypted=1, got ${rawRow?.encrypted}`);
-  closeDb();
+  await closeDb();
   cleanupFiles();
   process.exit(1);
 }
 if (rawRow.value === "hello-plaintext") {
   console.error(`[test] FAIL: raw row value is plaintext, not ciphertext`);
-  closeDb();
+  await closeDb();
   cleanupFiles();
   process.exit(1);
 }
@@ -74,12 +74,12 @@ console.log(`[test] OK: raw value is ciphertext (${rawRow.value.slice(0, 16)}...
 const readBack = getSwarmConfigById(config.id);
 if (readBack?.value !== "hello-plaintext") {
   console.error(`[test] FAIL: read-back plaintext mismatch, got ${readBack?.value}`);
-  closeDb();
+  await closeDb();
   cleanupFiles();
   process.exit(1);
 }
 console.log(`[test] OK: roundtrip plaintext = '${readBack.value}'`);
 
-closeDb();
+await closeDb();
 cleanupFiles();
 console.log("[test] PASS: fresh-DB encryption roundtrip works end-to-end");

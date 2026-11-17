@@ -575,7 +575,7 @@ describe("telemetry ingest anchor", () => {
       await record(1, "install_ffffffffffffffff");
       expect(await getTelemetryIngestAnchor()).toBeNull();
     } finally {
-      db.closeDb();
+      await db.closeDb();
     }
   });
 });

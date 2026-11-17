@@ -78,7 +78,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -188,7 +188,7 @@ describe("handlePullRequestCreated", () => {
   });
 
   test("a skip_event template override suppresses the task", async () => {
-    const override = upsertPromptTemplate({
+    const override = await upsertPromptTemplate({
       eventType: "bitbucket.pull_request.opened",
       scope: "global",
       state: "skip_event",

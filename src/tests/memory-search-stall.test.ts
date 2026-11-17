@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, getDbClient, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { SEARCH_HEALTH_TTL_MS, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import {
@@ -95,8 +95,8 @@ function watchCountScans(): {
   release: (i: number) => void;
   stop: () => void;
 } {
-  const db = getDb();
-  const realPrepare = db.prepare;
+  const db = getDbClient();
+  const realPrepare = db.get;
   const realGet = memorySearchReader.get;
   const gates: { counted: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> }[] = [];
   const gate = (i: number) => {
@@ -111,17 +111,17 @@ function watchCountScans(): {
     counted: (i: number) => gate(i).counted.promise,
     release: (i: number) => gate(i).release.resolve(),
     stop: () => {
-      db.prepare = realPrepare;
+      db.get = realPrepare;
       memorySearchReader.get = realGet;
       for (const held of gates) held?.release.resolve();
     },
   };
-  db.prepare = ((sql: string, ...rest: unknown[]) => {
+  db.get = ((sql: string, ...rest: unknown[]) => {
     // getHealthCounts() runs this statement exactly once per call.
     if (sql === "SELECT COUNT(*) as count FROM agent_memory") seen.health++;
     if (sql === "SELECT COUNT(*) as count FROM memory_vec") seen.vecCount++;
     return (realPrepare as (...args: unknown[]) => unknown).call(db, sql, ...rest);
-  }) as typeof db.prepare;
+  }) as typeof db.get;
   memorySearchReader.get = (async (sql: string, params?: never) => {
     if (!sql.includes("AS extraInVec")) return realGet(sql, params);
     const i = seen.offLoop++;
@@ -142,14 +142,24 @@ async function countedWithin(scans: ReturnType<typeof watchCountScans>, i: numbe
 
 /** Make every memory_vec INSERT throw until the returned restore runs. */
 function failVecInserts(): () => void {
-  const db = getDb();
-  const realQuery = db.query;
-  db.query = ((sql: string, ...rest: unknown[]) => {
-    if (sql.startsWith("INSERT INTO memory_vec")) throw new Error("injected vec insert failure");
-    return (realQuery as (...args: unknown[]) => unknown).call(db, sql, ...rest);
-  }) as typeof db.query;
+  const db = getDbClient();
+  const realTransaction = db.transaction;
+  db.transaction = ((fn, opts) =>
+    realTransaction.call(
+      db,
+      async (tx) =>
+        fn({
+          ...tx,
+          run: (sql, params) => {
+            if (sql.startsWith("INSERT INTO memory_vec"))
+              throw new Error("injected vec insert failure");
+            return tx.run(sql, params);
+          },
+        }),
+      opts,
+    )) as typeof db.transaction;
   return () => {
-    db.query = realQuery;
+    db.transaction = realTransaction;
   };
 }
 
@@ -167,7 +177,7 @@ beforeAll(async () => {
   }
   globals.__savedSearchStallTemplate = globals.__testMigrationTemplate;
   globals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: healthAgent, name: "Health Agent", isLead: false, status: "idle" });
   await createAgent({ id: reviewAgent, name: "Review Agent", isLead: false, status: "idle" });
@@ -179,7 +189,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await __resetMemorySearchReaderForTests();
-  closeDb();
+  await closeDb();
   globals.__testMigrationTemplate = globals.__savedSearchStallTemplate;
   globals.__savedSearchStallTemplate = undefined;
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -192,7 +202,10 @@ afterAll(async () => {
 describe("memory search does not rescan the tables on every call", () => {
   test("a cached or in-flight fallback is dropped by the first vector write", async () => {
     const store = new SqliteMemoryStore();
-    const vecUsable = store.getHealth().sqliteVec.initialized;
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
+    const vecUsable = (await store.getHealth()).sqliteVec.initialized;
     const expectedSource = vecUsable ? "vec" : "fallback";
     const scans = watchCountScans();
     scans.hold = new Set([0, 1]);
@@ -226,7 +239,10 @@ describe("memory search does not rescan the tables on every call", () => {
 
   test("search computes the health counts off the event loop, once per window, and never counts memory_vec per query", async () => {
     const store = new SqliteMemoryStore();
-    const vecUsable = store.getHealth().sqliteVec.initialized;
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
+    const vecUsable = (await store.getHealth()).sqliteVec.initialized;
     await remember(store, healthAgent, "second-note", "manual", null, 0.8);
     const scans = watchCountScans();
     try {
@@ -257,11 +273,11 @@ describe("memory search does not rescan the tables on every call", () => {
 
       // The health endpoint's read stays fresh on every call, and the worker's
       // single-statement counts equal it.
-      const fresh = store.getHealth();
-      store.getHealth();
+      const fresh = await store.getHealth();
+      await store.getHealth();
       expect(scans.health).toBe(2);
-      const offLoop = await (
-        store as unknown as { getHealthCountsOffLoop(): Promise<unknown> }
+      const { counts: offLoop } = await (
+        store as unknown as { getHealthCountsOffLoop(): Promise<{ counts: unknown }> }
       ).getHealthCountsOffLoop();
       expect(offLoop).toEqual(fresh.counts);
       if (!vecUsable) return; // no vec0: every result is a fallback
@@ -347,6 +363,9 @@ describe("a review task's recall excludes review completions in the store query"
 
   beforeAll(async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
     // Nearest neighbours: 100 completions of other review tasks, one task each
     // so rerank()'s per-document collapse plays no part.
     const reviewTasks = [
@@ -398,6 +417,9 @@ describe("a review task's recall excludes review completions in the store query"
   for (const queryText of [undefined, QUERY]) {
     test(`${queryText ? "hybrid" : "vec"}: one store.search round fills the limit with none of them`, async () => {
       const store = new SqliteMemoryStore();
+      await store.whenReady();
+      await store.whenVecPopulated();
+      await store.whenFtsPopulated();
       let rounds = 0;
       const realSearch = store.search.bind(store);
       store.search = (...args: Parameters<SqliteMemoryStore["search"]>) => {
@@ -418,6 +440,9 @@ describe("a review task's recall excludes review completions in the store query"
 
   test("without the option the review completions still rank first", async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
     const rows = await store.search(queryEmbedding, reviewAgent, { limit: LIMIT });
     expect(rows.map((row) => row.name)).toEqual([0, 1, 2, 3, 4].map((i) => `review-${i}`));
   });
@@ -436,18 +461,27 @@ describe("health counts and the FTS sync avoid full scans", () => {
   });
 
   function watchFtsDeletes(): { deletes: number; stop: () => void } {
-    const db = getDb();
-    const realQuery = db.query;
+    const db = getDbClient();
+    const realTransaction = db.transaction;
     const seen = {
       deletes: 0,
       stop: () => {
-        db.query = realQuery;
+        db.transaction = realTransaction;
       },
     };
-    db.query = ((sql: string, ...rest: unknown[]) => {
-      if (sql === FTS_DELETE_SQL) seen.deletes++;
-      return (realQuery as (...args: unknown[]) => unknown).call(db, sql, ...rest);
-    }) as typeof db.query;
+    db.transaction = ((fn, opts) =>
+      realTransaction.call(
+        db,
+        async (tx) =>
+          fn({
+            ...tx,
+            run: (sql, params) => {
+              if (sql === FTS_DELETE_SQL) seen.deletes++;
+              return tx.run(sql, params);
+            },
+          }),
+        opts,
+      )) as typeof db.transaction;
     return seen;
   }
 
@@ -461,7 +495,10 @@ describe("health counts and the FTS sync avoid full scans", () => {
 
   test("missingFromVec equals the agent_memory anti-join it replaced", async () => {
     const store = new SqliteMemoryStore();
-    if (!store.getHealth().sqliteVec.initialized) return; // no vec0: the count is validEmbedding
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
+    if (!(await store.getHealth()).sqliteVec.initialized) return; // no vec0: the count is validEmbedding
     for (let i = 0; i < 3; i++) await remember(store, scanAgent, `vec-${i}`, "manual", null, 0.5);
     const dropped = await store.store({
       agentId: scanAgent,
@@ -496,17 +533,17 @@ describe("health counts and the FTS sync avoid full scans", () => {
       new Uint8Array(mix(0.5, 6).buffer),
     ]);
 
-    const oracle = getDb()
-      .prepare<{ n: number }, []>(
+    const oracle = (
+      await getDbClient().get<{ n: number }>(
         `SELECT COUNT(*) AS n FROM agent_memory m
          LEFT JOIN memory_vec v ON v.memory_id = m.id
          WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${512 * 4}
            AND v.memory_id IS NULL`,
       )
-      .get()?.n;
+    )?.n;
     try {
       expect(oracle).toBeGreaterThanOrEqual(1);
-      const counts = store.getHealth().counts;
+      const counts = (await store.getHealth()).counts;
       expect(counts.extraInVec).toBeGreaterThanOrEqual(1);
       expect(counts.missingFromVec).toBe(oracle as number);
     } finally {
@@ -561,6 +598,9 @@ describe("health counts and the FTS sync avoid full scans", () => {
 
   test("a backfill that finishes between store()'s commit and return leaves one memory_fts row", async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
     await store.whenFtsPopulated();
     // Pause store() after its outermost transaction commits, before it returns.
     const client = getDbClient();

@@ -164,7 +164,7 @@ describe("savings scripts", () => {
   afterAll(async () => {
     server?.close();
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 

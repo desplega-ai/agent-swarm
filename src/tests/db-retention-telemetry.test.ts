@@ -291,7 +291,7 @@ describe("db-retention.ts telemetry wiring (integration)", () => {
 
   afterAll(async () => {
     await resetDbRetentionForTests();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

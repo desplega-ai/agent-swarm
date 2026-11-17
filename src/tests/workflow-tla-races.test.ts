@@ -172,7 +172,7 @@ beforeAll(() => initDb(TEST_DB_PATH));
 afterAll(async () => {
   stopRetryPoller();
   for (const id of workflowIds) await deleteWorkflow(id).catch(() => {});
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
 });
 

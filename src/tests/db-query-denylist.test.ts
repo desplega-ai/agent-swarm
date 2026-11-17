@@ -36,7 +36,7 @@ async function removeDb(): Promise<void> {
 beforeAll(async () => {
   savedTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   await removeDb();
   initDb(DB_PATH);
   const db = getDb();
@@ -48,7 +48,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   testGlobals.__testMigrationTemplate = savedTemplate;
   await removeDb();
 });

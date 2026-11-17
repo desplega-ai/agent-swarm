@@ -201,7 +201,7 @@ describe("Runner-Level Polling API", () => {
     });
 
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {

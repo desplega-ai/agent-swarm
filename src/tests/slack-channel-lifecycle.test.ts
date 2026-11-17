@@ -82,7 +82,7 @@ async function callTool(name: string, args: Record<string, unknown>) {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "Slack Lifecycle Lead", isLead: true, status: "idle" });
 
@@ -95,7 +95,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

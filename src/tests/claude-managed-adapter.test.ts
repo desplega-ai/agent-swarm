@@ -1613,7 +1613,11 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
   ) {
     const spy = makeFakeClient({
       streamEvents: async function* () {
-        for (const e of events) yield e;
+        for (const e of events) {
+          yield e;
+          // Model the I/O boundary between events while template resolution awaits the DB.
+          await Bun.sleep(0);
+        }
       },
       onSend,
     });

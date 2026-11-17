@@ -194,7 +194,7 @@ describe("worker nudges", () => {
   afterEach(async () => {
     for (const client of clients.splice(0)) await closeClient(client);
     await waitUntil(() => listSubscribedWorkerAgents().length === 0);
-    closeDb();
+    await closeDb();
     if (previousFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
     else process.env.RUNTIME_POOLS_ENABLED = previousFlag;
   });
@@ -507,7 +507,7 @@ describe("worker nudge database hooks", () => {
     await flushDbHooks();
     stop();
     removeWorkerSubscription(agentId, subscriber);
-    closeDb();
+    await closeDb();
     if (previousFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
     else process.env.RUNTIME_POOLS_ENABLED = previousFlag;
   });

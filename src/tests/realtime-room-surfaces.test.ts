@@ -61,7 +61,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await closeRooms();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

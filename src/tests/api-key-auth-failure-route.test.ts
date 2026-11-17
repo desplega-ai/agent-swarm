@@ -51,7 +51,7 @@ describe("API key auth-failure routes", () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     await unlink(TEST_DB).catch(() => {});
     await unlink(`${TEST_DB}-wal`).catch(() => {});
     await unlink(`${TEST_DB}-shm`).catch(() => {});

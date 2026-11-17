@@ -146,7 +146,7 @@ beforeAll(async () => {
   // TEST_DB_PATH and forces resolveEncryptionKey() to actually run, instead of
   // silently reusing whatever connection (and cached key) the previous test
   // file in the run left open.
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
@@ -167,7 +167,7 @@ afterAll(async () => {
   globalThis.fetch = savedFetch;
   setScriptEmbeddingProviderForTests(null);
   __resetEncryptionKeyForTests();
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];

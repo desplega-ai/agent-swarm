@@ -31,7 +31,6 @@ import {
   getCredentialBindingById,
   getScriptConnectionById,
   listRelationalCredentialBindings,
-  listScriptConnections,
   listScriptConnectionsAsync,
   refreshScriptConnection,
   ScriptConnectionConflictError,
@@ -1322,14 +1321,16 @@ async function decorateConnections(
   );
 }
 
-function listConnections(
+async function listConnections(
   query: z.infer<typeof listConnectionsQuerySchema>,
 ): Promise<DecoratedConnection[]> {
-  const connections = listScriptConnections({
-    includeDisabled: true,
-    allScopes: true,
-    kind: query.kind as ScriptConnectionKind | undefined,
-  }).filter((connection) => {
+  const connections = (
+    await listScriptConnectionsAsync({
+      includeDisabled: true,
+      allScopes: true,
+      kind: query.kind as ScriptConnectionKind | undefined,
+    })
+  ).filter((connection) => {
     if (query.scope && connection.scope !== query.scope) return false;
     if (query.scopeId && connection.scopeId !== query.scopeId) return false;
     return true;
@@ -1911,7 +1912,7 @@ export async function handleScriptConnections(
     const parsed = await getConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const connection =
-      listScriptConnections({ includeDisabled: true, allScopes: true }).find(
+      (await listScriptConnectionsAsync({ includeDisabled: true, allScopes: true })).find(
         (candidate) => candidate.id === parsed.params.id,
       ) ?? null;
     if (!connection) {

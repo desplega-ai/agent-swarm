@@ -151,7 +151,7 @@ afterAll(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  closeDb();
+  await closeDb();
   await Promise.all(["", "-wal", "-shm"].map((suffix) => rm(dbPath + suffix, { force: true })));
 });
 

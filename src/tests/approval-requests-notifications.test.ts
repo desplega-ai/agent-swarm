@@ -87,7 +87,7 @@ describe("POST /api/approval-requests notifications", () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

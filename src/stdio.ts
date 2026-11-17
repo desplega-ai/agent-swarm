@@ -1,6 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "@/server";
-import { closeDb } from "./be/db";
+import { closeDb, whenDbReady } from "./be/db";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -10,11 +10,13 @@ import {
   stopAuditWriter,
 } from "./be/rbac-audit";
 import { clearAuditSink, setAuditSink } from "./rbac";
+import { scrubSecrets } from "./utils/secret-scrubber";
 
 async function main() {
   // createServer() initializes the DB, so this standalone stdio transport OWNS
   // the database and serves the same gated tools as src/http — wire the RBAC
   // permission-audit sink here too (DES-445 Phase 6; plan "stdio blind spot").
+  await whenDbReady();
   const server = await createServer();
   setAuditSink(enqueueAuditRow);
   startAuditWriter();
@@ -30,14 +32,7 @@ async function main() {
   });
 }
 
-// NOTE: main() resolves right after the transport starts (the process stays
-// alive on stdin), so `.finally` below runs post-boot — NOT at shutdown.
-// getDb() lazily re-opens on the next query, which is why the existing
-// closeDb() here is harmless. Audit teardown therefore hangs off shutdown:
-// the final flush is asynchronous, so it runs from `beforeExit` (stdin closed,
-// event loop drained) and from explicit SIGINT/SIGTERM handlers — both of
-// which can await it, unlike the `exit` event. Supervisors stop stdio workers
-// with SIGTERM; without these handlers up to 199 buffered rows would be lost.
+// Stdio owns the database until stdin closes or a signal requests shutdown.
 let auditDrained = false;
 async function drainAudit(): Promise<void> {
   if (auditDrained) return;
@@ -46,21 +41,25 @@ async function drainAudit(): Promise<void> {
   stopAuditWriter();
   await flushAuditBuffer();
   clearAuditSink();
+  await closeDb();
 }
-process.on("beforeExit", async () => {
-  await drainAudit();
+async function shutdown(exitCode?: number): Promise<void> {
+  try {
+    await drainAudit();
+    if (exitCode !== undefined) process.exit(exitCode);
+  } catch (error) {
+    console.error("[shutdown] Stdio shutdown failed:", scrubSecrets(String(error)));
+    process.exit(1);
+  }
+}
+process.on("beforeExit", () => {
+  void shutdown();
 });
-process.on("SIGINT", async () => {
-  await drainAudit();
-  process.exit(130);
+process.on("SIGINT", () => {
+  void shutdown(130);
 });
-process.on("SIGTERM", async () => {
-  await drainAudit();
-  process.exit(143);
+process.on("SIGTERM", () => {
+  void shutdown(143);
 });
 
-main()
-  .catch(console.error)
-  .finally(() => {
-    closeDb();
-  });
+main().catch(console.error);

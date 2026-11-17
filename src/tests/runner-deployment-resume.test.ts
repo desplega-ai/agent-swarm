@@ -48,7 +48,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await rm(dbPath + suffix, { force: true });
 });
 

@@ -42,7 +42,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

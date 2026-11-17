@@ -337,7 +337,7 @@ describe("socket watchdog against a live Slack mock", () => {
       await stopSlackApp();
       process.env = saved;
       await stopSlackMock(slack, false);
-      closeDb();
+      await closeDb();
     }
   }, 40_000);
 
@@ -376,7 +376,7 @@ describe("socket watchdog against a live Slack mock", () => {
       await stopSlackApp();
       process.env = saved;
       await stopSlackMock(slack, false);
-      closeDb();
+      await closeDb();
     }
   }, 20_000);
 
@@ -718,7 +718,7 @@ async function withLiveSlack(
     await stopSlackApp();
     process.env = saved;
     await stopSlackMock(slack, false);
-    closeDb();
+    await closeDb();
   }
 }
 

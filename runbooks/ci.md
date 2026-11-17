@@ -63,6 +63,40 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 | `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
 | `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
+## Database driver coverage
+
+The three SQLite PR shards retain their existing commands and artifact names.
+The separate **E2E Worker Smoke** job passes `--sut-env DB_DRIVER=worker` for targeted scenarios.
+Its `core-telemetry` scenario checks the effective driver through authenticated `GET /api/stats`.
+Public health responses omit driver configuration.
+
+```bash
+bun run e2e --sut-env DB_DRIVER=worker --only health,db-driver-startup,task-lifecycle,core-sessions,core-telemetry,knowledge-prompt-templates,script-connections,script-inline-run,knowledge-memory --json e2e-worker-smoke.json
+```
+
+Worker smoke results use `e2e-worker-smoke-results`. They never enter `e2e-contract-shard-*` or the SQLite coverage union.
+The required **E2E Contract** aggregate depends on Worker smoke success. Worker failure, cancellation, or unexpected skipping fails the aggregate.
+Targeted PR coverage is smoke coverage. It does not establish full Worker contract coverage.
+
+Nightly runs a complete Worker contract in `contract-worker`, separately from the SQLite contract and provider legs:
+
+```bash
+bun run e2e --sut-env DB_DRIVER=worker --strict --json out/e2e-worker-results.json
+```
+
+The artifact `nightly-e2e-contract-worker` contains `e2e-worker-results.json` and its separate Markdown summary.
+The nightly report reads SQLite and harness inputs from `**/e2e-results.json`.
+It reads Worker input from `**/e2e-worker-results.json` and displays separate contract sections.
+A missing Worker result, failed Worker scenario, or failed Worker coverage gate fails the report.
+Provider costs and earlier cost reports retain their existing behavior.
+
+Compare repeated local driver runs with `bun run e2e:bench <sqlite.json> <worker.json>`.
+The command reports differences without enforcing thresholds. Investigate scenario ratios above 1.5x and record absolute latency differences.
+Keep HTTP latency, Worker execution, message round-trip time, client queue waits, and event-loop delay separate.
+Rollout requires a separate PR, explicit approval, and one week of staging evidence.
+Measure sustained RSS without forced collection across the complete API topology, including boot, runtime, and separate memory read pools.
+See [the lifecycle and rollback procedure](./local-development.md#experimental-database-worker).
+
 ## The local check loop
 
 `bun run check:local` (`scripts/check.sh`) is the inner loop. Run it before every push:

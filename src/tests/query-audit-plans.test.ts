@@ -211,7 +211,7 @@ describe("query audit plans without sqlite_stat1", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

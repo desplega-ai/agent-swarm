@@ -210,7 +210,7 @@ describe("task UI spec storage", () => {
     ).id;
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await Promise.all(["", "-wal", "-shm"].map((suffix) => rm(dbPath + suffix, { force: true })));
   });
 

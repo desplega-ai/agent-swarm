@@ -231,12 +231,15 @@ function publishRoom(room: ManagedRoom, type: "update" | "reset" | "deleted"): v
 }
 
 function scheduleFlush(room: ManagedRoom): void {
-  if (room.flushTimer) return;
-  room.flushTimer = setTimeout(() => {
-    room.flushTimer = undefined;
-    void flushRoom(room);
-  }, FLUSH_DELAY_MS);
-  room.flushTimer.unref?.();
+  // Persistence retries must start outside the caller's transaction scope.
+  getDbClient().afterCommit(() => {
+    if (room.flushTimer) return;
+    room.flushTimer = setTimeout(() => {
+      room.flushTimer = undefined;
+      void flushRoom(room);
+    }, FLUSH_DELAY_MS);
+    room.flushTimer.unref?.();
+  });
 }
 
 function markChanged(room: ManagedRoom): void {

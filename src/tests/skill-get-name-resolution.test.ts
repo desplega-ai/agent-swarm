@@ -54,7 +54,7 @@ describe("skill-get swarm name resolution", () => {
         // File doesn't exist
       }
     }
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     for (const [id, name] of [
       [CALLER_ID, "Caller"],
@@ -68,7 +68,7 @@ describe("skill-get swarm name resolution", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

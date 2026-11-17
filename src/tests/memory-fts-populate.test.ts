@@ -46,11 +46,12 @@ describe("memory_fts boot backfill", () => {
     initDb(TEST_DB_PATH);
     await createAgent({ id: agentId, name: "FTS Populate Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
     await store.whenFtsPopulated();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -118,6 +119,7 @@ describe("memory_fts boot backfill", () => {
     );
 
     const rebuilt = new SqliteMemoryStore();
+    await rebuilt.whenReady();
     await rebuilt.whenFtsPopulated();
 
     expect(await count("SELECT COUNT(*) AS count FROM memory_fts")).toBe(total);
@@ -135,6 +137,7 @@ describe("memory_fts boot backfill", () => {
   test("a steady-state boot inserts nothing", async () => {
     const before = await count("SELECT COUNT(*) AS count FROM memory_fts");
     const again = new SqliteMemoryStore();
+    await again.whenReady();
     await again.whenFtsPopulated();
     expect(await count("SELECT COUNT(*) AS count FROM memory_fts")).toBe(before);
   });

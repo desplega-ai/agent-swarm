@@ -90,7 +90,7 @@ describe("MCP workflow tools accept webhook filter and preset", () => {
     for (const id of createdIds) {
       await deleteWorkflow(id).catch(() => {});
     }
-    closeDb();
+    await closeDb();
     await unlink(TEST_DB_PATH).catch(() => {});
     await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

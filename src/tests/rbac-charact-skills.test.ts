@@ -99,7 +99,7 @@ async function removeDbFiles() {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
@@ -125,7 +125,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

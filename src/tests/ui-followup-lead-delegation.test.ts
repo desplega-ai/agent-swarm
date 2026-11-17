@@ -98,7 +98,7 @@ beforeAll(async () => {
       await unlink(TEST_DB_PATH + suffix);
     } catch {}
   }
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   leadAgentId = (await createAgent({ name: "ui-followup-lead", isLead: true, status: "idle" })).id;
@@ -123,7 +123,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);

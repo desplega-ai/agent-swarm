@@ -338,7 +338,7 @@ beforeAll(() => {
 beforeEach(async () => {
   clearVolatileSecretsForTesting();
   process.env.SLACK_RENDER_V2_DELEGATION = "false";
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
   await ensureSlackRenderV2Activation();
@@ -369,7 +369,7 @@ afterAll(async () => {
   if (originalCombEnabled === undefined) delete process.env.COMB_ENABLED;
   else process.env.COMB_ENABLED = originalCombEnabled;
   _resetSlackRenderV2ForTests();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 
@@ -956,7 +956,7 @@ describe("Slack renderer v2", () => {
       __testMigrationTemplate?: Uint8Array;
     };
     const migrationTemplate = testGlobals.__testMigrationTemplate;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     delete testGlobals.__testMigrationTemplate;
     try {
@@ -978,7 +978,7 @@ describe("Slack renderer v2", () => {
 
       await processSlackRenderV2();
       const firstActivation = await getSlackRenderV2ActivatedAt();
-      closeDb();
+      await closeDb();
       initDb(TEST_DB_PATH);
       _resetSlackRenderV2ForTests();
       calls.length = 0;
@@ -989,7 +989,7 @@ describe("Slack renderer v2", () => {
       expect(await getSlackRenderV2ActivatedAt()).toBe(firstActivation);
       expect(calls).toHaveLength(0);
     } finally {
-      closeDb();
+      await closeDb();
       if (migrationTemplate) testGlobals.__testMigrationTemplate = migrationTemplate;
       await removeDbFiles();
     }
@@ -5351,7 +5351,7 @@ describe("optional Slack V2 task tree", () => {
     const globals = globalThis as typeof globalThis & { __testMigrationTemplate?: Uint8Array };
     const originalTemplate = globals.__testMigrationTemplate;
     globals.__testMigrationTemplate = getDb().serialize();
-    closeDb();
+    await closeDb();
     try {
       initDb(TEST_DB_PATH);
     } finally {

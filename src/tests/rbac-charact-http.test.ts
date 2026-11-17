@@ -145,7 +145,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => pipelineServer.close(() => resolve()));
   await new Promise<void>((resolve) => bareServer.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   delete process.env.AGENT_FS_LOCAL_DIR;

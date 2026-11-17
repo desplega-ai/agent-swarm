@@ -51,13 +51,13 @@ beforeAll(async () => {
       await unlink(TEST_DB_PATH + suffix);
     } catch {}
   }
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);

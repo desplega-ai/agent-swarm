@@ -34,9 +34,10 @@ describe("Self-Improvement Mechanisms", () => {
       }
     }
 
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
+    await store.whenReady();
 
     await createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
     await createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
@@ -44,7 +45,7 @@ describe("Self-Improvement Mechanisms", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

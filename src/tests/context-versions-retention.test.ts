@@ -84,7 +84,7 @@ async function rowFor(agentId: string, field: string, version: number) {
 }
 
 beforeAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
   await createAgent({ id: AGENT_A, name: "Retention A", isLead: true, status: "idle" });
@@ -98,7 +98,7 @@ afterAll(async () => {
   await resetDbRetentionForTests();
   delete process.env[KEEP_KEY];
   delete process.env.DB_RETENTION_DRY_RUN;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

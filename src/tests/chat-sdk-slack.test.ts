@@ -125,7 +125,7 @@ afterAll(async () => {
   await stopChatSdk();
   await slack.stop();
   restoreEnv();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

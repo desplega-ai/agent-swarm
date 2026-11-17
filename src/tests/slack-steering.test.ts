@@ -71,12 +71,12 @@ beforeAll(async () => {
   ).id;
 });
 
-afterAll(() => {
+afterAll(async () => {
   restoreEnv("STEERING_ENABLED", previousSteeringEnabled);
   restoreEnv("SLACK_THREAD_STEERING", previousSteering);
   restoreEnv("SLACK_THREAD_STEERING_MODE", previousSteeringMode);
   restoreEnv("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION", previousRequireMention);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

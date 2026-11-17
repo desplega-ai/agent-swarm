@@ -201,7 +201,7 @@ const testGlobals = globalThis as typeof globalThis & {
 };
 
 async function restartDb(): Promise<void> {
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 }
 
@@ -216,7 +216,7 @@ let server: Server;
 beforeAll(async () => {
   testGlobals.__savedWorkflowIdempotencyTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
   server = createTestServer();
@@ -225,7 +225,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   testGlobals.__testMigrationTemplate = testGlobals.__savedWorkflowIdempotencyTemplate;
   testGlobals.__savedWorkflowIdempotencyTemplate = undefined;
   await removeDbFiles();

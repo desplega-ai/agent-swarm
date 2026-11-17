@@ -41,7 +41,7 @@ describe("list search params", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDb();
   });
 

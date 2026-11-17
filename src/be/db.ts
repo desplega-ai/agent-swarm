@@ -1,4 +1,13 @@
 import {
+  type PromptTemplateFilters,
+  type PromptTemplateRow,
+  promptTemplateListQuery,
+  rowToPromptTemplate,
+} from "./db/prompt-templates";
+
+export { resetPromptTemplateToDefault, upsertPromptTemplate } from "./db/prompt-templates";
+
+import {
   CREDENTIAL_SUFFIX_SQL,
   CREDENTIAL_TYPE_SQL,
   type CreateSessionCostInput,
@@ -192,7 +201,7 @@ import {
   planAllowsModelFamily,
   SUBSCRIPTION_KEY_TYPES,
 } from "../utils/subscription-plans";
-import { auditAssetKeys } from "./asset-key-audit";
+import { auditAssetKeysAsync } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import {
@@ -386,9 +395,11 @@ export {
   closeDb,
   getDb,
   getDbClient,
+  getDbDriver,
   initDb,
   isSqliteVecAvailable,
   resolveSqliteVecExtensionPath,
+  whenDbReady,
 } from "./db/runtime";
 
 export {
@@ -492,7 +503,7 @@ configureTaskWriteDependencies({
 });
 
 configureSessionMoveDependencies({
-  auditAssetKeys: () => auditAssetKeys(getDb()),
+  auditAssetKeys: (tx) => auditAssetKeysAsync(tx),
   insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
 });
 
@@ -2962,7 +2973,7 @@ export async function createTaskExtended(
   // (src/tools/send-task.ts, src/linear/sync.ts) stay a fast path only.
   const claim = await getDbClient().transaction<
     { existing: ExistingTrackerContextWork } | { row: AgentTaskRow }
-  >(async () => {
+  >(async (tx) => {
     // A workflow step's task commits only while the step may still start
     // work. Checked in the INSERT's transaction: a cascade cancel of the
     // step's run tree either commits first and is seen here, or sees and
@@ -3089,7 +3100,7 @@ export async function createTaskExtended(
 
     if (routingDecisionSnapshot) {
       try {
-        await getDbClient().run(
+        await tx.run(
           `INSERT INTO routing_decisions (
              task_id, selected_agent_id, captured_at, worker_statuses,
              continuity_candidates, created_by, updated_by
@@ -6656,7 +6667,7 @@ export function autoEncryptLegacyPlaintextSecrets(
       stmt.run(encryptSecret(r.value, key), r.id);
     }
   });
-  txn(rows);
+  txn.immediate(rows);
   console.log(`[secrets] Auto-migrated ${rows.length} secret(s) to encrypted storage.`);
 }
 
@@ -6747,7 +6758,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
     `SELECT * FROM swarm_config
        WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
+         AND UPPER(key) NOT IN ('DB_DRIVER', 'API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
        ORDER BY key ASC`,
   );
   return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);
@@ -9309,20 +9320,6 @@ export async function getMetricVersion(
 // Prompt Template Operations
 // ============================================================================
 
-type PromptTemplateRow = {
-  id: string;
-  eventType: string;
-  scope: string;
-  scopeId: string | null;
-  state: string;
-  body: string;
-  isDefault: number; // SQLite boolean
-  version: number;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
 type PromptTemplateHistoryRow = {
   id: string;
   templateId: string;
@@ -9333,22 +9330,6 @@ type PromptTemplateHistoryRow = {
   changedAt: string;
   changeReason: string | null;
 };
-
-function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
-  return {
-    id: row.id,
-    eventType: row.eventType,
-    scope: row.scope as "global" | "agent" | "repo",
-    scopeId: row.scopeId ?? null,
-    state: row.state as "enabled" | "default_prompt_fallback" | "skip_event",
-    body: row.body,
-    isDefault: row.isDefault === 1,
-    version: row.version,
-    createdBy: row.createdBy ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
 
 function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTemplateHistory {
   return {
@@ -9363,46 +9344,11 @@ function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTempla
   };
 }
 
-/**
- * List prompt templates with optional filters.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
- */
-export function getPromptTemplates(filters?: {
-  eventType?: string;
-  scope?: string;
-  scopeId?: string;
-  isDefault?: boolean;
-}): PromptTemplate[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.eventType) {
-    conditions.push("eventType = ?");
-    params.push(filters.eventType);
-  }
-  if (filters?.scope) {
-    conditions.push("scope = ?");
-    params.push(filters.scope);
-  }
-  if (filters?.scopeId) {
-    conditions.push("scopeId = ?");
-    params.push(filters.scopeId);
-  }
-  if (filters?.isDefault !== undefined) {
-    conditions.push("isDefault = ?");
-    params.push(filters.isDefault ? 1 : 0);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
-
-  return getDb()
-    .prepare<PromptTemplateRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToPromptTemplate);
+export async function getPromptTemplates(
+  filters?: PromptTemplateFilters,
+): Promise<PromptTemplate[]> {
+  const { query, params } = promptTemplateListQuery(filters);
+  return (await getDbClient().query<PromptTemplateRow>(query, params)).map(rowToPromptTemplate);
 }
 
 /**
@@ -9424,7 +9370,7 @@ export async function getPromptTemplateById(id: string): Promise<PromptTemplate 
  * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
  * `initDb`'s body — stays on the raw sync handle.
  */
-export function upsertPromptTemplate(data: {
+export function upsertPromptTemplateForBoot(data: {
   eventType: string;
   scope: "global" | "agent" | "repo";
   scopeId?: string | null;
@@ -9575,7 +9521,10 @@ export async function deletePromptTemplate(id: string): Promise<boolean> {
  * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
  * `initDb`'s body — stays on the raw sync handle.
  */
-export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+export function resetPromptTemplateToDefaultForBoot(
+  id: string,
+  defaultBody: string,
+): PromptTemplate {
   const now = new Date().toISOString();
   const existing = getDb()
     .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
@@ -9642,48 +9591,26 @@ export async function getPromptTemplateHistory(
  *   - 'skip_event': return { skip: true }
  *   - 'default_prompt_fallback': continue to next scope level
  *
- * DEFERRED (boot-path rule): injected as `src/prompts/resolver.ts`'s
- * `dbResolverFn` via `configureDbResolver` (called from `initDb`'s body) and
- * invoked synchronously, on every render, by that module's still-sync
- * `resolveTemplate()` / `resolveTemplateViaDb()` / `expandTemplateRefs()` —
- * a public API used pervasively across GitHub/GitLab/Linear/Jira/Slack/
- * agentmail handlers, heartbeat, and workflows. Converting this function
- * would force `resolveTemplate()` itself async, cascading into dozens of
- * unrelated call sites outside this batch's blast radius. Stays on the raw
- * sync handle; `resolveTemplateAsync()` already exists as the async path for
- * callers that need one.
  */
-export function resolvePromptTemplate(
+export async function resolvePromptTemplate(
   eventType: string,
   agentId?: string,
   repoId?: string,
-): { template: PromptTemplate } | { skip: true } | null {
-  // Helper to look up a template at a specific scope
-  const lookupAtScope = (
+): Promise<{ template: PromptTemplate } | { skip: true } | null> {
+  const lookupAtScope = async (
     et: string,
     scope: "global" | "agent" | "repo",
     scopeId: string | null,
-  ): PromptTemplateRow | undefined => {
-    if (scopeId === null) {
-      return (
-        getDb()
-          .prepare<PromptTemplateRow, [string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(et, scope) ?? undefined
-      );
-    }
-    return (
-      getDb()
-        .prepare<PromptTemplateRow, [string, string, string]>(
-          "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
-        )
-        .get(et, scope, scopeId) ?? undefined
+  ): Promise<PromptTemplateRow | null> =>
+    getDbClient().get<PromptTemplateRow>(
+      "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS ?",
+      [et, scope, scopeId],
     );
-  };
 
   // Try resolution at the scope chain for a given eventType string
-  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+  const tryResolve = async (
+    et: string,
+  ): Promise<{ template: PromptTemplate } | { skip: true } | "continue"> => {
     // Build scope chain: agent → repo → global
     const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
     if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
@@ -9691,7 +9618,7 @@ export function resolvePromptTemplate(
     scopeChain.push({ scope: "global", scopeId: null });
 
     for (const { scope, scopeId } of scopeChain) {
-      const row = lookupAtScope(et, scope, scopeId);
+      const row = await lookupAtScope(et, scope, scopeId);
       if (!row) continue;
 
       if (row.state === "enabled") {
@@ -9707,7 +9634,7 @@ export function resolvePromptTemplate(
   };
 
   // Pass 1: exact match
-  const exactResult = tryResolve(eventType);
+  const exactResult = await tryResolve(eventType);
   if (exactResult !== "continue") return exactResult;
 
   // Pass 2: wildcard matching
@@ -9719,7 +9646,7 @@ export function resolvePromptTemplate(
   }
 
   for (const wildcard of wildcards) {
-    const wildcardResult = tryResolve(wildcard);
+    const wildcardResult = await tryResolve(wildcard);
     if (wildcardResult !== "continue") return wildcardResult;
   }
 

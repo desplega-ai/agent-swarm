@@ -43,7 +43,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await closeRooms();
-  closeDb();
+  await closeDb();
   await deleteTestDb();
 });
 

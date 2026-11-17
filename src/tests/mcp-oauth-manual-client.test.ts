@@ -157,7 +157,7 @@ describe("MCP OAuth manual client flow", () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
     delete process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS;
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     if (originalPublicMcpBaseUrl === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
     else process.env.PUBLIC_MCP_BASE_URL = originalPublicMcpBaseUrl;

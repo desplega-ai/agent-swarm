@@ -72,7 +72,7 @@ afterAll(async () => {
   if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
   else process.env.STEERING_ENABLED = originalSteeringEnabled;
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

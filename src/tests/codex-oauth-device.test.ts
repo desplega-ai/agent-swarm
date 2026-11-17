@@ -95,7 +95,7 @@ beforeAll(async () => {
 afterAll(async () => {
   resetFetchForTesting();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 beforeEach(async () => {

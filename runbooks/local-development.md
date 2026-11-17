@@ -199,3 +199,81 @@ Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (
 ```bash
 docker compose -f docker-compose.local.yml up --build
 ```
+
+## Experimental database Worker
+
+`DB_DRIVER` accepts `sqlite` or `worker`. The default is `sqlite`.
+On macOS, Worker mode selects an installed Homebrew SQLite library before boot so both connections can load extensions.
+The default driver retains Bun's existing library selection.
+An explicit `SQLITE_VEC_EXTENSION_PATH` is required support. A load failure stops startup on either driver.
+Without that variable, optional extension failures disable vector support. The Worker verifies its own capability after boot.
+Fatal Worker transport loss terminates the API with exit code 1. Recovery requires a process restart.
+Slow Worker statements have separate execution warnings. These warnings scrub SQL and never include bound parameters.
+This flag comes only from the deployment environment. Changes require an API restart.
+Stored configuration, including legacy rows, cannot override it. The configuration page does not expose an editor.
+To restore the default, set `DB_DRIVER=sqlite` and restart against the same database file.
+For a local source API, stop the current process and retain its `DATABASE_PATH`:
+
+```bash
+DB_DRIVER=sqlite DESPLEGA_TELEMETRY_ENV=test bun run start:http
+```
+
+Worker mode keeps migrations and seeders synchronous on the main connection.
+Boot stays on the main thread. Application runtime code must not execute SQL through `getDb()`.
+The runtime Worker opens a second connection to the same file. Other API paths can own additional read-only connections.
+Startup awaits runtime Worker readiness and actual vector capability.
+`getDbClient()` returns synchronously. Its operations await shared driver readiness.
+The server awaits `whenDbReady()` before accepting requests or starting schedulers. This also awaits memory schema readiness.
+Vector and FTS population continue asynchronously after schema readiness. Population completion has a separate lifecycle.
+Production Worker mode requires a file database. Tests may use the documented in-memory SQLite fallback.
+Authenticated `GET /api/stats` reports the effective `dbDriver`. Public health responses omit this configuration.
+Await `closeDb()` before reopening or deleting a database. Stale clients and expired transaction executors reject calls.
+Shutdown drains admitted operations and hooks. Transport failure never permits replay or automatic recovery.
+A lost COMMIT reply leaves an unknown outcome. Restart the process after Worker failure.
+
+Runtime prompt resolution, listing, mutation, script types, asset audits, and memory operations use the asynchronous client.
+The synchronous template resolver reads code defaults only. Boot seeding retains separate synchronous helpers.
+Migrations, backfills, boot seeders, metrics, and the explicit explorer fallback remain synchronous.
+Metrics use a separate read-only connection. The bounded explorer normally uses a subprocess and permits an explicit synchronous fallback.
+Neither path proves that the runtime client uses a Worker.
+
+Keep these measurements separate:
+
+| Measurement | Meaning |
+| --- | --- |
+| `executionMs` | Driver execution across attempts, including SQLite BUSY spin time. Excludes FIFO waits, retry backoff, and Worker message transfer. |
+| Message round-trip time | Request transfer, Worker execution, and response transfer. Excludes client queue wait when measured at driver dispatch. |
+| Client call duration | Queue wait, round-trip time, and any retry backoff. HTTP latency also includes handler work. |
+| Event-loop delay | Main-thread timer delay. Worker execution duration does not establish main-thread blocking. |
+
+Worker execution warnings include the driver and scrubbed SQL. Bound parameters never appear in these warnings.
+Stall attribution keeps Worker execution separate from synchronous `db_ms`. Missing stall logs alone do not establish acceptance.
+
+Production-client assertions:
+
+```bash
+bun scripts/bench-db-worker.ts --driver sqlite --assert
+bun scripts/bench-db-worker.ts --driver worker --assert
+```
+
+`--assert` selects the production `getDbClient()` path, with boot and Worker connections open together.
+Without `--assert`, `--driver sqlite|worker` retains the Phase 0 raw comparison path.
+The production path checks writes, reads, vector search, calibrated query cost, and main-thread lag.
+It reports Worker execution separately from synchronous `db_ms` stall attribution.
+Run `--assert` from source. Verify the compiled production API separately with the owned-container smoke test in the database Worker plan.
+
+### Rollout and rollback
+
+Worker mode remains experimental. A separate rollout PR must receive explicit approval before any default change.
+Keep `sqlite` as the default in Docker, Helm, and Compose until that PR passes its acceptance criteria.
+
+Require at least one week of staging evidence from the complete production connection topology:
+
+- Compare errors, throughput, tail latency, BUSY behavior, and event-loop delay against `DB_DRIVER=sqlite`.
+- Measure sustained RSS without forced garbage collection. Include boot, runtime, and separate read-only pools, including memory search Workers.
+- Compare retained memory and transient peaks against the SQLite driver with the same read-only pools enabled.
+- Check startup readiness, actual vector capability, graceful shutdown, admitted-operation draining, and process exit.
+- Record deployment startup and shutdown checks in the rollout PR. Phase 0 forced-collection samples do not prove production memory acceptance.
+
+Rollback sets `DB_DRIVER=sqlite` and restarts the API against the same database file.
+No schema rollback is required. Retain the database path and data during the restart.

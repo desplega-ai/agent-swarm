@@ -112,8 +112,8 @@ let now: Date;
 let controllerId: string;
 let buildSpy: ReturnType<typeof spyOn<typeof dispatch, "buildImageTemplate">>;
 let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
-beforeAll(() => {
-  closeDb();
+beforeAll(async () => {
+  await closeDb();
   initDb(dbPath);
 });
 beforeEach(async () => {
@@ -157,7 +157,7 @@ afterEach(async () => {
   errorSpy.mockRestore();
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"])
     await Bun.file(dbPath + suffix)
       .delete()

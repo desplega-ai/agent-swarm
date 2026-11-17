@@ -33,7 +33,7 @@ describe("extension DB helpers", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

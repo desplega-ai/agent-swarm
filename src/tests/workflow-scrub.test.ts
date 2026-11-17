@@ -83,9 +83,9 @@ beforeEach(() => {
   secret = syntheticSecret("workflow");
 });
 
-afterAll(() => {
+afterAll(async () => {
   secret.cleanup();
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

@@ -30,7 +30,7 @@ import {
   linkIdentity,
 } from "../be/users";
 import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { type Agent, isTerminalTaskStatus } from "../types";
@@ -574,7 +574,7 @@ async function createInitialJiraTask(input: {
         description_section: descriptionSection,
       };
 
-  const result = resolveTemplate(tmplName, variables);
+  const result = await resolveTemplateAsync(tmplName, variables);
   if (result.skipped) {
     console.log(`[Jira Sync] Template ${tmplName} resolved as skipped — not creating task`);
     return;
@@ -617,7 +617,7 @@ async function createCommentMentionTask(input: {
     ? `\nDescription:\n${input.descriptionText}\n`
     : "";
 
-  const result = resolveTemplate("jira.issue.commented", {
+  const result = await resolveTemplateAsync("jira.issue.commented", {
     issue_key: input.issueKey,
     issue_summary: input.summary,
     issue_url: input.issueUrl,

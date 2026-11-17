@@ -117,7 +117,7 @@ describe("ScrubbedText at a production writer", () => {
 
   afterAll(async () => {
     secret.cleanup();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

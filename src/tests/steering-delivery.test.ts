@@ -18,7 +18,7 @@ describe("steering delivery sender", () => {
   });
 
   test("sender is a template variable and whitespace is flattened", async () => {
-    configureDbResolver(() => ({
+    configureDbResolver(async () => ({
       template: { id: "custom", scope: "global", body: "{{sender}}: {{body}}" },
     }));
     expect(await renderSteeringDelivery("id", "body", "Taras\n(user)")).toBe("Taras (user): body");
@@ -32,7 +32,7 @@ describe("steering delivery sender", () => {
         throw new Error("unavailable");
       },
     ]) {
-      configureDbResolver(resolver);
+      configureDbResolver(async () => resolver());
       expect(await renderSteeringDelivery("id", "body", "Taras (user)")).toBe("body");
     }
   });

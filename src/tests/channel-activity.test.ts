@@ -48,8 +48,8 @@ beforeAll(() => {
   initDb(TEST_DB_PATH);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);

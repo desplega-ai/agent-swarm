@@ -500,7 +500,7 @@ afterAll(async () => {
   setScriptEmbeddingProviderForTests(null);
   await new Promise<void>((resolve) => httpServer?.close(() => resolve()) ?? resolve());
   slackServer?.stop(true);
-  closeDb();
+  await closeDb();
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
   }

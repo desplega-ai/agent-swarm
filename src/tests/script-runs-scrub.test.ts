@@ -78,7 +78,7 @@ describe("script run writers scrub at write", () => {
   afterAll(async () => {
     known.cleanup();
     refreshSecretScrubberCache();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

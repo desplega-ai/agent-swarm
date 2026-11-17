@@ -83,7 +83,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   if (originalSteeringEnabled === undefined) {
     delete process.env.STEERING_ENABLED;
   } else {

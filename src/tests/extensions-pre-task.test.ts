@@ -136,7 +136,7 @@ describe("extension task boundaries", () => {
 
   afterAll(async () => {
     await stopExtensionRuntime();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

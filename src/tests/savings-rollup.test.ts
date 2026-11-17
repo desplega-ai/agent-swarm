@@ -174,7 +174,7 @@ describe("savings rollup", () => {
   afterAll(async () => {
     server?.close();
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
     testGlobals.__testMigrationTemplate = testGlobals.__savedRollupTemplate;
     testGlobals.__savedRollupTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);

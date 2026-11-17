@@ -227,7 +227,7 @@ beforeAll(async () => {
 afterAll(async () => {
   reloadSpy.mockRestore();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
 });
 

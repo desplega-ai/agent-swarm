@@ -1,8 +1,8 @@
 import type { RunScriptOutput } from "../../scripts-runtime/loader";
 import type { ScriptRecord } from "../../types";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptMcpConnectionDescriptorsAsync,
 } from "../script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../script-credential-broker";
 import { restoreScratchScriptLastUsedIfUnchanged, touchScratchScriptLastUsed } from "./db";
@@ -56,8 +56,8 @@ export async function runSavedScriptAsAgent(
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
+        apiConnections: await getScriptApiConnectionDescriptorsAsync({ agentId: args.agentId }),
+        mcpConnections: await getScriptMcpConnectionDescriptorsAsync({ agentId: args.agentId }),
         ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
         ...(args.signal ? { signal: args.signal } : {}),
       });

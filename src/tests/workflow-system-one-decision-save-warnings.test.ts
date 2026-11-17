@@ -149,7 +149,7 @@ describe("saving a workflow whose system-one-decision node has no working key", 
   afterAll(async () => {
     stopRetryPoller();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
   });
 

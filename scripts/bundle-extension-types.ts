@@ -33,6 +33,7 @@ async function main() {
     baseUrl: resolve("."),
     declaration: true,
     emitDeclarationOnly: true,
+    lib: ["lib.esnext.d.ts"],
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     paths: { "@/*": ["src/*"] },

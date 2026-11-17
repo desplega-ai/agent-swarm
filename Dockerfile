@@ -102,9 +102,10 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar -xf - -C /build/script-types/node_modules
 
 # Compile HTTP server to standalone binary
-# The quickjs executor's worker thread, the sheet engine's worker and the memory search read worker are separate entrypoints inside the binary.
+# QuickJS, sheets, memory reads, and database execution need separate Worker entrypoints.
 RUN bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
       ./src/be/primitives/sheets/engine-worker.ts ./src/be/memory/search-read-worker.ts \
+      ./src/be/db/db-worker.ts \
       --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image

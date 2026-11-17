@@ -38,7 +38,7 @@ afterAll(async () => {
   await Promise.all(clients.map((client) => client.close()));
   await Promise.all(Object.values(transports).map((transport) => transport.close()));
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await rm(dbPath + suffix, { force: true });
   for (const [key, value] of Object.entries(savedEnv)) {
     if (value === undefined) delete process.env[key];

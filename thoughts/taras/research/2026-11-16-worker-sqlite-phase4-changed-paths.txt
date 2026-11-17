@@ -1,0 +1,16 @@
+.github/workflows/merge-gate.yml
+.github/workflows/nightly-e2e.yml
+scripts/e2e/nightly-report.ts
+src/tests/e2e-nightly-report.test.ts
+runbooks/local-development.md
+runbooks/ci.md
+CLAUDE.md
+.asyncdb/residual-sync-allowlist.json
+scripts/check-async-db-seam.sh
+LOCAL_TESTING.md
+scripts/e2e/README.md
+runbooks/e2e-blackbox.md
+src/be/db-client.ts
+thoughts/taras/research/2026-11-16-worker-sqlite-phase4.md
+thoughts/taras/research/2026-11-16-worker-sqlite-phase4.patch
+thoughts/taras/research/2026-11-16-worker-sqlite-phase4-changed-paths.txt

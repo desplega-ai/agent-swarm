@@ -80,9 +80,9 @@ beforeAll(async () => {
   await createAgent({ id: agentId, name: "space", isLead: false, status: "idle" });
 });
 
-afterAll(() => {
+afterAll(async () => {
   server.stop(true);
-  closeDb();
+  await closeDb();
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];

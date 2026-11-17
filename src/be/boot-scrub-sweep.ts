@@ -389,6 +389,7 @@ async function sweepTarget(
     }
 
     const batchLastId = rows[rows.length - 1]!.id as string;
+    if (target.memory) await getMemoryStore().whenReady();
     await client.transaction(async (tx) => {
       for (const { id, before, after } of pending) {
         const wrote = target.memory

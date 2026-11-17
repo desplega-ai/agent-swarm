@@ -105,7 +105,7 @@ afterAll(async () => {
   await stopChatSdk();
   telegram.stop();
   slackStub.stop(true);
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   restoreEnv();
   if (savedPublicUrl === undefined) delete process.env.PUBLIC_MCP_BASE_URL;

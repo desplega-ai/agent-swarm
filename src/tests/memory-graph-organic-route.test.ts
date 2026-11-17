@@ -15,6 +15,14 @@ import { computeScore, rerank } from "../be/memory/reranker";
 // - manual neighbour, also a direct match: relevance 0.60, composite 0.90
 // - unrelated manual row: relevance 0.54, composite 0.81
 
+async function populatedStore(): Promise<SqliteMemoryStore> {
+  const store = new SqliteMemoryStore();
+  await store.whenReady();
+  await store.whenVecPopulated();
+  await store.whenFtsPopulated();
+  return store;
+}
+
 const TEST_DB_PATH = "./test-memory-graph-organic-route.sqlite";
 const agentId = randomUUID();
 
@@ -35,7 +43,7 @@ let prevHybridFlag: string | undefined;
 let prevGraphFlag: string | undefined;
 
 async function searchAndExpand() {
-  const candidates = await new SqliteMemoryStore().search(queryEmbedding, agentId, {
+  const candidates = await (await populatedStore()).search(queryEmbedding, agentId, {
     scope: "all",
     limit: 15,
   });
@@ -57,6 +65,7 @@ beforeAll(async () => {
   await createAgent({ id: agentId, name: "Organic Route Agent", isLead: false, status: "idle" });
 
   const store = new SqliteMemoryStore();
+  await store.whenReady();
   const parent = await store.store({
     agentId,
     scope: "agent",
@@ -101,7 +110,7 @@ afterAll(async () => {
   else process.env.MEMORY_HYBRID_SEARCH = prevHybridFlag;
   if (prevGraphFlag === undefined) delete process.env.MEMORY_GRAPH_EXPANSION;
   else process.env.MEMORY_GRAPH_EXPANSION = prevGraphFlag;
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);

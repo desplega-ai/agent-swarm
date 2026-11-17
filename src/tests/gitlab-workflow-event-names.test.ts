@@ -18,7 +18,7 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const s of ["", "-wal", "-shm"]) {
     await unlink(DB + s).catch(() => {});
   }

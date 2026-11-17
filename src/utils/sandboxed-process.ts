@@ -224,6 +224,8 @@ function buildSandboxedCommandCore(
 
   return [
     useBashShell ? "bash" : "sh",
+    // Disable startup files before env -i applies the sandbox environment.
+    ...(useBashShell ? ["--noprofile", "--norc", "-p"] : []),
     "-c",
     `${ulimits}; exec ${dropPrivileges}env -i ${envAssignments} ${quotedInner}`,
   ];

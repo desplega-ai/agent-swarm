@@ -96,8 +96,8 @@ beforeAll(() => {
   process.env.COMPANY_EMAIL_DOMAINS = "example.com";
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   cleanupDb();
   if (priorCompanyDomains === undefined) delete process.env.COMPANY_EMAIL_DOMAINS;
   else process.env.COMPANY_EMAIL_DOMAINS = priorCompanyDomains;

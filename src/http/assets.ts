@@ -3,12 +3,11 @@ import { z } from "zod";
 import { getApp } from "../apps/store";
 import { normalizeAssetKey } from "../assets/key";
 import { sourceMoveError, sourceOfKey } from "../assets/source-key";
-import { auditAssetKeys } from "../be/asset-key-audit";
+import { auditAssetKeysAsync } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AssetKeyMovesBlockedError,
-  getDb,
   getDbClient,
   getRootTaskChain,
   getTaskById,
@@ -244,10 +243,8 @@ export async function handleAssets(
     const parsed = await keyAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
-    // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-    // client transaction so the read cannot observe another request's
-    // uncommitted writes on the shared connection.
-    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
+    // Audit through the active transaction connection.
+    const audit = await getDbClient().transaction(async (tx) => auditAssetKeysAsync(tx), {
       readOnly: true,
     });
     keyAuditRoute.respond(res, 200, audit);

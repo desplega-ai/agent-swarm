@@ -80,7 +80,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDb();
   if (previousKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
   else process.env.AGENT_SWARM_API_KEY = previousKey;

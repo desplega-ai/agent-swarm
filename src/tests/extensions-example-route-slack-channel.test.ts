@@ -86,7 +86,7 @@ describe("extension Slack channel routing", () => {
 
   afterAll(async () => {
     await stopExtensionRuntime();
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     for (const key of Object.keys(process.env)) {
       if (!(key in savedEnv)) delete process.env[key];

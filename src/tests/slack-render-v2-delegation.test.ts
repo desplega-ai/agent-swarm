@@ -160,7 +160,7 @@ beforeAll(() => {
 
 beforeEach(async () => {
   clearVolatileSecretsForTesting();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
   await ensureSlackRenderV2Activation();
@@ -186,7 +186,7 @@ afterEach(() => {
 
 afterAll(async () => {
   _resetSlackRenderV2ForTests();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

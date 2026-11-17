@@ -147,10 +147,10 @@ beforeAll(async () => {
   receiverUrl = `http://127.0.0.1:${await listenOnFreePort(receiver)}`;
 });
 
-afterAll(() => {
+afterAll(async () => {
   fake.stop(true);
   receiver.close();
-  closeDb();
+  await closeDb();
   restoreEnv("API_AGENT_FS_API_KEY");
   restoreEnv("PUBLIC_MCP_BASE_URL");
 });

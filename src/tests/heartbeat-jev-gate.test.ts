@@ -928,11 +928,11 @@ describe("heartbeat-jev-gate on the real system-one-decide tool", () => {
     });
     prevBase = process.env.OPENROUTER_BASE_URL;
   });
-  afterAll(() => {
+  afterAll(async () => {
     globalThis.fetch = realFetch;
     if (prevBase === undefined) delete process.env.OPENROUTER_BASE_URL;
     else process.env.OPENROUTER_BASE_URL = prevBase;
-    closeDb();
+    await closeDb();
   });
 
   /** `ctx.swarm.systemOne_decide` as the MCP bridge serves it, backed by the registered tool. */

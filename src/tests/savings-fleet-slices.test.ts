@@ -37,7 +37,7 @@ describe("savings fleet read slices", () => {
     // first-day scan goes through the bounded db-query path.
     templateGlobals.__savedFleetSlicesTemplate = templateGlobals.__testMigrationTemplate;
     templateGlobals.__testMigrationTemplate = undefined;
-    closeDb();
+    await closeDb();
     dbDir = mkdtempSync(join(tmpdir(), "savings-fleet-slices-"));
     initDb(join(dbDir, "fleet.sqlite"));
     await resetSavingsRollupForTests();
@@ -82,8 +82,8 @@ describe("savings fleet read slices", () => {
     resetSavingsReadCache();
   }, 60_000);
 
-  afterAll(() => {
-    closeDb();
+  afterAll(async () => {
+    await closeDb();
     templateGlobals.__testMigrationTemplate = templateGlobals.__savedFleetSlicesTemplate;
     templateGlobals.__savedFleetSlicesTemplate = undefined;
     if (dbDir) rmSync(dbDir, { recursive: true, force: true });

@@ -43,7 +43,7 @@ describe("Scheduled Tasks Integration", () => {
 
   afterAll(async () => {
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {

@@ -9,7 +9,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import { closeDb, createAgent, getDb, getDbClient, getDbDriver, initDb } from "../be/db";
 import { attachDemotionEvidence } from "../be/memory/demotion-evidence";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
@@ -100,13 +100,16 @@ async function maxTimerGap(run: () => Promise<unknown>): Promise<number> {
 beforeAll(async () => {
   globals.__savedSearchReaderTemplate = globals.__testMigrationTemplate;
   globals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   await removeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: agentId, name: "Reader Agent", isLead: false, status: "idle" });
   await createAgent({ id: otherAgent, name: "Other Agent", isLead: false, status: "idle" });
 
   const store = new SqliteMemoryStore();
+  await store.whenReady();
+  await store.whenVecPopulated();
+  await store.whenFtsPopulated();
   for (let i = 0; i < 80; i++) {
     const row = await store.store({
       agentId: i % 3 === 0 ? otherAgent : agentId,
@@ -136,7 +139,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await __resetMemorySearchReaderForTests();
-  closeDb();
+  await closeDb();
   globals.__testMigrationTemplate = globals.__savedSearchReaderTemplate;
   globals.__savedSearchReaderTemplate = undefined;
   await removeDb();
@@ -145,6 +148,9 @@ afterAll(async () => {
 describe("memory search reads in worker threads", () => {
   test("every search path returns the same results from the workers as in-process", async () => {
     const store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
     // FTS scores apply recency decay against the clock; hold it still across both runs.
     setSystemTime(new Date());
     await __resetMemorySearchReaderForTests({ inProcess: true });
@@ -172,11 +178,28 @@ describe("memory search reads in worker threads", () => {
       const params = [SLOW_ROWS];
       await __resetMemorySearchReaderForTests({ inProcess: true });
       const started = performance.now();
-      const frozen = await maxTimerGap(() => memorySearchReader.get(SLOW_SQL, params));
+      const frozen = await maxTimerGap(() =>
+        getDbDriver() === "worker"
+          ? Promise.resolve(
+              getDb()
+                .query(SLOW_SQL)
+                .get(...params),
+            )
+          : memorySearchReader.get(SLOW_SQL, params),
+      );
       const statementMs = performance.now() - started;
       // Negative control: the in-process read blocks the timer for the whole statement.
       expect(statementMs).toBeGreaterThan(150);
       expect(frozen).toBeGreaterThan(statementMs * 0.8);
+
+      if (getDbDriver() === "worker") {
+        let fallback: unknown;
+        const gap = await maxTimerGap(async () => {
+          fallback = await memorySearchReader.get(SLOW_SQL, params);
+        });
+        expect(fallback).toEqual({ n: SLOW_ROWS });
+        expect(gap).toBeLessThan(Math.min(100, statementMs / 2));
+      }
 
       await __resetMemorySearchReaderForTests();
       await memorySearchReader.get("SELECT 1"); // start the pool outside the measurement
@@ -232,6 +255,42 @@ describe("memory search reads in worker threads", () => {
       .catch((err: Error & { row?: unknown }) => err.row);
     expect(seen).toEqual({ id });
     expect(await memorySearchReaderStats()).toBeNull();
+
+    const outsideId = randomUUID();
+    const holding = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const transaction = getDbClient().transaction(async (tx) => {
+      await tx.run(
+        `INSERT INTO memory_rating (id, memoryId, source, signal, weight, createdAt)
+         VALUES (?, 'uncommitted', 'llm', 1, 1, datetime('now'))`,
+        [outsideId],
+      );
+      holding.resolve();
+      await release.promise;
+    });
+    await holding.promise;
+    const deadline = Promise.withResolvers<never>();
+    const timer = setTimeout(
+      () => deadline.reject(new Error("Reader startup waited for the writer lock.")),
+      1000,
+    );
+    try {
+      // The first pool can read the committed snapshot before this unrelated writer releases its lock.
+      expect(
+        await Promise.race([
+          memorySearchReader.get("SELECT id FROM memory_rating WHERE id = ?", [outsideId]),
+          deadline.promise,
+        ]),
+      ).toBeNull();
+      expect(await memorySearchReaderStats()).not.toBeNull();
+    } finally {
+      clearTimeout(timer);
+      release.resolve();
+      await transaction;
+    }
+    expect(
+      await memorySearchReader.get("SELECT id FROM memory_rating WHERE id = ?", [outsideId]),
+    ).toEqual({ id: outsideId });
   });
 
   test("workers that fail to start leave reads in-process, with a log line", async () => {
@@ -244,6 +303,9 @@ describe("memory search reads in worker threads", () => {
     } as unknown as typeof Worker;
     try {
       const store = new SqliteMemoryStore();
+      await store.whenReady();
+      await store.whenVecPopulated();
+      await store.whenFtsPopulated();
       const results = await store.search(vector(3), agentId, { limit: 5, queryText: "deploy" });
       expect(results.length).toBeGreaterThan(0);
       expect(await memorySearchReaderStats()).toBeNull();
@@ -253,6 +315,68 @@ describe("memory search reads in worker threads", () => {
     } finally {
       globalThis.Worker = RealWorker;
       warn.mockRestore();
+    }
+
+    const prefix = `${process.env.TMPDIR ?? "/tmp"}/memory-integration-startup-${randomUUID()}`;
+    const delayed = `${prefix}-delayed.ts`;
+    const earlyExit = `${prefix}-exit.ts`;
+    await Bun.write(
+      delayed,
+      `self.onmessage = ({ data }) => {
+      if (data.type === "close") process.exit(0);
+      if (data.type === "init") setTimeout(() => self.postMessage({ type: "ready", sqliteVec: Boolean(data.vecExtensionPath) }), 100);
+    };`,
+    );
+    await Bun.write(
+      earlyExit,
+      `self.onmessage = ({ data }) => {
+      if (data.type === "close") process.exit(0);
+      if (data.type === "init") {
+        self.postMessage({ type: "ready", sqliteVec: Boolean(data.vecExtensionPath) });
+        setTimeout(() => process.exit(0), 10);
+      }
+    };`,
+    );
+    await __resetMemorySearchReaderForTests();
+    let created = 0;
+    globalThis.Worker = new Proxy(RealWorker, {
+      construct(target, args) {
+        return Reflect.construct(target, [created++ === 0 ? delayed : earlyExit, ...args.slice(1)]);
+      },
+    });
+    const startupWarn = spyOn(console, "warn").mockImplementation(() => {});
+    const deadline = Promise.withResolvers<never>();
+    const timer = setTimeout(
+      () => deadline.reject(new Error("A closed startup Worker retained its read.")),
+      1000,
+    );
+    try {
+      expect(
+        await Promise.race([memorySearchReader.get("SELECT 7 AS n"), deadline.promise]),
+      ).toEqual({ n: 7 });
+      expect(await memorySearchReaderStats()).toBeNull();
+      expect(startupWarn.mock.calls.map((args) => String(args[0]))).toContain(
+        "[memory-search] read workers failed to start (worker exited during startup); reads run in-process",
+      );
+      await __resetMemorySearchReaderForTests();
+      await Bun.write(
+        earlyExit,
+        `self.onmessage = ({ data }) => {
+        if (data.type === "init" || data.type === "close") process.exit(0);
+      };`,
+      );
+      created = 0;
+      expect(
+        await Promise.race([memorySearchReader.get("SELECT 8 AS n"), deadline.promise]),
+      ).toEqual({ n: 8 });
+      expect(await memorySearchReaderStats()).toBeNull();
+    } finally {
+      clearTimeout(timer);
+      globalThis.Worker = RealWorker;
+      await __resetMemorySearchReaderForTests();
+      startupWarn.mockRestore();
+      await Bun.file(delayed).delete();
+      await Bun.file(earlyExit).delete();
     }
   });
 });

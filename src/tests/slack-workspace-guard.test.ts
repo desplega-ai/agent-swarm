@@ -52,17 +52,17 @@ function removeTestDb(): void {
   }
 }
 
-beforeAll(() => {
-  closeDb();
+beforeAll(async () => {
+  await closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
   removeTestDb();
   initDb(TEST_DB_PATH);
 });
 
-afterAll(() => {
+afterAll(async () => {
   resetSlackWorkspaceGuardForTests();
-  closeDb();
+  await closeDb();
   removeTestDb();
   testGlobals.__testMigrationTemplate = savedMigrationTemplate;
 });

@@ -20,10 +20,10 @@ describe("SqliteMemoryStore", () => {
     return embedding;
   }
 
-  function skipVecAssertionsWhenUnavailable(): boolean {
+  async function skipVecAssertionsWhenUnavailable(): Promise<boolean> {
     if (isSqliteVecAvailable()) return false;
 
-    const health = store.getHealth();
+    const health = await store.getHealth();
     expect(health.sqliteVec.extensionLoaded).toBe(false);
     expect(health.retrievalMode).toBe("fallback");
     expect(health.reasons).toContain("sqlite_vec_extension_unavailable");
@@ -40,10 +40,13 @@ describe("SqliteMemoryStore", () => {
     await createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
     await createAgent({ id: agentB, name: "Test Agent B", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
+    await store.whenVecPopulated();
+    await store.whenFtsPopulated();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -438,7 +441,7 @@ describe("SqliteMemoryStore", () => {
     });
 
     test("uses sqlite-vec for 512d embeddings with scope-filter parity", async () => {
-      if (skipVecAssertionsWhenUnavailable()) return;
+      if (await skipVecAssertionsWhenUnavailable()) return;
 
       for (let i = 0; i < 6; i++) {
         const otherAgent = await store.store({
@@ -466,7 +469,7 @@ describe("SqliteMemoryStore", () => {
       expect(results[0]!.id).toBe(visible.id);
       expect(results.every((r) => r.agentId === agentA && r.scope === "agent")).toBe(true);
 
-      const health = store.getHealth();
+      const health = await store.getHealth();
       expect(health.sqliteVec.schema).toContain("distance_metric=cosine");
       expect(health.counts.memoryVec).toBeGreaterThanOrEqual(2);
       expect(health.retrievalMode).toBe("vec");
@@ -475,7 +478,7 @@ describe("SqliteMemoryStore", () => {
 
   describe("memory_vec population", () => {
     test("populates existing embeddings on startup and reports health counts", async () => {
-      if (skipVecAssertionsWhenUnavailable()) return;
+      if (await skipVecAssertionsWhenUnavailable()) return;
 
       const raw = await store.store({
         agentId: agentA,
@@ -491,7 +494,10 @@ describe("SqliteMemoryStore", () => {
       await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [raw.id]);
 
       const freshStore = new SqliteMemoryStore();
-      const health = freshStore.getHealth();
+      await freshStore.whenReady();
+      await freshStore.whenVecPopulated();
+      await freshStore.whenFtsPopulated();
+      const health = await freshStore.getHealth();
 
       expect(health.counts.missingFromVec).toBe(0);
       expect(health.sqliteVec.lastPopulate?.attempted).toBeGreaterThanOrEqual(1);
@@ -504,7 +510,7 @@ describe("SqliteMemoryStore", () => {
     });
 
     test("rebuilds an old non-cosine memory_vec table from agent_memory", async () => {
-      if (skipVecAssertionsWhenUnavailable()) return;
+      if (await skipVecAssertionsWhenUnavailable()) return;
 
       const raw = await store.store({
         agentId: agentA,
@@ -527,7 +533,10 @@ describe("SqliteMemoryStore", () => {
       `);
 
       const freshStore = new SqliteMemoryStore();
-      const health = freshStore.getHealth();
+      await freshStore.whenReady();
+      await freshStore.whenVecPopulated();
+      await freshStore.whenFtsPopulated();
+      const health = await freshStore.getHealth();
 
       expect(health.sqliteVec.schema).toContain("distance_metric=cosine");
       expect(health.counts.missingFromVec).toBe(0);
@@ -697,7 +706,7 @@ describe("SqliteMemoryStore", () => {
     });
 
     test("also removes corresponding vec rows", async () => {
-      if (skipVecAssertionsWhenUnavailable()) return;
+      if (await skipVecAssertionsWhenUnavailable()) return;
 
       const client = getDbClient();
       const emb = vector({ 0: 0.9, 100: 0.1 });
@@ -741,7 +750,7 @@ describe("SqliteMemoryStore", () => {
       const embBuffer = serializeEmbedding(emb);
 
       // Check if vec is available — if not, skip (test is meaningful only with vec)
-      const health = store.getHealth();
+      const health = await store.getHealth();
       if (health.retrievalMode !== "vec") return;
 
       // Insert enough rows to exceed 4096 in the vec table

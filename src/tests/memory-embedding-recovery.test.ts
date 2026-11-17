@@ -48,9 +48,9 @@ beforeAll(async () => {
   await createAgent({ id: agentId, name: "recovery", isLead: false, status: "idle" });
 });
 
-afterAll(() => {
+afterAll(async () => {
   server.stop(true);
-  closeDb();
+  await closeDb();
   for (const [env, value] of [
     ["EMBEDDING_API_BASE_URL", saved.baseUrl],
     ["EMBEDDING_API_KEY", saved.key],

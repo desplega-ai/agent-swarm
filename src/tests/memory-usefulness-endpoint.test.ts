@@ -89,10 +89,11 @@ describe("GET /api/memory/usefulness", () => {
     await getDbClient().run(insertTaskSql, [TASK_A, AGENT_ID, "usefulness task A", nowIso, nowIso]);
     await getDbClient().run(insertTaskSql, [TASK_B, AGENT_ID, "usefulness task B", nowIso, nowIso]);
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

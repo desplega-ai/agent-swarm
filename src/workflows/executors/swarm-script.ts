@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { getWorkflowRunTriggeredByAgentId } from "../../be/db/workflow-runs";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptMcpConnectionDescriptorsAsync,
 } from "../../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
 import {
@@ -141,8 +141,12 @@ export class SwarmScriptExecutor extends BaseExecutor<
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
+        apiConnections: await getScriptApiConnectionDescriptorsAsync({
+          agentId: agentId ?? undefined,
+        }),
+        mcpConnections: await getScriptMcpConnectionDescriptorsAsync({
+          agentId: agentId ?? undefined,
+        }),
         timeoutMs: config.timeoutMs,
         // The step watchdog aborts this when the node budget runs out, which
         // kills the script process: a step reported as timed out must not go

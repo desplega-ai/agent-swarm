@@ -163,7 +163,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   host.stop(true);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
   await rm(fsDir, { recursive: true, force: true });
   delete process.env.AGENT_FS_LOCAL_DIR;

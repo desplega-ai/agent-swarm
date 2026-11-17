@@ -58,7 +58,7 @@ async function journalRunIds(): Promise<string[]> {
 }
 
 beforeAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
@@ -67,7 +67,7 @@ afterAll(async () => {
   await resetDbRetentionForTests();
   delete process.env[DAYS_KEY];
   delete process.env.DB_RETENTION_DRY_RUN;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

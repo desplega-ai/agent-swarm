@@ -355,4 +355,4 @@ if (args.json) {
   }
   console.error(`\nSum of medians: ${total} ms`);
 }
-closeDb();
+await closeDb();

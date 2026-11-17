@@ -194,7 +194,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
         // Already deleted
       }
     }
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

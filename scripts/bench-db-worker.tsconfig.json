@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "resolveJsonModule": true },
+  "include": [
+    "bench-db-worker.ts",
+    "bench-db-worker-thread.ts",
+    "bench-db-worker-fixture.ts",
+    "../src/**/*.d.ts"
+  ],
+  "exclude": []
+}

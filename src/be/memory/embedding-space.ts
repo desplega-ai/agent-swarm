@@ -166,6 +166,7 @@ async function reembedMemory(
 ): Promise<boolean> {
   const client = getDbClient();
   const store = getMemoryStore();
+  await store.whenReady();
   const cursorKey = embeddingSpaceCursorKey("memory");
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
   let cursor = (await readState(cursorKey)) ?? "";

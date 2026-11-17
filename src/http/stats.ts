@@ -4,6 +4,7 @@ import {
   getAgentStatusCounts,
   getAllLogs,
   getConcurrentContext,
+  getDbDriver,
   getLogsByAgentId,
   getScheduledTasks,
   getSwarmMetrics,
@@ -48,6 +49,7 @@ const TaskCountsSchema = z.object({
 
 /** Mirrors the object literal built by handleStats for GET /api/stats. */
 const DashboardStatsSchema = z.object({
+  dbDriver: z.enum(["sqlite", "worker"]),
   agents: AgentCountsSchema,
   tasks: TaskCountsSchema,
   steeringEnabled: z.boolean(),
@@ -255,6 +257,7 @@ export async function handleStats(
       },
       // Authenticated home for the steering feature flag — deliberately NOT on
       // the unauthenticated /health endpoint (config must not leak).
+      dbDriver: getDbDriver(),
       steeringEnabled: isSteeringEnabled(),
       devMode: isEnvFlagEnabled("SWARM_DEV_MODE", false),
       // Same authenticated home, for the same reason. Read through the helper

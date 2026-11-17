@@ -112,7 +112,7 @@ beforeAll(async () => {
 afterAll(async () => {
   server.close();
   proxy.stop(true);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);

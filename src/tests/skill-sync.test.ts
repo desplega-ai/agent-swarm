@@ -75,7 +75,7 @@ describe("syncSkillsToFilesystem", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     rmSync(FAKE_HOME, { recursive: true, force: true });
     await unlink(TEST_DB_PATH).catch(() => {});
     await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});

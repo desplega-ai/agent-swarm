@@ -77,6 +77,8 @@ export interface DbClient extends DbExecutor {
    * transaction via AsyncLocalStorage, mirroring how synchronous helpers
    * sharing one connection behaved before this seam existed. Nested
    * `transaction` calls become SAVEPOINTs (opts are ignored for them).
+   * Callback rejection rolls back. Caught statement errors retain native Promise semantics.
+   * Await, return, or join all DB work. See runbooks/async-db-promises.md.
    */
   transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T>;
   /**
@@ -93,9 +95,9 @@ export interface DbClient extends DbExecutor {
    * `executionMs` sums only the driver attempts, measured with
    * `performance.now()` (so it is fractional, and sub-millisecond statements
    * do not floor to 0). A retried statement counts every attempt: each one
-   * really did occupy the driver and block the event loop, up to
-   * `attemptSpinMs` per BUSY attempt. It excludes all lock waiting and all
-   * backoff sleeping.
+   * occupies the driver, up to `attemptSpinMs` per BUSY attempt. Only the
+   * synchronous driver blocks the main event loop during execution.
+   * The timer excludes FIFO lock waits, retry backoff, and Worker message transfer.
    *
    * `changes` counts only the rows the statement itself changed. Unlike
    * `run`, it excludes rows touched by foreign-key actions.
@@ -126,6 +128,80 @@ export interface DbClient extends DbExecutor {
    * back runs only if the outer transaction rolls back too.
    */
   afterRollback(fn: () => void): void;
+  close(): Promise<void>;
+}
+
+export type DriverResult<T> = { value: T; executionMs: number };
+export type DriverOptions = { spinMs?: number; deadlineAt?: number };
+export interface SqliteDriver {
+  readonly blocksEventLoop: boolean;
+  all<T>(
+    sql: string,
+    params: DbParam[],
+    options?: DriverOptions,
+  ): DriverResult<T[]> | Promise<DriverResult<T[]>>;
+  get<T>(
+    sql: string,
+    params: DbParam[],
+    options?: DriverOptions,
+  ): DriverResult<T | null> | Promise<DriverResult<T | null>>;
+  run(
+    sql: string,
+    params: DbParam[],
+    options?: DriverOptions,
+  ): DriverResult<{ changes: number }> | Promise<DriverResult<{ changes: number }>>;
+  runTimed(
+    sql: string,
+    params: DbParam[],
+    options?: DriverOptions,
+  ): DriverResult<{ changes: number }> | Promise<DriverResult<{ changes: number }>>;
+  exec(sql: string, options?: DriverOptions): DriverResult<void> | Promise<DriverResult<void>>;
+  close(): Promise<void>;
+}
+
+/** Execute on the current handle. The caller owns this handle's lifecycle. */
+export function createSyncSqliteDriver(getDatabase: () => Database): SqliteDriver {
+  let closed = false;
+  const execute = <T>(run: (db: Database) => T, options?: DriverOptions): DriverResult<T> => {
+    if (closed) throw new Error("db-client: driver is closed");
+    const db = getDatabase();
+    const restore =
+      options?.spinMs === undefined
+        ? undefined
+        : (db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()?.timeout ?? 5000);
+    if (options?.spinMs !== undefined) db.exec(`PRAGMA busy_timeout = ${options.spinMs}`);
+    const start = performance.now();
+    try {
+      assertBeforeDeadline(options?.deadlineAt);
+      return { value: run(db), executionMs: performance.now() - start };
+    } catch (error) {
+      if (error instanceof Error) Object.assign(error, { executionMs: performance.now() - start });
+      throw error;
+    } finally {
+      if (restore !== undefined) db.exec(`PRAGMA busy_timeout = ${restore}`);
+    }
+  };
+  return {
+    blocksEventLoop: true,
+    all: <T>(sql: string, params: DbParam[], options?: DriverOptions) =>
+      execute((db) => db.query<T, DbParam[]>(sql).all(...params), options),
+    get: <T>(sql: string, params: DbParam[], options?: DriverOptions) =>
+      execute((db) => db.query<T, DbParam[]>(sql).get(...params), options),
+    run: (sql, params, options) =>
+      execute((db) => ({ changes: db.query(sql).run(...params).changes }), options),
+    runTimed: (sql, params, options) =>
+      execute((db) => {
+        db.query(sql).run(...params);
+        return { changes: (db.query("SELECT changes() AS n").get() as { n: number }).n };
+      }, options),
+    exec: (sql, options) =>
+      execute((db) => {
+        db.run(sql);
+      }, options),
+    close: async () => {
+      closed = true;
+    },
+  };
 }
 
 const LOCK_WATCHDOG_MS = 30_000;
@@ -169,9 +245,13 @@ class FifoLock {
   }
 }
 
+type TransactionScope = { closed: boolean };
 type TxContext = {
   /** Set once the outermost transaction commits or rolls back. */
   closed: boolean;
+  client: BunSqliteClient;
+  tail: Promise<void>;
+  fatal?: { error: unknown };
   /** Hooks to run after COMMIT; dropped on ROLLBACK. */
   afterCommit: (() => void | Promise<void>)[];
   /** Hooks to run after ROLLBACK; dropped on COMMIT. */
@@ -179,6 +259,8 @@ type TxContext = {
 };
 
 const txContext = new AsyncLocalStorage<TxContext>();
+const transactionScope = new AsyncLocalStorage<TransactionScope>();
+const hookContext = new AsyncLocalStorage<{ client: BunSqliteClient; active: boolean }>();
 
 export function isInTransaction(): boolean {
   const store = txContext.getStore();
@@ -253,8 +335,12 @@ const SLOW_STATEMENT_WARN_MS = 100;
 const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
 
 /** Params are never logged: they can carry secrets and user content. */
-function warnIfSlowStatement(sql: string, durationMs: number): void {
-  recordStatement(sql, durationMs);
+function warnIfSlowStatement(
+  sql: string,
+  durationMs: number,
+  driver: "sqlite" | "worker" = "sqlite",
+): void {
+  recordStatement(sql, durationMs, driver);
   if (durationMs < SLOW_STATEMENT_WARN_MS) return;
   // Scrub the complete SQL before truncation, so a secret that straddles the
   // cut cannot leave a partial token, then scrub the complete line at egress.
@@ -265,19 +351,9 @@ function warnIfSlowStatement(sql: string, durationMs: number): void {
       : flat;
   console.warn(
     scrubSecrets(
-      `[db-client] slow sync statement blocked the event loop for ${Math.round(durationMs)}ms path=${currentLoopPath()}: ${shown}`,
+      `[db-client] ${driver === "sqlite" ? "slow sync statement blocked the event loop for" : "slow worker statement executed for"} ${Math.round(durationMs)}ms path=${currentLoopPath()}: ${shown}`,
     ),
   );
-}
-
-/** Run one synchronous driver call and log it when it blocked the loop too long. */
-function timedStatement<T>(sql: string, run: () => T): T {
-  const startedAt = performance.now();
-  try {
-    return run();
-  } finally {
-    warnIfSlowStatement(sql, performance.now() - startedAt);
-  }
 }
 
 /**
@@ -306,20 +382,6 @@ async function yieldIfSliceSpent(): Promise<void> {
   if (performance.now() - sliceStartedAt < SLICE_MS) return;
   await new Promise<void>((resolve) => setImmediate(resolve));
   sliceStartedAt = 0;
-}
-
-/**
- * In-transaction statement: runs NOW, before any await, exactly as it did
- * before slicing, so an interleaved rollback or commit cannot overtake it
- * (a statement parked on a yield would resume after the transaction closed
- * and autocommit outside it). Only the caller's continuation waits for the
- * yield. A throw skips the yield: the caller is about to unwind anyway.
- */
-async function runThenYield<T>(run: () => T): Promise<T> {
-  markSlice();
-  const result = run();
-  await yieldIfSliceSpent();
-  return result;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -413,11 +475,13 @@ class BunSqliteClient implements DbClient {
   private readonly lock = new FifoLock();
   private readonly gate: BusyGate;
   private savepointSeq = 0;
-  /** Lazily captured ambient busy_timeout, restored after each short-spin attempt. */
-  private restoreBusyTimeoutMs: number | null = null;
+  private closing = false;
+  private closePromise?: Promise<void>;
+  private readonly admitted = new Set<Promise<unknown>>();
+  private readonly hooks = new Set<Promise<void>>();
 
   constructor(
-    private readonly getDatabase: () => Database,
+    private readonly driver: SqliteDriver,
     private readonly busyRetry: BusyRetryOptions = DEFAULT_BUSY_RETRY,
   ) {
     this.gate = new BusyGate(
@@ -427,47 +491,92 @@ class BunSqliteClient implements DbClient {
   }
 
   query<T>(sql: string, params: DbParam[] = []): Promise<T[]> {
-    return this.execute(sql, (db) => db.query<T, DbParam[]>(sql).all(...params));
+    return this.admit(() =>
+      this.execute(sql, (options) => this.driver.all<T>(sql, params, options)),
+    );
   }
 
   get<T>(sql: string, params: DbParam[] = []): Promise<T | null> {
-    return this.execute(sql, (db) => db.query<T, DbParam[]>(sql).get(...params));
+    return this.admit(() =>
+      this.execute(sql, (options) => this.driver.get<T>(sql, params, options)),
+    );
   }
 
   run(sql: string, params: DbParam[] = []): Promise<{ changes: number }> {
-    return this.execute(sql, (db) => {
-      const result = db.query(sql).run(...params);
-      return { changes: result.changes };
+    return this.admit(() => this.execute(sql, (options) => this.driver.run(sql, params, options)));
+  }
+
+  runTimed(sql: string, params: DbParam[] = []): Promise<{ changes: number; executionMs: number }> {
+    return this.admit(async () => {
+      let executionMs = 0;
+      const result = await this.execute(
+        sql,
+        (options) => this.driver.runTimed(sql, params, options),
+        (ms) => {
+          executionMs += ms;
+        },
+      );
+      return { ...result, executionMs };
     });
   }
 
-  async runTimed(
-    sql: string,
-    params: DbParam[] = [],
-  ): Promise<{ changes: number; executionMs: number }> {
-    let executionMs = 0;
-    const result = await this.execute(
-      sql,
-      (db) => {
-        db.query(sql).run(...params);
-        // bun:sqlite's `run().changes` also counts rows touched by foreign-key
-        // actions (an ON DELETE SET NULL child update counts as a change), so
-        // a DELETE on a self-referencing table reports up to twice the rows it
-        // removed. SQLite's changes() counts only the statement's own rows.
-        // Same connection, still inside the lock: nothing can run in between.
-        const own = db.query("SELECT changes() AS n").get() as { n: number } | null;
-        return { changes: own?.n ?? 0 };
-      },
-      (ms) => {
-        executionMs += ms;
-      },
+  private admit<T>(fn: () => Promise<T>): Promise<T> {
+    const ctx = txContext.getStore();
+    if (this.closing && !(ctx?.client === this && !ctx.closed) && !this.inActiveHook())
+      return Promise.reject(new Error("db-client: client is closed"));
+    const promise = fn();
+    this.admitted.add(promise);
+    void promise.then(
+      () => this.admitted.delete(promise),
+      () => this.admitted.delete(promise),
     );
-    return { ...result, executionMs };
+    return promise;
   }
 
-  async transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T> {
+  close(): Promise<void> {
+    if (txContext.getStore()?.client === this && !txContext.getStore()?.closed) {
+      return Promise.reject(new Error("db-client: cannot close inside a transaction"));
+    }
+    this.closing = true;
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = (async () => {
+      let timedOut = false;
+      let timer: ReturnType<typeof setTimeout>;
+      const drain = async () => {
+        while (this.admitted.size || this.hooks.size) {
+          await Promise.allSettled([...this.admitted, ...this.hooks]);
+        }
+      };
+      const timeout = new Promise<void>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          // The driver bounds its own close wait and terminates a stuck Worker.
+          void this.driver
+            .close()
+            .then(() => reject(new Error("db-client: shutdown drain timed out")), reject);
+        }, 10_000);
+      });
+      try {
+        await Promise.race([drain(), timeout]);
+        await this.driver.close();
+        if (timedOut) throw new Error("db-client: shutdown drain timed out");
+      } finally {
+        clearTimeout(timer!);
+      }
+    })();
+    return this.closePromise;
+  }
+
+  transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T> {
+    return this.admit(() => this.transact(fn, opts));
+  }
+
+  private async transact<T>(
+    fn: (tx: DbExecutor) => Promise<T>,
+    opts?: TransactionOptions,
+  ): Promise<T> {
     const existing = txContext.getStore();
-    if (existing && !existing.closed) {
+    if (existing?.client === this && !existing.closed) {
       return this.savepoint(existing, fn);
     }
 
@@ -506,15 +615,21 @@ class BunSqliteClient implements DbClient {
     deadlineAt?: number,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
-    const ctx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
+    const ctx: TxContext = {
+      closed: false,
+      client: this,
+      tail: Promise.resolve(),
+      afterCommit: [],
+      afterRollback: [],
+    };
     let began = false;
+    let committing = false;
     try {
-      const db = this.getDatabase();
       const tx = this.boundExecutor(ctx);
       if (readOnly) {
         // Deferred BEGIN executes no locking work, cannot BUSY, and keeps the
         // whole transaction off the cross-process write lock.
-        db.run("BEGIN");
+        await this.driver.exec("BEGIN");
       } else {
         try {
           // IMMEDIATE takes the write lock at BEGIN: a cross-process BUSY
@@ -522,7 +637,10 @@ class BunSqliteClient implements DbClient {
           // instead of on an arbitrary statement mid-callback where it is
           // not. The short spin keeps the driver's synchronous busy wait off
           // the event loop; the real waiting is the caller's async backoff.
-          this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"), finalAttempt);
+          await this.shortSpin(
+            (options) => this.driver.exec("BEGIN IMMEDIATE", options),
+            finalAttempt,
+          );
           this.gate.recordRecovered();
         } catch (err) {
           if (isSqliteBusy(err)) return { ok: false, busyBegin: err };
@@ -531,26 +649,40 @@ class BunSqliteClient implements DbClient {
       }
       began = true;
       const result = await txContext.run(ctx, () => fn(tx));
+      await this.drain(ctx);
+      if (ctx.fatal) throw ctx.fatal.error;
+      ctx.closed = true;
       // Last point a deadline can stop the write: the throw rolls back in the catch below.
       assertBeforeDeadline(deadlineAt);
+      committing = true;
       if (readOnly) {
-        db.run("COMMIT");
+        await this.driver.exec("COMMIT", { deadlineAt });
       } else {
         // A BUSY COMMIT leaves the transaction open and intact, so a repeat
         // is exact. The open transaction pins the connection, so these
         // retries hold the FIFO lock and their sleeps block queued work;
         // WAL-mode COMMIT BUSY is rare enough for that to be acceptable.
         await this.retryHoldingLock(
-          () => this.shortSpin(db, () => db.run("COMMIT"), false, false),
+          () =>
+            this.shortSpin(
+              (options) => this.driver.exec("COMMIT", { ...options, deadlineAt }),
+              false,
+              false,
+            ),
           deadlineAt,
         );
       }
       for (const hook of ctx.afterCommit) this.scheduleHook(hook);
       return { ok: true, value: result };
     } catch (err) {
-      if (began) {
+      if (
+        began &&
+        !(committing && (err as Error | null | undefined)?.name === "DbWorkerTransportError")
+      ) {
         try {
-          this.getDatabase().run("ROLLBACK");
+          ctx.closed = true;
+          await this.drain(ctx);
+          await this.driver.exec("ROLLBACK");
         } catch {
           // Connection-level failure while rolling back; surface the original error.
         }
@@ -558,7 +690,7 @@ class BunSqliteClient implements DbClient {
           try {
             hook();
           } catch (hookErr) {
-            console.error("[db-client] afterRollback hook threw:", hookErr);
+            console.error("[db-client] afterRollback hook threw:", scrubSecrets(String(hookErr)));
           }
         }
       }
@@ -571,7 +703,9 @@ class BunSqliteClient implements DbClient {
 
   afterCommit(fn: () => void | Promise<void>): void {
     const ctx = txContext.getStore();
-    if (ctx && !ctx.closed) {
+    if (this.closing && !(ctx?.client === this && !ctx.closed) && !this.inActiveHook())
+      throw new Error("db-client: client is closed");
+    if (ctx?.client === this && !ctx.closed) {
       // Inside a transaction: run only if it commits; dropped on rollback.
       ctx.afterCommit.push(fn);
       return;
@@ -581,7 +715,7 @@ class BunSqliteClient implements DbClient {
 
   afterRollback(fn: () => void): void {
     const ctx = txContext.getStore();
-    if (ctx && !ctx.closed) ctx.afterRollback.push(fn);
+    if (ctx?.client === this && !ctx.closed) ctx.afterRollback.push(fn);
   }
 
   private scheduleHook(fn: () => void | Promise<void>): void {
@@ -590,42 +724,91 @@ class BunSqliteClient implements DbClient {
     // re-acquire normally. A hook that throws synchronously or rejects
     // asynchronously must not become an unhandled rejection (which would
     // crash the process) and must not look like a lock failure.
-    void this.lock.acquire().then((release) => {
+    const hook = this.lock.acquire().then(async (release) => {
       release();
+      const context = { client: this, active: true };
       try {
-        const result = fn();
-        if (result && typeof result.then === "function") {
-          result.then(undefined, (err) => {
-            console.error("[db-client] afterCommit hook rejected:", err);
-          });
-        }
+        await txContext.exit(() => transactionScope.exit(() => hookContext.run(context, fn)));
       } catch (err) {
-        console.error("[db-client] afterCommit hook threw:", err);
+        console.error("[db-client] afterCommit hook failed:", scrubSecrets(String(err)));
+      } finally {
+        context.active = false;
       }
     });
+    this.hooks.add(hook);
+    void hook.then(() => this.hooks.delete(hook));
+  }
+
+  private inActiveHook(): boolean {
+    const context = hookContext.getStore();
+    return context?.client === this && context.active;
   }
 
   private async savepoint<T>(ctx: TxContext, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
-    const db = this.getDatabase();
-    // Monotonic per-client counter, NOT nesting depth: two nested transactions
-    // running concurrently under one outer transaction would otherwise reuse a
-    // name, and the first RELEASE would silently swallow the sibling's writes.
-    // SQLite savepoints are still a stack, so out-of-LIFO release remains
-    // wrong — unique names turn that into a loud "no such savepoint" error
-    // instead of silent data loss.
+    const scope: TransactionScope = { closed: false };
+    return transactionScope.run(scope, () => this.runSavepoint(ctx, scope, fn));
+  }
+
+  private async runSavepoint<T>(
+    ctx: TxContext,
+    scope: TransactionScope,
+    fn: (tx: DbExecutor) => Promise<T>,
+  ): Promise<T> {
     this.savepointSeq += 1;
     const name = `db_client_sp_${this.savepointSeq}`;
-    const tx = this.boundExecutor(ctx);
-    db.run(`SAVEPOINT ${name}`);
+    const tx = this.boundExecutor(ctx, scope);
+    await this.enqueue(ctx, () => this.driver.exec(`SAVEPOINT ${name}`));
     try {
       const result = await fn(tx);
-      db.run(`RELEASE SAVEPOINT ${name}`);
+      await this.drain(ctx);
+      if (ctx.fatal) throw ctx.fatal.error;
+      await this.enqueue(ctx, () => this.driver.exec(`RELEASE SAVEPOINT ${name}`));
       return result;
     } catch (err) {
-      db.run(`ROLLBACK TO SAVEPOINT ${name}`);
-      db.run(`RELEASE SAVEPOINT ${name}`);
+      await this.drain(ctx);
+      try {
+        await this.enqueue(ctx, () => this.driver.exec(`ROLLBACK TO SAVEPOINT ${name}`));
+        await this.enqueue(ctx, () => this.driver.exec(`RELEASE SAVEPOINT ${name}`));
+      } catch (rollbackError) {
+        // A caught savepoint error cannot authorize commit after failed recovery.
+        ctx.fatal ??= { error: rollbackError };
+        throw rollbackError;
+      }
       throw err;
+    } finally {
+      scope.closed = true;
     }
+  }
+
+  private async drain(ctx: TxContext): Promise<void> {
+    let tail: Promise<void>;
+    do {
+      tail = ctx.tail;
+      await tail;
+      // Statement continuations can admit more work while the captured tail drains.
+    } while (tail !== ctx.tail);
+  }
+
+  /** Reserve order before readiness or transport can yield. Drain every admitted operation. */
+  private enqueue<T>(
+    ctx: TxContext,
+    op: () => T | Promise<T>,
+    scope = transactionScope.getStore(),
+  ): Promise<T> {
+    if (ctx.closed || scope?.closed)
+      return Promise.reject(
+        new Error("db-client: transaction executor used after the transaction closed"),
+      );
+    const result = ctx.tail.then(op);
+    ctx.tail = result.then(
+      () => {},
+      (error) => {
+        // Ordinary statement errors retain native catch semantics. Transport loss is fatal.
+        if ((error as Error | null | undefined)?.name === "DbWorkerTransportError")
+          ctx.fatal ??= { error };
+      },
+    );
+    return result;
   }
 
   /**
@@ -635,37 +818,18 @@ class BunSqliteClient implements DbClient {
    */
   private async execute<T>(
     sql: string,
-    op: (db: Database) => T,
+    op: (options?: DriverOptions) => DriverResult<T> | Promise<DriverResult<T>>,
     recordExecutionMs?: (ms: number) => void,
   ): Promise<T> {
-    // Wraps ONLY the synchronous driver call, so lock acquisition above and
-    // backoff sleeps below are never charged to the statement. Called once per
-    // attempt; a retrying statement reports the sum. See DbClient.runTimed.
-    // A BUSY attempt that will be retried is not logged as slow: its block is
-    // capped at `attemptSpinMs` by construction.
-    const timed = (attempt: () => T, retryable = false): T => {
-      const startedAt = performance.now();
-      let willRetry = false;
-      try {
-        return attempt();
-      } catch (err) {
-        willRetry = retryable && isSqliteBusy(err);
-        throw err;
-      } finally {
-        const ms = performance.now() - startedAt;
-        recordExecutionMs?.(ms);
-        if (!willRetry) warnIfSlowStatement(sql, ms);
-      }
-    };
-    // The first call opens the database and applies migrations; resolve it
-    // before the timer, so boot work is not logged as this statement's cost.
-    // Outside a transaction it resolves inside the retry loop, so a boot that
-    // hits SQLITE_BUSY boots again.
+    const timed = (attempt: () => DriverResult<T> | Promise<DriverResult<T>>, retryable = false) =>
+      this.timed(sql, attempt, recordExecutionMs, retryable);
     const ctx = txContext.getStore();
-    if (ctx && !ctx.closed) {
-      const db = this.getDatabase();
-      // The transaction holds the lock: the yield after the statement lets only timers and sockets run.
-      return runThenYield(() => timed(() => op(db)));
+    if (ctx?.client === this && !ctx.closed) {
+      return this.enqueue(ctx, async () => {
+        const value = await timed(() => op());
+        if (this.driver.blocksEventLoop) await yieldIfSliceSpent();
+        return value;
+      });
     }
     let sleptMs = 0;
     let sawBusy = false;
@@ -677,12 +841,11 @@ class BunSqliteClient implements DbClient {
       try {
         // Checked while holding the lock: waiters queued behind it passed any
         // earlier check long ago. Other callers just wait, as behind a slow statement.
-        await yieldIfSliceSpent();
+        if (this.driver.blocksEventLoop) await yieldIfSliceSpent();
         // A top-level single statement is atomic, so a repeat on BUSY is
         // exact. The final attempt spins `finalAttemptSpinMs` (see
         // transaction()).
-        const db = this.getDatabase();
-        const result = timed(() => this.shortSpin(db, () => op(db), !canRetryAfter), canRetryAfter);
+        const result = await timed(() => this.shortSpin(op, !canRetryAfter), canRetryAfter);
         // A statement that was BUSY earlier in this call and now landed is a
         // write that got through: the external holder is gone.
         if (sawBusy) this.gate.recordRecovered();
@@ -701,6 +864,29 @@ class BunSqliteClient implements DbClient {
     }
   }
 
+  private async timed<T>(
+    sql: string,
+    attempt: () => DriverResult<T> | Promise<DriverResult<T>>,
+    recordExecutionMs?: (ms: number) => void,
+    retryable = false,
+  ): Promise<T> {
+    try {
+      const result = await attempt();
+      recordExecutionMs?.(result.executionMs);
+      this.observe(sql, result.executionMs);
+      return result.value;
+    } catch (err) {
+      const ms = (err as { executionMs?: number } | null | undefined)?.executionMs ?? 0;
+      recordExecutionMs?.(ms);
+      if (!(retryable && isSqliteBusy(err))) this.observe(sql, ms);
+      throw err;
+    }
+  }
+
+  private observe(sql: string, ms: number): void {
+    warnIfSlowStatement(sql, ms, this.driver.blocksEventLoop ? "sqlite" : "worker");
+  }
+
   /**
    * Run a driver attempt under a short `busy_timeout` so the synchronous
    * in-driver busy wait blocks the event loop for at most `attemptSpinMs`
@@ -708,29 +894,22 @@ class BunSqliteClient implements DbClient {
    * lock is held, so the set/attempt/restore sequence cannot interleave with
    * other client work.
    */
-  private shortSpin<T>(db: Database, attempt: () => T, finalAttempt = false, gateable = true): T {
-    if (this.restoreBusyTimeoutMs === null) {
-      const row = db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
-      this.restoreBusyTimeoutMs = row?.timeout ?? 5000;
-    }
-    // While a holder is known (BusyGate) the attempt runs without a spin: it
-    // still tries, so a released lock is taken at once, but a held one costs
-    // microseconds of event loop instead of a full spin per queued writer.
-    // Only the spinning probe that follows a lapsed gate reports BUSY back.
+  private async shortSpin<T>(
+    attempt: (options: DriverOptions) => T | Promise<T>,
+    finalAttempt = false,
+    gateable = true,
+  ): Promise<T> {
     const gated = gateable && this.gate.isOpen();
     const spinMs = gated
       ? 0
       : finalAttempt
         ? (this.busyRetry.finalAttemptSpinMs ?? DEFAULT_FINAL_ATTEMPT_SPIN_MS)
         : this.busyRetry.attemptSpinMs;
-    db.exec(`PRAGMA busy_timeout = ${spinMs}`);
     try {
-      return attempt();
+      return await attempt({ spinMs });
     } catch (err) {
       if (gateable && !gated && isSqliteBusy(err)) this.gate.recordBusy();
       throw err;
-    } finally {
-      db.exec(`PRAGMA busy_timeout = ${this.restoreBusyTimeoutMs}`);
     }
   }
 
@@ -738,11 +917,11 @@ class BunSqliteClient implements DbClient {
    * COMMIT-only retry: the open transaction pins the shared connection, so
    * the FIFO lock stays held and these sleeps block queued in-process work.
    */
-  private async retryHoldingLock<T>(attempt: () => T, deadlineAt?: number): Promise<T> {
+  private async retryHoldingLock<T>(attempt: () => Promise<T>, deadlineAt?: number): Promise<T> {
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
       try {
-        return attempt();
+        return await attempt();
       } catch (err) {
         if (!isSqliteBusy(err)) throw err;
         // The transaction is still open and intact after a BUSY COMMIT: the caller rolls it back.
@@ -756,52 +935,43 @@ class BunSqliteClient implements DbClient {
     }
   }
 
-  private boundExecutor(ctx: TxContext): DbExecutor {
-    const guard = (): Database => {
-      if (ctx.closed) {
-        throw new Error("db-client: transaction executor used after the transaction closed");
-      }
-      return this.getDatabase();
-    };
+  private boundExecutor(
+    ctx: TxContext,
+    scope = transactionScope.getStore() ?? { closed: false },
+  ): DbExecutor {
+    const execute = <T>(sql: string, op: () => DriverResult<T> | Promise<DriverResult<T>>) =>
+      this.enqueue(
+        ctx,
+        async () => {
+          const value = await this.timed(sql, op);
+          if (this.driver.blocksEventLoop) await yieldIfSliceSpent();
+          return value;
+        },
+        scope,
+      );
     return {
-      query: <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
-        runThenYield(() =>
-          timedStatement(sql, () =>
-            guard()
-              .query<T, DbParam[]>(sql)
-              .all(...params),
-          ),
-        ),
-      get: <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
-        runThenYield(() =>
-          timedStatement(sql, () =>
-            guard()
-              .query<T, DbParam[]>(sql)
-              .get(...params),
-          ),
-        ),
-      run: (sql: string, params: DbParam[] = []): Promise<{ changes: number }> =>
-        runThenYield(() => {
-          const result = timedStatement(sql, () =>
-            guard()
-              .query(sql)
-              .run(...params),
-          );
-          return { changes: result.changes };
-        }),
+      query: <T>(sql: string, params: DbParam[] = []) =>
+        execute(sql, () => this.driver.all<T>(sql, params)),
+      get: <T>(sql: string, params: DbParam[] = []) =>
+        execute(sql, () => this.driver.get<T>(sql, params)),
+      run: (sql: string, params: DbParam[] = []) =>
+        execute(sql, () => this.driver.run(sql, params)),
     };
   }
 }
 
 /**
  * Wrap a lazily-resolved bun:sqlite handle in the async DbClient seam.
- * `getDatabase` is invoked per operation so close/reopen cycles (tests) are
- * transparent to holders of the client. `busyRetry` overrides the
+ * `getDatabase` is invoked per operation. Closed clients reject stale calls. `busyRetry` overrides the
  * cross-process SQLITE_BUSY retry posture (tests use tiny values).
  */
 export function createBunSqliteClient(
   getDatabase: () => Database,
   busyRetry?: BusyRetryOptions,
 ): DbClient {
-  return new BunSqliteClient(getDatabase, busyRetry);
+  return createDbClient(createSyncSqliteDriver(getDatabase), busyRetry);
+}
+
+export function createDbClient(driver: SqliteDriver, busyRetry?: BusyRetryOptions): DbClient {
+  return new BunSqliteClient(driver, busyRetry);
 }

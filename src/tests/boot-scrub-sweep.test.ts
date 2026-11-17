@@ -179,7 +179,7 @@ describe("boot retro-sweep", () => {
     delete process.env[envName];
     known.cleanup();
     refreshSecretScrubberCache();
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -486,10 +486,10 @@ describe("boot retro-sweep forward-only mode", () => {
   const rowIds: string[] = [];
 
   beforeAll(() => initDb(":memory:"));
-  afterAll(() => {
+  afterAll(async () => {
     if (savedMode === undefined) delete process.env.BOOT_SCRUB_MODE;
     else process.env.BOOT_SCRUB_MODE = savedMode;
-    closeDb();
+    await closeDb();
   });
 
   async function content(id: string): Promise<string | undefined> {

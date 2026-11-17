@@ -61,18 +61,22 @@ export function autoEncryptLegacyOAuthSecrets(database: Database): OAuthEncrypti
      WHERE id = ? AND tokensEncrypted = 0`,
   );
 
-  database.transaction(() => {
-    for (const app of apps) {
-      updateApp.run(encryptSecret(app.clientSecret, key), app.id);
-    }
-    for (const authorization of authorizations) {
-      updateAuthorization.run(
-        encryptSecret(authorization.accessToken, key),
-        authorization.refreshToken == null ? null : encryptSecret(authorization.refreshToken, key),
-        authorization.id,
-      );
-    }
-  })();
+  database
+    .transaction(() => {
+      for (const app of apps) {
+        updateApp.run(encryptSecret(app.clientSecret, key), app.id);
+      }
+      for (const authorization of authorizations) {
+        updateAuthorization.run(
+          encryptSecret(authorization.accessToken, key),
+          authorization.refreshToken == null
+            ? null
+            : encryptSecret(authorization.refreshToken, key),
+          authorization.id,
+        );
+      }
+    })
+    .immediate();
 
   console.log(
     `[oauth-encryption] Migrated ${apps.length} app secret(s) and ${authorizations.length} authorization token set(s).`,

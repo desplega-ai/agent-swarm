@@ -77,7 +77,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await harness.stop();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

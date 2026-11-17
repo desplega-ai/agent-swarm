@@ -21,7 +21,7 @@ import {
 } from "../be/db";
 import { getPageEditCounter } from "../be/db/page-versions";
 import { snapshotPage } from "../pages/version";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 // Side-effect import: registers `task.page.feedback`.
 import "../prompts/session-templates";
 import { can } from "../rbac";
@@ -972,7 +972,7 @@ export async function handlePages(
     }
 
     const note = parsed.body.note;
-    const taskPrompt = resolveTemplate("task.page.feedback", {
+    const taskPrompt = await resolveTemplateAsync("task.page.feedback", {
       page_id: page.id,
       page_title: page.title,
       page_slug: page.slug,

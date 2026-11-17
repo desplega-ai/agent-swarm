@@ -41,7 +41,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   delete process.env.LINEAR_SIGNING_SECRET;
-  closeDb();
+  await closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

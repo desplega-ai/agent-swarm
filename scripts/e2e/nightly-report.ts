@@ -1,7 +1,8 @@
 /**
  * Merges the per-job results of the Nightly E2E workflow into one report.
  *
- * Inputs are the downloaded artifacts: one `e2e-results.json` per job under
+ * Inputs are the downloaded artifacts: one `e2e-results.json` per SQLite/harness job,
+ * plus `e2e-worker-results.json` from the full Worker contract job under
  * `--results`, plus earlier `nightly-report.json` files under `--previous` for
  * the cost trend. Writes a Markdown summary and a JSON report, and appends
  * `ok=<bool>` to `$GITHUB_OUTPUT` when that file is set.
@@ -36,6 +37,8 @@ export type NightlyReport = {
   ok: boolean;
   /** Null when the contract job produced no result file. */
   contract: ContractSummary | null;
+  /** Absent in older reports. Null when the Worker job produced no result file. */
+  workerContract?: ContractSummary | null;
   harness: HarnessResult[];
   /** Providers with no result file, such as a leg that died before writing one. */
   missingLegs: string[];
@@ -48,6 +51,7 @@ export type NightlyReport = {
 
 export type ReportInputs = {
   results: E2eResult[];
+  workerResult: E2eResult | null;
   previous: NightlyReport[];
   providers: string[];
   runId: string;
@@ -83,6 +87,14 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
         gates: contractResult.gates,
       }
     : null;
+  const workerContract: ContractSummary | null = inputs.workerResult
+    ? {
+        ok: inputs.workerResult.ok,
+        scenarios: inputs.workerResult.scenarios,
+        coverage: inputs.workerResult.coverage,
+        gates: inputs.workerResult.gates,
+      }
+    : null;
   const legs = new Map<string, HarnessResult>();
   for (const result of inputs.results) {
     for (const leg of result.harness) legs.set(harnessLegName(leg), normalizeLeg(leg));
@@ -101,6 +113,10 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
   const warnings: string[] = [];
   if (!contract) warnings.push("The contract job produced no result file.");
   else if (!contract.gates.passed) warnings.push("Coverage gates failed in the contract job.");
+  if (!workerContract) warnings.push("The Worker contract job produced no result file.");
+  else if (!workerContract.gates.passed) {
+    warnings.push("Coverage gates failed in the Worker contract job.");
+  }
   for (const provider of missingLegs) warnings.push(`${provider}: no result file from the leg.`);
   for (const leg of harness) {
     if (leg.attempts.length > 1) {
@@ -125,6 +141,8 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
 
   const ok =
     contract?.ok === true &&
+    workerContract?.ok === true &&
+    workerContract.gates.passed &&
     missingLegs.length === 0 &&
     harness.every((leg) => leg.status === "pass");
   return {
@@ -135,6 +153,7 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
     sha: inputs.sha,
     ok,
     contract,
+    workerContract,
     harness,
     missingLegs,
     skippedLegs,
@@ -201,31 +220,36 @@ export function nightlyMarkdown(
     "",
   ];
 
-  lines.push("### Contract scenarios", "");
-  if (report.contract) {
-    const { scenarios, coverage, gates } = report.contract;
-    const count = (status: string) => scenarios.filter((s) => s.status === status).length;
-    lines.push(
-      `${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped, ${count("flaky")} flaky · ` +
-        `routes ${coverage.routes.covered}/${coverage.routes.total} (${coverage.routes.percent.toFixed(1)}%) · ` +
-        `MCP tools ${coverage.mcpTools.covered}/${coverage.mcpTools.total} (${coverage.mcpTools.percent.toFixed(1)}%) · ` +
-        `gates ${gates.passed ? "PASS" : "FAIL"}`,
-      "",
-    );
-    const notPassed = scenarios.filter((scenario) => scenario.status !== "pass");
-    if (notPassed.length > 0) {
+  for (const [label, summary] of [
+    ["SQLite", report.contract],
+    ["Worker", report.workerContract],
+  ] as const) {
+    lines.push(`### ${label} contract scenarios`, "");
+    if (summary) {
+      const { scenarios, coverage, gates } = summary;
+      const count = (status: string) => scenarios.filter((s) => s.status === status).length;
       lines.push(
-        "| Scenario | Status | Error |",
-        "| --- | --- | --- |",
-        ...notPassed.map(
-          (scenario) =>
-            `| ${scenario.name} | ${scenario.status.toUpperCase()} | ${markdownCell(scenario.error ?? "")} |`,
-        ),
+        `${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped, ${count("flaky")} flaky · ` +
+          `routes ${coverage.routes.covered}/${coverage.routes.total} (${coverage.routes.percent.toFixed(1)}%) · ` +
+          `MCP tools ${coverage.mcpTools.covered}/${coverage.mcpTools.total} (${coverage.mcpTools.percent.toFixed(1)}%) · ` +
+          `gates ${gates.passed ? "PASS" : "FAIL"}`,
         "",
       );
+      const notPassed = scenarios.filter((scenario) => scenario.status !== "pass");
+      if (notPassed.length > 0) {
+        lines.push(
+          "| Scenario | Status | Error |",
+          "| --- | --- | --- |",
+          ...notPassed.map(
+            (scenario) =>
+              `| ${scenario.name} | ${scenario.status.toUpperCase()} | ${markdownCell(scenario.error ?? "")} |`,
+          ),
+          "",
+        );
+      }
+    } else {
+      lines.push(`No result file from the ${label} contract job.`, "");
     }
-  } else {
-    lines.push("No result file from the contract job.", "");
   }
 
   if (report.warnings.length > 0) {
@@ -290,11 +314,16 @@ async function main(): Promise<void> {
     .map((p) => p.trim())
     .filter(Boolean);
   const results = await readJsonFiles<E2eResult>(values.results, "**/e2e-results.json");
+  const workerResults = await readJsonFiles<E2eResult>(
+    values.results,
+    "**/e2e-worker-results.json",
+  );
   const previous = values.previous
     ? await readJsonFiles<NightlyReport>(values.previous, "**/nightly-report.json")
     : [];
   const report = buildNightlyReport({
     results,
+    workerResult: workerResults[0] ?? null,
     previous: previous.filter((run) => run.runId !== values["run-id"]),
     providers,
     runId: values["run-id"],

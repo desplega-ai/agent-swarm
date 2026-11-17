@@ -87,7 +87,7 @@ describe("readableSessionRowCondition", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 

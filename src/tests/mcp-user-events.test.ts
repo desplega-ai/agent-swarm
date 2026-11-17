@@ -235,7 +235,7 @@ afterAll(async () => {
   else process.env.MCP_USER_EVENTS_ENABLED = originalEnabled;
   await new Promise<void>((resolve) => mcpServer.close(() => resolve()));
   await new Promise<void>((resolve) => receiver.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 

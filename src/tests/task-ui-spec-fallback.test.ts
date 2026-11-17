@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await rm(`${TEST_DB_PATH}${suffix}`, { force: true });
 });
 

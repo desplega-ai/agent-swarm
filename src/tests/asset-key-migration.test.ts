@@ -109,7 +109,7 @@ function dropMigration129ForHistoricalFixture(): void {
 beforeAll(async () => {
   globals.__savedAssetKeyTemplate = globals.__testMigrationTemplate;
   globals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   await removeDb(FRESH_DB);
   await removeDb(HISTORICAL_DB);
   await removeDb(HISTORY_REBUILD_DB);
@@ -119,7 +119,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   globals.__testMigrationTemplate = globals.__savedAssetKeyTemplate;
   globals.__savedAssetKeyTemplate = undefined;
   await removeDb(FRESH_DB);
@@ -197,7 +197,7 @@ describe("asset namespace key migrations", () => {
       "SELECT \"notnull\", dflt_value FROM pragma_table_info('inbox_item_state') WHERE name = 'lastReadAt'",
     );
     expect(column).toEqual({ notnull: 0, dflt_value: null });
-    closeDb();
+    await closeDb();
     initDb(INBOX_UPGRADE_DB);
     try {
       const user = await createUser({ name: "Upgrade User", email: "inbox-upgrade@example.com" });
@@ -209,17 +209,17 @@ describe("asset namespace key migrations", () => {
       );
       await getDbClient().run("ALTER TABLE inbox_item_state DROP COLUMN lastReadAt");
       await getDbClient().run("DELETE FROM _migrations WHERE version = 227");
-      closeDb();
+      await closeDb();
       initDb(INBOX_UPGRADE_DB);
       expect(
         await getDbClient().get(
           "SELECT status, readAt, lastReadAt FROM inbox_item_state WHERE itemId = 'existing-item'",
         ),
       ).toEqual({ status: "done", readAt, lastReadAt: null });
-      closeDb();
+      await closeDb();
       expect(() => initDb(INBOX_UPGRADE_DB)).not.toThrow();
     } finally {
-      closeDb();
+      await closeDb();
       initDb(FRESH_DB);
     }
   });
@@ -277,7 +277,7 @@ describe("asset namespace key migrations", () => {
   });
 
   test("migration 129 preserves existing history rows while widening entity types", async () => {
-    closeDb();
+    await closeDb();
     initDb(HISTORY_REBUILD_DB);
 
     const historyId = crypto.randomUUID();
@@ -292,7 +292,7 @@ describe("asset namespace key migrations", () => {
     );
 
     dropMigration129ForHistoricalFixture();
-    closeDb();
+    await closeDb();
     initDb(HISTORY_REBUILD_DB);
 
     try {
@@ -328,7 +328,7 @@ describe("asset namespace key migrations", () => {
           .get()?.count,
       ).toBe(1);
     } finally {
-      closeDb();
+      await closeDb();
       initDb(FRESH_DB);
     }
   });
@@ -366,7 +366,7 @@ describe("asset namespace key migrations", () => {
   });
 
   test("upgrades a historical database, backfills attachment mappings, and is repeatable", async () => {
-    closeDb();
+    await closeDb();
     initDb(HISTORICAL_DB);
     dropMigration115ForHistoricalFixture();
 
@@ -399,7 +399,7 @@ describe("asset namespace key migrations", () => {
        ) VALUES (?, 'historical-script', 'global', 'export default () => null', '', '', '{}', '', ?, ?)`,
       [scriptId, now, now],
     );
-    closeDb();
+    await closeDb();
 
     initDb(HISTORICAL_DB);
     expect(getDb().query('SELECT "key" FROM agent_tasks WHERE id = ?').get(taskId)).toEqual({
@@ -419,7 +419,7 @@ describe("asset namespace key migrations", () => {
       key: "shared/",
     });
 
-    closeDb();
+    await closeDb();
     expect(() => initDb(HISTORICAL_DB)).not.toThrow();
     expect(
       getDb()
@@ -431,7 +431,7 @@ describe("asset namespace key migrations", () => {
   });
 
   test("preserves asset keys when upgrading a legacy restrictive task status schema", async () => {
-    closeDb();
+    await closeDb();
     initDb(LEGACY_STATUS_DB);
     dropMigration115ForHistoricalFixture();
 
@@ -492,7 +492,7 @@ describe("asset namespace key migrations", () => {
       [taskId, now, now, user.id, user.id, user.id],
     );
 
-    closeDb();
+    await closeDb();
 
     expect(() => initDb(LEGACY_STATUS_DB)).not.toThrow();
     expect(getDb().query('SELECT "key" FROM agent_tasks WHERE id = ?').get(taskId)).toEqual({
@@ -548,16 +548,16 @@ describe("asset namespace key migrations", () => {
     expect(createdAfterUpgrade.key).toBe(`shared/task:${createdAfterUpgrade.id}/`);
   });
 
-  test("startup audit fails closed on structural corruption", () => {
-    closeDb();
+  test("startup audit fails closed on structural corruption", async () => {
+    await closeDb();
     initDb(HISTORICAL_DB);
     const taskId = getDb()
       .prepare<{ id: string }, []>("SELECT id FROM agent_tasks LIMIT 1")
       .get()!.id;
     getDb().run("DROP TRIGGER validate_agent_tasks_asset_key_update");
     getDb().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', ["INVALID", taskId]);
-    closeDb();
+    await closeDb();
     expect(() => initDb(HISTORICAL_DB)).toThrow("structurally invalid");
-    closeDb();
+    await closeDb();
   });
 });

@@ -241,7 +241,7 @@ afterAll(async () => {
   // stub with no edit() (broke memory-edit.test.ts on Linux CI, where the
   // readdir-driven file order runs this file first).
   mock.module("../be/memory", () => realMemoryExports);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);

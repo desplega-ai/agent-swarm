@@ -24,13 +24,14 @@ describe("Memory System", () => {
 
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
+    await store.whenReady();
 
     await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
     await createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

@@ -532,7 +532,7 @@ ${serveFakeAcpAgent("FakeAgent")}
           )?.result?.isError,
         ).toBe(true);
       } finally {
-        closeDb();
+        await closeDb();
       }
     } finally {
       await closeTokenStub();
@@ -1620,7 +1620,7 @@ ${serveFakeAcpAgent("FakeAgent")}
         expect(cost).toMatchObject({ totalCostUsd, costSource });
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
-        closeDb();
+        await closeDb();
       }
     } finally {
       await closeTokenStub();

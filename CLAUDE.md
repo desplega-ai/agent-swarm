@@ -22,7 +22,18 @@ Section rules and length targets: the "writing a pull request description" block
 
 <important if="you are writing or modifying API-server code that reads or writes the database (src/be, src/http, src/tools, src/apps, src/workflows, src/heartbeat, src/scheduler)">
 
-All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite` imports) is allowed only for the boot-path files listed in `scripts/check-async-db-seam.sh` (CI-enforced).
+Runtime DB access uses `getDbClient()` from `src/be/db.ts`. Await `client.query<Row>(sql, params)`, `get<Row>`, `run`, and `client.transaction(async (tx) => ...)`.
+
+`DB_DRIVER=sqlite` remains the default. The deployment environment alone selects `DB_DRIVER=worker`. Stored configuration cannot override it. Driver changes require an API restart.
+
+`getDbClient()` returns synchronously. Its operations await driver readiness. Server startup awaits `whenDbReady()` before accepting requests or starting schedulers.
+Await `closeDb()` before reopening or deleting the database. Closure drains admitted operations and hooks and stops memory population.
+
+`getDb()` is boot-only for application code. Migrations, backfills, and seeders stay synchronous on the main thread.
+Worker mode retains that boot connection and opens a second runtime connection to the same file. Production Worker mode requires a file database.
+The seam and explorer have explicit exemptions in `scripts/check-async-db-seam.sh`. Metrics and the explicit explorer fallback still execute synchronous SQL.
+Worker execution time, message round-trip time, FIFO queue waits, and event-loop delay measure different costs. Worker execution never counts as synchronous `db_ms`.
+Full lifecycle, limits, and rollout requirements: [runbooks/local-development.md](./runbooks/local-development.md#experimental-database-worker).
 
 - Client-level calls made inside a transaction callback join that transaction automatically (AsyncLocalStorage routing). Nested `transaction` calls become SAVEPOINTs.
 - `transaction` opens with `BEGIN IMMEDIATE` (write lock taken at BEGIN, with cross-process BUSY retry). Pass `{ readOnly: true }` only for SELECT-only callbacks. Boot-path code that still uses raw `db.transaction(fn)` must invoke it as `.immediate(...)`. A deferred BEGIN that reads before it writes fails with `SQLITE_BUSY_SNAPSHOT` ("database is locked") when a second process shares the file, and `busy_timeout` never retries that error.

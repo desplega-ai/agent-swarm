@@ -44,6 +44,7 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface MemoryStore {
+  whenReady(): Promise<void>;
   store(input: MemoryInput): Promise<AgentMemory>;
   storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]>;
   /**
@@ -86,7 +87,7 @@ export interface MemoryStore {
     after: MemoryScrubFields,
   ): Promise<boolean>;
   getStats(agentId: string): Promise<MemoryStats>;
-  getHealth(): MemoryHealth;
+  getHealth(): Promise<MemoryHealth>;
 }
 
 // ============================================================================

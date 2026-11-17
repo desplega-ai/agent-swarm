@@ -1,7 +1,7 @@
 import { Assistant } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { ackSlackMessage, reactionName } from "./ack";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
@@ -87,7 +87,7 @@ export function createAssistant(
         await saveThreadContext();
 
         if (!isSlackRenderV2Enabled()) {
-          const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+          const greetingResult = await resolveTemplateAsync("slack.assistant.greeting", {});
           await say(greetingResult.text);
         }
 
@@ -385,7 +385,7 @@ export function createAssistant(
           if (isSlackRenderV2Enabled()) {
             await ensureSlackThreadPresentation([task.id]);
           } else {
-            const offlineResult = resolveTemplate("slack.assistant.offline", {});
+            const offlineResult = await resolveTemplateAsync("slack.assistant.offline", {});
             await say(offlineResult.text);
           }
           return;

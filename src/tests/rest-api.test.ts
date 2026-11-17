@@ -232,7 +232,7 @@ describe("REST API Endpoints", () => {
     });
 
     // Close database
-    closeDb();
+    await closeDb();
 
     // Clean up test database file
     try {
@@ -645,7 +645,7 @@ describe("REST API Endpoints", () => {
 
     test("should return empty stats for empty database", async () => {
       // Clean up the database for this test
-      closeDb();
+      await closeDb();
       await unlink(TEST_DB_PATH).catch(() => {});
       await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
       await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});

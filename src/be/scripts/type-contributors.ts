@@ -14,7 +14,7 @@ export interface ScriptTypeContext {
  * only names it owns (prefix-namespaced) or merges into `SwarmSdk`, returns ""
  * when it has nothing to contribute, and never throws.
  *
- * Implementations: `getScriptApiTypes` / `getScriptMcpTypes`
+ * Implementations: `getScriptApiTypesAsync` / `getScriptMcpTypesAsync`
  * (`src/be/script-connections.ts`) and `getScriptAppTypes`
  * (`src/apps/script-types.ts`). Adding a fourth (e.g. typed workflows, if
  * `swarm-script` nodes ever get a typecheck gate) is one parameter on

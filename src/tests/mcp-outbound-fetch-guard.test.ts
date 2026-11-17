@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   for (const [key, value] of Object.entries(savedEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

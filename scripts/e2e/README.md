@@ -270,6 +270,17 @@ posts nothing: `bun scripts/e2e/tracker-ingest.ts --dry-run --out /tmp/payloads`
 
 ## Benchmarks
 
+The PR gate runs three unchanged SQLite shards and a separate targeted Worker smoke job.
+Worker smoke includes `core-telemetry`, which checks the effective driver through authenticated `GET /api/stats`.
+Pass `--sut-env DB_DRIVER=worker`. The SUT does not inherit arbitrary environment variables from the runner.
+Worker artifacts never enter the SQLite shard union. The required E2E aggregate also requires Worker smoke success.
+
+Nightly runs the full Worker contract with `--strict`, independently of the SQLite contract and real provider legs.
+Its `nightly-e2e-contract-worker` artifact contains `e2e-worker-results.json`.
+The nightly report requires that file alongside the SQLite and harness `e2e-results.json` files.
+It reports both contracts separately and fails when either contract fails or Worker results are missing.
+Targeted PR smoke does not prove full Worker contract coverage.
+
 Latency is recorded on every `ctx.api` call. Compare two runs:
 
 ```bash
@@ -281,3 +292,5 @@ bun scripts/e2e/bench.ts /tmp/e2e-before.json /tmp/e2e-after.json
 
 `bench.ts` prints per-group p50/p95 deltas and the scenario durations side by side.
 CI uploads result JSON for local comparison.
+Use repeated paired runs for driver comparisons. Investigate scenario ratios above 1.5x and record absolute latency changes.
+HTTP latency includes handler work and client waits. It does not isolate Worker execution, transport, or main-thread event-loop delay.

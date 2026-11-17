@@ -21,10 +21,11 @@ describe("Memory E2E Lifecycle", () => {
     await createAgent({ id: agentA, name: "E2E Agent A", isLead: false, status: "idle" });
     await createAgent({ id: agentB, name: "E2E Agent B", isLead: true, status: "idle" });
     store = new SqliteMemoryStore();
+    await store.whenReady();
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

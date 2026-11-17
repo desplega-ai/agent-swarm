@@ -60,8 +60,8 @@ export function runtimeFailureFixture(dbPath: string) {
   const state = { fake: new FailureTestController(), controllerId: "" };
   let commandsSpy: ReturnType<typeof spyOn<typeof controllers, "getControllerCommands">>;
   let errorSpy: ReturnType<typeof spyOn<typeof console, "error">>;
-  beforeAll(() => {
-    closeDb();
+  beforeAll(async () => {
+    await closeDb();
     initDb(dbPath);
   });
   beforeEach(async () => {
@@ -99,7 +99,7 @@ export function runtimeFailureFixture(dbPath: string) {
     errorSpy.mockRestore();
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"])
       await Bun.file(dbPath + suffix)
         .delete()

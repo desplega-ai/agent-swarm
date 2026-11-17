@@ -55,7 +55,7 @@ afterAll(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await rm(`${TEST_DB_PATH}${suffix}`, { force: true });
 });
 

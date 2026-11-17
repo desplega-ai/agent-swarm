@@ -87,7 +87,7 @@ async function seedStaleRunningTask(
 
 beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   server = createHttpServer(async (req, res) => {
     const pathSegments = getPathSegments(req.url || "");
@@ -109,7 +109,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server.close();
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
 });
 

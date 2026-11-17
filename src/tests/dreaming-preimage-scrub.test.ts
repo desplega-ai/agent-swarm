@@ -82,7 +82,7 @@ describe("dreaming memory pre-images follow the memory's redaction", () => {
     initDb(TEST_DB_PATH);
   });
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 

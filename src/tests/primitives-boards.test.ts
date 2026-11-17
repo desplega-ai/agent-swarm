@@ -73,9 +73,9 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   fake.stop(true);
-  closeDb();
+  await closeDb();
 });
 
 beforeEach(async () => {

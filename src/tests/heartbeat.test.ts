@@ -51,12 +51,12 @@ describe("Heartbeat Triage", () => {
     } catch {
       // File doesn't exist
     }
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     try {
       await unlink(TEST_DB_PATH);
       await unlink(`${TEST_DB_PATH}-wal`);

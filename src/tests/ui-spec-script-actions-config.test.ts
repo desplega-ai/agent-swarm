@@ -81,7 +81,7 @@ beforeAll(async () => {
 afterAll(async () => {
   reloadSpy.mockRestore();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
 });
 
 function put(headers: Record<string, string>, value = PIN) {

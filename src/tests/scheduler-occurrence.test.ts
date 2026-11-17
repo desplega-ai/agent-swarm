@@ -68,7 +68,7 @@ afterEach(() => {
 });
 afterAll(async () => {
   setScriptEmbeddingProviderForTests(null);
-  db.closeDb();
+  await db.closeDb();
   templateGlobals.__testMigrationTemplate = savedTemplate;
   for (const suffix of ["", "-wal", "-shm"]) await rm(dbPath + suffix, { force: true });
 });

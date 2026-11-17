@@ -25,7 +25,7 @@ const output = { exitCode: 0, stdout: "done", stderr: "" };
 beforeAll(() => initDb(dbPath));
 afterAll(async () => {
   for (const id of workflowIds) await deleteWorkflow(id);
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(dbPath + suffix).catch(() => {});
 });
 

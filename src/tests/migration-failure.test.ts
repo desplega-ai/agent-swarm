@@ -26,14 +26,14 @@ function makeMigration136Fail(database: Database): void {
 }
 
 beforeEach(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
   testGlobals.__savedMigrationFailureTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
 });
 
 afterEach(async () => {
-  closeDb();
+  await closeDb();
   testGlobals.__testMigrationTemplate = testGlobals.__savedMigrationFailureTemplate;
   delete testGlobals.__savedMigrationFailureTemplate;
   await removeDbFiles();

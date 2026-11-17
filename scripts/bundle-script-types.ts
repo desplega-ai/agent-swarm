@@ -53,7 +53,7 @@ main()
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   })
-  .finally(() => {
-    closeDb();
+  .finally(async () => {
+    await closeDb();
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   });

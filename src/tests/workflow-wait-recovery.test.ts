@@ -109,7 +109,7 @@ afterAll(async () => {
       // already deleted
     }
   }
-  closeDb();
+  await closeDb();
   templateGlobals.__testMigrationTemplate = savedTemplate;
   for (const suffix of ["", "-wal", "-shm"]) {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => {});
@@ -126,7 +126,7 @@ describe("WaitExecutor — recovery on startup", () => {
     const { run, step, wait, payload, resolution } = await makeResolvedWait(mode, status, nextPort);
 
     // Reopen after the resolution commits, before the waiting step is checkpointed.
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
     expect((await getWorkflowRunStep(step.id))?.status).toBe("waiting");
     expect((await getWaitStateByStepId(step.id))?.status).toBe(status);

@@ -90,9 +90,9 @@ beforeEach(async () => {
   leadId = (await createAgent({ name: "Reconcile Lead", isLead: true, status: "idle" })).id;
 });
 
-afterEach(() => {
+afterEach(async () => {
   _resetSlackRenderV2ForTests();
-  closeDb();
+  await closeDb();
 });
 
 describe("slack render-v2 reconcile scheduling", () => {

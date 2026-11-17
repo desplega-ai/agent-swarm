@@ -104,7 +104,7 @@ afterAll(async () => {
   clearUserMergeRetryTimersForTests();
   await runUserMergeJobs();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   await removeDbFiles(TEST_DB_PATH);
   if (ORIGINAL_API_KEY === undefined) {
     delete process.env.AGENT_SWARM_API_KEY;

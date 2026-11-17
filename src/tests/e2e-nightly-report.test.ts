@@ -10,6 +10,7 @@ import {
   nightlyMarkdown,
 } from "../../scripts/e2e/nightly-report";
 import type { E2eResult, HarnessResult } from "../../scripts/e2e/report";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const coverage: E2eResult["coverage"] = {
   routes: { total: 352, covered: 16, percent: 4.5, byGroup: {}, uncovered: [], unknown: [] },
@@ -69,6 +70,7 @@ function harnessResult(legs: HarnessResult[]): E2eResult {
 }
 
 const base = {
+  workerResult: contractResult(),
   providers: DEFAULT_PROVIDERS,
   previous: [] as NightlyReport[],
   runId: "42",
@@ -79,6 +81,81 @@ const base = {
 };
 
 describe("nightly report", () => {
+  test(
+    "reads distinct contract artifacts and rejects a missing Worker artifact",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "worker-sqlite-phase4-nightly-"));
+      try {
+        const workerPath = join(dir, "results/a-worker/e2e-worker-results.json");
+        const sqlitePath = join(dir, "results/z-sqlite/e2e-results.json");
+        await Bun.write(workerPath, JSON.stringify(contractResult(false)));
+        await Bun.write(sqlitePath, JSON.stringify(contractResult()));
+        const build = async () => {
+          expectChildOk(
+            await runChild(
+              [
+                process.execPath,
+                "scripts/e2e/nightly-report.ts",
+                "--results",
+                join(dir, "results"),
+                "--providers",
+                "",
+                "--out",
+                join(dir, "summary.md"),
+                "--json",
+                join(dir, "report.json"),
+              ],
+              { env: { ...process.env, GITHUB_OUTPUT: "" } },
+            ),
+            "nightly report",
+          );
+          return (await Bun.file(join(dir, "report.json")).json()) as NightlyReport;
+        };
+        let report = await build();
+        expect(report.ok).toBe(false);
+        expect(report.contract?.ok).toBe(true);
+        expect(report.workerContract?.ok).toBe(false);
+
+        await Bun.write(workerPath, JSON.stringify(contractResult()));
+        report = await build();
+        expect(report.ok).toBe(true);
+        expect(await Bun.file(join(dir, "summary.md")).text()).toContain(
+          "### Worker contract scenarios",
+        );
+
+        await rm(workerPath);
+        report = await build();
+        expect(report.ok).toBe(false);
+        expect(report.contract?.ok).toBe(true);
+        expect(report.workerContract).toBeNull();
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test("requires both contracts and reports their failures separately", () => {
+    const results = [contractResult(), ...DEFAULT_PROVIDERS.map((p) => harnessResult([leg(p)]))];
+    for (const workerResult of [null, contractResult(false)]) {
+      const report = buildNightlyReport({ ...base, results, workerResult });
+      expect(report.ok).toBe(false);
+      expect(report.contract?.ok).toBe(true);
+      expect(report.workerContract?.ok ?? false).toBe(false);
+      const markdown = nightlyMarkdown(report, [], DEFAULT_PROVIDERS);
+      expect(markdown).toContain("### SQLite contract scenarios");
+      expect(markdown).toContain("### Worker contract scenarios");
+      if (workerResult) expect(markdown).toContain("| auth | FAIL | boom |");
+      else expect(report.warnings).toContain("The Worker contract job produced no result file.");
+    }
+    const workerResult = contractResult();
+    workerResult.gates = { ...workerResult.gates, passed: false };
+    const report = buildNightlyReport({ ...base, results, workerResult });
+    expect(report.ok).toBe(false);
+    expect(report.warnings).toContain("Coverage gates failed in the Worker contract job.");
+    expect(buildNightlyReport({ ...base, results: results.slice(1) }).ok).toBe(false);
+  });
+
   test("passes when the contract and every leg pass", () => {
     const report = buildNightlyReport({
       ...base,

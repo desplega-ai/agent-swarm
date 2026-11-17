@@ -10,7 +10,7 @@ import {
 import { getOAuthApp, upsertAuthorization, upsertOAuthApp } from "../be/db-queries/oauth";
 import {
   deleteScriptConnection,
-  getScriptApiConnectionDescriptors,
+  getScriptApiConnectionDescriptorsAsync,
   getScriptConnectionById,
   listRelationalCredentialBindings,
   upsertCredentialBinding,
@@ -701,7 +701,7 @@ describe("embedded connection auth", () => {
         agentId: "agent-e2e",
         resources,
         egressSecrets: await buildScriptCredentialBindings({}),
-        apiConnections: getScriptApiConnectionDescriptors(),
+        apiConnections: await getScriptApiConnectionDescriptorsAsync(),
         source: `
           export default async (_args, ctx) => {
             return await ctx.api.e2eVendor.getMe({});

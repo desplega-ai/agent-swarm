@@ -13,8 +13,9 @@
  * - the workers failed to start or one died (logged once).
  */
 
-import { getDb, getDbClient, isSqliteVecAvailable, resolveSqliteVecExtensionPath } from "@/be/db";
-import { type DbParam, isInTransaction } from "../db-client";
+import { getDbClient } from "@/be/db";
+import { getDbConnectionIdentity, getMemoryReadConnection, isCurrentDbClient } from "../db/runtime";
+import { type DbClient, type DbParam, isInTransaction } from "../db-client";
 import type { SearchReadMessage, SearchReadRequest } from "./search-read-worker";
 
 /** Workers in the pool. Reads beyond this wait in a FIFO queue, so a burst never piles onto SQLite. */
@@ -43,27 +44,81 @@ function workerSpecifier(): string {
   return new URL("./search-read-worker.ts", import.meta.url).href;
 }
 
-function spawnWorker(file: string, vecExtensionPath: string | undefined): Promise<Worker> {
+type PoolEntry = {
+  client: DbClient;
+  identity: object;
+  controller: AbortController;
+  pool: Promise<SearchReadPool | null>;
+  exits: Promise<void>[];
+  workers: RefWorker[];
+  closedWorkers: Set<RefWorker>;
+};
+
+function closeWorker(worker: RefWorker): void {
+  try {
+    worker.ref?.();
+    worker.postMessage({ type: "close" });
+  } catch {
+    worker.terminate();
+  }
+}
+
+function spawnWorker(
+  connection: Awaited<ReturnType<typeof getMemoryReadConnection>>,
+  entry: PoolEntry,
+): Promise<Worker> {
+  const signal = entry.controller.signal;
   return new Promise<Worker>((resolve, reject) => {
     // Inside the executor, so a constructor that throws rejects like a failed boot.
     const worker: RefWorker = new Worker(workerSpecifier());
+    let ready = false;
+    entry.workers.push(worker);
+    entry.exits.push(
+      new Promise<void>((exited) =>
+        worker.addEventListener(
+          "close",
+          () => {
+            entry.closedWorkers.add(worker);
+            exited();
+            if (!ready) fail("worker exited during startup");
+          },
+          { once: true },
+        ),
+      ),
+    );
     // An idle pool must not keep the API process (or a test run) alive.
     worker.unref?.();
     const fail = (message: string) => {
       clearTimeout(timer);
-      worker.terminate();
+      signal.removeEventListener("abort", abort);
+      closeWorker(worker);
       reject(new Error(message));
     };
+    const abort = () => fail("database connection closed");
     const timer = setTimeout(() => fail("timed out starting"), START_TIMEOUT_MS);
+    signal.addEventListener("abort", abort, { once: true });
     worker.addEventListener("message", function onReady(event: MessageEvent<SearchReadMessage>) {
       worker.removeEventListener("message", onReady);
       if (event.data.type === "ready") {
         clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+        if (event.data.sqliteVec !== connection.sqliteVec) {
+          fail("vector capability differs from the database client");
+          return;
+        }
+        if (signal.aborted) return abort();
+        ready = true;
         resolve(worker);
       } else fail(event.data.type === "fatal" ? event.data.message : "unexpected first message");
     });
     worker.addEventListener("error", (event) => fail(event.message), { once: true });
-    worker.postMessage({ type: "init", file, vecExtensionPath });
+    worker.postMessage({
+      type: "init",
+      file: connection.file,
+      customSQLite: connection.customSQLite,
+      vecExtensionPath: connection.vecExtensionPath,
+    });
+    if (signal.aborted) abort();
   });
 }
 
@@ -116,7 +171,11 @@ class SearchReadPool {
         sql: job.sql,
         params: job.params,
       };
-      slot.worker.postMessage(request);
+      try {
+        slot.worker.postMessage(request);
+      } catch {
+        this.stop("request submission failed");
+      }
     }
   }
 
@@ -129,7 +188,10 @@ class SearchReadPool {
     slot.worker.unref?.();
     this.idle.push(slot);
     if (message.type === "result") job.resolve(message.rows);
-    else job.reject(new Error(message.message));
+    else
+      job.reject(
+        Object.assign(new Error(message.message), { name: message.name, code: message.code }),
+      );
     this.pump();
   }
 
@@ -142,42 +204,63 @@ class SearchReadPool {
     this.queue.length = 0;
     for (const slot of this.slots) {
       slot.job = null;
-      slot.worker.terminate();
+      closeWorker(slot.worker);
     }
     for (const job of pending) job.reject(new WorkerGoneError(reason));
   }
 }
 
 // One pool per database handle: a closed and reopened DB (tests) gets fresh workers.
-let current: { db: unknown; pool: Promise<SearchReadPool | null> } | null = null;
+let current: PoolEntry | null = null;
 let inProcessOnly = false;
 
-function poolForCurrentDb(): Promise<SearchReadPool | null> {
-  const db = getDb();
-  if (current?.db === db) return current.pool;
-  void current?.pool.then((pool) => pool?.stop("database handle changed", false));
-  const file = db.filename;
-  const pool =
-    !file || file === ":memory:"
-      ? Promise.resolve(null)
-      : startPool(file, isSqliteVecAvailable() ? resolveSqliteVecExtensionPath() : undefined);
-  current = { db, pool };
-  return pool;
+function poolForCurrentDb(client: DbClient): Promise<SearchReadPool | null> {
+  const identity = getDbConnectionIdentity();
+  if (!identity || !isCurrentDbClient(client))
+    return Promise.reject(new Error("Memory store connection closed."));
+  if (current?.client === client && current.identity === identity) return current.pool;
+  if (current) stopEntry(current);
+  const entry: PoolEntry = {
+    client,
+    identity,
+    controller: new AbortController(),
+    pool: Promise.resolve(null),
+    exits: [],
+    workers: [],
+    closedWorkers: new Set(),
+  };
+  // Await the effective driver's capability before opening additional connections.
+  entry.pool = (async () => {
+    const config = await getMemoryReadConnection(client);
+    if (entry.controller.signal.aborted) return null;
+    return !config.file || config.file === ":memory:" ? null : startPool(config, entry);
+  })();
+  current = entry;
+  return entry.pool;
 }
 
 async function startPool(
-  file: string,
-  vecExtensionPath: string | undefined,
+  connection: Awaited<ReturnType<typeof getMemoryReadConnection>>,
+  entry: PoolEntry,
 ): Promise<SearchReadPool | null> {
+  const signal = entry.controller.signal;
   const started = await Promise.allSettled(
-    Array.from({ length: SEARCH_READ_WORKERS }, () => spawnWorker(file, vecExtensionPath)),
+    Array.from({ length: SEARCH_READ_WORKERS }, () => spawnWorker(connection, entry)),
   );
   const failed = started.find((result) => result.status === "rejected");
-  if (failed) {
-    for (const result of started) if (result.status === "fulfilled") result.value.terminate();
-    console.warn(
-      `[memory-search] read workers failed to start (${(failed.reason as Error).message}); reads run in-process`,
-    );
+  if (
+    failed ||
+    started.some((result) => result.status === "fulfilled" && entry.closedWorkers.has(result.value))
+  ) {
+    for (const result of started) if (result.status === "fulfilled") closeWorker(result.value);
+    if (!signal.aborted)
+      console.warn(
+        `[memory-search] read workers failed to start (${failed ? (failed.reason as Error).message : "worker exited during startup"}); reads run in-process`,
+      );
+    return null;
+  }
+  if (signal.aborted) {
+    for (const result of started) if (result.status === "fulfilled") closeWorker(result.value);
     return null;
   }
   console.log(`[memory-search] read workers started workers=${SEARCH_READ_WORKERS}`);
@@ -186,28 +269,79 @@ async function startPool(
   );
 }
 
-function readInProcess(mode: Mode, sql: string, params: DbParam[]): Promise<unknown> {
-  return mode === "all" ? getDbClient().query(sql, params) : getDbClient().get(sql, params);
+function readInProcess(
+  client: DbClient,
+  mode: Mode,
+  sql: string,
+  params: DbParam[],
+): Promise<unknown> {
+  if (!isCurrentDbClient(client))
+    return Promise.reject(new Error("Memory store connection closed."));
+  return mode === "all" ? client.query(sql, params) : client.get(sql, params);
 }
 
-async function read(mode: Mode, sql: string, params: DbParam[]): Promise<unknown> {
-  if (inProcessOnly || isInTransaction()) return readInProcess(mode, sql, params);
-  const pool = await poolForCurrentDb();
-  if (!pool || pool.broken) return readInProcess(mode, sql, params);
+async function read(
+  client: DbClient,
+  mode: Mode,
+  sql: string,
+  params: DbParam[],
+): Promise<unknown> {
+  if (inProcessOnly || isInTransaction()) return readInProcess(client, mode, sql, params);
+  const pool = await poolForCurrentDb(client);
+  if (!isCurrentDbClient(client)) throw new Error("Memory store connection closed.");
+  if (!pool || pool.broken) return readInProcess(client, mode, sql, params);
   try {
-    return await pool.read(mode, sql, params);
+    const result = await pool.read(mode, sql, params);
+    if (!isCurrentDbClient(client)) throw new Error("Memory store connection closed.");
+    return result;
   } catch (err) {
     // shortcut: a dead worker stops the pool for this DB handle, no respawn; add one if crashes show up.
-    if (err instanceof WorkerGoneError) return readInProcess(mode, sql, params);
+    if (err instanceof WorkerGoneError) return readInProcess(client, mode, sql, params);
     throw err;
   }
 }
 
 /** Read-only executor for memory search statements; same contract as getDbClient().query/get. */
 export const memorySearchReader = {
-  query: <T>(sql: string, params: DbParam[] = []) => read("all", sql, params) as Promise<T[]>,
-  get: <T>(sql: string, params: DbParam[] = []) => read("get", sql, params) as Promise<T | null>,
+  query: <T>(sql: string, params: DbParam[] = [], client = getDbClient()) =>
+    read(client, "all", sql, params) as Promise<T[]>,
+  get: <T>(sql: string, params: DbParam[] = [], client = getDbClient()) =>
+    read(client, "get", sql, params) as Promise<T | null>,
 };
+
+function stopEntry(entry: PoolEntry): void {
+  entry.controller.abort();
+  void entry.pool.then(
+    (pool) => pool?.stop("database connection closed", false),
+    () => {},
+  );
+}
+
+/** Cancel startup and active reads before the database lifecycle closes admission. */
+export async function stopMemorySearchReader(client: DbClient): Promise<void> {
+  const entry = current;
+  if (!entry || entry.client !== client) return;
+  current = null;
+  stopEntry(entry);
+  await entry.pool.then(
+    (pool) => pool?.stop("database connection closed", false),
+    () => {},
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.all(entry.exits),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          for (const worker of entry.workers) worker.terminate();
+          reject(new Error("Memory read worker shutdown timed out."));
+        }, START_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Pool state for tests and diagnostics; null while no pool is running. */
 export async function memorySearchReaderStats(): Promise<SearchReadPool["stats"] | null> {
@@ -217,7 +351,6 @@ export async function memorySearchReaderStats(): Promise<SearchReadPool["stats"]
 
 /** Test-only: stop the pool; `inProcess` forces every read onto the main connection. */
 export async function __resetMemorySearchReaderForTests(options: { inProcess?: boolean } = {}) {
-  (await current?.pool)?.stop("reset", false);
-  current = null;
+  if (current) await stopMemorySearchReader(current.client);
   inProcessOnly = options.inProcess ?? false;
 }

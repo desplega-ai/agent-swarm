@@ -46,7 +46,7 @@ describe("skill_files storage", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 
@@ -63,7 +63,7 @@ describe("skill_files storage", () => {
   });
 
   test("re-opening an existing DB keeps skill_files available", async () => {
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
 
     const columns = await getDbClient().query<{ name: string }>("PRAGMA table_info(skill_files)");

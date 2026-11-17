@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import { isInTransaction } from "../be/db-client";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
 import { MemoryKeyError } from "../be/memory/key-guard";
@@ -96,16 +97,19 @@ beforeAll(async () => {
   process.env.OPENAI_API_KEY = "";
   initDb(":memory:");
   store = new SqliteMemoryStore();
+  await store.whenReady();
+  await store.whenVecPopulated();
+  await store.whenFtsPopulated();
   await createAgent({ id: lead, name: "Key Paths Lead", isLead: true, status: "idle" });
   await createAgent({ id: worker, name: "Key Paths Worker", isLead: false, status: "idle" });
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (originalEmbeddingKey === undefined) delete process.env.EMBEDDING_API_KEY;
   else process.env.EMBEDDING_API_KEY = originalEmbeddingKey;
   if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = originalOpenAiKey;
-  closeDb();
+  await closeDb();
 });
 
 beforeEach(async () => {
@@ -601,6 +605,8 @@ describe("/longterm is the curated tier", () => {
     const realSetImmediate = globalThis.setImmediate;
     let curated: Promise<unknown> | undefined;
     globalThis.setImmediate = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      // Client slicing also yields. Curate only at the boundary between purge batches.
+      if (isInTransaction()) return realSetImmediate(callback, ...args);
       globalThis.setImmediate = realSetImmediate;
       curated = editTool(worker, { memoryId: curatedId, newKey: longKey, intent: "curate" });
       return realSetImmediate(() => {
@@ -864,6 +870,7 @@ describe("keyPrefix search", () => {
     // Search reuses one health result per window and this delete bypasses the
     // store, so the search runs on a store that has not read its health yet.
     const unsearched = new SqliteMemoryStore();
+    await unsearched.whenReady();
     await getDbClient().run("DELETE FROM memory_vec");
 
     const filtered = await unsearched.search(queryEmbedding, worker, {

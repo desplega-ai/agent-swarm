@@ -7,8 +7,8 @@ import { sessionViewerCondition } from "./session-visibility";
 import { getTaskById } from "./tasks/read";
 
 type SessionMoveDependencies = {
-  /** The sync boot audit (`auditAssetKeys`) over the raw handle, which only db.ts may use. */
-  auditAssetKeys: () => AssetKeyAuditResult;
+  /** The runtime audit reads through the supplied transaction executor. */
+  auditAssetKeys: (tx: import("../db-client").DbExecutor) => Promise<AssetKeyAuditResult>;
   insertAssetKeyHistory: (input: {
     entityType: AssetEntityType;
     entityId: string;
@@ -36,10 +36,8 @@ export class AssetKeyMovesBlockedError extends Error {
 }
 
 export async function assertAssetKeyMovesAllowed(): Promise<void> {
-  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-  // client transaction so this request-path read cannot observe another
-  // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(), {
+  // Keep all audit reads on this transaction's connection.
+  const audit = await getDbClient().transaction(async (tx) => auditAssetKeys(tx), {
     readOnly: true,
   });
   if (!audit.ok) {

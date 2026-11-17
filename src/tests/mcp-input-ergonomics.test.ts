@@ -85,8 +85,8 @@ beforeAll(async () => {
   await createAgent({ id: otherId, name: "Other schema worker", isLead: false, status: "idle" });
   await createAgent({ id: leadId, name: "Schema lead", isLead: true, status: "idle" });
 });
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   if (originalEmbeddingKey === undefined) delete process.env.EMBEDDING_API_KEY;
   else process.env.EMBEDDING_API_KEY = originalEmbeddingKey;
   if (originalOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;

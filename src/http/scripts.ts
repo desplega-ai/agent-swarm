@@ -7,10 +7,10 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, getDbClient, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
-  getScriptApiConnectionDescriptors,
-  getScriptApiTypes,
-  getScriptMcpConnectionDescriptors,
-  getScriptMcpTypes,
+  getScriptApiConnectionDescriptorsAsync,
+  getScriptApiTypesAsync,
+  getScriptMcpConnectionDescriptorsAsync,
+  getScriptMcpTypesAsync,
 } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
@@ -830,8 +830,8 @@ export async function handleScripts(
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+        apiConnections: await getScriptApiConnectionDescriptorsAsync({ agentId: agent.id }),
+        mcpConnections: await getScriptMcpConnectionDescriptorsAsync({ agentId: agent.id }),
       },
       {
         sourceScriptRunId: runId,
@@ -1003,8 +1003,8 @@ export async function handleScripts(
   // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
-    const apiTypes = getScriptApiTypes();
-    const mcpTypes = getScriptMcpTypes();
+    const apiTypes = await getScriptApiTypesAsync();
+    const mcpTypes = await getScriptMcpTypesAsync();
     const appTypes = await getScriptAppTypes();
     typeDefsRoute.respond(res, 200, {
       sdkTypes: await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
@@ -1062,13 +1062,13 @@ export async function handleScripts(
         ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
         : null,
       sdkTypes: await scriptSdkTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypesAsync({ agentId: agent.id }),
+        await getScriptMcpTypesAsync({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
       stdlibTypes: await scriptStdlibTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypesAsync({ agentId: agent.id }),
+        await getScriptMcpTypesAsync({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
     });

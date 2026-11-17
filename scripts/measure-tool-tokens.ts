@@ -112,7 +112,7 @@ async function main() {
   }
 
   // Cleanup
-  closeDb();
+  await closeDb();
   const { unlink } = await import("node:fs/promises");
   for (const suffix of ["", "-wal", "-shm"]) {
     try {

@@ -106,7 +106,7 @@ beforeEach(() => {
 afterAll(async () => {
   if (originalFlag === undefined) delete process.env.SLACK_BLOCK_EXTERNAL_CHANNELS;
   else process.env.SLACK_BLOCK_EXTERNAL_CHANNELS = originalFlag;
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

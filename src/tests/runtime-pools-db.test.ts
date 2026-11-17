@@ -47,7 +47,7 @@ beforeAll(async () => {
   initDb(dbPath);
 });
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await cleanup();
 });
 beforeEach(async () => {

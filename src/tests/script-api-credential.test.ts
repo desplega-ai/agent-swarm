@@ -64,8 +64,8 @@ afterEach(() => {
   else process.env.SCRIPT_EXECUTOR = savedExecutor;
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
 });
 
 describe("acquireScriptApiCredential", () => {

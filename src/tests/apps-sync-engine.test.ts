@@ -281,7 +281,7 @@ afterAll(async () => {
   // Keep-alive sockets from the proxying tools would otherwise hold close().
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  closeDb();
+  await closeDb();
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
   }

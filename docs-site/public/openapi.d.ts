@@ -26281,6 +26281,8 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            /** @enum {string} */
+                            dbDriver: "sqlite" | "worker";
                             agents: {
                                 total: number;
                                 idle: number;

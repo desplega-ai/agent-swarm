@@ -2,7 +2,7 @@ import { normalizeAssetKey } from "../assets/key";
 import { getLeadAgent } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { scrubObject } from "../utils/secret-scrubber";
 import type { AppActionCaller } from "./action-caller";
@@ -136,7 +136,7 @@ export async function runAppAction({
   }
 
   const lead = action.agentId ? null : await getLeadAgent();
-  const taskPrompt = resolveTemplate("task.app.action", {
+  const taskPrompt = await resolveTemplateAsync("task.app.action", {
     prompt: action.prompt,
     app_id: app.id,
     action_name: name,

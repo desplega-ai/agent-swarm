@@ -126,7 +126,7 @@ describe("reload-config", () => {
 
   afterAll(async () => {
     server.close();
-    closeDb();
+    await closeDb();
     // Clean up env vars we set
     for (const key of envKeysToClean) {
       delete process.env[key];

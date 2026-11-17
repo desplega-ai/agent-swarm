@@ -1,493 +1,589 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { unlink } from "node:fs/promises";
-import { createBunSqliteClient, type DbClient, DbTransactionDeadlineError } from "../be/db-client";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
+import { createWorkerSqliteDriver } from "../be/db/worker-driver";
+import {
+  type BusyRetryOptions,
+  createBunSqliteClient,
+  createDbClient,
+  type DbClient,
+  DbTransactionDeadlineError,
+} from "../be/db-client";
 
-// Cross-process SQLITE_BUSY retry: a second connection on the same file plays
-// the external lock holder (litestream checkpoint, CLI access). The client's
-// own connection gets a tiny busy_timeout so each driver attempt fails fast
-// and the async retry path is what actually bridges the contention window.
-
-const TEST_DB_PATH = "./test-db-client-busy-retry.sqlite";
-
-let main: Database;
-let locker: Database;
-let client: DbClient;
-/** Outstanding holdWriteLock() timer, if any; afterEach waits for it. */
-let pendingHold: Promise<void> | null = null;
-
-beforeEach(() => {
-  main = new Database(TEST_DB_PATH);
-  main.exec("PRAGMA journal_mode = WAL");
-  main.exec("PRAGMA busy_timeout = 25");
-  main.run("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
-  main.run("DELETE FROM items");
-  locker = new Database(TEST_DB_PATH);
-  locker.exec("PRAGMA busy_timeout = 25");
-  client = createBunSqliteClient(() => main, {
-    maxWaitMs: 2_000,
-    // Headroom over the longest holdWriteLock() hold used with this client
-    // (400ms): 5 backoff slots sum to 775ms, so even at the minimum 0.5x
-    // jitter the writer's final non-retried attempt lands after the
-    // external lock releases instead of racing it.
-    backoffMs: [25, 50, 100, 200, 400],
-    attemptSpinMs: 25,
-  });
-  pendingHold = null;
-});
-
-afterEach(async () => {
-  // A test that exits early (a failed assertion, a thrown error) never
-  // awaits its own holdWriteLock() promise. Wait for it here so its
-  // setTimeout callback runs against a still-open, still-in-transaction
-  // `locker` instead of firing later against a rolled-back or already
-  // reassigned connection.
-  if (pendingHold) {
-    await pendingHold;
-    pendingHold = null;
-  }
-  try {
-    locker.run("ROLLBACK");
-  } catch {
-    // No transaction open; fine.
-  }
-  locker.close();
-  main.close();
-  await unlink(TEST_DB_PATH).catch(() => {});
-  await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
-  await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
-});
-
-/** Hold the write lock on the second connection for `ms`, then release. */
-function holdWriteLock(ms: number): Promise<void> {
-  locker.run("BEGIN IMMEDIATE");
-  locker.run("INSERT INTO items (name) VALUES ('locker')");
-  const hold = new Promise<void>((resolve) =>
-    setTimeout(() => {
-      // Only commit if `locker` is still the connection that opened this
-      // transaction: afterEach's ROLLBACK (or the next test's beforeEach
-      // reassigning `locker`) may already have run by the time this fires.
-      if (locker.inTransaction) locker.run("COMMIT");
-      resolve();
-    }, ms),
-  );
-  pendingHold = hold;
-  return hold;
-}
-
-describe("db-client SQLITE_BUSY retry", () => {
-  test("top-level run bridges an external write lock instead of failing", async () => {
-    const released = holdWriteLock(150);
-    const result = await client.run("INSERT INTO items (name) VALUES (?)", ["bridged"]);
-    expect(result.changes).toBe(1);
-    await released;
-    const rows = await client.query<{ name: string }>("SELECT name FROM items ORDER BY name");
-    expect(rows.map((r) => r.name)).toEqual(["bridged", "locker"]);
-  });
-
-  test("runTimed excludes the async backoff sleeps a bridged statement waited out", async () => {
-    // The retry path releases the FIFO lock and sleeps between attempts, so
-    // nothing is executing for most of the bridge. Only the driver attempts
-    // count: each is capped at attemptSpinMs (25ms) by the short busy_timeout,
-    // and the attempt count is capped at backoffMs.length + 1 (6), so
-    // executionMs cannot structurally exceed ~150ms however long the hold is.
-    const released = holdWriteLock(400);
-    const startedAt = performance.now();
-    const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["bridged-timed"]);
-    const wallMs = performance.now() - startedAt;
-    await released;
-
-    expect(timed.changes).toBe(1);
-    expect(wallMs).toBeGreaterThan(400);
-    expect(timed.executionMs).toBeLessThan(300);
-    expect(timed.executionMs).toBeLessThan(wallMs);
-  });
-
-  test("transaction BEGIN IMMEDIATE bridges an external write lock", async () => {
-    const released = holdWriteLock(150);
-    await client.transaction(async (tx) => {
-      await tx.run("INSERT INTO items (name) VALUES (?)", ["tx-a"]);
-      await tx.run("INSERT INTO items (name) VALUES (?)", ["tx-b"]);
+// Preserve synchronous spies. Worker observations inspect the actual transport options.
+describe.each(["sqlite", "worker"] as const)("driver %s", (driverName) => {
+  const ownedClients: DbClient[] = [];
+  const attempts: { spinMs: number; busy: boolean }[] = [];
+  const createTestClient = (getDatabase: () => Database, retry?: BusyRetryOptions): DbClient => {
+    if (driverName === "sqlite") return createBunSqliteClient(getDatabase, retry);
+    const database = getDatabase();
+    const driver = createWorkerSqliteDriver({
+      filename: database.filename,
+      customSQLite:
+        process.platform === "darwin"
+          ? [
+              "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+              "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+            ].find(existsSync)
+          : undefined,
+      pragmas: [
+        "PRAGMA journal_mode=WAL",
+        `PRAGMA busy_timeout=${(database.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout}`,
+        "PRAGMA foreign_keys=ON",
+        "PRAGMA synchronous=NORMAL",
+      ],
     });
-    await released;
-    const rows = await client.query<{ name: string }>(
-      "SELECT name FROM items WHERE name LIKE 'tx-%' ORDER BY name",
-    );
-    expect(rows.map((r) => r.name)).toEqual(["tx-a", "tx-b"]);
+    const run = driver.run.bind(driver);
+    driver.run = async (sql, params, options) => {
+      try {
+        const value = await run(sql, params, options);
+        if (sql.startsWith("INSERT INTO items"))
+          attempts.push({ spinMs: options?.spinMs ?? -1, busy: false });
+        return value;
+      } catch (error) {
+        if (sql.startsWith("INSERT INTO items"))
+          attempts.push({
+            spinMs: options?.spinMs ?? -1,
+            busy: (error as { code?: string }).code === "SQLITE_BUSY",
+          });
+        throw error;
+      }
+    };
+    const client = createDbClient(driver, retry);
+    ownedClients.push(client);
+    return client;
+  };
+  afterEach(async () => {
+    for (const client of ownedClients.splice(0)) await client.close();
+    attempts.length = 0;
   });
 
-  test("gives up with SQLITE_BUSY when the lock outlives the retry budget", async () => {
-    const tightClient = createBunSqliteClient(() => main, {
-      maxWaitMs: 60,
-      backoffMs: [20, 20],
+  // Cross-process SQLITE_BUSY retry: a second connection on the same file plays
+  // the external lock holder (litestream checkpoint, CLI access). The client's
+  // own connection gets a tiny busy_timeout so each driver attempt fails fast
+  // and the async retry path is what actually bridges the contention window.
+
+  let TEST_DB_PATH: string;
+  let dir: string;
+
+  let main: Database;
+  let locker: Database;
+  let client: DbClient;
+  /** Outstanding holdWriteLock() timer, if any; afterEach waits for it. */
+  let pendingHold: Promise<void> | null = null;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(`${process.env.TMPDIR ?? "/tmp"}/db-worker-busy-`);
+    TEST_DB_PATH = `${dir}/db.sqlite`;
+    main = new Database(TEST_DB_PATH);
+    main.exec("PRAGMA journal_mode = WAL");
+    main.exec("PRAGMA busy_timeout = 25");
+    main.run("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+    main.run("DELETE FROM items");
+    locker = new Database(TEST_DB_PATH);
+    locker.exec("PRAGMA busy_timeout = 25");
+    client = createTestClient(() => main, {
+      maxWaitMs: 2_000,
+      // Headroom over the longest holdWriteLock() hold used with this client
+      // (400ms): 5 backoff slots sum to 775ms, so even at the minimum 0.5x
+      // jitter the writer's final non-retried attempt lands after the
+      // external lock releases instead of racing it.
+      backoffMs: [25, 50, 100, 200, 400],
       attemptSpinMs: 25,
     });
-    const released = holdWriteLock(600);
-    let caught: unknown;
+    pendingHold = null;
+  });
+
+  afterEach(async () => {
+    // A test that exits early (a failed assertion, a thrown error) never
+    // awaits its own holdWriteLock() promise. Wait for it here so its
+    // setTimeout callback runs against a still-open, still-in-transaction
+    // `locker` instead of firing later against a rolled-back or already
+    // reassigned connection.
+    if (pendingHold) {
+      await pendingHold;
+      pendingHold = null;
+    }
     try {
-      await tightClient.run("INSERT INTO items (name) VALUES (?)", ["never"]);
-    } catch (err) {
-      caught = err;
+      locker.run("ROLLBACK");
+    } catch {
+      // No transaction open; fine.
     }
-    await released;
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toMatch(/database is locked/);
-    expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
+    await client.close();
+    locker.close();
+    main.close();
+    await unlink(TEST_DB_PATH).catch(() => {});
+    await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
+    await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
+    await rm(dir, { recursive: true, force: true });
   });
 
-  test("readOnly transaction proceeds at full speed under an external write lock", async () => {
-    await client.run("INSERT INTO items (name) VALUES (?)", ["seed"]);
-    const order: string[] = [];
-    const released = holdWriteLock(400).then(() => {
-      order.push("released");
-    });
-    const names = await client.transaction(
-      async (tx) => (await tx.query<{ name: string }>("SELECT name FROM items")).map((r) => r.name),
-      { readOnly: true },
+  /** Hold the write lock on the second connection for `ms`, then release. */
+  function holdWriteLock(ms: number): Promise<void> {
+    locker.run("BEGIN IMMEDIATE");
+    locker.run("INSERT INTO items (name) VALUES ('locker')");
+    const hold = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        // Only commit if `locker` is still the connection that opened this
+        // transaction: afterEach's ROLLBACK (or the next test's beforeEach
+        // reassigning `locker`) may already have run by the time this fires.
+        if (locker.inTransaction) locker.run("COMMIT");
+        resolve();
+      }, ms),
     );
-    order.push("read");
-    await released;
-    // Deferred BEGIN never touches the write lock: no busy spin, no retry
-    // budget, so the read settles before the locker releases regardless of
-    // scheduler noise (an ordering check, not a wall-clock bound).
-    expect(order).toEqual(["read", "released"]);
-    expect(names).toEqual(["seed"]);
-  });
+    pendingHold = hold;
+    return hold;
+  }
 
-  test("reads flow while a write retries in backoff (FIFO lock released between attempts)", async () => {
-    await client.run("INSERT INTO items (name) VALUES (?)", ["reader-food"]);
-    const order: string[] = [];
-    const released = holdWriteLock(400).then(() => {
-      order.push("released");
-    });
-    const write = client.run("INSERT INTO items (name) VALUES (?)", ["late-write"]);
-    // Let the write burn its first attempt and enter async backoff.
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const rows = await client.query<{ name: string }>(
-      "SELECT name FROM items WHERE name = 'reader-food'",
-    );
-    order.push("read");
-    await released;
-    await write;
-    const landed = await client.get<{ name: string }>(
-      "SELECT name FROM items WHERE name = 'late-write'",
-    );
-    // Pre-fix, the retrying writer held the FIFO lock across its sleeps and
-    // this read queued behind the full retry span; assert the settle order
-    // instead of a wall-clock bound so scheduler noise cannot flip the
-    // result, and only assert after every started call has been awaited so
-    // a failing expectation can never orphan `write` or `released`.
-    expect(order).toEqual(["read", "released"]);
-    expect(rows.length).toBe(1);
-    expect(landed?.name).toBe("late-write");
-  });
-
-  test("short spin restores the ambient busy_timeout after a retried attempt", async () => {
-    const released = holdWriteLock(120);
-    await client.run("INSERT INTO items (name) VALUES (?)", ["spin-check"]);
-    await released;
-    const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
-    expect(row?.timeout).toBe(25);
-  });
-
-  test("non-BUSY errors are not retried", async () => {
-    const started = Date.now();
-    await expect(client.run("INSERT INTO no_such_table (name) VALUES (?)", ["x"])).rejects.toThrow(
-      /no such table/,
-    );
-    // A retried error would have slept through at least the first backoff
-    // step (>=12ms jittered) plus spin overhead; widened from 100ms to
-    // absorb --parallel=4 scheduler noise without masking an accidental
-    // retry, which would need to clear the full ~775ms backoff schedule.
-    expect(Date.now() - started).toBeLessThan(500);
-  });
-
-  describe("under the production 5000ms ambient busy_timeout", () => {
-    /** Largest gap between 5ms ticks while `work` runs: the longest the loop was frozen. */
-    async function maxLoopFreezeMs(work: () => Promise<unknown>): Promise<number> {
-      let last = performance.now();
-      let maxGap = 0;
-      const ticker = setInterval(() => {
-        const now = performance.now();
-        maxGap = Math.max(maxGap, now - last);
-        last = now;
-      }, 5);
-      try {
-        await work();
-        // One more tick so a freeze that ended on the last attempt is seen.
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      } finally {
-        clearInterval(ticker);
-      }
-      return maxGap;
-    }
-
-    beforeEach(() => {
-      main.exec("PRAGMA busy_timeout = 5000");
-    });
-
-    test("a contended write still succeeds via the async retry", async () => {
-      const released = holdWriteLock(300);
-      const freezeMs = await maxLoopFreezeMs(() =>
-        client.run("INSERT INTO items (name) VALUES (?)", ["contended"]),
-      );
+  describe("db-client SQLITE_BUSY retry", () => {
+    test("top-level run bridges an external write lock instead of failing", async () => {
+      const released = holdWriteLock(150);
+      const result = await client.run("INSERT INTO items (name) VALUES (?)", ["bridged"]);
+      expect(result.changes).toBe(1);
       await released;
-      const landed = await client.get<{ name: string }>(
-        "SELECT name FROM items WHERE name = 'contended'",
-      );
-      expect(landed?.name).toBe("contended");
-      // Every attempt spins at most attemptSpinMs (25ms) or finalAttemptSpinMs;
-      // the release happened during an async backoff sleep.
-      expect(freezeMs).toBeLessThan(1_000);
+      const rows = await client.query<{ name: string }>("SELECT name FROM items ORDER BY name");
+      expect(rows.map((r) => r.name)).toEqual(["bridged", "locker"]);
     });
 
-    test("the final statement attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
-      const tight = createBunSqliteClient(() => main, {
+    test("runTimed excludes the async backoff sleeps a bridged statement waited out", async () => {
+      // The retry path releases the FIFO lock and sleeps between attempts, so
+      // nothing is executing for most of the bridge. Only the driver attempts
+      // count: each is capped at attemptSpinMs (25ms) by the short busy_timeout,
+      // and the attempt count is capped at backoffMs.length + 1 (6), so
+      // executionMs cannot structurally exceed ~150ms however long the hold is.
+      const released = holdWriteLock(400);
+      const startedAt = performance.now();
+      const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["bridged-timed"]);
+      const wallMs = performance.now() - startedAt;
+      await released;
+
+      expect(timed.changes).toBe(1);
+      expect(wallMs).toBeGreaterThan(400);
+      expect(timed.executionMs).toBeLessThan(300);
+      expect(timed.executionMs).toBeLessThan(wallMs);
+    });
+
+    test("transaction BEGIN IMMEDIATE bridges an external write lock", async () => {
+      const released = holdWriteLock(150);
+      await client.transaction(async (tx) => {
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["tx-a"]);
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["tx-b"]);
+      });
+      await released;
+      const rows = await client.query<{ name: string }>(
+        "SELECT name FROM items WHERE name LIKE 'tx-%' ORDER BY name",
+      );
+      expect(rows.map((r) => r.name)).toEqual(["tx-a", "tx-b"]);
+    });
+
+    test("gives up with SQLITE_BUSY when the lock outlives the retry budget", async () => {
+      const tightClient = createTestClient(() => main, {
         maxWaitMs: 60,
         backoffMs: [20, 20],
         attemptSpinMs: 25,
-        finalAttemptSpinMs: 50,
       });
-      // The holder releases on a timer, which cannot fire while the final
-      // attempt blocks the loop: pre-fix this froze for the full 5000ms.
-      const released = holdWriteLock(3_000);
-      let caught: unknown;
-      const startedAt = performance.now();
-      const freezeMs = await maxLoopFreezeMs(async () => {
-        try {
-          await tight.run("INSERT INTO items (name) VALUES (?)", ["never"]);
-        } catch (err) {
-          caught = err;
-        }
-      });
-      const wallMs = performance.now() - startedAt;
-      await released;
-      expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
-      expect(wallMs).toBeLessThan(2_000);
-      expect(freezeMs).toBeLessThan(1_000);
-      const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
-      expect(row?.timeout).toBe(5000);
-    });
-
-    test("the final BEGIN IMMEDIATE attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
-      const tight = createBunSqliteClient(() => main, {
-        maxWaitMs: 60,
-        backoffMs: [20, 20],
-        attemptSpinMs: 25,
-        finalAttemptSpinMs: 50,
-      });
-      const released = holdWriteLock(3_000);
-      let caught: unknown;
-      const startedAt = performance.now();
-      const freezeMs = await maxLoopFreezeMs(async () => {
-        try {
-          await tight.transaction(async (tx) => {
-            await tx.run("INSERT INTO items (name) VALUES (?)", ["never-tx"]);
-          });
-        } catch (err) {
-          caught = err;
-        }
-      });
-      const wallMs = performance.now() - startedAt;
-      await released;
-      expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
-      expect(wallMs).toBeLessThan(2_000);
-      expect(freezeMs).toBeLessThan(1_000);
-      const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
-      expect(row?.timeout).toBe(5000);
-    });
-  });
-
-  test("reads proceed under an external write lock without needing the retry path", async () => {
-    await client.run("INSERT INTO items (name) VALUES (?)", ["pre-existing"]);
-    const released = holdWriteLock(150);
-    // WAL readers do not block on the write lock.
-    const rows = await client.query<{ name: string }>("SELECT name FROM items");
-    expect(rows.map((r) => r.name)).toEqual(["pre-existing"]);
-    await released;
-  });
-  test("a crowd of queued writers does not spin the event loop while a holder persists", async () => {
-    // Regression for the 31/10 stalls: a long external holder (a Litestream
-    // snapshot) with many writers queued. Each writer used to spin its full
-    // attemptSpinMs inside the FIFO lock on every attempt, so a round of
-    // attempts blocked the loop for writers x spin and the nominal retry
-    // budget stretched to minutes.
-    const crowdClient = createBunSqliteClient(() => main, {
-      maxWaitMs: 4_000,
-      backoffMs: [25, 50, 100, 250, ...Array<number>(20).fill(250)],
-      attemptSpinMs: 50,
-      finalAttemptSpinMs: 50,
-    });
-    const writers = 60;
-    // The gate logs "(N spinning probes)" when the episode ends. Counting
-    // probes measures the thing that blocks the loop (each probe is one
-    // synchronous attemptSpinMs wait) without sampling wall-clock timer lag,
-    // which stalls for 700-1100ms on loaded CI runners although the gate held.
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    // Record every driver attempt with the busy_timeout it ran under and
-    // whether it hit BUSY. The gate's own probe count cannot see attempts it
-    // classed as gated, so this checks what the driver was actually told to
-    // wait, independent of the gate's bookkeeping and of runner scheduling.
-    const attempts: { spinMs: number; busy: boolean }[] = [];
-    let busyTimeoutMs = -1;
-    const exec = main.exec.bind(main);
-    const query = main.query.bind(main);
-    const execSpy = spyOn(main, "exec").mockImplementation(((sql: string) => {
-      const set = /^PRAGMA busy_timeout = (\d+)$/.exec(sql);
-      if (set) busyTimeoutMs = Number(set[1]);
-      return exec(sql);
-    }) as typeof main.exec);
-    const querySpy = spyOn(main, "query").mockImplementation(((sql: string) => {
-      const stmt = query(sql);
-      if (!sql.startsWith("INSERT INTO items")) return stmt;
-      return {
-        run: (...params: unknown[]) => {
-          const spinMs = busyTimeoutMs;
-          try {
-            const out = stmt.run(...(params as never[]));
-            attempts.push({ spinMs, busy: false });
-            return out;
-          } catch (err) {
-            attempts.push({ spinMs, busy: (err as { code?: string }).code === "SQLITE_BUSY" });
-            throw err;
-          }
-        },
-      };
-    }) as unknown as typeof main.query);
-    const released = holdWriteLock(1_500);
-
-    let results: PromiseSettledResult<unknown>[];
-    try {
-      results = await Promise.allSettled(
-        Array.from({ length: writers }, (_, i) =>
-          crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
-        ),
-      );
-    } finally {
-      await released;
-      execSpy.mockRestore();
-      querySpy.mockRestore();
-    }
-    const messages = warn.mock.calls.map((c) => String(c[0]));
-    warn.mockRestore();
-
-    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
-    const episode = messages.map((m) => /released after \d+ms \((\d+) spinning probes\)/.exec(m));
-    const probes = Number(episode.find((m) => m)?.[1]);
-    // The episode must have been observed and closed, or the count proves nothing.
-    expect(Number.isFinite(probes)).toBe(true);
-    // Ungated every one of the 60 writers spins on every round of attempts
-    // (60 x 50ms = 3s of blocked loop per round). Gated, only one probe runs
-    // per gate interval (50, 100, 200, 400, 800ms), so a 1.5s hold needs ~6.
-    expect(probes).toBeGreaterThan(0);
-    expect(probes).toBeLessThanOrEqual(15);
-    const busy = attempts.filter((a) => a.busy);
-    const spinning = busy.filter((a) => a.spinMs > 0).length;
-    // Every other writer hit the held lock with a zero busy_timeout, so it
-    // failed in microseconds instead of blocking the loop. Without the gate
-    // there are no such attempts at all.
-    expect(busy.length - spinning).toBeGreaterThan(writers);
-    // The only BUSY attempts allowed to wait are the gate's probes: a gated
-    // attempt that waits any time (even 10ms x hundreds of attempts) shows up
-    // here as more spinning attempts than the gate reported probes.
-    expect(spinning).toBe(probes);
-    // No wall-clock bound on purpose. Idle, the crowd finishes in ~1.85s
-    // (1.5s hold plus the post-release backoff); a loaded CI runner stretched
-    // that past 3s twice although the gate held, so a time limit measured the
-    // runner. "Ungated the crowd spins for seconds" is already asserted above
-    // by counting spinning attempts, and the per-test timeout still fails a
-    // crowd that never drains.
-    const rows = await crowdClient.query<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM items WHERE name LIKE 'crowd-%'",
-    );
-    expect(rows[0]?.n).toBe(writers);
-    // The test spends 1.5s in the hold alone, so the 5s default leaves a
-    // loaded runner under 3s of slack; 15s keeps a hung crowd a failure.
-  }, 15_000);
-
-  test("a held lock past the budget fails fast for the whole crowd", async () => {
-    const crowdClient = createBunSqliteClient(() => main, {
-      maxWaitMs: 400,
-      backoffMs: [25, 50, 100, 250],
-      attemptSpinMs: 50,
-      finalAttemptSpinMs: 50,
-    });
-    const released = holdWriteLock(2_500);
-    const startedAt = performance.now();
-    const results = await Promise.allSettled(
-      Array.from({ length: 40 }, (_, i) =>
-        crowdClient.run("INSERT INTO items (name) VALUES (?)", [`doomed-${i}`]),
-      ),
-    );
-    const wallMs = performance.now() - startedAt;
-    await released;
-    expect(results.every((r) => r.status === "rejected")).toBe(true);
-    for (const r of results) {
-      expect((r as PromiseRejectedResult).reason.code).toBe("SQLITE_BUSY");
-    }
-    // Ungated: 40 writers x 5 spins x 50ms = 10s. Gated: well under 2s.
-    expect(wallMs).toBeLessThan(2_000);
-  });
-
-  test("the gate closes once a blocked write lands, so the next BUSY probes afresh", async () => {
-    const released = holdWriteLock(150);
-    await client.run("INSERT INTO items (name) VALUES (?)", ["after-hold"]);
-    await released;
-    // New episode: a second, short hold is still bridged.
-    const second = holdWriteLock(100);
-    await client.run("INSERT INTO items (name) VALUES (?)", ["after-second-hold"]);
-    await second;
-    const rows = await client.query<{ name: string }>(
-      "SELECT name FROM items WHERE name LIKE 'after-%' ORDER BY name",
-    );
-    expect(rows.map((r) => r.name)).toEqual(["after-hold", "after-second-hold"]);
-  });
-  describe("transaction deadlineAt", () => {
-    const names = async () =>
-      (await client.query<{ name: string }>("SELECT name FROM items ORDER BY id")).map(
-        (r) => r.name,
-      );
-
-    test("BEGIN stops retrying at the deadline instead of outwaiting the holder", async () => {
       const released = holdWriteLock(600);
-      const startedAt = performance.now();
-      await expect(
-        client.transaction(
-          async (tx) => {
-            await tx.run("INSERT INTO items (name) VALUES ('late')");
-          },
-          { deadlineAt: Date.now() + 150 },
-        ),
-      ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
-      expect(performance.now() - startedAt).toBeLessThan(500);
+      let caught: unknown;
+      try {
+        await tightClient.run("INSERT INTO items (name) VALUES (?)", ["never"]);
+      } catch (err) {
+        caught = err;
+      }
       await released;
-      expect(await names()).toEqual(["locker"]);
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/database is locked/);
+      expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
     });
 
-    test("a callback that outlives the deadline is rolled back, not committed", async () => {
-      await expect(
-        client.transaction(
-          async (tx) => {
-            await tx.run("INSERT INTO items (name) VALUES ('slow')");
-            await new Promise((r) => setTimeout(r, 120));
-          },
-          { deadlineAt: Date.now() + 60 },
-        ),
-      ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
-      expect(await names()).toEqual([]);
-      // The connection is not left inside the transaction.
-      await client.run("INSERT INTO items (name) VALUES ('after')");
-      expect(await names()).toEqual(["after"]);
-    });
-
-    test("a transaction inside its deadline commits as before", async () => {
-      await client.transaction(
-        async (tx) => {
-          await tx.run("INSERT INTO items (name) VALUES ('ok')");
-        },
-        { deadlineAt: Date.now() + 5_000 },
+    test("readOnly transaction proceeds at full speed under an external write lock", async () => {
+      await client.run("INSERT INTO items (name) VALUES (?)", ["seed"]);
+      const order: string[] = [];
+      const released = holdWriteLock(400).then(() => {
+        order.push("released");
+      });
+      const names = await client.transaction(
+        async (tx) =>
+          (await tx.query<{ name: string }>("SELECT name FROM items")).map((r) => r.name),
+        { readOnly: true },
       );
-      expect(await names()).toEqual(["ok"]);
+      order.push("read");
+      await released;
+      // Deferred BEGIN never touches the write lock: no busy spin, no retry
+      // budget, so the read settles before the locker releases regardless of
+      // scheduler noise (an ordering check, not a wall-clock bound).
+      expect(order).toEqual(["read", "released"]);
+      expect(names).toEqual(["seed"]);
+    });
+
+    test("reads flow while a write retries in backoff (FIFO lock released between attempts)", async () => {
+      await client.run("INSERT INTO items (name) VALUES (?)", ["reader-food"]);
+      const order: string[] = [];
+      const released = holdWriteLock(400).then(() => {
+        order.push("released");
+      });
+      const write = client.run("INSERT INTO items (name) VALUES (?)", ["late-write"]);
+      // Let the write burn its first attempt and enter async backoff.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const rows = await client.query<{ name: string }>(
+        "SELECT name FROM items WHERE name = 'reader-food'",
+      );
+      order.push("read");
+      await released;
+      await write;
+      const landed = await client.get<{ name: string }>(
+        "SELECT name FROM items WHERE name = 'late-write'",
+      );
+      // Pre-fix, the retrying writer held the FIFO lock across its sleeps and
+      // this read queued behind the full retry span; assert the settle order
+      // instead of a wall-clock bound so scheduler noise cannot flip the
+      // result, and only assert after every started call has been awaited so
+      // a failing expectation can never orphan `write` or `released`.
+      expect(order).toEqual(["read", "released"]);
+      expect(rows.length).toBe(1);
+      expect(landed?.name).toBe("late-write");
+    });
+
+    test("short spin restores the ambient busy_timeout after a retried attempt", async () => {
+      const released = holdWriteLock(120);
+      await client.run("INSERT INTO items (name) VALUES (?)", ["spin-check"]);
+      await released;
+      const row = await client.transaction(
+        (tx) => tx.get<{ timeout: number }>("PRAGMA busy_timeout"),
+        { readOnly: true },
+      );
+      expect(row?.timeout).toBe(25);
+    });
+
+    test("non-BUSY errors are not retried", async () => {
+      const started = Date.now();
+      await expect(
+        (await settled(client.run("INSERT INTO no_such_table (name) VALUES (?)", ["x"])))[0],
+      ).rejects.toThrow(/no such table/);
+      // A retried error would have slept through at least the first backoff
+      // step (>=12ms jittered) plus spin overhead; widened from 100ms to
+      // absorb --parallel=4 scheduler noise without masking an accidental
+      // retry, which would need to clear the full ~775ms backoff schedule.
+      expect(Date.now() - started).toBeLessThan(500);
+    });
+
+    describe("under the production 5000ms ambient busy_timeout", () => {
+      /** Largest gap between 5ms ticks while `work` runs: the longest the loop was frozen. */
+      async function maxLoopFreezeMs(work: () => Promise<unknown>): Promise<number> {
+        let last = performance.now();
+        let maxGap = 0;
+        const ticker = setInterval(() => {
+          const now = performance.now();
+          maxGap = Math.max(maxGap, now - last);
+          last = now;
+        }, 5);
+        try {
+          await work();
+          // One more tick so a freeze that ended on the last attempt is seen.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        } finally {
+          clearInterval(ticker);
+        }
+        return maxGap;
+      }
+
+      beforeEach(async () => {
+        main.exec("PRAGMA busy_timeout = 5000");
+        await client.run("PRAGMA busy_timeout = 5000");
+      });
+
+      test("a contended write still succeeds via the async retry", async () => {
+        const released = holdWriteLock(300);
+        const freezeMs = await maxLoopFreezeMs(() =>
+          client.run("INSERT INTO items (name) VALUES (?)", ["contended"]),
+        );
+        await released;
+        const landed = await client.get<{ name: string }>(
+          "SELECT name FROM items WHERE name = 'contended'",
+        );
+        expect(landed?.name).toBe("contended");
+        // Every attempt spins at most attemptSpinMs (25ms) or finalAttemptSpinMs;
+        // the release happened during an async backoff sleep.
+        expect(freezeMs).toBeLessThan(1_000);
+      });
+
+      test("the final statement attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
+        const tight = createTestClient(() => main, {
+          maxWaitMs: 60,
+          backoffMs: [20, 20],
+          attemptSpinMs: 25,
+          finalAttemptSpinMs: 50,
+        });
+        // The holder releases on a timer, which cannot fire while the final
+        // attempt blocks the loop: pre-fix this froze for the full 5000ms.
+        const released = holdWriteLock(3_000);
+        let caught: unknown;
+        const startedAt = performance.now();
+        const freezeMs = await maxLoopFreezeMs(async () => {
+          try {
+            await tight.run("INSERT INTO items (name) VALUES (?)", ["never"]);
+          } catch (err) {
+            caught = err;
+          }
+        });
+        const wallMs = performance.now() - startedAt;
+        await released;
+        expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
+        expect(wallMs).toBeLessThan(2_000);
+        expect(freezeMs).toBeLessThan(1_000);
+        const row = await tight.transaction(
+          (tx) => tx.get<{ timeout: number }>("PRAGMA busy_timeout"),
+          { readOnly: true },
+        );
+        expect(row?.timeout).toBe(5000);
+      });
+
+      test("the final BEGIN IMMEDIATE attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
+        const tight = createTestClient(() => main, {
+          maxWaitMs: 60,
+          backoffMs: [20, 20],
+          attemptSpinMs: 25,
+          finalAttemptSpinMs: 50,
+        });
+        const released = holdWriteLock(3_000);
+        let caught: unknown;
+        const startedAt = performance.now();
+        const freezeMs = await maxLoopFreezeMs(async () => {
+          try {
+            await tight.transaction(async (tx) => {
+              await tx.run("INSERT INTO items (name) VALUES (?)", ["never-tx"]);
+            });
+          } catch (err) {
+            caught = err;
+          }
+        });
+        const wallMs = performance.now() - startedAt;
+        await released;
+        expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
+        expect(wallMs).toBeLessThan(2_000);
+        expect(freezeMs).toBeLessThan(1_000);
+        const row = await tight.transaction(
+          (tx) => tx.get<{ timeout: number }>("PRAGMA busy_timeout"),
+          { readOnly: true },
+        );
+        expect(row?.timeout).toBe(5000);
+      });
+    });
+
+    test("reads proceed under an external write lock without needing the retry path", async () => {
+      await client.run("INSERT INTO items (name) VALUES (?)", ["pre-existing"]);
+      const released = holdWriteLock(150);
+      // WAL readers do not block on the write lock.
+      const rows = await client.query<{ name: string }>("SELECT name FROM items");
+      expect(rows.map((r) => r.name)).toEqual(["pre-existing"]);
+      await released;
+    });
+    test("a crowd of queued writers does not spin the event loop while a holder persists", async () => {
+      // Regression for the 31/10 stalls: a long external holder (a Litestream
+      // snapshot) with many writers queued. Each writer used to spin its full
+      // attemptSpinMs inside the FIFO lock on every attempt, so a round of
+      // attempts blocked the loop for writers x spin and the nominal retry
+      // budget stretched to minutes.
+      const crowdClient = createTestClient(() => main, {
+        maxWaitMs: 4_000,
+        backoffMs: [25, 50, 100, 250, ...Array<number>(20).fill(250)],
+        attemptSpinMs: 50,
+        finalAttemptSpinMs: 50,
+      });
+      const writers = 60;
+      // The gate logs "(N spinning probes)" when the episode ends. Counting
+      // probes measures the thing that blocks the loop (each probe is one
+      // synchronous attemptSpinMs wait) without sampling wall-clock timer lag,
+      // which stalls for 700-1100ms on loaded CI runners although the gate held.
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      // Record every driver attempt with the busy_timeout it ran under and
+      // whether it hit BUSY. The gate's own probe count cannot see attempts it
+      // classed as gated, so this checks what the driver was actually told to
+      // wait, independent of the gate's bookkeeping and of runner scheduling.
+      const syncAttempts: { spinMs: number; busy: boolean }[] = [];
+      let busyTimeoutMs = -1;
+      const exec = main.exec.bind(main);
+      const query = main.query.bind(main);
+      const execSpy = spyOn(main, "exec").mockImplementation(((sql: string) => {
+        const set = /^PRAGMA busy_timeout = (\d+)$/.exec(sql);
+        if (set) busyTimeoutMs = Number(set[1]);
+        return exec(sql);
+      }) as typeof main.exec);
+      const querySpy = spyOn(main, "query").mockImplementation(((sql: string) => {
+        const stmt = query(sql);
+        if (!sql.startsWith("INSERT INTO items")) return stmt;
+        return {
+          run: (...params: unknown[]) => {
+            const spinMs = busyTimeoutMs;
+            try {
+              const out = stmt.run(...(params as never[]));
+              syncAttempts.push({ spinMs, busy: false });
+              return out;
+            } catch (err) {
+              syncAttempts.push({
+                spinMs,
+                busy: (err as { code?: string }).code === "SQLITE_BUSY",
+              });
+              throw err;
+            }
+          },
+        };
+      }) as unknown as typeof main.query);
+      const released = holdWriteLock(1_500);
+
+      let results: PromiseSettledResult<unknown>[];
+      try {
+        results = await Promise.allSettled(
+          Array.from({ length: writers }, (_, i) =>
+            crowdClient.run("INSERT INTO items (name) VALUES (?)", [`crowd-${i}`]),
+          ),
+        );
+      } finally {
+        await released;
+        execSpy.mockRestore();
+        querySpy.mockRestore();
+      }
+      const messages = warn.mock.calls.map((c) => String(c[0]));
+      warn.mockRestore();
+
+      expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+      const episode = messages.map((m) => /released after \d+ms \((\d+) spinning probes\)/.exec(m));
+      const probes = Number(episode.find((m) => m)?.[1]);
+      // The episode must have been observed and closed, or the count proves nothing.
+      expect(Number.isFinite(probes)).toBe(true);
+      // Ungated every one of the 60 writers spins on every round of attempts
+      // (60 x 50ms = 3s of blocked loop per round). Gated, only one probe runs
+      // per gate interval (50, 100, 200, 400, 800ms), so a 1.5s hold needs ~6.
+      expect(probes).toBeGreaterThan(0);
+      expect(probes).toBeLessThanOrEqual(15);
+      const busy = (driverName === "sqlite" ? syncAttempts : attempts).filter((a) => a.busy);
+      const spinning = busy.filter((a) => a.spinMs > 0).length;
+      // Every other writer hit the held lock with a zero busy_timeout, so it
+      // failed in microseconds instead of blocking the loop. Without the gate
+      // there are no such attempts at all.
+      expect(busy.length - spinning).toBeGreaterThan(writers);
+      // The only BUSY attempts allowed to wait are the gate's probes: a gated
+      // attempt that waits any time (even 10ms x hundreds of attempts) shows up
+      // here as more spinning attempts than the gate reported probes.
+      expect(spinning).toBe(probes);
+      // No wall-clock bound on purpose. Idle, the crowd finishes in ~1.85s
+      // (1.5s hold plus the post-release backoff); a loaded CI runner stretched
+      // that past 3s twice although the gate held, so a time limit measured the
+      // runner. "Ungated the crowd spins for seconds" is already asserted above
+      // by counting spinning attempts, and the per-test timeout still fails a
+      // crowd that never drains.
+      const rows = await crowdClient.query<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM items WHERE name LIKE 'crowd-%'",
+      );
+      expect(rows[0]?.n).toBe(writers);
+      // The test spends 1.5s in the hold alone, so the 5s default leaves a
+      // loaded runner under 3s of slack; 15s keeps a hung crowd a failure.
+    }, 15_000);
+
+    test("a held lock past the budget fails fast for the whole crowd", async () => {
+      const crowdClient = createTestClient(() => main, {
+        maxWaitMs: 400,
+        backoffMs: [25, 50, 100, 250],
+        attemptSpinMs: 50,
+        finalAttemptSpinMs: 50,
+      });
+      const released = holdWriteLock(2_500);
+      const startedAt = performance.now();
+      const results = await Promise.allSettled(
+        Array.from({ length: 40 }, (_, i) =>
+          crowdClient.run("INSERT INTO items (name) VALUES (?)", [`doomed-${i}`]),
+        ),
+      );
+      const wallMs = performance.now() - startedAt;
+      await released;
+      expect(results.every((r) => r.status === "rejected")).toBe(true);
+      for (const r of results) {
+        expect((r as PromiseRejectedResult).reason.code).toBe("SQLITE_BUSY");
+      }
+      // Ungated: 40 writers x 5 spins x 50ms = 10s. Gated: well under 2s.
+      expect(wallMs).toBeLessThan(2_000);
+    });
+
+    test("the gate closes once a blocked write lands, so the next BUSY probes afresh", async () => {
+      const released = holdWriteLock(150);
+      await client.run("INSERT INTO items (name) VALUES (?)", ["after-hold"]);
+      await released;
+      // New episode: a second, short hold is still bridged.
+      const second = holdWriteLock(100);
+      await client.run("INSERT INTO items (name) VALUES (?)", ["after-second-hold"]);
+      await second;
+      const rows = await client.query<{ name: string }>(
+        "SELECT name FROM items WHERE name LIKE 'after-%' ORDER BY name",
+      );
+      expect(rows.map((r) => r.name)).toEqual(["after-hold", "after-second-hold"]);
+    });
+    describe("transaction deadlineAt", () => {
+      const names = async () =>
+        (await client.query<{ name: string }>("SELECT name FROM items ORDER BY id")).map(
+          (r) => r.name,
+        );
+
+      test("BEGIN stops retrying at the deadline instead of outwaiting the holder", async () => {
+        const released = holdWriteLock(600);
+        const startedAt = performance.now();
+        await expect(
+          (
+            await settled(
+              client.transaction(
+                async (tx) => {
+                  await tx.run("INSERT INTO items (name) VALUES ('late')");
+                },
+                { deadlineAt: Date.now() + 150 },
+              ),
+            )
+          )[0],
+        ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
+        expect(performance.now() - startedAt).toBeLessThan(500);
+        await released;
+        expect(await names()).toEqual(["locker"]);
+      });
+
+      test("a callback that outlives the deadline is rolled back, not committed", async () => {
+        await expect(
+          (
+            await settled(
+              client.transaction(
+                async (tx) => {
+                  await tx.run("INSERT INTO items (name) VALUES ('slow')");
+                  await new Promise((r) => setTimeout(r, 120));
+                },
+                { deadlineAt: Date.now() + 60 },
+              ),
+            )
+          )[0],
+        ).rejects.toBeInstanceOf(DbTransactionDeadlineError);
+        expect(await names()).toEqual([]);
+        // The connection is not left inside the transaction.
+        await client.run("INSERT INTO items (name) VALUES ('after')");
+        expect(await names()).toEqual(["after"]);
+      });
+
+      test("a transaction inside its deadline commits as before", async () => {
+        await client.transaction(
+          async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES ('ok')");
+          },
+          { deadlineAt: Date.now() + 5_000 },
+        );
+        expect(await names()).toEqual(["ok"]);
+      });
     });
   });
 });
+
+// Bun 1.4.4 nested rejection matchers do not dispatch Worker messages.
+// Settle transport work first, then retain the original rejection assertion.
+async function settled<T>(promise: Promise<T>): Promise<[Promise<T>]> {
+  try {
+    return [Promise.resolve(await promise)];
+  } catch (error) {
+    const rejected = Promise.reject<T>(error);
+    void rejected.catch(() => {});
+    return [rejected];
+  }
+}

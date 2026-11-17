@@ -10,7 +10,12 @@ import type { DbParam } from "../db-client";
 
 declare const self: Worker;
 
-export type SearchReadInit = { type: "init"; file: string; vecExtensionPath?: string };
+export type SearchReadInit = {
+  type: "init";
+  file: string;
+  vecExtensionPath?: string;
+  customSQLite?: string;
+};
 export type SearchReadRequest = {
   type: "read";
   id: number;
@@ -19,23 +24,32 @@ export type SearchReadRequest = {
   params: DbParam[];
 };
 export type SearchReadMessage =
-  | { type: "ready" }
+  | { type: "ready"; sqliteVec: boolean }
   | { type: "fatal"; message: string }
   | { type: "result"; id: number; rows: unknown }
-  | { type: "error"; id: number; message: string };
+  | { type: "error"; id: number; message: string; name: string; code?: string };
 
 let db: Database | null = null;
 
-self.onmessage = (event: MessageEvent<SearchReadInit | SearchReadRequest>) => {
+self.onmessage = (event: MessageEvent<SearchReadInit | SearchReadRequest | { type: "close" }>) => {
   const message = event.data;
+  if (message.type === "close") {
+    db?.close();
+    process.exit(0);
+  }
   if (message.type === "init") {
     try {
+      if (message.customSQLite) Database.setCustomSQLite(message.customSQLite);
       db = new Database(message.file, { readonly: true });
       // Same lock wait as the main connection; WAL readers rarely wait at all.
       db.run("PRAGMA busy_timeout = 5000;");
       db.run("PRAGMA mmap_size = 268435456;");
-      if (message.vecExtensionPath) db.loadExtension(message.vecExtensionPath);
-      self.postMessage({ type: "ready" } satisfies SearchReadMessage);
+      let sqliteVec = false;
+      if (message.vecExtensionPath) {
+        db.loadExtension(message.vecExtensionPath);
+        sqliteVec = Boolean(db.query("SELECT vec_version() AS version").get());
+      }
+      self.postMessage({ type: "ready", sqliteVec } satisfies SearchReadMessage);
     } catch (err) {
       self.postMessage({
         type: "fatal",
@@ -55,6 +69,8 @@ self.onmessage = (event: MessageEvent<SearchReadInit | SearchReadRequest>) => {
       type: "error",
       id,
       message: (err as Error).message,
+      name: (err as Error).name,
+      code: (err as Error & { code?: string }).code,
     } satisfies SearchReadMessage);
   }
 };

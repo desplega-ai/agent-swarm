@@ -91,7 +91,7 @@ const DENIED = "Only lead agents can create or change stdio MCP servers.";
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "Stdio Gate Lead", isLead: true, status: "idle" });
   await createAgent({ id: WORKER_ID, name: "Stdio Gate Worker", isLead: false, status: "idle" });
@@ -122,7 +122,7 @@ afterAll(async () => {
   await new Promise<void>((resolve, reject) =>
     routeServer.close((error) => (error ? reject(error) : resolve())),
   );
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

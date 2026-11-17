@@ -156,7 +156,7 @@ describe("API key tracking DB queries", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await unlink(TEST_DB).catch(() => {});
     await unlink(`${TEST_DB}-wal`).catch(() => {});
     await unlink(`${TEST_DB}-shm`).catch(() => {});

@@ -123,7 +123,7 @@ describe("store-progress handler — attachments insert path", () => {
 
   afterAll(async () => {
     globalThis.fetch = ORIGINAL_FETCH;
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

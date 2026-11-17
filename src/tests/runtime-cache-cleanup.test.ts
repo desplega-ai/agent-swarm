@@ -66,10 +66,10 @@ async function runtime(poolId: string) {
   return id;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   savedTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
-  closeDb();
+  await closeDb();
   initDb(path);
   logSpy = spyOn(console, "error").mockImplementation(() => {});
 });
@@ -92,7 +92,7 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   logSpy.mockRestore();
-  closeDb();
+  await closeDb();
   testGlobals.__testMigrationTemplate = savedTemplate;
   for (const suffix of ["", "-wal", "-shm"])
     await Bun.file(path + suffix)
@@ -153,7 +153,7 @@ test("a failed release is scrubbed, persisted over restart, and retried", async 
   });
   expect((await jobs())[0]?.last_error).not.toContain(secret);
   const id = (await jobs())[0]!.id;
-  closeDb();
+  await closeDb();
   initDb(path);
   expect((await jobs())[0]?.id).toBe(id);
   release = async () => {};
@@ -190,7 +190,7 @@ test("re-enabling uses a new generation; edits retain the current generation", a
   const p = await pool();
   const oldKey = (await getPoolCache(p.id))!.key;
   await updateRuntimePool(p.id, { name: "renamed", cache: { mountPath: "/cache/changed" } });
-  closeDb();
+  await closeDb();
   initDb(path);
   expect((await getPoolCache(p.id))!.key).toBe(oldKey);
   await updateRuntimePool(p.id, { cache: null });
@@ -247,7 +247,7 @@ test("an abandoned deleting lease is recovered after restart", async () => {
   await getDbClient().run("UPDATE runtime_cache_releases SET state = 'deleting', updated_at = ?", [
     new Date(Date.now() - 6 * 60_000).toISOString(),
   ]);
-  closeDb();
+  await closeDb();
   initDb(path);
   await drain();
   expect(calls).toHaveLength(1);

@@ -1103,6 +1103,10 @@ export const knowledgeMemory: Scenario = {
       );
       expect(["vec", "fallback"].includes(String(health.retrievalMode)), "health retrievalMode");
       expect(Array.isArray(health.reasons), "health reasons");
+      expect(
+        counts.total === dbCount(ctx, "SELECT count(*) AS n FROM agent_memory", []),
+        "async health counts match committed source rows",
+      );
       expect(asRecord(health.sqliteVec).distanceMetric === "cosine", "health distance metric");
 
       response = await ctx.api("GET", "/api/memory/usefulness?days=7&threshold=0.5");
@@ -1205,6 +1209,22 @@ export const knowledgeMemory: Scenario = {
         response = await ctx.api("DELETE", `/api/memory/${id}`);
         expectStatus(response, [200], "operator cleanup delete");
       }
+      const deletedIds = [privateId, indexedId, swarmId, ...longIds];
+      expect(
+        dbCount(
+          ctx,
+          `SELECT count(*) AS n FROM memory_fts WHERE memory_id IN (${deletedIds.map(() => "?").join(",")})`,
+          deletedIds,
+        ) === 0,
+        "delete removes FTS rows with source rows",
+      );
+      response = await ctx.api("GET", "/api/memory/health");
+      expectStatus(response, [200], "fresh memory health after deletion");
+      expect(
+        asRecord(asRecord(response.json).counts).total ===
+          dbCount(ctx, "SELECT count(*) AS n FROM agent_memory", []),
+        "health invalidates counts after deletion",
+      );
       expect(
         dbCount(ctx, "SELECT count(*) AS n FROM agent_memory WHERE agentId = ? AND key = ?", [
           agentA,

@@ -100,9 +100,9 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   fake.stop(true);
-  closeDb();
+  await closeDb();
   if (savedServiceKey === undefined) delete process.env.API_AGENT_FS_API_KEY;
   else process.env.API_AGENT_FS_API_KEY = savedServiceKey;
 });

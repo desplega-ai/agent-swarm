@@ -134,7 +134,7 @@ afterAll(async () => {
   }
   await cleanExtensionTmpRoot();
   await harness.stop();
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

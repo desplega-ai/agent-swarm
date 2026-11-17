@@ -32,16 +32,16 @@ function removeTestDb(): void {
   }
 }
 
-beforeAll(() => {
-  closeDb();
+beforeAll(async () => {
+  await closeDb();
   savedMigrationTemplate = testGlobals.__testMigrationTemplate;
   testGlobals.__testMigrationTemplate = undefined;
   removeTestDb();
   initDb(TEST_DB_PATH);
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   removeTestDb();
   testGlobals.__testMigrationTemplate = savedMigrationTemplate;
 });
@@ -60,7 +60,7 @@ describe("durable Slack relay obligations", () => {
     await completeTask(task.id, "durable result");
     expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).toContain(task.id);
 
-    closeDb();
+    await closeDb();
     initDb(TEST_DB_PATH);
 
     expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).toContain(task.id);

@@ -105,9 +105,9 @@ beforeAll(async () => {
   ezeAuth = { kind: "user", userId: eze.id, user: eze as never };
 });
 
-afterAll(() => {
+afterAll(async () => {
   sweepRealtimeTickets(Number.MAX_SAFE_INTEGER);
-  closeDb();
+  await closeDb();
 });
 
 beforeEach(async () => {

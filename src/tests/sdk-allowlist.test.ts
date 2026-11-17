@@ -47,7 +47,7 @@ describe("script SDK allowlist", () => {
   afterAll(async () => {
     if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
     else process.env.STEERING_ENABLED = originalSteeringEnabled;
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 
@@ -383,7 +383,7 @@ describe("mcp-bridge allowlist gate", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
     if (prevApiKey === undefined) {
       delete process.env.AGENT_SWARM_API_KEY;

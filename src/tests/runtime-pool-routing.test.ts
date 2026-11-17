@@ -59,12 +59,12 @@ async function cleanup() {
 }
 beforeAll(async () => {
   await cleanup();
-  closeDb();
+  await closeDb();
   initDb(dbPath);
 });
 afterAll(async () => {
   stopPoolRouting();
-  closeDb();
+  await closeDb();
   await cleanup();
   for (const key of envKeys) {
     if (savedEnv[key] === undefined) delete process.env[key];

@@ -319,10 +319,25 @@ runs the same rule in JS as a net for a store that ignores the option, and the
 routes run it again after graph expansion. Other sources, non-review searchers and
 source tasks that no longer exist are unchanged.
 
+## Store readiness and lifecycle
+
+`SqliteMemoryStore` performs no SQL during construction. Call `await store.whenReady()` before transaction-dependent service work.
+Readiness creates schemas through the bound client, then starts separate vector and FTS populations outside transaction context.
+Calls reject with an actionable error if initialization would wait behind the caller's transaction, including initialization already pending.
+
+Public database methods await schema readiness. Semantic search uses source embeddings while indexes remain incomplete.
+Keyword-only search awaits FTS population. Tests that inspect final counts explicitly await `whenVecPopulated()` or `whenFtsPopulated()`.
+Vector population reads and writes within each 500-row transaction, then yields before the next batch.
+Runtime writes maintain indexes directly, including UUID inserts behind the population cursor.
+
+Stores and health caches belong to one client. Database closure cancels further batches and drains admitted operations through that client.
+A reopened database receives a new singleton. Old stores reject access instead of acquiring the new connection.
+Schema and transport errors reject readiness. Optional vector absence degrades retrieval, while separate population failures appear in health reasons.
+
 ## Health on the search path
 
-`store.search` routes on `getHealth().retrievalMode`. The health counts are
-synchronous `COUNT(*)` scans of `agent_memory` and `memory_vec`, so search reuses
+`store.search` routes on `(await store.getHealth()).retrievalMode`. Health counts use
+asynchronous `COUNT(*)` scans of `agent_memory` and `memory_vec`, so search reuses
 one result for `SEARCH_HEALTH_TTL_MS` (60 s). A populate drops the cached result,
 and a vec write drops a cached fallback, so the first vector switches search to
 the vec path at once. A cached `vec` result survives writes and can be up to 60 s

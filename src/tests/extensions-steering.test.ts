@@ -125,7 +125,7 @@ describe("extension steering boundary", () => {
   afterAll(async () => {
     await stopExtensionRuntime();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    closeDb();
+    await closeDb();
     await removeDbFiles();
     for (const [key, value] of savedEnv) {
       if (value === undefined) delete process.env[key];

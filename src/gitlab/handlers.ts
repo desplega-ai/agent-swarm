@@ -19,7 +19,7 @@ import {
 import { renderIdentity, resolveIdentity } from "../be/identity";
 import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
-import { resolveTemplate } from "../prompts/resolver";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { AgentTask } from "../types";
@@ -197,7 +197,7 @@ export async function handleMergeRequest(
       const context = mr.description ? extractMentionContext(mr.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
       const username = await renderGitLabIdentity(user.username);
-      const result = resolveTemplate("gitlab.merge_request.opened", {
+      const result = await resolveTemplateAsync("gitlab.merge_request.opened", {
         mr_iid: mr.iid,
         mr_title: mr.title,
         repo,
@@ -318,7 +318,7 @@ export async function handleIssue(
       const context = issue.description ? extractMentionContext(issue.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
       const username = await renderGitLabIdentity(user.username);
-      const result = resolveTemplate("gitlab.issue.assigned", {
+      const result = await resolveTemplateAsync("gitlab.issue.assigned", {
         issue_iid: issue.iid,
         issue_title: issue.title,
         repo,
@@ -435,7 +435,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     : "";
 
   const username = await renderGitLabIdentity(user.username);
-  const noteResult = resolveTemplate("gitlab.comment.mentioned", {
+  const noteResult = await resolveTemplateAsync("gitlab.comment.mentioned", {
     entity_label: entityLabel,
     username,
     repo,
@@ -521,7 +521,7 @@ export async function handlePipeline(
   }
 
   const lead = await findLeadAgent();
-  const pipelineResult = resolveTemplate("gitlab.pipeline.failed", {
+  const pipelineResult = await resolveTemplateAsync("gitlab.pipeline.failed", {
     pipeline_id: pipeline.id,
     mr_iid: mrIid,
     repo,

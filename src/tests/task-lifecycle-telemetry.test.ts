@@ -37,7 +37,7 @@ describe("task lifecycle telemetry", () => {
   let calls: Array<{ event: string; props: Parameters<typeof telemetry.taskEvent>[1] }>;
 
   beforeEach(async () => {
-    closeDb();
+    await closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
     await createAgent({ id: WORKER_ID, name: "Telemetry Worker", isLead: false, status: "idle" });
@@ -50,7 +50,7 @@ describe("task lifecycle telemetry", () => {
 
   afterEach(async () => {
     taskEventSpy.mockRestore();
-    closeDb();
+    await closeDb();
     await removeTestDb();
   });
 

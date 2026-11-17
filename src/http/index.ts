@@ -14,6 +14,7 @@ import {
   emitBuiltInIntegrationConnectedOnce,
   getSwarmConfigs,
   upsertSwarmConfig,
+  whenDbReady,
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
@@ -621,7 +622,7 @@ async function shutdown() {
     httpServer.close((error) => (error ? reject(error) : resolve()));
   });
   await closeRooms();
-  closeDb();
+  await closeDb();
   console.log("MCP HTTP server closed, and database connection closed");
   process.exit(0);
 }
@@ -634,21 +635,23 @@ if (!globalState.__sigintRegistered) {
   // learn why the process failed to exit cleanly.
   process.on("SIGINT", () => {
     shutdownSignal = "SIGINT";
-    shutdown().catch((err) =>
+    shutdown().catch((err) => {
       console.error(
         "[shutdown] SIGINT shutdown failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
+      );
+      process.exit(1);
+    });
   });
   process.on("SIGTERM", () => {
     shutdownSignal = "SIGTERM";
-    shutdown().catch((err) =>
+    shutdown().catch((err) => {
       console.error(
         "[shutdown] SIGTERM shutdown failed:",
         scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
+      );
+      process.exit(1);
+    });
   });
 }
 
@@ -686,6 +689,7 @@ try {
   process.exitCode = 1;
   throw err;
 }
+await whenDbReady();
 warnIfCorsAllowsAnyOrigin();
 
 // Register every stored secret (config secrets of all scopes, OAuth and MCP

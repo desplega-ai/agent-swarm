@@ -84,7 +84,7 @@ describe("searchSkills on long skill bodies", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
 

@@ -64,7 +64,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

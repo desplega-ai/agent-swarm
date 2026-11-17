@@ -69,7 +69,7 @@ describe("human-free flag stays correct when a classifying input changes", () =>
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);

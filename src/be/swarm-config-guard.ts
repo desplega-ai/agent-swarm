@@ -65,6 +65,7 @@ export function teamsSdkEnvKeysSql(): string {
 }
 
 const RESERVED_KEYS = new Set([
+  "DB_DRIVER",
   "API_KEY",
   "SECRETS_ENCRYPTION_KEY",
   "CORS_ALLOW_ANY_ORIGIN",

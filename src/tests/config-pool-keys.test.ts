@@ -132,8 +132,8 @@ afterEach(async () => {
   fetchSpy.mockRestore();
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   __resetInjectedEnvTracking();
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) delete process.env[key];

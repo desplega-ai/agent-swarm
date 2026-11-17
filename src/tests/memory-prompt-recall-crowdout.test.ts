@@ -24,6 +24,14 @@ const realMemoryExports = {
   getMemoryStore: realMemoryModule.getMemoryStore,
 };
 
+async function populatedStore(): Promise<SqliteMemoryStore> {
+  const store = new SqliteMemoryStore();
+  await store.whenReady();
+  await store.whenVecPopulated();
+  await store.whenFtsPopulated();
+  return store;
+}
+
 const TEST_DB_PATH = "./test-memory-prompt-recall-crowdout.sqlite";
 const agentId = randomUUID();
 const sourceTaskId = randomUUID();
@@ -112,6 +120,7 @@ beforeAll(async () => {
   );
 
   const store = new SqliteMemoryStore();
+  await store.whenReady();
   // Fresh manual parent, cosine 0.7, matched by both arms, never accessed.
   const parent = await store.store({
     agentId,
@@ -150,7 +159,7 @@ afterAll(async () => {
   mock.module("../be/memory", () => realMemoryExports);
   if (prevHybridFlag === undefined) delete process.env.MEMORY_HYBRID_SEARCH;
   else process.env.MEMORY_HYBRID_SEARCH = prevHybridFlag;
-  closeDb();
+  await closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
@@ -177,7 +186,7 @@ describe("pre-task recall with independently boosted graph neighbours", () => {
 
   test("fixture reproduces the review: the neighbours alone out-score the eligible parent", async () => {
     await boostFixture();
-    const candidates = await new SqliteMemoryStore().search(queryEmbedding, agentId, {
+    const candidates = await (await populatedStore()).search(queryEmbedding, agentId, {
       scope: "all",
       limit: 15,
       queryText: PARENT_NAME,
@@ -200,7 +209,7 @@ describe("pre-task recall with independently boosted graph neighbours", () => {
 
   test("a parent outranks its own boosted graph neighbours in the reranked top five", async () => {
     await boostFixture();
-    const candidates = await new SqliteMemoryStore().search(queryEmbedding, agentId, {
+    const candidates = await (await populatedStore()).search(queryEmbedding, agentId, {
       scope: "all",
       limit: 15,
       queryText: PARENT_NAME,
@@ -252,6 +261,7 @@ describe("pre-task recall with independently boosted graph neighbours", () => {
       status: "idle",
     });
     const store = new SqliteMemoryStore();
+    await store.whenReady();
     const hit = await store.store({
       agentId: otherAgentId,
       scope: "agent",

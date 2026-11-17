@@ -130,6 +130,7 @@ export async function storeTaskLearning(params: {
       await rateDuplicate(duplicate, task.id);
       return duplicate;
     }
+    await getMemoryStore().whenReady();
     // One write transaction for the replay check and the insert, so two
     // overlapping calls with the same learning store it once.
     return await getDbClient().transaction(() =>

@@ -256,7 +256,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => bridgeServer.close(() => resolve()));
-  closeDb();
+  await closeDb();
   setScriptEmbeddingProviderForTests(null);
   await removeDbFiles();
   for (const key of Object.keys(process.env)) {

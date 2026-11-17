@@ -57,8 +57,8 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     initDb(":memory:");
   });
 
-  afterAll(() => {
-    closeDb();
+  afterAll(async () => {
+    await closeDb();
   });
 
   test("write path: secret upsert produces ciphertext row with encrypted=1", async () => {
@@ -226,7 +226,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
   });
 
   afterAll(async () => {
-    closeDb();
+    await closeDb();
     // Restore template for any subsequent test suites.
     testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedTemplate;
     delete testTemplateGlobals.__savedTemplate;
@@ -343,7 +343,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     const keyFilePath = join(tmpDir, ".encryption-key");
 
     try {
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
       initDb(dbPath);
@@ -355,7 +355,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
         isSecret: true,
       });
 
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       delete process.env.SECRETS_ENCRYPTION_KEY;
       delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
@@ -363,7 +363,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       expect(() => initDb(dbPath)).toThrow(/existing database with encrypted secret rows/i);
       expect(existsSync(keyFilePath)).toBe(false);
     } finally {
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
       rmSync(tmpDir, { recursive: true, force: true });
@@ -376,7 +376,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     const keyFilePath = join(tmpDir, ".encryption-key");
 
     try {
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
       initDb(dbPath);
@@ -389,7 +389,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
         [id, now, now],
       );
 
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       delete process.env.SECRETS_ENCRYPTION_KEY;
       delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
@@ -405,7 +405,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       expect(migrated?.value).not.toBe("legacy-plain");
       expect((await getSwarmConfigById(id))?.value).toBe("legacy-plain");
     } finally {
-      closeDb();
+      await closeDb();
       __resetEncryptionKeyForTests();
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
       rmSync(tmpDir, { recursive: true, force: true });

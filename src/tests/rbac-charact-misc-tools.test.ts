@@ -98,7 +98,7 @@ async function removeDbFiles() {
 
 beforeAll(async () => {
   await removeDbFiles();
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
 
   // Best-effort: keep inject-learning's embedding side path offline.
@@ -148,7 +148,7 @@ afterAll(async () => {
   } else {
     delete process.env.OPENAI_API_KEY;
   }
-  closeDb();
+  await closeDb();
   await removeDbFiles();
 });
 

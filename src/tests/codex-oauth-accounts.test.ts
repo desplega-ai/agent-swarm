@@ -108,9 +108,9 @@ beforeEach(async () => {
 
 afterEach(() => _resetAutoReloadForTests());
 
-afterAll(() => {
+afterAll(async () => {
   _resetAutoReloadForTests();
-  closeDb();
+  await closeDb();
 });
 
 describe("Codex account HTTP routes", () => {

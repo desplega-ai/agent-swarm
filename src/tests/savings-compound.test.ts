@@ -273,7 +273,7 @@ describe("savings with components", () => {
   afterAll(async () => {
     server?.close();
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
     testGlobals.__testMigrationTemplate = testGlobals.__savedCompoundTemplate;
     testGlobals.__savedCompoundTemplate = undefined;
     await removeDbFiles(TEST_DB_PATH);
@@ -687,7 +687,7 @@ describe("each task counts under one root", () => {
 
   afterAll(async () => {
     await resetSavingsRollupForTests();
-    closeDb();
+    await closeDb();
   });
 
   test("a step task below another step task counts once", async () => {

@@ -54,7 +54,7 @@ describe("savings fleet read", () => {
 
   afterAll(async () => {
     server?.close();
-    closeDb();
+    await closeDb();
   });
 
   test("an empty DB is not valid, never $0", async () => {

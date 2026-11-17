@@ -151,7 +151,7 @@ beforeAll(async () => {
   // process keeps writing to the previous template-restored DB while the
   // spawned server reads from TEST_DB_PATH — cross-process WAL visibility
   // breaks and `applied=0` / 400 / empty edge lists ensue.
-  closeDb();
+  await closeDb();
   initDb(TEST_DB_PATH);
   await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
   await createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
@@ -164,10 +164,11 @@ beforeAll(async () => {
   );
 
   store = new SqliteMemoryStore();
+  await store.whenReady();
 }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
-  closeDb();
+  await closeDb();
   testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedEdgesTemplate;
   testTemplateGlobals.__savedEdgesTemplate = undefined;
   if (serverProc) {

@@ -34,8 +34,8 @@ beforeAll(() => {
   }
 });
 
-afterAll(() => {
-  closeDb();
+afterAll(async () => {
+  await closeDb();
   for (const [key, value] of previous) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

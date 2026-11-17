@@ -48,7 +48,7 @@ describe("task-digest example extension", () => {
   afterAll(async () => {
     await stopExtensionRuntime();
     setScriptEmbeddingProviderForTests(null);
-    closeDb();
+    await closeDb();
     await removeDbFiles();
   });
 
