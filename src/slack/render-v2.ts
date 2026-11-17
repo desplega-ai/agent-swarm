@@ -63,6 +63,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import { getChannelExternality } from "./external-channel";
 import {
   completedStatusIcon,
   iconPrefix,
@@ -1179,6 +1180,82 @@ async function isSlackContinuation(task: AgentTask): Promise<boolean> {
   );
 }
 
+/** Lead review tasks the engine creates when a worker finishes or a session resumes. */
+const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
+/** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
+const SLACK_ANCESTOR_WALK_LIMIT = 50;
+
+/** True when `task`'s parent chain holds a task a person started in Slack. */
+async function hasSlackAskAncestor(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<boolean> {
+  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
+  const seen = new Set<string>([task.id]);
+  let parentId = task.parentTaskId;
+  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
+    seen.add(parentId);
+    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
+    if (!parent) return false;
+    if (parent.source === "slack") return true;
+    parentId = parent.parentTaskId;
+  }
+  return false;
+}
+
+/**
+ * A Lead follow-up (worker completion) or resume task in a tree a person
+ * started in Slack. Its output is the answer the thread waits for, so it gets
+ * an outcome card like the ask did; before this, the thread stayed silent
+ * until someone asked "status?".
+ */
+async function isSlackLeadFollowUp(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<boolean> {
+  return (
+    task.source === "system" &&
+    SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "") &&
+    !!task.slackChannelId &&
+    !!task.slackThreadTs &&
+    !!task.agentId &&
+    !!(await getAgentById(task.agentId))?.isLead &&
+    (await hasSlackAskAncestor(task, threadTasks))
+  );
+}
+
+/**
+ * Gates a new outcome card for a Lead follow-up; every other task passes.
+ * No card when the Lead already answered with `slack-reply` (it would repeat
+ * that answer), when the delegation child pass owns the card, or when Slack
+ * does not confirm the channel is internal: a Slack Connect channel is a
+ * customer's, and posting there needs a person's explicit yes.
+ */
+async function mayPostLeadFollowUpCard(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+  ownerAskId: ReadonlyMap<string, string>,
+  delegationActivatedAt: string | null,
+): Promise<boolean> {
+  if (task.source !== "system" || !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "")) {
+    return true;
+  }
+  if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) return false;
+  const askId = ownerAskId.get(task.id);
+  const ownerAsk = askId ? threadTasks.find((candidate) => candidate.id === askId) : undefined;
+  if (
+    delegationActivatedAt !== null &&
+    ownerAsk &&
+    ownerAsk.createdAt >= delegationActivatedAt &&
+    isChildCardCandidate(task, delegationActivatedAt)
+  ) {
+    return false;
+  }
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId) return false;
+  return (await getChannelExternality(app.client, task.slackChannelId)) === "internal";
+}
+
 /**
  * True when `task` is a candidate for its own child result card (plan
  * section 3.4, rules 1-4, 3, and part of rule 6). Callers still need the
@@ -1216,12 +1293,15 @@ export async function slackDelegationOwnsChildCard(task: AgentTask): Promise<boo
   return !!ownerAsk && ownerAsk.createdAt >= delegationActivatedAt;
 }
 
-async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {
-  return (
-    ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
-      ((await isSlackContinuation(task)) && isOutcomeStatus(task.status))) &&
-    task.createdAt >= activatedAt
-  );
+async function taskNeedsDirectOutcome(
+  task: AgentTask,
+  activatedAt: string,
+  threadTasks: readonly AgentTask[],
+): Promise<boolean> {
+  if (task.createdAt < activatedAt) return false;
+  if (task.source === "slack") return isAskOutcomeStatus(task.status);
+  if (!isOutcomeStatus(task.status)) return false;
+  return (await isSlackContinuation(task)) || (await isSlackLeadFollowUp(task, threadTasks));
 }
 
 /**
@@ -2072,10 +2152,13 @@ async function processSlackThread(
 
   for (const task of tasks) {
     if (!isSlackRenderV2Enabled()) return "stop";
-    if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
+    if (!(await taskNeedsDirectOutcome(task, activatedAt, tasks))) continue;
     const card = await getSlackOutcomeMessage(task.id);
     if (card && isSettledSlackMessage(card)) continue;
     if (await isAnsweredByDeferralCard(task, tasks)) continue;
+    if (!card && !(await mayPostLeadFollowUpCard(task, tasks, ownerAskId, delegationActivatedAt))) {
+      continue;
+    }
     const deferByClosure =
       task.source === "slack" &&
       delegationEnabled &&
