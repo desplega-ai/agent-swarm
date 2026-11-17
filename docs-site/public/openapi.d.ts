@@ -37735,6 +37735,15 @@ export interface operations {
                         results: {
                             name: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;
@@ -37833,6 +37842,15 @@ export interface operations {
                 content: {
                     "application/json": {
                         signature: {
+                            /** @enum {string} */
+                            kind?: "durable";
+                            methods?: {
+                                [key: string]: {
+                                    argsType: string;
+                                    resultType: string;
+                                    description: string;
+                                };
+                            };
                             argsType: string;
                             resultType: string;
                             description: string;
@@ -37989,6 +38007,15 @@ export interface operations {
                             createdAt: string;
                             updatedAt: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;

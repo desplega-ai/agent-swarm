@@ -299,6 +299,7 @@ export const RESERVED_CTX_KEYS: readonly string[] = [
   "run",
   "step",
   "config",
+  "caller",
 ];
 
 const NAMESPACE_NAME = /^[a-z][a-zA-Z]*$/;

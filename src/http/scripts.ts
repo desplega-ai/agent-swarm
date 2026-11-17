@@ -110,6 +110,13 @@ const listScriptsQuerySchema = z.object({
 // `extractScriptSignature`, so `JSON.parse(script.signatureJson)` is always
 // exactly this shape.
 const scriptSignatureSchema = z.object({
+  kind: z.literal("durable").optional(),
+  methods: z
+    .record(
+      z.string(),
+      z.object({ argsType: z.string(), resultType: z.string(), description: z.string() }),
+    )
+    .optional(),
   argsType: z.string(),
   resultType: z.string(),
   description: z.string(),
@@ -693,6 +700,14 @@ export async function handleScripts(
       return true;
     }
 
+    if (
+      parsed.body.scope !== "global" &&
+      extractScriptSignature(parsed.body.source).kind === "durable"
+    ) {
+      jsonError(res, "DurableObject scripts must be global scope", 400);
+      return true;
+    }
+
     const typecheck = await typecheckScript(parsed.body.source, { agentId: agent.id });
     if (!typecheck.ok) {
       json(
@@ -774,6 +789,11 @@ export async function handleScripts(
     const secretRefusal = parsed.body.source ? refuseSourceWithSecrets(parsed.body.source) : null;
     if (secretRefusal) {
       json(res, secretRefusal, 400);
+      return true;
+    }
+
+    if (parsed.body.source && extractScriptSignature(parsed.body.source).kind === "durable") {
+      jsonError(res, "DurableObject scripts must be saved globally and called by name", 400);
       return true;
     }
 

@@ -1,3 +1,5 @@
+import { DURABLE_OBJECT_RESERVED_METHODS } from "../durable-object-base";
+
 /**
  * JavaScript that the quickjs runner evaluates inside the sandbox before the
  * user bundle. It rebuilds the script `ctx` (swarm, api, mcp, stdlib, logger)
@@ -452,7 +454,8 @@ const namespaces = Object.fromEntries(
     Object.freeze(Object.fromEntries(names.map((name) => [name, method(ns + "." + name)]))),
   ]),
 );
-const ctx = Object.freeze({ ...namespaces, swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console });
+const caller = globalThis.__swarm_caller;
+const ctx = Object.freeze({ ...namespaces, swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console, caller: caller === null ? null : Object.freeze(caller) });
 
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });
@@ -572,6 +575,13 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
     }
   };
   const mod = globalThis.__swarm_module;
+  const durable = globalThis.__swarm_durable;
+  if (durable && !mod?.default?.__swarmDurable) {
+    throw new Error("this script is not a DurableObject");
+  }
+  if (!durable && mod?.default?.__swarmDurable) {
+    throw new Error("this script is a DurableObject. Call it with object: { id, method }");
+  }
   if (!mod || typeof mod.default !== "function") {
     throw new Error(
       "Swarm script must export a default function. Script must export default async function (args, ctx): args FIRST, ctx second.",
@@ -596,6 +606,28 @@ export const SANDBOX_EPILOGUE = String.raw`(async () => {
       }
       throw error;
     }
+  }
+  if (durable) {
+    const obj = new mod.default(durable.id);
+    obj.state = durable.state === undefined ? await obj.initialState() : durable.state;
+    if (durable.storedCodeVersion < durable.codeVersion && typeof obj.migrate === "function") {
+      obj.state = await obj.migrate(obj.state, durable.storedCodeVersion);
+    }
+    const method = durable.method;
+    if (
+      method.startsWith("_") ||
+      ${JSON.stringify([...DURABLE_OBJECT_RESERVED_METHODS])}.includes(method) ||
+      typeof Object.getOwnPropertyDescriptor(mod.default.prototype, method)?.value !== "function"
+    ) {
+      throw new Error('DurableObject method "' + method + '" is not callable');
+    }
+    return {
+      __swarmDurable: 1,
+      result: (await obj[method](args, globalThis.__swarm_ctx)) ?? null,
+      state: obj.state,
+      destroyed: obj._destroyed,
+      idleTtlSec: mod.default.idleTtlSec ?? null,
+    };
   }
   return await mod.default(args, globalThis.__swarm_ctx);
 })().then(

@@ -64680,6 +64680,34 @@
                           "signature": {
                             "type": "object",
                             "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "durable"
+                                ]
+                              },
+                              "methods": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "argsType": {
+                                      "type": "string"
+                                    },
+                                    "resultType": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "argsType",
+                                    "resultType",
+                                    "description"
+                                  ]
+                                }
+                              },
                               "argsType": {
                                 "type": "string"
                               },
@@ -64876,6 +64904,34 @@
                     "signature": {
                       "type": "object",
                       "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "durable"
+                          ]
+                        },
+                        "methods": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "argsType": {
+                                "type": "string"
+                              },
+                              "resultType": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "argsType",
+                              "resultType",
+                              "description"
+                            ]
+                          }
+                        },
                         "argsType": {
                           "type": "string"
                         },
@@ -65278,6 +65334,34 @@
                         "signature": {
                           "type": "object",
                           "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "durable"
+                              ]
+                            },
+                            "methods": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "argsType": {
+                                    "type": "string"
+                                  },
+                                  "resultType": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "argsType",
+                                  "resultType",
+                                  "description"
+                                ]
+                              }
+                            },
                             "argsType": {
                               "type": "string"
                             },
