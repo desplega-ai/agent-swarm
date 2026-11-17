@@ -121,6 +121,49 @@ export const slackLeadFollowUpCard: Scenario = {
     expect(copies === 1, `The Lead follow-up's outcome posted ${copies} times, expected 1`);
     expectFinalizedCard(ctx, posted.followUpId, posted.threadTs, "worker follow-up");
 
+    // 1b. A Lead follow-up pinned to the thread by hand, with no Slack ask in
+    // its parent chain, posts nothing and settles its card so the thread closes.
+    const pinConn = await ctx.connectMcp(posted.leadId);
+    let pinnedId = "";
+    try {
+      const sent = expectToolOk(
+        await callTool(pinConn, "send-task", {
+          agentId: workerId,
+          task: `pinned worker task ${ctx.nonce}`,
+          routingReason: "skill",
+          routingNote: "e2e: a worker task pinned to a Slack thread by hand",
+          slackChannelId: GENERAL,
+          slackThreadTs: posted.threadTs,
+        }),
+        "send-task pinned to the thread",
+      );
+      pinnedId = String(asRecord(sent.data.task).id);
+    } finally {
+      await pinConn.close();
+    }
+    await claim(ctx, workerId, pinnedId);
+    await finish(ctx, workerId, pinnedId, { status: "completed", output: "pinned worker done" });
+    const pinnedFollowUpId = await findWorkerFollowUp(ctx, posted.leadId, pinnedId);
+    await claim(ctx, posted.leadId, pinnedFollowUpId);
+    const pinnedOutput = `pinned follow-up review ${ctx.nonce}`;
+    await finish(ctx, posted.leadId, pinnedFollowUpId, {
+      status: "completed",
+      output: pinnedOutput,
+    });
+    const pinnedSettled = await pollUntil(
+      () =>
+        ctx.db.get<{ delivery_abandoned_at: string | null }>(
+          "SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+          [pinnedFollowUpId],
+        )?.delivery_abandoned_at != null,
+      30_000,
+    );
+    expect(pinnedSettled, "The pinned follow-up's card was never settled as abandoned");
+    expect(
+      threadMessages(ctx, GENERAL, posted.threadTs, pinnedOutput).length === 0,
+      "A Lead follow-up with no Slack ask in its parent chain posted a card",
+    );
+
     // 2. A graceful-shutdown resume of the ask posts its output the same way.
     const resumeAsk = await ctx.slack.postMessage({
       channel: GENERAL,
