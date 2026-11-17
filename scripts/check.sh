@@ -8,8 +8,8 @@
 #      apps/ui when it changed
 #   5. drift: only the generators whose inputs changed (CI's trigger filters);
 #      fails when regenerating changes a checked-in output
-#   6. test:root on the tests affected by the change (scripts/pre-push-tests.sh
-#      scoping, including its full-suite fallbacks)
+#   6. test:root on the tests nearest to the change (scripts/pre-push-tests.sh
+#      scoping; PRE_PUSH_FULL=1 runs the full suite)
 #   7. E2E Contract on the scenarios the change reaches (scripts/e2e/scope.ts);
 #      the full suite when the diff cannot be scoped, nothing when it reaches
 #      neither the API nor the runner. `--skip-e2e` skips it.
