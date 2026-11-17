@@ -566,14 +566,17 @@ export function TranscriptUserMessage({
       {avatar ? <div className="mt-2 shrink-0">{avatar}</div> : null}
       <div
         className={cn(
+          // A fixed width: a short line, a code block or a long one-line
+          // header value must not change it. `w-full` below stops a nowrap
+          // header (`truncate`) from widening the bubble past this column.
           "flex min-w-0 flex-col gap-1.5",
-          avatar ? "max-w-[85%]" : "max-w-[80%]",
+          avatar ? "w-[85%]" : "w-[80%]",
           align === "end" && "items-end",
         )}
       >
         <div
           className={cn(
-            "relative min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
+            "relative w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
             align === "end"
               ? "rounded-tr-sm bg-muted"
               : "rounded-tl-sm border border-border bg-card",
