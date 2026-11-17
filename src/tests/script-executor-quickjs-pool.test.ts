@@ -8,12 +8,16 @@ import { QuickJSScriptExecutor, quickJSWorkerCount } from "./src/scripts-runtime
 import { DEFAULT_SCRIPT_RESOURCES } from "./src/scripts-runtime/executors/types";
 let release;
 const gate = new Promise(resolve => { release = resolve; });
+let allStarted;
+const ready = new Promise(resolve => { allStarted = resolve; });
+let workers;
 let started = 0;
 let inFlight = 0;
 let peak = 0;
 const server = Bun.serve({ port: 0, async fetch() {
   started++;
   peak = Math.max(peak, ++inFlight);
+  if (started === workers) allStarted();
   await gate;
   inFlight--;
   return new Response("ok");
@@ -32,15 +36,13 @@ try {
     fsMode: "none", network: "open",
   };
   const jobs = Array.from({ length: 10 }, () => executor.run(input));
-  const workers = quickJSWorkerCount();
-  const deadline = Date.now() + 10_000;
-  while (started < workers && Date.now() < deadline) await Bun.sleep(10);
-  const heldPeak = peak;
+  workers = quickJSWorkerCount();
+  if (workers > 0) await Promise.race([ready, Promise.all(jobs)]);
   release();
   const outputs = await Promise.all(jobs);
   process.env.SCRIPT_QUICKJS_POOL_SIZE = "16";
   const later = await executor.run(input);
-  console.log(JSON.stringify({ workers, heldPeak, results: outputs.map(o => o.result),
+  console.log(JSON.stringify({ workers, peak, results: outputs.map(o => o.result),
     errors: outputs.map(o => o.error), stderr: outputs[0].stderr,
     retainedWorkers: quickJSWorkerCount(), laterResult: later.result }));
 } finally {
@@ -59,7 +61,7 @@ async function inspectPool(size?: string) {
   );
   return JSON.parse(result.stdout.trim()) as {
     workers: number;
-    heldPeak: number;
+    peak: number;
     results: string[];
     errors: Array<string | null>;
     stderr: string;
@@ -80,7 +82,7 @@ describe("QuickJS pool configuration", () => {
       async () => {
         const result = await inspectPool(size);
         expect(result.workers).toBe(expected);
-        expect(result.heldPeak).toBe(expected);
+        expect(result.peak).toBe(expected);
         expect(result.results).toEqual(Array(10).fill("ok"));
         expect(result.errors).toEqual(Array(10).fill(null));
         expect(result.retainedWorkers).toBe(expected);
