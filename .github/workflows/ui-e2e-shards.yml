@@ -1,6 +1,6 @@
 name: UI E2E Shards
 
-# The Playwright suite in 4 shards, one runner each. Merge Gate calls it on pull_request and
+# The Playwright suite in 8 shards, one runner each. Merge Gate calls it on pull_request and
 # merge_group and needs it; ui-e2e.yml calls it on main and the nightly dispatch. Results,
 # the PR comment and the tracker come from ui-e2e-report.yml, which never blocks the gate.
 on:
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - name: Checkout repository
@@ -65,15 +65,18 @@ jobs:
         run: npx playwright install-deps chromium
         working-directory: packages/ui-e2e
 
-      # retries: 1 in playwright.config.ts. A spec that passes on its rerun is flaky, which
-      # exits 0, so it never fails the gate. UI_E2E_COVERAGE builds with sourcemaps and
-      # writes packages/ui-e2e/coverage/lcov.info.
+      # retries: 0 in playwright.config.ts: one failed spec fails the shard. boot/shard.ts packs
+      # spec files into the 8 shards by shard-weights.json. UI_E2E_COVERAGE builds with
+      # sourcemaps and writes packages/ui-e2e/coverage/lcov.info.
       - name: Run UI E2E shard
         id: run
         continue-on-error: true
+        # UI_E2E_SKIP_TYPECHECK: Merge Gate's UI Lint and Type Check job runs `tsc -b` once
+        # whenever these shards run, so the shards build the bundle only.
         env:
           UI_E2E_COVERAGE: "1"
-        run: bun run e2e:ui -- --shard=${{ matrix.shard }}/4
+          UI_E2E_SKIP_TYPECHECK: "1"
+        run: bun run e2e:ui -- --shard=${{ matrix.shard }}/8
 
       - name: Upload blob report
         if: always()

@@ -5,6 +5,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { runTaskUiAction, type TaskUiActionResult } from "../ui-spec/actions";
 import { UI_SPEC_ACTION_PREFIX } from "../utils/task-ui-spec";
+import { registerApprovalActionHandlers } from "./approval-actions";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
@@ -64,6 +65,8 @@ async function postExternalChannelNotice(
 }
 
 export function registerActionHandlers(app: App): void {
+  registerApprovalActionHandlers(app);
+
   // "View Full Logs" — URL button, just ack (Slack opens the link automatically)
   app.action("view_task_logs", async ({ ack }) => {
     await ack();

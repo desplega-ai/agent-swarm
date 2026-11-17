@@ -7,7 +7,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, Globe, ListTodo, X } from "lucide-react";
+import { AlertCircle, ChevronLeft, ExternalLink, Globe, ListTodo, X } from "lucide-react";
 import { lazy, type ReactNode, Suspense } from "react";
 import { api } from "@/api/client";
 import { useAgentFsStat } from "@/api/hooks/use-agent-fs";
@@ -28,6 +28,7 @@ import { type LinkPreviewTarget, linkPreviewOpenHref } from "@/lib/link-preview"
 import { formatRelative } from "@/lib/relative-time";
 import { statusLabel } from "@/lib/status-labels";
 import { taskListTitle } from "@/lib/task-title";
+import { cn } from "@/lib/utils";
 
 const PAGE_ID_RE = /^[a-f0-9]{32}$/i;
 
@@ -41,21 +42,28 @@ const TaskPreviewBody = lazy(() =>
   import("./task-preview-body").then((m) => ({ default: m.TaskPreviewBody })),
 );
 
-/** The panel for one target: the header, then the file or page body. */
+/** How the panel leaves: a close button (the side panel), a back button (a phone screen), or neither (a tab). */
+interface PreviewExit {
+  onClose?: () => void;
+  onBack?: () => void;
+}
+
+/**
+ * The panel for one target: the header, then the file or page body. The
+ * side panel passes `onClose`. A sessions tab passes neither (the tab has
+ * its own close button). The phone screen passes `onBack`.
+ */
 export function LinkPreviewContent({
   target,
   onClose,
+  onBack,
 }: {
   target: LinkPreviewTarget;
-  onClose: () => void;
-}) {
-  if (target.kind === "file") {
-    return <FilePreview key={target.route} target={target} onClose={onClose} />;
-  }
-  if (target.kind === "task") {
-    return <TaskPreview key={target.taskId} target={target} onClose={onClose} />;
-  }
-  return <PagePreview key={`${target.id}${target.query}`} target={target} onClose={onClose} />;
+} & PreviewExit) {
+  const exit = { onClose, onBack };
+  if (target.kind === "file") return <FilePreview key={target.route} target={target} {...exit} />;
+  if (target.kind === "task") return <TaskPreview key={target.taskId} target={target} {...exit} />;
+  return <PagePreview key={`${target.id}${target.query}`} target={target} {...exit} />;
 }
 
 /** The preview as a sheet over the page, where the page has no room for it inline. */
@@ -93,6 +101,7 @@ function PreviewFrame({
   meta,
   openHref,
   onClose,
+  onBack,
   children,
 }: {
   icon: ReactNode;
@@ -101,15 +110,30 @@ function PreviewFrame({
   detail?: string;
   meta?: string;
   openHref: string;
-  onClose: () => void;
   children: ReactNode;
-}) {
+} & PreviewExit) {
   const subtitle = [detail, meta].filter(Boolean).join(" · ");
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-testid="link-preview-panel">
       {/* One header row, as T3 Code's diff panel: icon, title, open, close.
           The path and size go on one muted line under it; the icon names the kind. */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+      <div
+        className={cn(
+          "flex items-center gap-2 border-b border-border py-1.5 pr-3",
+          onBack ? "pl-1" : "pl-3",
+        )}
+      >
+        {onBack ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Back"
+            onClick={onBack}
+            className="size-11 shrink-0"
+          >
+            <ChevronLeft className="size-6" />
+          </Button>
+        ) : null}
         <span
           role="img"
           aria-label={kind}
@@ -142,15 +166,17 @@ function PreviewFrame({
           </TooltipTrigger>
           <TooltipContent side="bottom">Open in new tab</TooltipContent>
         </Tooltip>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          onClick={onClose}
-          aria-label="Close preview"
-        >
-          <X className="size-4" />
-        </Button>
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={onClose}
+            aria-label="Close preview"
+          >
+            <X className="size-4" />
+          </Button>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
     </div>
@@ -179,11 +205,10 @@ function Unavailable({ title, children }: { title: string; children: ReactNode }
 
 function FilePreview({
   target,
-  onClose,
+  ...exit
 }: {
   target: Extract<LinkPreviewTarget, { kind: "file" }>;
-  onClose: () => void;
-}) {
+} & PreviewExit) {
   const agentFs = useOptionalAgentFs();
   const connected = agentFs?.state === "ready";
   const stat = useAgentFsStat(target.file);
@@ -224,7 +249,7 @@ function FilePreview({
       detail={target.file.path}
       meta={meta}
       openHref={linkPreviewOpenHref(target, { connected })}
-      onClose={onClose}
+      {...exit}
     >
       {body}
     </PreviewFrame>
@@ -233,11 +258,10 @@ function FilePreview({
 
 function PagePreview({
   target,
-  onClose,
+  ...exit
 }: {
   target: Extract<LinkPreviewTarget, { kind: "page" }>;
-  onClose: () => void;
-}) {
+} & PreviewExit) {
   // A link can name the page by slug; the bearer lookup and the body take the id.
   const bySlug = !PAGE_ID_RE.test(target.id);
   const resolved = useQuery({
@@ -291,7 +315,7 @@ function PagePreview({
       detail={page?.slug ?? (bySlug ? target.id : undefined)}
       meta={meta}
       openHref={linkPreviewOpenHref(target, { pageId })}
-      onClose={onClose}
+      {...exit}
     >
       {body}
     </PreviewFrame>
@@ -300,11 +324,10 @@ function PagePreview({
 
 function TaskPreview({
   target,
-  onClose,
+  ...exit
 }: {
   target: Extract<LinkPreviewTarget, { kind: "task" }>;
-  onClose: () => void;
-}) {
+} & PreviewExit) {
   const { data: task, error } = useTask(target.taskId);
 
   let body: ReactNode;
@@ -338,7 +361,7 @@ function TaskPreview({
       detail={target.taskId.slice(0, 8)}
       meta={task ? statusLabel(task.status) : undefined}
       openHref={linkPreviewOpenHref(target)}
-      onClose={onClose}
+      {...exit}
     >
       {body}
     </PreviewFrame>

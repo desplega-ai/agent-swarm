@@ -1,8 +1,8 @@
 /**
  * The rows a sidebar list adds around its sessions: "Show 10 more" and
  * "View all N" (SPEC R6), the centered empty state (R5), the loading
- * placeholder, and the group rows of My groups: "New group", the name
- * field of a new group, and "Show N hidden". An empty or loading line carries an id, so the row
+ * placeholder, and the group rows of My groups: "New group" (an icon in
+ * the heading), the name field of a new group, and "Show N hidden". An empty or loading line carries an id, so the row
  * it sits under can point at it (`aria-describedby`).
  */
 
@@ -26,6 +26,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { GroupNameField } from "./group-node";
 import { TreeRow } from "./tree-row";
 import type { EmptyKind } from "./tree-rows";
@@ -83,6 +84,7 @@ export function PagingRow({
   cursor,
   label,
   all,
+  guide,
   onClick,
 }: {
   id: string;
@@ -91,6 +93,8 @@ export function PagingRow({
   label: string;
   /** "View all": an arrow, not a chevron. */
   all: boolean;
+  /** The guide line: under a list of groups, not under session rows (they have none). */
+  guide: boolean;
   onClick: (event: MouseEvent) => void;
 }) {
   const Icon = all ? ArrowRight : ChevronDown;
@@ -99,6 +103,7 @@ export function PagingRow({
       id={id}
       level={level}
       cursor={cursor}
+      guide={guide}
       onClick={onClick}
       className="h-[26px] text-data font-medium text-muted-foreground hover:text-foreground"
     >
@@ -122,7 +127,7 @@ const TRIAGE_HINTS = new Set<EmptyKind>(["later", "done"]);
 
 /**
  * A centered empty state: text only, so no control sits inside the tree.
- * "New group" is a row of its own. A Later or Done key hint shows only to
+ * "New group" is in the My groups heading. A Later or Done key hint shows only to
  * someone who can triage. `note` replaces the hint (search). `phone` swaps
  * the key hints for touch words.
  */
@@ -157,7 +162,11 @@ export function EmptyRow({
   );
 }
 
-/** "New group" at the end of My groups: it opens the name field. */
+/**
+ * "New group": an icon at the right end of the My groups heading. It opens
+ * the name field. It is a tree item like the rows, so the keys reach it
+ * before the groups.
+ */
 export function AddGroupRow({
   id,
   cursor,
@@ -168,18 +177,21 @@ export function AddGroupRow({
   onClick: (event: MouseEvent) => void;
 }) {
   return (
-    <TreeRow
-      id={id}
-      level={0}
-      cursor={cursor}
-      onClick={onClick}
-      className="h-7 text-data font-medium text-muted-foreground hover:text-foreground"
-    >
-      <span className="grid size-4 shrink-0 place-items-center">
-        <FolderPlus aria-hidden className="size-3.5" />
-      </span>
-      New group
-    </TreeRow>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <TreeRow
+          id={id}
+          level={0}
+          cursor={cursor}
+          aria-label="New group"
+          onClick={onClick}
+          className="mx-0 size-6 shrink-0 justify-center p-0 text-muted-foreground hover:text-foreground"
+        >
+          <FolderPlus aria-hidden className="size-3.5" />
+        </TreeRow>
+      </TooltipTrigger>
+      <TooltipContent>New group</TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -44,11 +44,13 @@ export const KEY_RULES = {
     minLength: 100,
     hint: "Starts with sk-ant-oat01-",
   },
+  // Anthropic issues keys with other prefixes too (service-account keys, for
+  // example). The live check on save validates the key itself.
   anthropicKey: {
-    prefixes: ["sk-ant-api03-"],
+    prefixes: ["sk-ant-"],
     strict: true,
     minLength: 100,
-    hint: "Starts with sk-ant-api03-",
+    hint: "Starts with sk-ant-",
   },
   openRouter: {
     prefixes: ["sk-or-v1-"],

@@ -22,6 +22,7 @@ function serviceShape(service: Service) {
   return {
     defaultModel: service.defaultModel,
     allowedModels: service.allowedModels ? [...service.allowedModels] : undefined,
+    knownModels: service.knownModels ? [...service.knownModels] : undefined,
   };
 }
 

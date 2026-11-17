@@ -113,8 +113,13 @@ test("prompt attachment links open viewers and keep downloads separate", async (
   const scorecard = prompt.getByRole("link", {
     name: "Open HOL check-level scorecard in a new tab",
   });
-  // A plain click on an agent-fs file opens the in-page preview, not a tab.
+  // A plain click on an agent-fs file opens it as a tab in the split pane,
+  // next to the session, not in a browser tab.
   await scorecard.click();
+  const assetTab = page
+    .getByRole("tablist", { name: "Split pane tabs" })
+    .getByRole("tab", { name: "hol-scorecard.md" });
+  await expect(assetTab).toHaveAttribute("aria-selected", "true");
   const preview = page.getByTestId("link-preview-panel");
   await expect(preview.getByText("/reports/hol-scorecard.md", { exact: true })).toBeVisible();
   await expect(preview.getByText("Preview needs agent-fs")).toBeVisible();
@@ -123,8 +128,10 @@ test("prompt attachment links open viewers and keep downloads separate", async (
   const previewPopup = await previewPopupPromise;
   await expect(previewPopup.getByRole("heading", { name: "File viewer" })).toBeVisible();
   await previewPopup.close();
-  await preview.getByRole("button", { name: "Close preview" }).click();
+  // The tab closes the asset, and the split closes with its last tab.
+  await assetTab.getByRole("button", { name: "Close tab hol-scorecard.md" }).click();
   await expect(preview).toHaveCount(0);
+  await expect(page.getByRole("tablist", { name: "Split pane tabs" })).toHaveCount(0);
   // A modifier click keeps the browser's link behavior: the app leaves the
   // event alone and opens no preview. Headless Chromium opens no tab for it,
   // so a window listener (after React's root listener) records the event and

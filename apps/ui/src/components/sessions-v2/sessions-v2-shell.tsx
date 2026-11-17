@@ -1,33 +1,46 @@
 /**
- * Sessions v2 shell: a resizable sidebar frame next to the pane area, and the
- * status bar under both. It collapses the global nav to icons while it is
- * open, so the sidebar and the panes keep their width (UX review R9).
+ * Sessions v2 shell: a resizable sidebar frame next to the pane area. It
+ * collapses the global nav to icons while it is open, so the sidebar and the
+ * panes keep their width (UX review R9). The sidebar header holds the help
+ * button (the guide and the keys) and the switch to the legacy view.
  *
  * The sidebar holds the search and the session tree (Phases 4 and 5). The
- * pane area (Phase 8) holds the main pane with its tabs and one split pane.
- * A tab shows the New session composer (it keeps the `?seed=` and
- * `?prefill=` links working), the group tab (`?view=`), or a session: the
- * header (Phase 6) over the turn timeline (Phase 7). A use-case group (one
+ * pane area (Phase 8) holds the main pane and one split pane, each with its
+ * own tabs. A tab shows the New session composer (it keeps the `?seed=` and
+ * `?prefill=` links working), the group tab (`?view=`), an asset (a file, a
+ * page, or a task that a link opened), or a session: the header (Phase 6)
+ * over the turn timeline (Phase 7). A link in a pane opens its asset as a
+ * tab in the other pane, so both show side by side. A use-case group (one
  * with a schedule or files under its key) gets a pinned Overview tab first
  * (step-10), and `?tab=overview|list` picks its face. The first-run guide
  * and the "Open in split…" picker mount here too.
  */
 
-import { History } from "lucide-react";
+import { CircleHelp, LayoutList, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { useSession } from "@/api/hooks/use-sessions";
 import type { SessionListItem } from "@/api/types";
-import { LinkPreviewDock } from "@/components/link-preview/link-preview-dock";
+import { LinkPreviewOpener } from "@/components/link-preview/link-preview-state";
 import { ResizeHandle } from "@/components/shared/resize-handle";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useCollapseNavWhile } from "@/hooks/use-collapse-nav-while";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
+import { assetTabId, type LinkPreviewTarget } from "@/lib/link-preview";
 import { MAIN_BLEED } from "@/lib/main-gutter";
-import { detailGroupKey, GROUP_TAB, isSessionTab, NEW_SESSION_TAB } from "@/lib/sessions-v2";
+import {
+  detailGroupKey,
+  GROUP_TAB,
+  isAssetTab,
+  isSessionTab,
+  NEW_SESSION_TAB,
+  type PaneIndex,
+} from "@/lib/sessions-v2";
 import { cn } from "@/lib/utils";
 import { FirstRunGuide, GUIDE_KEYS_STEP, useFirstRunGuide } from "./first-run-guide";
 import { GroupTab } from "./group-tab";
@@ -37,8 +50,9 @@ import { OverviewTab } from "./overview/overview-tab";
 import { SessionPane } from "./pane/session-pane";
 import { usePaneKeys } from "./pane/use-pane-keys";
 import { SessionTree, type SessionTreeHandle } from "./sidebar/session-tree";
-import { StatusBar } from "./status-bar";
-import { type PaneIndex, SplitPanes } from "./tabs/split-panes";
+import { TipKey } from "./sidebar/tree-row";
+import { AssetTab } from "./tabs/asset-tab";
+import { SplitPanes } from "./tabs/split-panes";
 import { SplitPicker } from "./tabs/split-picker";
 import { useMyGroups } from "./use-my-groups";
 import { useSessionsUrlState } from "./use-sessions-url-state";
@@ -48,8 +62,6 @@ const WIDTH_MIN = 260;
 const WIDTH_MAX = 520;
 const WIDTH_STEP = 16;
 const WIDTH_STORAGE_KEY = "agent-swarm-sessions-v2-sidebar-width";
-/** The room the panes need next to a link preview. */
-const PANE_MIN_WIDTH = 400;
 
 function clampWidth(width: number): number {
   return Math.round(Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, width)));
@@ -88,35 +100,30 @@ export interface SessionsV2ShellProps {
 export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   useCollapseNavWhile(true);
   const url = useSessionsUrlState();
-  const { focused, tabs, split, view, q, setQuery, focusTab } = url;
+  const { focused, tabs, split, splitFocused, view, q, setQuery } = url;
   // A use case is one tab: its Overview and its session list are two faces
   // of that tab, switched inside it (`?tab=`), never two strip tabs.
   const groupPane = useGroupPane(view, url.groupPane);
-  const focusStripTab = (tab: string) => {
-    setActivePane(0);
-    focusTab(tab);
-  };
   const [width, setWidth] = useSidebarWidth();
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalToggle(
+    "sessions:sidebar-collapsed",
+    false,
+  );
   const sidebarId = useId();
   // The pane that holds the pane keys, Cmd+K's session, and sidebar clicks.
   const [paneState, setActivePane] = useState<PaneIndex>(0);
-  const activePane: PaneIndex = split ? paneState : 0;
-  const current = activePane === 1 && split ? split : focused;
+  const activePane: PaneIndex = splitFocused ? paneState : 0;
+  const current = activePane === 1 && splitFocused ? splitFocused : focused;
+  // A click on a tab: the tab takes the focus in its pane, and the pane the keys.
+  const focusStripTab = (tab: string) => setActivePane(url.focusTab(tab));
   // The group the New session tab starts in: the one it was opened from.
   const [startIn, setStartIn] = useState<string | null>(null);
-  // One New session draft: while the split holds it, "+" and `c` focus it there.
-  const newSession = useCallback(
-    (group: string | null = null) => {
-      setStartIn(group);
-      if (split === NEW_SESSION_TAB) {
-        setActivePane(1);
-        return;
-      }
-      setActivePane(0);
-      focusTab(NEW_SESSION_TAB);
-    },
-    [focusTab, split],
-  );
+  // One New session draft: "+" and `c` focus it in the pane that holds it,
+  // else open it in `pane` (the active pane by default).
+  const newSession = (group: string | null = null, pane: PaneIndex = activePane) => {
+    setStartIn(group);
+    setActivePane(url.openSession(NEW_SESSION_TAB, { pane }));
+  };
   // The session whose header title is its rename field (Cmd+K "Rename
   // session", the pencil), in one pane. A switch to another session ends it.
   const [renaming, setRenaming] = useState<{ id: string; pane: PaneIndex } | null>(null);
@@ -132,48 +139,57 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   const { openView } = url;
   const revealGroup = useCallback(
     (groupKey: string | null) => {
+      setSidebarCollapsed(false);
       treeRef.current?.revealGroup(groupKey);
       openView(groupKey ?? "nogroup");
     },
-    [openView],
+    [openView, setSidebarCollapsed],
   );
 
   /**
    * Every open goes through here, so one session never mounts in two panes
-   * (two panes would poll it twice). The split session gets the focus in its
-   * pane. A plain open goes to the active pane, in its current tab (SPEC R2):
-   * in the split pane, a session that has a main tab gets the focus there.
-   * A new tab opens in the main pane, and so does any open while the split
-   * holds the New session tab (its draft stays). A background tab (a middle-click)
-   * keeps the focus and does not mark the session read (mockup
-   * `index.html:4802-4807`). `pane` names the pane for an open from inside
-   * it (the group tab).
+   * (two panes would poll it twice). An open session takes the focus in the
+   * pane that holds it. Any other opens as a new tab after the focused tab
+   * of the active pane: an open never replaces a tab. A new tab (`t`) opens
+   * in the main pane. A background tab (a middle-click) keeps the focus and
+   * does not mark the session read (mockup `index.html:4802-4807`). `pane`
+   * names the pane for an open from inside it (the group tab).
    */
   const openSession = (
     id: string,
     options: { newTab?: boolean; background?: boolean; pane?: PaneIndex } = {},
   ) => {
     if (options.background) {
-      const open = id === split || tabs.includes(id);
+      const open = tabs.includes(id) || split.includes(id);
       if (!open) url.openSession(id, { background: true });
       toast(open ? "Already open in a tab." : "Opened in a new tab.");
-    } else if (id === split) setActivePane(1);
-    else if (options.newTab || (options.pane ?? activePane) === 0 || split === NEW_SESSION_TAB) {
-      setActivePane(0);
-      url.openSession(id, { newTab: options.newTab });
-    } else if (tabs.includes(id)) {
-      setActivePane(0);
-      focusTab(id);
-    } else url.replaceSplit(id);
+      return;
+    }
+    setActivePane(url.openSession(id, { pane: options.newTab ? 0 : (options.pane ?? activePane) }));
   };
-  const openInSplit = (id: string) => {
-    const message = url.openInSplit(id);
-    if (message) toast(message);
-    else setActivePane(1);
+  /** Move a tab to a pane (or to a new place in it). A toast says why it cannot. */
+  const moveTab = (tab: string, to: PaneIndex, before?: string | null): boolean => {
+    const message = url.moveTab(tab, to, before);
+    if (message) {
+      toast(message);
+      return false;
+    }
+    // The main pane's only tab joins the split: one pane stays, the main one.
+    setActivePane(to === 1 && tabs.length === 1 && tabs[0] === tab ? 0 : to);
+    return true;
   };
+  const openInSplit = (id: string) => void moveTab(id, 1);
   const closeSplit = (keep: boolean) => {
     setActivePane(0);
     url.closeSplit(keep);
+  };
+  /**
+   * A link in a pane opens its file, page, or task as a tab in the other
+   * pane (the split starts if there is none), so the session stays in view
+   * next to it. The keys stay with the pane the link is in.
+   */
+  const openAsset = (target: LinkPreviewTarget, from: PaneIndex) => {
+    url.openSession(assetTabId(target), { pane: from === 0 ? 1 : 0 });
   };
   const [pickingSplit, setPickingSplit] = useState(false);
   const guide = useFirstRunGuide();
@@ -194,15 +210,9 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   // A new New session tab in the split starts in the group of the pane's
   // session, as `c` does. A moved one keeps its group.
   const pickSplit = (id: string) => {
-    const fresh = id === NEW_SESSION_TAB && split !== id && !tabs.includes(id);
+    const fresh = id === NEW_SESSION_TAB && !split.includes(id) && !tabs.includes(id);
     const group = startGroupOfPane();
-    const message = url.openInSplit(id);
-    if (message) {
-      toast(message);
-      return;
-    }
-    setActivePane(1);
-    if (fresh) setStartIn(group);
+    if (moveTab(id, 1) && fresh) setStartIn(group);
   };
   usePaneKeys({
     split: () => setPickingSplit(true),
@@ -210,22 +220,18 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   });
 
   const renderPane = (tab: string, pane: PaneIndex) => {
-    if (pane === 1) {
-      return tab === NEW_SESSION_TAB ? (
-        <NewSessionTab startIn={startIn} onStarted={url.replaceSplit} />
-      ) : (
-        renderSession(tab, 1)
-      );
-    }
-    // The New session tab stays mounted while it is open, so a click on a
-    // sidebar row or another tab never loses its draft.
-    const draft = tabs.includes(NEW_SESSION_TAB) ? (
+    // The New session tab stays mounted while it is open in the pane, so a
+    // click on a sidebar row or another tab never loses its draft.
+    const draft = (pane === 0 ? tabs : split).includes(NEW_SESSION_TAB) ? (
       <div className={tab === NEW_SESSION_TAB ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
         <NewSessionTab startIn={startIn} onStarted={url.replaceNewTab} />
       </div>
     ) : null;
     const body =
-      tab === NEW_SESSION_TAB ? null : tab === GROUP_TAB && view ? (
+      tab === NEW_SESSION_TAB ? null : isAssetTab(tab) ? (
+        // A new key per asset: the viewer's scroll and state never carry over.
+        <AssetTab key={tab} tab={tab} />
+      ) : tab === GROUP_TAB && view ? (
         groupPane.pane === "pending" ? (
           // A link with no `?tab=` waits for the group's schedules and files.
           <GroupPanePending />
@@ -250,13 +256,13 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
           </div>
         )
       ) : (
-        renderSession(tab, 0)
+        renderSession(tab, pane)
       );
     return (
-      <>
+      <LinkPreviewOpener open={(target) => openAsset(target, pane)}>
         {draft}
         {body}
-      </>
+      </LinkPreviewOpener>
     );
   };
   const renderSession = (tab: string, pane: PaneIndex) => (
@@ -274,7 +280,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
   );
 
   return (
-    // The tab, pane, and status bar tooltips open after 300 ms, as in the sidebar and the header.
+    // The tab and pane tooltips open after 300 ms, as in the sidebar and the header.
     <TooltipProvider delayDuration={300} skipDelayDuration={300}>
       <div className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", MAIN_BLEED)}>
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -283,25 +289,87 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
             aria-label="Sessions"
             style={{ "--sessions-sidebar-w": `${width}px` } as CSSProperties}
             data-sessions-sidebar=""
-            className="group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:w-(--sessions-sidebar-w) md:border-r md:border-b-0"
+            className={cn(
+              "group/nav relative flex shrink-0 flex-col border-b border-border bg-surface md:border-r md:border-b-0",
+              sidebarCollapsed ? "md:w-10" : "md:w-(--sessions-sidebar-w)",
+            )}
           >
             {/* The bulk bar covers this header while sessions are selected: hide
               it from the pointer, the keys, and screen readers then. */}
-            <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-subtle pr-2 pl-4 group-has-[[data-bulk-bar]]/nav:invisible max-md:border-b-0">
-              <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Sessions</h2>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => onViewChange("legacy")}
-                className="text-muted-foreground hover:text-foreground"
+            <div
+              className={cn(
+                "flex h-9 shrink-0 items-center gap-1 border-b border-border-subtle group-has-[[data-bulk-bar]]/nav:invisible max-md:border-b-0",
+                sidebarCollapsed ? "justify-center px-1" : "pr-2 pl-4",
+              )}
+            >
+              <h2
+                className={
+                  sidebarCollapsed ? "sr-only" : "min-w-0 flex-1 truncate text-sm font-semibold"
+                }
               >
-                <History />
-                Legacy sessions
-              </Button>
+                Sessions
+              </h2>
+              {!sidebarCollapsed && (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Guide and keys"
+                        aria-haspopup="dialog"
+                        aria-keyshortcuts="Shift+?"
+                        onClick={() => guide.open(GUIDE_KEYS_STEP)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <CircleHelp />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="flex items-center gap-1.5">
+                      Guide and keys
+                      <TipKey>?</TipKey>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Legacy sessions"
+                        onClick={() => onViewChange("legacy")}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <LayoutList />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Switch to the legacy sessions view</TooltipContent>
+                  </Tooltip>
+                </>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={
+                      sidebarCollapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"
+                    }
+                    aria-expanded={!sidebarCollapsed}
+                    aria-controls={sidebarId}
+                    onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  >
+                    {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {sidebarCollapsed ? "Expand sessions sidebar" : "Collapse sessions sidebar"}
+                </TooltipContent>
+              </Tooltip>
             </div>
             {/* Phones render `MobileSessions` instead (pages/sessions/page.tsx). */}
-            <div className="hidden min-h-0 flex-1 flex-col md:flex">
+            <div className={cn("hidden min-h-0 flex-1 flex-col", !sidebarCollapsed && "md:flex")}>
               <SessionTree
+                onReveal={() => flushSync(() => setSidebarCollapsed(false))}
                 focused={current}
                 openSession={openSession}
                 newSession={newSession}
@@ -313,58 +381,48 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
                 paneCommands={{
                   openInSplit,
                   pickSplit: () => setPickingSplit(true),
-                  closeSplit: split ? () => closeSplit(true) : undefined,
+                  closeSplit: split.length > 0 ? () => closeSplit(true) : undefined,
                   showGuide: () => guide.open(0),
                 }}
                 ref={treeRef}
               />
             </div>
-            <ResizeHandle
-              edge="right"
-              width={width}
-              min={WIDTH_MIN}
-              max={WIDTH_MAX}
-              defaultWidth={WIDTH_DEFAULT}
-              step={WIDTH_STEP}
-              onResize={setWidth}
-              label="Resize the sidebar"
-              controls={sidebarId}
-              className="hidden md:block"
-            />
+            {!sidebarCollapsed && (
+              <ResizeHandle
+                edge="right"
+                width={width}
+                min={WIDTH_MIN}
+                max={WIDTH_MAX}
+                defaultWidth={WIDTH_DEFAULT}
+                step={WIDTH_STEP}
+                onResize={setWidth}
+                label="Resize the sidebar"
+                controls={sidebarId}
+                className="hidden md:block"
+              />
+            )}
           </nav>
 
           <SplitPanes
             tabs={tabs}
             focused={focused}
             split={split}
+            splitFocused={splitFocused}
             view={view}
             activePane={activePane}
             onActivatePane={setActivePane}
             onFocusTab={focusStripTab}
             onCloseTab={url.closeTab}
-            onNewSession={() => newSession(null)}
+            onNewSession={(pane) => newSession(null, pane)}
             onPickSplit={() => setPickingSplit(true)}
             onCloseSplit={closeSplit}
-            onDropToSplit={openInSplit}
+            onMoveTab={moveTab}
             renderPane={renderPane}
           />
-          {/* A link preview opens here, next to the panes (T3 Code's preview panel). */}
-          <LinkPreviewDock
-            storageKey="agent-swarm-sessions-link-preview-width"
-            siblingMinWidth={width + PANE_MIN_WIDTH}
-            className="max-md:hidden"
-          />
         </div>
-        <StatusBar
-          query={q}
-          onQueryChange={setQuery}
-          tabCount={tabs.length + (split ? 1 : 0)}
-          paneCount={split ? 2 : 1}
-          onKeys={() => guide.open(GUIDE_KEYS_STEP)}
-        />
         <SplitPicker
           open={pickingSplit}
-          tabs={tabs.filter((tab) => isSessionTab(tab) && tab !== split)}
+          tabs={tabs.filter(isSessionTab)}
           onOpenChange={setPickingSplit}
           onPick={pickSplit}
         />

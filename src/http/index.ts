@@ -94,6 +94,7 @@ import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { getDeploymentEnvValue, handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
+import { handleDesignSystem } from "./design-system";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
@@ -434,6 +435,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePagesPublic(req, res, pathSegments, queryParams),
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),
+        () => handleDesignSystem(req, res, pathSegments, queryParams, myAgentId),
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),

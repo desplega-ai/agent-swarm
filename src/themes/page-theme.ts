@@ -1,13 +1,17 @@
 /**
  * Theme resolution and CSS for HTML pages (design version 2).
  *
- * Resolution picks one preset, then applies the page's own overrides:
- * - Preset: the page `theme` when it names a known preset, else the viewer
- *   theme (the dashboard's `__swarm-theme` param) when it names a known
- *   preset, else `hive`. Direct links pass no viewer theme, so they get Hive.
- * - Tokens: the Hive values, then the preset's contract keys, then the page
- *   `themeTokens` overrides. A shared token (font, radius) that the overrides
- *   set only in `light` applies to dark too.
+ * Resolution picks one preset, then applies the token layers on top:
+ * - Preset: the page `theme` when it names a known preset, else the org
+ *   design system's `basePreset`, else the viewer theme (the dashboard's
+ *   `__swarm-theme` param) when it names a known preset, else `hive`. Direct
+ *   links pass no viewer theme, so they get Hive. Once an org has a brand,
+ *   the viewer preset no longer repaints it.
+ * - Tokens: the Hive values, then the preset's contract keys, then the org
+ *   design system tokens, then the page `themeTokens` overrides. A shared
+ *   token (font, radius) that a layer sets only in `light` applies to dark too.
+ * - The caller passes `designSystem` only for a page without its own `theme`
+ *   (`pageHead` in src/http/pages-public.ts), so a page `theme` ignores it.
  *
  * The CSS carries both modes. `.dark` on `<html>` picks dark, and print is
  * always light.
@@ -60,24 +64,29 @@ export function resolvePageTheme({
   pageTheme,
   viewerTheme,
   overrides,
+  designSystem,
 }: {
   pageTheme?: string | null;
   viewerTheme?: string | null;
   overrides?: PageThemeTokens | null;
+  designSystem?: { basePreset: string; tokens: PageThemeTokens } | null;
 }): ResolvedPageTheme {
   const preset =
-    getThemePreset(pageTheme) ?? getThemePreset(viewerTheme) ?? getThemePreset(DEFAULT_THEME_ID);
-  const lightOverrides = contractValues(overrides?.light);
-  const darkOverrides = contractValues(overrides?.dark);
-  const light = {
-    ...HIVE_PAGE_TOKENS.light,
-    ...contractValues(preset?.vars.light),
-    ...lightOverrides,
-  };
-  const dark = { ...HIVE_PAGE_TOKENS.dark, ...contractValues(preset?.vars.dark), ...darkOverrides };
-  for (const token of PAGE_THEME_SHARED_TOKENS) {
-    const value = lightOverrides[token];
-    if (value !== undefined && darkOverrides[token] === undefined) dark[token] = value;
+    getThemePreset(pageTheme) ??
+    getThemePreset(designSystem?.basePreset) ??
+    getThemePreset(viewerTheme) ??
+    getThemePreset(DEFAULT_THEME_ID);
+  const light = { ...HIVE_PAGE_TOKENS.light, ...contractValues(preset?.vars.light) };
+  const dark = { ...HIVE_PAGE_TOKENS.dark, ...contractValues(preset?.vars.dark) };
+  for (const layer of [designSystem?.tokens, overrides]) {
+    const lightValues = contractValues(layer?.light);
+    const darkValues = contractValues(layer?.dark);
+    Object.assign(light, lightValues);
+    Object.assign(dark, darkValues);
+    for (const token of PAGE_THEME_SHARED_TOKENS) {
+      const value = lightValues[token];
+      if (value !== undefined && darkValues[token] === undefined) dark[token] = value;
+    }
   }
   return { presetId: preset?.id ?? DEFAULT_THEME_ID, light, dark };
 }

@@ -15,6 +15,7 @@ import {
 import { approvalCancellationNotificationKey } from "../be/db/approvals";
 import { resolveTemplate } from "../prompts/resolver";
 import { getSlackApp } from "../slack/app";
+import { buildApprovalAnswerButtons } from "../slack/approval-buttons";
 import { isSlackUserId, resolveSlackConversationId } from "../slack/dm";
 import {
   externalChannelToolError,
@@ -24,6 +25,7 @@ import {
 import { TERMINAL_TASK_STATUSES } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import type { ApprovalQuestionLike } from "./approval-inline";
 
 /** Slack Block Kit caps a section block's text at 3000 characters. */
 const SLACK_SECTION_TEXT_LIMIT = 3000;
@@ -80,7 +82,7 @@ export interface ApprovalNotificationChannel {
 export interface ApprovalNotificationsInput {
   requestId: string;
   title: string;
-  questions: ReadonlyArray<{ label?: string; type?: string }>;
+  questions: ReadonlyArray<ApprovalQuestionLike>;
   timeoutSeconds?: number;
   notifications: ReadonlyArray<ApprovalNotificationChannel>;
 }
@@ -142,6 +144,7 @@ export async function dispatchApprovalNotifications(
         }
 
         const questionsText = buildSlackQuestionsSummary(questions);
+        const answerButtons = buildApprovalAnswerButtons(requestId, questions);
 
         // The deadline is a caption under the button, not part of the ask.
         const timeoutCaption =
@@ -177,11 +180,13 @@ export async function dispatchApprovalNotifications(
           {
             type: "actions",
             elements: [
+              ...answerButtons,
               {
                 type: "button",
                 text: { type: "plain_text", text: "Review & Respond" },
                 url: approvalUrl,
-                style: "primary",
+                // With inline buttons, Approve is the primary action.
+                ...(answerButtons.length === 0 ? { style: "primary" } : {}),
               },
             ],
           },

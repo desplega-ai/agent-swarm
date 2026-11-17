@@ -24,6 +24,7 @@ import "./pool-keys";
 import "./context";
 import "./core";
 import "./db-query";
+import "./design-system";
 
 import "./api-keys";
 import "./events";

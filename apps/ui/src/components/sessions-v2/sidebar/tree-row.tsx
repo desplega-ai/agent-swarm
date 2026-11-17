@@ -8,17 +8,20 @@ import { cn } from "@/lib/utils";
  * level) with its guide line under the parent's icon, the pointer hover
  * (with the linger), and the keyboard cursor. The tree (`group/tree`) sets
  * `data-kb` while keys drive it: then the cursor row shows a ring and no row
- * fades, so `j`/`k` leave no trail (UX review R9).
+ * fades, so `j`/`k` leave no trail (UX review R9). `guide={false}`: no guide
+ * line (session rows put their marker where it would run).
  */
 export function TreeRow({
   level,
   cursor,
+  guide = true,
   className,
   style,
   ...props
 }: HTMLAttributes<HTMLDivElement> & {
   level: number;
   cursor: boolean;
+  guide?: boolean;
   ref?: Ref<HTMLDivElement>;
 }) {
   return (
@@ -35,6 +38,7 @@ export function TreeRow({
         "transition-colors hover-linger hover:bg-accent group-data-[kb=true]/tree:transition-none",
         "group-data-[kb=true]/tree:data-[cursor=true]:bg-accent group-data-[kb=true]/tree:data-[cursor=true]:ring-2 group-data-[kb=true]/tree:data-[cursor=true]:ring-ring/60 group-data-[kb=true]/tree:data-[cursor=true]:ring-inset",
         level > 0 &&
+          guide &&
           "before:pointer-events-none before:absolute before:inset-y-0 before:left-[calc(var(--lv)*14px)] before:border-l before:border-border-subtle",
         className,
       )}
@@ -78,11 +82,20 @@ export function ReadMark({ unread, className }: { unread: boolean; className?: s
 /** The title of an unread session: bold, in the full foreground color (SPEC R4). */
 export const UNREAD_TITLE = "font-semibold text-foreground";
 
-export function NeedsYouBadge({ children }: { children: ReactNode }) {
+export function NeedsYouBadge({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <Badge
       variant="outline"
-      className="h-[18px] rounded-sm border-status-active/50 bg-status-active/15 px-1.5 text-meta font-semibold tabular-nums text-status-active-strong"
+      className={cn(
+        "h-[18px] rounded-sm border-status-active/50 bg-status-active/15 px-1.5 text-meta font-semibold tabular-nums text-status-active-strong",
+        className,
+      )}
     >
       {children}
     </Badge>

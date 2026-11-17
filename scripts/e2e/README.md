@@ -164,7 +164,7 @@ on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. Two rules follow:
 | `ctx.startAgent({ name, role, onTask, onTrigger, progress })` | A simulated agent polling `/api/poll`. Default completes each task with `done <taskId>`. `waitForTask(id)`, `waitForTasks(n)`, `handled`, `stop()`. Stopped automatically at scenario end. |
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
-| `ctx.restartSut()` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. |
+| `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |

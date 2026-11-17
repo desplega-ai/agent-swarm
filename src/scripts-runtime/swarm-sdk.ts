@@ -79,8 +79,13 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "memory_search":
       return { method: "POST", path: "/api/memory/search", body };
     case "memory_get": {
-      const memoryId = typeof body.memoryId === "string" ? body.memoryId : undefined;
-      if (!memoryId) throw new Error("memory_get requires string `memoryId`");
+      if (body.memoryId && body.id && body.memoryId !== body.id) {
+        throw new Error("memoryId and id must identify the same memory; supply only one.");
+      }
+      const memoryId = body.memoryId ?? body.id;
+      if (typeof memoryId !== "string" || !memoryId) {
+        throw new Error("Supply memoryId (or its alias id) from memory-search.");
+      }
       const getIntent = typeof body.intent === "string" ? body.intent : "script-sdk";
       return {
         method: "GET",
@@ -108,33 +113,17 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     }
 
     // ── tasks ──
+    // task_storeProgress deliberately has no REST shortcut: the store-progress
+    // MCP tool owns every completion field (attachments, citations, uiSpec,
+    // learning, persistMemory, chainedTaskId), and rebuilding its body by hand
+    // silently dropped the fields this switch forgot. Falls through to the
+    // generic MCP bridge below, like task_defer and the other lifecycle tools.
     case "task_list":
       return { method: "GET", path: appendQuery("/api/tasks", body) };
     case "task_get": {
       const taskId = typeof body.taskId === "string" ? body.taskId : undefined;
       if (!taskId) throw new Error("task_get requires string `taskId`");
       return { method: "GET", path: `/api/tasks/${encodeURIComponent(taskId)}` };
-    }
-    case "task_storeProgress": {
-      const taskId = typeof body.taskId === "string" ? body.taskId : undefined;
-      if (!taskId) throw new Error("task_storeProgress requires string `taskId`");
-      if (body.status === "completed" || body.status === "failed" || body.status === "skipped") {
-        return {
-          method: "POST",
-          path: `/api/tasks/${encodeURIComponent(taskId)}/finish`,
-          body: {
-            status: body.status,
-            output: body.output,
-            failureReason: body.failureReason,
-            force: body.force,
-          },
-        };
-      }
-      return {
-        method: "POST",
-        path: `/api/tasks/${encodeURIComponent(taskId)}/progress`,
-        body: { progress: body.progress ?? "" },
-      };
     }
     case "task_cancel": {
       const taskId = typeof body.taskId === "string" ? body.taskId : undefined;
