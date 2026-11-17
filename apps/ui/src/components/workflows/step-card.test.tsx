@@ -37,6 +37,7 @@ const {
   SubWorkflowOutput,
   SystemOneExtractionOutput,
   SystemOneOutput,
+  jsonByteSize,
 } = await import("./step-card");
 
 function step(status: string): WorkflowRunStep {
@@ -349,5 +350,13 @@ describe("foreach attempt history", () => {
     expect(html).toContain("sub-workflow · #1");
     expect(html).not.toContain("foreach #1");
     expect(html).toContain("attempt 2");
+  });
+});
+
+
+describe("jsonByteSize", () => {
+  test("counts UTF-8 bytes, not UTF-16 code units, for non-ASCII output", () => {
+    expect(jsonByteSize("😀")).toBe(4);
+    expect(jsonByteSize("hello")).toBe(5);
   });
 });
