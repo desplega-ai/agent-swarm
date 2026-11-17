@@ -146,7 +146,6 @@ import {
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   type UserAvatar,
-  UserAvatarSchema,
 } from "../types";
 import {
   CODEX_AUTH_FAILURE_BENCH_MS,
@@ -268,6 +267,7 @@ import {
   WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
   WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
 } from "./db/user-references";
+import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
@@ -12591,17 +12591,6 @@ type UserRow = {
   createdAt: string;
   lastUpdatedAt: string;
 };
-
-/** Malformed avatar JSON reads as "no avatar", like `parseAgentAvatar`. */
-function parseUserAvatar(raw: string | null): UserAvatar | null {
-  if (!raw) return null;
-  try {
-    const parsed = UserAvatarSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
 
 function rowToUser(row: UserRow): User {
   return {
