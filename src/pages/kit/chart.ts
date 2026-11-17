@@ -256,6 +256,7 @@ export function renderChart(
   ctx: ChartContext,
 ): string {
   const { title, chart, note } = props;
+  // shortcut: one fixed viewBox per layout, so labels shrink on a phone; upgrade to a client-measured width when mobile readers complain.
   const width = Math.max(
     240,
     Math.round((ctx.panel ? ctx.width - 42 : ctx.width) / (ctx.deck ? 1.45 : 1)),
