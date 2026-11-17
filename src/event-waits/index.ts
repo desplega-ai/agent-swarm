@@ -16,7 +16,9 @@ export function getExternalEventAdapter(source: string): ExternalEventAdapter | 
  * trusts the event (no `confirm`), or drive confirm reads with server credentials.
  */
 export function isReservedProviderEvent(name: string): boolean {
-  return EXTERNAL_EVENT_ADAPTERS.some((adapter) => name.startsWith(adapter.busPrefix));
+  return EXTERNAL_EVENT_ADAPTERS.some((adapter) =>
+    adapter.busPrefixes.some((prefix) => name.startsWith(prefix)),
+  );
 }
 
 /** Every shared event name some adapter serves, deduplicated. */
@@ -26,4 +28,4 @@ export const EXTERNAL_EVENT_NAMES: [string, ...string[]] = [
 
 /** Tool-description line listing the served events; the docs generator reads it as a literal, so keep it in step with the list above. */
 export const EXTERNAL_EVENTS_DOC =
-  'vcs.pr.merged with source "github" and match {repo (owner/name), number}';
+  'vcs.pr.merged or vcs.pr.checks_done (every required check of the base branch ruleset finished on the PR head, any conclusion) with source "github" and match {repo (owner/name), number}';
