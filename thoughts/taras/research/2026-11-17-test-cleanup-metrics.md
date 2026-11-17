@@ -22,8 +22,8 @@ The net reduction decreased by 22 lines when C22 landed. Its justified accountin
 
 ## Forecast, not an acceptance target
 
-The reconciled inventory has 1616 current test files. Of these, 195 received at least partial audit work and 1421 remain pending.
-Three files appeared on main after the initial inventory. Two have recorded audits, and object-viewer.test.tsx remains pending.
+The reconciled inventory has 1616 current test files. Of these, 197 received at least partial audit work (12.2%) and 1419 remain pending.
+Three files appeared on main after the initial inventory. All three have recorded audits. The object viewer received a static audit, and the existing eval timestamp suite received runtime verification.
 Three deleted rows remain as historical records.
 The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
 This extrapolation is weak. The inspected files are not a random sample, and partial audits are not completed cleanup.
@@ -124,6 +124,16 @@ The earlier adjacent runs passed 72 cases before the target-only case was restor
 
 The superseded C28 preview pair retained 901 covered locations out of 2839 across 36 production files.
 That unpublished alternative contributes no merged lines or cases. The external repair #3312 superseded it.
+
+## Pending changes at the checkpoint on main da88ba4a02
+
+| Change | Added / deleted test lines | Cases before / after in the affected suites | Paired production coverage |
+| --- | ---: | ---: | --- |
+| Eval timestamp fixture, #3320 | +47 / -32 | 4 / 4 | All 27 loaded production records match. Generated shell code is outside LCOV. |
+| Duplicate Codex cases, #3321 | +0 / -13 | 85 / 83 | 10,408 of 33,347 locations on both sides across 183 files. No lost locations. |
+| Scheduling filters, local candidate | +29 / -8 | 36 / 36 | 24,656 of 115,253 locations on both sides across 783 files. No lost locations. |
+
+These changes and scheduling PR #3318 await landing. The 31-PR deletion total excludes all four.
 
 ## CI timing reference
 
