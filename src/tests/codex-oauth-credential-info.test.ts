@@ -187,10 +187,11 @@ describe("resolveCodexOAuthCredentialInfo — issue #1102 bug 1", () => {
 
 describe("resolveCodexOAuthCredentialInfo — sparse slot availability (#1555 B1)", () => {
   it.each([
-    { slots: [1, 2], limited: [1], expected: 2, available: 1 },
-    { slots: [0, 2], limited: [2], expected: 0, available: 1 },
-    { slots: [0, 1, 2], limited: [0, 2], expected: 1, available: 1 },
-    { slots: [1, 2], limited: [], expected: undefined, available: 2 },
+    { slots: [1, 2], limited: [1], expected: [2, 2], available: 1 },
+    { slots: [0, 2], limited: [2], expected: [0, 0], available: 1 },
+    { slots: [0, 1, 2], limited: [0, 2], expected: [1, 1], available: 1 },
+    { slots: [1, 2], limited: [], expected: [1, 2], available: 2 },
+    { slots: [0, 1, 2], limited: [0, 1, 2], expected: [0, 2], available: 0 },
   ])("honors real slot ids for $slots with $limited rate-limited", async ({
     slots,
     limited,
@@ -198,18 +199,22 @@ describe("resolveCodexOAuthCredentialInfo — sparse slot availability (#1555 B1
     available,
   }) => {
     const requests: URL[] = [];
+    const credentials = (slot: number) => ({
+      access: `header.${btoa(
+        JSON.stringify({ "https://api.openai.com/auth": { chatgpt_user_id: `user-slot${slot}` } }),
+      )}.signature`,
+      refresh: `example-refresh-pool-${slot}`,
+      expires: Date.now() + 3_600_000,
+      accountId: `acc-pool-${slot}`,
+    });
+    const authFile = Bun.file(join(tmpHome, ".codex", "auth.json"));
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = new URL(input instanceof Request ? input.url : input);
       if (url.pathname === "/api/config/resolved") {
         return Response.json({
           configs: slots.map((slot) => ({
             key: `codex_oauth_${slot}`,
-            value: JSON.stringify({
-              access: "example-access-pool",
-              refresh: "example-refresh-pool",
-              expires: Date.now() + 3_600_000,
-              accountId: "acc-pool",
-            }),
+            value: JSON.stringify(credentials(slot)),
           })),
         });
       }
@@ -229,16 +234,28 @@ describe("resolveCodexOAuthCredentialInfo — sparse slot availability (#1555 B1
     const random = spyOn(Math, "random");
     const log = spyOn(console, "log").mockImplementation(() => {});
     try {
-      for (const value of [0, 0.999]) {
+      for (const [draw, value] of [0, 0.999].entries()) {
         random.mockReturnValue(value);
-        const info = await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY, {
-          poolOnly: true,
-        });
+        const info = await resolveCodexOAuthCredentialInfo(MOCK_API_URL, MOCK_API_KEY);
+        const slot = expected[draw]!;
+        const creds = credentials(slot);
         expect(info?.isPoolBacked).toBe(true);
-        expect(info?.selection.total).toBe(slots.length);
-        expect(slots).toContain(info!.selection.index);
-        expect(limited).not.toContain(info!.selection.index);
-        if (expected !== undefined) expect(info?.selection.index).toBe(expected);
+        expect(info?.selection).toMatchObject({
+          index: slot,
+          total: slots.length,
+          selected: creds.accountId,
+          keyType: "CODEX_OAUTH",
+          keySuffix: `slot${slot}-${slot}`,
+        });
+        expect(await authFile.json()).toMatchObject({
+          auth_mode: "chatgpt",
+          tokens: {
+            access_token: creds.access,
+            refresh_token: "",
+            account_id: creds.accountId,
+          },
+        });
+        await authFile.delete();
       }
       expect(requests).toHaveLength(2);
       for (const url of requests) {
