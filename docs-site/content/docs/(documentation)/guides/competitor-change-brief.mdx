@@ -21,7 +21,7 @@ Agent Swarm fits a different shape: several people need the same view, and a wro
 
 This is an illustrative design: not a built-in competitor feature, not a monitoring integration, not a measured deployment and not a customer result. Collection, prior-version storage and the comparison logic are custom work your team writes and tests. The pieces it assembles are documented; the arrangement is yours.
 
-<Mermaid title="Illustrative competitor change brief: the team names sources and a cadence, configured collection records URL and date per item as JSON, a reviewer step compares this run with the stored prior version, an agent drafts the brief, and a human gate decides what reaches sales material." chart={`flowchart LR
+<Mermaid title="Illustrative competitor change brief: the team names sources and a cadence, configured collection records URL and date per item as JSON, a reviewer step compares this run with the stored prior version, an agent drafts the brief, and a human gate decides what reaches sales material." chart={`flowchart TB
   A["Sources and cadence<br/>named by the team"] --> B["Configured collection<br/>URL + observation<br/>date per item (JSON)"]
   B --> C["Reviewer step<br/>compares with stored<br/>prior version"]
   C --> D["Agent drafts the<br/>source-linked brief"]
