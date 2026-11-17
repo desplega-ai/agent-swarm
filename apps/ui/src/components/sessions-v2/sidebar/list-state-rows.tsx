@@ -27,8 +27,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { GroupNameField } from "./group-node";
-import { TreeRow } from "./tree-row";
+import { SESSION_ROW_INDENT, TreeRow } from "./tree-row";
 import type { EmptyKind } from "./tree-rows";
 
 const EMPTY: Record<EmptyKind, { icon: LucideIcon; title: string; hint?: ReactNode }> = {
@@ -105,7 +106,11 @@ export function PagingRow({
       cursor={cursor}
       guide={guide}
       onClick={onClick}
-      className="h-[26px] text-data font-medium text-muted-foreground hover:text-foreground"
+      className={cn(
+        "h-[26px] text-data font-medium text-muted-foreground hover:text-foreground",
+        // Under session rows, the words start under the session titles.
+        !guide && level > 0 && SESSION_ROW_INDENT,
+      )}
     >
       <span aria-hidden className="size-4 shrink-0" />
       {label}

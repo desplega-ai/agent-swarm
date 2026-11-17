@@ -36,6 +36,7 @@ import {
   NeedsYouBadge,
   ReadMark,
   rowPropsEqual,
+  SESSION_ROW_INDENT,
   TipKey,
   TreeRow,
   UNREAD_TITLE,
@@ -321,7 +322,7 @@ function SessionRowView({
             // The read mark and the checkbox sit in the parent row's icon
             // column, one level out, and the title starts right after them,
             // under the parent's label.
-            level > 0 && "pl-[calc(var(--lv)*14px-8px)]",
+            level > 0 && SESSION_ROW_INDENT,
             "data-[open=true]:bg-accent data-[open=true]:[--avatar-ring:var(--color-accent)]",
             // The open session's marker sits inside the row (UX review R9).
             "data-[open=true]:after:absolute data-[open=true]:after:inset-y-1.5 data-[open=true]:after:left-0 data-[open=true]:after:w-0.5 data-[open=true]:after:rounded-full data-[open=true]:after:bg-primary",
