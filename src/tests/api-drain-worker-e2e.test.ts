@@ -229,8 +229,6 @@ describe("API drain with a real worker", () => {
 
     try {
       await waitForTask(taskId, (task) => task.status === "in_progress");
-      // Give the runner a few ping iterations with the task in flight.
-      await Bun.sleep(2_000);
 
       const signalledAt = Date.now();
       sut.process.kill("SIGTERM");
