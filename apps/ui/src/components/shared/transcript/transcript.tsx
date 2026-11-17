@@ -571,7 +571,7 @@ export function TranscriptUserMessage({
       <div
         className={cn(
           // The bubble spans the column at most, like the agent's rows, and
-          // half of it at least. On a phone it is always the full width.
+          // at least 8rem wide. On a phone it is always the full width.
           // `max-w-full` on it stops a nowrap header (`truncate`) from
           // widening it past the column.
           "flex w-full min-w-0 flex-col gap-1.5",
@@ -580,7 +580,7 @@ export function TranscriptUserMessage({
       >
         <div
           className={cn(
-            "relative w-full max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:w-fit md:min-w-1/2 md:text-sm",
+            "relative w-full max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:w-fit md:min-w-32 md:text-sm",
             align === "end"
               ? "rounded-tr-sm bg-muted"
               : "rounded-tl-sm border border-border bg-card",
