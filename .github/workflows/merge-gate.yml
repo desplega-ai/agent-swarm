@@ -64,6 +64,8 @@ jobs:
 
       - name: Compute per-domain change flags
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           # --no-renames: with rename detection on (git's default), a move
@@ -79,12 +81,13 @@ jobs:
           # Always re-run everything if the merge-gate workflow itself changed.
           GATE_CHANGED=$(echo "$CHANGED" | grep -E '^\.github/workflows/merge-gate\.yml$' || true)
 
+          # match <pattern> [file list]: the list defaults to every changed file.
           match() {
-            local pattern="$1"
+            local pattern="$1" files="${2-$CHANGED}"
             if [ -n "$GATE_CHANGED" ]; then
               echo "true"; return
             fi
-            if echo "$CHANGED" | grep -E "$pattern" > /dev/null; then
+            if echo "$files" | grep -E "$pattern" > /dev/null; then
               echo "true"
             else
               echo "false"
@@ -138,7 +141,8 @@ jobs:
           # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
           # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
           # and apps/evals/ feeds the evals-service image.
-          DOCKER=$(match '^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
+          DOCKER_INPUTS='^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)'
+          DOCKER=$(match "$DOCKER_INPUTS")
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
@@ -150,7 +154,25 @@ jobs:
           UI_E2E=$(match '^(apps/ui/|packages/ui-e2e/|scripts/e2e/|src/http/|src/be/|bun\.lock|package\.json$|bunfig\.toml$|\.github/workflows/ui-e2e(-shards|-report)?\.yml$)')
 
           # dashboard image: everything Dockerfile.ui copies, plus its smoke test.
-          UI_IMAGE=$(match '^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)')
+          UI_IMAGE_INPUTS='^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)'
+          UI_IMAGE=$(match "$UI_IMAGE_INPUTS")
+
+          # A pull request builds images only when its diff touches what assembles one:
+          # Dockerfiles, entrypoints, manifests, the lockfile and the directories an image
+          # copies. A diff of application source alone (src/, scripts/e2e/) builds none
+          # here. Lint, tests and E2E check that source on the pull request, and the merge
+          # queue uses the full lists above, so every image builds before the change lands.
+          # In the 14 days to 2026-11-16, Docker Build Test failed in 1 of 1,007 pull
+          # request runs and Dashboard Image in none.
+          # Dashboard Image keeps the src/ directories apps/ui imports;
+          # src/tests/merge-gate-detect-changes.test.ts fails when that list goes stale.
+          if [ "${EVENT_NAME:-}" = "pull_request" ]; then
+            DOCKER=$(match "$DOCKER_INPUTS" "$(echo "$CHANGED" | grep -vE '^(src/|scripts/e2e/)' || true)")
+            UI_IMAGE=$(match "$UI_IMAGE_INPUTS" "$(echo "$CHANGED" | grep -vE '^src/' || true)")
+            if [ "$UI_IMAGE" = "false" ]; then
+              UI_IMAGE=$(match '^src/(utils|themes|telemetry-contract|commands/onboard)/')
+            fi
+          fi
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
