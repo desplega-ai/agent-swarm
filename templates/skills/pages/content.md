@@ -223,7 +223,7 @@ Rules for free HTML:
 
 - **No hardcoded colors.** No hex, `rgb()`, `hsl()`, `oklch()`, named colors or Tailwind palette classes (`bg-blue-500`, `bg-white`). Use `var(--color-*)` or the token class. For a tint, use `bg-primary/10` or `color-mix(in oklab, var(--color-primary) 10%, transparent)`. In SVG, use `fill-chart-1` or `currentColor`; on a canvas, read the token with `getComputedStyle`. At 8 or more literals, `create_page` warns and the page stays light in dark mode.
 - **Dark mode is free.** Inside the dashboard the page follows the viewer's mode, unless the org design system locks it. Do not set `color-scheme` or tokens in your own `:root`. Use `dark:` only for rare swaps such as a logo pair. Check with `?__swarm-mode=dark` on the `api_url`.
-- **Taste.** Put the point, a one-line summary and the key numbers in the first viewport. Keep the built-in type scale. Flat surfaces, 1px borders, almost no shadows. No gradients, glassmorphism, emoji decoration, nested cards, hero sections or scroll animations. Label headings plainly. Collapse raw JSON in `<details>`. Tables scroll on mobile instead of crushing columns.
+- **Taste.** Put the point, a one-line summary and the key numbers in the first viewport. Keep the built-in type scale. Flat surfaces, 1px borders, almost no shadows. No gradients, glassmorphism, emoji decoration, nested cards, hero sections or scroll animations. Label headings plainly. Collapse raw JSON in `<details>`. Tables scroll on mobile instead of crushing columns. These rules and the design system override `taste-minimalist-skill`.
 - **Links.** The head sets `<base target="_blank">`. An in-page `href="#id"` stays in the page.
 - **CSP** sets `connect-src 'self'`. Inline your data or read it through the browser SDK.
 

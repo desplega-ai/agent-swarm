@@ -4,7 +4,7 @@
   "displayName": "Pages",
   "slug": "pages",
   "title": "Pages",
-  "description": "Page kit for `create_page`: publish a report, one-pager, dashboard or deck by filling `kit: { template, slots }`; the server renders layout, charts and styling, and a dashboard can refresh from KV. Free HTML is the escape hatch for interactive pages (design system, browser SDK, rooms, `<swarm-diff>`). Also covers auth modes, share URLs, themes, the org design system, PDF export and limits.",
+  "description": "Page kit for `create_page`: publish a report, one-pager, dashboard or deck by filling `kit: { template, slots }`; the server renders layout, charts and styling, and a dashboard can refresh from KV. Free HTML is the escape hatch for interactive pages (design system, minimalist taste rules, browser SDK, rooms, `<swarm-diff>`). Also covers auth modes, share URLs, themes, the org design system, PDF export and limits.",
   "version": "3.0.0",
   "category": "skills",
   "placeholders": [],

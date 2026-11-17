@@ -63,7 +63,7 @@ describe("system-default skills", () => {
     // rather than one exact marketing phrase.
     expect(pagesSkill?.description).toMatch(/taste/i);
     expect(pagesSkill?.content).toContain("taste-minimalist-skill");
-    expect(pagesSkill?.content).toContain("Report density layer");
+    expect(pagesSkill?.content).toContain("## Page kit");
     // ...and the mechanics half that used to live only in the baked copy.
     expect(pagesSkill?.content).toContain("create_page");
     expect(pagesSkill?.content).toContain("swarm-diff");

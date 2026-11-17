@@ -143,7 +143,6 @@ import {
   isTerminalTaskStatus,
   type ModelTier,
   OPEN_TASK_STATUSES,
-  PageKitStoredSchema,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
 } from "../types";
@@ -225,7 +224,7 @@ import {
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageSearchSql } from "./db/page-search";
-import { parsePageThemeTokens } from "./db/page-theme-tokens";
+import { parsePageKit, parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
@@ -8679,17 +8678,6 @@ type PageRow = {
   design_version: number;
   kit: string | null;
 };
-
-/** Stored `kit` JSON, or null when the column is empty, is not JSON, or has the wrong shape. */
-function parsePageKit(raw: string | null): Page["kit"] {
-  if (!raw) return null;
-  try {
-    const parsed = PageKitStoredSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
 
 function rowToPage(row: PageRow): Page {
   return {
