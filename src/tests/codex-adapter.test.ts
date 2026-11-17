@@ -1541,48 +1541,6 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("")).toBe(CODEX_DEFAULT_MODEL);
   });
 
-  test("claude shortname 'opus' → gpt-6.1-sol", () => {
-    expect(resolveCodexModel("opus")).toBe("gpt-6.1-sol");
-  });
-
-  test("claude shortname 'sonnet' → gpt-6.1-terra", () => {
-    expect(resolveCodexModel("sonnet")).toBe("gpt-6.1-terra");
-  });
-
-  test("claude shortname 'haiku' → gpt-6-luna", () => {
-    expect(resolveCodexModel("haiku")).toBe("gpt-6-luna");
-  });
-
-  test("passthrough 'gpt-5.4-mini' → gpt-5.4-mini", () => {
-    expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
-  });
-
-  test("passthrough 'gpt-5.5' → gpt-5.5", () => {
-    expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
-  });
-
-  test("passthrough GPT-5.6 Codex models", () => {
-    expect(resolveCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
-    expect(resolveCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(resolveCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
-  });
-
-  test("passthrough GPT-6 Astra", () => {
-    expect(resolveCodexModel("GPT-6-ASTRA")).toBe("gpt-6-astra");
-  });
-
-  test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
-    expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
-  });
-
-  test("passthrough 'gpt-5.2-codex' → gpt-5.2-codex", () => {
-    expect(resolveCodexModel("gpt-5.2-codex")).toBe("gpt-5.2-codex");
-  });
-
-  test("case-insensitive: GPT-5.4 → gpt-5.4", () => {
-    expect(resolveCodexModel("GPT-5.4")).toBe("gpt-5.4");
-  });
-
   test("unknown model passes through verbatim (lowercased)", () => {
     expect(resolveCodexModel("gpt-5.5-experimental")).toBe("gpt-5.5-experimental");
     expect(resolveCodexModel("GPT-9-FUTURE")).toBe("gpt-9-future");

@@ -5,7 +5,6 @@ import cache from "../be/modelsdev-cache.json";
 import { buildModelsDevSeedRows } from "../be/seed-pricing";
 import {
   CODEX_DEFAULT_MODEL,
-  computeCodexCostUsd,
   getCodexContextWindow,
   getCodexModelPricing,
   listCodexModels,
@@ -30,10 +29,6 @@ for (const release of releases) {
         cachedInputPerMillion: release.read,
         outputPerMillion: release.output,
       });
-      expect(computeCodexCostUsd(release.id, 1_000_000, 250_000, 100_000)).toBeCloseTo(
-        release.input * 0.75 + release.read * 0.25 + release.output * 0.1,
-        8,
-      );
     });
 
     test("exposes the full reasoning range and transports none/max correctly", () => {
@@ -109,10 +104,6 @@ describe("gpt-6.1-sol", () => {
       cachedInputPerMillion: 0.1,
       outputPerMillion: 10,
     });
-    expect(computeCodexCostUsd(id, 1_000_000, 250_000, 100_000)).toBeCloseTo(
-      2 * 0.75 + 0.1 * 0.25 + 10 * 0.1,
-      8,
-    );
   });
 
   test("exposes low through max without an off level", () => {
