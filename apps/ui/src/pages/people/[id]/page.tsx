@@ -1,10 +1,12 @@
-import { ArrowLeft, ChevronDown, Plus, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useUpdateUser, useUser } from "@/api/hooks/use-users";
-import type { User, UserCommsPrefs } from "@/api/types";
+import type { MediaIcon, User, UserCommsPrefs } from "@/api/types";
+import { MediaIconField } from "@/components/shared/media-icon-field";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -258,6 +260,27 @@ function RoleSelect({ value, onChange }: { value: string; onChange: (next: strin
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Saves on its own, like the agent avatar: each pick or upload stores at once. */
+function AvatarCard({ user }: { user: User }) {
+  const updateUser = useUpdateUser();
+  async function saveAvatar(avatar: MediaIcon | null) {
+    await updateUser.mutateAsync({ id: user.id, data: { avatar } });
+  }
+  return (
+    <Card>
+      <CardContent className="p-5 space-y-3">
+        <h2 className="text-sm font-semibold tracking-tight">Avatar</h2>
+        <MediaIconField
+          value={user.avatar}
+          fallback={UserRound}
+          uploadPrefix={`/users/${user.id}/avatar`}
+          onSave={saveAvatar}
+        />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -685,6 +708,7 @@ export default function PersonDetailPage() {
       </div>
 
       <div className="flex items-center gap-3 shrink-0 flex-wrap">
+        <UserAvatar id={user.id} name={user.name} avatar={user.avatar ?? null} size="default" />
         <h1 className="text-2xl font-semibold tracking-tight">{user.name}</h1>
         <UserStatusPill status={user.status} />
         {user.email && (
@@ -709,7 +733,12 @@ export default function PersonDetailPage() {
 
         <TabsContent value="profile" className="mt-4 overflow-y-auto">
           <DetailPageBody
-            main={<ProfileCard user={user} />}
+            main={
+              <div className="space-y-4">
+                <ProfileCard user={user} />
+                <AvatarCard user={user} />
+              </div>
+            }
             rail={
               <DetailPageRail>
                 <QuickStats>

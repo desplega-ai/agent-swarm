@@ -216,6 +216,38 @@ export const platformUsersLifecycle: Scenario = {
       `comms null removes only comms, got ${JSON.stringify(withoutComms.metadata)}`,
     );
 
+    // avatar takes an agent's avatar shapes, records profile_changed, and null resets it.
+    const avatar = { type: "agent-fs", path: `/users/${alice.id}/avatar-1.png` };
+    const withAvatar = userOf(
+      (await ctx.api("PATCH", `/api/users/${alice.id}`, { body: { avatar } })).json,
+    );
+    expect(
+      JSON.stringify(withAvatar.avatar) === JSON.stringify(avatar),
+      `patch stores the avatar, got ${JSON.stringify(withAvatar.avatar)}`,
+    );
+    expect(
+      (await getUser(ctx, alice.id, "?recentEvents=50")).recentEvents.some(
+        (event) =>
+          event.eventType === "profile_changed" &&
+          JSON.stringify(event.after) === JSON.stringify({ avatar }),
+      ),
+      "an avatar change records profile_changed",
+    );
+    expectStatus(
+      await ctx.api("PATCH", `/api/users/${alice.id}`, {
+        body: { avatar: { type: "url", url: "http://example.com/a.png" } },
+      }),
+      [400],
+      "patch rejects a non-https avatar link",
+    );
+    const noAvatar = userOf(
+      (await ctx.api("PATCH", `/api/users/${alice.id}`, { body: { avatar: null } })).json,
+    );
+    expect(
+      noAvatar.avatar === null,
+      `avatar null resets it, got ${JSON.stringify(noAvatar.avatar)}`,
+    );
+
     // ── identities ───────────────────────────────────────────────────────────
     const extraId = `plat-extra-${ctx.nonce}`;
     const linked = await ctx.api("POST", `/api/users/${alice.id}/identities`, {

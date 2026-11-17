@@ -16,6 +16,12 @@ export const MEDIA_ICON_TYPES: Readonly<Record<string, string>> = {
   "image/svg+xml": "svg",
 };
 
+/** File extensions of an image an icon can point at, for agent-fs pickers. */
+export const MEDIA_ICON_EXTENSIONS: readonly string[] = [
+  ...Object.values(MEDIA_ICON_TYPES),
+  "jpeg",
+];
+
 /** 1 MB: an icon renders at tile size, so a bigger file only slows the page. */
 export const MEDIA_ICON_MAX_BYTES = 1024 * 1024;
 

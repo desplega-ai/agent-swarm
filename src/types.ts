@@ -1255,6 +1255,12 @@ export const UserSchema = z
     // user's rows into the target. Such a user cannot authenticate, and
     // identity lookups resolve to the target. Absent once the job deletes it.
     mergedIntoUserId: z.string().nullable().optional(),
+    // Custom avatar, same shapes as an agent's. Null/missing = initials.
+    // Migration 344 adds the column.
+    avatar: z
+      .lazy(() => UserAvatarSchema)
+      .nullable()
+      .optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
@@ -1547,6 +1553,10 @@ export type MediaIcon = z.infer<typeof MediaIconSchema>;
 // Agent avatars accept the same shapes as app icons.
 export const AgentAvatarSchema = MediaIconSchema;
 export type AgentAvatar = MediaIcon;
+
+// User avatars accept the same shapes as agent avatars.
+export const UserAvatarSchema = MediaIconSchema;
+export type UserAvatar = MediaIcon;
 
 /**
  * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https

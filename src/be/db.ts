@@ -145,6 +145,8 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type UserAvatar,
+  UserAvatarSchema,
 } from "../types";
 import {
   CODEX_AUTH_FAILURE_BENCH_MS,
@@ -12584,9 +12586,22 @@ type UserRow = {
   dailyBudgetUsd: number | null;
   status: string;
   mergedIntoUserId: string | null;
+  // Migration 344: JSON of UserAvatar. NULL = initials.
+  avatar: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
+
+/** Malformed avatar JSON reads as "no avatar", like `parseAgentAvatar`. */
+function parseUserAvatar(raw: string | null): UserAvatar | null {
+  if (!raw) return null;
+  try {
+    const parsed = UserAvatarSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 function rowToUser(row: UserRow): User {
   return {
@@ -12602,6 +12617,7 @@ function rowToUser(row: UserRow): User {
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
     ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
+    avatar: parseUserAvatar(row.avatar),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12628,12 +12644,13 @@ export async function createUser(data: {
   metadata?: Record<string, unknown>;
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
+  avatar?: UserAvatar | null;
 }): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const row = await getDbClient().get<UserRow>(
-    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, avatar, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       data.name,
@@ -12646,6 +12663,7 @@ export async function createUser(data: {
       data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
       data.dailyBudgetUsd ?? null,
       data.status ?? "active",
+      data.avatar ? JSON.stringify(data.avatar) : null,
       now,
       now,
     ],
@@ -12669,6 +12687,8 @@ export async function updateUser(
     metadata: Record<string, unknown> | null;
     dailyBudgetUsd: number | null;
     status: "invited" | "active" | "suspended";
+    // null resets to initials.
+    avatar: UserAvatar | null;
   }>,
 ): Promise<User | null> {
   const sets: string[] = [];
@@ -12713,6 +12733,10 @@ export async function updateUser(
   if (data.status !== undefined) {
     sets.push("status = ?");
     params.push(data.status);
+  }
+  if (data.avatar !== undefined) {
+    sets.push("avatar = ?");
+    params.push(data.avatar === null ? null : JSON.stringify(data.avatar));
   }
 
   if (sets.length === 0) return getUserById(id);
