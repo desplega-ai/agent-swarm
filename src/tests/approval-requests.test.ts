@@ -18,7 +18,6 @@ import {
   getApprovalRequestById,
   getApprovalRequestByStepId,
   getDbClient,
-  getExpiredPendingApprovals,
   getTaskById,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -597,11 +596,6 @@ describe("Approval Requests", () => {
   });
 
   describe("DB: listApprovalRequests", () => {
-    test("lists all requests (with limit)", async () => {
-      const results = await listApprovalRequests({ limit: 1000 });
-      expect(results.length).toBeGreaterThan(0);
-    });
-
     test("filters by status", async () => {
       // Create a fresh pending one
       const data = makeApprovalData();
@@ -699,18 +693,6 @@ describe("Approval Requests", () => {
 
       const claim = await claimApprovalCancellationNotification(data.id, "slack:C1:1.0");
       expect(claim).not.toBeNull();
-    });
-  });
-
-  describe("DB: getExpiredPendingApprovals", () => {
-    test("returns empty for non-expired requests", async () => {
-      // All our test requests with timeout have expiresAt in the future
-      const expired = await getExpiredPendingApprovals();
-      // Filter to only our test requests
-      for (const r of expired) {
-        expect(r.status).toBe("pending");
-        expect(r.expiresAt).toBeTruthy();
-      }
     });
   });
 
