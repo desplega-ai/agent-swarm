@@ -91,6 +91,8 @@ Measure timing without coverage instrumentation. For a performance claim, altern
 Use at least three runs per version and report the median, range, and failures. Do not discard slow or failing runs.
 Compare total test-step seconds and the slowest shard. Track complete workflow duration and queue failures separately.
 Use GitHub timing and result artifacts instead of a second reporting service.
+Compare full-suite runs with full-suite runs. PR jobs can select only affected tests, so their comparison against nightly main can exaggerate gains.
+For example, PR #3291 reports a 51% root wall-time reduction against main while running only affected tests. That is not campaign savings.
 
 After each merged batch, append a dated checkpoint with PRs, cumulative reductions, coverage artifacts, timing samples, and unresolved limitations.
 Keep missing coverage or timing evidence explicitly unmeasured. The campaign is not complete while its coverage comparison remains unresolved.
