@@ -148,7 +148,8 @@ export function ResponsiveOverlayContent({
       {...(title !== undefined ? { "aria-describedby": undefined } : {})}
       // A body view marked `data-sheet-tall` (a search with results under it)
       // gets a fixed 92 dvh sheet, so its field stays put while rows filter.
-      className="pb-[max(0.75rem,env(safe-area-inset-bottom))] data-[vaul-drawer-direction=bottom]:max-h-[85dvh] has-[[data-sheet-tall]]:h-[92dvh] data-[vaul-drawer-direction=bottom]:has-[[data-sheet-tall]]:max-h-[92dvh]"
+      // The sheet takes the focus when it opens: it shows no focus ring around itself.
+      className="pb-[max(0.75rem,env(safe-area-inset-bottom))] outline-none data-[vaul-drawer-direction=bottom]:max-h-[85dvh] has-[[data-sheet-tall]]:h-[92dvh] data-[vaul-drawer-direction=bottom]:has-[[data-sheet-tall]]:max-h-[92dvh]"
       {...focus}
       onPointerDownCapture={(event) => {
         press.current = { x: event.clientX, y: event.clientY, dragged: false };

@@ -1,13 +1,13 @@
 /**
- * The phone list screen (SPEC R8.5): a large "Sessions" title with New
- * session and "⋯" (Legacy sessions, the theme, the guide), then the
- * sidebar tree at full width in its phone form: the search with token
- * chips, the same sections as desktop, and touch rows. In search mode the
- * large title and its actions give way to the field and its Cancel. While a
- * pushed screen covers it, it is inert and keeps its scroll position.
+ * The phone list screen (SPEC R8.5): one top row with the "Sessions" title,
+ * the search icon, the filter, New session, and "⋯" (Legacy sessions, the
+ * theme, the guide), then the sidebar tree at full width in its phone form:
+ * the same sections as desktop, and touch rows. In search mode the field
+ * and its Cancel take the top row. While a pushed screen covers it, it is
+ * inert and keeps its scroll position.
  */
 
-import { CircleHelp, Ellipsis, History, Moon, SquarePen, Sun } from "lucide-react";
+import { CircleHelp, Ellipsis, LayoutList, Moon, SquarePen, Sun } from "lucide-react";
 import { type RefObject, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { SessionsViewMode } from "@/hooks/use-sessions-view";
@@ -41,45 +41,40 @@ export function MobileListScreen({
   treeRef: RefObject<SessionTreeHandle | null>;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  // Search mode: the field moves up and its Cancel replaces these actions (iOS Mail).
-  const [searching, setSearching] = useState(false);
   const { theme, toggleTheme } = useTheme();
   return (
     <div
       inert={covered}
       aria-hidden={covered || undefined}
       data-phone-screen="list"
-      className="relative flex min-h-0 flex-1 flex-col bg-background"
+      // `touch-manipulation`: a double tap does not zoom the page in.
+      className="relative flex min-h-0 flex-1 touch-manipulation flex-col bg-background"
     >
-      {searching ? null : (
-        <header className="flex h-14 shrink-0 items-center gap-1 pr-1 pl-4">
-          <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight">
-            Sessions
-          </h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="New session"
-            onClick={() => newSession(null)}
-            className="size-11"
-          >
-            <SquarePen className="size-5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="More"
-            aria-haspopup="dialog"
-            onClick={() => setMoreOpen(true)}
-            className="size-11"
-          >
-            <Ellipsis className="size-5" />
-          </Button>
-        </header>
-      )}
       <SessionTree
         phone
-        onSearchMode={setSearching}
+        phoneActions={
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="New session"
+              onClick={() => newSession(null)}
+              className="size-11"
+            >
+              <SquarePen className="size-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="More"
+              aria-haspopup="dialog"
+              onClick={() => setMoreOpen(true)}
+              className="size-11"
+            >
+              <Ellipsis className="size-5" />
+            </Button>
+          </>
+        }
         focused={focused}
         openSession={(id) => openSession(id)}
         newSession={newSession}
@@ -99,7 +94,7 @@ export function MobileListScreen({
       />
       <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title="Sessions">
         <ActionSheetItem
-          icon={History}
+          icon={LayoutList}
           label="Legacy sessions"
           onSelect={() => onViewChange("legacy")}
         />

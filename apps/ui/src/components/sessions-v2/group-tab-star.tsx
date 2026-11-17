@@ -13,7 +13,8 @@ export function GroupTabStar({ groupKey }: { groupKey: string | null }) {
       disabled={star.disabled}
       onToggle={star.toggle}
       labels={GROUP_STAR_LABELS}
-      className="-my-1"
+      // A 44 px tap area on a phone.
+      className="-my-1 hit-area [--hit-size:44px]"
     />
   );
 }

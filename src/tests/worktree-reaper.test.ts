@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -92,7 +92,7 @@ async function worktreeOfEndedTask(
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "worktree-reaper-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "worktree-reaper-")));
   repo = join(root, "repo");
   const origin = join(root, "origin.git");
   await execFileAsync("git", ["init", "-q", "--bare", "-b", "main", origin], { env: gitEnv() });

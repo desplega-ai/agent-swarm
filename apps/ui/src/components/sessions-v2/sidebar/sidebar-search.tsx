@@ -4,8 +4,9 @@
  * it from anywhere on the page, Escape clears it and gives the focus back
  * to the tree, and the down arrow moves into the results.
  *
- * On a phone (SPEC R8.5) `MobileSearch` draws the field: token chips,
- * suggestions for `with:` and `in:`, and Cancel.
+ * On a phone (SPEC R8.5) `MobileSearch` draws the row: the title, the
+ * search icon, and the actions, or the field with token chips, suggestions
+ * for `with:` and `in:`, and Cancel.
  */
 
 import {
@@ -41,7 +42,6 @@ export function SidebarSearch({
   inputRef,
   phone = false,
   groups = [],
-  onSearchMode,
   action,
   onReveal,
 }: {
@@ -55,9 +55,7 @@ export function SidebarSearch({
   phone?: boolean;
   /** My groups, for the phone's `in:` suggestions. */
   groups?: SearchGroup[];
-  /** The phone search mode turned on or off (the list screen hides its top bar). */
-  onSearchMode?: (on: boolean) => void;
-  /** At the end of the row: the filter menu. The phone hides it while searching. */
+  /** At the end of the row: the filter menu (and the phone screen's actions). The phone hides it while searching. */
   action?: ReactNode;
   /**
    * `/` calls it before it focuses the field: the shell shows a collapsed
@@ -126,7 +124,6 @@ export function SidebarSearch({
         inputRef={inputRef}
         onLeave={onLeave}
         groups={groups}
-        onSearchMode={onSearchMode}
         action={action}
       />
     );

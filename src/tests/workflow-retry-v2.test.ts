@@ -446,26 +446,25 @@ describe("Workflow Retry v2 (Phase 4)", () => {
         ],
       });
 
-      // Execute — first attempt will fail, setting nextRetryAt
-      failCounter = 0;
-      const runId = await startWorkflowExecution(workflow, {}, registry);
+      try {
+        const runId = await startWorkflowExecution(workflow, {}, registry);
+        const steps = await getWorkflowRunStepsByRunId(runId);
+        const step = steps.find((s) => s.nodeId === "n1")!;
+        expect(step.status).toBe("failed");
+        expect(step.nextRetryAt).toBeTruthy();
+        expect(step.retryCount).toBe(1);
 
-      // Check step is failed with a nextRetryAt
-      const steps = await getWorkflowRunStepsByRunId(runId);
-      const step = steps.find((s) => s.nodeId === "n1")!;
-      expect(step.status).toBe("failed");
-      expect(step.nextRetryAt).toBeTruthy();
-      expect(step.retryCount).toBe(1);
-
-      // Verify getRetryableSteps finds it once nextRetryAt has passed
-      await waitUntil(
-        async () => (await getRetryableSteps()).some((s) => s.runId === runId),
-        () => `step n1 of run ${runId} never became retryable`,
-      );
-      const retryable = await getRetryableSteps();
-      expect(retryable.length).toBeGreaterThanOrEqual(1);
-      const ourStep = retryable.find((s) => s.runId === runId);
-      expect(ourStep).toBeTruthy();
+        await waitUntil(
+          async () => (await getRetryableSteps()).some((s) => s.runId === runId),
+          () => `step n1 of run ${runId} never became retryable`,
+        );
+        const retryable = await getRetryableSteps();
+        const ourStep = retryable.find((s) => s.runId === runId);
+        expect(ourStep).toBeTruthy();
+      } finally {
+        // Retire the queued retry before later pollers use the shared executor counter.
+        await deleteWorkflow(workflow.id);
+      }
     });
 
     test("retry limit respected (does not retry past maxRetries)", async () => {
@@ -488,32 +487,24 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       failCounter = 0;
       const runId = await startWorkflowExecution(workflow, {}, registry);
 
-      // Step should be failed after first attempt (retryCount=1, maxRetries=1)
-      const run = await getWorkflowRun(runId);
-      // With maxRetries=1, the first failure increments to retryCount=1.
-      // Since retryCount(1) >= maxRetries(1), no more retries — run should be failed.
-      // Actually: checkpoint checks retryCount < maxRetries. After first failure, retryCount=1 and
-      // maxRetries=1, so 1 < 1 is false => no retry => run fails.
-      // Wait, let me re-check: the engine passes currentRetryCount (from existing step, which is 0
-      // on first attempt), and checkpoint does retryCount + 1 = 1, then checks 0 < 1 = true,
-      // so it DOES retry once.
-      const steps = await getWorkflowRunStepsByRunId(runId);
-      const step = steps.find((s) => s.nodeId === "n1")!;
+      const [initial] = await getWorkflowRunStepsByRunId(runId);
+      expect(initial?.status).toBe("failed");
+      expect(initial?.retryCount).toBe(1);
+      expect(initial?.nextRetryAt).toBeTruthy();
+      expect(failCounter).toBe(1);
 
-      if (step.status === "failed" && step.nextRetryAt) {
-        // Was given one retry chance: the poller picks it up once it expires.
-        // After retry, the second failure should be terminal (retryCount >= maxRetries)
-        startRetryPoller(registry, 10);
-        try {
-          const updatedRun = await waitForRunStatus(runId, "failed");
-          expect(updatedRun.status).toBe("failed");
-        } finally {
-          stopRetryPoller();
-        }
-      } else {
-        // Already terminal
-        expect(run!.status).toBe("failed");
+      startRetryPoller(registry, 10);
+      try {
+        await waitForRunStatus(runId, "failed");
+      } finally {
+        stopRetryPoller();
       }
+
+      const [exhausted] = await getWorkflowRunStepsByRunId(runId);
+      expect(exhausted?.status).toBe("failed");
+      expect(exhausted?.retryCount).toBe(1);
+      expect(exhausted?.nextRetryAt).toBeUndefined();
+      expect(failCounter).toBe(2);
     });
 
     test("a tick in flight when the poller stops does not schedule another", async () => {

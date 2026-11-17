@@ -15,6 +15,39 @@ const GHOST = "00000000-0000-4000-8000-00000000dead";
 
 /** Worker log batches: stored per task, scrubbed on write, readable by the session's viewers. */
 async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, stranger: string) {
+  const empty = await ctx.api("GET", `/api/tasks/${taskId}/session-logs`);
+  expectStatus(empty, [200], "existing task without logs");
+  expect(
+    Array.isArray(asRecord(empty.json).logs) && asRecords(empty.json, "logs").length === 0,
+    "An existing task without logs must return logs: []",
+  );
+
+  const unassignedSessionId = `core-sl-unassigned-${ctx.nonce}`;
+  const unassigned = await ctx.api("POST", "/api/session-logs", {
+    body: {
+      sessionId: unassignedSessionId,
+      iteration: 1,
+      cli: "claude",
+      lines: ['{"type":"system"}', '{"type":"result"}'],
+    },
+  });
+  expectStatus(unassigned, [201], "store logs without taskId");
+  expect(
+    asRecord(unassigned.json).success === true && asRecord(unassigned.json).count === 2,
+    "A batch without taskId must report success and its count",
+  );
+  const unassignedRows = ctx.db.query<{ taskId: string | null; content: string }>(
+    "SELECT taskId, content FROM session_logs WHERE sessionId = ? ORDER BY rowid",
+    [unassignedSessionId],
+  );
+  expect(
+    unassignedRows.length === 2 &&
+      unassignedRows.every((row) => row.taskId === null) &&
+      unassignedRows[0]?.content === '{"type":"system"}' &&
+      unassignedRows[1]?.content === '{"type":"result"}',
+    "Logs without taskId must persist in order with a null taskId",
+  );
+
   const secret = `sk-ant-api03-${"A".repeat(90)}`;
   let response = await ctx.api("POST", "/api/session-logs", {
     body: {
@@ -69,10 +102,11 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
     "limit=1 should return the last row",
   );
   expectStatus(await ctx.api("GET", `/api/tasks/${taskId}/session-logs?limit=0`), [400], "limit=0");
-  expectStatus(
-    await ctx.api("GET", `/api/tasks/${GHOST}/session-logs`),
-    [404],
-    "logs of an unknown task",
+  response = await ctx.api("GET", `/api/tasks/${GHOST}/session-logs`);
+  expectStatus(response, [404], "logs of an unknown task");
+  expect(
+    String(asRecord(response.json).error).includes("Task not found"),
+    "Unknown task error must name the missing task",
   );
   expectStatus(
     await ctx.api("GET", `/api/tasks/${taskId}/session-logs`, { headers: asUser(owner) }),
@@ -84,15 +118,19 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
     [403],
     "a stranger reads the logs",
   );
-  for (const [body, label] of [
-    [{ sessionId: "", iteration: 1, lines: ["x"] }, "empty session id"],
-    [{ sessionId: "s", iteration: 0, lines: ["x"] }, "iteration 0"],
-    [{ sessionId: "s", iteration: 1, lines: [] }, "no lines"],
+  for (const [body, field, label] of [
+    [{ iteration: 1, lines: ["x"] }, "sessionId", "missing sessionId"],
+    [{ sessionId: "s", lines: ["x"] }, "iteration", "missing iteration"],
+    [{ sessionId: "s", iteration: 1 }, "lines", "missing lines"],
+    [{ sessionId: "", iteration: 1, lines: ["x"] }, "sessionId", "empty session id"],
+    [{ sessionId: "s", iteration: 0, lines: ["x"] }, "iteration", "iteration 0"],
+    [{ sessionId: "s", iteration: 1, lines: [] }, "lines", "no lines"],
   ] as const) {
-    expectStatus(
-      await ctx.api("POST", "/api/session-logs", { body }),
-      [400],
-      `log batch: ${label}`,
+    response = await ctx.api("POST", "/api/session-logs", { body });
+    expectStatus(response, [400], `log batch: ${label}`);
+    expect(
+      String(asRecord(response.json).error).includes(field),
+      `Log validation error must name ${field}: ${label}`,
     );
   }
 }
