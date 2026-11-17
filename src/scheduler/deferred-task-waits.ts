@@ -6,6 +6,7 @@ import {
   updateScheduledTask,
 } from "@/be/db";
 import {
+  type ConfirmResult,
   describeEventWait,
   type EventMatch,
   EXTERNAL_EVENT_ADAPTERS,
@@ -13,6 +14,7 @@ import {
   type ExternalEventAdapter,
   getExternalEventAdapter,
   matchKeyOf,
+  toConfirmResult,
 } from "@/event-waits";
 import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
 import { type AgentTask, type ScheduledTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "@/types";
@@ -83,6 +85,7 @@ const WAIT_MEMBER_STATUS_SQL = `CASE
 async function resolveWaitCause(
   scheduleId: string,
   reason: WakeReason,
+  causeDetail?: string,
 ): Promise<
   { table: WaitTable; mode?: "all" | "any"; cause: string; matchedTaskIds: string[] } | undefined
 > {
@@ -102,11 +105,11 @@ async function resolveWaitCause(
     if (reason !== externalWakeReason(eventWait.source, eventWait.event)) return undefined;
     return {
       table: "deferred_event_waits",
-      cause: describeEventWait(
+      cause: `${describeEventWait(
         eventWait.source,
         eventWait.event,
         JSON.parse(eventWait.matchJson) as EventMatch,
-      ),
+      )}${causeDetail ? `: ${causeDetail}` : ""}`,
       matchedTaskIds: [],
     };
   }
@@ -160,8 +163,9 @@ async function prepareDeferredWakeTask(
   scheduleId: string,
   reason: WakeReason,
   extraTags: string[],
+  causeDetail?: string,
 ): Promise<PreparedTaskCreate | undefined> {
-  const resolved = await resolveWaitCause(scheduleId, reason);
+  const resolved = await resolveWaitCause(scheduleId, reason, causeDetail);
   if (!resolved) return undefined;
   let schedule = await getScheduledTaskById(scheduleId);
   if (!schedule?.enabled) return undefined;
@@ -179,11 +183,15 @@ async function prepareDeferredWakeTask(
  */
 export const DEFERRED_WAIT_WOKE_EVENT = "task_deferred_wait_woke";
 
-/** Undefined means a normal schedule; an empty preparation means the wait is not ready. */
+/**
+ * Undefined means a normal schedule; an empty preparation means the wait is not ready.
+ * `causeDetail` is what an external event's confirm read reported; it is appended to the cause.
+ */
 export async function prepareDeferredTaskWait(
   scheduleId: string,
   reason: WakeReason,
   extraTags: string[] = [],
+  causeDetail?: string,
 ): Promise<{ task?: PreparedTaskCreate } | undefined> {
   const client = getDbClient();
   // Keep ordinary schedule dispatch off the write-lock path.
@@ -199,7 +207,7 @@ export async function prepareDeferredTaskWait(
   // first; the transaction below re-reads the wait and its member set before claiming.
   // The prepared description carries the cause seen here; for an `any` wait a member
   // that settles between this read and the claim is missing from that text only.
-  return { task: await prepareDeferredWakeTask(scheduleId, reason, extraTags) };
+  return { task: await prepareDeferredWakeTask(scheduleId, reason, extraTags, causeDetail) };
 }
 
 /** Undefined means a normal schedule; an empty result means another caller won. */
@@ -209,14 +217,16 @@ export async function dispatchDeferredTaskWait(
   extraTags: string[] = [],
   triggerTaskId?: string,
   prepared?: { task?: PreparedTaskCreate },
+  causeDetail?: string,
 ): Promise<{ task?: AgentTask } | undefined> {
-  const preparation = prepared ?? (await prepareDeferredTaskWait(scheduleId, reason, extraTags));
+  const preparation =
+    prepared ?? (await prepareDeferredTaskWait(scheduleId, reason, extraTags, causeDetail));
   if (!preparation) return undefined;
   const preparedForWait = preparation.task;
   if (!preparedForWait) return {};
   const client = getDbClient();
   return client.transaction(async () => {
-    const resolved = await resolveWaitCause(scheduleId, reason);
+    const resolved = await resolveWaitCause(scheduleId, reason, causeDetail);
     if (!resolved) return {};
     let schedule = await getScheduledTaskById(scheduleId);
     if (!schedule?.enabled) return {};
@@ -367,6 +377,50 @@ export async function reapSpentDeferredSchedules(now = new Date()): Promise<numb
 }
 
 /**
+ * Newest confirm read per wait target. The same provider event can arrive twice
+ * (an App webhook and a repo webhook both subscribed), and a PR's check runs finish
+ * in bursts, so candidates for one target share reads. A caller only shares a read
+ * that has not started yet: one that started before the caller arrived may have read
+ * state the caller's event changed. So a candidate arriving mid-read queues one
+ * trailing read, which every later candidate joins until it starts. At most one read
+ * runs and one waits per target. The claim in `dispatchDeferredTaskWait` still makes
+ * the wake itself exactly-once.
+ */
+type ConfirmFlight = { started: boolean; result: Promise<ConfirmResult> };
+const confirmFlights = new Map<string, ConfirmFlight>();
+
+function confirmFresh(
+  key: string,
+  read: () => Promise<boolean | ConfirmResult>,
+): Promise<ConfirmResult> {
+  const previous = confirmFlights.get(key);
+  if (previous && !previous.started) return previous.result;
+  const flight: ConfirmFlight = { started: false, result: Promise.resolve({ happened: false }) };
+  const after = previous ? previous.result.then(noop, noop) : Promise.resolve();
+  flight.result = after
+    .then(() => {
+      flight.started = true;
+      return read();
+    })
+    .then(toConfirmResult)
+    .finally(() => {
+      if (confirmFlights.get(key) === flight) confirmFlights.delete(key);
+    });
+  confirmFlights.set(key, flight);
+  return flight.result;
+}
+
+function noop(): void {}
+
+/** True when some agent holds a pending wait for `event`, so its webhook deliveries are worth verifying. */
+export async function hasPendingEventWait(source: string, event: string): Promise<boolean> {
+  return !!(await getDbClient().get(
+    "SELECT 1 AS found FROM deferred_event_waits WHERE status = 'pending' AND source = ? AND event = ? LIMIT 1",
+    [source, event],
+  ));
+}
+
+/**
  * Fire pending external-event waits. A webhook names the candidate target (`only`)
  * and sets `trustEvent`: an adapter without `confirm` fires on it, one with `confirm`
  * still has to read the provider first. With no `trustEvent` (boot, and the recheck
@@ -387,7 +441,7 @@ export async function reconcileDeferredEventWaits(
        ${only ? "AND w.source = ? AND w.event = ? AND w.matchKey = ?" : ""}`,
     only ? [only.source, only.event, only.matchKey] : [],
   );
-  const satisfied = new Map<string, boolean>();
+  const satisfied = new Map<string, ConfirmResult>();
   for (const wait of waits) {
     const adapter = getExternalEventAdapter(wait.source);
     if (!adapter || (!adapter.confirm && !trustEvent)) continue;
@@ -397,13 +451,20 @@ export async function reconcileDeferredEventWaits(
         satisfied.set(
           key,
           adapter.confirm
-            ? await adapter.confirm(wait.event, JSON.parse(wait.matchJson) as EventMatch)
-            : true,
+            ? await confirmFresh(key, () =>
+                adapter.confirm!(wait.event, JSON.parse(wait.matchJson) as EventMatch),
+              )
+            : { happened: true },
         );
-      if (satisfied.get(key))
+      const result = satisfied.get(key)!;
+      if (result.happened)
         await dispatchDeferredTaskWait(
           wait.scheduleId,
           externalWakeReason(wait.source, wait.event),
+          [],
+          undefined,
+          undefined,
+          result.detail,
         );
     } catch (err) {
       // A broken wait must not stop the others or the ceiling poller.
@@ -462,7 +523,7 @@ export async function initDeferredTaskWaits(): Promise<void> {
   for (const adapter of EXTERNAL_EVENT_ADAPTERS) {
     const listener = externalEventListener(adapter);
     externalEventListeners.set(adapter, listener);
-    workflowEventBus.onPrefix(adapter.busPrefix, listener);
+    for (const prefix of adapter.busPrefixes) workflowEventBus.onPrefix(prefix, listener);
   }
   await reconcileDeferredTaskWaits();
   // Provider reads can be slow or down: never hold boot on them.
@@ -479,7 +540,7 @@ export function stopDeferredTaskWaits(): void {
   workflowEventBus.off("task.superseded", onTaskEvent);
   workflowEventBus.off("task.created", onTaskEvent);
   for (const [adapter, listener] of externalEventListeners) {
-    workflowEventBus.offPrefix(adapter.busPrefix, listener);
+    for (const prefix of adapter.busPrefixes) workflowEventBus.offPrefix(prefix, listener);
   }
   externalEventListeners.clear();
 }

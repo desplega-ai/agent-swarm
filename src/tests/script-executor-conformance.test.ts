@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyExit, NativeScriptExecutor } from "../scripts-runtime/executors/native";
 import { QuickJSScriptExecutor } from "../scripts-runtime/executors/quickjs";
-import type {
-  ExecutorInput,
-  ExecutorOutput,
-  ScriptExecutor,
-} from "../scripts-runtime/executors/types";
+import type { ExecutorInput, ScriptExecutor } from "../scripts-runtime/executors/types";
 import { DEFAULT_SCRIPT_RESOURCES } from "../scripts-runtime/executors/types";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
@@ -39,49 +35,7 @@ function input(overrides: Partial<ExecutorInput> = {}): ExecutorInput {
   };
 }
 
-class FakeScriptExecutor implements ScriptExecutor {
-  readonly name = "fake";
-
-  async run(runInput: ExecutorInput): Promise<ExecutorOutput> {
-    if (runInput.fsMode === "workspace-rw") {
-      return {
-        result: undefined,
-        stdout: "",
-        stderr: "workspace-rw not supported",
-        truncated: { stdout: false, stderr: false },
-        durationMs: 0,
-        exitCode: 1,
-        error: "executor_error",
-      };
-    }
-
-    if (runInput.signal?.aborted) {
-      return {
-        result: undefined,
-        stdout: "",
-        stderr: "",
-        truncated: { stdout: false, stderr: false },
-        durationMs: 0,
-        exitCode: 1,
-        error: "killed",
-      };
-    }
-
-    const stdout = "x".repeat(runInput.resources.maxStdoutBytes + 10);
-    return {
-      result: runInput.configPayload.system.agentId.value,
-      stdout: stdout.slice(0, runInput.resources.maxStdoutBytes),
-      stderr: "",
-      truncated: { stdout: true, stderr: false },
-      durationMs: 1,
-      exitCode: 0,
-    };
-  }
-}
-
 // `spawns` marks whether this executor variant shells out via Bun.spawn.
-// FakeScriptExecutor is plain JS and never touches the sandbox, so it must
-// keep running even when the spawn probe has disabled the native suite.
 function conformance(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean) {
   const spawnTest = test.skipIf(spawns && SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -132,7 +86,6 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor, spawns: b
 }
 
 conformance("native", () => new NativeScriptExecutor(), true);
-conformance("fake", () => new FakeScriptExecutor(), false);
 // Worker threads and WASM, no Bun.spawn: runs even when the spawn probe fails.
 conformance("quickjs", () => new QuickJSScriptExecutor(), false);
 
@@ -1193,7 +1146,9 @@ describe("native-only executor behavior", () => {
 describe("classifyExit", () => {
   test("timeout and killed take precedence over other exit codes", () => {
     expect(classifyExit(1, true, false, false)).toBe("timeout");
+    expect(classifyExit(1, true, false, true)).toBe("timeout");
     expect(classifyExit(1, false, true, false)).toBe("killed");
+    expect(classifyExit(1, false, true, true)).toBe("killed");
   });
 
   test("exit 134 is authoritative even if the watchdog also fired (our kill can't produce SIGABRT)", () => {
@@ -1209,6 +1164,7 @@ describe("classifyExit", () => {
 
   test("OOM-kill exit codes map to killed", () => {
     expect(classifyExit(137, false, false, false)).toBe("killed");
+    expect(classifyExit(137, false, false, true)).toBe("killed");
     expect(classifyExit(9, false, false, false)).toBe("killed");
   });
 

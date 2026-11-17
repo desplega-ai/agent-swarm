@@ -48,7 +48,7 @@ export function UserPromptBubble({
       aria-label="User message"
       className={cn("flex justify-end pl-10 pb-3 min-w-0", className)}
     >
-      <div className="flex flex-col gap-1 items-end max-w-[85%] min-w-0">
+      <div className="flex flex-col gap-1 items-end w-full min-w-0">
         <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground px-1">
           <span>{requesterName}</span>
           <span aria-hidden="true">·</span>
@@ -61,7 +61,7 @@ export function UserPromptBubble({
             "text-sm leading-relaxed text-foreground/95",
             // `wrap-anywhere`, not `break-words`: a long URL or id must shrink
             // the bubble's min-content width, or it overflows a narrow panel.
-            "whitespace-pre-wrap wrap-anywhere text-left min-w-0",
+            "whitespace-pre-wrap wrap-anywhere text-left w-full max-w-full min-w-0 md:w-fit md:min-w-1/2",
           )}
         >
           <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />

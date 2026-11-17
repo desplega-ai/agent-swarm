@@ -21,15 +21,16 @@ async function setSkippedReaction(ctx: ScenarioContext, value: string): Promise<
   expectStatus(upsert, [200], `configure ${skippedKey}`);
   const configId = asRecord(upsert.json).id;
   expect(typeof configId === "string", `Config upsert for ${skippedKey} has no id`);
-  await waitForSkippedKeyPresence(ctx, true);
   return configId;
 }
 
 /**
- * A global config write reloads process.env on a ~250ms debounce. Wait until
- * the override is live (or gone again) before driving a message through it.
+ * Restart after a config change, then wait for the socket before checking the override.
+ * Environment presence alone can precede the reconnect.
  */
-async function waitForSkippedKeyPresence(ctx: ScenarioContext, present: boolean): Promise<void> {
+async function restartAndAwaitSkippedKey(ctx: ScenarioContext, present: boolean): Promise<void> {
+  await ctx.restartSut();
+  await ctx.slack.waitForConnection(60_000);
   const settled = await pollUntil(async () => {
     const response = await ctx.api("GET", `/api/config/env-presence?keys=${skippedKey}`);
     expectStatus(response, [200], `check ${skippedKey} presence`);
@@ -164,6 +165,7 @@ async function skipAndCheckSlack(ctx: ScenarioContext, renderer: Renderer): Prom
   const configured = "see_no_evil";
   const configId = await setSkippedReaction(ctx, configured);
   try {
+    await restartAndAwaitSkippedKey(ctx, true);
     await skipOneAsk(ctx, renderer, "override", configured, false);
   } finally {
     expectStatus(
@@ -172,7 +174,7 @@ async function skipAndCheckSlack(ctx: ScenarioContext, renderer: Renderer): Prom
       `delete config ${configId}`,
     );
     // Later scenarios expect the code-default reaction names.
-    await waitForSkippedKeyPresence(ctx, false);
+    await restartAndAwaitSkippedKey(ctx, false);
   }
 }
 
