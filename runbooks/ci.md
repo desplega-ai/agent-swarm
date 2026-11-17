@@ -72,7 +72,7 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 3. `bun run lint:slop`: the anti-slop Oxlint rules over the whole lint scope (about 5 s)
 4. `bun check` on the root project, plus `apps/ui` (`bun check -b`) when it changed
 5. Drift: each generator below runs only when its inputs changed, and the step fails when regenerating changes a checked-in output. Output that is current but not yet committed passes with a reminder; CI checks the pushed tree.
-6. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+6. `test:root` on the nearest affected tests, using `scripts/pre-push-tests.sh` scoping (`PRE_PUSH_FULL=1` runs the full suite)
 7. E2E Contract, scoped by `scripts/e2e/scope.ts` (below). `bun run check:local --skip-e2e` skips it.
 
 | Drift generator | Runs when the change touches | Same filter as CI? |
