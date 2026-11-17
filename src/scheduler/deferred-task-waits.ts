@@ -377,26 +377,40 @@ export async function reapSpentDeferredSchedules(now = new Date()): Promise<numb
 }
 
 /**
- * Confirm reads in flight, by wait target. The same provider event can arrive twice
+ * Newest confirm read per wait target. The same provider event can arrive twice
  * (an App webhook and a repo webhook both subscribed), and a PR's check runs finish
- * in bursts: concurrent candidates for one target share one provider read. The
- * claim in `dispatchDeferredTaskWait` still makes the wake itself exactly-once.
+ * in bursts, so candidates for one target share reads. A caller only shares a read
+ * that has not started yet: one that started before the caller arrived may have read
+ * state the caller's event changed. So a candidate arriving mid-read queues one
+ * trailing read, which every later candidate joins until it starts. At most one read
+ * runs and one waits per target. The claim in `dispatchDeferredTaskWait` still makes
+ * the wake itself exactly-once.
  */
-const confirmsInFlight = new Map<string, Promise<ConfirmResult>>();
+type ConfirmFlight = { started: boolean; result: Promise<ConfirmResult> };
+const confirmFlights = new Map<string, ConfirmFlight>();
 
-function confirmOnce(
+function confirmFresh(
   key: string,
   read: () => Promise<boolean | ConfirmResult>,
 ): Promise<ConfirmResult> {
-  let pending = confirmsInFlight.get(key);
-  if (!pending) {
-    pending = read()
-      .then(toConfirmResult)
-      .finally(() => confirmsInFlight.delete(key));
-    confirmsInFlight.set(key, pending);
-  }
-  return pending;
+  const previous = confirmFlights.get(key);
+  if (previous && !previous.started) return previous.result;
+  const flight: ConfirmFlight = { started: false, result: Promise.resolve({ happened: false }) };
+  const after = previous ? previous.result.then(noop, noop) : Promise.resolve();
+  flight.result = after
+    .then(() => {
+      flight.started = true;
+      return read();
+    })
+    .then(toConfirmResult)
+    .finally(() => {
+      if (confirmFlights.get(key) === flight) confirmFlights.delete(key);
+    });
+  confirmFlights.set(key, flight);
+  return flight.result;
 }
+
+function noop(): void {}
 
 /** True when some agent holds a pending wait for `event`, so its webhook deliveries are worth verifying. */
 export async function hasPendingEventWait(source: string, event: string): Promise<boolean> {
@@ -437,7 +451,7 @@ export async function reconcileDeferredEventWaits(
         satisfied.set(
           key,
           adapter.confirm
-            ? await confirmOnce(key, () =>
+            ? await confirmFresh(key, () =>
                 adapter.confirm!(wait.event, JSON.parse(wait.matchJson) as EventMatch),
               )
             : { happened: true },

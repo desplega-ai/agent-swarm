@@ -176,8 +176,17 @@ export const deferWakePrChecksDone: Scenario = {
         });
         expectStatus(forged, [403], "forged check_run event");
 
-        // Positive: Merge Gate finishes (failure still counts as done). The same delivery arrives
-        // on both webhooks at once; the waiter wakes exactly once with every conclusion.
+        // Positive: Merge Gate finishes (failure still counts as done) while the server is still
+        // reading the checks for an earlier lint candidate, held after it read Merge Gate as
+        // running. That read answers "not done"; the Merge Gate candidates arriving during it
+        // must still get a read that starts after them. The same delivery arrives on both
+        // webhooks at once; the waiter wakes exactly once with every conclusion.
+        const held = ctx.llm.holdNextGithubCheckRunRead("lint");
+        await checkRunCompleted(2, sha, "lint");
+        expect(
+          await Promise.race([held.reached.then(() => true), Bun.sleep(10_000).then(() => false)]),
+          "The lint candidate never read the lint check",
+        );
         ctx.llm.setGithubCheckRuns(repo, sha, [
           run("Merge Gate", "failure", "2026-11-17T10:05:00Z"),
           run("lint", "success", "2026-11-17T10:01:00Z"),
@@ -186,6 +195,8 @@ export const deferWakePrChecksDone: Scenario = {
           checkRunCompleted(2, sha, "Merge Gate"),
           checkRunCompleted(2, sha, "Merge Gate"),
         ]);
+        await Bun.sleep(300);
+        held.release();
         expect(
           await pollUntil(() => waitRow(ctx, scheduleId)?.status === "fired", 15_000),
           "Finished required checks never fired the wait",

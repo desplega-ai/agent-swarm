@@ -487,6 +487,8 @@ export async function startMockLlm() {
   const githubRequiredChecks = new Map<string, string[]>();
   /** Check runs per `owner/name@sha` (lowercase repo). */
   const githubCheckRuns = new Map<string, GithubCheckRun[]>();
+  /** One held check-runs read (`holdNextGithubCheckRunRead`): answers only after release. */
+  let heldRunRead: { name: string; reached: () => void; released: Promise<void> } | undefined;
   // The SUT signs an App JWT with this key before asking the stub for a token.
   const githubAppKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
     .privateKey.export({ type: "pkcs1", format: "pem" })
@@ -573,6 +575,12 @@ export async function startMockLlm() {
           const name = url.searchParams.get("check_name");
           const all = githubCheckRuns.get(`${runs[1]!.toLowerCase()}@${runs[2]}`) ?? [];
           const matching = all.filter((run) => !name || run.name === name);
+          if (heldRunRead && heldRunRead.name === name) {
+            const held = heldRunRead;
+            heldRunRead = undefined;
+            held.reached();
+            await held.released;
+          }
           return json(200, { total_count: matching.length, check_runs: matching });
         }
         if (
@@ -650,6 +658,22 @@ export async function startMockLlm() {
     setGithubRequiredChecks(repo: string, branch: string, names: string[]): void {
       githubRequiredChecks.set(`${repo.toLowerCase()}@${branch}`, names);
     },
+    /**
+     * Hold the next check-runs read filtered to `name` until `release()`. It answers with the
+     * runs as they were when it arrived, like a slow read. `reached` resolves on arrival.
+     */
+    holdNextGithubCheckRunRead(name: string): { reached: Promise<void>; release: () => void } {
+      let reached!: () => void;
+      let release!: () => void;
+      const arrived = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      heldRunRead = { name, reached, released };
+      return { reached: arrived, release };
+    },
     /** Tell the GitHub stub which check runs (latest per name) exist on a SHA. */
     setGithubCheckRuns(repo: string, sha: string, checkRuns: GithubCheckRun[]): void {
       githubCheckRuns.set(`${repo.toLowerCase()}@${sha}`, checkRuns);
@@ -664,6 +688,7 @@ export async function startMockLlm() {
       githubPulls.clear();
       githubRequiredChecks.clear();
       githubCheckRuns.clear();
+      heldRunRead = undefined;
     },
     async stop(): Promise<void> {
       await server.stop(true);
