@@ -87,18 +87,18 @@ Production includes each synchronous SQLite attempt in execution time. Its final
 The fixed ceiling therefore cannot protect the accounting contract under load.
 Keep real SQLite contention and verify that execution time includes failed attempts but excludes backoff.
 C22 first passed 53 affected checks and two mutation controls with clock and timer spies.
-Independent review rejected the added maintenance cost. A smaller real-clock version remains under validation.
+Independent review rejected the added maintenance cost. The later real-clock version appears in the final C22 checkpoint below.
 C10 also failed this unchanged guard in merge-group run 44125275220, measuring 364.037399ms.
 GitHub check annotations identify the exact failure at db-client-busy-retry.test.ts:102.
 PR #3277 later merged a zero-spin fixture with a 200ms ceiling as 7d5ad4e75d396bebb57e460f40f7c72432531a6d.
 C15 and C10 returned to queue validation after that change. C15 merged.
 C10 run 44131652948 failed the zero-spin guard: executionMs 201.530818ms against the new 200ms ceiling.
-Check 134210204331 identifies db-client-busy-retry.test.ts:113. No further queue retry was requested.
+Check 134210204331 identifies db-client-busy-retry.test.ts:113. No retry was requested before the later C22 repair.
 The C22 candidate targets an additional contract: failed BUSY attempts contribute to executionMs, which controls retention batch sizing.
 Its first real-clock revision passed 53 affected checks and rejected both accounting mutants.
 It also rejected omitted failed-attempt cost when 80ms of successful-attempt overhead masked the simpler proposed assertion.
 A caller pause of 250ms still masked the backoff-inclusion mutant. The evidence does not claim universal accounting precision.
-The candidate predates PR #3277. Rebase, current-main controls, and renewed review remain pending.
+That first candidate predates PR #3277. The final C22 checkpoint below records its rebase, fresh controls, and renewed review.
 
 ## Slack readiness repair
 
@@ -149,3 +149,33 @@ Paired production line coverage, on identical source within each pair:
 C22 increases come from timing-dependent logging. C24 preserves the exact covered source locations.
 Both pairs ran on macOS with Bun 1.4.4. Neither proves branch coverage, Linux behavior, or whole-repository coverage.
 See the measurements document for source bases, scopes, historical coverage, and timing limitations.
+
+## Approval-card consolidation and new inventory audits
+
+C25 card PR #3299 changes one existing test file, +2/-17 lines, with no production change.
+Six affected suites passed sequentially: 151 baseline cases and 149 candidate cases.
+The changed suite passed 20 cases and 86 assertions. Parent check:local passed against main at 7be110da2c.
+Formatting, lint, configured root typechecking, boundaries, secret scanning, and pre-push affected tests passed.
+Independent review found no lost behavior guard or correctness blocker.
+Wrong channel, unwanted reply, incorrect rejection icon, and missing operator fallback controls each failed a retained assertion.
+Paired coverage measured 224 production files and 40097 lines, with zero lost covered source locations.
+Relevant notification, storage, and DM coverage matched exactly. Seven incidental scrubber hits are not a claimed improvement.
+Neither version tests a channel target with messageTs but no channelId. Line coverage does not establish branch equivalence.
+The full repository suite and live Slack were not run locally. PR #3299 passed required validation and merged as 2204b5c8fa41ec45a9bac915c5abe40b527598d3.
+
+The initial six-file approval audit ran no tests or controls. Subsequent slice validation follows below.
+PR #3301 implements the copied HTTP replacement: +43/-208 lines, with 87 cases retained.
+Parent check:local passed after rebase onto main at 498e8d3542. The implementation also passed 18 credential-resolution cases.
+Five controls failed. Parent paired coverage measured 751 files and 114917 fixed line locations, with 29 gained and zero lost production lines.
+Independent review found no lost guards. Full-server admission remains outside these handler harnesses.
+A baseline 404 instead of 409 remains unexplained. Subsequent passes do not establish a repair.
+The executor fixture and copied fallback candidates passed their scoped checks and controls.
+Independent review accepted the fallback deletion. It confirmed executor correctness but requested removal of repeated assertions and duplicated setup.
+The seven-file approval dashboard audit ran no tests or controls. Its two bounded recommendations remain unimplemented.
+
+Two new main files remain unchanged after audit. The pre-push selector passed four cases and 39 assertions.
+Saved UI configuration passed 25 cases and 110 assertions with deployment settings explicitly cleared.
+These two checks ran without mutation controls. No browser or complete UI subsystem validation ran.
+
+C10 merged as 7be110da2c264e6ba3e68879818f7ad0d168c5bd after C22 removed the reproduced timing ceiling.
+C24 merged as 5ee2b27ad8ffc9d089a7f59ffce89396a95b2673. The coverage checkpoint merged through PR #3295 as 36a09fbd30ed871c2b47627942441324b8aae323.

@@ -5,24 +5,26 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 19 merged cleanup changes, verified through GitHub.
+The current checkpoint includes 22 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: 2026-11-17 at 19:55 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 19 merged changes | 478 | 1641 | 1163 | 66 | 3 |
-| Pending C10 and C24 only | 14 | 389 | 375 | 13 | 0 |
-| Combined, if both land unchanged | 492 | 2030 | 1538 | 79 | 3 |
+| 22 merged changes | 494 | 2047 | 1553 | 81 | 3 |
+| Pending C25 HTTP only | 43 | 208 | 165 | 0 | 0 |
+| Combined, if C25 HTTP lands unchanged | 537 | 2255 | 1718 | 81 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293.
-Pending means implemented and reviewed, not merged. C10 is PR #3274 and C24 is PR #3294.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299.
+Pending means implemented and reviewed, not merged. C25 HTTP is PR #3301.
+Executor fixture refinements and the reviewed copied fallback candidate remain unpublished and outside these totals.
 The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
 
-The reconciled inventory has 1615 current test files. Of these, 173 received at least partial audit work and 1442 remain pending.
-Two files appeared on main after the initial inventory. Both remain pending. Three campaign-deleted rows remain as historical records.
+The reconciled inventory has 1615 current test files. Of these, 188 received at least partial audit work and 1427 remain pending.
+Two files appeared on main after the initial inventory. Both now have recorded audits. Three deleted rows remain as historical records.
 The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
 This extrapolation is weak. The inspected files are not a random sample, and partial audits are not completed cleanup.
 
@@ -60,19 +62,27 @@ No complete post-cleanup coverage comparison exists yet. The historical referenc
 
 ## Paired coverage checkpoint, 2026-11-17
 
-Both pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
+The four published-slice pairs ran sequentially on macOS with Bun 1.4.4 and the same production source for each pair.
 The scope excludes src/tests. Each pair uses one changed test file, with the existing coverage configuration and preload.
 
 | Slice | Source base | Cases before / after | Loaded production files | Covered lines before / after | Instrumented lines | Lost covered lines |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | C22, PR #3293 | 37d3a1bc85 | 18 / 18 | 152 | 10033 / 10216 | 31196 | 0 |
 | C24, PR #3294 | b2ae0d76bf | 43 / 33 | 744 | 24544 / 24544 | 113518 | 0 |
+| C25 cards, PR #3299 | 4731627d06 | 22 / 20 | 224 | 11733 / 11740 | 40097 | 0 |
+| C25 HTTP, PR #3301 | 36a09fbd30 | 87 / 87 | 751 | 25302 / 25331 | 114917 | 0 |
 
-The comparisons also checked source locations. Neither pair changed its instrumented line locations or loaded production file set.
+The comparisons also checked source locations. No pair changed its instrumented line total or loaded production file set.
 C24 retained every covered source location. Its four regression controls also failed as expected.
 C22 gained nine slow-statement warning lines and 174 scrubber lines because logging depends on timing.
 Do not count those 183 lines as new regression coverage. Its accounting controls provide the behavioral evidence.
-Neither artifact contains branch records. These scoped results do not establish repository-wide coverage equality.
+C25 preserves coverage in approval notifications, both measured storage modules, and Slack DM resolution.
+Its seven additional scrubber hits are incidental and do not establish stronger regression coverage.
+Four controls failed retained assertions. The absent-channelId fallback remains untested before and after consolidation.
+C25 HTTP gains 29 lines in the real approval route. Its five controls provide behavior evidence beyond those line counts.
+Unpublished executor and fallback candidates also have paired evidence. Review accepted the fallback deletion and requested smaller executor coverage.
+The executor scope includes packages and uses a different denominator, so do not sum their coverage counts.
+The artifacts contain no branch records. These scoped results do not establish repository-wide coverage equality.
 Coverage-instrumented durations are not performance measurements.
 
 One parent C22 attempt overlapped coverage and ordinary tests against the same fixture database.
