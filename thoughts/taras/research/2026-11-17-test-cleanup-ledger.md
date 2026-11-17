@@ -471,8 +471,9 @@ Some auxiliary production reads followed the initial test read. Transitive broke
 The strongest candidate removes historical previous-checklist prompt-parser variants. Production reads receipts containing full task IDs instead.
 Preserve current multiline failure titles, receipt validation, and actual SQL selection of previous checklists.
 PR #3294 changes only heartbeat-jev-gate.test.ts: +9/-241 lines, net -232.
-It removes nine historical variants, two hollow or redundant cases, and unused fixture plumbing. No new test call site was added.
-Baseline 43 cases passed. The final candidate passed 33 cases, with formatting, allowlist, and patch checks passing.
+It removes 11 executed cases: nine historical variants and two hollow or redundant cases, plus unused fixture plumbing.
+One mixed-array row adds an executed case to an existing parameter table. No new test call site was added.
+The case count is 43 - 11 + 1 = 33. All 33 final cases, formatting, allowlist, and patch checks passed.
 Ignoring receipts caused four failures. Suppression by creation time caused seven failures.
 Malformed-array acceptance initially survived. A mixed string/number row in the existing table now detects it with one failure.
 All original malformed-input cases remain. A single-line regex control failed the retained multiline total assertion.
