@@ -155,6 +155,8 @@ export interface TranscriptProps {
   outcomeText?: string;
   /** A finished run folds behind this line. Without it, every row shows. */
   fold?: TranscriptFold | null;
+  /** Shown under the open fold, before the rows: the run's earlier tries. */
+  earlier?: ReactNode;
   /** When the live run started: the "Working for" timer counts from it. */
   workingSince?: string;
   /**
@@ -176,6 +178,7 @@ export function Transcript({
   later,
   outcomeText,
   fold,
+  earlier,
   workingSince,
   waitingLabel,
   scroller,
@@ -203,6 +206,7 @@ export function Transcript({
     >
       {prompt}
       {activeFold ? <TurnFoldRow fold={activeFold} /> : null}
+      {activeFold?.open ? earlier : null}
       {hidden > 0 ? (
         <Button
           type="button"
@@ -383,7 +387,7 @@ const RESUME_REASONS: Record<string, string> = {
   provider_fallback: "a provider error",
 };
 
-function resumeLabel(tags: readonly string[] | undefined): string {
+export function resumeLabel(tags: readonly string[] | undefined): string {
   const reason = tags?.find((tag) => tag.startsWith("reason:"))?.slice("reason:".length);
   if (!reason) return "Resumed";
   return `Resumed after ${RESUME_REASONS[reason] ?? reason.replaceAll("_", " ")}`;
