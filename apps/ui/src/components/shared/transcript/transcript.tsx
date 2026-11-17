@@ -566,17 +566,17 @@ export function TranscriptUserMessage({
       {avatar ? <div className="mt-2 shrink-0">{avatar}</div> : null}
       <div
         className={cn(
-          // A fixed width: a short line, a code block or a long one-line
-          // header value must not change it. `w-full` below stops a nowrap
-          // header (`truncate`) from widening the bubble past this column.
-          "flex min-w-0 flex-col gap-1.5",
-          avatar ? "w-[85%]" : "w-[80%]",
+          // The bubble spans the column at most, like the agent's rows, and
+          // half of it at least. On a phone it is always the full width.
+          // `max-w-full` on it stops a nowrap header (`truncate`) from
+          // widening it past the column.
+          "flex w-full min-w-0 flex-col gap-1.5",
           align === "end" && "items-end",
         )}
       >
         <div
           className={cn(
-            "relative w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
+            "relative w-full max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:w-fit md:min-w-1/2 md:text-sm",
             align === "end"
               ? "rounded-tr-sm bg-muted"
               : "rounded-tl-sm border border-border bg-card",
