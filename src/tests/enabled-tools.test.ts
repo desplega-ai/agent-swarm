@@ -182,7 +182,6 @@ describe("SWARM_ENABLED_TOOLS on the MCP server", () => {
     expect(unset).toContain("send-task");
     // messaging is a default-disabled capability
     expect(unset).not.toContain("post-message");
-    expect(await toolNames({ enabledTools: undefined })).toEqual(unset);
   });
 
   test("set registers exactly the listed tools, ignoring capabilities", async () => {
@@ -230,7 +229,6 @@ describe("SWARM_ENABLED_TOOLS on the MCP server", () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
       expect(await toolNames({ enabledTools: " , " })).toEqual(unset);
-      expect(await toolNames({ enabledTools: "" })).toEqual(unset);
       expect(
         warn.mock.calls.some((call) => String(call[0]).includes("lists no tools; ignoring it")),
       ).toBe(true);

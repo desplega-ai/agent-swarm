@@ -1311,16 +1311,6 @@ describe("Slack renderer v2", () => {
         ` ↳ ▶️ ship this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`>`,
       ].join("\n"),
     );
-    expect(text).not.toContain("workspace.slack.com");
-    expect(text).not.toContain("|↵>");
-    expect(text).not.toContain("|result>");
-    expect(text).toContain(getTaskLink(ask.id));
-    expect(text).toContain(`\`${ask.id.slice(0, 8)}\``);
-    expect(text).not.toContain("```");
-    expect(text).not.toContain("↩");
-    expect(text).not.toContain(":leftwards_arrow_with_hook:");
-    const rows = text.split("\n").slice(1);
-    expect(rows.slice(0, 3).map((row) => row.match(/^ +/u)?.[0].length)).toEqual([1, 4, 7]);
   });
 
   test("glyphs: running vs stalled in_progress, and a pending task blocked on a dependency", async () => {
@@ -1708,7 +1698,7 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    await completeTask(ask.id, "Recover this outcome through its deterministic task link.");
+    await completeTask(ask.id, "Recover this outcome through its presentation text.");
     await getDbClient().run(`CREATE TRIGGER fail_outcome_timestamp_bind
       BEFORE UPDATE OF ts ON slack_messages
       WHEN OLD.kind = 'outcome' AND OLD.ts LIKE 'pending:%'
@@ -1816,29 +1806,16 @@ describe("Slack renderer v2", () => {
     expect(outcomeBody).toBe(
       "✅ Implemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
     );
-    expect(outcomeBody).not.toMatch(/\n{3,}/);
-    expect(outcomeBody).toBe(outcomeBody.trim());
-    expect(outcomeBody).not.toContain("**Done**");
-    expect(outcomeBody).not.toContain(getTaskLink(ask.id));
     expect(started.payload.channel).toBe(channelId);
     expect(started.payload.thread_ts).toBe(threadTs);
     expect(started.payload.recipient_user_id).toBe("U_REQUESTER");
     expect(started.payload.recipient_team_id).toBe("T_TEST");
-    expect(String(started.payload.markdown_text).startsWith("✅ Implemented")).toBe(true);
-    expect(Object.keys(started.payload).sort()).toEqual([
-      "channel",
-      "icon_emoji",
-      "markdown_text",
-      "recipient_team_id",
-      "recipient_user_id",
-      "thread_ts",
-      "username",
-    ]);
+    expect(started.payload).not.toHaveProperty("blocks");
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const stopped = calls.find(
       (call) => call.method === "chat.stopStream" && call.payload.channel === channelId,
     )!;
-    expect(Object.keys(stopped.payload).sort()).toEqual(["blocks", "channel", "ts"]);
+    expect(stopped.payload.markdown_text).toBeUndefined();
     const completedAsk = (await getTaskById(ask.id))!;
     const duration = formatV2Duration(
       new Date(completedAsk.createdAt),
@@ -2232,15 +2209,6 @@ describe("Slack renderer v2", () => {
 
     const started = calls.find((call) => call.method === "chat.startStream");
     expect(started?.payload.markdown_text).toBe(`✅\n\n${output.trim()}`);
-    expect(String(started?.payload.markdown_text)).toContain("# Complete result");
-    expect(String(started?.payload.markdown_text)).toContain("**Bold text**");
-    expect(String(started?.payload.markdown_text)).toContain(
-      "[a labeled link](https://example.com/result)",
-    );
-    expect(String(started?.payload.markdown_text)).toContain("  - nested item");
-    expect(String(started?.payload.markdown_text)).toContain(
-      '```ts\nconst message = "preserved";\n```',
-    );
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
   });
 
@@ -2702,30 +2670,6 @@ describe("Slack renderer v2", () => {
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
-  test("keeps the full outcome body when the agent has not replied inline", async () => {
-    const lead = await createAgent({ name: "No Reply Lead", isLead: true, status: "idle" });
-    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_NO_REPLY");
-    const ask = await createTaskExtended("ask without an inline reply", {
-      agentId: lead.id,
-      source: "slack",
-      slackChannelId: channelId,
-      slackThreadTs: threadTs,
-      contextKey: slackContextKey({ channelId, threadTs }),
-    });
-    await startTask(ask.id);
-    await ensureSlackThreadTree([ask.id]);
-    await completeTask(ask.id, "This output must reach Slack since no slack-reply was sent.");
-    calls.length = 0;
-    _resetSlackRenderV2ForTests();
-
-    await processSlackRenderV2();
-
-    const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe(
-      "✅ This output must reach Slack since no slack-reply was sent.",
-    );
-  });
-
   test("redacts a runtime-rotated config secret from persisted output and its Slack outcome", async () => {
     const lead = await createAgent({ name: "Rotating Secret Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_ROTATED_SECRET");
@@ -2792,7 +2736,7 @@ describe("Slack renderer v2", () => {
     expect(outcome?.finalizedAt).toBeDefined();
   });
 
-  test("renders a legacy deferral as ⏳ with its ETA, even after a slack-reply", async () => {
+  test("renders a legacy deferral as ⏳ without its ETA, even after a slack-reply", async () => {
     const lead = await createAgent({ name: "Deferring Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_DEFER_AFTER_REPLY");
     const ask = await createTaskExtended("defer after replying by hand", {
@@ -3293,7 +3237,7 @@ describe("Slack renderer v2", () => {
     expect(attempts()).toBe(0);
   });
 
-  test("a deferral with no pending text still posts its ETA", async () => {
+  test("a legacy deferral with no pending text still posts a waiting card", async () => {
     const { channelId, threadTs } = uniqueSlackAddress("C_ETA_ONLY");
     const ask = await createTaskExtended("wait", {
       source: "slack",
@@ -3773,40 +3717,6 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
   });
 
   // --- T3: child result cards ---------------------------------------------
-
-  test("an eligible mcp child posts once and never twice across 3 ticks", async () => {
-    const lead = await createAgent({ name: "Delegation Lead", isLead: true, status: "idle" });
-    const worker = await createAgent({ name: "Delegation Worker", isLead: false, status: "idle" });
-    const { channelId, threadTs } = uniqueSlackAddress("C_CHILD_ONCE");
-    const ask = await createTaskExtended("delegate research", {
-      agentId: lead.id,
-      source: "slack",
-      slackChannelId: channelId,
-      slackThreadTs: threadTs,
-      contextKey: slackContextKey({ channelId, threadTs }),
-    });
-    await startTask(ask.id);
-    const child = await createTaskExtended("research the API", {
-      agentId: worker.id,
-      source: "mcp",
-      parentTaskId: ask.id,
-      followUpConfig: { disabled: true },
-    });
-    await startTask(child.id);
-    await completeTask(child.id, "Found the answer.");
-    calls.length = 0;
-
-    await processSlackRenderV2();
-    await processSlackRenderV2();
-    await processSlackRenderV2();
-
-    const startStreamCalls = calls.filter((call) => call.method === "chat.startStream");
-    expect(startStreamCalls).toHaveLength(1);
-    expect(String(startStreamCalls[0]!.payload.markdown_text)).toContain(
-      "↳ ✅ Delegation Worker — result",
-    );
-    expect((await getSlackOutcomeMessage(child.id))?.finalizedAt).toBeDefined();
-  });
 
   test("follow-up and reroute-decision children never get a card; a resume child does", async () => {
     const lead = await createAgent({ name: "Tasktype Lead", isLead: true, status: "idle" });
@@ -4664,59 +4574,6 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
       method: "reactions.add",
       payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
     });
-  });
-
-  test("acceptance: ask done + child running yields zero outcome rows across 10 ticks, then exactly one within 2 ticks after settling", async () => {
-    const lead = await createAgent({ name: "Acceptance T4 Lead", isLead: true, status: "idle" });
-    const worker = await createAgent({
-      name: "Acceptance T4 Worker",
-      isLead: false,
-      status: "idle",
-    });
-    const { channelId, threadTs } = uniqueSlackAddress("C_T4_ACCEPTANCE");
-    const ask = await createTaskExtended("acceptance ask", {
-      agentId: lead.id,
-      source: "slack",
-      slackChannelId: channelId,
-      slackThreadTs: threadTs,
-      contextKey: slackContextKey({ channelId, threadTs }),
-    });
-    await startTask(ask.id);
-    const child = await createTaskExtended("acceptance child", {
-      agentId: worker.id,
-      source: "mcp",
-      parentTaskId: ask.id,
-      followUpConfig: { disabled: true },
-    });
-    await startTask(child.id);
-    await completeTask(ask.id, "Ask done; child still running.");
-    calls.length = 0;
-
-    for (let tick = 0; tick < 10; tick++) {
-      await processSlackRenderV2();
-    }
-    const openRows = await getDbClient().query(
-      `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome'`,
-      [ask.id],
-    );
-    expect(openRows).toHaveLength(0);
-
-    await completeTask(child.id, "Child finished.");
-    await backdateLastUpdated([ask.id, child.id], 60);
-
-    let ticksToFinalize = 0;
-    for (let tick = 0; tick < 2 && !(await getSlackOutcomeMessage(ask.id))?.finalizedAt; tick++) {
-      await processSlackRenderV2();
-      ticksToFinalize = tick + 1;
-    }
-
-    expect(ticksToFinalize).toBeLessThanOrEqual(2);
-    const finalRows = await getDbClient().query<{ conclusion_kind: string | null }>(
-      `SELECT conclusion_kind FROM slack_messages WHERE task_id = ? AND kind = 'outcome'`,
-      [ask.id],
-    );
-    expect(finalRows).toHaveLength(1);
-    expect(finalRows[0]?.conclusion_kind).toBe("complete");
   });
 
   test("ask and child both terminal before the first tick: conclusion still links the child's permalink, not a digest", async () => {

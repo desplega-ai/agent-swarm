@@ -224,6 +224,7 @@ function buildSandboxedCommandCore(
 
   return [
     useBashShell ? "bash" : "sh",
+    ...(useBashShell ? ["--noprofile", "--norc", "-p"] : []),
     "-c",
     `${ulimits}; exec ${dropPrivileges}env -i ${envAssignments} ${quotedInner}`,
   ];

@@ -21,13 +21,8 @@ const catalog: HarnessCatalogSections = {
     models: {
       "gpt-6-luna": { release_date: "2026-09-01", reasoning: true },
       "gpt-5.6-sol": { release_date: "2026-05-01", reasoning: true },
-      "gpt-5.6-terra": { release_date: "2026-05-01", reasoning: true },
-      "gpt-5.6-luna": { release_date: "2026-05-01", reasoning: true },
       "gpt-5-nano": { release_date: "2025-08-01", reasoning: true },
     },
-  },
-  openrouter: {
-    models: { "anthropic/claude-opus-5.5": { release_date: "2026-08-01" } },
   },
 };
 
@@ -60,13 +55,17 @@ describe("harnessModelMismatch", () => {
       for (const harness of ["claude", "claude-managed"]) {
         expect(harnessModelMismatch(id, harness, sections)).toBeNull();
         expect(harnessModelMismatch(`anthropic/${id}[1m]`, harness, sections)).toBeNull();
-        expect(harnessModelIds(harness, models)).toEqual(
-          harnessModelIds(harness, catalog.anthropic?.models),
-        );
       }
       expect(harnessModelMismatch(id, "codex", sections)).toContain(
         "does not run on the codex harness",
       );
+    }
+    for (const harness of ["claude", "claude-managed"]) {
+      expect(harnessModelIds(harness, models)).toEqual([
+        "claude-opus-5-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+      ]);
     }
   });
 
@@ -115,7 +114,7 @@ describe("harnessModelMismatch", () => {
     ).toContain("does not run on the claude harness");
   });
 
-  test("anthropic/claude-opus-5-5 on claude passes (own section prefix)", () => {
+  test("anthropic/claude-opus-5-5 on claude-managed passes (own section prefix)", () => {
     expect(harnessModelMismatch("anthropic/claude-opus-5-5", "claude-managed", catalog)).toBeNull();
   });
 

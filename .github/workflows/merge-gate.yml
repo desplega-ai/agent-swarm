@@ -64,6 +64,8 @@ jobs:
 
       - name: Compute per-domain change flags
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           # --no-renames: with rename detection on (git's default), a move
@@ -79,12 +81,13 @@ jobs:
           # Always re-run everything if the merge-gate workflow itself changed.
           GATE_CHANGED=$(echo "$CHANGED" | grep -E '^\.github/workflows/merge-gate\.yml$' || true)
 
+          # match <pattern> [file list]: the list defaults to every changed file.
           match() {
-            local pattern="$1"
+            local pattern="$1" files="${2-$CHANGED}"
             if [ -n "$GATE_CHANGED" ]; then
               echo "true"; return
             fi
-            if echo "$CHANGED" | grep -E "$pattern" > /dev/null; then
+            if echo "$files" | grep -E "$pattern" > /dev/null; then
               echo "true"
             else
               echo "false"
@@ -138,7 +141,8 @@ jobs:
           # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
           # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
           # and apps/evals/ feeds the evals-service image.
-          DOCKER=$(match '^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
+          DOCKER_INPUTS='^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)'
+          DOCKER=$(match "$DOCKER_INPUTS")
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
@@ -150,7 +154,25 @@ jobs:
           UI_E2E=$(match '^(apps/ui/|packages/ui-e2e/|scripts/e2e/|src/http/|src/be/|bun\.lock|package\.json$|bunfig\.toml$|\.github/workflows/ui-e2e(-shards|-report)?\.yml$)')
 
           # dashboard image: everything Dockerfile.ui copies, plus its smoke test.
-          UI_IMAGE=$(match '^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)')
+          UI_IMAGE_INPUTS='^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)'
+          UI_IMAGE=$(match "$UI_IMAGE_INPUTS")
+
+          # A pull request builds images only when its diff touches what assembles one:
+          # Dockerfiles, entrypoints, manifests, the lockfile and the directories an image
+          # copies. A diff of application source alone (src/, scripts/e2e/) builds none
+          # here. Lint, tests and E2E check that source on the pull request, and the merge
+          # queue uses the full lists above, so every image builds before the change lands.
+          # In the 14 days to 2026-11-16, Docker Build Test failed in 1 of 1,007 pull
+          # request runs and Dashboard Image in none.
+          # Dashboard Image keeps the src/ directories apps/ui imports;
+          # src/tests/merge-gate-detect-changes.test.ts fails when that list goes stale.
+          if [ "${EVENT_NAME:-}" = "pull_request" ]; then
+            DOCKER=$(match "$DOCKER_INPUTS" "$(echo "$CHANGED" | grep -vE '^(src/|scripts/e2e/)' || true)")
+            UI_IMAGE=$(match "$UI_IMAGE_INPUTS" "$(echo "$CHANGED" | grep -vE '^src/' || true)")
+            if [ "$UI_IMAGE" = "false" ]; then
+              UI_IMAGE=$(match '^src/(utils|themes|telemetry-contract|commands/onboard)/')
+            fi
+          fi
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
@@ -179,7 +201,8 @@ jobs:
       # (the preload's DB template), templates/ (seeders), the preload and its preload-only
       # helpers (hang-watchdog*.ts; `--changed` ignores preload imports), bunfig.toml,
       # tsconfig.json, bun.lock, a package.json change beyond the version, or this
-      # workflow. scripts/pre-push-tests.sh uses the same list, minus this workflow.
+      # workflow. scripts/pre-push-tests.sh keeps only the preload, bunfig.toml and
+      # tsconfig.json from this list; it leaves the rest to CI.
       # src/tests/merge-gate-detect-changes.test.ts runs this step.
       - name: Compute unit-test scope
         id: test-scope
@@ -682,10 +705,10 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  # Three shards, one runner each: its own API process, DB file, ports and mocks. Bands
+  # Four shards, one runner each: its own API process, DB file, ports and mocks. Bands
   # are fixed by scenario order (SHARD_CUTS in scripts/e2e/shard.ts), not timing.
   e2e-contract-shard:
-    name: E2E Contract (shard ${{ matrix.shard }}/3)
+    name: E2E Contract (shard ${{ matrix.shard }}/4)
     needs: detect-changes
     # PRs skip the suite when they touch nothing it loads. merge_group (and any
     # other event) always runs it.
@@ -697,7 +720,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -724,7 +747,7 @@ jobs:
       # --coverage writes one lcov per API process (PRs for the changed-lines comment, the merge
       # queue for the coverage-on-main trend in the tracker); a coverage problem never fails it.
       - name: Run E2E contract shard
-        run: bun run e2e --shard ${{ matrix.shard }}/3 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --shard ${{ matrix.shard }}/4 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -783,7 +806,7 @@ jobs:
 
       # merge.ts imports no package, so no install. A missing shard file fails the merge.
       - name: Merge shards (strict coverage gate)
-        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json
+        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json e2e-shards/e2e-shard-4.json
 
       - name: Add E2E job summary
         if: always()
@@ -1372,6 +1395,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Start Docker build timer
         id: docker-timer
@@ -1469,6 +1495,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build Docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

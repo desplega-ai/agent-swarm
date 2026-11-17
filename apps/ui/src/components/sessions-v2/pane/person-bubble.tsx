@@ -72,13 +72,14 @@ export function PersonBubble({
         // Centered on the first line: 8 px padding plus half a line, minus half the avatar.
         className={cn("mt-2", mine && "@max-[30rem]/turns:hidden")}
       />
-      <div className={cn("flex max-w-[85%] min-w-0 flex-col gap-1.5", mine && "items-end")}>
+      {/* The bubble spans the column at most and half of it at least; a narrow pane gets the full width. */}
+      <div className={cn("flex w-full min-w-0 flex-col gap-1.5", mine && "items-end")}>
         {/* Only what the person sent: the agent's files show with its reply (`SwarmReply`). */}
         <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="person" />
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
-            "min-w-0 rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:text-sm",
+            "w-full max-w-full min-w-0 rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere @min-[30rem]/turns:w-fit @min-[30rem]/turns:min-w-1/2 md:text-sm",
             mine ? "rounded-tr-sm bg-muted" : "rounded-tl-sm border border-border bg-card",
             // A message from Slack or a chat channel stays greyed (SPEC R2).
             external && "border border-dashed bg-surface text-muted-foreground",

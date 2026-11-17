@@ -68,19 +68,32 @@ export async function enableSlackDelegation(ctx: ScenarioContext): Promise<void>
  * unreachable (see run.ts's ordering comment on the slackDelegation* block).
  */
 export async function enableSlackRenderV2Only(ctx: ScenarioContext): Promise<void> {
-  expectStatus(
-    await ctx.api("PUT", "/api/config", {
-      body: {
-        scope: "global",
-        scopeId: null,
-        key: "SLACK_RENDER_V2",
-        value: "true",
-        isSecret: false,
-      },
-    }),
-    [200],
-    "enable SLACK_RENDER_V2 for flag-off-delegation e2e",
-  );
+  const configResponse = await ctx.api("GET", "/api/config?scope=global");
+  expectStatus(configResponse, [200], "list global config while confirming delegation is off");
+  const configs = asRecord(configResponse.json).configs;
+  expect(Array.isArray(configs), "Config list has no configs array");
+  if (
+    !configs
+      .map(asRecord)
+      .some((config) => config.key === "SLACK_RENDER_V2" && config.value === "true")
+  ) {
+    expectStatus(
+      await ctx.api("PUT", "/api/config", {
+        body: {
+          scope: "global",
+          scopeId: null,
+          key: "SLACK_RENDER_V2",
+          value: "true",
+          isSecret: false,
+        },
+      }),
+      [200],
+      "enable SLACK_RENDER_V2 for flag-off-delegation e2e",
+    );
+    // Restart consumes the saved config without leaving a debounced reload pending.
+    await ctx.restartSut();
+  }
+  await ctx.slack.waitForConnection(60_000);
   const activated = await pollUntil(() => {
     const row = ctx.db.get<{ activated_at: string | null }>(
       "SELECT activated_at FROM slack_render_v2_state WHERE id = 1",
@@ -97,10 +110,6 @@ export async function enableSlackRenderV2Only(ctx: ScenarioContext): Promise<voi
     "SLACK_RENDER_V2_DELEGATION is already activated — this scenario must run before any flag-on delegation scenario",
   );
 
-  const configResponse = await ctx.api("GET", "/api/config?scope=global");
-  expectStatus(configResponse, [200], "list global config while confirming delegation is off");
-  const configs = asRecord(configResponse.json).configs;
-  expect(Array.isArray(configs), "Config list has no configs array");
   expect(
     !configs
       .map(asRecord)

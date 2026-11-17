@@ -543,12 +543,13 @@
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, and the flag-off repro",
+      "description": "Delegated child results, failed and late children, the flag-off repro, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
-        "slack-delegation-late-child"
+        "slack-delegation-late-child",
+        "slack-delegation-band-entry"
       ]
     },
     "slack-http-native": {
@@ -585,6 +586,10 @@
     "task-defer-wake-pr-merged": {
       "description": "defer-task wakeOn vcs.pr.merged (external-event wait, github adapter): refused with GitHub off or an unknown source, already-happened and unreadable targets rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires, a task-scoped token is refused, the 20-wait cap refuses the 21st but not a timer-only defer",
       "scenarios": ["defer-wake-pr-merged"]
+    },
+    "task-defer-wake-pr-checks-done": {
+      "description": "defer-task wakeOn vcs.pr.checks_done (github adapter): rejected when the base branch has no required checks or they already finished, a check_run while a required check still runs wakes nobody, a forged check_run is refused, the same finished delivery twice wakes once with every conclusion",
+      "scenarios": ["defer-wake-pr-checks-done"]
     },
     "task-delegation": {
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",

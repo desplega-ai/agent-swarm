@@ -1,0 +1,151 @@
+# Initial broad validation and follow-up
+
+Baseline: 20c45be1a9. Local macOS run. The first broad checks ran concurrently and created substantial load.
+These records preserve useful failing guards. A narrow pass does not prove that a load-sensitive failure is fixed.
+
+## Initial results
+
+| Check | Result |
+|---|---|
+| Root suite | 22,548 passed, 43 skipped, 16 failed, 2 unhandled errors across 1,498 files. 648.46 seconds. |
+| API E2E | 174 passed, 1 failed. script-inline-run failed its clean-stderr check on both attempts. |
+| UI E2E | 283 passed, 74 skipped, 1 failed. The MCP detail redirect raced OAuth cleanup. |
+| Root lint and TypeScript | Passed. |
+| Boundary checks | Passed. Dependency graph reported 2,613 warnings and zero errors. |
+
+## Failure signatures and disposition
+
+| Area | Initial evidence | Follow-up |
+|---|---|---|
+| app-shell | Plain-canvas test exceeded 5 seconds. Unhandled ChainHaltError: Not connected to an API yet. | Unchanged file passed all 5 tests alone. Load sensitivity and the asynchronous error remain unresolved. |
+| QuickJS pool | Configured size 8 produced heldPeak 5 after the probe's 10-second cutoff. | Unchanged file passed 7 tests alone. Delaying ready messages by 11 seconds reproduced the failure. C09 repairs readiness observation. |
+| Asset migrations | A fresh/upgrade test exceeded 5 seconds. Later checks saw duplicate column lastReadAt and missing fixture rows. | Unchanged file passed all 8 tests alone. Timeout-driven fixture interference remains unresolved. |
+| Entrypoint chown | Expected one chown call, received none. | BSD realpath lacks the GNU options used by production. GNU PATH passed all related tests. Docker daemon unavailable. |
+| Entrypoint clone target | Expected partial-clone preservation, received a symlink-refusal warning. | GNU PATH passed. Preserve this Linux boundary. |
+| Workflow swarm script | Abort expected an error containing killed. Received Bash startup stderr about /.turso/env. | Shares the native wrapper defect below. Preserve the abort guard. |
+| Preload environment | Child process remained observable after its parent was killed and a 10-second grace expired. | Unchanged file passed both tests alone. Loaded-run behavior remains unresolved. |
+| Worktree reaper | Six failures compared /var paths with Git's /private/var paths, including an active-task guard. | C05 canonicalized the fixture root. All 21 tests passed. Active-task and process-directory controls each failed when disabled. PR #3257 merged. |
+| Browser redirects | Expected preserved oauth=success and hash, but the destination consumed OAuth parameters and selected tab=auth. | C04 uses probe=keep and preserves query/hash assertions. All 13 redirect cases passed. PR #3255 merged. |
+
+## Native sandbox stderr
+
+A clean inline script returned exitCode 0 with this stderr:
+
+```text
+/Users/taras/.bashrc: line 6: /.turso/env: No such file or directory
+```
+
+The isolated script-inline-run scenario failed on both built-in attempts.
+A shell probe with open stdin reproduced the warning.
+Adding `--noprofile --norc -p` produced empty stderr.
+Inline mode in src/utils/sandboxed-process.ts uses plain `bash -c` before its `env -i` prelude.
+Spawn mode already includes these protective flags.
+The clean-stderr assertion is useful and must remain. A production fix needs a separate review and controlled startup-file evidence.
+
+## QuickJS controls
+
+C09 retains the existing 30-second child deadline and 35-second test budget.
+It waits for actual worker requests instead of releasing the request gate after 10 seconds.
+The final assertion measures peak requests across the entire run.
+
+| Control | Result |
+|---|---|
+| Delay every worker-ready message by 11 seconds | Original failed: heldPeak 0 versus 8. Repaired case passed. |
+| Permit one extra worker slot | Repaired case failed: 9 workers versus 8. |
+| Fail worker boot | Repaired case failed promptly: peak 0 versus 8. |
+| Reuse a busy slot instead of queuing | Survived both original and repaired tests. This is an existing coverage limit. |
+
+All controls used temporary source copies. Restored production copies matched the shared files.
+The parent removed the 48 MiB scratch tree. Available disk space stayed 12 GiB at rounded precision.
+
+## Later local checks
+
+The second local check loop passed 196 affected tests.
+The third local check loop passed affected tests and core-session-data with 95 HTTP calls.
+The campaign ledger holds each slice's detailed contract map, mutation evidence, review result, and merge status.
+
+## Isolated sandbox follow-up
+
+C15 check:local passed with GNU coreutils on PATH in 546 seconds. Root results: 13368 passed, 34 skipped, zero failed.
+API results: 172 first-attempt passes and three retry passes. The retry cases remain explicit campaign risks.
+
+| Scenario | First-attempt failure | Retry |
+|---|---|---|
+| slack-skipped-task-v2 | Timed out waiting for reactions.add | Passed on fresh API and database |
+| workflow-approvals | ECONNRESET after 33.7 seconds | Passed on fresh API and database |
+| slack-approval-buttons | No Socket Mode connection | Passed on fresh API and database |
+
+The separate script-inline-run scenario passed its clean-stderr guard. Controlled .bashrc and BASH_ENV fixtures detect removal of their protective flags.
+The .bashrc control is proven on macOS. Linux socket-stdin behavior remains unverified locally.
+Default macOS tools reproduced only the two known GNU entrypoint assumptions before the corrected PATH run.
+
+## Merge-queue DB timing failure
+
+C15 passed its PR checks. Merge-group run 44123585250 failed Run Tests (2/8).
+The unchanged db-client-busy-retry test required executionMs below 300ms. The run measured 371.386837ms.
+Production includes each synchronous SQLite attempt in execution time. Its final attempt can spin for 250ms.
+The fixed ceiling therefore cannot protect the accounting contract under load.
+Keep real SQLite contention and verify that execution time includes failed attempts but excludes backoff.
+C22 first passed 53 affected checks and two mutation controls with clock and timer spies.
+Independent review rejected the added maintenance cost. A smaller real-clock version remains under validation.
+C10 also failed this unchanged guard in merge-group run 44125275220, measuring 364.037399ms.
+GitHub check annotations identify the exact failure at db-client-busy-retry.test.ts:102.
+PR #3277 later merged a zero-spin fixture with a 200ms ceiling as 7d5ad4e75d396bebb57e460f40f7c72432531a6d.
+C15 and C10 returned to queue validation after that change. C15 merged.
+C10 run 44131652948 failed the zero-spin guard: executionMs 201.530818ms against the new 200ms ceiling.
+Check 134210204331 identifies db-client-busy-retry.test.ts:113. No further queue retry was requested.
+The C22 candidate targets an additional contract: failed BUSY attempts contribute to executionMs, which controls retention batch sizing.
+Its first real-clock revision passed 53 affected checks and rejected both accounting mutants.
+It also rejected omitted failed-attempt cost when 80ms of successful-attempt overhead masked the simpler proposed assertion.
+A caller pause of 250ms still masked the backoff-inclusion mutant. The evidence does not claim universal accounting precision.
+The candidate predates PR #3277. Rebase, current-main controls, and renewed review remain pending.
+
+## Slack readiness repair
+
+C20 avoids repeated renderer config writes. Required changes restart the API and explicitly await a Slack socket.
+The reaction override uses the same readiness barrier during setup and cleanup.
+All 35 affected scenarios passed check:local: zero failures, skips, or flaky results, with 553 HTTP calls.
+Paired runs passed before and after a two-second reconnect delay. Removing override barriers failed both existing runner attempts.
+Legacy and first-writer scenarios passed. All 16 legacy PNGs remained valid, including 11 transition frames.
+The workflow-approvals ECONNRESET remains unexplained. A skip path cannot drain an unrelated earlier config reload.
+
+## Cancellation consolidation
+
+C21 reduced the affected Codex suites from 126 to 123 tests. Parent check:local passed in 12 seconds.
+Seven controls failed retained guards. Missing poll abort still times out, and afterEach restores console.log.
+Removing name-only AbortError classification survives both versions because both explicitly call abort. This remains a coverage limit.
+Scoped test typechecking reports 13 unchanged baseline errors. The configured root typecheck passes.
+
+## Codex pool consolidation
+
+C23 removes the copied selection algorithm and exercises the exported resolver instead.
+Baseline 17 tests passed. Candidate 13 tests passed, with seven detected regression controls.
+The baseline missed exhaustion, refresh-token leakage, missing credential files, and incorrect file contents.
+Parent check:local passed. Five unchanged filesystem cases also passed with 16 assertions.
+Scoped type diagnostics decreased from ten to four existing errors. Configured root typechecking passed.
+The candidate retains nonzero-slot persistence forwarding and uses task-owned credential homes.
+Availability results containing only unconfigured slots, failed fetches, and non-ok responses remain uncovered branches.
+
+## C22 and C24 parent coverage checkpoint
+
+C22 PR #3293 changes one existing test, +48/-26 lines. Baseline affected checks passed 53 cases.
+The candidate busy suite passed 18 cases. Its combined implementation run had 52 passes and one unchanged sibling timing failure.
+The sibling timer-gap assertion received 218.9ms against a 150ms ceiling. An isolated diagnostic pass does not make the combined run green.
+Fresh controls reject backoff inclusion and omitted failed-attempt costs, including successful-overhead masking.
+Parent check:local passed 18 selected cases after sequential fixture execution.
+An earlier parent overlap between coverage and ordinary tests caused seven fixture-lock failures. Both overlapping runs were discarded.
+
+C24 PR #3294 changes one test file, +9/-241 lines. Baseline 43 cases and candidate 33 cases passed.
+Receipt, creation-time, malformed-array, and multiline-regex controls failed at the retained assertions.
+Parent check:local passed with 33 cases and configured root typechecking.
+
+Paired production line coverage, on identical source within each pair:
+
+| Slice | Covered before | Covered after | Instrumented lines | Lost covered lines |
+| --- | ---: | ---: | ---: | ---: |
+| C22 | 10033 | 10216 | 31196 | 0 |
+| C24 | 24544 | 24544 | 113518 | 0 |
+
+C22 increases come from timing-dependent logging. C24 preserves the exact covered source locations.
+Both pairs ran on macOS with Bun 1.4.4. Neither proves branch coverage, Linux behavior, or whole-repository coverage.
+See the measurements document for source bases, scopes, historical coverage, and timing limitations.
