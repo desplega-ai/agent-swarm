@@ -858,8 +858,19 @@ export const platformKeyPace: Scenario = {
 
       const near = (value: number | undefined, want: number) =>
         typeof value === "number" && Math.abs(value - want) < 0.01;
+      // Flag off (default): the worker ranks by usage; keyPace is reported but unused.
+      expect(
+        (await available(ctx, pool)).selectionStrategy === "usage",
+        "usage is the default strategy",
+      );
+      const row = await putConfig(ctx, { key: "CREDENTIAL_SELECTION_STRATEGY", value: "pace" });
+      cleanup.add("restore the default strategy", async () => {
+        await deleteConfig(ctx, String(row.id));
+        await reloadConfig(ctx);
+      });
+      await reloadConfig(ctx);
       const paced = await available(ctx, `${pool}&model=opus`);
-      expect(paced.selectionStrategy === "pace", "pace is the default strategy");
+      expect(paced.selectionStrategy === "pace", "the operator setting opts in to pace ranking");
       expect(
         near(paced.keyPace[0], 0.18 - 2 / 7) && near(paced.keyPace[1], 0.39 - 5 / 7),
         `keyPace is used minus the elapsed share of the week (got ${paced.keyPace.join()})`,
@@ -884,15 +895,11 @@ export const platformKeyPace: Scenario = {
         [400],
         "an unknown strategy is rejected",
       );
-      const row = await putConfig(ctx, { key: "CREDENTIAL_SELECTION_STRATEGY", value: "usage" });
-      cleanup.add("restore the default strategy", async () => {
-        await deleteConfig(ctx, String(row.id));
-        await reloadConfig(ctx);
-      });
+      await putConfig(ctx, { key: "CREDENTIAL_SELECTION_STRATEGY", value: "usage" });
       await reloadConfig(ctx);
       expect(
         (await available(ctx, pool)).selectionStrategy === "usage",
-        "the operator setting switches the worker back to usage ranking",
+        "setting usage switches the worker back to usage ranking",
       );
     } finally {
       await cleanup.run();

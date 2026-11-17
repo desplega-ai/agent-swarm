@@ -710,9 +710,9 @@ export async function resolveCredentialPools(
         }
       }
 
-      // An older server sends no `keyPace`: rank by usage, as it did.
+      // Pace only when the server opts in and sends `keyPace`; otherwise rank by usage, as before.
       const strategy: CredentialSelectionStrategy =
-        info?.keyPace && info.selectionStrategy !== "usage" ? "pace" : "usage";
+        info?.keyPace && info.selectionStrategy === "pace" ? "pace" : "usage";
       const usage = strategy === "pace" ? info?.keyPace : info?.keyUsage;
       const sessions = info?.activeSessions;
       const result = seatFallbackIndices

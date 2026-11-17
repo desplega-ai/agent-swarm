@@ -243,10 +243,10 @@ describe("keyPaceFromWindows", () => {
 });
 
 describe("credentialSelectionStrategy", () => {
-  test("defaults to pace; only usage switches", () => {
-    expect(credentialSelectionStrategy(undefined)).toBe("pace");
-    expect(credentialSelectionStrategy(" USAGE ")).toBe("usage");
-    expect(credentialSelectionStrategy("nonsense")).toBe("pace");
+  test("defaults to usage; only pace switches", () => {
+    expect(credentialSelectionStrategy(undefined)).toBe("usage");
+    expect(credentialSelectionStrategy(" PACE ")).toBe("pace");
+    expect(credentialSelectionStrategy("nonsense")).toBe("usage");
   });
 });
 
@@ -282,9 +282,14 @@ describe("resolveCredentialPools with keyPace", () => {
     expect(line).toContain("usage 39% pace -32% strategy pace");
   });
 
-  test("usage keeps the old pick, and an older server without keyPace ranks by usage", async () => {
+  test("usage, no strategy, or no keyPace keeps the old pick", async () => {
     logSpy = spyOn(console, "log").mockImplementation(() => {});
-    for (const map of [read("usage"), read(undefined, false)]) {
+    for (const map of [
+      read("usage"),
+      read(undefined),
+      read(undefined, false),
+      read("pace", false),
+    ]) {
       const env: Record<string, string | undefined> = { CLAUDE_CODE_OAUTH_TOKEN: pool };
       const [selection] = await resolveCredentialPools(env, {
         provider: "claude",

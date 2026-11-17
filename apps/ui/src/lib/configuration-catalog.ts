@@ -972,10 +972,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CREDENTIAL_SELECTION_STRATEGY",
         label: "Credential selection strategy",
         description:
-          "How a worker picks a key from a pooled credential. pace: the key furthest under even use of its windows first, so quota that resets soon gets used. usage: the lowest-utilization key first, legacy behaviour.",
+          "How a worker picks a key from a pooled credential. usage (default): the lowest-utilization key first. pace: the key furthest under even use of its windows first, so quota that resets soon gets used.",
         kind: "enum",
-        options: ["pace", "usage"],
-        defaultValue: "pace",
+        options: ["usage", "pace"],
+        defaultValue: "usage",
         restartRequired: false,
         docsUrl: `${DOCS}guides/harness-configuration`,
       },

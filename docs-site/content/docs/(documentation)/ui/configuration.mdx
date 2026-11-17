@@ -359,7 +359,7 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
 </Callout>
 
 <Callout type="info" title="CREDENTIAL_SELECTION_STRATEGY decides which pooled key a worker picks">
-  `pace` (default) picks the key furthest under even use: for each live window, used minus the share of the window that has passed, taking the window furthest over pace. A key with 39% used two days before its weekly reset goes before one with 18% used five days before it, so quota that resets soon gets used. `usage` restores the lowest-utilization pick. Neither excludes a key; see [Claude Code pools](/docs/guides/harness-configuration#claude-code). Takes effect on the worker's next key pick; no restart required.
+  `usage` (default) picks the lowest-utilization key. `pace` picks the key furthest under even use: for each live window, used minus the share of the window that has passed, taking the window furthest over pace. A key with 39% used two days before its weekly reset goes before one with 18% used five days before it, so quota that resets soon gets used. The API reports the pace delta under either setting. Neither excludes a key; see [Claude Code pools](/docs/guides/harness-configuration#claude-code). Takes effect on the worker's next key pick; no restart required.
 </Callout>
 
 ## Model tier defaults
