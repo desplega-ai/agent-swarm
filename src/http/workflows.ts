@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   createWorkflow,
@@ -62,6 +62,7 @@ import { workflowSaveWarnings } from "../workflows/readiness";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { requestSecretReadScope } from "./config";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import {
@@ -737,7 +738,7 @@ export async function handleWorkflows(
     let key: string | undefined;
     try {
       key = parsed.body.key
-        ? await authorizeAssetKeyWrite(parsed.body.key, trustedUserId)
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key, trustedUserId)
         : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
@@ -867,10 +868,7 @@ export async function handleWorkflows(
     const updateArgs: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
     if (parsed.body.key !== undefined) {
       try {
-        updateArgs.key = await authorizeAssetKeyWrite(
-          parsed.body.key,
-          await resolveHttpRequesterUserId(req, myAgentId),
-        );
+        updateArgs.key = await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -980,10 +978,7 @@ export async function handleWorkflows(
     let key: string | undefined;
     if (body.key !== undefined) {
       try {
-        key = await authorizeAssetKeyWrite(
-          body.key,
-          await resolveHttpRequesterUserId(req, myAgentId),
-        );
+        key = await authorizeHttpAssetKeyWrite(req, myAgentId, body.key);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);

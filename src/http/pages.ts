@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
-import { resolveHttpRequesterUserId } from "../be/audit-user";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import {
   countAllPages,
   countPagesByAgent,
@@ -22,6 +21,7 @@ import {
 import { getPageEditCounter } from "../be/db/page-versions";
 import { snapshotPage } from "../pages/version";
 import { resolveTemplate } from "../prompts/resolver";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 // Side-effect import: registers `task.page.feedback`.
 import "../prompts/session-templates";
 import { can } from "../rbac";
@@ -633,10 +633,7 @@ export async function handlePages(
 
     try {
       const key = parsed.body.key
-        ? await authorizeAssetKeyWrite(
-            parsed.body.key,
-            await resolveHttpRequesterUserId(req, myAgentId),
-          )
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key)
         : undefined;
       const page = await createPage({
         key,
@@ -880,10 +877,7 @@ export async function handlePages(
     let key: string | undefined;
     if (parsed.body.key !== undefined) {
       try {
-        key = await authorizeAssetKeyWrite(
-          parsed.body.key,
-          await resolveHttpRequesterUserId(req, myAgentId),
-        );
+        key = await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
