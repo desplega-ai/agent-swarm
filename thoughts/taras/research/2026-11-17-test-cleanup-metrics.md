@@ -5,24 +5,26 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 28 merged cleanup changes, verified through GitHub.
-Merge status checkpoint: 2026-11-17 at 21:01 BCN.
+The current checkpoint includes 31 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: 2026-11-18 at 00:17 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 28 merged changes | 639 | 2435 | 1796 | 86 | 3 |
+| 31 merged changes | 715 | 2618 | 1903 | 89 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310.
-PR #3310 adds 18 deleted lines and two removed cases to the preceding 27-change checkpoint.
-Notification synchronization #3308, dashboard consolidation #3311, and memory rating #3313 remain outside merged totals.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310, #3308, #3311, #3313.
+PRs #3308, #3311, and #3313 add +76/-183 test lines and three removed cases to the preceding 28-change checkpoint.
+Scheduling PR #3318 remains outside merged totals: +2/-44 lines and two removed cases.
+The unpublished preview alternative and the external repair #3312 also remain outside campaign totals.
 The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
 
-The reconciled inventory has 1615 current test files. Of these, 188 received at least partial audit work and 1427 remain pending.
-Two files appeared on main after the initial inventory. Both now have recorded audits. Three deleted rows remain as historical records.
+The reconciled inventory has 1616 current test files. Of these, 195 received at least partial audit work and 1421 remain pending.
+Three files appeared on main after the initial inventory. Two have recorded audits, and object-viewer.test.tsx remains pending.
+Three deleted rows remain as historical records.
 The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
 This extrapolation is weak. The inspected files are not a random sample, and partial audits are not completed cleanup.
 
@@ -75,9 +77,9 @@ Each pair records its configuration and preload. Newer pairs add network isolati
 | C25 index, PR #3306 | 43e3e5027b | 2 / 2 | 153 | 9554 / 9554 | 31215 | 0 |
 | C25 follow-up, PR #3307 | c4ab35afe1 | 85 / 84 | 752 | 25357 / 25359 | 114945 | 0 |
 | C25 list/expiry, PR #3310, two-suite union | c4ab35afe1 | 114 / 112 | 753 | 26274 / 26274 | 115005 | 0 |
-| C25 notifications, PR #3308, open | c4ab35afe1 | 6 / 6 | 778 | 23923 / 23923 | 116221 | 0 |
-| C26 dashboard, PR #3311, open | 9a61e25bbd | 58 / 57 | 49 | 1478 / 1478 | 6258 | 0 |
-| C27 rating, PR #3313, open | 9a61e25bbd | 47 / 45 | 744 | 23056 / 23056 | 113212 | 0 |
+| C25 notifications, PR #3308 | c4ab35afe1 | 6 / 6 | 778 | 23923 / 23923 | 116221 | 0 |
+| C26 dashboard, PR #3311 | 9a61e25bbd | 58 / 57 | 49 | 1478 / 1478 | 6258 | 0 |
+| C27 rating, PR #3313 | 9a61e25bbd | 47 / 45 | 744 | 23056 / 23056 | 113212 | 0 |
 
 The comparisons also checked source locations. No pair changed its instrumented line total or loaded production file set.
 C24 retained every covered source location. Its four regression controls also failed as expected.
@@ -102,6 +104,26 @@ One parent C22 attempt overlapped coverage and ordinary tests against the same f
 That ordinary run produced seven lock failures. Both overlapping runs were discarded.
 Sequential coverage and check:local runs then passed. Never run these fixture consumers concurrently.
 The earlier implementation run also had one unrelated sibling timing failure, recorded in the validation ledger.
+
+## Scheduling coverage checkpoint, 2026-11-18
+
+C29 PR #3318 remains open. Its refined pair passes 33 baseline and 31 candidate cases.
+Loaded src production locations and hit sets match. Five controls fail retained assertions, including the restored target-only guard.
+The selected scheduling scopes contain 360 covered locations out of 829 on each side:
+
+| Scope | Instrumented locations | Covered before / after | Lost covered locations |
+| --- | ---: | ---: | ---: |
+| db.ts lines 5981 through 6525 | 290 | 201 / 201 | 0 |
+| scheduler.ts | 448 | 108 / 108 | 0 |
+| schedule-task.ts | 65 | 43 / 43 | 0 |
+| schedules/validate.ts | 26 | 8 / 8 | 0 |
+
+The HTTP schedule handler is not loaded by this pair. Child scripts, branches, and full scheduling coverage remain unmeasured.
+Do not sum these selected scopes with earlier pairs. Evidence: /tmp/test-cleanup-scheduling-refined/report.md and coverage-summary.json.
+The earlier adjacent runs passed 72 cases before the target-only case was restored. They are not fresh runs of the final candidate.
+
+The superseded C28 preview pair retained 901 covered locations out of 2839 across 36 production files.
+That unpublished alternative contributes no merged lines or cases. The external repair #3312 superseded it.
 
 ## CI timing reference
 

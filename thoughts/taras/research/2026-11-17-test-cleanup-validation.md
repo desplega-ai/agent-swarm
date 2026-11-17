@@ -210,7 +210,9 @@ PR #3308 retains six cases and all old assertions. Its test diff is +41/-27 line
 Parent check:local passed. Four behavior controls fail, and the delayed unwanted-email control catches a baseline false pass.
 Coverage matches across 778 production files and 116221 locations. Independent review found no blockers.
 PR checks passed, but merge-queue run 44161166221 failed job 134315202045 on the unchanged link-preview-sheet test.
-The Re-run button did not render before line 146. No toast behavior assertion ran. Diagnosis is active, with no requested queue retry.
+The Re-run button did not render before line 146. No toast behavior assertion ran.
+After external PR #3312 repaired that fixture on main, the parent requested fresh queue validation.
+PR #3308 merged as 531c9fb1f9c97cb2740a21deebf3388b4db28b05 on November 18 at 00:06 BCN.
 Response latency and dispatch hangs remain separate limits.
 
 PR #3310 deletes 18 lines and two cases. Both affected suites passed: 114 baseline and 112 candidate cases.
@@ -235,4 +237,30 @@ The original request-task and request-model controls failed to parse. Independen
 Valid replacements now fail the selected test at toEqual. Other reviewed controls remain recorded separately.
 Paired LCOV matches across 744 files and 113212 locations, excluding the API child.
 Parent check:local, allowlist, whitespace, and pre-push checks pass. The existing disabled-hook gap remains unresolved.
-Neither slice changes production code or establishes full-suite CI savings. Both PRs remain outside merged totals at this checkpoint.
+Neither slice changes production code or establishes full-suite CI savings. Both now contribute to merged totals.
+PR #3311 merged as bcc13793189670179ad39a2e32419c6576a73544. PR #3313 merged as 52452f001f69fff9106b276ce127f641b46339ba.
+
+## C28 preview readiness and superseded alternative
+
+A controlled pending import reproduced the missing-button guard. This does not establish the historical CI cause.
+The unpublished preload alternative passed 47 baseline and candidate cases. Delayed module evaluation failed baseline and passed candidate.
+Pointer and navigation controls failed their original behavior assertions. Production coverage retained identical locations and hits across 36 files.
+Independent review found no blockers. Parent check:local passed. Screenshots show the shared phone preview body, not the Radix sheet.
+Fetched main then contained external repair #3312. The parent retired the alternative and verified the merged target case: one pass, four assertions.
+The evidence remains at /tmp/test-cleanup-preview-validation/report.md. Neither alternative nor external repair contributes to campaign deletion totals.
+
+## C29 scheduling review and refinement
+
+The static audit covers six scheduling test files. Transitive production boundaries remain partial, and the audit itself ran no controls.
+The initial candidate removed three cases. Independent review rejected deletion of the target-only fixture.
+The comprehensive fixture uses the same target and creator, so it cannot detect assignment from the wrong field.
+The parent restored the original case and removed the status transfer. The final patch is +2/-44 lines, with two removed cases.
+Fresh baseline and candidate passed 33/128 and 31/121 cases/assertions respectively. The restored candidate also passed after all controls.
+Five fresh controls failed retained assertions: missing insertion, missing manual timestamp, forced cadence, wrong mapped type, and creator-as-target assignment.
+All temporary production changes were restored. The final patch changes only scheduled-tasks.test.ts.
+Earlier adjacent runs passed 72 cases, including real scripts. These preceded restoration of the target-only case and were not repeated afterward.
+The refined coverage pair has identical loaded src locations and hit sets. Selected scheduling scopes retain 360 covered locations out of 829.
+The HTTP handler is not loaded. Child scripts, branches, and full-repository coverage remain unmeasured.
+Parent check:local and pre-push checks passed. PR #3318 remains outside merged totals while CI and merge validation proceed.
+Refined evidence: /tmp/test-cleanup-scheduling-refined/report.md. The earlier three-case report remains historical evidence only.
+No owned service remains. The refinement preserves evidence and claims no reclaimed disk space.
