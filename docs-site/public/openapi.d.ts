@@ -17989,6 +17989,7 @@ export interface paths {
                                 theme?: string | null;
                                 themeTokens?: components["schemas"]["PageThemeTokens"] | null;
                                 designVersion?: number;
+                                kit?: components["schemas"]["PageKit"];
                                 /** @default 0 */
                                 viewCount: number;
                                 createdAt: string;
@@ -33388,6 +33389,13 @@ export interface components {
             language?: string;
             verbosity?: string;
         };
+        PageKit: {
+            /** @enum {string} */
+            template: "report" | "one-pager" | "dashboard" | "deck";
+            slots: {
+                [key: string]: unknown;
+            };
+        } | null;
         Page: {
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
@@ -33406,6 +33414,7 @@ export interface components {
             theme: string | null;
             themeTokens: components["schemas"]["PageThemeTokens"] | null;
             designVersion: number;
+            kit?: components["schemas"]["PageKit"];
             /** @default 0 */
             viewCount: number;
             createdAt: string;
@@ -33433,6 +33442,7 @@ export interface components {
             theme?: string | null;
             themeTokens?: components["schemas"]["PageThemeTokens"] | null;
             designVersion?: number;
+            kit?: components["schemas"]["PageKit"];
         };
         PromptTemplateResponse: components["schemas"]["PromptTemplate"] & {
             defaultDrifted: boolean;
