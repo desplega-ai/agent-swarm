@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   backfillSupersedeTaskResumeTaskId,
@@ -104,6 +104,7 @@ import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { readsRepoSecrets } from "./config";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
@@ -1246,7 +1247,7 @@ export async function handleTasks(
       const inheritedKey = parentTask?.key;
       const requestedKey = parsed.body.key ?? inheritedKey;
       assetKey = requestedKey
-        ? await authorizeAssetKeyWrite(requestedKey, trustedUserId)
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, requestedKey, trustedUserId)
         : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {

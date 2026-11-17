@@ -81,8 +81,8 @@ export function countsLabel(counts: SessionSectionCounts, plain?: boolean): stri
  * The counts of a container in the row words: a running ring with its
  * number, "1 needs you", "3 unread" (SPEC R4, R9). `plain` (Later, Done)
  * shows the session total when nothing else shows. The row's name already
- * says them, so they are hidden from screen readers here. `touch` (the
- * phone rows): larger text and no tooltip.
+ * says them, so they are hidden from screen readers here. The phone rows
+ * draw their own (`TouchCounts`).
  *
  * On desktop the name has priority: in a narrow row the counts give way a
  * whole mark at a time, the running count first and "unread" last. They
@@ -92,24 +92,19 @@ export function countsLabel(counts: SessionSectionCounts, plain?: boolean): stri
 export function SessionCounts({
   counts,
   plain,
-  touch = false,
   className,
 }: {
   counts: SessionSectionCounts;
   plain?: boolean;
-  touch?: boolean;
   className?: string;
 }) {
   const tip = countsLabel(counts, plain);
   if (!tip) return null;
-  const number = cn(
-    "font-mono tabular-nums text-muted-foreground",
-    touch ? "text-data" : "px-0.5 text-meta",
-  );
+  const number = "px-0.5 font-mono text-meta tabular-nums text-muted-foreground";
   const items = [
     counts.running > 0 ? (
       <span key="running" className={cn("flex shrink-0 items-center gap-1", number)}>
-        <TaskStatusIcon variant="active" className={touch ? "size-3.5" : "size-3"} />
+        <TaskStatusIcon variant="active" className="size-3" />
         {counts.running}
       </span>
     ) : null,
@@ -122,10 +117,7 @@ export function SessionCounts({
       <Badge
         key="unread"
         variant="outline"
-        className={cn(
-          "rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums",
-          touch ? "h-5" : "h-[18px]",
-        )}
+        className="h-[18px] rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
       >
         {counts.unread} unread
       </Badge>
@@ -136,13 +128,6 @@ export function SessionCounts({
       </span>
     ) : null,
   ];
-  if (touch) {
-    return (
-      <span aria-hidden className={cn("ml-auto flex shrink-0 items-center gap-1.5", className)}>
-        {items}
-      </span>
-    );
-  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>

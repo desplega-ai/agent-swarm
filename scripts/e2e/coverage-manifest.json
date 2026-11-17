@@ -261,8 +261,8 @@
       "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-primitives"]
     },
     "asset-namespaces": {
-      "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
-      "scenarios": ["knowledge-assets"]
+      "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit; an operator-key dashboard writes only its logged-in user's personal keys",
+      "scenarios": ["knowledge-assets", "knowledge-assets-dashboard-user"]
     },
     "audit-attribution": {
       "description": "create, cross-actor update and no-person update record the writing agent and person on scripts, skills, workflows and schedules over HTTP, MCP and a script run's ctx.swarm calls",

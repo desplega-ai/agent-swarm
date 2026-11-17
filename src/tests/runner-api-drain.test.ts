@@ -131,9 +131,6 @@ function setup(taskCount = 1) {
   return { state, sessions, tasks };
 }
 
-/** Let the fire-and-forget `session.abort` microtask run. */
-const flush = () => Bun.sleep(5);
-
 describe("applyApiDrainSignal", () => {
   test("a draining answer sets the state and a clean answer clears it", () => {
     const { state } = setup(0);
@@ -203,8 +200,8 @@ describe("pollForTrigger", () => {
 describe("handOffTasksForApiDrain", () => {
   test("supersedes with the graceful_shutdown reason and aborts the session once", async () => {
     const { state, sessions, tasks } = setup(2);
-    await handOffTasksForApiDrain(state, "worker", apiConfig());
-    await flush();
+    for (let i = 0; i < 4; i++) await handOffTasksForApiDrain(state, "worker", apiConfig());
+    expect(supersedeCalls()).toHaveLength(2);
 
     for (const [i, task] of tasks.entries()) {
       const call = supersedeCalls().find((r) => r.path === `/api/tasks/${task.taskId}/supersede`);
@@ -216,21 +213,12 @@ describe("handOffTasksForApiDrain", () => {
     }
   });
 
-  test("hands off once: later passes make no call for an answered task", async () => {
-    const { state, sessions } = setup(1);
-    for (let i = 0; i < 4; i++) await handOffTasksForApiDrain(state, "worker", apiConfig());
-    await flush();
-    expect(supersedeCalls()).toHaveLength(1);
-    expect(sessions[0]?.abortReasons).toHaveLength(1);
-  });
-
   test("a failed call leaves the task running and retries up to the cap", async () => {
     stub.supersede = [{ status: 503, body: { error: "unavailable" } }];
     const { state, sessions, tasks } = setup(1);
     for (let i = 0; i < API_DRAIN_HANDOFF_MAX_ATTEMPTS + 3; i++) {
       await handOffTasksForApiDrain(state, "worker", apiConfig());
     }
-    await flush();
     expect(supersedeCalls()).toHaveLength(API_DRAIN_HANDOFF_MAX_ATTEMPTS);
     expect(sessions[0]?.abortReasons).toEqual([]);
     expect(tasks[0]?.serverTerminalStatus).toBeUndefined();
@@ -242,7 +230,6 @@ describe("handOffTasksForApiDrain", () => {
     const { state, sessions } = setup(1);
     await handOffTasksForApiDrain(state, "worker", apiConfig());
     await handOffTasksForApiDrain(state, "worker", apiConfig());
-    await flush();
     expect(supersedeCalls()).toHaveLength(2);
     expect(sessions[0]?.abortReasons).toEqual(["graceful_shutdown"]);
   });
@@ -253,7 +240,6 @@ describe("handOffTasksForApiDrain", () => {
     ];
     const { state, sessions, tasks } = setup(1);
     await handOffTasksForApiDrain(state, "worker", apiConfig());
-    await flush();
     expect(tasks[0]?.serverTerminalStatus).toBe("failed");
     expect(sessions[0]?.abortReasons).toEqual(["graceful_shutdown"]);
   });
@@ -269,7 +255,6 @@ describe("handOffTasksForApiDrain", () => {
       const { state, sessions, tasks } = setup(1);
       await handOffTasksForApiDrain(state, "worker", apiConfig());
       await handOffTasksForApiDrain(state, "worker", apiConfig());
-      await flush();
       expect(supersedeCalls()).toHaveLength(1);
       expect(sessions[0]?.abortReasons).toEqual([]);
       expect(tasks[0]?.serverTerminalStatus).toBeUndefined();
