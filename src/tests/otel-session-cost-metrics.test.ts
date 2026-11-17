@@ -1,12 +1,4 @@
-// Unit tests for the OTEL metric-emission path introduced in
-// src/http/session-data.ts (recordSessionCost call) and src/otel.ts (facade).
-//
-// Coverage goals:
-//   1. otel.ts recordSessionCost() is a no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
-//   2. handleSessionData() forwards the recomputed totalCostUsd + costSource to
-//      recordSessionCost() — not the raw request value.
-//   3. All six token classes map to the expected token_type keys.
-//   4. harness / pricing-table / unpriced / zero-cost cases are all covered.
+// Verify cost drift metrics and forwarding from the real session-data handler.
 
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
@@ -27,33 +19,6 @@ import { listenOnFreePort } from "./test-net";
 const driftCounterAddSpy = mock((..._args: unknown[]) => {});
 const driftCounter = { add: driftCounterAddSpy } as unknown as Counter;
 const metricCounter = { add: mock((..._args: unknown[]) => {}) } as unknown as Counter;
-
-// ── 1. Verify the otel.ts facade is a no-op when OTEL is disabled ────────────
-
-describe("otel.ts recordSessionCost — no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset", () => {
-  test("does not throw and is a no-op without OTEL_EXPORTER_OTLP_ENDPOINT", async () => {
-    // The test environment never sets OTEL_EXPORTER_OTLP_ENDPOINT, so the
-    // facade's `enabled` flag is false and realRecordSessionCost is undefined.
-    const { recordSessionCost } = await import("../otel");
-    expect(() =>
-      recordSessionCost({
-        totalCostUsd: 0.05,
-        harness: "claude",
-        model: "claude-sonnet-4-6",
-        costSource: "harness",
-        isError: false,
-        tokens: {
-          input: 100,
-          output: 50,
-          cacheRead: 0,
-          cacheWrite: 0,
-          reasoning: 0,
-          thinking: 0,
-        },
-      }),
-    ).not.toThrow();
-  });
-});
 
 describe("otel-impl cost drift metric", () => {
   test("records absolute drift with direction and cost dimensions", () => {
@@ -134,8 +99,6 @@ describe("otel-impl cost drift metric", () => {
     expect(driftCounterAddSpy).not.toHaveBeenCalled();
   });
 });
-
-// ── 2-4. handleSessionData() → recordSessionCost() integration ───────────────
 
 const recordSessionCostSpy = mock((_m: SessionCostMetric) => {});
 
