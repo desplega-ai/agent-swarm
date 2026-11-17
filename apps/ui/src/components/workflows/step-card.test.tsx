@@ -353,7 +353,6 @@ describe("foreach attempt history", () => {
   });
 });
 
-
 describe("jsonByteSize", () => {
   test("counts UTF-8 bytes, not UTF-16 code units, for non-ASCII output", () => {
     expect(jsonByteSize("😀")).toBe(4);
