@@ -3833,6 +3833,9 @@
       "exempt": "enum or fixed-format value"
     },
     "mergedIntoUserId": { "exempt": "identifier" },
+    "avatar": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
     "createdAt": {
       "exempt": "timestamp"
     },

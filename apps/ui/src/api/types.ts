@@ -684,6 +684,8 @@ export interface User {
   /** Set while a merge job still moves this user into another one; the row disappears when it is done. */
   mergedIntoUserId?: string | null;
   metadata?: Record<string, unknown>;
+  /** Custom avatar, same shapes as an agent's. Null/missing = initials. */
+  avatar?: MediaIcon | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -862,6 +864,8 @@ export interface UpdateUserInput {
   status?: "invited" | "active" | "suspended";
   metadata?: Record<string, unknown> | null;
   comms?: UserCommsPrefs | null;
+  /** `null` resets to initials. */
+  avatar?: MediaIcon | null;
 }
 
 /**

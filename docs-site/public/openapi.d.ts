@@ -28591,6 +28591,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -29083,6 +29100,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -33872,6 +33906,23 @@ export interface components {
              */
             status: "invited" | "active" | "suspended";
             mergedIntoUserId?: string | null;
+            avatar?: {
+                /** @enum {string} */
+                type: "lucide";
+                icon: string;
+                color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
+            };
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

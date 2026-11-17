@@ -145,6 +145,7 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type UserAvatar,
 } from "../types";
 import {
   CODEX_AUTH_FAILURE_BENCH_MS,
@@ -266,6 +267,7 @@ import {
   WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
   WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
 } from "./db/user-references";
+import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
@@ -12584,6 +12586,8 @@ type UserRow = {
   dailyBudgetUsd: number | null;
   status: string;
   mergedIntoUserId: string | null;
+  // Migration 344: JSON of UserAvatar. NULL = initials.
+  avatar: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -12602,6 +12606,7 @@ function rowToUser(row: UserRow): User {
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
     ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
+    avatar: parseUserAvatar(row.avatar),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12628,12 +12633,13 @@ export async function createUser(data: {
   metadata?: Record<string, unknown>;
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
+  avatar?: UserAvatar | null;
 }): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const row = await getDbClient().get<UserRow>(
-    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, avatar, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       data.name,
@@ -12646,6 +12652,7 @@ export async function createUser(data: {
       data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
       data.dailyBudgetUsd ?? null,
       data.status ?? "active",
+      data.avatar ? JSON.stringify(data.avatar) : null,
       now,
       now,
     ],
@@ -12669,6 +12676,8 @@ export async function updateUser(
     metadata: Record<string, unknown> | null;
     dailyBudgetUsd: number | null;
     status: "invited" | "active" | "suspended";
+    // null resets to initials.
+    avatar: UserAvatar | null;
   }>,
 ): Promise<User | null> {
   const sets: string[] = [];
@@ -12713,6 +12722,10 @@ export async function updateUser(
   if (data.status !== undefined) {
     sets.push("status = ?");
     params.push(data.status);
+  }
+  if (data.avatar !== undefined) {
+    sets.push("avatar = ?");
+    params.push(data.avatar === null ? null : JSON.stringify(data.avatar));
   }
 
   if (sets.length === 0) return getUserById(id);
