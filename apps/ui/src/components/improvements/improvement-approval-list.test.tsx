@@ -123,6 +123,8 @@ test("a pending row highlights its leak hints and approves with the person's ema
   await mount();
   const marks = [...container.querySelectorAll("mark")].map((m) => m.textContent);
   expect(marks).toEqual(["worker-7", "acme/api"]);
+  expect(container.querySelector("pre")).toBeNull();
+  expect(container.textContent).not.toContain("install_id");
   await act(async () => button("Approve and send")?.click());
   expect(approved).toEqual([{ id: "i1", email: "dana@acme.com" }]);
 });
@@ -143,12 +145,6 @@ test("approve needs a valid email", async () => {
   expect(button("Approve and send")?.disabled).toBe(false);
   await act(async () => button("Approve and send")?.click());
   expect(approved).toEqual([{ id: "i1", email: "ops@acme.com" }]);
-});
-
-test("the popover shows no JSON payload preview", async () => {
-  await mount();
-  expect(container.querySelector("pre")).toBeNull();
-  expect(container.textContent).not.toContain("install_id");
 });
 
 test("a failed row offers Retry and sent rows stay out of the popover", async () => {
