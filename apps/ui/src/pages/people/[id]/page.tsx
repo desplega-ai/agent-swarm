@@ -289,10 +289,12 @@ function ProfileCard({ user }: { user: User }) {
   const [draft, setDraft] = useState<ProfileDraft>(() => userToDraft(user));
   const [newAlias, setNewAlias] = useState("");
 
-  // Re-seed when server-side user changes (e.g. after a save).
+  // Re-seed when a draft field changes server-side (e.g. after a save). Keyed on
+  // the draft fields, so an avatar save does not wipe unsaved profile edits.
+  const seedKey = JSON.stringify(userToDraft(user));
   useEffect(() => {
-    setDraft(userToDraft(user));
-  }, [user]);
+    setDraft(JSON.parse(seedKey) as ProfileDraft);
+  }, [seedKey]);
 
   const { changes, error } = useMemo(() => draftDiff(user, draft), [user, draft]);
   const hasChanges = Object.keys(changes).length > 0;
