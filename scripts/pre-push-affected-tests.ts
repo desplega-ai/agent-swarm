@@ -9,8 +9,9 @@
  *   - otherwise walk its importers outward (relative and `@/` imports), one level
  *     at a time, and take the tests found at each level while the file's total
  *     stays within PRE_PUSH_TESTS_BUDGET (default 40). The level that would pass
- *     the budget contributes only its tests named after the file (`<stem>*.test.ts`,
- *     the directory name for an index file), then the walk stops.
+ *     the budget contributes its tests named after the file (`<stem>*.test.ts`,
+ *     the directory name for an index file), then its other tests in path order
+ *     until the budget is full, then the walk stops.
  *   - a file no test imports (templates/, JSON, SQL) selects the tests whose
  *     source names its path, or its parent directory when that has 3+ segments
  *     (templates/skills/<name>); a migration also selects
@@ -102,9 +103,17 @@ for (const file of changed) {
         next.push(imp);
       }
     }
-    const levelTests = next.filter(isTest);
+    const levelTests = next.filter(isTest).sort();
     if (picked.size + levelTests.length > budget) {
-      for (const t of levelTests) if (namedAfter(t, stemOf(file))) picked.add(t);
+      // Named tests first, then the rest of this level in path order until the
+      // budget is full, so a hub whose direct importers alone pass the budget
+      // still runs a stable, nonempty sample instead of nothing.
+      const stem = stemOf(file);
+      for (const t of levelTests) if (namedAfter(t, stem)) picked.add(t);
+      for (const t of levelTests) {
+        if (picked.size >= budget) break;
+        picked.add(t);
+      }
       capped = true;
     } else {
       for (const t of levelTests) picked.add(t);
