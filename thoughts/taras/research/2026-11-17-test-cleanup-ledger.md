@@ -210,7 +210,7 @@ Controlled worker boot failure now fails promptly with peak 0 instead of waiting
 
 ### C10: Slack rendering
 
-State: bounded implementation complete and independently reviewed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
+State: PR https://github.com/desplega-ai/agent-swarm/pull/3274 passed PR checks, then left the merge queue after run 44125275220 failed Run Tests (2/8). The unchanged DB timing guard measured 364.037399ms against its 300ms ceiling. C22 must resolve this before another queue attempt. Independent review passed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
 Candidates: three repeated delivery tests, substring checks following exact equality, and payload key lists that reject harmless additions.
 Retain recovery stop-before-update order, native Markdown, truncation, child-before-conclusion delivery, visibility, caption limits, and stale UI-spec fixtures.
 All five controls failed: answer replacement, finalized-child repetition, early conclusions, unwanted Markdown conversion, and missing recovery updates.
@@ -254,7 +254,7 @@ Limits: the tests do not prove live provider compatibility, and validateRoute ti
 
 ### C14: Model catalog package
 
-State: all four test files audited, cleanup implemented, and independently reviewed. Final diff +17/-32 lines. One overlapping routing test consolidated.
+State: landed through PR https://github.com/desplega-ai/agent-swarm/pull/3271 as b27cd0917ff62aea52d87f5fff2fece7182114ef. Independent review passed. Final diff +17/-32 lines. One overlapping routing test consolidated.
 Original suite: 66 passed, 285 assertions. Final suite: 65 passed, 282 assertions. Package TypeScript, Biome, and diff checks passed.
 All 12 mutation controls failed. Original assertions missed shared wrong subscription results, empty picker output, and both dated-candidate controls.
 Subscription routing now uses one row declaring only high effort, which differs from fallback levels. All three prefixes retain literal checks.
@@ -269,7 +269,7 @@ These gaps do not justify replacing the compact suite or deleting distinct routi
 
 ### C15: Sandbox startup isolation follow-up
 
-State: PR https://github.com/desplega-ai/agent-swarm/pull/3269 opened with auto-merge requested. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
+State: PR https://github.com/desplega-ai/agent-swarm/pull/3269 passed PR checks, then left the merge queue after an unrelated DB timing failure. C22 must resolve that failure before another queue attempt. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
 Production and existing sandbox tests were read first. A controlled startup file confirms the C08 production defect independently.
 With BASH_ENV pointing at a task-owned file that exits 37, inline mode executes it and exits 37. Spawn mode exits 0.
 Adding --noprofile --norc -p to the inline command exits 0, forwards stdin, and produces no stderr.
@@ -290,7 +290,7 @@ Keep this fix separate from C08 test-only consolidation.
 
 ### C16: Console and OTel contracts
 
-State: bounded cleanup implemented and independently reviewed. Two test files changed, +1/-47 lines. No new cases.
+State: landed through PR https://github.com/desplega-ai/agent-swarm/pull/3275 as 005f4b47f480822407ecf7029fa469363ab36034. Independent review passed. Two test files changed, +1/-47 lines. No new cases.
 Read console formatting and fail-closed behavior, OTel implementation and facade, session-cost forwarding, and harness context injection.
 Removed a fake facade no-op case. A temporary identity assertion proved its import was the test's own recordSessionCostSpy.
 That case never executed the production facade. Its claimed disabled-telemetry guard was absent before this deletion and remains a coverage limit.
@@ -308,13 +308,20 @@ Local check loop passed in 507 seconds: frozen install, Biome, anti-slop, typech
 The root run skipped 26 cases and failed none. API checks reported zero failures and zero flaky results.
 Final review refinements passed their affected tests, Biome, root typecheck, allowlist, and diff checks separately.
 
-### C17: Memory audit, in progress
+### C17: Memory audit, storage slice landed
 
-All 34 memory suites, openai-embedding-credentials, knowledge-memory, and script-memory-rate received complete static review. No changes or controls yet.
-Candidates: overlapping CRUD in memory-store, dependent lifecycle cases in memory-e2e, repeated TTL cases, scalar fusion arithmetic, repeated ranking fixtures, and unused taskB.
-Repair before consolidation: timestamp checks must inspect persisted access time, timeout helpers must reject, and pending gates must release in finally.
+All 34 memory suites, openai-embedding-credentials, knowledge-memory, and script-memory-rate received complete static review.
+Storage candidate: +89/-328 across memory, memory-store, and memory-e2e. Cases decrease from 89 to 69. No new test calls.
+Seven controls detect deletion, whole-document deletion, embedding BLOB/model loss, unchanged access time, partial batch commit, and missing owner filtering.
+Original timestamp and rollback guards missed their controls. The repaired guards detect them. Parent check:local passed all 69 cases.
+Independent review passed with no lost guards. PR https://github.com/desplega-ai/agent-swarm/pull/3276 landed as f59cce3d8626b83991f1068747da5db97ca6161e. Other memory findings remain separate.
+A separate production expiry defect was found: ISO expiresAt text compares incorrectly with SQLite datetime text on the same date.
+Affected filters, purge, and statistics can retain an expired row until UTC midnight. Existing fixtures use SQLite-formatted dates and miss this boundary.
+C17 preserves those fixtures and does not claim to repair expiry formatting.
+Storage consolidation completed overlapping CRUD, dependent lifecycle, and repeated TTL cases. Remaining candidates include scalar fusion arithmetic, repeated ranking fixtures, and unused taskB.
+C17 repaired persisted access time. Remaining repairs: timeout helpers must reject, and pending gates must release in finally.
 Several list assertions accept unrelated owners or are tautological. Retain exact fixture identities across owners.
-A batch rollback case must insert a valid first row before its conflicting second row. Current first-row rejection proves no rollback.
+C17 repaired batch rollback by inserting a valid first row before its conflicting second row. The original first-row rejection proved no rollback.
 Memory-edit clears embedding credentials without restoring the provider state. Preserve link pruning while repairing isolation.
 Preserve real sqlite-vec, worker-reader parity, FTS races, provider recovery, rating rollback, key-path entry points, and separate MCP/HTTP edit authorization.
 The preload uses in-memory SQLite despite database filenames. No audited basic case proves close-and-reopen durability.
@@ -329,10 +336,10 @@ Usefulness fixture deletion needs finally. Scenario setup and sequential session
 Read-order exception: migration 200 was inspected after its dependency appeared in memory-injection-outcome. No deletion relied on that premature read.
 Adjacent task-completion-memory-chunking, scripts-embeddings, and full hook/provider/authentication suites remain unaudited. No whole subsystem is complete.
 
-### C18: Apps audit, in progress
+### C18: Apps audit, migration slice landed
 
-Full initial reads: apps-rbac, apps-table-selection-migration, apps-table-filters-migration. Other sync and spike files remain partially audited.
-Both migration tests copy applyMergePatch. Replay retained stage fixtures through applyAppDefinitionPatch before deleting those copies.
+The initial pass covered apps-rbac and both table migration suites. Later passes completed every apps test body.
+Both original migration tests copied applyMergePatch. C18 replaced both copies with production applyAppDefinitionPatch.
 Candidate consolidation must keep selection, filtering, model equality, removed toolbar nodes, bulk actions, and search reset.
 The sync script's source-text method check overlaps behavioral invocation. Verify a method-renaming control before removing it.
 Timing risks: drift tests do not observe pull entry, lock tests use short sleeps, and a two-pair case cannot prove queuing under a three-pass limit.
@@ -354,10 +361,10 @@ The ideas-app seed has two consumers and remains necessary.
 The isolated migration implementation consolidates 11 cases to six and removes the selection test file: +44/-120 lines.
 Retained assertions now call production applyAppDefinitionPatch. Assertion executions increased from 27 to 28. All fixtures remain.
 Atomic replacement and removed mqBtn deletion controls failed as expected. Baseline, revised, formatting, allowlist, and patch checks passed.
-Independent review is pending. Script stand-ins still establish definition validity, not execution or authorization.
-Only in-memory comparisons and focused definition probes ran. No suites or mutation controls ran.
+Independent review passed. PR https://github.com/desplega-ai/agent-swarm/pull/3272 landed as e3d3c4117c88d94b4301e2151c34c4951a652d9c. Parent check:local passed. Script stand-ins establish definition validity, not execution or authorization.
+The static audit ran only in-memory comparisons and focused definition probes. The later migration implementation ran suites and controls as recorded above.
 
-### C19: Extension audit, in progress
+### C19: Extension audit, example slice landed
 
 All 26 extension suites now have complete static assertion reviews. Native tool-hooks HTTP and four extension scenarios also received full review.
 Confirmed candidates: example-heartbeat-remediate repeats extensions-heartbeat. Example-rewrite-and-suppress repeats pre-task guards, including the no-op interaction.
@@ -370,18 +377,60 @@ The comms SQL emulator does not validate SQL against real schema. Current lifecy
 The second pass confirmed simultaneous activation coverage in the retained Slack metadata case: a later no-op preserves the earlier priority modification.
 The isolated implementation deletes both example suites: +0/-139 lines and two test cases. All 31 retained cases passed.
 Four controls detected fail-to-record removal, lost priority rewriting, lost no-op preservation, and ignored follow-up suppression. All mutants were restored.
-All 52 fixture/helper files remain. Independent review is pending. Broader extension scenarios have not run for this patch.
+All 52 fixture/helper files remain. Independent review passed. PR https://github.com/desplega-ai/agent-swarm/pull/3273 merged as 74726a3e00dbdd6ecb0752d1257ccad2523d018c. Parent retained-suite runs passed nine and 22 cases. Broader extension scenarios have not run for this patch.
 Catalog invariant consolidation remains a separate candidate. Retain each entry validation and timeout budget.
 Native HTTP scrubbing, redaction refusal, clean rewrites, and MCP-only filtering remain distinct.
 Neighboring native-tool-hooks, extension-agent-visibility, requester-comms, live harness execution, multiple replicas, and reopen durability remain unaudited.
 No runtime controls ran during the static audit.
 
+### C20: Slack readiness repair
+
+A config write schedules reload after 250ms. Persistent activation rows can satisfy setup before the socket reconnects.
+The first failed reaction may have crossed this window. Logs do not prove that exact timing or explain the separate ECONNRESET.
+Candidate skips redundant flag writes and restarts after required config changes, then explicitly waits for a socket connection.
+Final diff +33/-22, net +11, all for dispatch readiness. Existing skipped-task assertions remain unchanged. No retry was added.
+Paired baseline, revised, delayed-socket, and restored runs passed without reruns. Removing override barriers under delayed reconnect failed both existing attempts.
+Independent review found no correctness blocker. Legacy caller and first full-shard writer passed without retries. All 16 legacy PNGs remained valid.
+Parent check:local passed all 35 affected scenarios: zero failures, skips, or flaky results, with 553 HTTP calls. PR #3278 is submitted with auto-merge requested.
+Earlier unrelated config writes can still leave a reload pending on the helper skip path. This limitation predates the repair.
+
+### C21: Remaining Codex provider audit
+
+Thirty-four files and three named Codex fixtures received production-first static review. Four files retain surrounding-production limits.
+Full Codex implementations were inspected for adapter, app-server, OAuth, pool, rate limits, rollout, steering, cancellation, and cost contracts.
+Partial surrounding scope: release catalog, other auth-chain harnesses, full container entrypoint, and other MCP authorization paths.
+Candidates: copied slot-selection algorithm, repeated cancellation cases, local regex tests, repeated filesystem scaffolding, duplicate rate-limit/public-client-ID assertions, and duplicate failed refresh calls.
+Preserve transport, subprocess, SQLite locking, device lease, storage recovery, caller identity, historical pricing, and jq execution boundaries.
+Weak guards: last-call-wins checks only defined values, PKCE omits SHA256 relation, refresh overlap uses sleep, and app-server shutdown asserts a one-second ceiling.
+Unexpected auth/network resolution and copied ratings conversion remain fixture risks. No live provider or runtime audit evidence yet.
+Cancellation cleanup changes only codex-adapter and codex-swarm-events: final +14/-104 lines, 126 to 123 cases.
+PR #3281 is submitted with auto-merge requested. Parent check:local passed in 12 seconds, including all 123 affected cases.
+Seven controls failed. Removing name-only AbortError classification survived both original and candidate, because explicit abort state covers that branch.
+Independent review found no lost guard. A refinement restores console.log from afterEach even when the abort event never arrives.
+Scoped test typechecking reports the same 13 errors on baseline and candidate. The configured root typecheck passes.
+
+### C22: DB busy timing flake
+
+C15 merge-group run 44123585250 failed only Run Tests (2/8). The unchanged db-client-busy-retry guard measured executionMs 371.386837 against a 300ms ceiling.
+PR checks passed. The merge queue removed C15 for failed_checks. Do not count that PR as landed.
+An isolated repair must preserve real contention and detect backoff incorrectly included in execution time. Merely raising the ceiling or adding retries is not acceptable.
+The first candidate added 71 and removed 15 lines, with three spies. Its two accounting mutants failed, and 53 affected checks passed.
+Independent review found no correctness defect, but rejected the maintenance cost of global clock and timer spies.
+A smaller real-clock alternative is under validation. No retry of the queue was requested after this failure.
+
+### C23: Codex pool selection
+
+Implementation is in progress in an isolated worktree. Remove copied slot selection only after the exported resolver protects its contracts.
+Preserve exhaustion, availability, sparse slot identity, actual credential files, blank refresh tokens, and nonzero-slot persistence forwarding.
+No deletion or runtime result is claimed yet.
+
 ## Resume order
 
-1. Land the reviewed C08, C10, C12, C14, C15, and C16 slices through narrow PRs. C09 has merged.
-2. Commit this ledger and reconcile the inventory against merged main.
-3. Diagnose remaining load-sensitive baseline failures without removing useful guards.
-4. Continue pending inventory rows. Audit fixtures with their callers. No releases.
+1. Resolve C22, then return C15 and any related failed queue entries to the queue. Land C08 after its production dependency.
+2. Complete queued C20 and C21, remaining C12, and the isolated C23 implementation.
+3. Update the landed ledger and reconcile its inventory against merged main.
+4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
+5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
 
 ## Completed slices
 
@@ -392,17 +441,26 @@ C04: PR #3255 merged. Test diff +1/-1. Browser query/hash forwarding retained wi
 C05: PR #3257 merged. Test diff +2/-2. Canonical fixture paths preserve 21 reaper guards.
 C07: PR #3259 merged. Test diff +59/-314. Copied HTTP layer removed after real-handler coverage retained its contracts.
 C09: PR #3266 merged. Test diff +9/-7. Actual request readiness replaces the premature cutoff. All seven guards remain.
+C14: PR #3271 merged. Test diff +17/-32. Literal expectations and discriminating fixtures replace weak oracles.
+C16: PR #3275 merged. Test diff +1/-47. Removed mock-only no-op and repeated service-name checks.
+C17 storage slice: PR #3276 merged. Test diff +89/-328. Removed duplicate fixtures and repaired access-time and rollback guards.
+C18 migration slice: PR #3272 merged. Test diff +44/-120. Replaced copied merge algorithms with production behavior.
+C19: PR #3273 merged. Test diff +0/-139. Two duplicate example suites removed, with all fixtures retained.
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
 
-- Test-line policy merged in PR #3254. Campaign ledger is prepared for its own documentation PR.
+- Test-line policy merged in PR #3254. Campaign ledger merged through PR #3270 as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
 - Live provider, Linux sandbox, Docker, and browser boundaries require distinct evidence.
 - Broad app-shell failure did not reproduce alone. QuickJS readiness failure reproduced under controlled boot delay. Its repair merged in PR #3266.
 - Reviewer noted an existing missing fable alias guard. This slice did not delete that contract.
-- Initial inventory contained 1616 tracked test files. Current main contains 1616. Package tests remain in scope.
+- Initial inventory contained 1616 tracked test files. Three files were deleted through C18 and C19. All 1613 remaining tracked test files have ledger rows. Package tests remain in scope.
 
 ## File audit inventory
+
+Static audit means production comparison and test-body review. It does not imply execution.
+Production partial means the direct test bodies were reviewed, but the surrounding production scope remains limited.
+Landed marks the named slice only. Other findings in the same subsystem remain open.
 
 | Test file | Status | Slice or evidence |
 |---|---|---|
@@ -836,10 +894,10 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | apps/ui/tests/cursor-logs-parser.test.ts | pending | |
 | apps/ui/tests/dsh-logs-parser.test.ts | pending | |
 | apps/ui/tests/tool-result-images.test.ts | pending | |
-| packages/model-catalog/src/chatgpt-subscription.test.ts | pending | |
-| packages/model-catalog/src/harness-models.test.ts | pending | |
-| packages/model-catalog/src/reasoning.test.ts | pending | |
-| packages/model-catalog/src/resolve-alias.test.ts | pending | |
+| packages/model-catalog/src/chatgpt-subscription.test.ts | landed | C14: PR #3271, literal expectations and discriminating fixtures |
+| packages/model-catalog/src/harness-models.test.ts | landed | C14: PR #3271, literal expectations and discriminating fixtures |
+| packages/model-catalog/src/reasoning.test.ts | landed | C14: PR #3271, literal expectations and discriminating fixtures |
+| packages/model-catalog/src/resolve-alias.test.ts | landed | C14: PR #3271, literal expectations and discriminating fixtures |
 | packages/model-routing/src/credential-status.test.ts | audited, retained | C13. All 48 package tests passed. Origin and redirect controls detected regressions. |
 | packages/model-routing/src/default-route.test.ts | audited, retained | C13. All 48 package tests passed. Origin and redirect controls detected regressions. |
 | packages/model-routing/src/scoped-fetch.test.ts | audited, retained | C13. All 48 package tests passed. Origin and redirect controls detected regressions. |
@@ -956,8 +1014,8 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/apps-spike5.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/apps-sync-engine.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/apps-sync.test.ts | static audit complete | C18: controls and consolidation pending |
-| src/tests/apps-table-filters-migration.test.ts | static audit complete | C18: controls and consolidation pending |
-| src/tests/apps-table-selection-migration.test.ts | static audit complete | C18: controls and consolidation pending |
+| src/tests/apps-table-filters-migration.test.ts | landed | C18: PR #3272, real merge path and both migration stages |
+| src/tests/apps-table-selection-migration.test.ts | removed | C18: PR #3272, guards consolidated into filters migration |
 | src/tests/apps-tree.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/apps-user-config.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/asset-key-api.test.ts | pending | |
@@ -1050,35 +1108,35 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/claude-stop-hook.test.ts | pending | |
 | src/tests/claude-thinking-tokens.test.ts | pending | |
 | src/tests/claude-worker-parity.test.ts | pending | |
-| src/tests/codex-adapter-otel.test.ts | pending | |
-| src/tests/codex-adapter-pool-auth-revalidate.test.ts | pending | |
-| src/tests/codex-adapter.test.ts | partial audit | C01 model helpers. Remaining suite still requires systematic audit. |
-| src/tests/codex-app-server.test.ts | pending | |
-| src/tests/codex-auth-failure.test.ts | pending | |
-| src/tests/codex-credential-pools.test.ts | pending | |
-| src/tests/codex-gateway-route.test.ts | pending | |
-| src/tests/codex-gpt6-release.test.ts | partial audit | C01 model helpers. Remaining suite still requires systematic audit. |
-| src/tests/codex-login.test.ts | pending | |
-| src/tests/codex-oauth-accounts.test.ts | pending | |
-| src/tests/codex-oauth-adapter.test.ts | pending | |
-| src/tests/codex-oauth-auth-json-fs.test.ts | pending | |
-| src/tests/codex-oauth-auth-timestamps.test.ts | pending | |
-| src/tests/codex-oauth-credential-info.test.ts | pending | |
-| src/tests/codex-oauth-device.test.ts | pending | |
-| src/tests/codex-oauth-env-keys.test.ts | pending | |
-| src/tests/codex-oauth-keep-warm.test.ts | pending | |
-| src/tests/codex-oauth-refresh-egress.test.ts | pending | |
-| src/tests/codex-oauth-refresh-lock.test.ts | pending | |
-| src/tests/codex-oauth-storage.test.ts | pending | |
-| src/tests/codex-oauth.test.ts | pending | |
-| src/tests/codex-pool.test.ts | pending | |
-| src/tests/codex-rate-limit-parse.test.ts | pending | |
-| src/tests/codex-rate-limits.test.ts | pending | |
-| src/tests/codex-rollouts.test.ts | pending | |
-| src/tests/codex-skill-resolver.test.ts | pending | |
-| src/tests/codex-steering-hook.test.ts | pending | |
-| src/tests/codex-subprocess-steering.test.ts | pending | |
-| src/tests/codex-swarm-events.test.ts | pending | |
+| src/tests/codex-adapter-otel.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-adapter-pool-auth-revalidate.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-adapter.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
+| src/tests/codex-app-server.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-auth-failure.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-credential-pools.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-gateway-route.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-gpt6-release.test.ts | test audit complete, production partial | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-login.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-accounts.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-adapter.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-auth-json-fs.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-auth-timestamps.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-credential-info.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-device.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-env-keys.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-keep-warm.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-refresh-egress.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-refresh-lock.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-storage.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-pool.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-rate-limit-parse.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-rate-limits.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-rollouts.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-skill-resolver.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-steering-hook.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-subprocess-steering.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-swarm-events.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
 | src/tests/comb-config-guard.test.ts | pending | |
 | src/tests/comb-default.test.ts | pending | |
 | src/tests/comb-links.test.ts | pending | |
@@ -1121,7 +1179,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/cursor-adapter.test.ts | pending | |
 | src/tests/db-agents.test.ts | pending | |
 | src/tests/db-capacity.test.ts | pending | |
-| src/tests/db-client-busy-retry.test.ts | pending | |
+| src/tests/db-client-busy-retry.test.ts | partial audit, repair in progress | C22: queue failure and smaller timing repair under validation |
 | src/tests/db-client.test.ts | pending | |
 | src/tests/db-extraction-contract.test.ts | pending | |
 | src/tests/db-queries-oauth.test.ts | pending | |
@@ -1162,7 +1220,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/e2b-dispatch.test.ts | pending | |
 | src/tests/e2b-stack-wizard.test.tsx | pending | |
 | src/tests/e2e-claude-transport.test.ts | pending | |
-| src/tests/e2e-codex-auth-chain.test.ts | pending | |
+| src/tests/e2e-codex-auth-chain.test.ts | test audit complete, production partial | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/e2e-coverage-contract.test.ts | pending | |
 | src/tests/e2e-diff-coverage.test.ts | pending | |
 | src/tests/e2e-nightly-report.test.ts | pending | |
@@ -1180,7 +1238,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/ensure-token.test.ts | pending | |
 | src/tests/entrypoint-api-readiness.test.ts | pending | |
 | src/tests/entrypoint-chown-no-follow.test.ts | audited, retained | C06. GNU tooling verified. Linux container boundary pending. |
-| src/tests/entrypoint-codex-oauth-seed.test.ts | pending | |
+| src/tests/entrypoint-codex-oauth-seed.test.ts | test audit complete, production partial | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/entrypoint-config-env-export.test.ts | pending | |
 | src/tests/entrypoint-export-to-env.test.ts | pending | |
 | src/tests/entrypoint-github-enterprise.test.ts | pending | |
@@ -1201,9 +1259,9 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/extensions-dispatcher.test.ts | static audit complete | C19: controls and cleanup pending |
 | src/tests/extensions-example-comms-adherence-gate.test.ts | static audit complete | C19: controls and cleanup pending |
 | src/tests/extensions-example-deploy-awareness.test.ts | static audit complete | C19: controls and cleanup pending |
-| src/tests/extensions-example-heartbeat-remediate.test.ts | static audit complete | C19: controls and cleanup pending |
+| src/tests/extensions-example-heartbeat-remediate.test.ts | removed | C19: PR #3273, stronger heartbeat and pre-task guards retained |
 | src/tests/extensions-example-no-exclamation-marks.test.ts | static audit complete | C19: controls and cleanup pending |
-| src/tests/extensions-example-rewrite-and-suppress.test.ts | static audit complete | C19: controls and cleanup pending |
+| src/tests/extensions-example-rewrite-and-suppress.test.ts | removed | C19: PR #3273, stronger heartbeat and pre-task guards retained |
 | src/tests/extensions-example-route-chat-channel.test.ts | static audit complete | C19: controls and cleanup pending |
 | src/tests/extensions-example-route-slack-channel.test.ts | static audit complete | C19: controls and cleanup pending |
 | src/tests/extensions-example-slack-reply-gate.test.ts | static audit complete | C19: controls and cleanup pending |
@@ -1339,7 +1397,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/mcp-oauth-wrapper.test.ts | pending | |
 | src/tests/mcp-outbound-fetch-guard.test.ts | pending | |
 | src/tests/mcp-overflow-sweep.test.ts | pending | |
-| src/tests/mcp-server-codex-oauth-env.test.ts | pending | |
+| src/tests/mcp-server-codex-oauth-env.test.ts | test audit complete, production partial | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/mcp-server-resolved-env.test.ts | pending | |
 | src/tests/mcp-server-ssrf.test.ts | pending | |
 | src/tests/mcp-server-stdio-gate.test.ts | pending | |
@@ -1349,7 +1407,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/mcp-user-events.test.ts | pending | |
 | src/tests/mcp-user-route.test.ts | pending | |
 | src/tests/memory-chunked-search-starvation.test.ts | static audit complete | C17: implementation and controls pending |
-| src/tests/memory-e2e.test.ts | static audit complete | C17: implementation and controls pending |
+| src/tests/memory-e2e.test.ts | landed | C17: PR #3276, storage consolidation and repaired guards |
 | src/tests/memory-edges.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-edit-authorization.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-edit.test.ts | static audit complete | C17: implementation and controls pending |
@@ -1379,9 +1437,9 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/memory-search-reader.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-search-stall.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-store-tool.test.ts | static audit complete | C17: implementation and controls pending |
-| src/tests/memory-store.test.ts | static audit complete | C17: implementation and controls pending |
+| src/tests/memory-store.test.ts | landed | C17: PR #3276, storage consolidation and repaired guards |
 | src/tests/memory-usefulness-endpoint.test.ts | static audit complete | C17: implementation and controls pending |
-| src/tests/memory.test.ts | static audit complete | C17: implementation and controls pending |
+| src/tests/memory.test.ts | landed | C17: PR #3276, storage consolidation and repaired guards |
 | src/tests/merge-gate-detect-changes.test.ts | pending | |
 | src/tests/metrics-http.test.ts | pending | |
 | src/tests/migration-046-budgets.test.ts | pending | |
@@ -1460,8 +1518,8 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/otel-env.test.ts | pending | |
 | src/tests/otel-event-loop-and-logs.test.ts | audited, retained | C16: interval reset and log export boundaries |
 | src/tests/otel-impl-secret-scrubbing.test.ts | audited, retained | C16: metric and span redaction |
-| src/tests/otel-service-name.test.ts | implemented, reviewed | C16: configured-name duplication |
-| src/tests/otel-session-cost-metrics.test.ts | implemented, reviewed | C16: fake facade assertion removed |
+| src/tests/otel-service-name.test.ts | landed | C16: PR #3275, configured-name duplication removed |
+| src/tests/otel-session-cost-metrics.test.ts | landed | C16: PR #3275, fake facade assertion removed |
 | src/tests/otel-span-kind.test.ts | audited, retained | C16: explicit server and default kinds |
 | src/tests/outbound-listener-rejection.test.ts | pending | |
 | src/tests/output-schema-inheritance.test.ts | pending | |
@@ -1527,7 +1585,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/provider-registration.test.ts | pending | |
 | src/tests/provider-runtime-dependencies.test.ts | pending | |
 | src/tests/provider-steering-capabilities.test.ts | pending | |
-| src/tests/providers/codex-cost.test.ts | pending | |
+| src/tests/providers/codex-cost.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/providers/pi-cost.test.ts | pending | |
 | src/tests/query-audit-plans.test.ts | pending | |
 | src/tests/queue-stall-alarm.test.ts | pending | |
@@ -1724,7 +1782,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/session-attach.test.ts | pending | |
 | src/tests/session-cost-attribution.test.ts | pending | |
 | src/tests/session-cost-recompute-unit.test.ts | pending | |
-| src/tests/session-costs-codex-recompute.test.ts | pending | |
+| src/tests/session-costs-codex-recompute.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/session-costs-golden.test.ts | pending | |
 | src/tests/session-costs-model-key-normalize.test.ts | pending | |
 | src/tests/session-costs-recompute-all-providers.test.ts | pending | |
@@ -1797,7 +1855,7 @@ Budget policy: PR #3254 merged. Zero net growth by default, with contract-specif
 | src/tests/slack-render-v2-delegation.test.ts | pending | |
 | src/tests/slack-render-v2-query-plans.test.ts | pending | |
 | src/tests/slack-render-v2-reconcile.test.ts | pending | |
-| src/tests/slack-render-v2.test.ts | pending | |
+| src/tests/slack-render-v2.test.ts | partial audit, cleanup reviewed | C10: PR #3274, six controls, remaining sections listed above |
 | src/tests/slack-router-require-mention.test.ts | pending | |
 | src/tests/slack-router.test.ts | pending | |
 | src/tests/slack-routing-guard.test.ts | pending | |
@@ -2151,7 +2209,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-delegation-late-child.ts | pending | |
 | scripts/e2e/scenarios/slack-failed-task.ts | pending | |
 | scripts/e2e/scenarios/slack-follow-up.ts | pending | |
-| scripts/e2e/scenarios/slack-helpers.ts | pending | |
+| scripts/e2e/scenarios/slack-helpers.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-http-command.ts | pending | |
 | scripts/e2e/scenarios/slack-http-cross-team-identity.ts | pending | |
 | scripts/e2e/scenarios/slack-http-helpers.ts | pending | |
@@ -2166,7 +2224,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-relay-restart.ts | pending | |
 | scripts/e2e/scenarios/slack-reply-card.ts | pending | |
 | scripts/e2e/scenarios/slack-session-mirror.ts | pending | |
-| scripts/e2e/scenarios/slack-skipped-task.ts | pending | |
+| scripts/e2e/scenarios/slack-skipped-task.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-task-output-citations.ts | pending | |
 | scripts/e2e/scenarios/slack-task-output-ui-spec.ts | pending | |
 | scripts/e2e/scenarios/slack-task-tree-toggle.ts | pending | |
@@ -2190,7 +2248,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/workflow-wait-event-loop.ts | pending | |
 | scripts/e2e/scenarios/workflow-webhook-filter.ts | pending | |
 | scripts/e2e/scenarios/workflow-webhook-hmac-sha1.ts | pending | |
-| src/tests/fixtures/app-shell-charts-definition.json.txt | pending | |
+| src/tests/fixtures/app-shell-charts-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
 | src/tests/fixtures/azure-boards/workitem.commented.json | pending | |
 | src/tests/fixtures/azure-boards/workitem.created.json | pending | |
 | src/tests/fixtures/azure-boards/workitem.deleted.json | pending | |
@@ -2206,84 +2264,84 @@ Audit each fixture with its callers before deletion.
 | src/tests/fixtures/bitbucket/pullrequest-created-reviewer.json | pending | |
 | src/tests/fixtures/bitbucket/pullrequest-fulfilled.json | pending | |
 | src/tests/fixtures/bitbucket/pullrequest-rejected.json | pending | |
-| src/tests/fixtures/bookmarks-definition.json.txt | pending | |
-| src/tests/fixtures/catalog-feedback-definition.json.txt | pending | |
-| src/tests/fixtures/catalog-inputs-definition.json.txt | pending | |
-| src/tests/fixtures/catalog-table-definition.json.txt | pending | |
+| src/tests/fixtures/bookmarks-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
+| src/tests/fixtures/catalog-feedback-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
+| src/tests/fixtures/catalog-inputs-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
+| src/tests/fixtures/catalog-table-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
 | src/tests/fixtures/chat-sdk/telegram-private-text.json | pending | |
-| src/tests/fixtures/codex-deferred-queue-runner.ts | pending | |
-| src/tests/fixtures/codex-session-runner.ts | pending | |
+| src/tests/fixtures/codex-deferred-queue-runner.ts | audited, retained | C21: production-first Codex audit, process boundaries preserved |
+| src/tests/fixtures/codex-session-runner.ts | audited, retained | C21: production-first Codex audit, process boundaries preserved |
 | src/tests/fixtures/compiled-migrations-boot.ts | pending | |
 | src/tests/fixtures/compiled-source-schema-boot.ts | pending | |
 | src/tests/fixtures/deploy-stubs/bun | pending | |
 | src/tests/fixtures/deploy-stubs/bunx | pending | |
 | src/tests/fixtures/deploy-stubs/curl | pending | |
 | src/tests/fixtures/deploy-stubs/docker | pending | |
-| src/tests/fixtures/extensions/bad-import/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/bad-import/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/bad-return-shape/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/bad-return-shape/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/block-tasks-from-source/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/block-tasks-from-source/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/ignore-channel/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/ignore-channel/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/load.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/minimal/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/minimal/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/native-tool-recorder/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/native-tool-recorder/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/never-fail-long-tasks/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/never-fail-long-tasks/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/no-exclamation-marks/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/no-exclamation-marks/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/post-logger/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/post-logger/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/priority-a/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/priority-a/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/priority-b/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/priority-b/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-blocks/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-blocks/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-only-on-tag/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-only-on-tag/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-task-create/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/record-task-create/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/reserved-assets/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/reserved-assets/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/rewrite-progress-prefix/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/rewrite-progress-prefix/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/rewrite-task-priority/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/rewrite-task-priority/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/route-channel-to-agent/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/route-channel-to-agent/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/route-chat-channel-to-agent/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/route-chat-channel-to-agent/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/slow/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/slow/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/steering-policy/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/steering-policy/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/suppress-lead-follow-up/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/suppress-lead-follow-up/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/throws/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/throws/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/with-assets/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/with-assets/manifest.json | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/with-assets/scripts/echo.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/worker-runtime/hooks.ts | audited, retained | C19: all fixtures have consumers |
-| src/tests/fixtures/extensions/worker-runtime/manifest.json | audited, retained | C19: all fixtures have consumers |
+| src/tests/fixtures/extensions/bad-import/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/bad-import/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/bad-return-shape/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/bad-return-shape/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/block-tasks-from-source/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/block-tasks-from-source/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/ignore-channel/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/ignore-channel/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/load.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/minimal/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/minimal/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/native-tool-recorder/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/native-tool-recorder/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/never-fail-long-tasks/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/never-fail-long-tasks/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/no-exclamation-marks/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/no-exclamation-marks/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/post-logger/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/post-logger/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/priority-a/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/priority-a/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/priority-b/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/priority-b/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-blocks/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-blocks/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-only-on-tag/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-only-on-tag/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-task-create/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/record-task-create/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/reserved-assets/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/reserved-assets/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/rewrite-progress-prefix/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/rewrite-progress-prefix/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/rewrite-task-priority/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/rewrite-task-priority/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/route-channel-to-agent/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/route-channel-to-agent/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/route-chat-channel-to-agent/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/route-chat-channel-to-agent/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/slow/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/slow/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/steering-policy/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/steering-policy/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/suppress-lead-follow-up/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/suppress-lead-follow-up/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/throws/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/throws/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/with-assets/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/with-assets/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/with-assets/scripts/echo.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/worker-runtime/hooks.ts | audited, retained | C19: all 52 fixture/helper files remain used |
+| src/tests/fixtures/extensions/worker-runtime/manifest.json | audited, retained | C19: all 52 fixture/helper files remain used |
 | src/tests/fixtures/fake-amp.ts | pending | |
 | src/tests/fixtures/fake-claude-routes.ts | pending | |
-| src/tests/fixtures/fake-codex-app-server.ts | pending | |
+| src/tests/fixtures/fake-codex-app-server.ts | audited, retained | C21: production-first Codex audit, process boundaries preserved |
 | src/tests/fixtures/fake-fx.ts | pending | |
 | src/tests/fixtures/file-lock-holder.ts | pending | |
 | src/tests/fixtures/fx/acp-responses-recorded.json | pending | |
 | src/tests/fixtures/fx/acp-updates-recorded.jsonl | pending | |
 | src/tests/fixtures/grok/acp-updates-recorded.jsonl | pending | |
 | src/tests/fixtures/grok/prompt-response-meta.json | pending | |
-| src/tests/fixtures/held-template-render.ts | pending | |
+| src/tests/fixtures/held-template-render.ts | audited, retained | C21: production-first Codex audit, process boundaries preserved |
 | src/tests/fixtures/hold-file-lock.ts | pending | |
 | src/tests/fixtures/import-package.ts | pending | |
-| src/tests/fixtures/kibo-blocks-definition.json.txt | pending | |
+| src/tests/fixtures/kibo-blocks-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
 | src/tests/fixtures/onboard/baseline-states.ts | pending | |
 | src/tests/fixtures/onboard/content.compose.yml.txt | pending | |
 | src/tests/fixtures/onboard/content.env.txt | pending | |
@@ -2299,9 +2357,9 @@ Audit each fixture with its callers before deletion.
 | src/tests/fixtures/onboard/solo.env.txt | pending | |
 | src/tests/fixtures/openai-compatible-registry-extension.child.ts | pending | |
 | src/tests/fixtures/pages/head-v1.html | pending | |
-| src/tests/fixtures/prs-app-definition.json.txt | pending | |
-| src/tests/fixtures/prs-filters-migration.patch.json.txt | pending | |
-| src/tests/fixtures/prs-selection-migration.patch.json.txt | pending | |
+| src/tests/fixtures/prs-app-definition.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
+| src/tests/fixtures/prs-filters-migration.patch.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
+| src/tests/fixtures/prs-selection-migration.patch.json.txt | audited, retained | C18: semantic and consumer review, distinct fixture contracts preserved |
 | src/tests/fixtures/runner-identity-refresh.ts | pending | |
 | src/tests/fixtures/runner-legacy-resume-prompt.ts | pending | |
 | src/tests/fixtures/runner-missing-dependency.ts | pending | |
