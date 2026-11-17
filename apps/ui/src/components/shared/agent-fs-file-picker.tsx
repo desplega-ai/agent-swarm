@@ -71,7 +71,10 @@ export function AgentFsFilePicker({
               key={hit.path}
               value={hit.path}
               disabled={disabled}
-              onSelect={() => onSelect({ ...drive, path: hit.path, name: hit.name })}
+              onSelect={() => {
+                onSelect({ ...drive, path: hit.path, name: hit.name });
+                setQuery("");
+              }}
               className="gap-2 text-xs"
             >
               <FileIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
