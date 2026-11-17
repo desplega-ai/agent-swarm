@@ -176,14 +176,14 @@ describe("Scheduled Tasks Integration", () => {
 
     test("should list scheduled tasks with filters", async () => {
       // Create enabled and disabled schedules
-      await createScheduledTask({
+      const enabled = await createScheduledTask({
         name: "test-filter-enabled",
         intervalMs: 60000,
         taskTemplate: "Enabled task",
         enabled: true,
       });
 
-      await createScheduledTask({
+      const disabled = await createScheduledTask({
         name: "test-filter-disabled",
         intervalMs: 60000,
         taskTemplate: "Disabled task",
@@ -193,6 +193,8 @@ describe("Scheduled Tasks Integration", () => {
       const enabledOnly = await getScheduledTasks({ enabled: true });
       const disabledOnly = await getScheduledTasks({ enabled: false });
 
+      expect(enabledOnly.some((s) => s.id === enabled.id)).toBe(true);
+      expect(disabledOnly.some((s) => s.id === disabled.id)).toBe(true);
       expect(enabledOnly.every((s) => s.enabled)).toBe(true);
       expect(disabledOnly.every((s) => !s.enabled)).toBe(true);
     });
@@ -214,15 +216,18 @@ describe("Scheduled Tasks Integration", () => {
       });
       await updateScheduledTask(failing.id, {
         lastRunAt: new Date(Date.now() - 60000).toISOString(),
-        consecutiveErrors: 3,
+        consecutiveErrors: 2,
         lastErrorAt: new Date().toISOString(),
         lastErrorMessage: "boom",
       });
 
-      const failingOnly = await getScheduledTasks({
-        lastRunStatus: "failed",
-        consecutiveErrorsMin: 2,
-      });
+      const belowMinimum = await getScheduledTasks({ consecutiveErrorsMin: 3 });
+      expect(belowMinimum.some((s) => s.id === failing.id)).toBe(false);
+      const atMinimum = await getScheduledTasks({ consecutiveErrorsMin: 2 });
+      expect(atMinimum.some((s) => s.id === failing.id)).toBe(true);
+      expect(atMinimum.some((s) => s.id === ok.id)).toBe(false);
+
+      const failingOnly = await getScheduledTasks({ lastRunStatus: "failed" });
       const succeededOnly = await getScheduledTasks({ lastRunStatus: "succeeded" });
 
       expect(failingOnly.some((s) => s.id === failing.id)).toBe(true);
