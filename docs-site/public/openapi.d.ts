@@ -6870,6 +6870,9 @@ export interface paths {
                             spendCappedIndices: number[];
                             authFailureFence: number;
                             keyUsage: number[];
+                            keyPace: number[];
+                            /** @enum {string} */
+                            selectionStrategy: "pace" | "usage";
                             activeSessions: number[];
                         };
                     };

@@ -21364,6 +21364,19 @@
                         "type": "number"
                       }
                     },
+                    "keyPace": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "selectionStrategy": {
+                      "type": "string",
+                      "enum": [
+                        "pace",
+                        "usage"
+                      ]
+                    },
                     "activeSessions": {
                       "type": "array",
                       "items": {
@@ -21379,6 +21392,8 @@
                     "spendCappedIndices",
                     "authFailureFence",
                     "keyUsage",
+                    "keyPace",
+                    "selectionStrategy",
                     "activeSessions"
                   ]
                 }
