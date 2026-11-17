@@ -2764,13 +2764,13 @@ Post a message to the Telegram, Slack, Discord or Teams thread your current task
 
 **Post to a chat thread or channel**
 
-Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread or Telegram topic, or channelId to use its registered default topic (otherwise the channel). Ids carry the adapter prefix, such as telegram:12345 or telegram:-100123:42 for topic 42. To answer the user of your current chat task, use chat-reply instead. For a structured result (key figures, a table, charts, links), send a `card`; it posts after the text as a native card.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
-| `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
-| `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
+| `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345, telegram:-100123:42 (positive integer topic id), or slack:C123:1700000000.000100. Overrides the channel default. |
+| `channelId` | `string` | No | - | Full SDK channel id, such as telegram:-100123 or slack:C123. Uses its registered default Telegram topic when set. Ignored when threadId is set. |
 | `text` | `string` | No | - | Markdown text to post. Required unless card is given. |
 | `card` | `unknown` | No | - | - |
 | `attachments` | `string[]` | No | - | Files to send after the text, up to 10: attachment ids of your current task (from get-task-details) or file paths in your agent-fs drive, such as thoughts/<agent-id>/report.pdf, read with your own agent-fs credential. Telegram shows JPEG and PNG as photos, MP4 as video, MP3 and M4A as audio, and anything else as a document. A file over the platform upload limit (Telegram 50 MB, Discord 10 MB) is not sent, and the thread gets a note naming it. |
@@ -2801,7 +2801,7 @@ Read the most recent messages of a Chat SDK thread, oldest first. Every agent ca
 
 **Route a chat channel to an agent or workflow**
 
-Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.
+Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. For Telegram, defaultThreadId sets the topic used by channel-only chat-post calls. Re-registering replaces the mapping; omit defaultThreadId to clear it. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2810,6 +2810,7 @@ Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Tele
 | `agentId` | `string` | No | - | Agent that receives the channel's tasks. |
 | `workflowId` | `string` | No | - | Workflow whose webhook trigger receives the channel's messages. |
 | `name` | `string` | No | - | Display name for the mapping. |
+| `defaultThreadId` | `string` | No | - | Telegram topic used when chat-post gives only channelId, such as telegram:-100123:42. Must belong to this channel. Explicit threadId and chat-reply ignore this default. |
 
 ### unregister-chat-channel
 
