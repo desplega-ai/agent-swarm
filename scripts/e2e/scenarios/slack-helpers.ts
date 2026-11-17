@@ -133,6 +133,20 @@ export async function settleWorkerFollowUp(
   leadId: string,
   childTaskId: string,
 ): Promise<void> {
+  const followUpId = await findWorkerFollowUp(ctx, leadId, childTaskId);
+  await claim(ctx, leadId, followUpId);
+  await finish(ctx, leadId, followUpId, {
+    status: "completed",
+    output: "Reviewed the delegated result — looks good.",
+  });
+}
+
+/** The id of the Lead's worker-completion follow-up for `childTaskId`. */
+export async function findWorkerFollowUp(
+  ctx: ScenarioContext,
+  leadId: string,
+  childTaskId: string,
+): Promise<string> {
   let followUpId: string | undefined;
   const found = await pollUntil(async () => {
     const response = await ctx.api("GET", `/api/tasks?agentId=${leadId}&fields=full&limit=50`);
@@ -149,11 +163,7 @@ export async function settleWorkerFollowUp(
     found && followUpId,
     `No worker-completion follow-up for child ${childTaskId} within 15 seconds`,
   );
-  await claim(ctx, leadId, followUpId as string);
-  await finish(ctx, leadId, followUpId as string, {
-    status: "completed",
-    output: "Reviewed the delegated result — looks good.",
-  });
+  return followUpId as string;
 }
 
 /** Creates a delegated child task under `parentTaskId`, inheriting the parent's Slack thread. */
