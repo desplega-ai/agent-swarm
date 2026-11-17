@@ -56570,6 +56570,16 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "Request body exceeds the session-log body limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

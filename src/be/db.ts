@@ -227,6 +227,13 @@ import { pageSearchSql } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
+import {
+  boundSessionLogLine,
+  sessionLogBudgetBytes,
+  sessionLogBudgetMarker,
+  sessionLogBytesWritten,
+  trackSessionLogBytes,
+} from "./db/session-log-bounds";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
@@ -4899,7 +4906,11 @@ export async function createSessionLogs(logs: {
   // the whole sweep. The regex scrub runs outside the transaction so only
   // the inserts hold the lock.
   const BATCH_SIZE = 200;
-  for (let start = 0; start < logs.lines.length; start += BATCH_SIZE) {
+  const budget = sessionLogBudgetBytes();
+  let written = sessionLogBytesWritten(logs.sessionId);
+  if (written >= budget) return;
+  let exhausted = false;
+  for (let start = 0; start < logs.lines.length && !exhausted; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
     if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
     const batch: Array<{ content: string; reasoning: ReturnType<typeof extractReasoning> }> = [];
@@ -4911,10 +4922,24 @@ export async function createSessionLogs(logs: {
       // content that is already scrubbed at the adapter emit site. We scrub
       // again here so any future write path that bypasses the adapter still
       // lands clean text in the persistent session_logs table.
-      const content = scrubSecrets(line);
+      const content = boundSessionLogLine(scrubSecrets(line));
+      written += content.length;
       // Parsed here, next to the scrub, so the write lock covers inserts only.
       batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
+      if (written >= budget) {
+        console.warn(
+          `[session-logs] session ${logs.sessionId} reached the ${Math.round(
+            budget / (1024 * 1024),
+          )} MB budget; dropping further logs for this session`,
+        );
+        const marker = sessionLogBudgetMarker(logs.sessionId, budget);
+        batch.push({ content: marker, reasoning: extractReasoning(logs.cli, marker) });
+        exhausted = true;
+        break;
+      }
     }
+    trackSessionLogBytes(logs.sessionId, written);
+    if (batch.length === 0) break;
     await getDbClient().transaction(async (tx) => {
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting

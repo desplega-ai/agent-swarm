@@ -785,6 +785,81 @@ describe("OpencodeSession — persisted rows render in the dashboard", () => {
   });
 });
 
+describe("OpencodeSession — persisted bytes stay bounded", () => {
+  /** Total bytes the runner would store for a session's `raw_log` events. */
+  const storedBytes = (emitted: ProviderEvent[]) =>
+    emitted
+      .filter((e) => e.type === "raw_log")
+      .reduce((sum, e) => sum + (e as { content: string }).content.length, 0);
+
+  test("a tool result is stored once, not as a raw event beside its mirror", async () => {
+    const result = "x".repeat(50_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { command: "ls" } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: result }],
+      }),
+      succeeded,
+    ]);
+
+    const rows = emitted
+      .filter((e) => e.type === "raw_log")
+      .map((e) => (e as { content: string }).content)
+      .filter((content) => content.includes(result));
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0] as string)).toMatchObject({ type: "tool_end", result });
+  });
+
+  test("a tool payload past the cap is truncated with a marker", async () => {
+    const huge = "y".repeat(400_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { script: huge } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: huge }],
+      }),
+      succeeded,
+    ]);
+
+    const toolEnd = emitted.find((e) => e.type === "tool_end") as { result: string };
+    expect(toolEnd.result).toContain("[truncated");
+    expect(toolEnd.result.length).toBeLessThan(huge.length);
+    const toolStart = emitted.find((e) => e.type === "tool_start") as {
+      args: { script: string };
+    };
+    expect(toolStart.args.script).toContain("[truncated");
+    // The bug: one 400 KB payload used to persist ~800 KB across two rows.
+    expect(storedBytes(emitted)).toBeLessThan(huge.length);
+  });
+
+  test("assistant text grows linearly with its parts, not quadratically", async () => {
+    const part = "z".repeat(10_000);
+    const parts = Array.from({ length: 40 }, (_, ordinal) =>
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: "msg_1",
+        ordinal,
+        text: part,
+      }),
+    );
+    const { emitted } = await runSession([...parts, succeeded]);
+
+    // Cumulative mirrors would store 40 rows averaging half the message:
+    // ~8 MB against the ~400 KB the parts themselves cost.
+    expect(storedBytes(emitted)).toBeLessThan(parts.length * part.length * 2);
+    // The runner still sees the full cumulative text for its final output.
+    const messages = emitted.filter((e) => e.type === "message");
+    expect((messages.at(-1) as { content: string }).content).toHaveLength(
+      part.length * parts.length,
+    );
+  });
+});
+
 describe("OpencodeSession — session end is bounded", () => {
   test("a profile sync that never answers cannot strand the host or completion", async () => {
     let syncCalls = 0;

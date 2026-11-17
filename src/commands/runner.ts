@@ -2972,6 +2972,7 @@ export function activeTaskRefs(state: RunnerState): ActiveTaskRef[] {
 /** Buffer for session logs */
 interface LogBuffer {
   lines: string[];
+  bytes: number;
   lastFlush: number;
   partialLine: string; // Accumulates incomplete line across chunks
 }
@@ -2979,6 +2980,12 @@ interface LogBuffer {
 /** Configuration for log streaming */
 const LOG_BUFFER_SIZE = 50; // Flush after this many lines
 const LOG_FLUSH_INTERVAL_MS = 5000; // Flush every 5 seconds
+/**
+ * Flush once the buffered lines reach this size. Line count alone let a
+ * tool-heavy session build ~95 MB request bodies, which the API had to buffer
+ * whole; staying under the route's 16 MB cap keeps every flush accepted.
+ */
+const LOG_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Push buffered logs to the API */
 async function flushLogBuffer(
@@ -2999,6 +3006,7 @@ async function flushLogBuffer(
   // (fire-and-forget callers would otherwise race on the same buffer)
   const lines = buffer.lines;
   buffer.lines = [];
+  buffer.bytes = 0;
   buffer.lastFlush = Date.now();
 
   const headers: Record<string, string> = {
@@ -4952,7 +4960,7 @@ export async function spawnProviderProcess(
   }
 
   // Set up log streaming
-  const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
+  const logBuffer: LogBuffer = { lines: [], bytes: 0, lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
   // Event buffer (flushes to API periodically)
@@ -5065,8 +5073,10 @@ export async function spawnProviderProcess(
   function bufferSessionLogLine(content: string) {
     if (!shouldStream) return;
     logBuffer.lines.push(content);
+    logBuffer.bytes += content.length;
     const shouldFlush =
       logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+      logBuffer.bytes >= LOG_BUFFER_MAX_BYTES ||
       Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
     if (shouldFlush) {
       flushLogBuffer(logBuffer, {

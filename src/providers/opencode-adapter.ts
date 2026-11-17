@@ -457,6 +457,31 @@ export function applyProviderKeySplice(
 const SWARM_AGENT_NAME = "swarm";
 const TRANSCRIPT_TAIL_CHARS = 20_000;
 const TOOL_RESULT_PREVIEW_CHARS = 500;
+/**
+ * Cap on a persisted tool argument or result. Tool payloads are the only
+ * unbounded field in an OpenCode session: one run wrote 7.3 GB of session_logs
+ * in 27 minutes and OOM-killed the API container.
+ */
+const TOOL_PAYLOAD_MAX_CHARS = 100_000;
+/**
+ * Raw events the dashboard never renders: tool events are covered by the
+ * `tool_start` / `tool_end` mirrors, and text or reasoning deltas by their
+ * `.ended` part. Keep in sync with `OPENCODE_V2_COVERED` in
+ * `apps/ui/src/logs-parser/adapters.ts`, which drops them at parse time.
+ */
+const UNRENDERED_EVENT_TYPES = new Set([
+  "session.tool.input.started",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.tool.called",
+  "session.tool.progress",
+  "session.tool.success",
+  "session.tool.failed",
+  "session.text.started",
+  "session.text.delta",
+  "session.reasoning.started",
+  "session.reasoning.delta",
+]);
 // The last response body finishes streaming with the step; this only covers
 // a read still in flight when the session ends.
 const BILLING_SETTLE_MS = 2_000;
@@ -583,6 +608,30 @@ export function measureOpencodeContext(
   });
 }
 
+function boundedToolText(value: string): string {
+  return value.length > TOOL_PAYLOAD_MAX_CHARS
+    ? `${value.slice(0, TOOL_PAYLOAD_MAX_CHARS)}… [truncated ${value.length - TOOL_PAYLOAD_MAX_CHARS} chars]`
+    : value;
+}
+
+/**
+ * Bound a tool's input for persistence. String fields are truncated in place so
+ * the shape stays usable by the dashboard and the context preamble, both of
+ * which read `args` field by field.
+ */
+function boundedToolArgs(input: unknown): unknown {
+  if (typeof input === "string") return boundedToolText(input);
+  if (!input || typeof input !== "object") return input;
+  const serialized = JSON.stringify(input);
+  if (serialized === undefined || serialized.length <= TOOL_PAYLOAD_MAX_CHARS) return input;
+  if (Array.isArray(input)) return { truncated: true, preview: boundedToolText(serialized) };
+  const bounded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    bounded[key] = typeof value === "string" ? boundedToolText(value) : value;
+  }
+  return bounded;
+}
+
 export class OpencodeSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   // The runner attaches its listener after `createSession` resolves; buffer
@@ -700,7 +749,13 @@ export class OpencodeSession implements ProviderSession {
     const data = (ev as { data?: { sessionID?: string } }).data;
     if (data?.sessionID !== this._sessionId) return;
 
-    this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(ev)) });
+    // Persist the raw event only when the dashboard can render it. Tool
+    // payloads carry the whole result, so storing the raw event next to its
+    // bounded mirror doubled the largest rows in session_logs for a copy the
+    // parser discards; streaming deltas are discarded the same way.
+    if (!UNRENDERED_EVENT_TYPES.has(ev.type)) {
+      this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(ev)) });
+    }
 
     switch (ev.type) {
       case "session.step.started": {
@@ -729,10 +784,11 @@ export class OpencodeSession implements ProviderSession {
           toolName,
           // OpenCode's native skill tool names the skill with `id`, not `name`.
           // Normalize only this tool for the shared skill.invoke tracker.
-          args:
+          args: boundedToolArgs(
             toolName === "skill" && typeof ev.data.input?.id === "string"
               ? { ...ev.data.input, name: ev.data.input.id }
               : ev.data.input,
+          ),
         });
         break;
       }
@@ -748,7 +804,7 @@ export class OpencodeSession implements ProviderSession {
           type: "tool_end",
           toolCallId: ev.data.id,
           toolName: this.toolNames.get(ev.data.id) ?? "tool",
-          result,
+          result: boundedToolText(result),
           isError,
         });
         break;
@@ -761,7 +817,11 @@ export class OpencodeSession implements ProviderSession {
         const text = parts.join("").trim();
         if (!text) break;
         this.transcript.push(`[assistant]: ${ev.data.text}`);
-        this.emit({
+        // The content is cumulative across the message's parts, so persisting
+        // every mirror rewrites the whole message per part — O(N²) bytes for
+        // rows the parser drops in favour of the raw `.ended` parts. The
+        // runner still needs the event itself for the final assistant text.
+        this.emitDirect({
           type: "message",
           role: "assistant",
           content: text,

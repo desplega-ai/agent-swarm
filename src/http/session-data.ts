@@ -35,6 +35,13 @@ import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
 
+/**
+ * A worker flushes 50 buffered lines per POST. The cap keeps a runaway session
+ * from forcing the API to buffer the whole batch in memory — one did, at ~95 MB
+ * a flush, until the container hit its limit and was SIGKILLed.
+ */
+const SESSION_LOGS_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
 /** Mirrors `SessionCostSummaryTotals` in src/be/db.ts. */
@@ -140,6 +147,7 @@ const createSessionLogsRoute = route({
   session: bodyTask("taskId"),
   summary: "Store session logs",
   tags: ["Session Data"],
+  maxBodyBytes: SESSION_LOGS_MAX_BODY_BYTES,
   body: z.object({
     sessionId: z.string().min(1),
     iteration: z.number().int().min(1),
@@ -153,6 +161,7 @@ const createSessionLogsRoute = route({
       schema: z.object({ success: z.literal(true), count: z.number().int().nonnegative() }),
     },
     400: { description: "Validation error" },
+    413: { description: "Request body exceeds the session-log body limit" },
   },
 });
 
