@@ -9,12 +9,14 @@
 // message or a wake-up). "Above" follows the task that dispatched a task when
 // it is in the chain, else `parentTaskId`: a continuation's parent can be an
 // earlier worker task in another turn. Each part shows:
-//   - reply: the opener's answer.
+//   - reply: the opener. Its answer is the opener itself, or the server's
+//     `resume` of it when a deploy or a crash cut it: one answer, tried again.
 //   - workers: tasks of other agents, by agent, then by task type. A try that
 //     did not pass (failed, cancelled, superseded) and a later try of the same
 //     agent and type form one step.
 //   - result: the lead's latest completed answer after the reply. The lead
-//     answers after its workers in a `system` follow-up.
+//     answers after its workers in a `system` follow-up. A resume of a cut
+//     follow-up joins its tries the same way.
 //   - live: a lead task that runs now, after the latest shown answer. It never
 //     replaces an answer.
 //   - internal: everything else of the lead or the system (follow-ups that only
@@ -41,19 +43,33 @@ export interface TurnWorker {
   steps: WorkerStep[];
 }
 
+/**
+ * One answer of the lead: its tries, oldest first. Every try but the last did
+ * not pass (a deploy or a crash cut it, and the server's `resume` of it took
+ * the work over); the last try is the answer shown.
+ */
+export interface LeadStep {
+  tries: AgentTask[];
+}
+
 export interface TurnPart {
   /** The task that opened the part: the person's message, the root, or a wake-up. */
   id: string;
-  /** The opener's answer. */
+  /** The opener: its text is the person's message, its source the channel. */
   reply: AgentTask;
+  /** The opener's answer. `answer.tries[0]` is `reply`. */
+  answer: LeadStep;
   workers: TurnWorker[];
   /** Oldest first. Excludes `result` and `live`. */
   internal: AgentTask[];
   /** The lead's latest completed answer after the reply. */
-  result?: AgentTask;
+  result?: LeadStep;
   /** A lead task that runs now, after the latest shown answer. */
   live?: AgentTask;
 }
+
+/** The try an answer shows: its last. */
+export const shownTry = (step: LeadStep): AgentTask => step.tries[step.tries.length - 1];
 
 export interface Turn {
   /** The task that opened the turn. */
@@ -158,6 +174,7 @@ export function buildTurns(chain: AgentTask[], options: BuildTurnsOptions = {}):
     const part: Draft = {
       id: opener.id,
       reply: opener,
+      answer: { tries: [opener] },
       workers: [],
       internal: [],
       turn,
@@ -267,19 +284,45 @@ function addTry(part: Draft, task: AgentTask, taskType: string): WorkerStep {
 }
 
 function finish({ id, reply, workers, internal, lead }: Draft): TurnPart {
-  // Lead tasks arrive oldest first.
-  const result = lead.filter((task) => task.status === "completed" && !!task.output?.trim()).at(-1);
-  const shownAt = (result ?? reply).createdAt;
+  // Lead tasks arrive oldest first. The server's `resume` of a lead task that
+  // did not pass is the same answer tried again (as a worker's resume is the
+  // same step): it joins that task's tries instead of standing on its own.
+  const answer: LeadStep = { tries: [reply] };
+  const steps: LeadStep[] = [];
+  const stepOf = new Map<string, LeadStep>([[reply.id, answer]]);
+  for (const task of lead) {
+    const continued = task.parentTaskId ? stepOf.get(task.parentTaskId) : undefined;
+    if (continued && task.taskType === "resume" && NOT_PASSED.has(shownTry(continued).status)) {
+      continued.tries.push(task);
+      stepOf.set(task.id, continued);
+      continue;
+    }
+    const step = { tries: [task] };
+    steps.push(step);
+    stepOf.set(task.id, step);
+  }
+  const result = steps
+    .filter((step) => {
+      const last = shownTry(step);
+      return last.status === "completed" && !!last.output?.trim();
+    })
+    .at(-1);
+  const shownAt = shownTry(result ?? answer).createdAt;
+  const placed = new Set([...answer.tries, ...(result?.tries ?? [])]);
   const live = lead
-    .filter((task) => !TERMINAL_STATUSES.has(task.status) && task.createdAt >= shownAt)
+    .filter(
+      (task) =>
+        !placed.has(task) && !TERMINAL_STATUSES.has(task.status) && task.createdAt >= shownAt,
+    )
     .at(-1);
   const all = new Set(internal);
   for (const task of lead) all.add(task);
-  all.delete(result as AgentTask);
+  for (const task of placed) all.delete(task);
   all.delete(live as AgentTask);
   return {
     id,
     reply,
+    answer,
     workers,
     internal: [...all].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     ...(result ? { result } : {}),
@@ -357,10 +400,10 @@ export function workerSummary(part: TurnPart, now: number): WorkerSummary | null
 /** The task ids a part shows or folds, so a lookup can find a task's part. */
 function partTaskIds(part: TurnPart): string[] {
   return [
-    part.reply.id,
+    ...part.answer.tries.map((task) => task.id),
     ...partSteps(part).flatMap((step) => step.tries.map((task) => task.id)),
     ...part.internal.map((task) => task.id),
-    ...(part.result ? [part.result.id] : []),
+    ...(part.result?.tries.map((task) => task.id) ?? []),
     ...(part.live ? [part.live.id] : []),
   ];
 }
@@ -448,7 +491,9 @@ export function deferralText(output: string | undefined): DeferralText {
 
 /** A part that only waits: its reply deferred, with no steps, later answer, or live work. */
 export function onlyWaits(part: TurnPart): boolean {
-  return isDeferral(part.reply) && part.workers.length === 0 && !part.result && !part.live;
+  return (
+    isDeferral(shownTry(part.answer)) && part.workers.length === 0 && !part.result && !part.live
+  );
 }
 
 export type PartRun = { kind: "part"; part: TurnPart } | { kind: "waits"; parts: TurnPart[] };

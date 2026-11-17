@@ -2,7 +2,7 @@ import { ChevronDown, Clock } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import type { AgentTask } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
-import { deferralText, type TurnPart } from "@/lib/session-turns";
+import { deferralText, shownTry, type TurnPart } from "@/lib/session-turns";
 import { cn, formatDuration, parseUTCDate } from "@/lib/utils";
 import { SwarmReply } from "./swarm-reply";
 
@@ -87,7 +87,7 @@ export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: (
  * Picateclas) · latest by 17:50". It opens one `DeferralLine` per wait.
  */
 export function DeferralGroup({ parts, onToggle }: { parts: TurnPart[]; onToggle?: () => void }) {
-  const texts = parts.map((part) => deferralText(part.reply.output));
+  const texts = parts.map((part) => deferralText(shownTry(part.answer).output));
   const names = [...new Set(texts.flatMap((text) => (text.who ? [text.who] : [])))];
   const latest = texts.at(-1)?.by;
   const label = `Waited ${parts.length} times${names.length ? ` (${names.join(", ")})` : ""}${
@@ -97,7 +97,7 @@ export function DeferralGroup({ parts, onToggle }: { parts: TurnPart[]; onToggle
     <WaitRow label={label} onToggle={onToggle}>
       <div className="flex min-w-0 flex-col gap-1 pt-1 pl-5">
         {parts.map((part) => (
-          <DeferralLine key={part.id} task={part.reply} onToggle={onToggle} />
+          <DeferralLine key={part.id} task={shownTry(part.answer)} onToggle={onToggle} />
         ))}
       </div>
     </WaitRow>
