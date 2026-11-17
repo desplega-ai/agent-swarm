@@ -39,6 +39,28 @@ import type {
 // npm's `latest` is older and lacks the JSON/stdin contract used here.
 export const DSH_PACKAGE = "@deepseek-ai/dsh@0.2.2-rc.3";
 
+/** Held stderr past this is flushed as is, so a line with no newline cannot grow without bound. */
+const STDERR_HOLD_MAX = 64 * 1024;
+const PEM_PRIVATE_BEGIN_RE = /^-----BEGIN [A-Z0-9 ]{0,32}PRIVATE KEY/;
+
+/**
+ * How much of the pending stderr text can be scrubbed and emitted now: every
+ * complete line, except a private-key PEM block still waiting for its END
+ * line. A token split across two pipe chunks, or a PEM body split across
+ * lines, is then scrubbed whole. Past `STDERR_HOLD_MAX` everything goes, and
+ * the scrubber's truncated-PEM rule still covers a cut block.
+ */
+export function stderrFlushLength(pending: string): number {
+  if (pending.length > STDERR_HOLD_MAX) return pending.length;
+  let cut = pending.lastIndexOf("\n") + 1;
+  const begin = cut > 0 ? pending.lastIndexOf("-----BEGIN ", cut - 1) : -1;
+  if (begin >= 0 && !pending.slice(begin, cut).includes("-----END ")) {
+    const lineStart = pending.lastIndexOf("\n", begin) + 1;
+    if (PEM_PRIVATE_BEGIN_RE.test(pending.slice(begin, begin + 64))) cut = lineStart;
+  }
+  return cut;
+}
+
 export function checkDshCredentials(env: Record<string, string | undefined>): CredStatus {
   return env.DEEPSEEK_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim()
     ? { ready: true, missing: [], satisfiedBy: "env" }
@@ -234,20 +256,33 @@ class DshSession implements ProviderSession {
 
   private async readStderr(): Promise<void> {
     const decoder = new TextDecoder();
+    // Scrub whole lines, not raw chunks: a chunk boundary can split a token.
+    let pending = "";
     for await (const chunk of this.proc.stderr) {
-      const content = scrubSecrets(decoder.decode(chunk, { stream: true }));
-      this.stderr = (this.stderr + content).slice(-8000);
-      this.emit({ type: "raw_stderr", content });
-      // dsh downgrades a failed plugin to a "did not activate" warning even
-      // with failOnStartupError, then runs on without the swarm tools. A
-      // session that cannot reach store-progress must not pass as healthy.
-      if (
-        !this.failure &&
-        this.stderr.includes(`${DSH_MCP_ENTRY_ID} (@deepseek-ai/dsh-mcp-client)`)
-      ) {
-        this.failure = `dsh could not connect to the swarm MCP server: ${this.stderr.trim().slice(0, 500)}`;
-        await terminateProcessGroup(this.proc.pid);
-      }
+      pending += decoder.decode(chunk, { stream: true });
+      const cut = stderrFlushLength(pending);
+      if (cut === 0) continue;
+      const text = pending.slice(0, cut);
+      pending = pending.slice(cut);
+      await this.consumeStderr(text);
+    }
+    pending += decoder.decode();
+    if (pending) await this.consumeStderr(pending);
+  }
+
+  private async consumeStderr(text: string): Promise<void> {
+    const content = scrubSecrets(text);
+    this.stderr = (this.stderr + content).slice(-8000);
+    this.emit({ type: "raw_stderr", content });
+    // dsh downgrades a failed plugin to a "did not activate" warning even
+    // with failOnStartupError, then runs on without the swarm tools. A
+    // session that cannot reach store-progress must not pass as healthy.
+    if (
+      !this.failure &&
+      this.stderr.includes(`${DSH_MCP_ENTRY_ID} (@deepseek-ai/dsh-mcp-client)`)
+    ) {
+      this.failure = `dsh could not connect to the swarm MCP server: ${this.stderr.trim().slice(0, 500)}`;
+      await terminateProcessGroup(this.proc.pid);
     }
   }
 
