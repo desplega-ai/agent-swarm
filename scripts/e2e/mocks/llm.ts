@@ -10,7 +10,9 @@
 //     extraction through the test-only CLOUDFLARE_API_BASE_URL.
 //   - A GitHub REST stub under `/github` (GITHUB_API_URL): the App installation token and
 //     `GET /repos/:owner/:repo/pulls/:n`, answered from the PRs a scenario sets with
-//     `setGithubPull`. An unknown PR is a 404.
+//     `setGithubPull`. An unknown PR is a 404. Also a branch's required checks
+//     (`GET /repos/:owner/:repo/rules/branches/:branch`, `setGithubRequiredChecks`) and the
+//     check runs on a SHA (`GET .../commits/:sha/check-runs`, `setGithubCheckRuns`).
 //   - The telemetry sink (`POST /telemetry/v1/events`, answers 202), reached through
 //     DESPLEGA_TELEMETRY_ENDPOINT once a scenario turns telemetry on.
 //
@@ -56,6 +58,14 @@ export type ChatResponder = (
   request: ChatRequest,
   schema: unknown,
 ) => string | object | undefined | Promise<string | object | undefined>;
+
+/** One check run as the GitHub stub reports it on a commit. */
+export type GithubCheckRun = {
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: string | null;
+  completed_at: string | null;
+};
 
 export type SystemOneResponder = (body: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -473,6 +483,12 @@ export async function startMockLlm() {
 
   /** PRs the GitHub stub reports, keyed `owner/name#n` (lowercase). */
   const githubPulls = new Map<string, { merged: boolean; headSha: string }>();
+  /** Required check names per `owner/name@branch` (lowercase repo). */
+  const githubRequiredChecks = new Map<string, string[]>();
+  /** Check runs per `owner/name@sha` (lowercase repo). */
+  const githubCheckRuns = new Map<string, GithubCheckRun[]>();
+  /** One held check-runs read (`holdNextGithubCheckRunRead`): answers only after release. */
+  let heldRunRead: { name: string; reached: () => void; released: Promise<void> } | undefined;
   // The SUT signs an App JWT with this key before asking the stub for a token.
   const githubAppKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
     .privateKey.export({ type: "pkcs1", format: "pem" })
@@ -534,7 +550,44 @@ export async function startMockLlm() {
             state: known.merged ? "closed" : "open",
             merged: known.merged,
             head: { sha: known.headSha },
+            base: { ref: "main" },
           });
+        }
+        const rules = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/rules\/branches\/(.+)$/);
+        if (method === "GET" && rules) {
+          const names = githubRequiredChecks.get(
+            `${rules[1]!.toLowerCase()}@${decodeURIComponent(rules[2]!)}`,
+          );
+          return json(
+            200,
+            names
+              ? [
+                  {
+                    type: "required_status_checks",
+                    parameters: { required_status_checks: names.map((context) => ({ context })) },
+                  },
+                ]
+              : [],
+          );
+        }
+        const runs = path.match(/^\/github\/repos\/([^/]+\/[^/]+)\/commits\/([^/]+)\/check-runs$/);
+        if (method === "GET" && runs) {
+          const name = url.searchParams.get("check_name");
+          const all = githubCheckRuns.get(`${runs[1]!.toLowerCase()}@${runs[2]}`) ?? [];
+          const matching = all.filter((run) => !name || run.name === name);
+          if (heldRunRead && heldRunRead.name === name) {
+            const held = heldRunRead;
+            heldRunRead = undefined;
+            held.reached();
+            await held.released;
+          }
+          return json(200, { total_count: matching.length, check_runs: matching });
+        }
+        if (
+          method === "GET" &&
+          /^\/github\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/status$/.test(path)
+        ) {
+          return json(200, { state: "pending", statuses: [] });
         }
         if (method === "POST" && path === "/telemetry/v1/events") {
           return json(202, {});
@@ -601,6 +654,30 @@ export async function startMockLlm() {
         headSha: pull.headSha ?? "0".repeat(40),
       });
     },
+    /** Tell the GitHub stub which checks the branch's rulesets require. */
+    setGithubRequiredChecks(repo: string, branch: string, names: string[]): void {
+      githubRequiredChecks.set(`${repo.toLowerCase()}@${branch}`, names);
+    },
+    /**
+     * Hold the next check-runs read filtered to `name` until `release()`. It answers with the
+     * runs as they were when it arrived, like a slow read. `reached` resolves on arrival.
+     */
+    holdNextGithubCheckRunRead(name: string): { reached: Promise<void>; release: () => void } {
+      let reached!: () => void;
+      let release!: () => void;
+      const arrived = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      heldRunRead = { name, reached, released };
+      return { reached: arrived, release };
+    },
+    /** Tell the GitHub stub which check runs (latest per name) exist on a SHA. */
+    setGithubCheckRuns(repo: string, sha: string, checkRuns: GithubCheckRun[]): void {
+      githubCheckRuns.set(`${repo.toLowerCase()}@${sha}`, checkRuns);
+    },
     setSystemOneResponder(responder: SystemOneResponder | undefined): void {
       systemOneResponder = responder;
     },
@@ -609,6 +686,9 @@ export async function startMockLlm() {
       chatResponder = undefined;
       systemOneResponder = undefined;
       githubPulls.clear();
+      githubRequiredChecks.clear();
+      githubCheckRuns.clear();
+      heldRunRead = undefined;
     },
     async stop(): Promise<void> {
       await server.stop(true);

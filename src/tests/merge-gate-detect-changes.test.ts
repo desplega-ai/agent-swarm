@@ -138,14 +138,19 @@ async function runStep(
   return { stdout: res.stdout, outputs };
 }
 
-/** Builds the repo and returns the change-flag step's flags. */
+/** Builds the repo and returns the change-flag step's flags, for `event` when given. */
 async function flagsFor(
   files: string[],
   change: (repo: string) => Promise<void>,
   script?: string,
+  event?: string,
 ): Promise<Record<string, string>> {
   const repo = await repoWith(files, change);
-  const { stdout, outputs } = await runStep(repo, script ?? (await loadFlagStep()));
+  const { stdout, outputs } = await runStep(
+    repo,
+    script ?? (await loadFlagStep()),
+    event ? { EVENT_NAME: event } : {},
+  );
   expect(stdout).toContain("Changed files:");
   return outputs;
 }
@@ -242,6 +247,107 @@ describe("merge-gate detect-changes flags", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+});
+
+/**
+ * Repo-relative src/ files the dashboard bundle reads: relative imports in apps/ui/src
+ * (tests excluded) and the `../../src/...` paths its vite configs name.
+ */
+async function dashboardSrcInputs(): Promise<string[]> {
+  const loaders = {
+    ts: new Bun.Transpiler({ loader: "ts" }),
+    tsx: new Bun.Transpiler({ loader: "tsx" }),
+  };
+  const uiRoot = join(REPO_ROOT, "apps/ui");
+  const found = new Set<string>();
+  const keep = (file: string, spec: string) => {
+    const rel = relative(REPO_ROOT, resolve(dirname(file), spec));
+    if (rel.startsWith("src/")) found.add(rel);
+  };
+  for await (const path of new Bun.Glob("src/**/*.{ts,tsx}").scan({ cwd: uiRoot })) {
+    if (/\.test\.tsx?$/.test(path)) continue;
+    const file = join(uiRoot, path);
+    const transpiler = path.endsWith(".tsx") ? loaders.tsx : loaders.ts;
+    for (const { path: spec } of transpiler.scanImports(await Bun.file(file).text())) {
+      if (spec.startsWith(".")) keep(file, spec);
+    }
+  }
+  for await (const path of new Bun.Glob("vite*.config.ts").scan({ cwd: uiRoot })) {
+    const file = join(uiRoot, path);
+    for (const m of (await Bun.file(file).text()).matchAll(
+      /["'`]((?:\.\.\/)+src\/[^"'`]+)["'`]/g,
+    )) {
+      if (m[1]) keep(file, m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+describe("merge-gate image builds on a pull request", () => {
+  const BASE_FILES = [
+    "src/be/db.ts",
+    "src/utils/task-citations.ts",
+    "scripts/e2e/scenarios/x.ts",
+    "scripts/init-local-postgres.sh",
+    "apps/ui/src/app.tsx",
+    "Dockerfile.worker",
+    "Dockerfile.ui",
+    "bun.lock",
+    ".github/workflows/merge-gate.yml",
+  ];
+
+  test.each([
+    // [changed file, event, docker, ui_image]
+    ["src/be/db.ts", "pull_request", "false", "false"],
+    ["src/be/db.ts", "merge_group", "true", "true"],
+    ["scripts/e2e/scenarios/x.ts", "pull_request", "false", "false"],
+    ["scripts/e2e/scenarios/x.ts", "merge_group", "true", "false"],
+    ["scripts/init-local-postgres.sh", "pull_request", "true", "false"],
+    ["Dockerfile.worker", "pull_request", "true", "false"],
+    ["Dockerfile.ui", "pull_request", "false", "true"],
+    ["bun.lock", "pull_request", "true", "true"],
+    ["apps/ui/src/app.tsx", "pull_request", "false", "true"],
+    ["src/utils/task-citations.ts", "pull_request", "false", "true"],
+    [".github/workflows/merge-gate.yml", "pull_request", "true", "true"],
+  ])(
+    "%s on %s: docker=%s ui_image=%s",
+    async (path, event, docker, uiImage) => {
+      const flags = await flagsFor(BASE_FILES, edit(path), undefined, event);
+      expect(flags.docker).toBe(docker);
+      expect(flags.ui_image).toBe(uiImage);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "a source change next to an image input still builds on a pull request",
+    async () => {
+      const flags = await flagsFor(
+        BASE_FILES,
+        async (repo) => {
+          await edit("src/be/db.ts")(repo);
+          await edit("Dockerfile.worker")(repo);
+        },
+        undefined,
+        "pull_request",
+      );
+      expect(flags.docker).toBe("true");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  // The pull-request list names the src/ directories the dashboard imports. A new import
+  // from another directory must join it, or a pull request that breaks the bundle goes
+  // green until the merge queue.
+  test("the pull-request Dashboard Image list covers every src/ file the dashboard reads", async () => {
+    const step = await loadFlagStep();
+    const pattern = /UI_IMAGE=\$\(match '(\^src\/[^']+)'\)/.exec(step)?.[1];
+    expect(pattern).toBeDefined();
+    const inputs = await dashboardSrcInputs();
+    expect(inputs.length).toBeGreaterThan(0);
+    const covered = new RegExp(pattern as string);
+    expect(inputs.filter((file) => !covered.test(file))).toEqual([]);
+  });
 });
 
 describe("merge-gate unit-test scope", () => {

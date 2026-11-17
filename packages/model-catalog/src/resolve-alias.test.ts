@@ -29,7 +29,7 @@ const catalog: ModelsDevCatalog = {
     models: {
       "gpt-5-sol": { release_date: "2026-03-01" },
       "gpt-6-sol": { release_date: "2026-07-01" },
-      "gpt-6-sol-20260701": { release_date: "2026-07-01" },
+      "gpt-7-sol-20260925": { release_date: "2026-09-25" },
       "gpt-7-sol": { release_date: "2026-09-25" },
       "gpt-7-sol-preview": { release_date: "2026-09-26" },
       "gpt-8-experimental-sol": { release_date: "2026-01-01" },

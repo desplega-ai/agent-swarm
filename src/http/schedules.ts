@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   createScheduledTask,
@@ -39,6 +39,7 @@ import {
   ScheduledTaskTargetTypeSchema,
   splitLegacyModelAlias,
 } from "../types";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
@@ -439,7 +440,9 @@ export async function handleSchedules(
       const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
       let key: string | undefined;
       try {
-        key = body.key ? await authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
+        key = body.key
+          ? await authorizeHttpAssetKeyWrite(req, myAgentId, body.key, trustedUserId)
+          : undefined;
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -577,10 +580,7 @@ export async function handleSchedules(
     const body = parsed.body as Record<string, unknown>;
     if (parsed.body.key !== undefined) {
       try {
-        body.key = await authorizeAssetKeyWrite(
-          parsed.body.key,
-          await resolveHttpRequesterUserId(req, myAgentId),
-        );
+        body.key = await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);

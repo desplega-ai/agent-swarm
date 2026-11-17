@@ -777,6 +777,14 @@ button[data-slot="sidebar-rail"] {
   margin: 0.1em 0;
 }
 
+/* A touch screen: list items that hold a link chip sit 40 px apart, so the
+ * 40 px tap areas of two chips (`hit-area`) do not overlap. */
+@media (pointer: coarse) {
+  .prose-chat li:has([data-slot="swarm-link"]) {
+    margin: 7px 0;
+  }
+}
+
 /* Chat keeps compact headings; the rest of the markdown look is shared
  * (`markdown.css`). */
 .prose-chat h1,

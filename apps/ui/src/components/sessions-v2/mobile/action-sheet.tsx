@@ -3,10 +3,10 @@
  * 48 px rows, the touch form of a desktop menu. A tap on a row starts the
  * sheet's close (the drawer's 250 ms exit) and runs the row in the same
  * tap, so a row that opens the next sheet opens it while this one slides
- * out. A switch row flips in place and keeps the sheet open.
+ * out. A switch row and a check row change in place and keep the sheet open.
  */
 
-import type { LucideIcon } from "lucide-react";
+import { Check, type LucideIcon } from "lucide-react";
 import { createContext, type ReactNode, useContext, useId } from "react";
 import {
   ResponsiveOverlay,
@@ -115,6 +115,61 @@ export function ActionSheetSwitch({
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
     </label>
+  );
+}
+
+/**
+ * A row that picks one value of a set (`radio`) or turns one on and off
+ * (`checkbox`), and keeps the sheet open. A check at the end marks it.
+ */
+export function ActionSheetCheck({
+  role,
+  checked,
+  onSelect,
+  lead,
+  label,
+  hint,
+  detail,
+  disabled,
+}: {
+  role: "radio" | "checkbox";
+  checked: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  /** At the start of the row: an icon or a logo. */
+  lead?: ReactNode;
+  label: ReactNode;
+  /** A muted second line. */
+  hint?: ReactNode;
+  /** Muted words before the check (a count). */
+  detail?: ReactNode;
+}) {
+  // A row with a label, a hint, and a count: a button in the role, not a bare input.
+  const state = { role, "aria-checked": checked };
+  return (
+    <button
+      type="button"
+      {...state}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(ROW, hint ? "py-2" : null)}
+    >
+      {lead ? (
+        <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
+          {lead}
+        </span>
+      ) : null}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{label}</span>
+        {hint ? <span className="text-data text-muted-foreground">{hint}</span> : null}
+      </span>
+      {detail ? (
+        <span className="shrink-0 font-mono text-data tabular-nums text-muted-foreground">
+          {detail}
+        </span>
+      ) : null}
+      <Check aria-hidden className={cn("size-5 shrink-0 text-primary", !checked && "invisible")} />
+    </button>
   );
 }
 

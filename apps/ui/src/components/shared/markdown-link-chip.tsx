@@ -265,6 +265,8 @@ export function SwarmLinkView({
           // `!`: the unlayered `.prose-chat a` rules would underline it on hover.
           className={cn(
             "hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60",
+            // A touch screen: a 40 px tap area around the one-line chip.
+            "hit-area",
             className,
           )}
         >
