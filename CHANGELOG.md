@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.4] - 2026-11-17
+
+### Added
+- Pages: an org design system (`design-system-get`, `design-system-set`, `GET`/`PUT /api/design-system`) restyles every version 2 page that sets no theme, with tokens, fonts, logo, a light/dark lock and a chart palette (#3225).
+- Slack: simple HITL approvals (one approval, boolean, single-select up to 5 options, or one-line text) are answered with inline buttons in the card (#3202).
+- Chat SDK: `register-chat-channel` takes a Telegram `defaultThreadId`, used by channel-only `chat-post` calls (#3194).
+- UI: both sessions panes are tab groups, and linked assets open as tabs (#3226).
+- Workflows: `system-one-decision` lists other OpenRouter decision models (#3228).
+
+### Changed
+- agent-fs pins bumped 0.18.29 -> 0.18.32 (#3227, #3231, and 0.18.31 -> 0.18.32 in this release).
+- CI: unit tests and UI E2E run in 8 shards; PRs run only affected unit tests (#3201).
+- Read-only MCP tools (skills, MCP servers, workflows and workflow runs) carry `readOnlyHint` (#3218).
+- Dependencies: worker harness bumps for amp and goose (#3191, #3229).
+- Docs: guides for contractor credential expiry (#3190), supplier order confirmations (#3216), unmatched bank transactions (#3219), guest accessibility requests (#3220) and partner data feed freshness (#3224); RFP, SLA breach, partner readiness and competitor brief guide updates (#3186, #3187, #3188, #3214); heartbeat spec sync (#3189); MCP.md regenerated for the Telegram default topic; `SCHEDULER_INTERVAL_MS` bounds in the environment variables reference.
+
+### Fixed
+- Tools: a session whose task already ended can no longer write (#3210).
+- Workflows: recovery re-enters an orphaned agent-task step instead of creating a second task (#3215).
+- Scripts: `ctx.swarm.task_storeProgress` goes through the store-progress tool, so attachments, citations and the other fields are kept (#3222); `memory_get` accepts the `id` alias (#3217).
+- Scrubber: tokens before punctuation, 9 more vendor token shapes, PEM keys and object keys are redacted (#3223).
+- Database: script run sources are deduplicated and retained space is reclaimed (#3200).
+- Scheduler: an unusable `SCHEDULER_INTERVAL_MS` falls back to 10s instead of a tight loop (#3174); heartbeat rejects non-positive stall thresholds (#3173).
+- RBAC: viewers can open authed pages (#3206).
+- Chat SDK: the bot mention is stripped in every adapter form, and Discord mentions are named (#3203).
+- Jira: ADF card URLs and ordered-list numbers are emitted (#3195).
+- Git: GitHub and Azure DevOps remotes are detected by hostname (#3196).
+- UI: Anthropic API keys with any `sk-ant-` prefix are accepted (#3230); zero-valued GitHub shorthand references are rejected (#3207); Slack HTTP transport guidance is corrected (#3157).
+
 ## [2.13.3] - 2026-11-16
 
 ### Added
