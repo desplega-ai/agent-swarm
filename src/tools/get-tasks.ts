@@ -9,12 +9,7 @@ import {
   toolOk,
 } from "@/tools/utils";
 import type { AgentTask, AgentTaskSummary } from "@/types";
-import {
-  AgentTaskStatusSchema,
-  AssetKeySchema,
-  TASK_STATUS_KINDS,
-  TaskStatusKindSchema,
-} from "@/types";
+import { AgentTaskStatusSchema, AssetKeySchema, TaskStatusKindSchema } from "@/types";
 
 const TaskSummarySchema = z.looseObject({
   id: z.string().optional(),
@@ -43,11 +38,8 @@ export const getTasksInputSchema = z.object({
     "Filter by task status (unassigned, offered, pending, in_progress, completed, failed).",
   ),
   statusKind: TaskStatusKindSchema.optional().describe(
-    `Filter by why the task ended. Pair with status, e.g. status 'failed' + statusKind 'error' (crash, rate limit, exit code) vs 'agent' (the agent chose to fail). Kinds per status: ${Object.entries(
-      TASK_STATUS_KINDS,
-    )
-      .map(([status, kinds]) => `${status}: ${kinds.join(", ")}`)
-      .join("; ")}.`,
+    // Static text: scripts/generate-mcp-docs.ts resolves only literal interpolations.
+    "Filter by why the task ended. Pair with status, e.g. status 'failed' + statusKind 'error' (crash, rate limit, exit code) vs 'agent' (the agent chose to fail).",
   ),
   mineOnly: z.boolean().optional().describe("Only return tasks assigned to you."),
   unassigned: z.boolean().optional().describe("Only return unassigned tasks in the pool."),

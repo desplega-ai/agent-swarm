@@ -290,6 +290,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded \| skipped` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
+| `statusKind` | `agent \| runner \| deferred \| error \| cascade \| external \| user \| workflow \| system \| graceful_shutdown \| context_limits \| manual_supersede \| crash_recovery \| provider_fallback \| workflow_retry` | No | - | Filter by why the task ended. Pair with status, e.g. status 'failed' + statusKind 'error' (crash, rate limit, exit code) vs 'agent' (the agent chose to fail). |
 | `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |

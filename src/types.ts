@@ -392,9 +392,33 @@ export const TASK_STATUS_KINDS = {
 export type TaskStatusKindFor<S extends TerminalTaskStatus> = (typeof TASK_STATUS_KINDS)[S][number];
 export type TaskStatusKind = TaskStatusKindFor<TerminalTaskStatus>;
 
+// Literal list so scripts/generate-mcp-docs.ts can render the values; the
+// assertion below fails tsc when it drifts from TASK_STATUS_KINDS.
 export const TaskStatusKindSchema = z.enum([
-  ...new Set(Object.values(TASK_STATUS_KINDS).flat()),
-] as [TaskStatusKind, ...TaskStatusKind[]]);
+  "agent",
+  "runner",
+  "deferred",
+  "error",
+  "cascade",
+  "external",
+  "user",
+  "workflow",
+  "system",
+  "graceful_shutdown",
+  "context_limits",
+  "manual_supersede",
+  "crash_recovery",
+  "provider_fallback",
+  "workflow_retry",
+]);
+type TaskStatusKindSchemaMatchesRegistry = [TaskStatusKind] extends [
+  z.infer<typeof TaskStatusKindSchema>,
+]
+  ? [z.infer<typeof TaskStatusKindSchema>] extends [TaskStatusKind]
+    ? true
+    : false
+  : false;
+true satisfies TaskStatusKindSchemaMatchesRegistry;
 
 export function isTaskStatusKindFor<S extends TerminalTaskStatus>(
   status: S,
