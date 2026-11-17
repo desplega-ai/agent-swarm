@@ -4,7 +4,7 @@
  * 44 px. A session row is one 48 px line: a chat source logo, the title,
  * the people, and the time. It takes a second line (56 px) only for more to
  * say: its group in a flat list, or when it comes back from Later. A group
- * name shows before its counts: the counts shrink when the row is narrow.
+ * name shows before its counts: the counts get shorter when the name does not fit.
  * There are no tooltips, no hover card, no key hints, and no drag. Rows sit
  * on two columns (marks and icons, then titles and names): a session uses
  * the columns of its group, and a subgroup takes one indent step, with no
@@ -31,6 +31,7 @@ import {
   type MouseEvent,
   memo,
   type ReactNode,
+  type RefObject,
   useLayoutEffect,
   useRef,
   useState,
@@ -327,6 +328,7 @@ function MobileContainerRowView({
 }: MobileContainerRowProps) {
   const press = useLongPress(onLongPress ? () => onLongPress(row.key) : undefined);
   const { name, searchMatch, hasChildren, plain, label } = containerFacts(row, ownerName);
+  const nameRef = useRef<HTMLSpanElement>(null);
 
   return (
     <div
@@ -363,9 +365,9 @@ function MobileContainerRowView({
         />
       ) : (
         <span
+          ref={nameRef}
           className={cn(
-            // The name keeps its width before the counts do, up to 70% of the row.
-            "max-w-[70%] min-w-0 truncate text-base",
+            "min-w-0 truncate text-base",
             row.type === "box" ? "font-semibold" : "font-medium",
             row.type === "group" && !row.node.name && "text-muted-foreground",
           )}
@@ -382,12 +384,11 @@ function MobileContainerRowView({
           )}
         />
       ) : null}
-      {/* The rename field takes the free room itself. The counts take it, else a spacer. */}
-      {renaming ? null : row.counts ? (
-        <TouchCounts counts={row.counts} plain={plain} />
-      ) : (
-        <span className="min-w-0 flex-1" />
-      )}
+      {/* The rename field takes the free room itself. */}
+      {renaming ? null : <span className="min-w-0 flex-1" />}
+      {row.counts && !renaming ? (
+        <TouchCounts counts={row.counts} plain={plain} name={name} nameRef={nameRef} />
+      ) : null}
     </div>
   );
 }
@@ -395,63 +396,75 @@ function MobileContainerRowView({
 export const MobileContainerRow = memo(MobileContainerRowView, rowPropsEqual);
 
 /**
- * The counts of a container row on a phone, in the room the name leaves.
- * They show in full when they fit. If not, the running count goes first,
- * then "N unread" turns into a dot. "N need you" always stays.
+ * The counts of a container row on a phone. They never shrink: the name
+ * takes the rest of the row. They show in full while the name fits. If it
+ * does not, the running count goes first, then "N unread" turns into a dot.
+ * "N need you" always stays, and a name that is still too long is cut.
  */
-function TouchCounts({ counts, plain }: { counts: SessionSectionCounts; plain?: boolean }) {
-  const room = useRef<HTMLSpanElement>(null);
-  const items = useRef<HTMLSpanElement>(null);
+function TouchCounts({
+  counts,
+  plain,
+  name,
+  nameRef,
+}: {
+  counts: SessionSectionCounts;
+  plain?: boolean;
+  /** The row's name: a new name measures again. */
+  name: string;
+  nameRef: RefObject<HTMLSpanElement | null>;
+}) {
   // 0: all. 1: no running count. 2: also the unread dot.
   const [fit, setFit] = useState({ level: 0, width: 0 });
-  const what = `${counts.running} ${counts.needsYou} ${counts.unread} ${counts.total}`;
-  // A new width or new counts: measure again from the full form.
+  const what = `${name} ${counts.running} ${counts.needsYou} ${counts.unread} ${counts.total}`;
+  // A new row width, a new name, or new counts: measure again from the full form.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `what` restarts the measure
   useLayoutEffect(() => {
-    const el = room.current;
-    if (!el) return;
-    const measure = () => setFit({ level: 0, width: el.clientWidth });
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
+    const row = nameRef.current?.parentElement;
+    if (!row) return;
+    setFit({ level: 0, width: row.clientWidth });
+    const observer = new ResizeObserver(() =>
+      setFit((prev) =>
+        prev.width === row.clientWidth ? prev : { level: 0, width: row.clientWidth },
+      ),
+    );
+    observer.observe(row);
     return () => observer.disconnect();
-  }, [what]);
-  // One step shorter while the items are wider than their room.
+  }, [what, nameRef]);
+  // One step shorter while the name is cut (1 px of slack for rounding).
   useLayoutEffect(() => {
-    if (fit.level >= 2 || !items.current) return;
-    if (items.current.offsetWidth > fit.width) setFit({ ...fit, level: fit.level + 1 });
-  }, [fit]);
+    const label = nameRef.current;
+    if (fit.level >= 2 || !label) return;
+    if (label.scrollWidth > label.clientWidth + 1) setFit({ ...fit, level: fit.level + 1 });
+  }, [fit, nameRef]);
 
   const number = "font-mono text-data tabular-nums text-muted-foreground";
   const showTotal = plain && counts.running === 0 && counts.needsYou === 0 && counts.unread === 0;
   return (
-    <span ref={room} aria-hidden className="flex min-w-0 flex-1 justify-end overflow-hidden">
-      <span ref={items} className="flex shrink-0 items-center gap-1.5">
-        {counts.running > 0 && fit.level < 1 ? (
-          <span className={cn("flex shrink-0 items-center gap-1", number)}>
-            <TaskStatusIcon variant="active" className="size-3.5" />
-            {counts.running}
-          </span>
-        ) : null}
-        {counts.needsYou > 0 ? (
-          <NeedsYouBadge>
-            {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
-          </NeedsYouBadge>
-        ) : null}
-        {counts.unread > 0 ? (
-          fit.level < 2 ? (
-            <Badge
-              variant="outline"
-              className="h-5 rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
-            >
-              {counts.unread} unread
-            </Badge>
-          ) : (
-            <ReadMark unread className="size-2" />
-          )
-        ) : null}
-        {showTotal ? <span className={number}>{counts.total}</span> : null}
-      </span>
+    <span aria-hidden className="flex shrink-0 items-center gap-1.5">
+      {counts.running > 0 && fit.level < 1 ? (
+        <span className={cn("flex shrink-0 items-center gap-1", number)}>
+          <TaskStatusIcon variant="active" className="size-3.5" />
+          {counts.running}
+        </span>
+      ) : null}
+      {counts.needsYou > 0 ? (
+        <NeedsYouBadge>
+          {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
+        </NeedsYouBadge>
+      ) : null}
+      {counts.unread > 0 ? (
+        fit.level < 2 ? (
+          <Badge
+            variant="outline"
+            className="h-5 rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
+          >
+            {counts.unread} unread
+          </Badge>
+        ) : (
+          <ReadMark unread className="size-2" />
+        )
+      ) : null}
+      {showTotal ? <span className={number}>{counts.total}</span> : null}
     </span>
   );
 }
