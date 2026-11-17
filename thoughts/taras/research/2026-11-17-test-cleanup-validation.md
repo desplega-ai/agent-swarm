@@ -78,3 +78,32 @@ API results: 172 first-attempt passes and three retry passes. The retry cases re
 The separate script-inline-run scenario passed its clean-stderr guard. Controlled .bashrc and BASH_ENV fixtures detect removal of their protective flags.
 The .bashrc control is proven on macOS. Linux socket-stdin behavior remains unverified locally.
 Default macOS tools reproduced only the two known GNU entrypoint assumptions before the corrected PATH run.
+
+## Merge-queue DB timing failure
+
+C15 passed its PR checks. Merge-group run 44123585250 failed Run Tests (2/8).
+The unchanged db-client-busy-retry test required executionMs below 300ms. The run measured 371.386837ms.
+Production includes each synchronous SQLite attempt in execution time. Its final attempt can spin for 250ms.
+The fixed ceiling therefore cannot protect the accounting contract under load.
+Keep real SQLite contention and verify that execution time includes failed attempts but excludes backoff.
+C22 first passed 53 affected checks and two mutation controls with clock and timer spies.
+Independent review rejected the added maintenance cost. A smaller real-clock version remains under validation.
+C10 also failed this unchanged guard in merge-group run 44125275220, measuring 364.037399ms.
+GitHub check annotations identify the exact failure at db-client-busy-retry.test.ts:102.
+No queue retry was requested after either failure.
+
+## Slack readiness repair
+
+C20 avoids repeated renderer config writes. Required changes restart the API and explicitly await a Slack socket.
+The reaction override uses the same readiness barrier during setup and cleanup.
+All 35 affected scenarios passed check:local: zero failures, skips, or flaky results, with 553 HTTP calls.
+Paired runs passed before and after a two-second reconnect delay. Removing override barriers failed both existing runner attempts.
+Legacy and first-writer scenarios passed. All 16 legacy PNGs remained valid, including 11 transition frames.
+The workflow-approvals ECONNRESET remains unexplained. A skip path cannot drain an unrelated earlier config reload.
+
+## Cancellation consolidation
+
+C21 reduced the affected Codex suites from 126 to 123 tests. Parent check:local passed in 12 seconds.
+Seven controls failed retained guards. Missing poll abort still times out, and afterEach restores console.log.
+Removing name-only AbortError classification survives both versions because both explicitly call abort. This remains a coverage limit.
+Scoped test typechecking reports 13 unchanged baseline errors. The configured root typecheck passes.
