@@ -12,7 +12,7 @@ const installationTokenRoute = route({
   pattern: ["api", "github", "installation-token"],
   summary: "Mint a GitHub App installation token for worker git and gh",
   description:
-    "Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`), the API resolves that repository's App installation with the App JWT and mints for it; the repository must be registered in `swarm_repos`. Without a `repo`, the installation in `GITHUB_APP_INSTALLATION_ID` is the fallback, so single-installation deployments are unchanged. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.",
+    "Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`) whose owner is listed in the deployment env `GITHUB_APP_REPO_OWNERS`, the API resolves that repository's App installation with the App JWT and mints for it; the repository must also be registered in `swarm_repos` on the configured GitHub host (403 otherwise). Any other call mints for the installation in `GITHUB_APP_INSTALLATION_ID`, so single-installation deployments are unchanged and a caller never picks an installation the operator did not list. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.",
   tags: ["GitHub"],
   body: z
     .object({
@@ -32,7 +32,8 @@ const installationTokenRoute = route({
       schema: z.object({ token: z.string(), expiresAt: z.string() }),
     },
     403: {
-      description: "Caller is not a registered agent, or the repo is not registered in the swarm",
+      description:
+        "Caller is not a registered agent, or the repo of a listed owner is not registered in the swarm",
     },
     404: { description: "GitHub App worker auth is not configured" },
     502: {
@@ -43,7 +44,7 @@ const installationTokenRoute = route({
   auth: { apiKey: true, agentId: true },
   rbac: {
     ungated:
-      "the handler admits only registered agent principals and mints only for the fixed installation or a registered repo's installation",
+      "the handler admits only registered agent principals and mints only for the fixed installation or the installation of a registered repo whose owner the deployment env lists",
   },
 });
 

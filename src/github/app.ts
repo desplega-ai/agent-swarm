@@ -293,14 +293,73 @@ export function normalizeRepo(repo: string): string {
 }
 
 /**
+ * Owners (GitHub user or org logins, lowercased) whose repos may get a token for
+ * their own installation, from the deployment env `GITHUB_APP_REPO_OWNERS`
+ * (comma-separated). It is a reserved key, so no config writer can extend it.
+ * Empty: every call mints for `GITHUB_APP_INSTALLATION_ID`, as before.
+ */
+function allowedRepoOwners(): Set<string> {
+  return new Set(
+    (process.env.GITHUB_APP_REPO_OWNERS ?? "")
+      .split(",")
+      .map((owner) => owner.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * `owner/name` of a `swarm_repos` URL when it points at the configured GitHub
+ * host (https, ssh or scp-like) or is the bare `owner/name` shorthand; `null`
+ * for any other host or shape. A URL on another host whose path merely ends in
+ * `owner/name` is not that repository.
+ */
+function registeredSlugOnHost(url: string, host: string): string | null {
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
+  let urlHost: string | null = null;
+  let path: string;
+  const scp = trimmed.match(/^[^@/:]+@([^:/]+):(.+)$/);
+  if (scp) {
+    urlHost = scp[1]!.toLowerCase();
+    path = scp[2]!;
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      urlHost = parsed.host.toLowerCase();
+      path = parsed.pathname;
+    } catch {
+      return null;
+    }
+  } else {
+    path = trimmed;
+  }
+  if (
+    urlHost !== null &&
+    urlHost !== host &&
+    !(host === "github.com" && urlHost === "www.github.com")
+  ) {
+    return null;
+  }
+  const segments = path.replace(/^\/+/, "").split("/");
+  if (segments.length !== 2) return null;
+  const slug = normalizeRepo(segments.join("/"));
+  return slug || null;
+}
+
+/**
  * The App installation that owns `repo`, asked of GitHub with an App JWT
  * (`GET /repos/{owner}/{repo}/installation`). Cached for ten minutes because a
  * worker asks once per git/gh call. `null` when GitHub does not answer 200:
  * no installation, a revoked one, or an App that cannot see the repository.
+ * Also `null` when the installation's account is not an allowed owner (a
+ * transferred repo redirects to its new owner's installation).
  */
 async function resolveInstallationId(
   repo: string,
   creds: { appId: string | null; privateKey: string | null },
+  owners: Set<string>,
 ): Promise<number | null> {
   const cached = installationCache.get(repo);
   if (cached && cached.expiresAt > Date.now()) return cached.id;
@@ -320,8 +379,13 @@ async function resolveInstallationId(
       console.log(`[GitHub] No installation for ${repo}: ${response.status}`);
       return null;
     }
-    const data = (await response.json()) as { id?: unknown };
+    const data = (await response.json()) as { id?: unknown; account?: { login?: unknown } };
     if (typeof data.id !== "number") return null;
+    const account = typeof data.account?.login === "string" ? data.account.login.toLowerCase() : "";
+    if (!owners.has(account)) {
+      console.log(`[GitHub] Installation for ${repo} belongs to an owner that is not allowed`);
+      return null;
+    }
     installationCache.set(repo, {
       id: data.id,
       expiresAt: Date.now() + INSTALLATION_CACHE_TTL_MS,
@@ -336,14 +400,17 @@ async function resolveInstallationId(
 /**
  * Installation token for worker `git` / `gh`.
  *
- * With a `repo` (`owner/name` or a URL), the token is minted for that
- * repository's App installation, resolved with the App JWT: one App with an
- * installation per owner can then serve repos from more than one account. The
- * repository must be registered in `swarm_repos`, so a caller cannot aim the App
- * at an installation the swarm does not manage.
+ * With a `repo` (`owner/name`) whose owner is listed in the deployment env
+ * `GITHUB_APP_REPO_OWNERS`, the token is minted for that repository's App
+ * installation, resolved with the App JWT: one App with an installation per
+ * owner can then serve repos from more than one account. The operator's owner
+ * list is the boundary; the repository must also be registered in `swarm_repos`
+ * on the configured GitHub host.
  *
- * Without a `repo`, the fixed `GITHUB_APP_INSTALLATION_ID` is the fallback, so a
- * single-installation deployment behaves exactly as before.
+ * Any other call, with no repo or a repo of an unlisted owner, mints for the
+ * fixed `GITHUB_APP_INSTALLATION_ID`, so a single-installation deployment
+ * behaves exactly as before and a caller never picks an installation the
+ * operator did not list.
  *
  * Reads env on each call: it works without the webhook (`initGitHub` loads App
  * credentials only when `GITHUB_WEBHOOK_SECRET` is set).
@@ -353,16 +420,21 @@ export async function getWorkerInstallationToken(repo?: string): Promise<WorkerI
   const workerAppId = process.env.GITHUB_APP_ID?.trim();
   const rawKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
   if (!workerAppId || !rawKey) return { status: "unconfigured" };
-  if (!resolveGitHubHost().ok) return { status: "error" };
+  const host = resolveGitHubHost();
+  if (!host.ok) return { status: "error" };
   const creds = { appId: workerAppId, privateKey: decodePrivateKey(rawKey) };
 
+  const owners = allowedRepoOwners();
+  const target = repo ? normalizeRepo(repo) : "";
+  const owner = target.split("/")[0] ?? "";
   let installationId: number;
-  if (repo) {
-    // Only repos the swarm manages may be used as a token target.
-    const target = normalizeRepo(repo);
-    const registered = (await getSwarmRepos()).some((r) => normalizeRepo(r.url) === target);
+  if (target && owners.has(owner)) {
+    // An allowed owner: the repo must also be one the swarm manages on this host.
+    const registered = (await getSwarmRepos()).some(
+      (r) => registeredSlugOnHost(r.url, host.config.host) === target,
+    );
     if (!registered) return { status: "forbidden" };
-    const resolved = await resolveInstallationId(target, creds);
+    const resolved = await resolveInstallationId(target, creds, owners);
     if (resolved === null) return { status: "error" };
     installationId = resolved;
   } else {

@@ -31,6 +31,8 @@ const API_KEY = "example-worker-api-key";
 const AGENT_ID = "0b0b0b0b-0000-4000-8000-000000000001";
 const APP_TOKEN = "ghs_fixtureAppToken0000000000000000"; // gitleaks:allow (synthetic)
 const PAT = "ghp_fixtureStaticPat000000000000000000"; // gitleaks:allow (synthetic)
+/** A repo the wrapper hands the helper through its env; a plain owner/name, not a secret. */
+const ENV_REPO = "spanishkangaroo/recadame";
 
 let mode: "ok" | "unconfigured" = "ok";
 let calls = 0;
@@ -206,21 +208,22 @@ describe("swarm-github-token", () => {
         "credential get (path)",
       );
       // The wrapper's channel: the repo travels in the env, never in argv.
-      expectChildOk(
-        await helper({ ...env, SWARM_GITHUB_TOKEN_REPO: "spanishkangaroo/recadame" }),
-        "env repo",
-      );
+      expectChildOk(await helper({ ...env, SWARM_GITHUB_TOKEN_REPO: ENV_REPO }), "env repo");
       // No repo named: the deployment-wide GITHUB_APP_INSTALLATION_ID, byte for byte.
       expectChildOk(await helper(env), "no repo");
-      // A value that is not `owner/name` is dropped rather than sent as JSON.
-      expectChildOk(await helper(env, ["--repo", "not a repo"]), "unsafe repo");
+      // A value that is not `owner/name` never reaches the API, and never gets the
+      // deployment-wide installation's token: the PAT answers instead.
+      const unsafe = expectChildOk(
+        await helper({ ...env, GITHUB_TOKEN: PAT }, ["--repo", "not a repo"]),
+        "unsafe repo",
+      );
+      expect(unsafe.stdout.trim()).toBe(PAT);
 
       const expected = [
         '{"repo":"clovellyapps/audb"}',
         '{"repo":"clovellyapps/audb"}',
         '{"repo":"clovellyapps/audb"}',
-        '{"repo":"spanishkangaroo/recadame"}',
-        "{}",
+        `{"repo":"${ENV_REPO}"}`,
         "{}",
       ];
       expect(payloads).toEqual(expected);
@@ -292,6 +295,15 @@ describe("gh-app-auth-wrapper", () => {
         ["GH_REPO", ["pr", "view"], { GH_REPO: "clovellyapps/audb" }, home],
         ["gh api path", ["api", "repos/clovellyapps/audb/issues/1"], {}, home],
         ["origin remote", ["pr", "view"], {}, repoDir],
+        // An explicit flag or gh api path beats GH_REPO, as it does in gh.
+        ["-R over GH_REPO", ["pr", "view", "-R", "clovellyapps/audb"], { GH_REPO: "x/y" }, home],
+        [
+          "api path over GH_REPO",
+          ["api", "repos/clovellyapps/audb/pulls"],
+          { GH_REPO: "x/y" },
+          home,
+        ],
+        ["HOST/OWNER/REPO", ["pr", "view", "--repo", "github.com/clovellyapps/audb"], {}, home],
       ];
       for (const [label, args, extraEnv, cwd] of cases) {
         expectChildOk(
@@ -389,6 +401,10 @@ describe("docker-entrypoint.sh: GitHub App worker auth", () => {
         "credential fill",
       );
       expect(fill.stdout).toContain(`password=${APP_TOKEN}`);
+      // Real git hands the helper the repo path only with useHttpPath, so the
+      // API is asked for that repository's installation, not the default one.
+      expect(run.gitconfig).toContain("useHttpPath = true");
+      expect(payloads.at(-1)).toBe('{"repo":"o/r"}');
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -401,6 +417,7 @@ describe("docker-entrypoint.sh: GitHub App worker auth", () => {
       expect(run.result.stdout).toContain(`GH_HOST=ghe.test GH_ENTERPRISE_TOKEN=${PAT}`);
       expect(run.gitconfig).toContain('[credential "https://ghe.test"]');
       expect(run.gitconfig).toContain(`helper = !${run.tokenBin} git-credential`);
+      expect(run.gitconfig).toContain("useHttpPath = true");
       expect(run.gitconfig).not.toContain(PAT);
       expect(run.linked).not.toBeNull();
     },

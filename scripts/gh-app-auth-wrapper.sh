@@ -9,33 +9,43 @@
 # deployment-wide GITHUB_APP_INSTALLATION_ID, as before.
 real_gh="${SWARM_REAL_GH:-/usr/bin/gh}"
 
-repo="${GH_REPO:-}"
-if [ -z "$repo" ]; then
-    prev=""
-    for arg in "$@"; do
-        case "$prev" in --repo|-R) repo="$arg"; break;; esac
-        case "$arg" in --repo=*|-R=*) repo="${arg#*=}"; break;; esac
-        prev="$arg"
-    done
-fi
+# Precedence follows gh: an explicit --repo/-R wins, then the repo a `gh api`
+# path names (GH_REPO only fills its {owner}/{repo} placeholders), then GH_REPO,
+# then the origin remote of the current checkout.
+repo=""
+prev=""
+for arg in "$@"; do
+    [ "$arg" = "--" ] && break
+    case "$prev" in --repo|-R) repo="$arg"; break;; esac
+    case "$arg" in
+        --repo=*) repo="${arg#--repo=}"; break;;
+        -R?*) repo="${arg#-R}"; repo="${repo#=}"; break;;
+    esac
+    prev="$arg"
+done
 # `gh api repos/<owner>/<repo>/...` names the repo in its first path argument.
-if [ -z "$repo" ]; then
+if [ -z "$repo" ] && [ "${1:-}" = "api" ]; then
     for arg in "$@"; do
         case "${arg#/}" in
             repos/*/*)
-                repo=$(printf '%s' "${arg#/}" | sed -n 's#^repos/\([^/]*/[^/]*\).*#\1#p')
+                repo=$(printf '%s' "${arg#/}" | sed -n 's#^repos/\([^/?]*/[^/?]*\).*#\1#p')
                 [ -n "$repo" ] && break
                 ;;
         esac
     done
 fi
-# Otherwise the repo gh runs in, from its origin remote. A remote that is not
-# the swarm's GitHub host still yields owner/name; the API refuses it unless the
-# repo is registered, and the helper falls back to the PAT.
+[ -n "$repo" ] || repo="${GH_REPO:-}"
+# Otherwise the repo gh runs in, from its origin remote. The API mints for a
+# repo's own installation only when an operator listed its owner and the repo is
+# registered; any other repo gets the deployment-wide installation.
 if [ -z "$repo" ]; then
     repo=$(git remote get-url origin 2>/dev/null |
         sed -n 's#^.*[:/]\([^/:]*/[^/:]*\)$#\1#p' | sed 's/\.git$//')
 fi
+# gh accepts [HOST/]OWNER/REPO and URLs: keep the last two path segments.
+case "$repo" in
+    */*/*) repo=$(printf '%s' "$repo" | sed 's#/*$##; s#\.git$##' | sed -n 's#^.*/\([^/]*/[^/]*\)$#\1#p') ;;
+esac
 
 if token=$(SWARM_GITHUB_TOKEN_REPO="$repo" "${SWARM_GITHUB_TOKEN_BIN:-/usr/local/bin/swarm-github-token}" 2>/dev/null) && [ -n "$token" ]; then
     if [ -n "${GH_HOST:-}" ] && [ "$GH_HOST" != "github.com" ]; then

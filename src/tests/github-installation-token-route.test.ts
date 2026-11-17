@@ -1,8 +1,7 @@
 /**
  * POST /api/github/installation-token: the worker endpoint that hands git and gh
  * a GitHub App installation token. A `Bun.serve` on port 0 stands in for the
- * GitHub host (GHES mode, so the API base is the mock) and records every mint
- * and every installation lookup.
+ * GitHub host (GHES mode, so the API base is the mock) and records every mint.
  */
 import {
   afterAll,
@@ -17,14 +16,7 @@ import {
 import { generateKeyPairSync } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
-import {
-  closeDb,
-  createAgent,
-  createSwarmRepo,
-  createTaskExtended,
-  createUser,
-  initDb,
-} from "../be/db";
+import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
 import { mintRuntimeToken, mintSessionToken, mintToken } from "../be/users";
 import { resetGitHub } from "../github/app";
 import { handleCore } from "../http/core";
@@ -47,10 +39,6 @@ const ENV_KEYS = [
 let github: ReturnType<typeof Bun.serve>;
 let githubStatus = 201;
 let mints: string[] = [];
-/** Repo -> installation id the mock App reports for `GET /repos/{repo}/installation`. */
-let installations: Record<string, number> = {};
-let lookups: string[] = [];
-let lookupAuth: string[] = [];
 let server: Server;
 let port: number;
 let agentId: string;
@@ -67,11 +55,11 @@ function cleanupDb() {
   }
 }
 
-function call(headers: Record<string, string>, body: Record<string, unknown> = {}) {
+function call(headers: Record<string, string>) {
   return fetch(`http://localhost:${port}/api/github/installation-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
+    body: "{}",
   });
 }
 
@@ -86,16 +74,6 @@ beforeAll(async () => {
     hostname: "127.0.0.1",
     fetch(req) {
       const path = new URL(req.url).pathname;
-      // Repo-aware resolution: the App JWT asks which installation owns a repo.
-      const lookup = path.match(/^\/api\/v3\/repos\/([^/]+\/[^/]+)\/installation$/);
-      if (lookup) {
-        const repo = lookup[1]!;
-        lookups.push(repo);
-        lookupAuth.push(req.headers.get("authorization") ?? "");
-        const id = installations[repo];
-        if (id === undefined) return new Response("no installation", { status: 404 });
-        return Response.json({ id });
-      }
       mints.push(path);
       if (githubStatus !== 201) return new Response("nope", { status: githubStatus });
       return Response.json(
@@ -134,9 +112,6 @@ beforeEach(() => {
   process.env.GITHUB_APP_INSTALLATION_ID = "77";
   githubStatus = 201;
   mints = [];
-  installations = {};
-  lookups = [];
-  lookupAuth = [];
   resetGitHub();
   logSpy = spyOn(console, "log").mockImplementation(() => {});
   errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -220,80 +195,5 @@ describe("POST /api/github/installation-token", () => {
     const res = await call(asAgent(agentId));
     expect(res.status).toBe(502);
     expect(mints).toEqual(["/api/v3/app/installations/77/access_tokens"]);
-  });
-
-  describe("repo-aware installation", () => {
-    const audb = "clovellyapps/audb";
-
-    test("a registered repo with its own installation mints for that installation", async () => {
-      installations[audb] = 88;
-      // Registered with a URL in a different case and with `.git`: the check
-      // normalizes both sides, so the shorthand below matches.
-      await createSwarmRepo({ url: "https://github.com/ClovellyApps/Audb.git", name: "audb" });
-
-      const res = await call(asAgent(agentId), { repo: audb });
-      expect(res.status).toBe(200);
-      expect(res.headers.get("cache-control")).toBe("no-store");
-      expect(((await res.json()) as { token: string }).token).toBe(INSTALLATION_TOKEN);
-      expect(lookups).toEqual([audb]);
-      // The lookup authenticated as the App (a JWT), never with a worker token.
-      expect(lookupAuth[0]).toMatch(/^Bearer eyJ/);
-      expect(mints).toEqual(["/api/v3/app/installations/88/access_tokens"]);
-
-      // Second call: the installation cache and the token cache both serve it.
-      expect((await call(asAgent(agentId), { repo: audb })).status).toBe(200);
-      expect(lookups).toEqual([audb]);
-      expect(mints).toEqual(["/api/v3/app/installations/88/access_tokens"]);
-
-      // The no-repo path is untouched: the fixed installation, still 77.
-      expect((await call(asAgent(agentId))).status).toBe(200);
-      expect(mints).toEqual([
-        "/api/v3/app/installations/88/access_tokens",
-        "/api/v3/app/installations/77/access_tokens",
-      ]);
-      for (const spy of [logSpy, errorSpy]) {
-        expect(JSON.stringify(spy.mock.calls)).not.toContain(INSTALLATION_TOKEN);
-      }
-    });
-
-    test("403 for a repo the swarm has not registered, and nothing is minted", async () => {
-      // The App could mint for it; the swarm registration gate is what refuses it.
-      installations["desplega-ai/agent-swarm"] = 99;
-      const res = await call(asAgent(agentId), { repo: "desplega-ai/agent-swarm" });
-      expect(res.status).toBe(403);
-      expect(((await res.json()) as { error: string }).error).toBe(
-        "The repo is not registered in the swarm",
-      );
-      // A `.`/`..` segment is not a repository and never reaches the lookup.
-      const traversal = await call(asAgent(agentId), { repo: "../x" });
-      expect(traversal.status).toBe(403);
-      // The registration gate runs before the App JWT lookup.
-      expect(lookups).toEqual([]);
-      expect(mints).toEqual([]);
-    });
-
-    test("502 when the registered repo has no App installation", async () => {
-      await createSwarmRepo({
-        url: "https://github.com/spanishkangaroo/recadame",
-        name: "recadame",
-      });
-      const res = await call(asAgent(agentId), { repo: "spanishkangaroo/recadame" });
-      expect(res.status).toBe(502);
-      expect(((await res.json()) as { error: string }).error).toBe(
-        "GitHub did not mint an installation token",
-      );
-      expect(lookups).toEqual(["spanishkangaroo/recadame"]);
-      expect(mints).toEqual([]);
-    });
-
-    test("400 for a repo that is not owner/name, and nothing is minted", async () => {
-      for (const repo of ["audb", "clovellyapps/audb/pulls", "clovellyapps audb", ""]) {
-        const res = await call(asAgent(agentId), { repo });
-        expect({ repo, status: res.status }).toEqual({ repo, status: 400 });
-        expect(await res.text()).toContain("Validation error");
-      }
-      expect(lookups).toEqual([]);
-      expect(mints).toEqual([]);
-    });
   });
 });

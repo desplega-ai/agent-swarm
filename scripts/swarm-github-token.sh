@@ -32,7 +32,7 @@ pat() {
 }
 
 # JSON-safe `owner/name`: exactly one slash and nothing a JSON reader would
-# reinterpret. Anything else is dropped, so the API never receives it.
+# reinterpret. Anything else gets no App token, so the API never receives it.
 safe_repo() {
     case "$1" in
         */*/*|/*|*/) return 1 ;;
@@ -59,7 +59,10 @@ app_token() {
     local base="${MCP_BASE_URL:-http://host.docker.internal:3013}"
     [ -n "$api_key" ] && [ -n "${AGENT_ID:-}" ] || return 1
     local payload='{}'
-    if [ -n "$target" ] && safe_repo "$target"; then
+    if [ -n "$target" ]; then
+        # A named repo that is not `owner/name` gets no App token (the caller
+        # falls back to the PAT), never the deployment-wide installation's.
+        safe_repo "$target" || return 1
         payload=$(printf '{"repo":"%s"}' "$target")
     fi
     local body token
