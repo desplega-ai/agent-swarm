@@ -6869,6 +6869,8 @@ export interface paths {
                             seatBlockedIndices?: number[];
                             spendCappedIndices: number[];
                             authFailureFence: number;
+                            keyUsage: number[];
+                            activeSessions: number[];
                         };
                     };
                 };

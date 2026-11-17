@@ -639,7 +639,7 @@ CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
 ANTHROPIC_API_KEY=sk-key1,sk-key2
 ```
 
-When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
+When a session is spawned, the runner splits the credential value by commas and selects an available key: among the keys within 0.10 of the lowest current usage, the one with the fewest running sessions (ties at random). Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
 
 On the pi and opencode harnesses, `OPENROUTER_API_KEY`, `NAN_API_KEY` (or `HELMCODE_API_NAN`) and `HELMCODE_API_KEY` pool the same way: each task gets one key, picked by the model's provider prefix. On opencode the picked key is handed to the provider config, so an `OPENROUTER_API_KEY` pool works there too.
 

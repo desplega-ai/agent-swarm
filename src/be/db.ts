@@ -169,6 +169,7 @@ import {
   checkIdentityFieldBudget,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { keyUsageFromWindows } from "../utils/key-usage";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
 import {
@@ -11955,6 +11956,17 @@ export interface AvailableKeyIndicesResult {
   /** Rate-limited indices whose limit is a provider spend cap: no retry helps before it resets. */
   spendCappedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
+  /**
+   * Usage per pool position (`keyUsageFromWindows`: max of the live 5h and 7d
+   * utilization, 0 when unobserved or reset). Ranks admissible keys only.
+   */
+  keyUsage: number[];
+  /**
+   * `in_progress` tasks per pool position whose `credentialKeyType` is this key
+   * type and whose `credentialKeySuffix` is the position's suffix. Breaks ties
+   * within the usage band; it never excludes a key.
+   */
+  activeSessions: number[];
 }
 
 /**
@@ -12087,6 +12099,39 @@ export async function getAvailableKeyIndices(
     availableIndices.push(i);
   }
 
+  // A position several rows apply to (one key pooled in several scopes) takes the highest reading.
+  const keyUsage = new Array<number>(totalKeys).fill(0);
+  for (const row of rows) {
+    const usage = keyUsageFromWindows(parseRateLimitWindowsJson(row.rateLimitWindows), nowMs);
+    if (usage === 0) continue;
+    for (const i of positionsOf(row)) {
+      if (i >= 0 && i < totalKeys) keyUsage[i] = Math.max(keyUsage[i]!, usage);
+    }
+  }
+
+  // Running sessions per position. A task stamps its key suffix at session start
+  // (`recordKeyUsage`), so this moves within seconds, before any usage report.
+  // Without `keySuffixes`, a position takes the suffix of its stored row in scope.
+  const suffixAt = (i: number): string | undefined =>
+    suffixes
+      ? suffixes[i]
+      : rows.find((r) => r.keyIndex === i && r.scope === scope && r.scopeId === effectiveScopeId)
+          ?.keySuffix;
+  const positionSuffixes = Array.from({ length: totalKeys }, (_, i) => suffixAt(i));
+  const distinctSuffixes = [...new Set(positionSuffixes.filter((s): s is string => !!s))];
+  const sessionsBySuffix = new Map<string, number>();
+  if (distinctSuffixes.length > 0) {
+    const counts = await client.query<{ suffix: string; n: number }>(
+      `SELECT credentialKeySuffix AS suffix, COUNT(*) AS n FROM agent_tasks
+         WHERE status = 'in_progress' AND credentialKeyType = ?
+           AND credentialKeySuffix IN (${distinctSuffixes.map(() => "?").join(", ")})
+         GROUP BY credentialKeySuffix`,
+      [keyType, ...distinctSuffixes],
+    );
+    for (const { suffix, n } of counts) sessionsBySuffix.set(suffix, n);
+  }
+  const activeSessions = positionSuffixes.map((s) => (s ? (sessionsBySuffix.get(s) ?? 0) : 0));
+
   return {
     availableIndices,
     rejectedIndices,
@@ -12098,6 +12143,8 @@ export async function getAvailableKeyIndices(
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()
         : null,
     authFailureFence: Math.max(0, ...rows.map((r) => r.authFailureSeq)),
+    keyUsage,
+    activeSessions,
   };
 }
 

@@ -14,6 +14,7 @@ import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
 import { getContextWindowSize } from "../utils/context-window";
 import {
   parseStderrForErrors,
+  RATE_LIMIT_WINDOWS_EVENT,
   redactRateLimitEvent,
   SessionErrorTracker,
   trackErrorFromJson,
@@ -576,6 +577,10 @@ class ClaudeSdkSession implements ProviderSession {
     this.transcript.push(...normalized.transcriptEntries);
     for (const event of normalized.events) this.emit(event);
     trackErrorFromJson(json, this.errorTracker);
+    if (json.type === "rate_limit_event") {
+      const windows = this.errorTracker.getRateLimitWindows();
+      if (windows) this.emit({ type: "custom", name: RATE_LIMIT_WINDOWS_EVENT, data: windows });
+    }
     return normalized.isResult;
   }
 
