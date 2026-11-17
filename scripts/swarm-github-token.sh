@@ -42,13 +42,19 @@ safe_repo() {
     esac
 }
 
+# `owner/name` from the first two segments of a repo path. git-lfs asks for
+# `owner/name.git/info/lfs`, which must name the same repo as git itself.
+owner_name() {
+    sed -n 's#^/*\([^/][^/]*\)/\([^/][^/]*\).*$#\1/\2#p' | sed 's/\.git$//'
+}
+
 # `owner/name` from a git credential request: `url=https://host/owner/name.git`
 # when git was handed a URL, else `host=` plus `path=owner/name.git`.
 repo_from_credentials() {
     local found=""
-    found=$(printf '%s\n' "$1" | sed -n 's#^url=.*[/:]\([^/]*/[^/]*\)$#\1#p' | sed 's/\.git$//')
+    found=$(printf '%s\n' "$1" | sed -n 's#^url=[A-Za-z][A-Za-z0-9+.-]*://[^/]*##p; s#^url=[^/:]*:##p' | owner_name)
     if [ -z "$found" ]; then
-        found=$(printf '%s\n' "$1" | sed -n 's#^path=\(..*\)$#\1#p' | sed 's#^/*##; s/\.git$//')
+        found=$(printf '%s\n' "$1" | sed -n 's#^path=##p' | owner_name)
     fi
     printf '%s' "$found"
 }

@@ -230,6 +230,26 @@ describe("swarm-github-token", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  test(
+    "git-lfs requests (`owner/name.git/info/lfs`) name the same repo as git",
+    async () => {
+      const { env } = sandbox();
+      const pat = { ...env, GITHUB_TOKEN: PAT };
+      // With credential.useHttpPath, git-lfs asks for the LFS endpoint path; the
+      // repo is its first two segments, so LFS gets the App token like git does.
+      for (const request of [
+        "protocol=https\nhost=github.com\npath=o/r.git/info/lfs\n\n",
+        "protocol=https\nhost=github.com\nurl=https://github.com/o/r.git/info/lfs\n\n",
+        "protocol=https\nhost=github.com\npath=/o/r/info/lfs/objects/batch\n\n",
+      ]) {
+        const get = expectChildOk(await helper(pat, ["git-credential", "get"], request), request);
+        expect(get.stdout).toBe(`username=x-access-token\npassword=${APP_TOKEN}\n`);
+      }
+      expect(payloads).toEqual(['{"repo":"o/r"}', '{"repo":"o/r"}', '{"repo":"o/r"}']);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
 
 describe("gh-app-auth-wrapper", () => {
