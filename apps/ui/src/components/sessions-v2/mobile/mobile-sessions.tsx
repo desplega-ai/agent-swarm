@@ -141,7 +141,8 @@ function PushedScreen({
       exit="exit"
       data-keyboard={viewport?.keyboard ? "open" : undefined}
       style={viewport ? { top: viewport.top, height: viewport.height } : { top: 0, bottom: 0 }}
-      className="group/screen fixed inset-x-0 z-40 flex flex-col bg-background shadow-xl outline-none"
+      // `touch-manipulation`: a double tap does not zoom the page in.
+      className="group/screen fixed inset-x-0 z-40 flex touch-manipulation flex-col bg-background shadow-xl outline-none"
     >
       {children}
     </motion.section>

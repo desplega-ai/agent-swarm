@@ -176,7 +176,7 @@ const PHONE_STEPS = [
   },
   {
     title: "Search and the Legacy view",
-    body: "Tap the search field for chips such as with: and is:unread. The ⋯ menu at the top opens the Legacy view and this guide.",
+    body: "Tap the search icon for chips such as with: and is:unread. The ⋯ menu at the top opens the Legacy view and this guide.",
   },
 ];
 

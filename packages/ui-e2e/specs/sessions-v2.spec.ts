@@ -281,15 +281,29 @@ test.describe("phone", () => {
     await clean.assertClean();
   });
 
-  test("a tap on the filter button opens the filter menu, not search", async ({ page, clean }) => {
+  test("a tap on the filter button opens the filter sheet, not search", async ({ page, clean }) => {
     await page.goto("/sessions");
     await page.getByRole("button", { name: /^Filter sessions/ }).tap();
-    const menu = page.getByRole("menu");
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole("menuitemcheckbox", { name: /^Dashboard/ })).toBeVisible();
+    const sheet = page.getByRole("dialog", { name: "Filter sessions" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("checkbox", { name: /^Dashboard/ })).toBeChecked();
     await expect(page.getByRole("button", { name: "Cancel" })).toBeHidden();
     await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
+    await expect(sheet).toBeHidden();
+    await clean.assertClean();
+  });
+
+  test("the search icon opens the field in the title row", async ({ page, clean }) => {
+    await page.goto("/sessions");
+    const title = page.getByRole("heading", { name: "Sessions", level: 1 });
+    await expect(title).toBeVisible();
+    await page.getByRole("button", { name: "Search sessions" }).tap();
+    const field = page.getByRole("textbox", { name: "Search sessions" });
+    await expect(field).toBeFocused();
+    await expect(title).toBeHidden();
+    await page.getByRole("button", { name: "Cancel" }).tap();
+    await expect(title).toBeVisible();
+    await expect(field).toBeHidden();
     await clean.assertClean();
   });
 });

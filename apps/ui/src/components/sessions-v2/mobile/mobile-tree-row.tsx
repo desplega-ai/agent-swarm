@@ -1,10 +1,14 @@
 /**
  * The sidebar rows on a phone (SPEC R8.5, UX review R9): the same row model
  * as the desktop tree (`tree-rows.ts`), drawn for touch. Rows are at least
- * 44 px, session rows 56 px with two lines (a chat source logo and the
- * title, then the group, the time, and the people). Counts always show. There are no tooltips, no
- * hover card, no key hints, and no drag. Flat lists sit at the left edge
- * and nested rows take one indent step, with no guide lines.
+ * 44 px. A session row is one 48 px line: a chat source logo, the title,
+ * the people, and the time. It takes a second line (56 px) only for more to
+ * say: its group in a flat list, or when it comes back from Later. A group
+ * name shows before its counts: the counts get shorter when the name does not fit.
+ * There are no tooltips, no hover card, no key hints, and no drag. Rows sit
+ * on two columns (marks and icons, then titles and names): a session uses
+ * the columns of its group, and a subgroup takes one indent step, with no
+ * guide lines.
  *
  * Touch: tap a session to open it, swipe it left for Done and right for
  * Later (the action color shows behind it), and long-press it to start a
@@ -22,23 +26,28 @@ import {
   Inbox,
   Users,
 } from "lucide-react";
-import { type CSSProperties, type MouseEvent, memo, type ReactNode } from "react";
-import type { SessionListItem } from "@/api/types";
+import {
+  type CSSProperties,
+  type MouseEvent,
+  memo,
+  type ReactNode,
+  type RefObject,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { SessionListItem, SessionSectionCounts } from "@/api/types";
 import { AvatarStack } from "@/components/comb/presence-avatars";
 import { TaskSourceMark } from "@/components/shared/task-source-mark";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useLongPress } from "@/hooks/use-long-press";
 import { type SwipeSide, useSwipeRow } from "@/hooks/use-swipe-row";
 import { peerColor } from "@/lib/comb/presence";
 import { chatSourceOf, groupLabel } from "@/lib/session-groups";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
-import {
-  type ContainerRow,
-  containerFacts,
-  GroupNameField,
-  RowIcon,
-  SessionCounts,
-} from "../sidebar/group-node";
+import { type ContainerRow, containerFacts, GroupNameField, RowIcon } from "../sidebar/group-node";
 import { type SourceRow, sourceRowLabel } from "../sidebar/section-header";
 import {
   ActivityMark,
@@ -49,12 +58,18 @@ import {
   shortAgo,
 } from "../sidebar/session-row";
 import { formatWakeShort } from "../sidebar/snooze-times";
-import { ReadMark, rowPropsEqual, UNREAD_TITLE } from "../sidebar/tree-row";
+import { NeedsYouBadge, ReadMark, rowPropsEqual, UNREAD_TITLE } from "../sidebar/tree-row";
 
 /** One indent step at most (UX review R9): 16 px, or 28 px nested. */
 function indent(level: number): CSSProperties {
-  return { paddingLeft: `${16 + Math.min(level, 1) * 12}px` };
+  return { paddingLeft: `${16 + Math.min(Math.max(level, 0), 1) * 12}px` };
 }
+
+/**
+ * The indent of a row inside a container (a session, "Show 10 more", "View
+ * all N"): the container's own, so the row's title sits under its name.
+ */
+const indentIn = (level: number) => indent(level - 1);
 
 /** No callout, no text selection, and the browser keeps vertical pans. */
 const TOUCH_ROW = "select-none outline-none [-webkit-touch-callout:none] touch-pan-y";
@@ -81,6 +96,8 @@ interface MobileSessionRowProps {
   now: number;
   /** The source group labels of the tree (`#eng`), for the group label of a flat row. */
   labels: Readonly<Record<string, string>>;
+  /** The group whose list this row is in (the group screen): its name does not repeat on the row. */
+  listGroup?: string;
   selected: boolean;
   /** A selection is on: a tap selects, and swipes are off. */
   selecting: boolean;
@@ -103,6 +120,7 @@ function MobileSessionRowView({
   me,
   now,
   labels,
+  listGroup,
   selected,
   selecting,
   canTriage,
@@ -132,6 +150,13 @@ function MobileSessionRowView({
   const behind = swipe.side ? swipeAction(session, swipe.side) : null;
   const BehindIcon = behind?.icon;
   const label = rowLabel(session, me, title, group, nowDate);
+  // The second line: the group (not the list's own), and when a Later session comes back.
+  const more = [
+    session.groupKey === listGroup ? "" : group,
+    wake ? `Back ${formatWakeShort(wake, nowDate)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const Root = as === "list" ? "li" : "div";
 
   return (
@@ -195,10 +220,11 @@ function MobileSessionRowView({
         </div>
       ) : null}
       <div
-        style={{ ...indent(flat ? 0 : level), ...swipe.style }}
+        style={{ ...(flat ? indent(0) : indentIn(level)), ...swipe.style }}
         className={cn(
           // Press feedback, as on the container rows (UX review R9).
-          "relative flex min-h-14 items-center gap-3 py-2 pr-4 active:bg-accent",
+          "relative flex items-center gap-3 py-2 pr-4 active:bg-accent",
+          more ? "min-h-14" : "min-h-12",
           // The row covers the swipe action: the list card's fill on the group screen.
           as === "list" ? "bg-card" : "bg-background",
           selected && "bg-accent",
@@ -235,25 +261,6 @@ function MobileSessionRowView({
                 <ActivityMark activity={activity} />
               </span>
             ) : null}
-          </span>
-          <span
-            className={cn(
-              "flex min-w-0 items-center gap-1.5 text-data text-muted-foreground",
-              // Under the title, not under the source logo (14 px and the 8 px gap).
-              chat && "pl-5.5",
-            )}
-          >
-            <span className="min-w-0 truncate">
-              {[
-                group,
-                wake
-                  ? `Back ${formatWakeShort(wake, nowDate)}`
-                  : shortAgo(session.lastActivityAt, now),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-            <span className="min-w-0 flex-1" />
             {others.length > 0 ? (
               <AvatarStack
                 decorative
@@ -270,9 +277,25 @@ function MobileSessionRowView({
                 }))}
               />
             ) : session.shared ? (
-              <Users aria-hidden className="size-3.5 shrink-0" />
+              <Users aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
             ) : null}
+            {wake ? null : (
+              <span className="shrink-0 font-mono text-data tabular-nums text-muted-foreground">
+                {shortAgo(session.lastActivityAt, now)}
+              </span>
+            )}
           </span>
+          {more ? (
+            <span
+              className={cn(
+                "min-w-0 truncate text-data text-muted-foreground",
+                // Under the title, not under the source logo (14 px and the 8 px gap).
+                chat && "pl-5.5",
+              )}
+            >
+              {more}
+            </span>
+          ) : null}
         </span>
       </div>
     </Root>
@@ -305,6 +328,7 @@ function MobileContainerRowView({
 }: MobileContainerRowProps) {
   const press = useLongPress(onLongPress ? () => onLongPress(row.key) : undefined);
   const { name, searchMatch, hasChildren, plain, label } = containerFacts(row, ownerName);
+  const nameRef = useRef<HTMLSpanElement>(null);
 
   return (
     <div
@@ -341,6 +365,7 @@ function MobileContainerRowView({
         />
       ) : (
         <span
+          ref={nameRef}
           className={cn(
             "min-w-0 truncate text-base",
             row.type === "box" ? "font-semibold" : "font-medium",
@@ -361,12 +386,88 @@ function MobileContainerRowView({
       ) : null}
       {/* The rename field takes the free room itself. */}
       {renaming ? null : <span className="min-w-0 flex-1" />}
-      {row.counts ? <SessionCounts counts={row.counts} plain={plain} touch /> : null}
+      {row.counts && !renaming ? (
+        <TouchCounts counts={row.counts} plain={plain} name={name} nameRef={nameRef} />
+      ) : null}
     </div>
   );
 }
 
 export const MobileContainerRow = memo(MobileContainerRowView, rowPropsEqual);
+
+/**
+ * The counts of a container row on a phone. They never shrink: the name
+ * takes the rest of the row. They show in full while the name fits. If it
+ * does not, the running count goes first, then "N unread" turns into a dot.
+ * "N need you" always stays, and a name that is still too long is cut.
+ */
+function TouchCounts({
+  counts,
+  plain,
+  name,
+  nameRef,
+}: {
+  counts: SessionSectionCounts;
+  plain?: boolean;
+  /** The row's name: a new name measures again. */
+  name: string;
+  nameRef: RefObject<HTMLSpanElement | null>;
+}) {
+  // 0: all. 1: no running count. 2: also the unread dot.
+  const [fit, setFit] = useState({ level: 0, width: 0 });
+  const what = `${name} ${counts.running} ${counts.needsYou} ${counts.unread} ${counts.total}`;
+  // A new row width, a new name, or new counts: measure again from the full form.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `what` restarts the measure
+  useLayoutEffect(() => {
+    const row = nameRef.current?.parentElement;
+    if (!row) return;
+    setFit({ level: 0, width: row.clientWidth });
+    const observer = new ResizeObserver(() =>
+      setFit((prev) =>
+        prev.width === row.clientWidth ? prev : { level: 0, width: row.clientWidth },
+      ),
+    );
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [what, nameRef]);
+  // One step shorter while the name is cut (1 px of slack for rounding).
+  useLayoutEffect(() => {
+    const label = nameRef.current;
+    if (fit.level >= 2 || !label) return;
+    if (label.scrollWidth > label.clientWidth + 1) setFit({ ...fit, level: fit.level + 1 });
+  }, [fit, nameRef]);
+
+  const number = "font-mono text-data tabular-nums text-muted-foreground";
+  const showTotal = plain && counts.running === 0 && counts.needsYou === 0 && counts.unread === 0;
+  return (
+    <span aria-hidden className="flex shrink-0 items-center gap-1.5">
+      {counts.running > 0 && fit.level < 1 ? (
+        <span className={cn("flex shrink-0 items-center gap-1", number)}>
+          <TaskStatusIcon variant="active" className="size-3.5" />
+          {counts.running}
+        </span>
+      ) : null}
+      {counts.needsYou > 0 ? (
+        <NeedsYouBadge>
+          {counts.needsYou} {counts.needsYou === 1 ? "needs" : "need"} you
+        </NeedsYouBadge>
+      ) : null}
+      {counts.unread > 0 ? (
+        fit.level < 2 ? (
+          <Badge
+            variant="outline"
+            className="h-5 rounded-sm bg-background px-1.5 text-meta font-semibold tabular-nums"
+          >
+            {counts.unread} unread
+          </Badge>
+        ) : (
+          <ReadMark unread className="size-2" />
+        )
+      ) : null}
+      {showTotal ? <span className={number}>{counts.total}</span> : null}
+    </span>
+  );
+}
 
 /**
  * A source section header on a phone: the section header look (logo, name,
@@ -429,7 +530,8 @@ export function MobileActionRow({
       tabIndex={-1}
       aria-level={level + 1}
       onClick={onClick}
-      style={indent(level)}
+      // "New group" is a row of its level. The others end a container's list.
+      style={kind === "add" ? indent(level) : indentIn(level)}
       className={cn(
         "flex min-h-12 items-center gap-3 pr-4 text-base font-medium text-muted-foreground active:bg-accent",
         TOUCH_ROW,
