@@ -12,13 +12,15 @@ import {
   startTask,
 } from "../be/db";
 import { handleCore } from "../http/core";
+import { handleMcpBridge } from "../http/mcp-bridge";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 
 // ctx.swarm.task_storeProgress({ status: "skipped" }) must end the task as
-// skipped through the real HTTP route, keeping the reason, like the MCP tool.
+// skipped through the store-progress tool, keeping the reason, like a direct
+// MCP call.
 
 const TEST_DB_PATH = "./test-sdk-store-progress-skipped.sqlite";
 const API_KEY = "example-test-sdk-store-progress-skipped-key-1234567890";
@@ -68,7 +70,10 @@ async function handle(request: Request): Promise<Response> {
   if (!(await handleCore(req, res, requestAgentId, API_KEY))) {
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
-    if (!(await handleTasks(req, res, pathSegments, queryParams, requestAgentId))) {
+    if (
+      !(await handleMcpBridge(req, res, pathSegments, queryParams, requestAgentId)) &&
+      !(await handleTasks(req, res, pathSegments, queryParams, requestAgentId))
+    ) {
       return new Response("Not Found", { status: 404 });
     }
   }
@@ -145,11 +150,13 @@ describe("ctx.swarm.task_storeProgress status skipped", () => {
     const result = (await sdk().task_storeProgress({ taskId: task.id, status: "skipped" })) as {
       success: boolean;
       status: number;
-      data: { error?: string };
+      message?: string;
     };
+    // The store-progress tool refuses with a tool error, which the bridge
+    // reports as an HTTP 200 body carrying `success: false`.
     expect(result.success).toBe(false);
-    expect(result.status).toBe(400);
-    expect(result.data.error).toContain("needs a one-line reason");
+    expect(result.status).toBe(200);
+    expect(result.message).toContain("needs a one-line reason");
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
   });
 });
