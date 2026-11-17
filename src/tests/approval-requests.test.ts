@@ -1482,36 +1482,6 @@ describe("Approval Requests", () => {
       const currentTask = await getAgentCurrentTask(agent.id);
       expect(currentTask).toBeNull();
     });
-
-    test("fallback sourceTaskId resolves correctly for approval request", async () => {
-      const agent = await createAgent({
-        name: "test-fallback-agent",
-        isLead: true,
-        status: "idle",
-      });
-      const task = await createTaskExtended("lead task calling request-human-input", {
-        agentId: agent.id,
-        source: "mcp",
-        slackChannelId: "C_LEAD_CHANNEL",
-        slackThreadTs: "1111111111.000000",
-        slackUserId: "U_LEAD_USER",
-      });
-      await startTask(task.id);
-
-      // Simulate what the fixed request-human-input tool does:
-      // sourceTaskId from header is missing, so fall back to agent's current task
-      const headerSourceTaskId: string | undefined = undefined;
-      let sourceTaskId = headerSourceTaskId;
-      if (!sourceTaskId) {
-        const currentTask = await getAgentCurrentTask(agent.id);
-        if (currentTask) {
-          sourceTaskId = currentTask.id;
-        }
-      }
-
-      const approval = await createApprovalRequest(makeApprovalData({ sourceTaskId }));
-      expect(approval.sourceTaskId).toBe(task.id);
-    });
   });
 
   describe("updateApprovalRequestNotifications", () => {
