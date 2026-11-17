@@ -1,22 +1,23 @@
 /**
- * The phone search field (SPEC R8.5, UX review R9): a 44 px field with
- * 16 px text. A tap enters search mode: the list screen hides its top bar,
- * Cancel sits next to the field, and token chips show under it (`with:`,
- * `in:`, `is:unread`, `is:running`). After `with:` or `in:`, 44 px
- * suggestions list the people or my groups that match the value typed so
- * far; a tap completes the token. `SidebarSearch` owns the text and when it
- * runs.
+ * The top row of the phone list screen (SPEC R8.5, UX review R9): the
+ * "Sessions" title, then the search icon and the screen's actions (the
+ * filter, New session, "⋯"). A tap on the icon enters search mode: a 44 px
+ * field with 16 px text takes the row (iOS does not zoom in), Cancel sits
+ * next to it, and token chips show under it (`with:`, `in:`, `is:unread`,
+ * `is:running`). After `with:` or `in:`, 44 px suggestions list the people
+ * or my groups that match the value typed so far; a tap completes the
+ * token. `SidebarSearch` owns the text and when it runs.
  */
 
-import { Hash } from "lucide-react";
+import { Hash, Search } from "lucide-react";
 import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
   type RefObject,
-  useEffect,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { useUsers } from "@/api/hooks/use-users";
 import { SearchBox } from "@/components/shared/search-box";
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -56,7 +57,6 @@ export function MobileSearch({
   inputRef,
   onLeave,
   groups,
-  onSearchMode,
   action,
 }: {
   text: string;
@@ -71,17 +71,12 @@ export function MobileSearch({
   onLeave: () => void;
   /** My groups, for `in:`. */
   groups: SearchGroup[];
-  onSearchMode?: (on: boolean) => void;
-  /** At the end of the row, out of search mode: the filter menu. */
+  /** After the search icon, out of search mode: the filter and the screen's actions. */
   action?: ReactNode;
 }) {
   // Search mode: the field has the focus or holds text.
   const [focused, setFocused] = useState(false);
   const searching = focused || text !== "";
-  useEffect(() => {
-    onSearchMode?.(searching);
-  }, [searching, onSearchMode]);
-  useEffect(() => () => onSearchMode?.(false), [onSearchMode]);
 
   const token = typingToken(text);
   const users = useUsers({ enabled: token?.kind === "with" });
@@ -97,9 +92,8 @@ export function MobileSearch({
 
   return (
     <search
-      className="shrink-0 px-4 pt-1 pb-2"
-      // Only the field starts search mode. A focused filter button would turn
-      // into Cancel before its click lands (Chromium focuses a tapped button).
+      className="shrink-0"
+      // The field kept its text and takes the focus again: an emptied field stays.
       onFocus={(event) => {
         if (event.target === inputRef.current) setFocused(true);
       }}
@@ -107,19 +101,19 @@ export function MobileSearch({
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
       }}
     >
-      <div className="flex items-center gap-2">
-        <SearchBox
-          value={text}
-          onChange={setText}
-          placeholder="Search sessions"
-          inputRef={inputRef}
-          onKeyDown={onKeyDown}
-          clearable
-          onClear={clear}
-          // The 28 px clear button gets a 44 px tap area (UX review R9).
-          className="flex-1 [&_button]:after:absolute [&_button]:after:-inset-2 [&_input]:h-11 [&_input]:rounded-lg [&_input]:bg-muted/60 [&_input]:text-base"
-        />
-        {searching ? (
+      {searching ? (
+        <div className="flex h-14 items-center gap-2 px-4">
+          <SearchBox
+            value={text}
+            onChange={setText}
+            placeholder="Search sessions"
+            inputRef={inputRef}
+            onKeyDown={onKeyDown}
+            clearable
+            onClear={clear}
+            // The 28 px clear button gets a 44 px tap area (UX review R9).
+            className="flex-1 [&_button]:after:absolute [&_button]:after:-inset-2 [&_input]:h-11 [&_input]:rounded-lg [&_input]:bg-muted/60 [&_input]:text-base"
+          />
           <Button
             type="button"
             variant="ghost"
@@ -133,13 +127,33 @@ export function MobileSearch({
           >
             Cancel
           </Button>
-        ) : (
-          action
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex h-14 items-center pr-1 pl-4">
+          <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight">
+            Sessions
+          </h1>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Search sessions"
+            // The field shows first, so it takes the focus in the same tap
+            // (iOS opens the keyboard only from the tap itself).
+            onClick={() => {
+              flushSync(() => setFocused(true));
+              inputRef.current?.focus();
+            }}
+            className="size-11"
+          >
+            <Search className="size-5" />
+          </Button>
+          {action}
+        </div>
+      )}
       {searching ? (
         // The row pads 4 px above and below, so each chip's 44 px touch area fits in it.
-        <div className="mt-1 flex gap-2 overflow-x-auto py-1">
+        <div className="flex gap-2 overflow-x-auto px-4 pt-1 pb-2">
           {CHIPS.map(({ label, token: chipToken, filter }) => {
             const on = filter ? quickFilterOn(text, filter) : false;
             return (
@@ -169,7 +183,10 @@ export function MobileSearch({
         </div>
       ) : null}
       {suggestions.length > 0 && token ? (
-        <ul aria-label={token.kind === "with" ? "People" : "Groups"} className="mt-1 flex flex-col">
+        <ul
+          aria-label={token.kind === "with" ? "People" : "Groups"}
+          className="flex flex-col px-4 pb-1"
+        >
           {suggestions.map((suggestion) => (
             <li key={suggestion.id}>
               <button
