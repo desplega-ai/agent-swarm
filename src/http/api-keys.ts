@@ -25,6 +25,7 @@ import {
   MAX_SPEND_CAP_HOLD_MS,
   type RateLimitWindowTelemetry,
 } from "../utils/error-tracker";
+import { CREDENTIAL_SELECTION_STRATEGIES, credentialSelectionStrategy } from "../utils/key-usage";
 import {
   activeModelBlocks,
   isModelScopedWindow,
@@ -424,14 +425,23 @@ const getAvailable = route({
         authFailureFence: z.number().int(),
         /**
          * Usage per pool position: max utilization (fraction, can exceed 1) of the key's
-         * live `five_hour` and `seven_day` windows; 0 when unobserved or reset. The worker
-         * picks the lowest among `availableIndices`. It never excludes a key.
+         * live `five_hour` and `seven_day` windows; 0 when unobserved or reset. Under the
+         * `usage` strategy the worker picks the lowest among `availableIndices`.
          */
         keyUsage: z.array(z.number()),
         /**
+         * Pace delta per pool position: used minus the elapsed share of the window, the max
+         * over the live `five_hour`, `seven_day` and (with `model`) that family's weekly
+         * window; 0 when none is live. Under the `pace` strategy the worker picks the lowest
+         * (most under even use) among `availableIndices`. It never excludes a key.
+         */
+        keyPace: z.array(z.number()),
+        /** How the worker ranks keys: `CREDENTIAL_SELECTION_STRATEGY` (default `pace`). */
+        selectionStrategy: z.enum(CREDENTIAL_SELECTION_STRATEGIES),
+        /**
          * Running sessions per pool position: `in_progress` tasks whose credential is this
          * key type and the position's key suffix. The worker picks the fewest among the
-         * keys within 0.10 of the lowest `keyUsage`. It never excludes a key.
+         * keys within 0.10 of the lowest ranking score. It never excludes a key.
          */
         activeSessions: z.array(z.number().int().min(0)),
       }),
@@ -925,6 +935,8 @@ export async function handleApiKeys(
         totalKeys,
         authFailureFence: result.authFailureFence,
         keyUsage: result.keyUsage,
+        keyPace: result.keyPace,
+        selectionStrategy: credentialSelectionStrategy(process.env.CREDENTIAL_SELECTION_STRATEGY),
         activeSessions: result.activeSessions,
         ...(model !== undefined
           ? {

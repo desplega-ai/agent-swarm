@@ -21,6 +21,7 @@ import {
   parseFollowUpGateScheduleIds,
 } from "../utils/follow-up-gate-schedule-ids";
 import { kindForModelString } from "../utils/internal-ai/models";
+import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -563,6 +564,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
+  ...enumValidator("CREDENTIAL_SELECTION_STRATEGY", [...CREDENTIAL_SELECTION_STRATEGIES]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
   // `enforce` is deliberately absent: the follow-up gate only records decisions.
   ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),

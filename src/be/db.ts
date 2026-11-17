@@ -169,7 +169,7 @@ import {
   checkIdentityFieldBudget,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
-import { keyUsageFromWindows } from "../utils/key-usage";
+import { keyPaceFromWindows, keyUsageFromWindows } from "../utils/key-usage";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
 import {
@@ -11962,6 +11962,12 @@ export interface AvailableKeyIndicesResult {
    */
   keyUsage: number[];
   /**
+   * Pace delta per pool position (`keyPaceFromWindows`: max of used minus elapsed
+   * share over the live 5h, 7d and `modelFamily` weekly windows, 0 when none).
+   * Ranks admissible keys under the `pace` strategy only.
+   */
+  keyPace: number[];
+  /**
    * `in_progress` tasks per pool position whose `credentialKeyType` is this key
    * type and whose `credentialKeySuffix` is the position's suffix. Breaks ties
    * within the usage band; it never excludes a key.
@@ -12101,11 +12107,16 @@ export async function getAvailableKeyIndices(
 
   // A position several rows apply to (one key pooled in several scopes) takes the highest reading.
   const keyUsage = new Array<number>(totalKeys).fill(0);
+  // The most over-pace reading wins; a position with no live window reads 0.
+  const keyPace = new Array<number | undefined>(totalKeys).fill(undefined);
   for (const row of rows) {
-    const usage = keyUsageFromWindows(parseRateLimitWindowsJson(row.rateLimitWindows), nowMs);
-    if (usage === 0) continue;
+    const windows = parseRateLimitWindowsJson(row.rateLimitWindows);
+    const usage = keyUsageFromWindows(windows, nowMs);
+    const pace = keyPaceFromWindows(windows, nowMs, modelFamily);
     for (const i of positionsOf(row)) {
-      if (i >= 0 && i < totalKeys) keyUsage[i] = Math.max(keyUsage[i]!, usage);
+      if (i < 0 || i >= totalKeys) continue;
+      keyUsage[i] = Math.max(keyUsage[i]!, usage);
+      if (pace !== undefined) keyPace[i] = Math.max(keyPace[i] ?? Number.NEGATIVE_INFINITY, pace);
     }
   }
 
@@ -12144,6 +12155,7 @@ export async function getAvailableKeyIndices(
         : null,
     authFailureFence: Math.max(0, ...rows.map((r) => r.authFailureSeq)),
     keyUsage,
+    keyPace: keyPace.map((pace) => pace ?? 0),
     activeSessions,
   };
 }

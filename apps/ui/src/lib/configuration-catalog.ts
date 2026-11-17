@@ -969,6 +969,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "CREDENTIAL_SELECTION_STRATEGY",
+        label: "Credential selection strategy",
+        description:
+          "How a worker picks a key from a pooled credential. pace: the key furthest under even use of its windows first, so quota that resets soon gets used. usage: the lowest-utilization key first, legacy behaviour.",
+        kind: "enum",
+        options: ["pace", "usage"],
+        defaultValue: "pace",
+        restartRequired: false,
+        docsUrl: `${DOCS}guides/harness-configuration`,
+      },
+      {
         key: "MODEL_LATEST_SOAK_DAYS",
         label: "latest: alias soak",
         description:
