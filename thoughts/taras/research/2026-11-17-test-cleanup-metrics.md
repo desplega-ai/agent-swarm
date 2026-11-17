@@ -5,24 +5,25 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 31 merged cleanup changes, verified through GitHub.
-Merge status checkpoint: 2026-11-18 at 00:17 BCN.
+The current checkpoint includes 33 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: main `62b976de6e`, 2026-11-18 at 00:51 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 31 merged changes | 715 | 2618 | 1903 | 89 | 3 |
+| 33 merged changes | 762 | 2663 | 1901 | 91 | 3 |
+| Including #3318, #3323 and #3324 | 791 | 2787 | 1996 | 96 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310, #3308, #3311, #3313.
-PRs #3308, #3311, and #3313 add +76/-183 test lines and three removed cases to the preceding 28-change checkpoint.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310, #3308, #3311, #3313, #3320, #3321.
+PRs #3320 and #3321 added 47 lines, deleted 45, and removed two cases since the 31-change checkpoint.
 Scheduling PR #3318 remains outside merged totals: +2/-44 lines and two removed cases.
 The unpublished preview alternative and the external repair #3312 also remain outside campaign totals.
 The net reduction decreased by 22 lines when C22 landed. Its justified accounting guard growth remains included in the total.
 
 ## Forecast, not an acceptance target
 
-The reconciled inventory has 1616 current test files. Of these, 197 received at least partial audit work (12.2%) and 1419 remain pending.
+The reconciled inventory has 1616 current test files. Of these, 202 received at least partial audit work (12.5%) and 1414 remain pending.
 Three files appeared on main after the initial inventory. All three have recorded audits. The object viewer received a static audit, and the existing eval timestamp suite received runtime verification.
 Three deleted rows remain as historical records.
 The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
@@ -125,15 +126,16 @@ The earlier adjacent runs passed 72 cases before the target-only case was restor
 The superseded C28 preview pair retained 901 covered locations out of 2839 across 36 production files.
 That unpublished alternative contributes no merged lines or cases. The external repair #3312 superseded it.
 
-## Pending changes at the checkpoint on main da88ba4a02
+## Recent measurements at main `62b976de6e`
 
 | Change | Added / deleted test lines | Cases before / after in the affected suites | Paired production coverage |
 | --- | ---: | ---: | --- |
 | Eval timestamp fixture, #3320 | +47 / -32 | 4 / 4 | All 27 loaded production records match. Generated shell code is outside LCOV. |
 | Duplicate Codex cases, #3321 | +0 / -13 | 85 / 83 | 10,408 of 33,347 locations on both sides across 183 files. No lost locations. |
-| Scheduling filters, local candidate | +29 / -8 | 36 / 36 | 24,656 of 115,253 locations on both sides across 783 files. No lost locations. |
+| Scheduling filters, #3323 | +24 / -16 | 36 / 36 | 24,709 of 115,377 locations on both sides across 783 files. No lost locations. |
+| Eval scenario catalog, #3324 | +3 / -64 | 21 / 18 | 7,158 of 15,503 locations on both sides across 76 files. No lost locations. |
 
-These changes and scheduling PR #3318 await landing. The 31-PR deletion total excludes all four.
+The merged total includes #3320 and #3321. The projection also includes #3318, #3323 and #3324. Each coverage pair has its own denominator.
 
 ## CI timing reference
 
@@ -148,6 +150,11 @@ The sum increased while the slowest shard decreased. This does not establish a c
 These runs differ in workflow, revision, runner load, and cached shard weights. They are not a controlled benchmark.
 The later run's longest job was UI E2E shard 5 at 286 seconds, including that job's setup and reporting.
 Do not convert root test savings directly into total CI savings.
+
+The affected-test jobs on #3318 and #3323 passed on all eight shards.
+Their slowest shards took 2.2 and 3.2 seconds respectively.
+Those jobs select changed tests. Campaign-wide CI savings still need a controlled full-suite comparison.
+See [#3318 timings](https://github.com/desplega-ai/agent-swarm/actions/runs/44201948622) and [#3323 timings](https://github.com/desplega-ai/agent-swarm/actions/runs/44202106462).
 
 ## Tracking protocol
 
