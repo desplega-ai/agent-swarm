@@ -10,9 +10,9 @@ import { type AppRecord, listAppRecords } from "./store";
 export const MAX_APP_TYPES_BYTES_PER_APP = 1024 * 1024;
 
 /**
- * All apps together may use up to 4 MiB: every `script-upsert` typechecks
- * against the whole overlay (about 0.7 s at 4 MiB), and the editor type-defs
- * route ships it twice.
+ * All rendered apps together may use up to 4 MiB: the editor type-defs route
+ * ships the whole overlay twice, and a script naming many large apps
+ * typechecks against all of them (about 0.7 s at 4 MiB).
  */
 export const MAX_APP_TYPES_BYTES = 4 * 1024 * 1024;
 
@@ -296,16 +296,22 @@ export function omittedAppTypesWarning(omitted: OmittedAppTypes): string {
  * alone; once the total budget is reached, that app and every later one are
  * omitted (oldest apps keep their types).
  */
-export function renderAppTypesReport(apps: AppRecord[]): AppTypesReport {
+export function renderAppTypesReport(
+  apps: AppRecord[],
+  select?: (app: AppRecord, namespace: string) => boolean,
+): AppTypesReport {
   const renderableApps = apps.filter((app) => !app.definitionError);
   if (renderableApps.length === 0) return { source: "", omitted: [] };
 
+  // Namespaces are assigned over every app so a selected app keeps the name it has unfiltered.
   const namespaces = new Set<string>();
-  const renderedApps = renderableApps.map((app) => {
-    const namespace = `App_${dedupe(pascalIdentifier(app.name), namespaces)}`;
-    const source = renderApp(app, namespace);
-    return { app, namespace, source, bytes: byteLength(source) };
-  });
+  const renderedApps = renderableApps
+    .map((app) => ({ app, namespace: `App_${dedupe(pascalIdentifier(app.name), namespaces)}` }))
+    .filter(({ app, namespace }) => select?.(app, namespace) ?? true)
+    .map(({ app, namespace }) => {
+      const source = renderApp(app, namespace);
+      return { app, namespace, source, bytes: byteLength(source) };
+    });
   const skipped = skippedAppsComment(apps.filter((app) => app.definitionError));
   const kept: Array<(typeof renderedApps)[number]> = [];
   const omitted: Array<(typeof renderedApps)[number] & { budget: OmittedAppTypes["budget"] }> = [];
@@ -358,20 +364,35 @@ export async function getScriptAppTypes(context: ScriptTypeContext = {}): Promis
   return (await getScriptAppTypesReport(context)).source;
 }
 
+/**
+ * With `scriptSource`, renders only the apps that source names (by app id or
+ * `App_<Name>` namespace): their overloads narrow only on a literal appId, so
+ * other apps add typecheck cost and no typing. That keeps every
+ * `script-upsert` typecheck independent of how many apps the swarm holds.
+ */
 export async function getScriptAppTypesReport(
   _context: ScriptTypeContext = {},
+  scriptSource?: string,
 ): Promise<AppTypesReport> {
   try {
-    return renderAppTypesReport(await listAppRecords());
+    const select =
+      scriptSource === undefined
+        ? undefined
+        : (app: AppRecord, namespace: string) => namesApp(scriptSource, app.id, namespace);
+    return renderAppTypesReport(await listAppRecords(), select);
   } catch {
     return { source: "", omitted: [] };
   }
 }
 
+function namesApp(source: string, appId: string, namespace: string): boolean {
+  return source.includes(appId) || new RegExp(`\\b${namespace}\\b`).test(source);
+}
+
 /** Warnings for omitted apps that a script names by app id or `App_<Name>` namespace. */
 export function scriptAppTypesWarnings(source: string, omitted: OmittedAppTypes[]): string[] {
   return omitted
-    .filter((app) => source.includes(app.id) || new RegExp(`\\b${app.namespace}\\b`).test(source))
+    .filter((app) => namesApp(source, app.id, app.namespace))
     .map(omittedAppTypesWarning);
 }
 

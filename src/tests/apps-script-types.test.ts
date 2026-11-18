@@ -263,6 +263,15 @@ describe("renderAppTypes", () => {
     expect(warnings[0]).toContain("per-app budget");
     expect(warnings[1]).toContain("swarm-wide budget");
     expect(scriptAppTypesWarnings("App_Huge_2 First-id", report.omitted)).toEqual([]);
+
+    // A script's typecheck renders only the apps it names, so other apps cost it nothing.
+    const selected = renderAppTypesReport(
+      [app("First", maxSize), app("Eighth", issueDefinition())],
+      (candidate) => candidate.id === "Eighth-id",
+    ).source;
+    expect(selected).toContain("namespace App_Eighth");
+    expect(selected).not.toContain("namespace App_First");
+    expect(selected).toContain("SwarmAppQueryResult");
   });
 
   test("stays within the byte budget even when metadata alone is pathological", () => {

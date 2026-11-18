@@ -1615,7 +1615,7 @@ export async function typecheckScript(
 ): Promise<ScriptTypecheckResult> {
   const apiTypes = getScriptApiTypes(context);
   const mcpTypes = getScriptMcpTypes(context);
-  const appTypesReport = await getScriptAppTypesReport(context);
+  const appTypesReport = await getScriptAppTypesReport(context, source);
   const appTypes = appTypesReport.source;
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
   const stdlibTypes = appTypes
