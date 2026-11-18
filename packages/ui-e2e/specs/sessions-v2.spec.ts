@@ -95,6 +95,8 @@ test.describe("desktop", () => {
 
   test("opening a session marks it read", async ({ page, api, swarm, seed, clean }) => {
     const session = await startSession(api, seed!.user.id, "read");
+    // A running session hides the dot (the spinner says it); a settled one shows it.
+    await api.post(`/api/tasks/${session.id}/cancel`, {});
     await page.goto("/sessions");
     const row = sessionRow(page.getByRole("tree", { name: "Sessions" }), session.title);
     await expect(row).toHaveAccessibleName(/^Unread\. /);
