@@ -17,6 +17,7 @@ import { updateMcpServerChecked } from "../be/mcp-server-checked-update";
 import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
+import { isApiOnlyConfigKey, isInternalConfigKey } from "../be/swarm-config-guard";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { isCodexOAuthConfigKey } from "../providers/codex-oauth/env-keys";
@@ -223,7 +224,11 @@ const getAgentMcpServersRoute = route({
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 async function canResolveMcpSecretsForHttpUser(req: IncomingMessage): Promise<boolean> {
-  const userId = authUserId(getRequestAuth(req));
+  const auth = getRequestAuth(req);
+  // Task tokens are ACP harness credentials and read no config secrets (as on
+  // /api/config/resolved). The worker resolves installed servers with its own key.
+  if (auth?.kind === "agent" && auth.tokenKind === "task") return false;
+  const userId = authUserId(auth);
   if (!userId) return true;
   if (!isRbacEnabled()) return true;
 
@@ -320,7 +325,14 @@ export async function handleMcpServers(
         return true;
       }
 
-      const configs = await getResolvedConfig(parsed.params.id);
+      // API-only and internal rows never leave the API, and Codex OAuth rows carry
+      // the refresh token: none of them resolve into an env var or a header.
+      const configs = (await getResolvedConfig(parsed.params.id)).filter(
+        (c) =>
+          !isApiOnlyConfigKey(c.key) &&
+          !isInternalConfigKey(c.key) &&
+          !isCodexOAuthConfigKey(c.key),
+      );
       const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
       const serversWithSecrets = await Promise.all(

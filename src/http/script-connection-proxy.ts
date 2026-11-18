@@ -192,9 +192,11 @@ export async function handleScriptConnectionProxy(
     );
     mcpCallRoute.respond(res, 200, result);
   } catch (err) {
+    // callMcpServerTool scrubs the upstream result and its own errors. This
+    // also covers errors raised while resolving the server and its headers.
     mcpCallRoute.respond(res, 200, {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: scrubSecrets(err instanceof Error ? err.message : String(err)),
     });
   }
   return true;

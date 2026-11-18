@@ -463,6 +463,10 @@
       "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
       "scenarios": ["script-connections", "script-credential-bindings"]
     },
+    "platform-secret-egress": {
+      "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
+      "scenarios": ["platform-secret-egress"]
+    },
     "script-inline-run": {
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]

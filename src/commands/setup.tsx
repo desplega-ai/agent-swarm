@@ -204,12 +204,15 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
           gitignoreContent = await gitignoreFile.text();
         }
 
+        // Match whole lines: a substring hit (a comment, a `!` rule) does not ignore
+        // anything. `.mcp.json` and its backup hold the API bearer token.
+        const ignoreLines = new Set(gitignoreContent.split(/\r?\n/).map((line) => line.trim()));
         const entriesToAdd: string[] = [];
-        if (!gitignoreContent.includes(".claude")) {
+        if (!ignoreLines.has(".claude") && !ignoreLines.has(".claude/")) {
           entriesToAdd.push(".claude");
         }
-        if (!gitignoreContent.includes(".mcp.json")) {
-          entriesToAdd.push(".mcp.json");
+        for (const entry of [".mcp.json", ".mcp.json.bak"]) {
+          if (!ignoreLines.has(entry)) entriesToAdd.push(entry);
         }
 
         if (entriesToAdd.length > 0) {
@@ -222,6 +225,17 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
           addLog(`Add to .gitignore: ${entriesToAdd.join(", ")}`, true);
         } else {
           addLog(".gitignore already contains required entries");
+        }
+
+        // An ignore rule does not untrack a file that is already committed.
+        const tracked = await Bun.$`git -C ${cwd} ls-files .mcp.json .mcp.json.bak`
+          .quiet()
+          .nothrow();
+        const trackedFiles = tracked.stdout.toString().trim();
+        if (trackedFiles) {
+          addLog(
+            `Warning: ${trackedFiles.split("\n").join(", ")} is tracked by git and will hold the API token. Run: git rm --cached ${trackedFiles.split("\n").join(" ")}`,
+          );
         }
       } else {
         addLog("Not a git repository (skipping .gitignore update)");
