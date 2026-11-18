@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflowRunSummary } from "@/be/db/workflow-runs";
+import { denyCatalog } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, retryFailedRun } from "@/workflows";
 
@@ -17,7 +18,13 @@ export const registerRetryWorkflowRunTool = (server: McpServer) => {
       }),
       outputSchema: swarmToolOutputSchema(),
     },
-    async ({ runId }) => {
+    async ({ runId }, requestInfo) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "workflow.run.any",
+        "Running workflows requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       try {
         if (!(await getWorkflowRunSummary(runId)))
           return toolErr(`Workflow run not found: ${runId}`);

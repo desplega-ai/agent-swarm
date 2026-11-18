@@ -846,7 +846,13 @@
     },
     "workflow-definitions": {
       "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",
-      "scenarios": ["workflow-definitions", "workflow-input-refs", "authz-workflow-env"]
+      "scenarios": [
+        "workflow-definitions",
+        "workflow-input-refs",
+        "authz-workflow-env",
+        "authz-catalog",
+        "authz-templates-config"
+      ]
     },
     "workflow-engine-control": {
       "description": "Idempotency keys, trigger schema, event subscriber isolation, GitHub and Jira event triggers with match filters and redelivery dedupe, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",

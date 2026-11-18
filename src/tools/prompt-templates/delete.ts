@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { deletePromptTemplate, getAgentById, getPromptTemplateById } from "@/be/db";
+import { deletePromptTemplate, getPromptTemplateById } from "@/be/db";
 import { can } from "@/rbac";
+import { catalogPrincipal } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeletePromptTemplateTool = (server: McpServer) => {
@@ -33,13 +34,8 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
           });
         }
 
-        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
-          principal: {
-            kind: "agent",
-            agentId: requestInfo.agentId,
-            isLead: agent?.isLead ?? false,
-          },
+          principal: await catalogPrincipal(requestInfo),
           verb: "prompt-template.write",
           resource: {
             kind: "owned",

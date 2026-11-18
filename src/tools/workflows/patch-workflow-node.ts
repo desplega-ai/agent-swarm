@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { denyCatalog } from "@/tools/catalog-auth";
 import {
   createToolRegistrar,
   findLongScriptTimeoutHint,
@@ -36,6 +37,12 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
       }),
     },
     async ({ id, nodeId, ...nodeFields }, requestInfo) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "workflow.write.any",
+        "Changing workflows requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       try {
         const updatedBy =
           (await resolveTaskAuditUserId(requestInfo.auditSourceTaskId, requestInfo.agentId)) ??

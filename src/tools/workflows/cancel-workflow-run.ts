@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { denyCatalog } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { cancelWorkflowRun } from "@/workflows";
 
@@ -17,7 +18,13 @@ export const registerCancelWorkflowRunTool = (server: McpServer) => {
       }),
       outputSchema: swarmToolOutputSchema(),
     },
-    async ({ runId, reason }) => {
+    async ({ runId, reason }, requestInfo) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "workflow.run.any",
+        "Running workflows requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       try {
         await cancelWorkflowRun(runId, reason);
         return toolOk(`Cancelled workflow run ${runId}.`);

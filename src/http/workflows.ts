@@ -64,7 +64,7 @@ import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
-import { requestSecretReadScope } from "./config";
+import { ensureHttpPermission, requestSecretReadScope } from "./config";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import {
   idempotencyKeyHeader,
@@ -177,6 +177,7 @@ const createWorkflowRoute = route({
   pattern: ["api", "workflows"],
   summary: "Create a new workflow",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.write.any" },
   headers: idempotencyKeyHeader("creates one workflow"),
   body: z.object({
     name: z.string().min(1),
@@ -196,13 +197,12 @@ const createWorkflowRoute = route({
   responses: {
     201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
     400: { description: "Invalid definition, or a malformed Idempotency-Key" },
-    403: { description: "Env var or secret input requires config.read.secrets" },
+    403: {
+      description:
+        "Caller may not change workflows, or an env var or secret input requires config.read.secrets",
+    },
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow created under this Idempotency-Key was deleted" },
-  },
-  rbac: {
-    ungated:
-      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -234,6 +234,7 @@ const updateWorkflowRoute = route({
   pattern: ["api", "workflows", null],
   summary: "Update a workflow",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.write.any" },
   params: z.object({ id: z.string() }),
   body: z.object({
     name: z.string().optional(),
@@ -257,12 +258,11 @@ const updateWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid definition" },
-    403: { description: "Env var or secret input requires config.read.secrets" },
+    403: {
+      description:
+        "Caller may not change workflows, or an env var or secret input requires config.read.secrets",
+    },
     404: { description: "Workflow not found" },
-  },
-  rbac: {
-    ungated:
-      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -272,6 +272,7 @@ const patchWorkflowRoute = route({
   pattern: ["api", "workflows", null],
   summary: "Patch a workflow definition (create/update/delete nodes)",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.write.any" },
   params: z.object({ id: z.string() }),
   body: WorkflowPatchSchema.extend({ key: AssetKeySchema.optional() }),
   responses: {
@@ -280,12 +281,11 @@ const patchWorkflowRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
-    403: { description: "Stored env var or secret input requires config.read.secrets" },
+    403: {
+      description:
+        "Caller may not change workflows, or a stored env var or secret input requires config.read.secrets",
+    },
     404: { description: "Workflow not found" },
-  },
-  rbac: {
-    ungated:
-      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -295,6 +295,7 @@ const patchWorkflowNodeRoute = route({
   pattern: ["api", "workflows", null, "nodes", null],
   summary: "Patch a single node in a workflow definition",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.write.any" },
   params: z.object({ id: z.string(), nodeId: z.string() }),
   body: WorkflowNodePatchSchema,
   responses: {
@@ -303,12 +304,11 @@ const patchWorkflowNodeRoute = route({
       schema: WorkflowSaveResponseSchema,
     },
     400: { description: "Invalid patch or resulting definition" },
-    403: { description: "Stored env var or secret input requires config.read.secrets" },
+    403: {
+      description:
+        "Caller may not change workflows, or a stored env var or secret input requires config.read.secrets",
+    },
     404: { description: "Workflow or node not found" },
-  },
-  rbac: {
-    ungated:
-      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -318,14 +318,14 @@ const deleteWorkflowRoute = route({
   pattern: ["api", "workflows", null],
   summary: "Delete a workflow",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.write.any" },
   params: z.object({ id: z.string() }),
   responses: {
     204: { description: "Workflow deleted" },
     404: { description: "Workflow not found" },
-  },
-  rbac: {
-    ungated:
-      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+    403: {
+      description: "Caller is not a lead agent, operator, or user with workflow write access",
+    },
   },
 });
 
@@ -337,6 +337,7 @@ const triggerWorkflowRoute = route({
   description:
     "With an `Idempotency-Key`, a retry returns the accepted run's `runId` and `skipped` without starting, resuming or waiting for anything, even after the workflow was disabled or edited and whatever state the run is in now.",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.trigger", alsoAdmits: ["workflow.run.any"] },
   params: z.object({ id: z.string() }),
   query: z.object({
     wait: z
@@ -355,12 +356,11 @@ const triggerWorkflowRoute = route({
     },
     400: { description: "Workflow is disabled, or a malformed Idempotency-Key" },
     401: { description: "Unauthorized" },
+    403: { description: "Caller is not a lead agent, operator, or user with workflow run access" },
     404: { description: "Workflow not found" },
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow triggered under this Idempotency-Key was deleted" },
   },
-  // Agents and the operator key pass (legacy policy); a user role needs the verb at admission.
-  rbac: { permission: "workflow.trigger" },
 });
 
 const validateTriggerRoute = route({
@@ -462,15 +462,13 @@ const retryWorkflowRunRoute = route({
   description:
     "Retries on the definition the run started with; to use an edited workflow, trigger a new run.",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.run.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Retry started", schema: SuccessResponseSchema },
     400: { description: "Cannot retry" },
     404: { description: "Run not found" },
-  },
-  rbac: {
-    ungated:
-      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+    403: { description: "Caller is not a lead agent, operator, or user with workflow run access" },
   },
 });
 
@@ -480,17 +478,15 @@ const cancelWorkflowRunRoute = route({
   pattern: ["api", "workflow-runs", null, "cancel"],
   summary: "Cancel a running or waiting workflow run",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.run.any" },
   params: z.object({ id: z.string() }),
   body: z.object({ reason: z.string().optional() }).optional(),
   responses: {
     200: { description: "Run cancelled", schema: SuccessResponseSchema },
     400: { description: "Cannot cancel" },
+    403: { description: "Caller is not a lead agent, operator, or user with workflow run access" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated:
-      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
-  },
 });
 
 const listExecutorTypesRoute = route({
@@ -591,6 +587,11 @@ const getWorkflowVersionRoute = route({
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+const WORKFLOW_WRITE_DENIED =
+  "Changing workflows requires the lead agent, operator, or user authentication";
+const WORKFLOW_RUN_DENIED =
+  "Running workflows requires the lead agent, operator, or user authentication";
 
 export async function handleWorkflows(
   req: IncomingMessage,
@@ -735,6 +736,16 @@ export async function handleWorkflows(
   }
 
   if (createWorkflowRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "workflow.write.any",
+        WORKFLOW_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const idempotency = readIdempotencyKey(req, res, myAgentId);
     if (idempotency === null) return true;
     const parsed = await createWorkflowRoute.parse(req, res, pathSegments, queryParams);
@@ -861,6 +872,16 @@ export async function handleWorkflows(
 
   // PATCH single node (5-segment) must be checked before bulk PATCH (3-segment)
   if (patchWorkflowNodeRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "workflow.write.any",
+        WORKFLOW_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await patchWorkflowNodeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
@@ -899,6 +920,16 @@ export async function handleWorkflows(
   }
 
   if (patchWorkflowRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "workflow.write.any",
+        WORKFLOW_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await patchWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { id } = parsed.params;
@@ -961,6 +992,16 @@ export async function handleWorkflows(
   }
 
   if (updateWorkflowRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "workflow.write.any",
+        WORKFLOW_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await updateWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { id } = parsed.params;
@@ -1060,6 +1101,16 @@ export async function handleWorkflows(
   }
 
   if (deleteWorkflowRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "workflow.write.any",
+        WORKFLOW_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
@@ -1102,6 +1153,8 @@ export async function handleWorkflows(
   }
 
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
+    if (!(await ensureHttpPermission(req, res, "workflow.run.any", WORKFLOW_RUN_DENIED, myAgentId)))
+      return true;
     const idempotency = readIdempotencyKey(req, res, myAgentId);
     if (idempotency === null) return true;
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
@@ -1237,6 +1290,8 @@ export async function handleWorkflows(
   }
 
   if (retryWorkflowRunRoute.match(req.method, pathSegments)) {
+    if (!(await ensureHttpPermission(req, res, "workflow.run.any", WORKFLOW_RUN_DENIED, myAgentId)))
+      return true;
     const parsed = await retryWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await getWorkflowRunSummary(parsed.params.id))) {
@@ -1256,6 +1311,8 @@ export async function handleWorkflows(
   }
 
   if (cancelWorkflowRunRoute.match(req.method, pathSegments)) {
+    if (!(await ensureHttpPermission(req, res, "workflow.run.any", WORKFLOW_RUN_DENIED, myAgentId)))
+      return true;
     const parsed = await cancelWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {

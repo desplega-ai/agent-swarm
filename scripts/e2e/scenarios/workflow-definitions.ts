@@ -4,6 +4,7 @@ import { sql } from "../db";
 // surface answers with. Run behaviour lives in workflow-engine-*.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -532,7 +533,9 @@ export const workflowDefinitions: Scenario = {
     );
 
     // ── MCP: the same lifecycle through the tools ─────────────────────────────
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    const connection = await ctx.connectMcp(leadId);
     try {
       const mcpName = `wf-mcp-${ctx.nonce}`;
       const createBad = await callToolErr(
@@ -561,7 +564,7 @@ export const workflowDefinitions: Scenario = {
       created.push(mcpId);
       expect(
         mcpCreated.text.includes(`Created workflow "${mcpName}"`) &&
-          mcpWorkflow.createdByAgentId === workerId,
+          mcpWorkflow.createdByAgentId === leadId,
         "create-workflow reports the workflow",
       );
       expect(

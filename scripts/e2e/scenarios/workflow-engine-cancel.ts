@@ -4,6 +4,7 @@ import { sql } from "../db";
 // of open work and a late signal or answer cannot revive the run.
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   approvalsForRun,
   callToolErr,
@@ -31,7 +32,9 @@ export const workflowEngineCancel: Scenario = {
     const workerId = await registerWorker(ctx, "wf-cancel");
     // Registered but never polling: tasks pinned to it stay open until the cancel.
     const idleId = await registerWorker(ctx, "wf-idle");
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    const connection = await ctx.connectMcp(leadId);
 
     try {
       // ── a waiting run ───────────────────────────────────────────────────────

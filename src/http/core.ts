@@ -56,6 +56,7 @@ import {
 import { refreshSecretScrubberCache, registerSensitiveKeyName } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
+import { pageExecutionPrincipal, requestPrincipal } from "./request-principal";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
 import {
   canReadSession,
@@ -446,6 +447,34 @@ const pingRoute = route({
   },
 });
 
+const INTERNAL_RELOAD_CONFIG_PATH = "/internal/reload-config";
+const internalReloadConfigRoute = route({
+  method: "post",
+  path: INTERNAL_RELOAD_CONFIG_PATH,
+  pattern: ["internal", "reload-config"],
+  literalUrl: true,
+  summary: "Reload global swarm config and re-initialize integrations (internal)",
+  tags: ["Config"],
+  rbac: { permission: "config.reload" },
+  responses: {
+    200: {
+      description: "Reload result",
+      schema: z.object({
+        success: z.literal(true),
+        configsLoaded: z.number(),
+        keysUpdated: z.array(z.string()),
+        integrationsReinitialized: z.array(z.string()),
+      }),
+    },
+    401: { description: "Unauthorized" },
+    403: { description: "Caller lacks permission to reload config" },
+    500: {
+      description: "Reload failed",
+      schema: z.object({ error: z.string(), details: z.string() }),
+    },
+  },
+});
+
 const closeRoute = route({
   method: "post",
   path: "/close",
@@ -551,7 +580,7 @@ export async function handleCore(
 
   // A user token never gains agent identity from X-Agent-ID, on /mcp, /api/poll
   // or any worker-header route.
-  const routeDef = findRoute(req.method, pathSegments);
+  const routeDef = findRoute(req.method, pathSegments, req.url);
   const agentIdentityDenial = await userAgentIdentityDenial(req, routeDef, pathSegments);
   if (agentIdentityDenial) {
     jsonError(res, agentIdentityDenial, 403);
@@ -654,19 +683,41 @@ export async function handleCore(
   }
 
   // POST /internal/reload-config — re-read swarm_config into process.env and re-init integrations
-  if (req.method === "POST" && req.url === "/internal/reload-config") {
+  if (
+    req.url === INTERNAL_RELOAD_CONFIG_PATH &&
+    internalReloadConfigRoute.match(req.method, pathSegments)
+  ) {
+    const reloadPrincipal =
+      (await pageExecutionPrincipal(auth)) ??
+      (await requestPrincipal(req, myAgentId, { unauthenticatedFallback: "anonymous-agent" }));
+    if (
+      !can({
+        principal: reloadPrincipal,
+        verb: "config.reload",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(
+        res,
+        "Reloading config requires the lead agent, operator, or user authentication",
+        403,
+      );
+      return true;
+    }
     try {
       const result = await reloadGlobalConfigsAndIntegrations();
       console.log(
         `[reload-config] Loaded ${result.configsLoaded} config(s), re-initialized: ${result.integrationsReinitialized.join(", ") || "none"}`,
       );
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true, ...result }));
+      internalReloadConfigRoute.respond(res, 200, { success: true, ...result });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("[reload-config] Failed:", message);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to reload config", details: message }));
+      internalReloadConfigRoute.respond(res, 500, {
+        error: "Failed to reload config",
+        details: message,
+      });
     }
     return true;
   }

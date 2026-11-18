@@ -26,6 +26,7 @@ import {
 import { getScript } from "@/be/scripts/db";
 import { can } from "@/rbac";
 import { calculateNextRun } from "@/scheduler";
+import { denyCatalog } from "@/tools/catalog-auth";
 import {
   createToolRegistrar,
   modelTierDeprecatedOutputSchema,
@@ -159,7 +160,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       title: "Update Scheduled Task",
       annotations: { idempotentHint: true },
       description:
-        "Update an existing scheduled task. Any registered agent can update schedules; only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).",
+        "Update an existing scheduled task. Requires the lead agent, operator, or user; a worker asks the lead via send-task. Only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).",
       inputSchema: updateScheduleInputSchema,
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -196,6 +197,12 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       requestInfo,
       _meta,
     ) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "schedule.write.any",
+        "Changing schedules requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }

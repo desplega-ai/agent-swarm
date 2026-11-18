@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById, getScheduledTaskById, getScheduledTaskByName } from "@/be/db";
 import { can } from "@/rbac";
 import { runScheduleNow } from "@/scheduler";
+import { denyCatalog } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getCurrentRequestAuth } from "@/utils/request-auth-context";
 
@@ -30,6 +31,12 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
       }),
     },
     async ({ scheduleId, name }, requestInfo, _meta) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "schedule.write.any",
+        "Changing schedules requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }

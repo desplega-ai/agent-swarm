@@ -18,12 +18,15 @@ import {
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { ScheduledTask, ScheduledTaskSummary } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-schedule-http-triage-tools.sqlite";
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // The shared key with an X-Agent-ID: the handler then acts as that agent.
+    setRequestAuth(req, { kind: "operator", fingerprint: "schedule-triage-test" });
     res.setHeader("Content-Type", "application/json");
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");

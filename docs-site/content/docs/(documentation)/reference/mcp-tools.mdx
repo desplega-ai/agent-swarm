@@ -673,7 +673,7 @@ Compare two versions of a context file. Shows a unified diff.
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support a concrete `model` override, a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`), a `profile` and a `modelGroup`, passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
+Manage recurring and one-time task automation. Only the lead agent, the operator or a user can create, update, delete or run schedules; a worker asks the lead via `send-task`. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support a concrete `model` override, a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`), a `profile` and a `modelGroup`, passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
 
 Schedules accept a logical asset `key`; tasks they create inherit that namespace. `list-schedules` supports exact `key` and subtree `keyPrefix` filters, while `update-schedule` and `patch-schedule` can move a schedule by updating its key.
 

@@ -31,6 +31,7 @@ import {
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
 import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow-node";
@@ -75,6 +76,8 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   const agent = await createAgent({ name: "audit-test-agent", isLead: false, status: "idle" });
   agentId = agent.id;
+  // The workflow write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(agentId);
 
   // Create a real user in the users table (requestedByUserId is a FK)
   const user = await createUser({ name: "Audit Test Human", email: "human@example.com" });

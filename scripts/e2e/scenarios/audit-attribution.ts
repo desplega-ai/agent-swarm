@@ -13,6 +13,7 @@ import {
   createAssignedTask,
   createUser,
   expectToolOk,
+  registerLead,
   registerWorker,
   retireAgent,
 } from "./core-helpers";
@@ -121,8 +122,8 @@ export const auditAttributionWorkflows: Scenario = {
   name: "audit-attribution-workflows",
   order: 345,
   async run(ctx) {
-    const a = await actor(ctx, await registerWorker(ctx, "audit-wf-a"), "wf-a");
-    const b = await actor(ctx, await registerWorker(ctx, "audit-wf-b"), "wf-b");
+    const a = await actor(ctx, await registerLead(ctx, "audit-wf-a"), "wf-a");
+    const b = await actor(ctx, await registerLead(ctx, "audit-wf-b"), "wf-b");
     const workflowIds: string[] = [];
     try {
       // ── HTTP create by A, MCP update by B, HTTP update with no person ───────────────────
@@ -256,8 +257,8 @@ export const auditAttributionSchedules: Scenario = {
   name: "audit-attribution-schedules",
   order: 356,
   async run(ctx) {
-    const a = await actor(ctx, await registerWorker(ctx, "audit-sched-a"), "sched-a");
-    const b = await actor(ctx, await registerWorker(ctx, "audit-sched-b"), "sched-b");
+    const a = await actor(ctx, await registerLead(ctx, "audit-sched-a"), "sched-a");
+    const b = await actor(ctx, await registerLead(ctx, "audit-sched-b"), "sched-b");
     const scheduleIds: string[] = [];
     try {
       // ── HTTP create by A, MCP update by B, HTTP PATCH with no person ───────────────────

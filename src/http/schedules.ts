@@ -43,6 +43,7 @@ import {
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
+import { ensureHttpPermission } from "./config";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
@@ -109,12 +110,16 @@ export const scheduleSummaryWithFavoriteSchema = z.object({
   favorite: z.boolean(),
 });
 
+const SCHEDULE_WRITE_DENIED =
+  "Changing schedules requires the lead agent, operator, or user authentication";
+
 const createSchedule = route({
   method: "post",
   path: "/api/schedules",
   pattern: ["api", "schedules"],
   summary: "Create a new schedule",
   tags: ["Schedules"],
+  rbac: { permission: "schedule.write.any" },
   body: z.object({
     key: AssetKeySchema.optional(),
     name: z.string().min(1),
@@ -151,9 +156,7 @@ const createSchedule = route({
     201: { description: "Schedule created", schema: ScheduledTaskSchema },
     400: { description: "Validation error" },
     409: { description: "Duplicate name" },
-  },
-  rbac: {
-    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
 });
 
@@ -163,6 +166,7 @@ const runScheduleNow = route({
   pattern: ["api", "schedules", null, "run"],
   summary: "Run a schedule immediately",
   tags: ["Schedules"],
+  rbac: { permission: "schedule.write.any", alsoAdmits: ["schedule.run.any"] },
   params: z.object({ id: z.string() }),
   responses: {
     200: {
@@ -175,8 +179,8 @@ const runScheduleNow = route({
     },
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
-  rbac: { permission: "schedule.run.any" },
 });
 
 const listSchedules = route({
@@ -241,17 +245,18 @@ const updateSchedule = route({
   pattern: ["api", "schedules", null],
   summary: "Update a schedule",
   tags: ["Schedules"],
+  rbac: { permission: "schedule.write.any" },
   params: z.object({ id: z.string() }),
   body: scheduleUpdateBodySchema,
   responses: {
     200: { description: "Schedule updated", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
-    403: { description: "Deferral or target owned by another agent" },
+    403: {
+      description:
+        "Caller may not change schedules, or the deferral or target is owned by another agent",
+    },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
-  },
-  rbac: {
-    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
   },
 });
 
@@ -263,18 +268,18 @@ const patchSchedule = route({
   description:
     "Partially updates a schedule by shallow-merging provided fields over the existing row.",
   tags: ["Schedules"],
+  rbac: { permission: "schedule.write.any" },
   params: z.object({ id: z.string() }),
   body: scheduleUpdateBodySchema,
   responses: {
     200: { description: "Schedule patched", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
-    403: { description: "Deferral or target owned by another agent" },
+    403: {
+      description:
+        "Caller may not change schedules, or the deferral or target is owned by another agent",
+    },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
-  },
-  rbac: {
-    ungated:
-      "matches existing schedule update/delete posture: bearer-authenticated agents may manage schedules",
   },
 });
 
@@ -284,13 +289,12 @@ const deleteSchedule = route({
   pattern: ["api", "schedules", null],
   summary: "Delete a schedule",
   tags: ["Schedules"],
+  rbac: { permission: "schedule.write.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Schedule deleted", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Schedule not found" },
-  },
-  rbac: {
-    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
 });
 
@@ -337,6 +341,16 @@ export async function handleSchedules(
   }
 
   if (createSchedule.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "schedule.write.any",
+        SCHEDULE_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await createSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const body = parsed.body;
@@ -539,6 +553,16 @@ export async function handleSchedules(
   }
 
   if (runScheduleNow.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "schedule.write.any",
+        SCHEDULE_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await runScheduleNow.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const schedule = await getScheduledTaskById(parsed.params.id);
@@ -621,6 +645,16 @@ export async function handleSchedules(
     updateSchedule.match(req.method, pathSegments) ||
     patchSchedule.match(req.method, pathSegments)
   ) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "schedule.write.any",
+        SCHEDULE_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const routeHandle = updateSchedule.match(req.method, pathSegments)
       ? updateSchedule
       : patchSchedule;
@@ -894,6 +928,16 @@ export async function handleSchedules(
   }
 
   if (deleteSchedule.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "schedule.write.any",
+        SCHEDULE_WRITE_DENIED,
+        myAgentId,
+      ))
+    )
+      return true;
     const parsed = await deleteSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const deleted = await deleteScheduledTask(parsed.params.id);

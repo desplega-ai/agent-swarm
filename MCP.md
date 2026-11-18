@@ -1217,7 +1217,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 
 **Update Scheduled Task**
 
-Update an existing scheduled task. Any registered agent can update schedules; only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).
+Update an existing scheduled task. Requires the lead agent, operator, or user; a worker asks the lead via send-task. Only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1249,7 +1249,7 @@ Update an existing scheduled task. Any registered agent can update schedules; on
 
 **Patch Scheduled Task**
 
-Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.
+Patch an existing scheduled task by shallow-merging provided fields over the current row. Requires the lead agent, operator, or user; a worker asks the lead via send-task.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1281,7 +1281,7 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 
 **Delete Scheduled Task**
 
-Delete a scheduled task permanently. Any registered agent can delete schedules.
+Delete a scheduled task permanently. Requires the lead agent, operator, or user; a worker asks the lead via send-task.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

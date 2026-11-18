@@ -6,6 +6,7 @@ import { rm } from "node:fs/promises";
 import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -58,7 +59,9 @@ export const workflowEngineControl: Scenario = {
     });
     const make = (name: string, definition: WorkflowDef, extra: Record<string, unknown> = {}) =>
       createWorkflow(ctx, name, definition, extra, workerId);
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    const connection = await ctx.connectMcp(leadId);
 
     try {
       // ── start the slow runs first so their waits overlap ────────────────────

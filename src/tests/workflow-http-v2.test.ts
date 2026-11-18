@@ -37,6 +37,7 @@ import type {
   WorkflowSummary,
   WorkflowVersion,
 } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { initWorkflows, stopRetryPoller, workflowEventBus } from "../workflows";
 import { listenOnFreePort } from "./test-net";
 import { waitForRunStatus } from "./workflow-wait";
@@ -49,6 +50,7 @@ const secretRef = (name: string): string => `secret.${name}`;
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
     res.setHeader("Content-Type", "application/json");
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");

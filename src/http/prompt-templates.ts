@@ -13,16 +13,36 @@ import {
 import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
-import type { RbacResource } from "../rbac";
 import { type PromptTemplate, PromptTemplateHistorySchema, PromptTemplateSchema } from "../types";
 import { interpolate } from "../utils/template";
-import { refuseAgentTokenWithout } from "./request-principal";
+import { ensureHttpPermission } from "./config";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
+const promptTemplateWriteRbac = {
+  permission: "prompt-template.write.any",
+  alsoAdmits: ["prompt-template.write"],
+} as const;
+
+const promptTemplateWriteForbidden = {
+  description: "Caller may not change shared templates or templates belonging to another agent",
+};
+
 /** An agent-scope override belongs to its agent; global and repo overrides belong to no agent. */
-function templateOwner(template: Pick<PromptTemplate, "scope" | "scopeId"> | null): RbacResource {
-  return { kind: "owned", ownerAgentId: template?.scope === "agent" ? template.scopeId : null };
+function ensurePromptTemplateWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  template: Pick<PromptTemplate, "scope" | "scopeId"> | null,
+): Promise<boolean> {
+  const ownerAgentId = template?.scope === "agent" ? template.scopeId : null;
+  return ensureHttpPermission(
+    req,
+    res,
+    ownerAgentId ? "prompt-template.write" : "prompt-template.write.any",
+    "Changing shared or another agent's prompt templates requires the lead agent, operator, or user",
+    undefined,
+    { kind: "owned", ownerAgentId },
+  );
 }
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -164,6 +184,7 @@ const checkoutRoute = route({
   pattern: ["api", "prompt-templates", null, "checkout"],
   summary: "Checkout a specific version of a prompt template from history",
   tags: ["PromptTemplates"],
+  rbac: promptTemplateWriteRbac,
   params: z.object({ id: z.string() }),
   body: z.object({ version: z.number() }),
   responses: {
@@ -173,9 +194,9 @@ const checkoutRoute = route({
     },
     400: { description: "Validation error" },
     404: { description: "Template or version not found" },
+    403: promptTemplateWriteForbidden,
   },
   auth: { apiKey: true },
-  rbac: { permission: "prompt-template.write" },
 });
 
 const resetRoute = route({
@@ -184,6 +205,7 @@ const resetRoute = route({
   pattern: ["api", "prompt-templates", null, "reset"],
   summary: "Reset a prompt template to its code-defined default",
   tags: ["PromptTemplates"],
+  rbac: promptTemplateWriteRbac,
   params: z.object({ id: z.string() }),
   responses: {
     200: {
@@ -191,9 +213,9 @@ const resetRoute = route({
       schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     404: { description: "Template not found or no code default available" },
+    403: promptTemplateWriteForbidden,
   },
   auth: { apiKey: true },
-  rbac: { permission: "prompt-template.write" },
 });
 
 const getByIdRoute = route({
@@ -222,6 +244,7 @@ const deleteByIdRoute = route({
   pattern: ["api", "prompt-templates", null],
   summary: "Delete a prompt template override",
   tags: ["PromptTemplates"],
+  rbac: promptTemplateWriteRbac,
   params: z.object({ id: z.string() }),
   responses: {
     200: {
@@ -230,9 +253,9 @@ const deleteByIdRoute = route({
     },
     400: { description: "Cannot delete default template" },
     404: { description: "Template not found" },
+    403: promptTemplateWriteForbidden,
   },
   auth: { apiKey: true },
-  rbac: { permission: "prompt-template.write" },
 });
 
 const listRoute = route({
@@ -262,6 +285,7 @@ const upsertRoute = route({
   pattern: ["api", "prompt-templates"],
   summary: "Create or update a prompt template override",
   tags: ["PromptTemplates"],
+  rbac: promptTemplateWriteRbac,
   body: z.object({
     eventType: z.string().min(1),
     scope: z.enum(["global", "agent", "repo"]).optional(),
@@ -277,9 +301,9 @@ const upsertRoute = route({
       schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     400: { description: "Validation error" },
+    403: promptTemplateWriteForbidden,
   },
   auth: { apiKey: true },
-  rbac: { permission: "prompt-template.write" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -374,9 +398,7 @@ export async function handlePromptTemplates(
     const parsed = await checkoutRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const target = await getPromptTemplateById(parsed.params.id);
-    if (await refuseAgentTokenWithout(req, res, "prompt-template.write", templateOwner(target))) {
-      return true;
-    }
+    if (!(await ensurePromptTemplateWrite(req, res, target))) return true;
 
     try {
       const template = await checkoutPromptTemplate(parsed.params.id, parsed.body.version);
@@ -402,9 +424,7 @@ export async function handlePromptTemplates(
       jsonError(res, `Prompt template ${parsed.params.id} not found`, 404);
       return true;
     }
-    if (await refuseAgentTokenWithout(req, res, "prompt-template.write", templateOwner(existing))) {
-      return true;
-    }
+    if (!(await ensurePromptTemplateWrite(req, res, existing))) return true;
 
     const definition = getTemplateDefinition(existing.eventType);
     if (!definition) {
@@ -443,9 +463,7 @@ export async function handlePromptTemplates(
     const parsed = await deleteByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const target = await getPromptTemplateById(parsed.params.id);
-    if (await refuseAgentTokenWithout(req, res, "prompt-template.write", templateOwner(target))) {
-      return true;
-    }
+    if (!(await ensurePromptTemplateWrite(req, res, target))) return true;
 
     try {
       const deleted = await deletePromptTemplate(parsed.params.id);
@@ -501,16 +519,8 @@ export async function handlePromptTemplates(
       jsonError(res, "Agent/repo scope requires scopeId", 400);
       return true;
     }
-    if (
-      await refuseAgentTokenWithout(
-        req,
-        res,
-        "prompt-template.write",
-        templateOwner({ scope, scopeId: scopeId ?? null }),
-      )
-    ) {
+    if (!(await ensurePromptTemplateWrite(req, res, { scope, scopeId: scopeId ?? null })))
       return true;
-    }
 
     try {
       const template = await upsertPromptTemplate({

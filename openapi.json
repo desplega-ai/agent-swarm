@@ -8846,6 +8846,102 @@
         }
       }
     },
+    "/internal/reload-config": {
+      "post": {
+        "summary": "Reload global swarm config and re-initialize integrations (internal)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reload result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "configsLoaded": {
+                      "type": "number"
+                    },
+                    "keysUpdated": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "integrationsReinitialized": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "configsLoaded",
+                    "keysUpdated",
+                    "integrationsReinitialized"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission to reload config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Reload failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "details"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/close": {
       "post": {
         "summary": "End a session or terminate an agent runtime",
@@ -16225,6 +16321,16 @@
                     "keysUpdated",
                     "integrationsReinitialized"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -46363,6 +46469,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller may not change shared templates or templates belonging to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Template or version not found",
             "content": {
@@ -46412,6 +46528,16 @@
                   "required": [
                     "template"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not change shared templates or templates belonging to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -46532,6 +46658,16 @@
           },
           "400": {
             "description": "Cannot delete default template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not change shared templates or templates belonging to another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -46704,6 +46840,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not change shared templates or templates belonging to another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -49639,6 +49785,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Duplicate name",
             "content": {
@@ -50472,6 +50628,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Schedule not found",
             "content": {
@@ -51112,7 +51278,7 @@
             }
           },
           "403": {
-            "description": "Deferral or target owned by another agent",
+            "description": "Caller may not change schedules, or the deferral or target is owned by another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -51537,7 +51703,7 @@
             }
           },
           "403": {
-            "description": "Deferral or target owned by another agent",
+            "description": "Caller may not change schedules, or the deferral or target is owned by another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -51606,6 +51772,16 @@
                   "required": [
                     "success"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -76373,7 +76549,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks or server-emitted events",
+            "description": "Caller may not signal workflow events, or the event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -76466,7 +76642,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks or server-emitted events",
+            "description": "Caller may not signal workflow events, or the event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -77212,7 +77388,7 @@
             }
           },
           "403": {
-            "description": "Env var or secret input requires config.read.secrets",
+            "description": "Caller may not change workflows, or an env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -77815,7 +77991,7 @@
             }
           },
           "403": {
-            "description": "Env var or secret input requires config.read.secrets",
+            "description": "Caller may not change workflows, or an env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -77917,7 +78093,7 @@
             }
           },
           "403": {
-            "description": "Stored env var or secret input requires config.read.secrets",
+            "description": "Caller may not change workflows, or a stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -77961,6 +78137,16 @@
         "responses": {
           "204": {
             "description": "Workflow deleted"
+          },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user with workflow write access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Workflow not found",
@@ -78108,7 +78294,7 @@
             }
           },
           "403": {
-            "description": "Stored env var or secret input requires config.read.secrets",
+            "description": "Caller may not change workflows, or a stored env var or secret input requires config.read.secrets",
             "content": {
               "application/json": {
                 "schema": {
@@ -78212,6 +78398,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user with workflow run access",
             "content": {
               "application/json": {
                 "schema": {
@@ -78664,6 +78860,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user with workflow run access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Run not found",
             "content": {
@@ -78736,6 +78942,16 @@
           },
           "400": {
             "description": "Cannot cancel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not a lead agent, operator, or user with workflow run access",
             "content": {
               "application/json": {
                 "schema": {

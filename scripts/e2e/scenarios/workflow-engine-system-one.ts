@@ -8,6 +8,7 @@ import { sql } from "../db";
 // The test-only origin override preserves the account path and Cloudflare response envelope.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -69,7 +70,9 @@ export const workflowEngineSystemOne: Scenario = {
   async run(ctx) {
     const marker = `s1-${ctx.nonce}`;
     const workerId = await registerWorker(ctx, "wf-s1");
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    const connection = await ctx.connectMcp(leadId);
     const cleanups: Array<() => Promise<void>> = [];
     const workflows: string[] = [];
     const track = async (name: string, definition: WorkflowDef) => {

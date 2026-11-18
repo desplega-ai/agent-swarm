@@ -720,7 +720,7 @@ that map 1:1 to the public REST API documented at
 | `swarmSdk.events` | `create(body)`, `list(filters?)`, `batch(body)`, `counts(filters?)` | `/api/events*` |
 | `swarmSdk.memory` | `search(body)`, `list(filters?)`, `get(id)`, `rate(body)` | `/api/memory*` |
 | `swarmSdk.repos` | `list()`, `get(id)`, `create(body)`, `update(id, body)`, `delete(id)` | `/api/repos*` |
-| `swarmSdk.schedules` | `list()`, `get(id)`, `create(body)`, `update(id, body)`, `delete(id)`, `run(id)` | `/api/schedules*` |
+| `swarmSdk.schedules` | `list()`, `get(id)`, `create(body)`, `update(id, body)`, `delete(id)`, `run(id)` | `/api/schedules*` (see [catalog permissions](#security--blast-radius) for writes) |
 | `swarmSdk.approvalRequests` | `list(filters?)`, `get(id)`, `create(body)`, `respond(id, body)` | `/api/approval-requests*` |
 | `swarmSdk.assets` | `list(filters?)`, `audit()`, `registerMapping(body)`, `move(entityType, id, key)` | `/api/assets*` |
 | `swarmSdk.kv` | `get(key)`, `set(key, value, opts?)`, `incr(key, by?)`, `del(key)`, `list(opts?)` | `/api/kv*` (namespace forced to `task:page:<id>`) |
@@ -1014,33 +1014,29 @@ with a custom `swarm.call` action handler. Action shape:
 }
 ```
 
-`swarm.call` dispatches through the SPA's bearer (for `app_url` loads) or
-the page-session cookie (for direct `api_url` loads). The endpoint must be
-a valid swarm API path. User-token sessions retain user authorization.
-Operator-launched sessions retain deployment-level API access. Password
-sessions are guests: they reach only their own page record and KV, so
-`swarm.call` to any other endpoint returns 403.
+`swarm.call` on a generic JSON page loaded in the dashboard (`app_url`) uses the viewer's bearer and keeps that viewer's API permissions. On direct `api_url` loads it uses the page-session cookie through the page proxy. Use a valid swarm API path and apply the rules below for the relevant authentication path.
 
 See the `@json-render/core` docs for the supported node types (`text`,
 `button`, `input`, `card`, etc.).
 
 ## Security & Blast Radius
 
-- User-token launches retain the signed viewer identity and its API permissions.
-- Operator launches keep deployment-level API access. They do not inherit the page author's agent identity.
+- The page proxy keeps the viewer's identity and API permissions. For catalog operations (workflow and schedule writes and runs, prompt-template writes, and config reload), a verified signed page session acts as the page owner. A worker's page may change only its owner's agent-scoped templates. With RBAC enabled, a user viewer must still hold the matching permission. These owner checks do not apply to the dashboard's bearer-based `swarm.call`.
 - Password sessions are guests. Through the proxy they reach only `GET pages/<own id>` (without
   `passwordHash`) and the page's own KV. Every other route returns 403, and every RBAC verb denies a guest.
 - Browser SDK memory operations use the page owner's agent scope through verified page execution context.
   Viewer authentication, permissions, and audit identity remain separate from this resource scope.
-- Treat agent-generated HTML / JSON like trusted code: the agent already
-  has equivalent MCP access, so a malicious page is no worse than a
-  malicious tool call. But: don't ship pages to **external** users (via
-  `password`) without reviewing the body first.
+- Before opening a generic dashboard JSON page from a less privileged author
+  with a privileged account, review its actions. The dashboard sends
+  `swarm.call` with your bearer, so actions can use your API permissions,
+  not just the author's. The owner check for signed proxy sessions does not
+  apply to this path. Review the page body before sharing a password page
+  with external users.
 - HTML pages render inside a sandboxed iframe with
   `sandbox="allow-scripts allow-forms allow-same-origin"`. This limits
   some attack surface (no top-level navigation, no pointer-lock) but the
-  page still has the SwarmSDK access of its session: full for user and
-  operator sessions, page record and KV only for password guests.
+  page can still call SwarmSDK through the proxy, subject to the signed
+  session or guest rules above.
 - All page bodies pass through `scrubSecrets` at the egress boundary
   (`/p/:id`, `/p/:id.json`, listing endpoint). Accidental secrets in
   the body get masked at serve time, not at write time. Don't rely on

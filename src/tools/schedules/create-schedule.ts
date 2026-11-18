@@ -16,6 +16,7 @@ import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
+import { denyCatalog } from "@/tools/catalog-auth";
 import {
   createToolRegistrar,
   modelTierDeprecatedOutputSchema,
@@ -221,6 +222,12 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       requestInfo,
       _meta,
     ) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "schedule.write.any",
+        "Changing schedules requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }

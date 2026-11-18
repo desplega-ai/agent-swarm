@@ -13,7 +13,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createUser, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createUser,
+  createWorkflow,
+  createWorkflowRun,
+  getDbClient,
+  initDb,
+} from "../be/db";
 import { flushAuditBuffer } from "../be/rbac-audit";
 import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles";
 import {
@@ -22,14 +30,19 @@ import {
 } from "../be/seed/agent-fs-provision";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleChecklist } from "../http/checklist";
+import { handleConfig } from "../http/config";
 import { handleCore } from "../http/core";
 import { handleDbQuery } from "../http/db-query";
 import { handleFs } from "../http/fs";
 import { handleInboxState } from "../http/inbox-state";
 import { handleMcpOAuth } from "../http/mcp-oauth";
+import { handlePromptTemplates } from "../http/prompt-templates";
 import { handleRealtimeTicket } from "../http/realtime";
+import { handleSchedules } from "../http/schedules";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { handleWorkflowEvents } from "../http/workflow-events";
+import { handleWorkflows } from "../http/workflows";
 import { decideAdmission, decideToolAdmission, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { listenOnFreePort } from "./test-net";
 
@@ -73,6 +86,11 @@ function createTestServer(): Server {
     if (await handleDbQuery(req, res, pathSegments, queryParams)) return;
     if (await handleMcpOAuth(req, res, pathSegments, queryParams)) return;
     if (await handleRealtimeTicket(req, res, pathSegments, queryParams)) return;
+    if (await handleConfig(req, res, pathSegments, queryParams)) return;
+    if (await handlePromptTemplates(req, res, pathSegments, queryParams)) return;
+    if (await handleSchedules(req, res, pathSegments, queryParams, myAgentId)) return;
+    if (await handleWorkflowEvents(req, res, pathSegments, queryParams)) return;
+    if (await handleWorkflows(req, res, pathSegments, queryParams, myAgentId)) return;
 
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
@@ -842,7 +860,7 @@ describe("join the shared agent-fs drive", () => {
   });
 });
 
-describe("realtime ticket admission", () => {
+describe("HTTP admission with specific grants", () => {
   async function grantOnly(userId: string, verbs: PermissionVerb[]): Promise<void> {
     const roleId = `rbac-role-test-${crypto.randomUUID()}`;
     await detachRole(userId, "admin");
@@ -862,19 +880,60 @@ describe("realtime ticket admission", () => {
     );
   }
 
-  test("a role with a presence verb or app.use gets a ticket; a role with none does not", async () => {
+  test("specific grants admit only the corresponding HTTP routes", async () => {
     process.env.RBAC_ENABLED = "true";
-    const cases: [PermissionVerb[], number][] = [
-      [["comb.presence"], 200],
-      [["session.presence"], 200],
-      [["app.use"], 200],
-      [["task.read.own"], 403],
+    const missingId = crypto.randomUUID();
+    const workflow = await createWorkflow({
+      name: "Workflow admission",
+      definition: {
+        nodes: [{ id: "done", type: "notify", config: { channel: "swarm", template: "done" } }],
+      },
+    });
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow.id });
+    const signal = { name: "admission.signal" };
+    const requests = [
+      ["POST", "/api/realtime/ticket"],
+      ["POST", "/internal/reload-config"],
+      ["POST", "/api/config/reload"],
+      ["POST", `/api/schedules/${missingId}/run`],
+      ["DELETE", `/api/schedules/${missingId}`],
+      ["PUT", "/api/prompt-templates"],
+      ["POST", `/api/prompt-templates/${missingId}/checkout`, { version: 1 }],
+      ["POST", `/api/prompt-templates/${missingId}/reset`],
+      ["DELETE", `/api/prompt-templates/${missingId}`],
+      ["POST", `/api/workflows/${workflow.id}/trigger`, {}],
+      ["POST", `/api/workflow-runs/${run.id}/events`, signal],
+      ["POST", "/api/workflow-events", signal],
+    ] as const;
+    const cases: [PermissionVerb, (number | null)[]][] = [
+      ["comb.presence", [200, 403]],
+      ["session.presence", [200, 403]],
+      ["app.use", [200]],
+      ["task.read.own", [403, 403, 403, 403, 403, 403, 403, 403, 403]],
+      ["config.reload", [403, 200, 200]],
+      ["config.write.any", [null, 403, 200]],
+      ["schedule.write.any", [null, null, null, 404, 404]],
+      ["schedule.run.any", [null, null, null, 404, 403]],
+      ["prompt-template.write.any", [null, null, null, null, null, 400, 404, 404, 404]],
+      ["prompt-template.write", [null, null, null, null, null, 400, 404, 404, 404]],
+      ["workflow.trigger", [null, null, null, null, null, null, null, null, null, 201, 403, 403]],
+      ["workflow.run.event", [null, null, null, null, null, null, null, null, null, 403, 200, 200]],
+      ["workflow.run.any", [null, null, null, null, null, null, null, null, null, 201, 200, 200]],
     ];
-    for (const [verbs, expected] of cases) {
-      const { userId, plaintext } = await createTokenForUser(`Presence ${verbs.join(",")}`);
-      await grantOnly(userId, verbs);
-      const response = await api(port, "POST", "/api/realtime/ticket", { bearer: plaintext });
-      expect({ verbs, status: response.status }).toEqual({ verbs, status: expected });
+    for (const [verb, statuses] of cases) {
+      const { userId, plaintext } = await createTokenForUser(`Grant ${verb}`);
+      await grantOnly(userId, [verb]);
+      for (const [index, [method, path, body]] of requests.entries()) {
+        const status = statuses[index];
+        if (status == null) continue;
+        const response = await api(port, method, path, { bearer: plaintext, body });
+        expect({ verb, method, path, status: response.status }).toEqual({
+          verb,
+          method,
+          path,
+          status,
+        });
+      }
     }
   });
 });

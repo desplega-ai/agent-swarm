@@ -14,6 +14,7 @@ const SCENARIOS_DIR = join(import.meta.dir);
 // wrong `order`/`run` types) and loadScenarios() throws — this is the "did I actually get wired
 // in" check, and it runs on every invocation, not just in CI.
 export const NON_SCENARIO_FILES = new Set([
+  "authz-helpers.ts",
   "core-helpers.ts",
   "registry.ts",
   "platform-helpers.ts",

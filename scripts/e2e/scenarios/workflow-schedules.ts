@@ -4,6 +4,7 @@ import { sql } from "../db";
 // each surface enforces. Far-future timings keep the real scheduler from firing them.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -25,7 +26,9 @@ export const workflowSchedules: Scenario = {
     const workerId = await registerWorker(ctx, "wf-sched");
     // Registered, never polling: tasks the schedules create for it stay pending.
     const idleId = await registerWorker(ctx, "wf-sched-idle");
-    const connection = await ctx.connectMcp(workerId);
+    // Schedule tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-sched-mcp");
+    const connection = await ctx.connectMcp(leadId);
     const schedules: string[] = [];
     const name = (suffix: string) => `e2e-${suffix}-${ctx.nonce}`;
 
@@ -709,7 +712,7 @@ export const workflowSchedules: Scenario = {
       const toolFlowId = asString(madeSchedule.id, "tool schedule id");
       schedules.push(toolFlowId);
       expect(
-        madeSchedule.createdByAgentId === workerId &&
+        madeSchedule.createdByAgentId === leadId &&
           madeSchedule.workflowId === targetWorkflow &&
           madeFlow.text.includes(`Created schedule "${tool.flow}"`),
         "create-schedule records the creating agent",

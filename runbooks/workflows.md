@@ -2,6 +2,20 @@
 
 Workflows are DAGs of nodes connected via `next`. Reference for authoring nodes with the `create-workflow` tool.
 
+## Who may change the catalog
+
+Creating, updating, patching, deleting, triggering, retrying and cancelling workflows needs `workflow.write.any` or `workflow.run.any`. Changing a schedule (create, update, patch, delete, run) needs `schedule.write.any`. Changing prompt templates outside an agent's own scope needs `prompt-template.write.any`. Reloading config needs `config.reload`. The lead agent, the operator and a user holding the required verb pass. A worker can change only its own agent-scoped prompt templates; for other catalog changes, it asks the lead through `send-task`. Validate, reads, render, preview and the webhook trigger keep their previous rules.
+
+For catalog calls through the page proxy with a verified signed page session, the API checks the page owner as the acting agent. With RBAC enabled, a user viewer must also hold the matching verb. Guest sessions retain their existing restrictions. Generic dashboard JSON pages send `swarm.call` with the viewer's bearer, not through the signed page proxy, so those calls keep the viewer's existing API permissions.
+
+Assumptions, not decisions by the operator:
+
+- The same call resolves differently by surface. Over MCP, the shared key with a registered agent ID acts as that agent. Over direct HTTP, the shared key with an `X-Agent-ID` header remains the operator. Through `/api/mcp-bridge`, the shared key with an unregistered agent ID is the operator. An `aseph_` session token acts as its bound agent.
+- Existing HTTP user grants still admit the operations they covered: `prompt-template.write` for template mutations, `schedule.run.any` for manual runs, and `config.write.any` for `/api/config/reload`.
+- A non-lead agent may not delete, run or edit even the schedules it created, nor its own deferral schedules, over HTTP or MCP.
+- With RBAC enabled, a direct HTTP user may trigger a workflow with `workflow.trigger` or `workflow.run.any`. The trigger grant does not cover MCP, retries or cancellation.
+- Both `POST /api/workflow-runs/{runId}/events` and `POST /api/workflow-events` admit an HTTP user with `workflow.run.event` or `workflow.run.any` and reject reserved event names. For triggers and signals, agent sessions and signed pages still check `workflow.run.any` against the acting agent or page owner.
+
 ## Cross-node data access
 
 Upstream outputs are **not** available by default. Declare an `inputs` mapping:
@@ -487,7 +501,9 @@ Use `env` for credentials instead of positional arguments or shell wrappers:
 
 `env` values are passed through the process environment, not embedded in the intermediate shell's command line. Scripts read them through `$NAME` in Bash, `os.environ["NAME"]` in Python, or `process.env.NAME` in TypeScript. Existing workflows without `env` keep their previous behavior.
 
-Storing a `secret.NAME` or `${ENV_VAR}` workflow input (create or update, MCP or HTTP) requires `config.read.secrets`: the lead agent, the operator key, or a user granted that verb. The check reads input after `params` render into it, so `{"b": "{{p}}"}` with `params: {"p": "secret.NAME"}` counts as a secret input. Changing the definition or `params` of a workflow that already stores such an input (full update, patch, node patch) needs the same verb. Other callers get an error; literal inputs and edits that leave the definition alone stay open. An operator can also limit which env vars a `${NAME}` input may read with `WORKFLOW_INPUT_ENV_ALLOWLIST` (see [ui/configuration](../docs-site/content/docs/(documentation)/ui/configuration.mdx#workflow-env-allowlist)); it does not limit script nodes.
+Storing a `secret.NAME` or `${ENV_VAR}` workflow input (create or update, MCP or HTTP) requires `config.read.secrets`: the lead agent, the operator key, or a user granted that verb. The check reads input after `params` render into it, so `{"b": "{{p}}"}` with `params: {"p": "secret.NAME"}` counts as a secret input. Changing the definition or `params` of a workflow that already stores such an input (full update, patch, node patch) needs the same verb. Other callers get an error. A non-lead agent never reaches this check: it may not create, change or run workflows at all (see Who may change the catalog).
+
+An operator can also limit which env vars a `${NAME}` input may read with `WORKFLOW_INPUT_ENV_ALLOWLIST` (see [ui/configuration](../docs-site/content/docs/(documentation)/ui/configuration.mdx#workflow-env-allowlist)); it does not limit script nodes.
 
 Secret workflow inputs (`secret.NAME` references and sensitive `${ENV_VAR}` references) remain masked as `***REDACTED***` in persisted `step.input`; the executing script receives the real values. This is not general secret detection for arbitrary literals or upstream outputs. Do not embed credentials directly in script source or echo them into output. Environment variables still have OS size limits and can be readable by other processes with sufficient permissions, including same-UID processes; `env` is not per-run process isolation.
 
@@ -1078,7 +1094,7 @@ A `wait` node pauses a workflow until either a duration elapses or a named event
 
 ### Signal endpoints
 
-External callers can fire arbitrary events into the bus via two HTTP routes (both auth via `Authorization: Bearer ${API_KEY}`):
+Both HTTP signal routes admit the operator and the lead agent. With RBAC enabled, a direct HTTP user needs `workflow.run.event` or `workflow.run.any`. Both routes reject names reserved for provider webhooks or server-emitted events:
 
 ```bash
 # Run-scoped: payload is augmented with { ..., _runId: "<runId>" } before emit.
