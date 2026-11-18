@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import ts from "typescript";
-import { getScriptAppTypes, MAX_APP_TYPES_BYTES, renderAppTypes } from "../apps/script-types";
+import {
+  getScriptAppTypes,
+  MAX_APP_TYPES_BYTES,
+  MAX_APP_TYPES_BYTES_PER_APP,
+  renderAppTypes,
+  renderAppTypesReport,
+  scriptAppTypesWarnings,
+} from "../apps/script-types";
 import { type AppRecord, createApp } from "../apps/store";
 import { closeDb, getDbClient, initDb } from "../be/db";
 
@@ -29,6 +36,21 @@ function app(
     createdAt: "2026-08-06T00:00:00.000Z",
     updatedAt: "2026-08-06T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+/** Default-cap max-size models (50) with 40-character column names; 400 columns overflows one app's budget. */
+function maxSizeDefinition(columns: number) {
+  const columnDefs = Object.fromEntries(
+    Array.from({ length: columns }, (_, index) => [
+      `c${String(index).padStart(39, "0")}`,
+      { kind: "string" },
+    ]),
+  );
+  return {
+    models: Object.fromEntries(
+      Array.from({ length: 50 }, (_, index) => [`model${index}`, { columns: columnDefs }]),
+    ),
   };
 }
 
@@ -209,36 +231,52 @@ describe("renderAppTypes", () => {
   });
 
   test("keeps oldest apps first and omits whole later apps within the byte budget", () => {
-    const definition = {
-      models: { issue: { columns: { title: { kind: "string" } } } },
-      queries: Object.fromEntries(
-        Array.from({ length: 45 }, (_, index) => [`query${index}`, { model: "issue" }]),
+    const maxSize = maxSizeDefinition(200);
+    const report = renderAppTypesReport([
+      app("Huge", maxSizeDefinition(400)),
+      ...["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth"].map((name) =>
+        app(name, maxSize),
       ),
-    };
-    const rendered = renderAppTypes([
-      app("First", definition),
-      app("Second", definition),
-      app("Third", definition),
-      app("Fourth", definition),
     ]);
+    const rendered = report.source;
 
     expect(new TextEncoder().encode(rendered).byteLength).toBeLessThanOrEqual(MAX_APP_TYPES_BYTES);
+    // A max-size app at the default caps keeps its types; one past the per-app budget does not.
     expect(rendered).toContain("namespace App_First");
+    expect(rendered).toContain("namespace App_Seventh");
+    expect(rendered).not.toContain("namespace App_Huge");
     expect(rendered).toContain("omitted (type budget)");
-    expect(rendered).toContain("Fourth (Fourth-id)");
+    expect(rendered).toContain("Huge (Huge-id), Eighth (Eighth-id)");
     expect(rendered).toContain("call app-get for their shape");
+    expect(report.omitted.map(({ id, budget }) => ({ id, budget }))).toEqual([
+      { id: "Huge-id", budget: "per-app" },
+      { id: "Eighth-id", budget: "total" },
+    ]);
+    expect(report.omitted[0]!.bytes).toBeGreaterThan(MAX_APP_TYPES_BYTES_PER_APP);
+
+    const warnings = scriptAppTypesWarnings(
+      'ctx.swarm.app_query({ appId: "Eighth-id", query: "q" }); type T = App_Huge.Model0;',
+      report.omitted,
+    );
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('App "Huge" (Huge-id) has no generated script types');
+    expect(warnings[0]).toContain("per-app budget");
+    expect(warnings[1]).toContain("swarm-wide budget");
+    expect(scriptAppTypesWarnings("App_Huge_2 First-id", report.omitted)).toEqual([]);
   });
 
   test("stays within the byte budget even when metadata alone is pathological", () => {
-    const definition = {
+    const small = {
       models: { issue: { columns: { title: { kind: "string" } } } },
       queries: Object.fromEntries(
         Array.from({ length: 45 }, (_, index) => [`query${index}`, { model: "issue" }]),
       ),
     };
-    const manyOmitted = renderAppTypes(
-      Array.from({ length: 40 }, (_, index) => app(`Bulk${index}`, definition)),
-    );
+    const maxSize = maxSizeDefinition(200);
+    const manyOmitted = renderAppTypes([
+      ...Array.from({ length: 7 }, (_, index) => app(`Big${index}`, maxSize)),
+      ...Array.from({ length: 40 }, (_, index) => app(`Bulk${index}`, small)),
+    ]);
     expect(new TextEncoder().encode(manyOmitted).byteLength).toBeLessThanOrEqual(
       MAX_APP_TYPES_BYTES,
     );

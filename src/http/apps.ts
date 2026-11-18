@@ -38,6 +38,7 @@ import {
   migrateAppSchema,
   withAppDefinitionLock,
 } from "../apps/schema-migrate";
+import { appWriteTypesWarnings } from "../apps/script-types";
 import {
   appDefinitionNeedsRepair,
   createApp,
@@ -234,7 +235,9 @@ const AppUserConfigSchema = z.record(AppNameSchema, AppUserConfigFieldSchema);
 const compatWarningsSchema = z
   .array(z.string())
   .optional()
-  .describe("Advisory quickjs-executor compatibility findings for the app's scripts.");
+  .describe(
+    "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget.",
+  );
 const appWriteResponseSchema = z.object({
   app: AppRecordSchema,
   migration: AppMigrationReportSchema,
@@ -1153,13 +1156,17 @@ export async function handleApps(
       invalidDefinition(res, definition.issues);
       return true;
     }
-    const warnings = await scriptCompatWarnings(definition.definition);
+    const app = await createApp({
+      name: parsed.body.name,
+      description: parsed.body.description,
+      definition: definition.definition,
+    });
+    const warnings = [
+      ...(await scriptCompatWarnings(definition.definition)),
+      ...(await appWriteTypesWarnings(app.id)),
+    ];
     createAppRoute.respond(res, 201, {
-      app: await createApp({
-        name: parsed.body.name,
-        description: parsed.body.description,
-        definition: definition.definition,
-      }),
+      app,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
     return true;
@@ -1619,7 +1626,12 @@ export async function handleApps(
       return true;
     }
     const warnings =
-      writtenDefinition === undefined ? [] : await scriptCompatWarnings(writtenDefinition);
+      writtenDefinition === undefined
+        ? []
+        : [
+            ...(await scriptCompatWarnings(writtenDefinition)),
+            ...(await appWriteTypesWarnings(parsed.params.id)),
+          ];
     patchAppRoute.respond(res, 200, {
       app,
       migration,
@@ -1711,7 +1723,12 @@ export async function handleApps(
       return true;
     }
     const warnings =
-      writtenDefinition === undefined ? [] : await scriptCompatWarnings(writtenDefinition);
+      writtenDefinition === undefined
+        ? []
+        : [
+            ...(await scriptCompatWarnings(writtenDefinition)),
+            ...(await appWriteTypesWarnings(parsed.params.id)),
+          ];
     updateAppRoute.respond(res, 200, {
       app,
       migration,

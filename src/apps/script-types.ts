@@ -2,7 +2,19 @@ import type { ScriptTypeContext } from "../be/scripts/type-contributors";
 import { type ColumnDef, type ColumnKind, SYSTEM_COLUMN_KINDS } from "./definition";
 import { type AppRecord, listAppRecords } from "./store";
 
-export const MAX_APP_TYPES_BYTES = 32 * 1024;
+/**
+ * One app's rendered types may use up to 1 MiB. A max-size app at the default
+ * caps (50 models x 200 columns, 100 actions, 100 queries, 40-char column
+ * names) renders about 580 KB, so it keeps typing.
+ */
+export const MAX_APP_TYPES_BYTES_PER_APP = 1024 * 1024;
+
+/**
+ * All apps together may use up to 4 MiB: every `script-upsert` typechecks
+ * against the whole overlay (about 0.7 s at 4 MiB), and the editor type-defs
+ * route ships it twice.
+ */
+export const MAX_APP_TYPES_BYTES = 4 * 1024 * 1024;
 
 const APP_TYPES_PREAMBLE = `// ── Swarm Apps: generated per-app types (source: apps table) ───────────────
 // Rows are the app's declared columns plus the 5 system columns. Query
@@ -251,52 +263,120 @@ function omittedAppsComment(apps: AppRecord[]): string {
   } — call app-get for their shape.\n`;
 }
 
-/** Renders the pure, generated per-app `.d.ts` overlay for script authors. */
-export function renderAppTypes(apps: AppRecord[]): string {
+/** An app whose types were left out of the overlay, and which budget it hit. */
+export interface OmittedAppTypes {
+  id: string;
+  name: string;
+  namespace: string;
+  bytes: number;
+  budget: "per-app" | "total";
+}
+
+export interface AppTypesReport {
+  source: string;
+  omitted: OmittedAppTypes[];
+}
+
+function mib(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
+}
+
+/** The visible warning for one omitted app. */
+export function omittedAppTypesWarning(omitted: OmittedAppTypes): string {
+  const reason =
+    omitted.budget === "per-app"
+      ? `its types (${mib(omitted.bytes)}) exceed the ${mib(MAX_APP_TYPES_BYTES_PER_APP)} per-app budget`
+      : `all apps' types together exceed the ${mib(MAX_APP_TYPES_BYTES)} swarm-wide budget`;
+  return `App "${omitted.name}" (${omitted.id}) has no generated script types: ${reason}. Scripts can still call ctx.swarm.app_query on it, untyped; call app-get for its shape.`;
+}
+
+/**
+ * Renders the pure, generated per-app `.d.ts` overlay for script authors and
+ * names every app left out of it. An app over the per-app budget is skipped
+ * alone; once the total budget is reached, that app and every later one are
+ * omitted (oldest apps keep their types).
+ */
+export function renderAppTypesReport(apps: AppRecord[]): AppTypesReport {
   const renderableApps = apps.filter((app) => !app.definitionError);
-  if (renderableApps.length === 0) return "";
+  if (renderableApps.length === 0) return { source: "", omitted: [] };
 
   const namespaces = new Set<string>();
-  const renderedApps = renderableApps.map((app) => ({
-    app,
-    source: renderApp(app, `App_${dedupe(pascalIdentifier(app.name), namespaces)}`),
-  }));
+  const renderedApps = renderableApps.map((app) => {
+    const namespace = `App_${dedupe(pascalIdentifier(app.name), namespaces)}`;
+    const source = renderApp(app, namespace);
+    return { app, namespace, source, bytes: byteLength(source) };
+  });
   const skipped = skippedAppsComment(apps.filter((app) => app.definitionError));
   const kept: Array<(typeof renderedApps)[number]> = [];
-  const omitted: AppRecord[] = [];
+  const omitted: Array<(typeof renderedApps)[number] & { budget: OmittedAppTypes["budget"] }> = [];
   let result = `${APP_TYPES_PREAMBLE}\n${skipped}`;
 
   for (const [index, rendered] of renderedApps.entries()) {
-    if (byteLength(`${result}${rendered.source}\n`) <= MAX_APP_TYPES_BYTES) {
+    if (rendered.bytes > MAX_APP_TYPES_BYTES_PER_APP) {
+      omitted.push({ ...rendered, budget: "per-app" });
+    } else if (byteLength(`${result}${rendered.source}\n`) <= MAX_APP_TYPES_BYTES) {
       kept.push(rendered);
       result += `${rendered.source}\n`;
     } else {
-      omitted.push(...renderedApps.slice(index).map((item) => item.app));
+      omitted.push(
+        ...renderedApps.slice(index).map((item) => ({ ...item, budget: "total" as const })),
+      );
       break;
     }
   }
 
-  while (
-    omitted.length > 0 &&
-    byteLength(`${result}${omittedAppsComment(omitted)}`) > MAX_APP_TYPES_BYTES
-  ) {
+  const omittedComment = () => omittedAppsComment(omitted.map((item) => item.app));
+  while (omitted.length > 0 && byteLength(`${result}${omittedComment()}`) > MAX_APP_TYPES_BYTES) {
     const removed = kept.pop();
     if (!removed) break;
     result = `${APP_TYPES_PREAMBLE}\n${skipped}${kept.map((item) => `${item.source}\n`).join("")}`;
-    omitted.unshift(removed.app);
+    omitted.unshift({ ...removed, budget: "total" });
   }
 
-  return omitted.length > 0 ? `${result}${omittedAppsComment(omitted)}` : result;
+  return {
+    source: omitted.length > 0 ? `${result}${omittedComment()}` : result,
+    omitted: omitted.map(({ app, namespace, bytes, budget }) => ({
+      id: app.id,
+      name: app.name,
+      namespace,
+      bytes,
+      budget,
+    })),
+  };
+}
+
+/** Renders the pure, generated per-app `.d.ts` overlay for script authors. */
+export function renderAppTypes(apps: AppRecord[]): string {
+  return renderAppTypesReport(apps).source;
 }
 
 /**
  * Generates types for every app. `context` is accepted for the future
  * `app.use` RBAC filter hook; apps are intentionally unfiltered today.
  */
-export async function getScriptAppTypes(_context: ScriptTypeContext = {}): Promise<string> {
+export async function getScriptAppTypes(context: ScriptTypeContext = {}): Promise<string> {
+  return (await getScriptAppTypesReport(context)).source;
+}
+
+export async function getScriptAppTypesReport(
+  _context: ScriptTypeContext = {},
+): Promise<AppTypesReport> {
   try {
-    return renderAppTypes(await listAppRecords());
+    return renderAppTypesReport(await listAppRecords());
   } catch {
-    return "";
+    return { source: "", omitted: [] };
   }
+}
+
+/** Warnings for omitted apps that a script names by app id or `App_<Name>` namespace. */
+export function scriptAppTypesWarnings(source: string, omitted: OmittedAppTypes[]): string[] {
+  return omitted
+    .filter((app) => source.includes(app.id) || new RegExp(`\\b${app.namespace}\\b`).test(source))
+    .map(omittedAppTypesWarning);
+}
+
+/** The warning for an app write when the saved app lost its script types. */
+export async function appWriteTypesWarnings(appId: string): Promise<string[]> {
+  const omitted = (await getScriptAppTypesReport()).omitted.find((app) => app.id === appId);
+  return omitted ? [omittedAppTypesWarning(omitted)] : [];
 }

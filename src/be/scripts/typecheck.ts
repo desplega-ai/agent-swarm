@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { getScriptAppTypes } from "@/apps/script-types";
+import {
+  getScriptAppTypes,
+  getScriptAppTypesReport,
+  scriptAppTypesWarnings,
+} from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
 import type { ScriptTypeContext } from "./type-contributors";
 
@@ -26,7 +30,7 @@ export type ScriptDiagnostic = {
 };
 
 export type ScriptTypecheckResult =
-  | { ok: true }
+  | { ok: true; warnings?: string[] }
   | { ok: false; diagnostics: string[]; structured: ScriptDiagnostic[] };
 
 export const SCRIPT_SDK_TYPES = `
@@ -1611,12 +1615,13 @@ export async function typecheckScript(
 ): Promise<ScriptTypecheckResult> {
   const apiTypes = getScriptApiTypes(context);
   const mcpTypes = getScriptMcpTypes(context);
-  const appTypes = await getScriptAppTypes(context);
+  const appTypesReport = await getScriptAppTypesReport(context);
+  const appTypes = appTypesReport.source;
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
   const stdlibTypes = appTypes
     ? await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
     : SCRIPT_STDLIB_TYPES;
-  return typecheckWithAmbient({
+  const result = await typecheckWithAmbient({
     source,
     modules: { "swarm-sdk": sdkTypes, stdlib: stdlibTypes },
     checkFile: `/// <reference path="./runtime-globals.d.ts" />
@@ -1626,4 +1631,6 @@ const _scriptMain: ScriptMain | (abstract new (id: string) => DurableObject<any>
 void _scriptMain;
 `,
   });
+  const warnings = scriptAppTypesWarnings(source, appTypesReport.omitted);
+  return result.ok && warnings.length > 0 ? { ok: true, warnings } : result;
 }

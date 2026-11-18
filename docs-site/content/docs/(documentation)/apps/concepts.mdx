@@ -11,7 +11,7 @@ An App definition is the versioned contract for its data and interface. The serv
 
 ## Models
 
-Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, `enum`, or `json` (any JSON value; serialized size capped at 256 KB by default, `APPS_JSON_COLUMN_MAX_BYTES`). Columns can be required, defaulted, or indexed where the kind supports it; a `json` column cannot be indexed, filtered, or sorted. The server adds identity, timestamps, and authorship fields to every row.
+Models define persistent rows. A definition has up to 50 models with up to 200 columns each and up to 100 actions by default (`APPS_MAX_MODELS`, `APPS_MAX_COLUMNS_PER_MODEL`, `APPS_MAX_ACTIONS`). Each model has typed columns: `string`, `number`, `boolean`, `date`, `enum`, or `json` (any JSON value; serialized size capped at 256 KB by default, `APPS_JSON_COLUMN_MAX_BYTES`). Columns can be required, defaulted, or indexed where the kind supports it; a `json` column cannot be indexed, filtered, or sorted. The server adds identity, timestamps, and authorship fields to every row.
 
 Prefer hiding a column when a field is being retired. Hiding preserves existing values and keeps rollback possible. Purging a column is an explicit, irreversible migration and should be reserved for data that really must be removed.
 
@@ -19,7 +19,7 @@ Prefer hiding a column when a field is being retired. Hiding preserves existing 
 
 Queries give an App a declared read surface. A query selects one model and can add equality filters, sorting, and a row limit. Parameter placeholders such as `{ "$param": "competitor" }` let a detail page or agent request one specific record without exposing an unfiltered fallback.
 
-Agents call named queries with `app-query`; saved scripts use `ctx.swarm.app_query`. Scripts also receive generated per-App TypeScript types for models and queries starting in 1.129.0.
+Agents call named queries with `app-query`; saved scripts use `ctx.swarm.app_query`. Scripts also receive generated per-App TypeScript types for models and queries starting in 1.129.0. Types are budgeted at 1 MiB per app and 4 MiB for all apps. An app past either budget stays callable untyped, and its writes and `script-upsert` calls that name it return a warning.
 
 ## Actions
 

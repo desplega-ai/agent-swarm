@@ -1051,7 +1051,7 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1285,7 +1285,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1480,7 +1480,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1646,7 +1646,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -37583,7 +37583,7 @@ export interface operations {
                         name: string;
                         version: number;
                         contentDeduped: boolean;
-                        /** @description Advisory quickjs-executor compatibility findings. Never blocks the save. */
+                        /** @description Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save. */
                         warnings?: string[];
                     };
                 };
