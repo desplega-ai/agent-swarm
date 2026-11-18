@@ -1,0 +1,2 @@
+-- The migration runner normalizes nextRunAt via schedule-next-run-at.ts.
+-- It uses the same parser as schedule writes to preserve the represented instant.

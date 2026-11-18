@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { normalizeScheduleNextRunTimes } from "./schedule-next-run-at";
 import { backfillScriptRunSources } from "./script-run-sources";
 
 interface Migration {
@@ -295,7 +296,11 @@ export function runMigrations(db: Database): void {
 
     try {
       db.transaction(() => {
-        db.exec(migration.sql);
+        if (migration.name === "350_schedule_next_run_at_utc") {
+          normalizeScheduleNextRunTimes(db);
+        } else {
+          db.exec(migration.sql);
+        }
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [migration.version, migration.name, new Date().toISOString(), migration.checksum],

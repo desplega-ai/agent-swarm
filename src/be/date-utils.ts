@@ -26,3 +26,10 @@ export function normalizeDateRequired(date: string): string {
   }
   return date;
 }
+
+/** Schedule instants must sort as fixed-width UTC strings in SQLite. */
+export function parseScheduleInstant(value: string): Date | undefined {
+  const instant = new Date(value);
+  const year = instant.getUTCFullYear();
+  return year >= 0 && year <= 9999 ? instant : undefined;
+}
