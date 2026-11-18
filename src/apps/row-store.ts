@@ -357,6 +357,43 @@ export async function getAppRow(
 /** Rows one `listAppRows` statement scans. A full-model scan was one 0.5 s+ sync stall. */
 const LIST_SCAN_WINDOW = 2000;
 const LIST_ROW_CAP = 100000;
+/** Index keys a filtered list will follow; a bigger bucket is cheaper to scan than to point-read. */
+const INDEX_LIST_MAX_KEYS = 20000;
+const INDEX_FETCH_BATCH = 500;
+
+/**
+ * Row ids behind the smallest equality-filter bucket of an indexed column, in
+ * row-id order, or null when no filter is indexed or every bucket is too big.
+ * Index values are truncated and SQL equality is loose, so the ids are a
+ * superset of the matches.
+ */
+async function indexedRowIds(
+  namespace: string,
+  model: string,
+  columns: Record<string, ColumnDef>,
+  equals: Array<{ column: string; value: string | number | boolean }>,
+): Promise<string[] | null> {
+  let best: string[] | null = null;
+  for (const { column, value } of equals) {
+    if (typeof value === "number" || column.includes("/")) continue;
+    const definition = Object.hasOwn(columns, column) ? columns[column] : undefined;
+    if (!definition || !isIndexed(definition)) continue;
+    const prefix = appIndexKey(model, column, value, "");
+    const keys = await getDbClient().query<{ key: string }>(
+      `SELECT key FROM kv_entries
+          WHERE namespace = ? AND key >= ? AND key < ?
+            AND (expires_at IS NULL OR expires_at > ?)
+          ORDER BY key
+          LIMIT ?`,
+      [namespace, prefix, kvPrefixUpperBound(prefix)!, Date.now(), INDEX_LIST_MAX_KEYS + 1],
+    );
+    if (keys.length > INDEX_LIST_MAX_KEYS) continue;
+    if (best === null || keys.length < best.length) {
+      best = keys.map((entry) => entry.key.slice(entry.key.lastIndexOf("/") + 1));
+    }
+  }
+  return best;
+}
 
 /**
  * `equals` pre-filters rows in SQL on top-level fields so a filtered list
@@ -365,14 +402,44 @@ const LIST_ROW_CAP = 100000;
  *
  * The scan runs in key windows with a yield between them: one statement over
  * a six-figure model blocks the event loop for every other request.
+ *
+ * With `columns`, an equality filter on an indexed column reads that column's
+ * index keys and fetches only those rows instead of scanning the model. The
+ * rows are then a superset of the matches (other filters are not applied).
  */
 export async function listAppRows(
   appId: string,
   model: string,
   equals: Array<{ column: string; value: string | number | boolean }> = [],
+  columns?: Record<string, ColumnDef>,
 ): Promise<AppRow[]> {
   const namespace = appsNamespace(appId);
   const prefix = `${model}/row/`;
+  const ids = columns ? await indexedRowIds(namespace, model, columns, equals) : null;
+  if (ids) {
+    const rows: AppRow[] = [];
+    for (let start = 0; start < ids.length; start += INDEX_FETCH_BATCH) {
+      const batch = ids.slice(start, start + INDEX_FETCH_BATCH);
+      const entries = await getDbClient().query<{ value: string; value_type: string }>(
+        `SELECT value, value_type FROM kv_entries
+            WHERE namespace = ? AND key IN (${batch.map(() => "?").join(",")})
+              AND (expires_at IS NULL OR expires_at > ?)
+            ORDER BY key`,
+        [namespace, ...batch.map((id) => rowKey(model, id)), Date.now()],
+      );
+      for (const entry of entries) {
+        if (entry.value_type !== "json") continue;
+        try {
+          const value: unknown = JSON.parse(entry.value);
+          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            rows.push(value as AppRow);
+          }
+        } catch {} // corrupt row: the scan path drops it too
+      }
+      if (!isInTransaction()) await yieldToEventLoop();
+    }
+    return rows;
+  }
   const upper = kvPrefixUpperBound(prefix)!;
   const jsonFieldEquals = equals
     .filter((filter) => !/["\\]/.test(filter.column))

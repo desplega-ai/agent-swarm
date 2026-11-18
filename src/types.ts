@@ -2536,7 +2536,7 @@ export const SwarmRepoSchema = z
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
     hooks: RepoHooksSchema.describe(
-      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
     ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),

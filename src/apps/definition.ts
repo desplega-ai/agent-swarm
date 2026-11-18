@@ -2,7 +2,10 @@ import * as z from "zod";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
-import { APPS_JSON_COLUMN_MAX_BYTES_BOUNDS } from "../be/swarm-config-guard";
+import {
+  APPS_DEFINITION_LIMIT_BOUNDS,
+  APPS_JSON_COLUMN_MAX_BYTES_BOUNDS,
+} from "../be/swarm-config-guard";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import { AppIconSchema } from "../types";
 import catalog from "./catalog.generated.json";
@@ -45,13 +48,50 @@ export const DEFAULT_JSON_COLUMN_MAX_BYTES = 256 * 1024;
  * same `APPS_JSON_COLUMN_MAX_BYTES_BOUNDS`.
  */
 export function jsonColumnMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.APPS_JSON_COLUMN_MAX_BYTES?.trim();
-  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_JSON_COLUMN_MAX_BYTES;
+  return boundedIntegerKnob(
+    env.APPS_JSON_COLUMN_MAX_BYTES,
+    DEFAULT_JSON_COLUMN_MAX_BYTES,
+    APPS_JSON_COLUMN_MAX_BYTES_BOUNDS,
+  );
+}
+
+function boundedIntegerKnob(
+  rawValue: string | undefined,
+  fallback: number,
+  { min, max }: { min: number; max: number },
+): number {
+  const raw = rawValue?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return fallback;
   const value = Number(raw);
-  const { min, max } = APPS_JSON_COLUMN_MAX_BYTES_BOUNDS;
-  return Number.isSafeInteger(value) && value >= min && value <= max
-    ? value
-    : DEFAULT_JSON_COLUMN_MAX_BYTES;
+  return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+/** Default per-definition size caps: models (tables), columns per model, actions. */
+export const DEFAULT_APP_DEFINITION_LIMITS = {
+  maxModels: 50,
+  maxColumnsPerModel: 200,
+  maxActions: 100,
+} as const;
+
+export type AppDefinitionLimits = { [K in keyof typeof DEFAULT_APP_DEFINITION_LIMITS]: number };
+
+/**
+ * The definition size caps, read on every call like `jsonColumnMaxBytes`, so
+ * a stored `APPS_MAX_MODELS` / `APPS_MAX_COLUMNS_PER_MODEL` /
+ * `APPS_MAX_ACTIONS` override applies on the next config reload. Out-of-range
+ * or non-digit values fall back to the defaults.
+ */
+export function appDefinitionLimits(env: NodeJS.ProcessEnv = process.env): AppDefinitionLimits {
+  const knob = (raw: string | undefined, fallback: number) =>
+    boundedIntegerKnob(raw, fallback, APPS_DEFINITION_LIMIT_BOUNDS);
+  return {
+    maxModels: knob(env.APPS_MAX_MODELS, DEFAULT_APP_DEFINITION_LIMITS.maxModels),
+    maxColumnsPerModel: knob(
+      env.APPS_MAX_COLUMNS_PER_MODEL,
+      DEFAULT_APP_DEFINITION_LIMITS.maxColumnsPerModel,
+    ),
+    maxActions: knob(env.APPS_MAX_ACTIONS, DEFAULT_APP_DEFINITION_LIMITS.maxActions),
+  };
 }
 
 /** The cap as a message label: whole KB when it divides evenly (`256KB`), else bytes. */
@@ -284,9 +324,9 @@ const ModelDefSchema = z
     sources: z.record(AppNameSchema, SourceDefSchema).optional(),
   })
   .superRefine((model, ctx) => {
-    const count = Object.keys(model.columns).length;
-    if (count < 1 || count > 40) {
-      ctx.addIssue({ code: "custom", path: ["columns"], message: "must define 1 to 40 columns" });
+    // The upper bound is write-time (`definitionLimitIssues`), so a lowered cap never breaks a stored app.
+    if (Object.keys(model.columns).length < 1) {
+      ctx.addIssue({ code: "custom", path: ["columns"], message: "must define at least 1 column" });
     }
     for (const name of Object.keys(model.columns)) {
       if (Object.hasOwn(SYSTEM_COLUMN_KINDS, name)) {
@@ -519,20 +559,6 @@ export const AppDefinitionSchema = z
           });
         }
       }
-    }
-
-    const modelCount = Object.keys(definition.models).length;
-    if (modelCount > 10) {
-      ctx.addIssue({ code: "custom", path: ["models"], message: "must define at most 10 models" });
-    }
-
-    const actionCount = Object.keys(definition.actions ?? {}).length;
-    if (actionCount > 20) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["actions"],
-        message: "must define at most 20 actions",
-      });
     }
 
     const userConfigCount = Object.keys(definition.userConfig ?? {}).length;
@@ -1020,6 +1046,31 @@ function jsonColumnDefaultSizeIssues(definition: AppDefinition): AppValidationIs
   return issues;
 }
 
+/**
+ * The configurable model / column / action caps (`appDefinitionLimits`),
+ * enforced on WRITES only for the same reason as `jsonColumnDefaultSizeIssues`:
+ * lowering a cap must not mark already-saved apps as needing repair.
+ */
+function definitionLimitIssues(definition: AppDefinition): AppValidationIssue[] {
+  const limits = appDefinitionLimits();
+  const issues: AppValidationIssue[] = [];
+  if (Object.keys(definition.models).length > limits.maxModels) {
+    issues.push({ path: "models", message: `must define at most ${limits.maxModels} models` });
+  }
+  for (const [modelName, model] of Object.entries(definition.models)) {
+    if (Object.keys(model.columns).length > limits.maxColumnsPerModel) {
+      issues.push({
+        path: `models.${modelName}.columns`,
+        message: `must define at most ${limits.maxColumnsPerModel} columns`,
+      });
+    }
+  }
+  if (Object.keys(definition.actions ?? {}).length > limits.maxActions) {
+    issues.push({ path: "actions", message: `must define at most ${limits.maxActions} actions` });
+  }
+  return issues;
+}
+
 export async function parseAppDefinition(
   input: unknown,
   elementContext: AppDefinitionParseContext = {},
@@ -1055,6 +1106,7 @@ export async function parseAppDefinition(
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
   const issues = [
+    ...definitionLimitIssues(parsed.data),
     ...jsonColumnDefaultSizeIssues(parsed.data),
     ...Object.keys(parsed.data.pages).flatMap((pageName) =>
       validatePage(parsed.data, catalog, pageName),

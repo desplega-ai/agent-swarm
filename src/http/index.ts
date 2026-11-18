@@ -22,6 +22,7 @@ import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { initMcpEventsDispatcher } from "../be/mcp-events/dispatcher";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
+import { setDeploymentEnvReader } from "../be/memory";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -687,6 +688,9 @@ try {
   throw err;
 }
 warnIfCorsAllowsAnyOrigin();
+// Before any embed: the provider exempts only the deployment env's base URL
+// from the SSRF check, and it fixes that choice when it builds its client.
+setDeploymentEnvReader(getDeploymentEnvValue);
 
 // Register every stored secret (config secrets of all scopes, OAuth and MCP
 // OAuth credentials, script API tokens) with the scrubber before listen, so
@@ -992,10 +996,7 @@ httpServer
     // prefix) changed, then embed rows with a missing or wrong-length vector.
     // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
     import("../be/memory/embedding-space")
-      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
-        setDeploymentEnvReader(getDeploymentEnvValue);
-        return runEmbeddingMaintenance({ backfill: true });
-      })
+      .then(({ runEmbeddingMaintenance }) => runEmbeddingMaintenance({ backfill: true }))
       .catch((err) => {
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });
