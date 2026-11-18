@@ -389,6 +389,64 @@ export const platformLeadTools: Scenario = {
       );
       expect(JSON.parse(mapping()?.value ?? "{}").agentId === workerId, "the mapping is stored");
 
+      // The Kapso routing namespace is written only by its lead tools; generic KV may read it.
+      const kapsoNs = "integrations:kapso:numbers";
+      expectToolError(
+        await callTool(worker, "kv-set", {
+          namespace: kapsoNs,
+          key: phoneNumberId,
+          value: { phoneNumberId, agentId: leadId, createdAt: new Date().toISOString() },
+        }),
+        "worker kv-set on the Kapso routing namespace",
+        "reserved for Kapso routing",
+      );
+      expectToolError(
+        await callTool(worker, "kv-delete", { namespace: kapsoNs, key: phoneNumberId }),
+        "worker kv-delete on the Kapso routing namespace",
+        "reserved for Kapso routing",
+      );
+      expectToolError(
+        await callTool(lead, "kv-set", {
+          namespace: "integrations:kapso:dedupe",
+          key: `wamid-${ctx.nonce}`,
+          value: 1,
+          valueType: "integer",
+        }),
+        "lead kv-set on the Kapso dedupe namespace",
+        "reserved for Kapso routing",
+      );
+      const httpPut = await ctx.api(
+        "PUT",
+        `/api/kv/_/${kapsoNs}/${encodeURIComponent(phoneNumberId)}`,
+        { agentId: workerId, body: { value: { phoneNumberId, agentId: leadId } } },
+      );
+      expectStatus(httpPut, [403], "HTTP PUT on the Kapso routing namespace");
+      expect(
+        JSON.parse(mapping()?.value ?? "{}").agentId === workerId,
+        "generic KV writes leave the Kapso mapping unchanged",
+      );
+      const kapsoRead = expectToolOk(
+        await callTool(worker, "kv-get", { namespace: kapsoNs, key: phoneNumberId }),
+        "worker kv-get on the Kapso routing namespace",
+      );
+      expect(kapsoRead.text.includes(workerId), "generic KV still reads the Kapso mapping");
+      const settingsKey = `telegram:-${ctx.nonce}`;
+      expectToolOk(
+        await callTool(worker, "kv-set", {
+          namespace: "integrations:chat:channel-settings",
+          key: settingsKey,
+          value: { textAcks: true },
+        }),
+        "kv-set on the chat channel settings namespace",
+      );
+      expectToolOk(
+        await callTool(worker, "kv-delete", {
+          namespace: "integrations:chat:channel-settings",
+          key: settingsKey,
+        }),
+        "kv-delete on the chat channel settings namespace",
+      );
+
       await trackConfig("KAPSO_API_KEY", `kapso_${ctx.nonce}`, true);
       await trackConfig("KAPSO_API_BASE_URL", kapso.origin);
       const registered = expectToolOk(

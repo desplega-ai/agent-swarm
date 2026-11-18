@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useMergeUsers, useUserMergeJob, useUsers } from "@/api/hooks/use-users";
 import type { User, UserMergeJob } from "@/api/types";
 import { StatusLine } from "@/components/shared/status-icon";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -535,14 +536,23 @@ function UserRow({ user, compact = false }: { user: User; compact?: boolean }) {
   const idCount = user.identities?.length ?? 0;
   return (
     <div className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
-      <div
-        className={cn(
-          "flex shrink-0 items-center justify-center rounded-full bg-muted text-foreground/80 font-semibold",
-          compact ? "h-7 w-7 text-[10px]" : "h-8 w-8 text-xs",
-        )}
-      >
-        {userInitials(user.name)}
-      </div>
+      {user.avatar ? (
+        <UserAvatar
+          id={user.id}
+          name={user.name}
+          avatar={user.avatar}
+          className={compact ? "size-7" : "size-8"}
+        />
+      ) : (
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-center rounded-full bg-muted text-foreground/80 font-semibold",
+            compact ? "h-7 w-7 text-[10px]" : "h-8 w-8 text-xs",
+          )}
+        >
+          {userInitials(user.name)}
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium leading-tight truncate">{user.name}</div>
         <div className="flex items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">

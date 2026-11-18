@@ -9,9 +9,11 @@ import {
   type AccountLimit,
   accountFacts,
   type Fact,
+  type QuotaPace,
   type QuotaWindow,
   quotaIsHigh,
   quotaLabel,
+  quotaPace,
   quotaRemaining,
   usageCreditsLabel,
 } from "@/lib/provider-quota";
@@ -37,10 +39,26 @@ function plural(count: number, noun: string): string {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+/** Text colour per pace: running out warns, unused quota informs. */
+export const PACE_TONE: Record<QuotaPace["status"], string> = {
+  overage: "text-status-warning-strong",
+  shortage: "text-status-info-strong",
+  "on-pace": "text-status-success-strong",
+};
+
 /** Filled space represents the remaining allowance. */
-export function QuotaBar({ percent, className }: { percent: number; className?: string }) {
+export function QuotaBar({
+  percent,
+  expected,
+  className,
+}: {
+  percent: number;
+  /** Even-use percent: a tick where the remaining fill should end by now. */
+  expected?: number;
+  className?: string;
+}) {
   return (
-    <span aria-hidden className={cn("block h-1 overflow-hidden rounded-full bg-muted", className)}>
+    <span aria-hidden className={cn("relative block h-1 rounded-full bg-muted", className)}>
       <span
         className={cn(
           "block h-full rounded-full",
@@ -48,6 +66,13 @@ export function QuotaBar({ percent, className }: { percent: number; className?: 
         )}
         style={{ width: `${quotaRemaining(percent)}%` }}
       />
+      {expected === undefined ? null : (
+        <span
+          data-testid="quota-pace-marker"
+          className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+          style={{ left: `${quotaRemaining(expected)}%` }}
+        />
+      )}
     </span>
   );
 }
@@ -138,6 +163,7 @@ function WindowCard({
   nowMs: number;
 }) {
   const credits = usageCreditsLabel(window);
+  const pace = quotaPace(window, nowMs);
   return (
     <li className="space-y-2 rounded-md border border-border-subtle bg-card px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -153,7 +179,14 @@ function WindowCard({
           {window.percent === null ? "Use not reported" : `${quotaRemaining(window.percent)}% left`}
         </span>
       </div>
-      {window.percent !== null ? <QuotaBar percent={window.percent} /> : null}
+      {window.percent !== null ? (
+        <QuotaBar percent={window.percent} expected={pace?.expected} />
+      ) : null}
+      {pace ? (
+        <p className="text-xs text-foreground/70">
+          <span className={PACE_TONE[pace.status]}>{pace.label}</span>. {pace.tip}
+        </p>
+      ) : null}
       <p className="text-xs text-foreground/70">
         {window.resetsAtMs === null
           ? "Reset not reported"

@@ -292,7 +292,6 @@ describe("agent-task node.retry on task failure", () => {
     teardownResumeListener?.();
     try {
       await failTask(first.id, "superseded_workflow_task");
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
@@ -344,6 +343,7 @@ describe("implicit retry for a superseded task on a node without retry", () => {
     expect(cut.workflowRunStepId).toBeFalsy();
     // A cut with a queued retry is not a real failure.
     expect(cut.status).toBe("superseded");
+    expect(cut.statusKind).toBe("workflow_retry");
     expect(cut.failureReason).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
     // It never gets a resume: the heartbeat orphan repair must not see it.
     const orphans = await getSupersededTasksWithoutResume(
@@ -429,7 +429,6 @@ describe("implicit retry for a superseded task on a node without retry", () => {
     teardownResumeListener?.();
     try {
       await failTask(first.id, SUPERSEDED_WORKFLOW_TASK_REASON);
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
@@ -478,7 +477,6 @@ describe("a cut the workflow carries on without", () => {
     teardownResumeListener?.();
     try {
       await failTask(cut.id, SUPERSEDED_WORKFLOW_TASK_REASON);
-      await new Promise((r) => setTimeout(r, 20));
       await recoverIncompleteRuns(registry);
     } finally {
       teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);

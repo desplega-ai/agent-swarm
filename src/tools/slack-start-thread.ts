@@ -3,7 +3,7 @@ import * as z from "zod";
 import { getAgentById, getTaskById, recordSlackMessage } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
-import { buildMrkdwnSectionBlocks } from "@/slack/blocks";
+import { buildMrkdwnSectionBlocks, findReservedActionId } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
@@ -57,6 +57,13 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
       });
       if (!decision.allow) {
         return toolErr("Posting to Slack channels requires lead privileges.");
+      }
+
+      const reservedActionId = findReservedActionId(blocks);
+      if (reservedActionId) {
+        return toolErr(
+          `blocks use the action_id "${reservedActionId}", which the swarm reserves for its own buttons. Use another action_id.`,
+        );
       }
 
       const app = getSlackApp();

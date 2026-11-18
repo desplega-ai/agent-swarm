@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.5] - 2026-11-18
+
+### Added
+- GitHub: the API mints an installation token per repository for owners listed in `GITHUB_APP_REPO_OWNERS`; other calls keep `GITHUB_APP_INSTALLATION_ID` (#3182).
+- Defer: `defer-task` can wake on `vcs.pr.checks_done`, when every required check finished on the PR head (#3260).
+- Tasks: `statusKind` records why a task ended, shown in task details and lists (#3303).
+- Users: custom avatars (`manage-user` `avatar`) and an agent-fs file picker (#3288).
+- Credentials: fresh usage telemetry with lowest-usage key selection (#3240), and opt-in pace ranking for pooled keys (#3262).
+- UI: usage cards show a quota pace line with shortage or overage (#3243); an admin "Add me to ranking" button on Home (#3238).
+
+### Changed
+- agent-fs pins bumped 0.18.32 -> 0.18.33.
+- Dependencies: worker harness bumps for claude-code, anthropic sdk, amp, grok, kiro and qwen (#3239, #3280); `azure/setup-helm` 5.1.0 (#3315); templates-ui `next` 16.4.5 (#3234).
+- Apps: app-sync passes run up to 3 at a time (#3244).
+- Pre-push: the hook runs only the nearest affected tests and lints changed files; CI stays the authority (#3287, #3292).
+- CI: shorter Merge Gate verdict and less repeated CI work (#3252).
+- Prompts: trackers route to sheets and diagrams to boards (#3241).
+- Tests: a test cleanup campaign consolidated duplicate suites and replaced copied fixtures with production contracts, with its ledger and test-line budget in the testing docs (#3253-#3336).
+- Docs: Goals playbook (#3279); contractor credential, supplier confirmation and competitor brief guide updates (#3236, #3245, #3246); TLA+ specs synced (#3237); swarm-scripts skill seed patches (#3235); MCP.md and the MCP tools reference list the `manage-user` `avatar` field.
+
+### Fixed
+- Slack: Lead follow-up outcomes post to the Slack thread (#3316).
+- Workflows: step output size counts UTF-8 bytes (#3267).
+- Sandbox: shell startup files are blocked before limits apply (#3269).
+- Assets: the dashboard's logged-in user can write its own personal keys (#3261).
+- Scripts: `memory_rate` accepts the `memoryId` alias (#3232).
+- UI: boards and sheets open as live embeds in Files and session previews (#3289); a malformed saved connection configuration no longer breaks the page (#3283); the lead's cut reply and its resume fold into one answer (#3296); message bubble sizing (#3268, #3298); sessions phone screens and sidebar alignment (#3242, #3247, #3263).
+
+## [2.13.4] - 2026-11-17
+
+### Added
+- Pages: an org design system (`design-system-get`, `design-system-set`, `GET`/`PUT /api/design-system`) restyles every version 2 page that sets no theme, with tokens, fonts, logo, a light/dark lock and a chart palette (#3225).
+- Slack: simple HITL approvals (one approval, boolean, single-select up to 5 options, or one-line text) are answered with inline buttons in the card (#3202).
+- Chat SDK: `register-chat-channel` takes a Telegram `defaultThreadId`, used by channel-only `chat-post` calls (#3194).
+- UI: both sessions panes are tab groups, and linked assets open as tabs (#3226).
+- Workflows: `system-one-decision` lists other OpenRouter decision models (#3228).
+
+### Changed
+- agent-fs pins bumped 0.18.29 -> 0.18.32 (#3227, #3231, and 0.18.31 -> 0.18.32 in this release).
+- CI: unit tests and UI E2E run in 8 shards; PRs run only affected unit tests (#3201).
+- Read-only MCP tools (skills, MCP servers, workflows and workflow runs) carry `readOnlyHint` (#3218).
+- Dependencies: worker harness bumps for amp and goose (#3191, #3229).
+- Docs: guides for contractor credential expiry (#3190), supplier order confirmations (#3216), unmatched bank transactions (#3219), guest accessibility requests (#3220) and partner data feed freshness (#3224); RFP, SLA breach, partner readiness and competitor brief guide updates (#3186, #3187, #3188, #3214); heartbeat spec sync (#3189); MCP.md regenerated for the Telegram default topic; `SCHEDULER_INTERVAL_MS` bounds in the environment variables reference.
+
+### Fixed
+- Tools: a session whose task already ended can no longer write (#3210).
+- Workflows: recovery re-enters an orphaned agent-task step instead of creating a second task (#3215).
+- Scripts: `ctx.swarm.task_storeProgress` goes through the store-progress tool, so attachments, citations and the other fields are kept (#3222); `memory_get` accepts the `id` alias (#3217).
+- Scrubber: tokens before punctuation, 9 more vendor token shapes, PEM keys and object keys are redacted (#3223).
+- Database: script run sources are deduplicated and retained space is reclaimed (#3200).
+- Scheduler: an unusable `SCHEDULER_INTERVAL_MS` falls back to 10s instead of a tight loop (#3174); heartbeat rejects non-positive stall thresholds (#3173).
+- RBAC: viewers can open authed pages (#3206).
+- Chat SDK: the bot mention is stripped in every adapter form, and Discord mentions are named (#3203).
+- Jira: ADF card URLs and ordered-list numbers are emitted (#3195).
+- Git: GitHub and Azure DevOps remotes are detected by hostname (#3196).
+- UI: Anthropic API keys with any `sk-ant-` prefix are accepted (#3230); zero-valued GitHub shorthand references are rejected (#3207); Slack HTTP transport guidance is corrected (#3157).
+
 ## [2.13.3] - 2026-11-16
 
 ### Added

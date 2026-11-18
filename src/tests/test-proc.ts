@@ -40,6 +40,8 @@ export async function runChild(
     cwd?: string;
     env?: Record<string, string | undefined>;
     stdin?: string | Uint8Array;
+    /** Keep stdin open until exit. Use only with children that do not wait for EOF. */
+    keepStdinOpen?: boolean;
     timeoutMs?: number;
   } = {},
 ): Promise<ChildResult> {
@@ -49,7 +51,7 @@ export async function runChild(
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
     env: opts.env,
-    stdin: hasStdin ? "pipe" : "ignore",
+    stdin: hasStdin || opts.keepStdinOpen ? "pipe" : "ignore",
     stdout: "pipe",
     stderr: "pipe",
     timeout: timeoutMs,
@@ -57,13 +59,14 @@ export async function runChild(
   });
   if (hasStdin) {
     proc.stdin?.write(opts.stdin as string | Uint8Array);
-    await proc.stdin?.end();
+    if (!opts.keepStdinOpen) await proc.stdin?.end();
   }
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
+  if (opts.keepStdinOpen) await proc.stdin?.end();
   const durationMs = performance.now() - start;
   // Bun's `timeout` option kills the child with `killSignal` once the
   // deadline passes. A signal exit that took at least `timeoutMs` wall time

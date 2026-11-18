@@ -8,6 +8,8 @@
 import type { AgentTaskStatus, TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { UI_SPEC_ACTION_PREFIX } from "../utils/task-ui-spec";
+import { APPROVAL_ACTION_PREFIX } from "./approval-buttons";
 import { completedStatusIcon, iconPrefix } from "./reaction-shortcode";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety.
@@ -127,6 +129,39 @@ export function splitSlackSectionText(text: string): string[] {
     remaining = remaining.slice(splitIdx).trimStart();
   }
   return chunks;
+}
+
+/** Action ids the swarm's own Slack handlers act on (see `actions.ts`, `approval-actions.ts`). */
+const RESERVED_ACTION_IDS = new Set(["cancel_task", "follow_up_task", "view_task_logs"]);
+const RESERVED_ACTION_PREFIXES = [APPROVAL_ACTION_PREFIX, UI_SPEC_ACTION_PREFIX];
+
+/**
+ * The first `action_id` in caller-supplied Block Kit that one of the swarm's
+ * own action handlers would act on, or `undefined` when there is none.
+ * Searches nested objects and arrays.
+ */
+export function findReservedActionId(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findReservedActionId(item);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      key === "action_id" &&
+      typeof child === "string" &&
+      (RESERVED_ACTION_IDS.has(child) ||
+        RESERVED_ACTION_PREFIXES.some((prefix) => child.startsWith(prefix)))
+    ) {
+      return child;
+    }
+    const found = findReservedActionId(child);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 // Slack's hard cap on section text.

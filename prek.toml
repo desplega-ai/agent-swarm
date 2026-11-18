@@ -28,9 +28,9 @@ fail_fast = true
 
 [[repos.hooks]]
 id = "biome-lint"
-name = "Biome lint"
+name = "Biome lint (changed files; PRE_PUSH_FULL=1 for the whole scope)"
 language = "system"
-entry = "bun run lint"
+entry = "bash scripts/pre-push-lint.sh biome"
 # CI "lint" domain: biome runs on src/ + apps/evals/; config + lockfile + tsconfig.
 files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
@@ -39,9 +39,9 @@ fail_fast = true
 
 [[repos.hooks]]
 id = "anti-slop-lint"
-name = "Anti-slop rules (Oxlint)"
+name = "Anti-slop rules (Oxlint, changed files; PRE_PUSH_FULL=1 for the whole scope)"
 language = "system"
-entry = "bun run lint:slop"
+entry = "bash scripts/pre-push-lint.sh oxlint"
 # Same CI "lint" domain, plus the Oxlint config and the vendored plugin.
 files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|oxlint\.config\.ts$|tools/oxlint/)'
 pass_filenames = false
@@ -62,14 +62,15 @@ fail_fast = true
 
 [[repos.hooks]]
 id = "test"
-name = "Unit tests (bun test --parallel=4, scoped with --changed)"
+name = "Unit tests (bun test --parallel=4, nearest affected files)"
 language = "system"
-# scripts/pre-push-tests.sh runs `--changed=<merge-base with origin/main>` and
-# falls back to the full suite when migrations, templates/, bunfig.toml,
-# bun.lock, or package.json beyond its version field changed (those reach every
-# test outside the import graph), or when origin/main is missing. A file-backed
+# scripts/pre-push-tests.sh runs the test files nearest to the change since the
+# merge-base with origin/main (scripts/pre-push-affected-tests.ts, bounded per
+# changed file). The full suite runs with PRE_PUSH_FULL=1, when the preload,
+# bunfig.toml or tsconfig.json changed, or when origin/main is missing. A file-backed
 # Bun probe detects host-load RLIMIT_NPROC failures and skips only sandbox-spawn
-# tests when it exits 134; CI leaves the env gate unset. Blocking; CI stays authoritative.
+# tests when it exits 134; CI leaves the env gate unset. A per-user machine lock
+# lets one worktree run its tests at a time. Blocking; CI stays authoritative.
 entry = "bash scripts/pre-push-tests.sh"
 # CI "test" domain: src/ + scripts tests import + lockfile/tsconfig/bunfig + templates.
 files = '^(src/|scripts/|templates/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'

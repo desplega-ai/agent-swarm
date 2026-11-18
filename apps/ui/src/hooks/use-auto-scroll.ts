@@ -13,6 +13,7 @@ interface UseAutoScrollResult {
  * Auto-scroll hook that scrolls to bottom when dependencies change,
  * but only if the user was already at/near the bottom.
  * If user has scrolled up to read history, it won't interrupt them.
+ * A view at the bottom also stays there when the element gets shorter.
  *
  * Returns state and controls to show a "Follow" button when auto-scroll is disabled.
  *
@@ -55,6 +56,22 @@ export function useAutoScroll(
     element.addEventListener("scroll", handleScroll);
     return () => element.removeEventListener("scroll", handleScroll);
   }, [element, handleScroll]);
+
+  // The view gets shorter (the composer grows, the keyboard opens): a view at
+  // the end stays at the end, so its last lines do not go under the new edge.
+  useEffect(() => {
+    if (!element) return;
+    let height = element.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const before = height;
+      height = element.clientHeight;
+      if (height >= before) return;
+      const fromEnd = element.scrollHeight - element.scrollTop - before;
+      if (fromEnd < 100) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
 
   // Auto-scroll when dependencies change
   useEffect(() => {

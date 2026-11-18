@@ -7,6 +7,7 @@ import {
   providerKeyVars,
 } from "@desplega/model-catalog";
 import { deriveDefaultRoute, routeCredentialStatus } from "@desplega/model-routing";
+import { type CredentialSelectionStrategy, pickLowestUsage } from "./key-usage";
 import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
 /** Env vars that may contain comma-separated credential pools */
@@ -307,12 +308,21 @@ export function splitCredentialPool(value: string): string[] {
  * `allowedIndices` (a profile's credential allowlist, as pool positions)
  * bounds every pick, including the "all rate-limited, pick anyway" fallbacks.
  * Indices stay positions in the full pool.
+ *
+ * `usageByIndex` (per pool position, from `GET /api/keys/available`: the
+ * `keyPace` or `keyUsage` score of the selection strategy) orders the pick
+ * among the available indices: the lowest score wins, ties break at random.
+ * It never excludes a key, whatever its score. `sessionsByIndex` (running
+ * sessions per pool position, same source) breaks ties within the score
+ * band: the fewest wins.
  */
 export function selectCredential(
   value: string,
   availableIndices?: number[],
   keyType = "ANTHROPIC_API_KEY",
   allowedIndices?: number[],
+  usageByIndex?: number[],
+  sessionsByIndex?: number[],
 ): CredentialSelection {
   // A CODEX_OAUTH value is one JSON blob ({access, refresh, expires, accountId}),
   // never a comma-separated pool: its commas are field separators. Splitting it
@@ -351,7 +361,7 @@ export function selectCredential(
       (i) => i >= 0 && i < credentials.length && (!drawFrom || drawFrom.includes(i)),
     );
     if (validIndices.length > 0) {
-      index = validIndices[Math.floor(Math.random() * validIndices.length)]!;
+      index = pickLowestUsage(validIndices, usageByIndex, sessionsByIndex)!;
     } else {
       // All available indices out of range — fall back to random from all
       index = pickAny();
@@ -458,6 +468,14 @@ export interface AvailabilityInfo {
   seatBlockedIndices?: number[];
   /** Rate-limited indices whose limit is a provider spend cap. */
   spendCappedIndices?: number[];
+  /** Usage per pool position (see `keyUsageFromWindows`). Orders a `usage` pick; never excludes. */
+  keyUsage?: number[];
+  /** Pace delta per pool position (see `keyPaceFromWindows`). Orders a `pace` pick; never excludes. */
+  keyPace?: number[];
+  /** The server's `CREDENTIAL_SELECTION_STRATEGY`. Absent from an older server. */
+  selectionStrategy?: CredentialSelectionStrategy;
+  /** Running sessions per pool position. Breaks ties within the usage band; never excludes. */
+  activeSessions?: number[];
 }
 
 /**
@@ -496,6 +514,10 @@ async function fetchAvailableIndices(
             earliestModelResetAt?: string | null;
             seatBlockedIndices?: number[];
             spendCappedIndices?: number[];
+            keyUsage?: number[];
+            keyPace?: number[];
+            selectionStrategy?: CredentialSelectionStrategy;
+            activeSessions?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
@@ -504,6 +526,10 @@ async function fetchAvailableIndices(
             earliestModelResetAt: data.earliestModelResetAt,
             seatBlockedIndices: data.seatBlockedIndices,
             spendCappedIndices: data.spendCappedIndices,
+            keyUsage: data.keyUsage,
+            keyPace: data.keyPace,
+            selectionStrategy: data.selectionStrategy,
+            activeSessions: data.activeSessions,
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
@@ -518,6 +544,9 @@ async function fetchAvailableIndices(
   }
   return availableIndicesMap;
 }
+
+const pct = (value: number | undefined) => Math.round((value ?? 0) * 100);
+const signedPct = (value: number | undefined) => `${pct(value) > 0 ? "+" : ""}${pct(value)}`;
 
 /**
  * For credential env vars that contain comma-separated values,
@@ -681,18 +710,26 @@ export async function resolveCredentialPools(
         }
       }
 
+      // Pace only when the server opts in and sends `keyPace`; otherwise rank by usage, as before.
+      const strategy: CredentialSelectionStrategy =
+        info?.keyPace && info.selectionStrategy === "pace" ? "pace" : "usage";
+      const usage = strategy === "pace" ? info?.keyPace : info?.keyUsage;
+      const sessions = info?.activeSessions;
       const result = seatFallbackIndices
         ? {
-            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx),
+            ...selectCredential(val, seatFallbackIndices, envVar, allowedIdx, usage, sessions),
             isRateLimitFallback: true,
           }
         : uncapped?.length
-          ? { ...selectCredential(val, uncapped, envVar, allowedIdx), isRateLimitFallback: true }
-          : selectCredential(val, available, envVar, allowedIdx);
+          ? {
+              ...selectCredential(val, uncapped, envVar, allowedIdx, usage, sessions),
+              isRateLimitFallback: true,
+            }
+          : selectCredential(val, available, envVar, allowedIdx, usage, sessions);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
-        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]${info?.rejectedIndices?.length ? ` (${info.rejectedIndices.length} rejected)` : ""}`,
+        `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]${info?.keyUsage ? ` usage ${pct(info.keyUsage[result.index])}%` : ""}${info?.keyPace ? ` pace ${signedPct(info.keyPace[result.index])}%` : ""}${info ? ` strategy ${strategy}` : ""}${info?.rejectedIndices?.length ? ` (${info.rejectedIndices.length} rejected)` : ""}`,
       );
       selections.push({
         ...result,

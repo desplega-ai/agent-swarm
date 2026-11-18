@@ -44,7 +44,8 @@ CONSTANTS
   FixCancelTree,     \* F9 (#2377): a cancel also drops queued retries and every open task of the run; a step's task is inserted only while the step runs in a live run; finalizeOrWait and the task/child claims write nothing in a run that is no longer live (cancelled tree)
   FixParkSiblings,   \* F10 (#2957, #2966): a parked step pauses only its own branch; the walk keeps routing its siblings' successors and then runs its finalizer
   FixSuccessorDebt,  \* F11 (#2966, #2974): a walk holds its run from entry until just before its finalizer (a claim's hold is handed to the walk it starts); every run finalizer leaves a held run to the holder
-  FixJoinRetryPending \* F12 (#3019): a branch whose latest row is pending its retry holds the join: awaitedNodeIds counts it (seed filter and batch gate), and the batch gate does not count it as completed
+  FixJoinRetryPending, \* F12 (#3019): a branch whose latest row is pending its retry holds the join: awaitedNodeIds counts it (seed filter and batch gate), and the batch gate does not count it as completed
+  FixTaskReclaim     \* F13 (#3215): with FixStepFence, an orphaned running agent-task row is re-claimed like a sub-workflow row; the executor parks on the task the attempt already dispatched (getTaskByWorkflowRunStepId) or dispatches it when there is none
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -126,7 +127,11 @@ Awaited(p, edges) ==
 
 \* F3: step rows an executeStep call still owns (engine.ts executingSteps,
 \* process-local, cleared by a crash). The retry poller's rows are not owned.
-Owned == {thr[t].sid : t \in {u \in Threads : thr[u].pc \in {"xRun", "xChild", "xCkOk", "xFail", "xCkWait"}}}
+Owned == {thr[t].sid : t \in {u \in Threads : thr[u].pc \in {"xRun", "xChild", "xTaskIns", "xCkOk", "xFail", "xCkWait"}}}
+
+\* F13 (#3215): every branch is an `agent-task` step, as ChildRunResume makes
+\* every branch a `sub-workflow` step.
+AgentTaskBranches == FixStepFence /\ FixTaskReclaim /\ ~ChildRunResume
 \* F3: nodes whose step already covers the current predecessor completions
 \* (no loops in this graph): completed, waiting, or running and owned.
 CurrentNodes == NodesWith("completed") \cup NodesWith("waiting")
@@ -160,7 +165,7 @@ TreeLive == ~(FixCancelTree /\ run = "cancelled")
 Owed == \E u \in Threads : thr[u].dh
 
 \* The node the retry poller currently holds (step flipped to running, not yet checkpointed).
-PollerHeld == IF thr[TPoll].pc \in {"p5", "p6", "p7", "p8", "p9", "p10"}
+PollerHeld == IF thr[TPoll].pc \in {"p5", "p5i", "p6", "p7", "p8", "p9", "p10"}
               THEN {thr[TPoll].cur} ELSE {}
 
 Init ==
@@ -216,6 +221,14 @@ WPick(t) ==
        SetT(t, [thr[t] EXCEPT !.pc = "xDedup", !.cur = n, !.pend = @ \ {n}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
+\* X1 step INSERT: a new row for node n, executed by this thread.
+NewStep(t, n) ==
+  /\ steps' = Append(steps, [node |-> n, st |-> "running", rc |-> 0,
+                             nra |-> FALSE, task |-> "none", tg |-> 0])
+  /\ execLive' = [execLive EXCEPT ![n] = @ + 1]
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "xRun", !.sid = Len(steps) + 1,
+               !.rc = IF FixStepFence THEN 0 ELSE @])
+
 \* X1 engine.ts:544-588 — dedup transaction: run-status guard, iteration =
 \* COUNT(steps for node), idempotency key includes that count, INSERT.
 XDedup(t) ==
@@ -233,7 +246,7 @@ XDedup(t) ==
                        !.hasW = @ \/ n \notin NodesWith("completed")])
           /\ UNCHANGED <<steps, execLive>>
      ELSE IF FixStepFence /\ ChildRunResume /\ FixConcurrentJoin /\ n \in Branches /\ OrphanRow(n) # {}
-     THEN \* F8 engine.ts:814-823: an orphaned sub-workflow row is this same
+     THEN \* F8 engine.ts:913-928: an orphaned sub-workflow row is this same
           \* invocation. Re-claim it (same row, same retryCount); the executor
           \* reconnects to the child this attempt already started
           \* (sub-workflow.ts:92-97), or starts it when there is none (XChild).
@@ -242,11 +255,14 @@ XDedup(t) ==
           LET i == CHOOSE j \in OrphanRow(n) : TRUE IN
           /\ SetT(t, [thr[t] EXCEPT !.sid = i, !.rc = steps[i].rc, !.pc = "xChild"])
           /\ UNCHANGED <<steps, execLive>>
-     ELSE /\ steps' = Append(steps, [node |-> n, st |-> "running", rc |-> 0,
-                                      nra |-> FALSE, task |-> "none", tg |-> 0])
-          /\ execLive' = [execLive EXCEPT ![n] = @ + 1]
-          /\ SetT(t, [thr[t] EXCEPT !.pc = "xRun", !.sid = Len(steps) + 1,
-                       !.rc = IF FixStepFence THEN 0 ELSE @])
+     ELSE IF AgentTaskBranches /\ FixConcurrentJoin /\ n \in Branches /\ OrphanRow(n) # {}
+     THEN \* F13 (#3215) engine.ts:913-928: an orphaned agent-task row is re-claimed
+          \* the same way (same row, same retryCount); XChild runs TaskStart.
+          \* With F13 every branch is an agent-task step (AgentTaskBranches).
+          LET i == CHOOSE j \in OrphanRow(n) : TRUE IN
+          /\ SetT(t, [thr[t] EXCEPT !.sid = i, !.rc = steps[i].rc, !.pc = "xChild"])
+          /\ UNCHANGED <<steps, execLive>>
+     ELSE NewStep(t, n)
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
 
 \* F8 + CR sub-workflow.ts:90-138 SubWorkflowExecutor.run: the attempt's
@@ -267,10 +283,45 @@ ChildStart(t, okPc, failPc, waitPc) ==
   ELSE /\ steps' = [steps EXCEPT ![i].task = "run", ![i].tg = @ + 1]
        /\ SetT(t, [thr[t] EXCEPT !.pc = waitPc])
 
+\* F13 (#3215) agent-task.ts:71-90 AgentTaskExecutor.execute on a re-claimed
+\* row: the task already bound to the step (getTaskByWorkflowRunStepId) is
+\* reused: completed is a sync success, any other status parks (a failed or
+\* cancelled task's event was dropped while the step ran; the waiting-run
+\* sweep settles it). With none, the task is inserted as in XRun, refused
+\* (F9) unless the step runs in a live run.
+\* The read and the insert are separate awaits (TaskRead, then TaskIns), so a
+\* second executor call of the same attempt (the poller's P5 on a row a walk
+\* re-claimed) can read "none" in between.
+TaskRead(t, okPc, insPc, waitPc) ==
+  LET tk == steps[thr[t].sid].task IN
+  /\ SetT(t, [thr[t] EXCEPT !.pc = IF tk = "none" THEN insPc ELSE IF tk = "ok" THEN okPc ELSE waitPc])
+  /\ UNCHANGED steps
+
+\* F13 createTaskExtended (agent-task.ts:164): refused (F9) unless the step
+\* runs in a live run. A row that already has a task bound gets a second one
+\* (no unique index on agent_tasks.workflowRunStepId): marked "dup", which
+\* AtMostOneExecuting counts twice.
+TaskIns(t, failPc, waitPc) ==
+  LET i == thr[t].sid IN
+  IF FixCancelTree /\ ~(steps[i].st = "running" /\ run \in {"running", "waiting"})
+  THEN SetT(t, [thr[t] EXCEPT !.pc = failPc]) /\ UNCHANGED steps
+  ELSE /\ steps' = IF steps[i].task = "none"
+                   THEN [steps EXCEPT ![i].task = "run", ![i].tg = @ + 1]
+                   ELSE [steps EXCEPT ![i].task = "dup"]
+       /\ SetT(t, [thr[t] EXCEPT !.pc = waitPc])
+
+TaskStart(t) == TaskRead(t, "xCkOk", "xTaskIns", "xCkWait")
+
+XTaskIns(t) ==
+  /\ thr[t].pc = "xTaskIns"
+  /\ TaskIns(t, "xFail", "xCkWait")
+  /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
+
 \* F8 + CR: the re-claimed row's executor call (reconnect or start).
+\* F13: an agent-task row (no ChildRunResume) runs TaskStart instead.
 XChild(t) ==
   /\ thr[t].pc = "xChild"
-  /\ ChildStart(t, "xCkOk", "xFail", "xCkWait")
+  /\ IF ChildRunResume THEN ChildStart(t, "xCkOk", "xFail", "xCkWait") ELSE TaskStart(t)
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
 \* X2 engine.ts:1031 — executor.run returns (ok / failed / async dispatch).
@@ -466,7 +517,7 @@ RFRun(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = thr[t].rf])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-Walk(t) == WStart(t) \/ WPick(t) \/ XDedup(t) \/ XRun(t) \/ XChild(t) \/ XCkOk(t) \/ XFail(t)
+Walk(t) == WStart(t) \/ WPick(t) \/ XDedup(t) \/ XRun(t) \/ XChild(t) \/ XTaskIns(t) \/ XCkOk(t) \/ XFail(t)
            \/ XCkWait(t) \/ WBatchEnd(t) \/ WFinal(t) \/ WRet(t)
            \/ WStartUnreadable(t) \/ XDedupUnreadable(t) \/ RFStep(t) \/ RFRun(t)
 
@@ -543,9 +594,20 @@ P5 ==
          [] o = "async" ->
               IF FixStepFence /\ ChildRunResume
               THEN ChildStart(TPoll, "p6", "p7", "p8")
+              ELSE IF AgentTaskBranches
+              THEN \* F13: the executor first reads the task bound to the step
+                   \* (agent-task.ts:72); a walk may have re-claimed this row.
+                   TaskRead(TPoll, "p6", "p5i", "p8")
               ELSE /\ steps' = [steps EXCEPT ![thr[TPoll].sid].task = "run", ![thr[TPoll].sid].tg = @ + 1]
                    /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p8"])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
+
+\* F13: the poller's task insert after a "none" read (TaskIns). Refused: the
+\* executor throws and the fenced P7 writes nothing for a row no longer running.
+P5i ==
+  /\ thr[TPoll].pc = "p5i"
+  /\ TaskIns(TPoll, "p7", "p8")
+  /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
 \* P5U retry-poller.ts:66 `run.context` opens the sealed context after the
 \* claim; the catch (:204 / :210) fails the claimed step and the run.
@@ -644,7 +706,7 @@ PRel ==
   /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p2"])
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
-Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ P10 \/ PRel \/ Walk(TPoll)
+Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5i \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ P10 \/ PRel \/ Walk(TPoll)
 
 ----------------------------------------------------------------------------
 (* Heartbeat recoverIncompleteRuns (recovery.ts)                          *)
@@ -1176,10 +1238,13 @@ TerminalNeverFails ==
 \* F8 + CR: a sub-workflow executor call only starts or reconnects its
 \* attempt's child, unique per (parentStepId, parentStepAttempt) (ChildStart),
 \* so for those nodes the child run is the execution and the call is not.
+\* F13: likewise an agent-task executor call reuses the task bound to its row,
+\* so the task is the execution; a row with a second task ("dup") counts twice.
 AtMostOneExecuting ==
   \A n \in Nodes :
-    (IF FixStepFence /\ ChildRunResume /\ n \in Branches THEN 0 ELSE execLive[n])
-      + Cardinality({i \in StepIds : steps[i].node = n /\ steps[i].task = "run"}) <= 1
+    (IF FixStepFence /\ (ChildRunResume \/ FixTaskReclaim) /\ n \in Branches THEN 0 ELSE execLive[n])
+      + Cardinality({i \in StepIds : steps[i].node = n /\ steps[i].task = "run"})
+      + 2 * Cardinality({i \in StepIds : steps[i].node = n /\ steps[i].task = "dup"}) <= 1
 
 \* Inv3: every node (in particular the convergence node) completes at most once.
 ExecutesOnce == \A n \in Nodes : okCount[n] <= 1

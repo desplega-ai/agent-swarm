@@ -487,10 +487,22 @@ describe("E2B namespaced env scoping", () => {
   });
 
   test("shared --secret applies to all three scopes", async () => {
-    const { api, lead, worker } = await resolveAllScopes(["--secret", "BAR=y"]);
+    const { api, lead, worker } = await resolveAllScopes([
+      "--secret",
+      "BAR=y",
+      "--secret",
+      "SECRETS_ENCRYPTION_KEY=master",
+      "--worker-secret",
+      "SLACK_SIGNING_SECRET=signing",
+    ]);
     expect(api.BAR).toBe("y");
     expect(lead.BAR).toBe("y");
     expect(worker.BAR).toBe("y");
+    // API-only keys reach the API sandbox only, even when a layer sets them.
+    expect(api.SECRETS_ENCRYPTION_KEY).toBe("master");
+    expect(lead.SECRETS_ENCRYPTION_KEY).toBeUndefined();
+    expect(worker.SECRETS_ENCRYPTION_KEY).toBeUndefined();
+    expect(worker.SLACK_SIGNING_SECRET).toBeUndefined();
   });
 
   test("scoped --secret layers on top of the shared --secret without replacing it", async () => {

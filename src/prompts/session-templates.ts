@@ -248,6 +248,7 @@ agent-fs is the shared drive between agents and people. Deliver results as files
 Use-case results go under the task's asset key (\`key\` in \`get-task-details\`) in the shared drive. The drive path equals the key string, for example \`shared/<slug>/report-<YYYY-MM-DD>.md\`. Later runs read the earlier reports in that folder and compare.
 Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
+A tracker or grid people keep editing: a sheet. A plan, diagram or map to think through: a board. See the \`boards-and-sheets\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
 Link files as \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>{{fileLinkQuery}}\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
@@ -784,6 +785,55 @@ registerTemplate({
     {
       name: "starter_notes_section",
       description: "Formatted notes section sourced from users.notes, or empty string",
+    },
+  ],
+  category: "task_lifecycle",
+});
+
+/**
+ * The Lead's follow-up preamble for a Sessions message (`source: "ui"`): a
+ * sandwich of the session's original ask, an elision marker, and the last
+ * Lead turns, so the new message is read against the conversation, not one
+ * parent task. Built worker-side by `buildSessionTurnsPreamble` in
+ * `src/commands/context-preamble.ts`, which also bounds it to its token budget.
+ */
+registerTemplate({
+  eventType: "task.followup.session_turns",
+  header: "",
+  defaultBody: `
+---
+## Prior Conversation Context
+
+This message continues a Sessions conversation with you. Below are the session's original ask and your last {{turn_count}} turns in it, oldest first: what you were asked and what you answered. The new message may refer to any of them.
+
+{{reply_target}}{{root}}{{elided}}{{turns}}
+If this block does not tell you what the new message refers to, get more context before you act. Never guess the referent.
+- \`get-task-details\` with any task id above: the original ask, a skipped turn, or a turn whose text was cut.
+- The \`task-context-gathering\` script returns a task plus the memories related to it: \`script-run\` with \`name: "task-context-gathering"\`, \`scope: "global"\` and \`args: { "taskId": "<id>", "queries": ["<topic>"] }\`.
+
+---
+`,
+  variables: [
+    { name: "turn_count", description: "Lead turns shown in `turns`" },
+    {
+      name: "reply_target",
+      description:
+        "A paragraph naming the task the message was sent on when that is not a Lead turn (a delegated task), else empty",
+    },
+    {
+      name: "root",
+      description:
+        "The session's original ask: '### Original ask (session root) (task `<id>`, <status>)', its ask, answer and artifacts. Empty when the root is the only turn or unknown",
+    },
+    {
+      name: "elided",
+      description:
+        "'### … N earlier turns skipped' with the skipped turn task ids, newest first, else empty",
+    },
+    {
+      name: "turns",
+      description:
+        "One block per Lead turn, oldest first: '### Turn N (task `<id>`, <status>)', the ask, the answer and its artifacts",
     },
   ],
   category: "task_lifecycle",

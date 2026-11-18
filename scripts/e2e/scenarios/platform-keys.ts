@@ -1,10 +1,19 @@
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  cancelQuietly,
+  claimTask,
+  createAssignedTask,
+  registerWorker,
+  retireAgent,
+} from "./core-helpers";
+import {
   cleanupStack,
+  deleteConfig,
   fakeJwt,
   jsonResponse,
   putConfig,
+  reloadConfig,
   startMockServer,
 } from "./platform-helpers";
 
@@ -46,6 +55,10 @@ async function available(ctx: ScenarioContext, query: string) {
     earliestModelResetAt?: string | null;
     seatBlockedIndices?: number[];
     spendCappedIndices: number[];
+    keyUsage: number[];
+    keyPace: number[];
+    selectionStrategy: string;
+    activeSessions: number[];
   };
 }
 
@@ -179,6 +192,28 @@ export const platformKeys: Scenario = {
       `/api/keys/status?keyType=${keyType}&scope=agent&scopeId=none`,
     );
     expect(asRecords(scoped.json, "keys").length === 0, "the scope filter hides global keys");
+
+    // ── running sessions per key ─────────────────────────────────────────────
+    // The pending task above also carries suffixA; only in_progress tasks count.
+    const worker = await registerWorker(ctx, "keys-sessions");
+    const running = await createAssignedTask(ctx, worker, `key session ${ctx.nonce}`);
+    await claimTask(ctx, worker, running);
+    await report(ctx, "report-usage", {
+      keyType,
+      keySuffix: suffixA,
+      keyIndex: 0,
+      taskId: running,
+    });
+    const bySuffix = await available(
+      ctx,
+      `keyType=${keyType}&totalKeys=2&keySuffixes=${suffixA},${suffixB}`,
+    );
+    expect(
+      bySuffix.activeSessions.join() === "1,0",
+      "activeSessions counts the in_progress task on each pool position",
+    );
+    await cancelQuietly(ctx, running);
+    await retireAgent(ctx, worker);
 
     // ── rate limit, clear, expiry ────────────────────────────────────────────
     await report(ctx, "report-rate-limit", {
@@ -607,6 +642,14 @@ export const platformKeys: Scenario = {
       "other families are unaffected",
     );
     expect(
+      forHaiku.keyUsage.join() === "0.4,0",
+      "available ranks keys by live 5h/7d usage, model windows aside, unobserved as 0",
+    );
+    expect(
+      forOpus.keyUsage.join() === "0.4,0",
+      "keyUsage covers every pool position, also a model-blocked one",
+    );
+    expect(
       (await available(ctx, `keyType=${keyType}&totalKeys=2`)).modelBlockedIndices === undefined,
       "model fields are only present when a model is asked for",
     );
@@ -772,6 +815,97 @@ export const platformKeys: Scenario = {
 };
 
 const NAN_KEY = "NAN_API_KEY";
+
+// The pick ranks keys by the score of `selectionStrategy` (lowest first, 0.10 band), so these
+// assertions on keyPace and keyUsage decide which key the worker draws.
+export const platformKeyPace: Scenario = {
+  name: "platform-key-pace",
+  order: 613,
+  async run(ctx) {
+    const cleanup = cleanupStack(ctx);
+    const keyType = `E2E_PACE_${ctx.nonce}`.toUpperCase();
+    const early = `e${ctx.nonce.slice(0, 8)}`;
+    const late = `l${ctx.nonce.slice(0, 8)}`;
+    const pool = `keyType=${keyType}&totalKeys=2&keySuffixes=${early},${late}`;
+    const nowS = Math.floor(Date.now() / 1000);
+    const day = 86_400;
+    const lastSeenAt = new Date().toISOString();
+    try {
+      // 18% used with 5 days to the weekly reset vs 39% used with 2 days to it.
+      await report(ctx, "report-rate-limit-windows", {
+        keyType,
+        keySuffix: early,
+        keyIndex: 0,
+        windows: {
+          seven_day: { status: "allowed", utilization: 0.18, resetsAt: nowS + 5 * day, lastSeenAt },
+        },
+      });
+      await report(ctx, "report-rate-limit-windows", {
+        keyType,
+        keySuffix: late,
+        keyIndex: 1,
+        windows: {
+          seven_day: { status: "allowed", utilization: 0.39, resetsAt: nowS + 2 * day, lastSeenAt },
+          // Fable: 90% used with 2 days left, over pace.
+          seven_day_overage_included: {
+            status: "allowed",
+            utilization: 0.9,
+            resetsAt: nowS + 2 * day,
+            lastSeenAt,
+          },
+        },
+      });
+
+      const near = (value: number | undefined, want: number) =>
+        typeof value === "number" && Math.abs(value - want) < 0.01;
+      // Flag off (default): the worker ranks by usage; keyPace is reported but unused.
+      expect(
+        (await available(ctx, pool)).selectionStrategy === "usage",
+        "usage is the default strategy",
+      );
+      const row = await putConfig(ctx, { key: "CREDENTIAL_SELECTION_STRATEGY", value: "pace" });
+      cleanup.add("restore the default strategy", async () => {
+        await deleteConfig(ctx, String(row.id));
+        await reloadConfig(ctx);
+      });
+      await reloadConfig(ctx);
+      const paced = await available(ctx, `${pool}&model=opus`);
+      expect(paced.selectionStrategy === "pace", "the operator setting opts in to pace ranking");
+      expect(
+        near(paced.keyPace[0], 0.18 - 2 / 7) && near(paced.keyPace[1], 0.39 - 5 / 7),
+        `keyPace is used minus the elapsed share of the week (got ${paced.keyPace.join()})`,
+      );
+      expect(
+        paced.keyPace[1]! + 0.1 < paced.keyPace[0]!,
+        "pace ranks the 39% key resetting in 2 days first, outside the 0.10 band",
+      );
+      expect(paced.keyUsage.join() === "0.18,0.39", "usage would rank the 18% key first");
+
+      const forFable = await available(ctx, `${pool}&model=fable`);
+      expect(
+        near(forFable.keyPace[1], 0.9 - 5 / 7) && forFable.keyPace[1]! > forFable.keyPace[0]!,
+        "for a Fable task the over-pace Fable window binds and the key ranks behind",
+      );
+      expect(forFable.availableIndices.join() === "0,1", "an over-pace key stays admissible");
+
+      expectStatus(
+        await ctx.api("PUT", "/api/config", {
+          body: { scope: "global", key: "CREDENTIAL_SELECTION_STRATEGY", value: "fastest" },
+        }),
+        [400],
+        "an unknown strategy is rejected",
+      );
+      await putConfig(ctx, { key: "CREDENTIAL_SELECTION_STRATEGY", value: "usage" });
+      await reloadConfig(ctx);
+      expect(
+        (await available(ctx, pool)).selectionStrategy === "usage",
+        "setting usage switches the worker back to usage ranking",
+      );
+    } finally {
+      await cleanup.run();
+    }
+  },
+};
 
 export const platformPoolKeys: Scenario = {
   name: "platform-pool-keys",
@@ -967,7 +1101,8 @@ export const platformPoolKeys: Scenario = {
         "keys",
       );
       expect(
-        cappedPool[0]?.status === "spend_capped" && asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
+        cappedPool[0]?.status === "spend_capped" &&
+          asRecord(cappedPool[0]?.spendCap).spendUsd === 1.07,
         "the pool view shows the spend cap",
       );
       await report(ctx, "clear-rate-limit", { keyType: NAN_KEY, keySuffix: goodSuffix });

@@ -77,6 +77,76 @@ test.describe("desktop", () => {
     test.skip(isMobile, "desktop layout, see the phone test");
   });
 
+  test("cites selected outcome text in a follow-up", async ({ page, api, swarm, seed, clean }) => {
+    const { id: agentId } = await api.post<{ id: string }>("/api/agents", {
+      name: `citation-worker-${randomUUID().slice(0, 8)}`,
+      isLead: false,
+    });
+    const session = await api.post<{ id: string }>("/api/tasks", {
+      task: "Summarize the cleanup work",
+      source: "ui",
+      requestedByUserId: seed!.user.id,
+      agentId,
+      routingReason: "human_pinned",
+    });
+    const output = "The **cleanup goal is paused** for now.\n\nA second passage.";
+    const headers = {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "Content-Type": "application/json",
+      "X-Agent-ID": agentId,
+    };
+    const poll = await fetch(`${swarm.apiUrl}/api/poll`, { headers });
+    expect(poll.ok).toBe(true);
+    const response = await fetch(`${swarm.apiUrl}/api/tasks/${session.id}/finish`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ status: "completed", output }),
+    });
+    expect(response.ok).toBe(true);
+    expect((await response.json()).task.output).toBe(output);
+    await page.goto(`/sessions/${session.id}`);
+
+    const select = (passage: Locator) =>
+      passage.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      });
+
+    await select(page.getByText("cleanup goal is paused", { exact: true }));
+    const cite = page.getByRole("button", { name: "Cite", exact: true });
+    await cite.click();
+    const excerpt = page.getByRole("group", { name: "Cited excerpts" });
+    await expect(excerpt).toContainText("cleanup goal is paused");
+    const composer = page.getByRole("textbox", { name: "Follow up…" });
+    await expect(composer).toBeFocused();
+    await composer.fill("What needs to happen next?");
+
+    const secondPassage = page.getByText("A second passage.", { exact: true });
+    await secondPassage.click();
+    await select(secondPassage);
+    await expect(cite).toBeVisible();
+    await page.keyboard.press("c");
+    await expect(excerpt).toContainText("A second passage.");
+    await page.reload();
+    await expect(excerpt).toContainText("cleanup goal is paused");
+    await expect(composer).toContainText("What needs to happen next?");
+    await excerpt.getByRole("button", { name: "Remove citation 2" }).click();
+    await expect(excerpt).not.toContainText("A second passage.");
+
+    const sent = page.waitForRequest(
+      (request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/tasks",
+    );
+    await page.getByRole("button", { name: "Follow up", exact: true }).click();
+    expect((await sent).postDataJSON().task).toBe(
+      "> cleanup goal is paused\n\nWhat needs to happen next?",
+    );
+    await expect(excerpt).toBeHidden();
+    await clean.assertClean();
+  });
+
   test("the tree shows the seeded group and its shared session", async ({ page, seed, clean }) => {
     const { title, groupName, teammate } = seed!.sessionChain;
     await page.goto("/sessions");
@@ -95,6 +165,8 @@ test.describe("desktop", () => {
 
   test("opening a session marks it read", async ({ page, api, swarm, seed, clean }) => {
     const session = await startSession(api, seed!.user.id, "read");
+    // A running session hides the dot (the spinner says it); a settled one shows it.
+    await api.post(`/api/tasks/${session.id}/cancel`, {});
     await page.goto("/sessions");
     const row = sessionRow(page.getByRole("tree", { name: "Sessions" }), session.title);
     await expect(row).toHaveAccessibleName(/^Unread\. /);
@@ -281,15 +353,29 @@ test.describe("phone", () => {
     await clean.assertClean();
   });
 
-  test("a tap on the filter button opens the filter menu, not search", async ({ page, clean }) => {
+  test("a tap on the filter button opens the filter sheet, not search", async ({ page, clean }) => {
     await page.goto("/sessions");
     await page.getByRole("button", { name: /^Filter sessions/ }).tap();
-    const menu = page.getByRole("menu");
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole("menuitemcheckbox", { name: /^Dashboard/ })).toBeVisible();
+    const sheet = page.getByRole("dialog", { name: "Filter sessions" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("checkbox", { name: /^Dashboard/ })).toBeChecked();
     await expect(page.getByRole("button", { name: "Cancel" })).toBeHidden();
     await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
+    await expect(sheet).toBeHidden();
+    await clean.assertClean();
+  });
+
+  test("the search icon opens the field in the title row", async ({ page, clean }) => {
+    await page.goto("/sessions");
+    const title = page.getByRole("heading", { name: "Sessions", level: 1 });
+    await expect(title).toBeVisible();
+    await page.getByRole("button", { name: "Search sessions" }).tap();
+    const field = page.getByRole("textbox", { name: "Search sessions" });
+    await expect(field).toBeFocused();
+    await expect(title).toBeHidden();
+    await page.getByRole("button", { name: "Cancel" }).tap();
+    await expect(title).toBeVisible();
+    await expect(field).toBeHidden();
     await clean.assertClean();
   });
 });

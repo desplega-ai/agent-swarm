@@ -64,11 +64,16 @@ type McpServerConfig = {
   };
 };
 
+/**
+ * The worker-owned `/workspace/.mcp.json` wins over the project's, as in the
+ * session MCP config. The project file is used only when the workspace file
+ * has no swarm entry (a local setup with no `/workspace`).
+ */
 export async function loadHookMcpConfig(
   projectDir: string,
   workspaceDir = "/workspace",
 ): Promise<McpServerConfig | undefined> {
-  for (const configDir of new Set([projectDir, workspaceDir])) {
+  for (const configDir of new Set([workspaceDir, projectDir])) {
     try {
       const mcpFile = Bun.file(`${configDir}/.mcp.json`);
       if (!(await mcpFile.exists())) continue;

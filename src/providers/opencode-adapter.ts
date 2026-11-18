@@ -225,10 +225,8 @@ function readOpencodeSdkVersion(entry: string): string | undefined {
 }
 
 // A variable specifier keeps `bun build --compile` from bundling the SDK.
-async function loadOpencodeSdk(
-  env: Record<string, string | undefined> = process.env,
-): Promise<LoadedOpencodeSdk> {
-  const specifier = resolveOpencodeSdkSpecifier(env);
+async function loadOpencodeSdk(): Promise<LoadedOpencodeSdk> {
+  const specifier = resolveOpencodeSdkSpecifier();
   const sdk = (await import(specifier)) as OpencodeSdk;
   const entry = specifier.startsWith("/") ? specifier : Bun.resolveSync(specifier, import.meta.dir);
   return { sdk, version: readOpencodeSdkVersion(entry) };
@@ -1066,7 +1064,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       isLead: config.role === "lead",
       env: config.env,
     };
-    const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl(env);
+    const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
     let listTools: OpencodeToolLister | undefined;
     let onContext: ((event: OpencodeRequestContext) => void) | undefined;
     const billing = config.model.startsWith("openrouter/") ? new OpenRouterBilling() : undefined;

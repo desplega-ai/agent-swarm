@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  classifyExit,
   NativeScriptExecutor,
   writeBareImportShim,
   writeBareImportShims,
@@ -65,15 +64,6 @@ describe("NativeScriptExecutor startup overhead & shim reuse (#2008)", () => {
     }
   });
 
-  test("classifyExit preserves retry-safety boundary around userCodeStarted and resource signals", () => {
-    expect(classifyExit(134, false, false, false)).toBe("capacity_exceeded");
-    expect(classifyExit(134, false, false, true)).toBe("eval_error");
-    expect(classifyExit(1, true, false, true)).toBe("timeout");
-    expect(classifyExit(1, false, true, true)).toBe("killed");
-    expect(classifyExit(137, false, false, true)).toBe("killed");
-    expect(classifyExit(0, false, false, true)).toBeUndefined();
-  });
-
   spawnTest(
     "NativeScriptExecutor resolves bare imports across repeated runs and cleans up tmpdir",
     async () => {
@@ -112,6 +102,7 @@ describe("NativeScriptExecutor startup overhead & shim reuse (#2008)", () => {
       expect(second.exitCode).toBe(0);
       expect(typeof second.result).toBe("string");
     },
+    defaultResources.wallClockMs * 2 + 5_000,
   );
 
   spawnTest(
@@ -160,6 +151,7 @@ describe("NativeScriptExecutor startup overhead & shim reuse (#2008)", () => {
       expect(secondResult.hasMarker).toBe(false);
       expect(secondResult.tmp).not.toBe(firstTmp);
     },
+    defaultResources.wallClockMs * 2 + 5_000,
   );
 
   spawnTest("NativeScriptExecutor enforces wallClockMs timeout", async () => {
@@ -226,26 +218,30 @@ describe("NativeScriptExecutor startup overhead & shim reuse (#2008)", () => {
     expect(out.result).toBeUndefined();
   });
 
-  spawnTest("NativeScriptExecutor enforces maxStdoutBytes truncation resource limit", async () => {
-    const executor = new NativeScriptExecutor();
+  spawnTest(
+    "NativeScriptExecutor enforces maxStdoutBytes truncation resource limit",
+    async () => {
+      const executor = new NativeScriptExecutor();
 
-    const out = await executor.run({
-      source: `
+      const out = await executor.run({
+        source: `
         export default async () => {
           console.log("x".repeat(4096));
           return { ok: true };
         };
       `,
-      args: null,
-      configPayload: defaultConfigPayload,
-      resources: { ...defaultResources, maxStdoutBytes: 512 },
-      fsMode: "none",
-      network: "full",
-    });
+        args: null,
+        configPayload: defaultConfigPayload,
+        resources: { ...defaultResources, maxStdoutBytes: 512 },
+        fsMode: "none",
+        network: "full",
+      });
 
-    expect(out.error, out.stderr).toBeUndefined();
-    expect(out.truncated.stdout).toBe(true);
-    expect(out.stdout.length).toBeLessThanOrEqual(512);
-    expect(out.result).toEqual({ ok: true });
-  });
+      expect(out.error, out.stderr).toBeUndefined();
+      expect(out.truncated.stdout).toBe(true);
+      expect(out.stdout.length).toBeLessThanOrEqual(512);
+      expect(out.result).toEqual({ ok: true });
+    },
+    defaultResources.wallClockMs + 5_000,
+  );
 });

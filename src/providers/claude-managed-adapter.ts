@@ -169,6 +169,20 @@ export function normalizeRepoUrl(vcsRepo: string): string {
     throw new Error("claude-managed does not support GitHub Enterprise Server (GITHUB_URL is set)");
   }
   if (vcsRepo.startsWith("http://") || vcsRepo.startsWith("https://")) {
+    // MANAGED_GITHUB_TOKEN rides with this URL, so it must name a github.com repo.
+    const url = new URL(vcsRepo);
+    const isGitHubRepo =
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      /^\/[^/]+\/[^/]+?(\.git)?\/?$/.test(url.pathname);
+    if (!isGitHubRepo) {
+      throw new Error(
+        "claude-managed supports only https://github.com/<owner>/<repo> repository URLs",
+      );
+    }
     return vcsRepo;
   }
   return `https://github.com/${vcsRepo}`;

@@ -97,7 +97,11 @@ import {
   normalizeProviderKeyAliases,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
-import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
+import {
+  RATE_LIMIT_WINDOWS_EVENT,
+  type RateLimitWindowTelemetry,
+  resolveCodexCreditsExhaustedCooldownMs,
+} from "../utils/error-tracker.ts";
 import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
@@ -128,9 +132,15 @@ import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
   buildContextPreamble,
   buildResumeContextPreamble,
+  buildSessionFollowUpPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
-import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
+import {
+  createWindowStreamReporter,
+  reportCredentialOutcomeThenFinish,
+  reportKeyRateLimitWindows,
+  reportTerminalSessionWindows,
+} from "./credential-outcome-report.ts";
 import {
   type CredentialRefreshState,
   credentialFingerprint,
@@ -4494,6 +4504,10 @@ function providerEventAttributes(event: ProviderEvent): Attributes {
         "agentswarm.context.total_tokens": event.contextTotalTokens,
       };
     case "custom":
+      // A window snapshot can carry seat billing fields: keep it off the span.
+      if (event.name === RATE_LIMIT_WINDOWS_EVENT) {
+        return { "agentswarm.provider.event_name": event.name };
+      }
       return {
         "agentswarm.provider.event_name": event.name,
         "agentswarm.provider.event_data_preview": telemetryPreview(event.data),
@@ -5068,10 +5082,33 @@ export async function spawnProviderProcess(
     }
   }
 
+  // Mid-session window snapshots, throttled: the pool view stays fresh while a
+  // long session runs, and a crash loses less than the whole session.
+  const streamWindows =
+    credentialInfo && opts.apiUrl
+      ? createWindowStreamReporter({
+          post: (windows) =>
+            reportKeyRateLimitWindows(
+              opts.apiUrl,
+              opts.apiKey,
+              credentialInfo.keyType,
+              credentialInfo.keySuffix,
+              credentialInfo.keyIndex,
+              windows,
+              false,
+            ),
+        })
+      : undefined;
+
   session.onEvent((event) =>
     withSpanContext(sessionSpan, () => {
       sessionSpan.addEvent(`provider.${event.type}`, providerEventAttributes(event));
       switch (event.type) {
+        case "custom":
+          if (event.name === RATE_LIMIT_WINDOWS_EVENT && streamWindows) {
+            streamWindows(event.data as RateLimitWindowTelemetry);
+          }
+          break;
         case "session_init":
           providerSessionId = event.sessionId;
           pendingHarnessVariant = event.harnessVariant;
@@ -5979,8 +6016,18 @@ export async function checkCompletedProcesses(
           cancelledSignaled?.delete(taskId);
           // The server finished this task without the session (heartbeat sweep,
           // another writer). Its result stands: no finish call, and no credential
-          // or model outcome built from the abort this runner forced.
+          // or model outcome built from the abort this runner forced. The usage
+          // windows the session observed are provider facts, so they still go out.
           if (serverTerminalStatus) {
+            if (apiConfig) {
+              void reportTerminalSessionWindows({
+                apiUrl: apiConfig.apiUrl,
+                apiKey: apiConfig.apiKey,
+                credentialInfo,
+                serverTerminalStatus,
+                rateLimitWindows: result.rateLimitWindows,
+              });
+            }
             console.log(
               `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
             );
@@ -7419,14 +7466,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(resumePrompt).slice(0, 100)}...`);
 
         const metadata = {
           type: metadataType,
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: resumePrompt,
+          prompt: scrubSecrets(resumePrompt),
           trigger: "task_resumed",
           resumedTaskId: task.id,
         };
@@ -7863,8 +7910,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           "task" in trigger.task
             ? (trigger.task as { task: string; id?: string; contextKey?: string })
             : null;
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const taskObj = trigger.task as
+          | { parentTaskId?: string; taskType?: string; source?: string }
+          | undefined;
         const isResumeTask = taskObj?.taskType === "resume";
+        // A Sessions message to the Lead reads against the session's last Lead
+        // turns, not one parent: a fresh session per message keeps no transcript.
+        const isSessionFollowUp = isLead && !isResumeTask && taskObj?.source === "ui";
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
 
         // The prompt enrichment below needs several API reads that do not
@@ -7892,7 +7944,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           taskObj?.parentTaskId && apiUrl
             ? isResumeTask
               ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : isSessionFollowUp
+                ? buildSessionFollowUpPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+                : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
             : null,
           fetchProfileSyncRejectionBanner({
             ...apiConfig,
@@ -8117,7 +8171,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Iteration ${iteration} ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(triggerPrompt).slice(0, 100)}...`);
         if (effectiveCwd) {
           console.log(`[${role}] Working directory: ${effectiveCwd}`);
         }
@@ -8127,7 +8181,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: triggerPrompt,
+          prompt: scrubSecrets(triggerPrompt),
           trigger: trigger.type,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);

@@ -1,4 +1,5 @@
 import { scrubObject } from "../utils/secret-scrubber";
+import { DURABLE_OBJECT_BASE_JS } from "./durable-object-base";
 import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import {
@@ -12,6 +13,8 @@ import {
 } from "./sdk-allowlist";
 import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
+
+export const DurableObject = new Function(`${DURABLE_OBJECT_BASE_JS}; return DurableObject;`)();
 
 type BridgeRequest = {
   method: string;
@@ -93,8 +96,15 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       };
     }
     case "memory_rate": {
+      if (body.id && body.memoryId && body.id !== body.memoryId) {
+        throw new Error("id and memoryId must identify the same memory; supply only one.");
+      }
+      const memoryId = body.id ?? body.memoryId;
+      if (typeof memoryId !== "string" || !memoryId) {
+        throw new Error("Supply id (or its alias memoryId) from memory-search.");
+      }
       const event = {
-        memoryId: body.id,
+        memoryId,
         signal: body.useful === false ? -1 : 1,
         weight: 1,
         source: "explicit-self",

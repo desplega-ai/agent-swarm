@@ -1,6 +1,6 @@
 ---
 title: Playbooks
-description: Sixteen production playbooks for running an agent swarm — feature development, prospecting, content, UX audits, customer support, code health, code-health reports, DORA metrics, cross-source reports, self-documenting releases, open-prompt motion-graphics videos, email domain health monitoring, Open Oncall incident response with provider failover, PR review with small-model triage, a Linear delivery loop that drives issues to merged pull requests, and a Slack reply gate that keeps Lead out of thread banter. Real flows, real schedules, real agents.
+description: Eighteen production playbooks for running an agent swarm — feature development, prospecting, content, UX audits, customer support, code health, code-health reports, DORA metrics, cross-source reports, self-documenting releases, open-prompt motion-graphics videos, email domain health monitoring, Open Oncall incident response with provider failover, PR review with small-model triage, a Linear delivery loop that drives issues to merged pull requests, goals that iterate until a check passes, and a Slack reply gate that keeps Lead out of thread banter. Real flows, real schedules, real agents.
 agent:
   offer: false
 ---
@@ -27,7 +27,7 @@ Every skill referenced in a playbook is tagged with one of three sources:
 
 Agent links always point at the matching [official template](https://templates.agent-swarm.dev/official) so new swarm users can clone the template as a starting point.
 
-## The sixteen playbooks
+## The eighteen playbooks
 
 - [Feature Development](/docs/playbooks/feature-development) — Slack/Linear request → research → plan → implementation PR → review → merge.
 - [Lead Prospecting](/docs/playbooks/lead-prospecting) — Daily discovery + drafting + scheduling, with a human approval gate before sending.
@@ -49,6 +49,7 @@ Need lighter static scans too? The same Code Health playbook also notes `weekly-
 - [PR Review](/docs/playbooks/pr-review) — Clairic and Jev triage every hunk of a pull request against its claims, and one cheap agent reviews only the flagged batches, for about $0.02 a PR.
 - [Linear Delivery Loop](/docs/playbooks/linear-delivery-loop) — A five-minute tick moves each enrolled Linear issue one step: agents implement, fix CI and answer review, a reviewer agent approves the head commit, and a human approves before GitHub merges.
 - [Software Factory](/docs/playbooks/software-factory) — Label a GitHub issue and four agent stations classify, plan, implement and review it into a draft PR, with a red-CI fixer capped at two attempts and a daily backlog sweep.
+- [Goals](/docs/playbooks/goals) — State an objective and a check a script can decide; the swarm iterates until the check passes, holds the result, and reopens work when the metric regresses.
 - [Slack Reply Gate](/docs/playbooks/slack-reply-gate) — A catalog extension asks Jev or Clef whether a Slack thread reply is meant for Lead, and drops the wake-up when it is not. Shadow first, then enforce.
 
 [Small tech team operating model](/docs/guides/small-tech-team-operating-model) turns these playbooks into a rollout order and an ownership table for a team of twenty or fewer.

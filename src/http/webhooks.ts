@@ -94,6 +94,7 @@ import type { KapsoConfig } from "../integrations/kapso/config";
 import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
+import { hasPendingEventWait } from "../scheduler/deferred-task-waits";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { getPublicMcpBaseUrl } from "../utils/constants";
 import { resolveGitHubHost } from "../utils/github-host";
@@ -440,7 +441,13 @@ export async function handleWebhooks(
 
     // Early ack: events nothing handles (check_run, workflow_run, push, ...) change
     // no state, so skip the body read, HMAC and parse, and drain the body in the background.
-    if (typeof eventType === "string" && eventType && !GITHUB_VERIFIED_EVENTS.has(eventType)) {
+    // check_run is read only while some agent waits on vcs.pr.checks_done.
+    if (
+      typeof eventType === "string" &&
+      eventType &&
+      !GITHUB_VERIFIED_EVENTS.has(eventType) &&
+      !(eventType === "check_run" && (await hasPendingEventWait("github", "vcs.pr.checks_done")))
+    ) {
       countGithubIgnoredEvent(eventType);
       githubWebhook.respond(res, 200, { created: false });
       req.resume();
@@ -553,6 +560,17 @@ export async function handleWebhooks(
             repo: ic.repository.full_name,
             number: ic.issue?.number,
             action: ic.action,
+          });
+          break;
+        }
+        case "check_run": {
+          const cr = body as CheckRunEvent;
+          workflowEventBus.emit(`github.check_run.${cr.action}`, {
+            repo: cr.repository.full_name,
+            name: cr.check_run.name,
+            headSha: cr.check_run.check_suite?.head_sha,
+            conclusion: cr.check_run.conclusion,
+            pullRequests: (cr.check_run.pull_requests ?? []).map((pr) => pr.number),
           });
           break;
         }

@@ -40,22 +40,28 @@ describe("db-client basics", () => {
     // cannot begin executing until it commits. Wall time around the call
     // therefore includes that queueing — which is what made a caller-side
     // measurement report a responsive process as stalled for multiple seconds.
+    let holderDoneAt = 0;
     const holding = client.transaction(async (tx) => {
       await tx.run("INSERT INTO items (name) VALUES (?)", ["holder"]);
       await Bun.sleep(250);
+      holderDoneAt = performance.now();
     });
     const startedAt = performance.now();
     const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["queued"]);
-    const wallMs = performance.now() - startedAt;
+    const endedAt = performance.now();
     await holding;
 
     expect(timed.changes).toBe(1);
     // It really did wait out the holder...
-    expect(wallMs).toBeGreaterThan(200);
-    // ...but only the driver call itself is charged to the statement. One
-    // in-memory INSERT is microseconds; the bound is loose on purpose.
+    expect(endedAt - startedAt).toBeGreaterThan(200);
+    // ...but only the driver call itself is charged to the statement. The
+    // driver call cannot start before the holder's callback returns, so it
+    // fits inside [holderDoneAt, endedAt]; charging the queueing would exceed
+    // that window by the ~250ms wait. Not an absolute bound: a GC pause or a
+    // starved CI runner can make one INSERT take tens of ms.
+    expect(holderDoneAt).toBeGreaterThan(startedAt);
     expect(timed.executionMs).toBeGreaterThan(0);
-    expect(timed.executionMs).toBeLessThan(50);
+    expect(timed.executionMs).toBeLessThanOrEqual(endedAt - holderDoneAt);
   });
 
   test("get supports RETURNING", async () => {

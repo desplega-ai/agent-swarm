@@ -1,6 +1,6 @@
-import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { constants } from "node:fs";
+import { type FileHandle, lstat, mkdir, open, realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { WebClient } from "@slack/web-api";
 
 /**
@@ -9,9 +9,14 @@ import type { WebClient } from "@slack/web-api";
 export const MAX_FILE_SIZE = 1073741824;
 
 /**
+ * Directory that `slack-download-file` saves inside when there is no task.
+ */
+export const DOWNLOAD_ROOT = "/workspace/shared/downloads";
+
+/**
  * Default download directory for Slack files
  */
-export const DEFAULT_DOWNLOAD_DIR = `/workspace/shared/downloads/${process.env.AGENT_ID || "default"}/slack`;
+export const DEFAULT_DOWNLOAD_DIR = `${DOWNLOAD_ROOT}/${process.env.AGENT_ID || "default"}/slack`;
 
 /**
  * File object from Slack API (partial, commonly used fields)
@@ -69,8 +74,10 @@ export interface UploadFileResult {
 export interface DownloadFileOptions {
   /** The file object or URL to download from */
   file: SlackFile | string;
-  /** Where to save the file. If a directory, uses the original filename. */
+  /** Where to save the file. If a directory, uses the original filename. A relative path resolves from `root`. */
   savePath: string;
+  /** Directory the saved file must stay inside. */
+  root: string;
   /** Bot token for authorization */
   token: string;
 }
@@ -167,6 +174,113 @@ export async function uploadFile(
   }
 }
 
+/** A regular file opened for reading. The caller closes `handle`. */
+export interface OpenedFile {
+  handle: FileHandle;
+  size: number;
+}
+
+/**
+ * Open `path` for reading when its real path is inside one of `roots`.
+ * Refuses a symlink at the last part, a file that is not regular, a file over
+ * MAX_FILE_SIZE, and a path that leads out of the roots after the open (for
+ * example, a parent directory that changed into a symlink).
+ */
+export async function openFileInside(
+  path: string,
+  roots: string[],
+): Promise<
+  { success: true; file: OpenedFile } | { success: false; notFound: boolean; error: string }
+> {
+  const outside = {
+    success: false as const,
+    notFound: false,
+    error: `${path} must be a regular file inside ${roots.join(" or ")}.`,
+  };
+  const inRoots = (real: string) => realRoots.some((root) => isInside(root, real));
+  const realRoots: string[] = [];
+  for (const root of roots) {
+    const real = await realpath(root).catch(() => undefined);
+    // A root of "/" would allow every file.
+    if (real && real !== "/") realRoots.push(real);
+  }
+  const real = await realpath(path).catch(() => undefined);
+  if (!real) return { success: false, notFound: true, error: `File not found: ${path}` };
+  if (!inRoots(real)) return outside;
+
+  // O_NONBLOCK: opening a FIFO must not hang. O_NOFOLLOW: the last part is not a link.
+  let handle: FileHandle;
+  try {
+    handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return { success: false, notFound: false, error: `Cannot read file: ${path}` };
+  }
+  try {
+    const info = await handle.stat();
+    const again = await realpath(real).catch(() => undefined);
+    const now = again ? await stat(again).catch(() => undefined) : undefined;
+    if (
+      !info.isFile() ||
+      !again ||
+      !inRoots(again) ||
+      now?.dev !== info.dev ||
+      now?.ino !== info.ino
+    ) {
+      await handle.close();
+      return outside;
+    }
+    if (info.size > MAX_FILE_SIZE) {
+      await handle.close();
+      const sizeMB = Math.round(info.size / 1024 / 1024);
+      return {
+        success: false,
+        notFound: false,
+        error: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
+      };
+    }
+    return { success: true, file: { handle, size: info.size } };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+/**
+ * Upload an open file to Slack without reading it into memory. It runs the
+ * external upload in three steps (get the upload URL, send the bytes from the
+ * file descriptor, complete the upload), because `filesUploadV2` reads every
+ * input into one buffer. The file must stay open until this resolves.
+ */
+export async function uploadOpenFile(
+  client: WebClient,
+  file: OpenedFile,
+  options: Omit<UploadFileOptions, "file" | "channelId"> & { channelId: string },
+): Promise<UploadFileResult> {
+  const { filename, channelId, threadTs, initialComment, title } = options;
+  try {
+    const ticket = await client.files.getUploadURLExternal({ filename, length: file.size });
+    if (!ticket.upload_url || !ticket.file_id) {
+      return { success: false, error: "Slack returned no upload URL" };
+    }
+    const sent = await fetch(ticket.upload_url, {
+      method: "POST",
+      body: Bun.file(file.handle.fd).slice(0, file.size),
+    });
+    if (!sent.ok) {
+      return { success: false, error: `Upload failed with HTTP ${sent.status}` };
+    }
+    await client.files.completeUploadExternal({
+      files: [{ id: ticket.file_id, title: title || filename }],
+      channel_id: channelId,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
+      ...(initialComment ? { initial_comment: initialComment } : {}),
+    });
+    return { success: true, fileId: ticket.file_id };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /**
  * Download a file from Slack.
  *
@@ -174,7 +288,7 @@ export async function uploadFile(
  * @returns Download result with saved path or error
  */
 export async function downloadFile(options: DownloadFileOptions): Promise<DownloadFileResult> {
-  const { file, savePath, token } = options;
+  const { file, savePath, token, root } = options;
 
   try {
     // Get the download URL
@@ -187,15 +301,32 @@ export async function downloadFile(options: DownloadFileOptions): Promise<Downlo
       };
     }
 
+    // The bot token goes only to Slack's own file hosts.
+    if (!isSlackFileUrl(downloadUrl)) {
+      return { success: false, error: "The download URL is not a Slack file URL" };
+    }
+
     // Determine final save path
     let finalPath = savePath;
     if (typeof file !== "string" && (savePath.endsWith("/") || !savePath.includes("."))) {
       // savePath is a directory, append the filename
-      finalPath = savePath.endsWith("/") ? `${savePath}${file.name}` : `${savePath}/${file.name}`;
+      const name = basename(file.name);
+      finalPath = savePath.endsWith("/") ? `${savePath}${name}` : `${savePath}/${name}`;
+    }
+    finalPath = resolve(root, finalPath);
+    if (!isInside(resolve(root), finalPath)) {
+      return { success: false, error: `The save path must be inside ${root}` };
     }
 
-    // Ensure directory exists
+    // Ensure directory exists, then check that no symlink leads out of root
+    await mkdir(root, { recursive: true });
+    if ((await lstat(root)).isSymbolicLink()) {
+      return { success: false, error: `${root} must not be a symlink` };
+    }
     await mkdir(dirname(finalPath), { recursive: true });
+    if (!isInside(await realpath(root), await realpath(dirname(finalPath)))) {
+      return { success: false, error: `The save path must be inside ${root}` };
+    }
 
     // Download the file using fetch with Authorization header
     const response = await fetch(downloadUrl, {
@@ -220,25 +351,18 @@ export async function downloadFile(options: DownloadFileOptions): Promise<Downlo
       };
     }
 
-    const writer = createWriteStream(finalPath);
-    const reader = body.getReader();
-
+    // O_NOFOLLOW: never write through a symlink at the final path.
+    const handle = await open(
+      finalPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+    );
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        writer.write(value);
+      for await (const chunk of body) {
+        await handle.write(chunk);
       }
-      writer.end();
     } finally {
-      reader.releaseLock();
+      await handle.close();
     }
-
-    // Wait for write to complete
-    await new Promise<void>((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
-    });
 
     return {
       success: true,
@@ -251,6 +375,32 @@ export async function downloadFile(options: DownloadFileOptions): Promise<Downlo
       error: errorMsg,
     };
   }
+}
+
+/** True when `child` is `parent` itself or a path below it. */
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/**
+ * True for an https URL on a Slack host (`slack.com`, `slack-gov.com` and their
+ * subdomains), or on the origin of `SLACK_API_URL` when that override is set.
+ */
+function isSlackFileUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const apiUrl = process.env.SLACK_API_URL;
+  if (apiUrl && URL.canParse(apiUrl) && new URL(apiUrl).origin === parsed.origin) return true;
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname;
+  return ["slack.com", "slack-gov.com"].some(
+    (domain) => host === domain || host.endsWith(`.${domain}`),
+  );
 }
 
 /**

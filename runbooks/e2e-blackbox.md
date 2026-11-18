@@ -54,7 +54,7 @@ model" is a failure, not a pass.
 
 ```bash
 bun run e2e --strict                               # the whole contract in one process
-bun run e2e --shard 1/3 --json shard-1.json        # one CI shard (bands fixed by order)
+bun run e2e --shard 1/4 --json shard-1.json        # one CI shard (bands fixed by order)
 bun scripts/e2e/merge.ts --strict shard-*.json     # what the "E2E Contract" job runs on the shards
 bun run e2e                                        # same scenarios, report only, no gate
 bun run e2e --only <name>,<name>                   # a subset while debugging
@@ -126,7 +126,7 @@ once, so a surface covered in any shard counts. It applies `--strict` and the mi
 carries `flaky` and quarantined rows into its summary, and fails when a shard result is
 missing, duplicated or red. It needs no `bun install`. The Merge Gate needs both jobs.
 
-To reproduce a red merge locally, download the three `e2e-contract-shard-<i>` artifacts and
+To reproduce a red merge locally, download the four `e2e-contract-shard-<i>` artifacts and
 run the same `merge.ts` command on them. The nightly workflow runs unsharded, plus real
 harness legs.
 

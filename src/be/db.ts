@@ -145,6 +145,7 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type UserAvatar,
 } from "../types";
 import {
   CODEX_AUTH_FAILURE_BENCH_MS,
@@ -169,6 +170,7 @@ import {
   checkIdentityFieldBudget,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { keyPaceFromWindows, keyUsageFromWindows } from "../utils/key-usage";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { isEffectiveOutputSchema } from "../utils/output-schema";
 import {
@@ -265,6 +267,7 @@ import {
   WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
   WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
 } from "./db/user-references";
+import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
 import {
@@ -281,11 +284,14 @@ import {
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
+import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import {
+  invalidConfigKeyError,
+  isApiProcessControlEnvKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -372,6 +378,7 @@ export {
   pinWorkflowDefinition,
   toPinnedDefinition,
 } from "./db/workflow-run-definitions";
+export { getWorkflowsByEventName } from "./db/workflows/read";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -3790,7 +3797,7 @@ export async function cascadeFailDependents(
     if (seen.has(dep.id)) continue;
 
     const reason = `Blocked dependency ${parentId.slice(0, 8)} was ${parentStatus}`;
-    const failed = await failTask(dep.id, reason);
+    const failed = await failTask(dep.id, reason, { statusKind: "cascade" });
     if (failed) {
       results.push({
         taskId: failed.id,
@@ -6668,46 +6675,6 @@ export function maskSecrets(configs: SwarmConfig[]): SwarmConfig[] {
 }
 
 /**
- * Write config values to .env files on disk when `envPath` is set.
- * Groups configs by envPath, reads existing file, updates/adds matching keys, writes back.
- */
-function writeEnvFile(configs: SwarmConfig[]): void {
-  const { readFileSync, writeFileSync } = require("node:fs");
-
-  const byPath = new Map<string, SwarmConfig[]>();
-  for (const config of configs) {
-    if (!config.envPath) continue;
-    const existing = byPath.get(config.envPath) ?? [];
-    existing.push(config);
-    byPath.set(config.envPath, existing);
-  }
-
-  for (const [envPath, entries] of byPath) {
-    let lines: string[] = [];
-    try {
-      const content = readFileSync(envPath, "utf-8") as string;
-      lines = content.split("\n");
-    } catch {
-      // File doesn't exist yet, start empty
-    }
-
-    for (const entry of entries) {
-      const prefix = `${entry.key}=`;
-      const lineIndex = lines.findIndex((l) => l.startsWith(prefix));
-      const newLine = `${entry.key}=${entry.value}`;
-      if (lineIndex >= 0) {
-        lines[lineIndex] = newLine;
-      } else {
-        lines.push(newLine);
-      }
-    }
-
-    const output = `${lines.filter((l) => l !== "").join("\n")}\n`;
-    writeFileSync(envPath, output, "utf-8");
-  }
-}
-
-/**
  * List config entries with optional filters.
  */
 export async function getSwarmConfigs(filters?: {
@@ -6741,7 +6708,8 @@ export async function getSwarmConfigs(filters?: {
 /**
  * Global configs that are allowed to flow into process.env.
  * Reserved env-only keys are filtered in SQL before decryption so a corrupted
- * legacy reserved row cannot block startup or reload.
+ * legacy reserved row cannot block startup or reload. Process-control keys
+ * (`isApiProcessControlEnvKey`) and keys that cannot be env names stay out too.
  */
 export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
@@ -6750,7 +6718,14 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
          AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
        ORDER BY key ASC`,
   );
-  return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);
+  return rows
+    .filter(
+      (row) =>
+        !isInternalConfigKey(row.key) &&
+        !isApiProcessControlEnvKey(row.key) &&
+        !invalidConfigKeyError(row.key),
+    )
+    .map(rowToSwarmConfig);
 }
 
 /**
@@ -6804,6 +6779,8 @@ export async function upsertSwarmConfig(data: {
   /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
   exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
+  const keyError = invalidConfigKeyError(data.key);
+  if (keyError) throw new Error(keyError);
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
@@ -6888,17 +6865,8 @@ export async function upsertSwarmConfig(data: {
   if (!row) throw new Error("Failed to upsert swarm config");
 
   // rowToSwarmConfig transparently decrypts `storedValue` back to plaintext so
-  // the returned object (and downstream writeEnvFile) sees the original value.
+  // the returned object sees the original value.
   const config = rowToSwarmConfig(row);
-
-  // Write to envPath if set
-  if (config.envPath) {
-    try {
-      writeEnvFile([config]);
-    } catch (e) {
-      console.error(`Failed to write env file ${config.envPath}:`, e);
-    }
-  }
 
   if (config.isSecret) {
     registerStoredSecret(config.value, configSecretName(config.key));
@@ -7487,9 +7455,10 @@ export async function failPendingResumeIfUnclaimed(
   const now = new Date().toISOString();
   const scrubbedReason = scrubSecrets(failureReason);
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+    `UPDATE agent_tasks SET status = ?, statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
        WHERE id = ? AND status = 'pending' RETURNING *`,
-    [status, scrubbedReason, now, now, taskId],
+    // The resume budget ran out (failed) or the reaper escalated the pin (cancelled).
+    [status, status === "failed" ? "error" : "system", scrubbedReason, now, now, taskId],
   );
 
   if (row) {
@@ -7602,58 +7571,6 @@ export async function getRecentFailedCount(hours: number = 24): Promise<number> 
 // ============================================================================
 // Workflow CRUD
 // ============================================================================
-
-type WorkflowRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  enabled: number;
-  definition: string;
-  triggers: string;
-  cooldown: string | null;
-  input: string | null;
-  triggerSchema: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  dir: string | null;
-  vcs_repo: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-function rowToWorkflow(row: WorkflowRow): Workflow {
-  return {
-    id: row.id,
-    key: row.key,
-    name: row.name,
-    description: row.description ?? undefined,
-    enabled: row.enabled === 1,
-    definition: JSON.parse(row.definition) as WorkflowDefinition,
-    triggers: JSON.parse(row.triggers) as TriggerConfig[],
-    cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
-    input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
-    triggerSchema: row.triggerSchema
-      ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
-      : undefined,
-    params: JSON.parse(row.params) as Record<string, unknown>,
-    requiredParams: JSON.parse(row.requiredParams) as string[],
-    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
-    dir: row.dir ?? undefined,
-    vcsRepo: row.vcs_repo ?? undefined,
-    createdByAgentId: row.createdByAgentId ?? undefined,
-    updatedByAgentId: row.updatedByAgentId ?? undefined,
-    createdAt: normalizeDateRequired(row.createdAt),
-    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
-    createdBy: row.created_by ?? undefined,
-    updatedBy: row.updated_by ?? undefined,
-  };
-}
 
 export async function createWorkflow(
   data: {
@@ -11955,6 +11872,23 @@ export interface AvailableKeyIndicesResult {
   /** Rate-limited indices whose limit is a provider spend cap: no retry helps before it resets. */
   spendCappedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
+  /**
+   * Usage per pool position (`keyUsageFromWindows`: max of the live 5h and 7d
+   * utilization, 0 when unobserved or reset). Ranks admissible keys only.
+   */
+  keyUsage: number[];
+  /**
+   * Pace delta per pool position (`keyPaceFromWindows`: max of used minus elapsed
+   * share over the live 5h, 7d and `modelFamily` weekly windows, 0 when none).
+   * Ranks admissible keys under the `pace` strategy only.
+   */
+  keyPace: number[];
+  /**
+   * `in_progress` tasks per pool position whose `credentialKeyType` is this key
+   * type and whose `credentialKeySuffix` is the position's suffix. Breaks ties
+   * within the usage band; it never excludes a key.
+   */
+  activeSessions: number[];
 }
 
 /**
@@ -12087,6 +12021,44 @@ export async function getAvailableKeyIndices(
     availableIndices.push(i);
   }
 
+  // A position several rows apply to (one key pooled in several scopes) takes the highest reading.
+  const keyUsage = new Array<number>(totalKeys).fill(0);
+  // The most over-pace reading wins; a position with no live window reads 0.
+  const keyPace = new Array<number | undefined>(totalKeys).fill(undefined);
+  for (const row of rows) {
+    const windows = parseRateLimitWindowsJson(row.rateLimitWindows);
+    const usage = keyUsageFromWindows(windows, nowMs);
+    const pace = keyPaceFromWindows(windows, nowMs, modelFamily);
+    for (const i of positionsOf(row)) {
+      if (i < 0 || i >= totalKeys) continue;
+      keyUsage[i] = Math.max(keyUsage[i]!, usage);
+      if (pace !== undefined) keyPace[i] = Math.max(keyPace[i] ?? Number.NEGATIVE_INFINITY, pace);
+    }
+  }
+
+  // Running sessions per position. A task stamps its key suffix at session start
+  // (`recordKeyUsage`), so this moves within seconds, before any usage report.
+  // Without `keySuffixes`, a position takes the suffix of its stored row in scope.
+  const suffixAt = (i: number): string | undefined =>
+    suffixes
+      ? suffixes[i]
+      : rows.find((r) => r.keyIndex === i && r.scope === scope && r.scopeId === effectiveScopeId)
+          ?.keySuffix;
+  const positionSuffixes = Array.from({ length: totalKeys }, (_, i) => suffixAt(i));
+  const distinctSuffixes = [...new Set(positionSuffixes.filter((s): s is string => !!s))];
+  const sessionsBySuffix = new Map<string, number>();
+  if (distinctSuffixes.length > 0) {
+    const counts = await client.query<{ suffix: string; n: number }>(
+      `SELECT credentialKeySuffix AS suffix, COUNT(*) AS n FROM agent_tasks
+         WHERE status = 'in_progress' AND credentialKeyType = ?
+           AND credentialKeySuffix IN (${distinctSuffixes.map(() => "?").join(", ")})
+         GROUP BY credentialKeySuffix`,
+      [keyType, ...distinctSuffixes],
+    );
+    for (const { suffix, n } of counts) sessionsBySuffix.set(suffix, n);
+  }
+  const activeSessions = positionSuffixes.map((s) => (s ? (sessionsBySuffix.get(s) ?? 0) : 0));
+
   return {
     availableIndices,
     rejectedIndices,
@@ -12098,6 +12070,9 @@ export async function getAvailableKeyIndices(
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()
         : null,
     authFailureFence: Math.max(0, ...rows.map((r) => r.authFailureSeq)),
+    keyUsage,
+    keyPace: keyPace.map((pace) => pace ?? 0),
+    activeSessions,
   };
 }
 
@@ -12537,6 +12512,8 @@ type UserRow = {
   dailyBudgetUsd: number | null;
   status: string;
   mergedIntoUserId: string | null;
+  // Migration 344: JSON of UserAvatar. NULL = initials.
+  avatar: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -12555,6 +12532,7 @@ function rowToUser(row: UserRow): User {
     dailyBudgetUsd: row.dailyBudgetUsd ?? null,
     status: (row.status as "invited" | "active" | "suspended") ?? "active",
     ...(row.mergedIntoUserId ? { mergedIntoUserId: row.mergedIntoUserId } : {}),
+    avatar: parseUserAvatar(row.avatar),
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -12581,12 +12559,13 @@ export async function createUser(data: {
   metadata?: Record<string, unknown>;
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
+  avatar?: UserAvatar | null;
 }): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const row = await getDbClient().get<UserRow>(
-    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, avatar, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       data.name,
@@ -12599,6 +12578,7 @@ export async function createUser(data: {
       data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
       data.dailyBudgetUsd ?? null,
       data.status ?? "active",
+      data.avatar ? JSON.stringify(data.avatar) : null,
       now,
       now,
     ],
@@ -12622,6 +12602,8 @@ export async function updateUser(
     metadata: Record<string, unknown> | null;
     dailyBudgetUsd: number | null;
     status: "invited" | "active" | "suspended";
+    // null resets to initials.
+    avatar: UserAvatar | null;
   }>,
 ): Promise<User | null> {
   const sets: string[] = [];
@@ -12666,6 +12648,10 @@ export async function updateUser(
   if (data.status !== undefined) {
     sets.push("status = ?");
     params.push(data.status);
+  }
+  if (data.avatar !== undefined) {
+    sets.push("avatar = ?");
+    params.push(data.avatar === null ? null : JSON.stringify(data.avatar));
   }
 
   if (sets.length === 0) return getUserById(id);
@@ -14248,6 +14234,9 @@ export async function countKv(namespace: string, opts: { prefix?: string }): Pro
 // ─── Script Runs ────────────────────────────────────────────────────────────
 
 type ScriptRunRow = {
+  objectScriptId: string | null;
+  objectId: string | null;
+  objectMethod: string | null;
   id: string;
   agentId: string;
   scriptName: string | null;
@@ -14292,6 +14281,9 @@ function parseJsonColumn(value: string | null): unknown | undefined {
 
 function rowToScriptRun(row: ScriptRunRow): ScriptRun {
   return {
+    objectScriptId: row.objectScriptId ?? undefined,
+    objectId: row.objectId == null ? undefined : scrubSecrets(row.objectId),
+    objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
@@ -14391,6 +14383,9 @@ export async function recordInlineScriptRun(data: {
   source: string;
   args: unknown;
   scriptName?: string;
+  objectScriptId?: string;
+  objectId?: string;
+  objectMethod?: string;
   status: "completed" | "failed";
   output?: unknown;
   error?: ScrubbedText;
@@ -14413,8 +14408,8 @@ export async function recordInlineScriptRun(data: {
       `INSERT INTO script_runs
         (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
          startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
-         sourceStepId, parentScriptRunId)
-       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         sourceStepId, parentScriptRunId, objectScriptId, objectId, objectMethod)
+       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [
         data.id,
@@ -14435,6 +14430,9 @@ export async function recordInlineScriptRun(data: {
         // ctx.swarm.script_run) records that run and its workflow step.
         provenance?.sourceStepId ?? null,
         provenance?.sourceScriptRunId ?? null,
+        data.objectScriptId ?? null,
+        data.objectId ?? null,
+        data.objectMethod ?? null,
       ],
     );
     if (!row) throw new Error("Failed to record inline script run");

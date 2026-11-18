@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { getConfig } from "@/lib/config";
-import type { TaskAttachment } from "./types";
+import { TERMINAL_STATUSES } from "@/lib/task-activity";
+import type { AgentTaskStatus, TaskAttachment } from "./types";
 
 export interface FsProviderCapability {
   supported: boolean;
@@ -140,13 +142,30 @@ export function useFsCapabilities() {
   });
 }
 
-export function useTaskAttachments(taskId: string, initialData?: TaskAttachment[]) {
-  return useQuery({
+export function useTaskAttachments(
+  taskId: string,
+  initialData?: TaskAttachment[],
+  options?: { status?: AgentTaskStatus },
+) {
+  // A finished task stops the 10 s default poll: its file list is settled,
+  // and this tab's own upload or delete invalidates the key.
+  const terminal = options?.status ? TERMINAL_STATUSES.has(options.status) : false;
+  const query = useQuery({
     queryKey: ["task", taskId, "attachments"],
     queryFn: () => fetchTaskAttachments(taskId),
     enabled: !!taskId,
     initialData: initialData ? { attachments: initialData } : undefined,
+    ...(terminal ? { refetchInterval: false as const } : {}),
   });
+  // The files an agent stores with its final progress land as it finishes:
+  // read the list once more when the task turns terminal.
+  const { refetch } = query;
+  const wasTerminal = useRef(terminal);
+  useEffect(() => {
+    if (terminal && !wasTerminal.current && taskId) void refetch();
+    wasTerminal.current = terminal;
+  }, [terminal, taskId, refetch]);
+  return query;
 }
 
 export function useUploadAttachment(taskId: string) {

@@ -221,6 +221,18 @@ export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
   return route ? `${live}/file/~/${route}${agentFsFileLinkQuery(live)}` : null;
 }
 
+/**
+ * A people-facing link to an agent-fs file, on the base from
+ * {@link resolveAgentFsLinkBase} (`attachment`): Comb in the dashboard when
+ * `APP_URL` is set and Comb is on, else the live app. Null like
+ * {@link buildAgentFsLiveUrl}.
+ */
+export function buildAgentFsFileLink(opts: AgentFsFileRef): string | null {
+  const route = agentFsFileRoute(opts);
+  const base = resolveAgentFsLinkBase("attachment");
+  return route ? `${base}/file/~/${route}${agentFsFileLinkQuery(base)}` : null;
+}
+
 export interface CombState {
   enabled: boolean;
   /** An explicit `COMB_ENABLED` decided it; otherwise the unset default did. */

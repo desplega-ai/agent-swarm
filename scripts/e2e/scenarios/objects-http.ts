@@ -496,6 +496,24 @@ export const objectsHttp: Scenario = {
       // APP_URL also changes link targets, so it is reverted, and the revert awaited, before
       // the scenario goes on. Scenarios run one at a time on a stack.
       const appUrlId = await setConfig(ctx, "global", null, "APP_URL", `${appOrigin}/`);
+      // A global AGENT_FS_API_URL turns Comb on, so object links open the dashboard's file
+      // route (the board and sheet viewer) instead of the agent-fs live app.
+      const combUrlId = await setConfig(ctx, "global", null, "AGENT_FS_API_URL", stub.origin);
+      const boardLink = async () =>
+        asRecord(asRecord((await ctx.api("GET", `/api/objects/${boardId}`, asPerson)).json).object)
+          .link;
+      const awaitLink = async (onDashboard: boolean) => {
+        let link = await boardLink();
+        const deadline = Date.now() + 10_000;
+        while (
+          (typeof link === "string" && link.startsWith(`${appOrigin}/file/~/`)) !== onDashboard &&
+          Date.now() < deadline
+        ) {
+          await Bun.sleep(100);
+          link = await boardLink();
+        }
+        return link;
+      };
       const directives = async () => {
         const served = await ctx.api("GET", `/p/${authed}`, {
           apiKey: null,
@@ -522,11 +540,25 @@ export const objectsHttp: Scenario = {
         return current;
       };
       let csp: Map<string, string[]>;
+      let dashboardLink: unknown;
       try {
         csp = await awaitCsp(true);
+        dashboardLink = await awaitLink(true);
       } finally {
         await ctx.api("DELETE", `/api/config/${appUrlId}`);
+        await ctx.api("DELETE", `/api/config/${combUrlId}`);
       }
+      expect(
+        dashboardLink === `${appOrigin}/file/~/${org}/${drive}/${boardPath}`,
+        `with APP_URL and Comb on, an object links to the dashboard file route: ${dashboardLink}`,
+      );
+      const liveLink = await awaitLink(false);
+      expect(
+        typeof liveLink === "string" &&
+          !liveLink.startsWith(appOrigin) &&
+          liveLink.endsWith(boardPath),
+        `the revert puts the link back on the live app: ${liveLink}`,
+      );
       expect(
         !(await awaitCsp(false)).get("script-src")?.includes(appOrigin),
         "the APP_URL revert reached the page CSP",

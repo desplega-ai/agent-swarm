@@ -1,7 +1,7 @@
 // Which Comb viewer opens a file. The extension lists come from agent-fs
 // `live/src/components/viewers/FileViewer.tsx` (v0.14.0) and `live/src/lib/audio.ts`
-// (v0.18.5). Keep them in sync. Comb adds `htm` (text) and the OOXML
-// extensions (binary).
+// (v0.18.5). Keep them in sync. Comb adds `htm` (text), the OOXML
+// extensions (binary), and swarm boards and sheets (`OBJECT_SUFFIXES`).
 
 export type FileKind =
   | "markdown"
@@ -11,7 +11,43 @@ export type FileKind =
   | "audio"
   | "pdf"
   | "table"
+  | "board"
+  | "sheet"
   | "fallback";
+
+/**
+ * Swarm boards and sheets by file suffix, as `PRIMITIVE_KINDS` in
+ * `src/be/primitives/objects.ts` names them. Checked before the extension, so
+ * `.sheet.json` is a sheet and not JSON text.
+ */
+export const OBJECT_SUFFIXES = [
+  [".excalidraw", "board"],
+  [".sheet.json", "sheet"],
+] as const satisfies readonly (readonly [string, FileKind])[];
+
+/** `board` or `sheet` for a swarm object file name, else null. */
+export function objectKindFor(name: string): "board" | "sheet" | null {
+  const lower = name.toLowerCase();
+  for (const [suffix, kind] of OBJECT_SUFFIXES) if (lower.endsWith(suffix)) return kind;
+  return null;
+}
+
+/**
+ * The object id (`swarm.id`) a board or sheet file carries, or null when the
+ * text is not JSON or has none (a stock Excalidraw save drops it until the
+ * swarm reindexes the file).
+ */
+export function swarmObjectId(text: string): string | null {
+  try {
+    const json: unknown = JSON.parse(text);
+    if (!json || typeof json !== "object") return null;
+    const swarm = (json as { swarm?: unknown }).swarm;
+    const id = swarm && typeof swarm === "object" ? (swarm as { id?: unknown }).id : undefined;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 export const IMAGE_EXTS: ReadonlySet<string> = new Set([
   "png",
@@ -202,13 +238,16 @@ export function looksLikeText(text: string): boolean {
 }
 
 /**
- * The viewer kind for a file name. HTML is `text`: the text viewer shows the
+ * The viewer kind for a file name. A swarm board or sheet (`OBJECT_SUFFIXES`)
+ * opens in the object viewer. HTML is `text`: the text viewer shows the
  * source, and the HTML viewer adds a sandboxed preview next to it. An unknown
  * extension opens as audio for an `audio/*` content type, and as text when
  * agent-fs reports a text content type, or when `needsSniff` holds and the
  * file (`size` from `stat`) is small. The text viewer then checks the bytes.
  */
 export function getFileKind(name: string, contentType?: string, size?: number): FileKind {
+  const objectKind = objectKindFor(name);
+  if (objectKind) return objectKind;
   const ext = fileExtension(name);
   if (ext === "md" || ext === "mdx") return "markdown";
   if (ext === "csv" || ext === "tsv") return "table";

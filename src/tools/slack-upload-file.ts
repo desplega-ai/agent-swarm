@@ -1,10 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
+import { getAgentById, getInboxMessageById, getSwarmRepoById, getTaskById } from "@/be/db";
+import { vcsRepoId } from "@/be/model-profile-check";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
-import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
+import {
+  MAX_FILE_SIZE,
+  type OpenedFile,
+  openFileInside,
+  type UploadFileResult,
+  uploadFile,
+  uploadOpenFile,
+} from "@/slack/files";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 /**
@@ -26,77 +34,77 @@ function resolveTaskUploadThreadTs(
 }
 
 /**
- * Resolves a file path to an absolute path and checks if it exists.
+ * Directories that a `filePath` upload may read from: /workspace, plus the working
+ * directory of each given task that the agent runs or created (the task `dir` and
+ * the clone path of its registered repo). A host-run API has no /workspace, so
+ * there the task directory is the only root.
+ */
+async function uploadRoots(agentId: string, taskIds: (string | undefined)[]): Promise<string[]> {
+  const roots = [WORKSPACE_DIR];
+  for (const id of new Set(taskIds.filter((t): t is string => !!t))) {
+    const task = await getTaskById(id);
+    if (!task || (task.agentId !== agentId && task.creatorAgentId !== agentId)) continue;
+    if (task.dir) roots.push(task.dir);
+    const repoId = await vcsRepoId(task.vcsRepo);
+    const repo = repoId ? await getSwarmRepoById(repoId) : null;
+    if (repo) roots.push(repo.clonePath);
+  }
+  return roots;
+}
+
+/**
+ * Opens the file that `filePath` names, read on the API server's filesystem.
  *
- * NOTE: existence is checked on the API server's filesystem (where this tool
+ * NOTE: the file is read on the API server's filesystem (where this tool
  * runs), NOT the caller's. Worker/lead containers have their own `/tmp` that
  * the API server cannot see — the only volume mounted on both is
  * `/workspace/shared/`. Files outside `/workspace/shared/` must be passed
  * inline via the `content` (base64) param instead of `filePath`.
  *
- * Handles several common patterns:
+ * Candidates, in order:
  * 1. Relative paths (e.g., "shared/file.png") -> resolved from /workspace
- * 2. Absolute paths under /workspace (e.g., "/workspace/shared/file.png") -> used as-is
- * 3. Absolute paths that look like they should be under /workspace (e.g., "/tmp/file.png")
- *    -> tries to find at /workspace/tmp/file.png if not found at original path
+ * 2. Absolute paths (e.g., "/workspace/shared/file.png") -> used as-is
+ * 3. Absolute paths outside /workspace (e.g., "/tmp/file.png") -> also tried as
+ *    /workspace/tmp/file.png
  *
- * @param filePath - The path provided by the user
- * @returns Object with resolved path and exists flag, or error message
+ * The first candidate whose real path is a regular file inside `roots` wins.
  */
-async function resolveAndValidateFilePath(
+async function openUploadFile(
   filePath: string,
+  roots: string[],
 ): Promise<
-  { success: true; resolvedPath: string } | { success: false; error: string; triedPaths: string[] }
+  | { success: true; file: OpenedFile; resolvedPath: string }
+  | { success: false; notFound: boolean; error: string; triedPaths: string[] }
 > {
-  const triedPaths: string[] = [];
-
-  // Helper to check if file exists
-  const fileExists = async (path: string): Promise<boolean> => {
-    try {
-      const bunFile = Bun.file(path);
-      return await bunFile.exists();
-    } catch {
-      return false;
-    }
-  };
-
-  // Case 1: Relative path - resolve from /workspace
-  if (!filePath.startsWith("/")) {
-    const absolutePath = `${WORKSPACE_DIR}/${filePath}`;
-    triedPaths.push(absolutePath);
-    if (await fileExists(absolutePath)) {
-      return { success: true, resolvedPath: absolutePath };
-    }
-    return {
-      success: false,
-      error: `File not found. Relative paths are resolved from ${WORKSPACE_DIR}.`,
-      triedPaths,
-    };
+  const triedPaths = filePath.startsWith("/")
+    ? [
+        filePath,
+        ...(filePath.startsWith(`${WORKSPACE_DIR}/`) ? [] : [`${WORKSPACE_DIR}${filePath}`]),
+      ]
+    : [`${WORKSPACE_DIR}/${filePath}`];
+  let refusal: string | undefined;
+  for (const candidate of triedPaths) {
+    const opened = await openFileInside(candidate, roots);
+    if (opened.success) return { success: true, file: opened.file, resolvedPath: candidate };
+    if (!opened.notFound) refusal ??= opened.error;
   }
-
-  // Case 2: Absolute path - try it directly first
-  triedPaths.push(filePath);
-  if (await fileExists(filePath)) {
-    return { success: true, resolvedPath: filePath };
-  }
-
-  // Case 3: Absolute path didn't exist - try resolving under /workspace
-  // This helps with paths like /tmp/file.png -> /workspace/tmp/file.png
-  if (!filePath.startsWith(WORKSPACE_DIR)) {
-    // Remove leading slash and resolve from workspace
-    const relativePath = filePath.slice(1); // "/tmp/file.png" -> "tmp/file.png"
-    const workspacePath = `${WORKSPACE_DIR}/${relativePath}`;
-    triedPaths.push(workspacePath);
-    if (await fileExists(workspacePath)) {
-      return { success: true, resolvedPath: workspacePath };
-    }
-  }
-
+  if (refusal) return { success: false, notFound: false, error: refusal, triedPaths };
   return {
     success: false,
-    error: `File not found at any of the attempted locations.`,
+    notFound: true,
+    error: filePath.startsWith("/")
+      ? "File not found at any of the attempted locations."
+      : `File not found. Relative paths are resolved from ${WORKSPACE_DIR}.`,
     triedPaths,
   };
+}
+
+function uploadResult(result: UploadFileResult) {
+  if (!result.success) {
+    return toolErr(`Failed to upload file: ${result.error}`);
+  }
+  const successMsg = `File uploaded successfully${result.fileId ? ` (ID: ${result.fileId})` : ""}.`;
+  return toolOk(successMsg, { data: { fileId: result.fileId } });
 }
 
 export const registerSlackUploadFileTool = (server: McpServer) => {
@@ -133,6 +141,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
             "Path to the file to upload. Either filePath OR content must be provided. " +
               "IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. " +
               "Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. " +
+              "The file must be a regular file inside /workspace or the working directory of your current task. " +
               "Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). " +
               "For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead.",
           ),
@@ -243,14 +252,12 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         return toolErr("filename is required when using base64 content upload.");
       }
 
-      let fileToUpload: string | Buffer;
-      let actualFilename: string;
-
       if (filePath) {
-        // Resolve and validate the file path
-        const pathResult = await resolveAndValidateFilePath(filePath);
+        const roots = await uploadRoots(agent.id, [taskId, requestInfo.sourceTaskId]);
+        const pathResult = await openUploadFile(filePath, roots);
 
         if (!pathResult.success) {
+          if (!pathResult.notFound) return toolErr(pathResult.error);
           const triedPathsList = pathResult.triedPaths.map((p) => `  - ${p}`).join("\n");
           const errorMsg =
             `${pathResult.error}\n` +
@@ -264,48 +271,44 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           return toolErr(errorMsg);
         }
 
-        const resolvedPath = pathResult.resolvedPath;
-        const bunFile = Bun.file(resolvedPath);
-        const fileSize = bunFile.size;
-
-        if (fileSize > MAX_FILE_SIZE) {
-          const sizeMB = Math.round(fileSize / 1024 / 1024);
-          return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
-        }
-
-        fileToUpload = resolvedPath;
-        actualFilename = filename || resolvedPath.split("/").pop() || "file";
-      } else {
-        // Base64 content mode: decode and check size
+        // The handle stays open until the upload has sent every byte.
         try {
-          fileToUpload = Buffer.from(content!, "base64");
-        } catch {
-          return toolErr("Invalid base64 content.");
+          return uploadResult(
+            await uploadOpenFile(app.client, pathResult.file, {
+              filename: filename || pathResult.resolvedPath.split("/").pop() || "file",
+              channelId: slackChannelId,
+              threadTs: slackThreadTs,
+              initialComment,
+            }),
+          );
+        } finally {
+          await pathResult.file.handle.close();
         }
+      }
 
-        if (fileToUpload.length > MAX_FILE_SIZE) {
-          const sizeMB = Math.round(fileToUpload.length / 1024 / 1024);
-          return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
-        }
+      // Base64 content mode: decode and check size
+      let fileToUpload: Buffer;
+      try {
+        fileToUpload = Buffer.from(content!, "base64");
+      } catch {
+        return toolErr("Invalid base64 content.");
+      }
 
-        actualFilename = filename!;
+      if (fileToUpload.length > MAX_FILE_SIZE) {
+        const sizeMB = Math.round(fileToUpload.length / 1024 / 1024);
+        return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
       }
 
       try {
-        const result = await uploadFile(app.client, {
-          file: fileToUpload,
-          filename: actualFilename,
-          channelId: slackChannelId,
-          threadTs: slackThreadTs,
-          initialComment,
-        });
-
-        if (!result.success) {
-          return toolErr(`Failed to upload file: ${result.error}`);
-        }
-
-        const successMsg = `File uploaded successfully${result.fileId ? ` (ID: ${result.fileId})` : ""}.`;
-        return toolOk(successMsg, { data: { fileId: result.fileId } });
+        return uploadResult(
+          await uploadFile(app.client, {
+            file: fileToUpload,
+            filename: filename!,
+            channelId: slackChannelId,
+            threadTs: slackThreadTs,
+            initialComment,
+          }),
+        );
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         return toolErr(`Failed to upload file: ${errorMsg}`);

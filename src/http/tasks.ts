@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   backfillSupersedeTaskResumeTaskId,
@@ -97,12 +97,14 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
   splitLegacyModelAlias,
   TaskAttachmentSchema,
+  TaskStatusKindSchema,
 } from "../types";
 import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { readsRepoSecrets } from "./config";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
@@ -172,6 +174,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
+  statusKind: true,
   peakContextPercent: true,
   totalCostUsd: true,
 });
@@ -270,6 +273,9 @@ const listTasks = route({
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
     status: z.string().optional(),
+    statusKind: TaskStatusKindSchema.optional().describe(
+      "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts.",
+    ),
     agentId: z.string().optional(),
     scheduleId: z.string().optional(),
     /** Only tasks of this workflow run (indexed; independent of fleet size). */
@@ -1095,6 +1101,7 @@ export async function handleTasks(
     });
     const filters = {
       status,
+      statusKind: parsed.query.statusKind,
       agentId: parsed.query.agentId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       workflowRunId: parsed.query.workflowRunId,
@@ -1240,7 +1247,7 @@ export async function handleTasks(
       const inheritedKey = parentTask?.key;
       const requestedKey = parsed.body.key ?? inheritedKey;
       assetKey = requestedKey
-        ? await authorizeAssetKeyWrite(requestedKey, trustedUserId)
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, requestedKey, trustedUserId)
         : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
@@ -1395,16 +1402,36 @@ export async function handleTasks(
   if (updateSession.match(req.method, pathSegments)) {
     const parsed = await updateSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await updateTaskClaudeSessionId(
-      parsed.params.id,
-      parsed.body.claudeSessionId,
-      parsed.body.provider,
-      parsed.body.providerMeta,
-      parsed.body.model,
-      "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
-      "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
-      "effort" in parsed.body ? parsed.body.effort : undefined,
-    );
+    const auth = getRequestAuth(req);
+    // An agent session token writes only its own task's session: a task token
+    // its bound task, any other agent token a task its agent holds. The holder is
+    // the offeree while a task is offered or in review (its review session), else
+    // strictly the assignee, so a stale offer never grants a write.
+    // Check and write in one transaction so a reassignment cannot slip between.
+    const task = await getDbClient().transaction(async () => {
+      if (auth?.kind === "agent") {
+        if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
+        const existing = await getTaskById(parsed.params.id);
+        if (!existing) return null;
+        const offerOpen = existing.status === "offered" || existing.status === "reviewing";
+        const holder = offerOpen ? existing.offeredTo : existing.agentId;
+        if (holder !== auth.agentId) return "forbidden";
+      }
+      return await updateTaskClaudeSessionId(
+        parsed.params.id,
+        parsed.body.claudeSessionId,
+        parsed.body.provider,
+        parsed.body.providerMeta,
+        parsed.body.model,
+        "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
+        "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
+        "effort" in parsed.body ? parsed.body.effort : undefined,
+      );
+    });
+    if (task === "forbidden") {
+      jsonError(res, "Task belongs to another token agent", 403);
+      return true;
+    }
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1466,7 +1493,12 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = await cancelTask(parsed.params.id, reason);
+    // Who cancelled comes from the resolved principal, never the body: an agent
+    // (X-Agent-ID, including ctx.swarm.task_cancel) records `agent`, as MCP
+    // cancel-task does; the dashboard and operator record `user`.
+    const cancelledTask = await cancelTask(parsed.params.id, reason, {
+      statusKind: principal.kind === "agent" ? "agent" : "user",
+    });
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -1957,21 +1989,25 @@ export async function handleTasks(
           const result = await completeTask(
             parsed.params.id,
             parsed.body.output || "Completed by runner wrapper (no explicit output)",
+            { statusKind: "runner" },
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
           }
           updatedTask = result;
         } else if (parsed.body.status === "skipped") {
-          const result = await skipTask(parsed.params.id, skipReason!);
+          const result = await skipTask(parsed.params.id, skipReason!, { statusKind: "runner" });
           if (!result) {
             return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
+          // The runner posts `failed` for a crash, a non-zero exit, a provider
+          // error or an output-schema parse failure: none is the agent's call.
           const result = await failTask(
             parsed.params.id,
             parsed.body.failureReason || "Process exited without explicit completion",
+            { statusKind: "error" },
           );
           if (!result) {
             return { error: "Failed to mark task as failed", status: 500 };
@@ -2402,7 +2438,9 @@ export async function handleTasks(
     // `task.failed`. Once it queues the step's retry it moves the task to
     // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
-      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON, {
+        statusKind: "error",
+      });
       if (task.agentId) {
         await updateAgentStatusFromCapacity(task.agentId);
       }

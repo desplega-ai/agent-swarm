@@ -1,8 +1,9 @@
+import { basename } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
-import { DEFAULT_DOWNLOAD_DIR, downloadFile, getFileInfo } from "@/slack/files";
+import { DEFAULT_DOWNLOAD_DIR, DOWNLOAD_ROOT, downloadFile, getFileInfo } from "@/slack/files";
 import { attachableTask, attachSlackFilesForAgent } from "@/slack/inbound-files";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -17,7 +18,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
     {
       title: "Download file from Slack",
       description:
-        "Download a file from Slack by file ID or URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved on the API server's disk, which your container usually can't read.",
+        "Download a file from Slack by file ID or Slack file URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved under /workspace/shared/downloads/ on the API server's disk, which your container usually can't read.",
       // Not read-only: from a task it uploads the file and records an attachment.
       annotations: { readOnlyHint: false, openWorldHint: true },
 
@@ -30,7 +31,9 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
           .string()
           .url()
           .optional()
-          .describe("Direct URL to download (url_private_download from a file object)."),
+          .describe(
+            "Slack file URL (url_private_download or url_private from a file object). The file ID in it is looked up in Slack.",
+          ),
         taskId: z
           .uuid()
           .optional()
@@ -41,7 +44,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
           .string()
           .optional()
           .describe(
-            "Only without a task: where to save the file on the API server (directory or full path). Defaults to /workspace/shared/downloads/{agentId}/slack/.",
+            "Only without a task: where to save the file on the API server (directory or full path). Must be inside /workspace/shared/downloads/; a relative path resolves from there. Defaults to /workspace/shared/downloads/{agentId}/slack/.",
           ),
         filename: z
           .string()
@@ -104,14 +107,12 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         if (fileId && !info) {
           return toolErr(`File not found: ${fileId}`);
         }
-        const fileInfo = info
-          ? { id: info.id, name: info.name, mimetype: info.mimetype, size: info.size }
-          : undefined;
+        if (!info) {
+          return toolErr("Could not identify the Slack file in that URL; pass fileId instead.");
+        }
+        const fileInfo = { id: info.id, name: info.name, mimetype: info.mimetype, size: info.size };
 
         if (task) {
-          if (!info) {
-            return toolErr("Could not identify the Slack file in that URL; pass fileId instead.");
-          }
           const outcome = (await attachSlackFilesForAgent(app.client, task, [info], agent.id)).get(
             info.id,
           );
@@ -128,7 +129,8 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
           );
         }
 
-        const downloadUrl = info?.url_private_download ?? url;
+        // Always the URL Slack returned for the file, never the caller's URL.
+        const downloadUrl = info.url_private_download;
         if (!downloadUrl) {
           return toolErr("No download URL available.");
         }
@@ -138,7 +140,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
 
         // If it's a directory path, append the filename
         if (finalSavePath.endsWith("/") || !finalSavePath.includes(".")) {
-          const actualFilename = filename || fileInfo?.name || `file_${Date.now()}`;
+          const actualFilename = basename(filename || info.name || `file_${Date.now()}`);
           finalSavePath = finalSavePath.endsWith("/")
             ? `${finalSavePath}${actualFilename}`
             : `${finalSavePath}/${actualFilename}`;
@@ -148,6 +150,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         const result = await downloadFile({
           file: downloadUrl,
           savePath: finalSavePath,
+          root: DOWNLOAD_ROOT,
           token,
         });
 

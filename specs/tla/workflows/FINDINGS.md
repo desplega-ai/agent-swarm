@@ -20,6 +20,7 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Open counterexamples on `main` @ `77039db51` (CX15 from #2364) | **1**, no repro test yet |
 | Partly closed by #3019 (CX8 before the poller claims the retry; repro `CX8: the join does not fire while a branch is pending its retry`) | **1** |
 | Open counterexamples on `main` @ `1f28a0c91` (CX17, CX18, pre-existing, found by the new `JoinWaitsForRetry`) | **2**, no repro test yet |
+| Closed by #3215 (the `Long.cfg` crash trace: a crash between the task insert and the park dispatched a second task) | **1** |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
@@ -1104,3 +1105,77 @@ regressions): 121 pass / 0 fail / 0 `test.failing`.
 | `Probe-join-retry.cfg` / control (new) | holds / found | 3,026,421 / 1,842 | - / 19 |
 | `Probe-join-retry-user.cfg` (new) | CX17 found | 1,147,687 | 31 |
 | `Probe-join-retry-sweep.cfg` (new) | CX18 found | 27,415,837 | 42 |
+
+## Sync with #3215 (`main` @ `cf2c8422e`)
+
+#3215 changes one guard: `executeStep`'s claim now re-claims an orphaned `running` `agent-task`
+row (latest row, not in `executingSteps`) the way it already re-claimed a `sub-workflow` row
+(`engine.ts:913-928`). The executor finds the task the attempt already inserted
+(`getTaskByWorkflowRunStepId`) and parks on it instead of a recovery walk inserting a second row
+and a second task. The spec models this as F13 `FixTaskReclaim`: the `XDedup` re-claim for
+agent-task branches, `TaskStart` / `XTaskIns` in `XChild`, and the same bound-task read in the
+poller's dispatch (`P5`, then `P5i`). The read and the insert are separate awaits, so a row can
+get a second task (`dup`, counted twice by `AtMostOneExecuting`). F13 is `TRUE` in every config
+with F8 on. New `Probe-task-crash.cfg` (holds) and `Probe-task-crash-control.cfg` (F13 off, finds
+the pre-#3215 second task) are the agent-task copies of `Probe-child-run-crash*.cfg`.
+
+- The `Long.cfg` crash trace (`AtMostOneExecuting`, open since the first run, "A fourth trace
+  needs a crash" above) is closed. `Long.cfg` now finds CX8, as `Workflows.cfg` does.
+- CX12 stays open. `Probe-task-retry.cfg` and `Probe-task-skip-sweep.cfg` still find it in its
+  original shape: the recovery walk inserts a new row while the poller retries the old one.
+  `Probe-child-run-control.cfg` (agent-task branches) finds a new shape #3215 makes reachable. A
+  recovery walk that passed `H3` before the poller's `P4` re-claims the row the poller is retrying
+  (the poller does not add to `executingSteps`). Both executor calls read no bound task, and both
+  insert one: two tasks on one row, since `agent_tasks.workflowRunStepId` has no unique index.
+  Trace: `… ER → P1 → P2 → P3 → P4 → P5 → WPick → XDedup (re-claim) → XChild → P5i → XTaskIns`.
+  Same root as CX12 (the sweep's walk is not fenced against the poller). No repro test yet.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 8` for
+`Probe-join-retry-sweep.cfg`). Configs with F13 off (calibration, `Fix-*`, `Ctl-*`,
+`Probe-cancel-finalize`, `Probe-input-await`, `Probe-child-run-crash-control`) keep their verdicts,
+and the ones that hold keep their distinct-state counts. `ChildRunResume` configs where F13 has no
+effect keep theirs too (`Probe-child-run.cfg` 7,825,516). Configs with F13 on that hold grow
+slightly, from the split poller dispatch. `src/tests/workflow-tla-races.test.ts` +
+`workflow-sub-workflow` + `workflow-cascade-cancel` + `workflow-agent-task-retry` +
+`workflow-finalization-races` + `workflow-parallel-park` + `workflow-retry-v2`: 121 pass / 0 fail /
+0 `test.failing`. #3215's e2e scenario `workflow-agent-task-crash-window` passes.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 31,118 | 25 |
+| `Long.cfg` | `JoinWaitsForBranches` violated (CX8; the crash trace is closed by F13) | 2,497,888 | 27 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 283 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,553 / 2,929 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,243 / 2,249 / 30,427 / 7,170 / 311 / 872 | 22 / 19 / 29 / 29 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,046 | - / 20 |
+| `Fix-CX13.cfg` / `Probe-cancel-finalize.cfg` | holds / CX13 found | 3,937 / 627 | - / 17 |
+| `Probe-task-retry.cfg` | CX12 found | 1,757,674 | 38 |
+| `Probe-input-await.cfg` | CX6 found | 315 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,261 / 17,396 | 19 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found (two tasks on one row) | 7,825,516 / 796,311 | - / 39 |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,264 | 18 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 10,704 / 531 | - / 18 |
+| `Probe-task-crash.cfg` / control (new) | holds / #3215 bug found | 4,584 / 471 | - / 18 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 7,795 | 36 |
+| `Probe-task-skip.cfg` | holds | 202,234 | - |
+| `Probe-task-skip-sweep.cfg` | CX12 found | 2,497,876 | 38 |
+| `Probe-successor-debt.cfg` / control | holds / CX16 found | 337,096 / 425 | - / 18 |
+| `Probe-join-retry.cfg` / control | holds / found | 3,014,429 / 1,509 | - / 19 |
+| `Probe-join-retry-user.cfg` | CX17 found | 1,120,354 | 33 |
+| `Probe-join-retry-sweep.cfg` | CX18 found | 16,592,523 | 42 |
+
+## Sync with #3258 and #3303 (`main` @ `975280ca9`)
+
+Neither PR changes a modelled guard, ordering or write path, so the `.tla` and `.cfg` files are
+unchanged. #3258 only rewrites retry-validation tests. #3303 adds a `statusKind` column to every
+task terminal write; the workflow cancel paths (`cancelWorkflowRunRows`, `cancelWorkflowRunStep`)
+pass `statusKind: "workflow"` to `cancelTask`, whose `WHERE` is unchanged, and no modelled guard
+reads the column. Its three added lines in `cancelWorkflowRunRows` shift every later `resume.ts`
+line, so ACTIONS.md re-pins the `Cancel`, sub-workflow and wait-listener rows.
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.

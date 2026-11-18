@@ -34,7 +34,6 @@ export const registerSwarmXTool = (server: McpServer) => {
           .record(z.string(), z.string())
           .optional()
           .describe("Optional extra headers. Auth headers are injected by the server."),
-        baseUrl: z.string().url().optional().describe("Optional Composio API base URL override."),
         useOrgKey: z
           .boolean()
           .default(false)
@@ -62,7 +61,6 @@ export const registerSwarmXTool = (server: McpServer) => {
       try {
         result = await executeComposioRequest(
           composioArgsFromParts({
-            baseUrl: input.baseUrl,
             body: input.body,
             endpoint: input.path,
             headers: input.headers,

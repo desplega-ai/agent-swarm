@@ -261,7 +261,16 @@ test.describe("sessions sidebar", () => {
     await expect(bar).toContainText(`2 of 12 in ${name}`);
     await shot(page, testInfo, "select-all-minus-every-loaded-row");
 
+    // The bar clears immediately; wait for the write before reading persisted triage.
+    const doneResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/session-triage" &&
+        response.request().method() === "POST",
+    );
     await bar.getByRole("button", { name: /^Done/ }).click();
+    const response = await doneResponse;
+    expect(response.ok()).toBe(true);
+    expect(await response.json()).toEqual({ updated: 2 });
     await expect(bar).toBeHidden();
     const done = await call<{ sessions: { root: { id: string } }[] }>(
       swarm,

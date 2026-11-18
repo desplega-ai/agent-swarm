@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { getScriptAppTypes } from "@/apps/script-types";
+import {
+  getScriptAppTypes,
+  getScriptAppTypesReport,
+  scriptAppTypesWarnings,
+} from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
 import type { ScriptTypeContext } from "./type-contributors";
 
@@ -26,7 +30,7 @@ export type ScriptDiagnostic = {
 };
 
 export type ScriptTypecheckResult =
-  | { ok: true }
+  | { ok: true; warnings?: string[] }
   | { ok: false; diagnostics: string[]; structured: ScriptDiagnostic[] };
 
 export const SCRIPT_SDK_TYPES = `
@@ -419,7 +423,7 @@ export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
   memory_get(args: { memoryId?: string; id?: string; intent: string }): Promise<unknown>;
-  memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
+  memory_rate(args: { id?: string; memoryId?: string; useful: boolean; note?: string; taskId?: string; referencesSource?: string }): Promise<unknown>;
   // --- tasks ---
   task_list(args?: Record<string, unknown>): Promise<unknown>;
   task_get(args: { taskId: string }): Promise<unknown>;
@@ -477,7 +481,7 @@ export interface SwarmSdk {
   schedule_list(args?: { enabled?: boolean; name?: string; scheduleType?: "recurring" | "one_time"; targetType?: "agent-task" | "workflow" | "script"; workflowId?: string; scriptName?: string; hideCompleted?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "failed" | "succeeded"; includeFull?: boolean }): Promise<unknown>;
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
-  script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
+  script_run(args: { name?: string; source?: string; object?: { id: string; method: string }; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
   // --- savings calibration (REST only) ---
   /** The savings curve in use (shipped or derived from this deployment) and the stored row's metadata. */
   savings_calibrationGet(): Promise<unknown>;
@@ -896,7 +900,25 @@ export interface ScriptShResult {
   exitCode: number;
 }
 
+/** The invoking agent, or the saved script that made a nested call. */
+export type ScriptCaller =
+  | { kind: "agent"; agentId: string }
+  | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
+  | null;
+
+export abstract class DurableObject<S> {
+  constructor(id: string);
+  readonly id: string;
+  state: S;
+  abstract initialState(): S | Promise<S>;
+  migrate?(state: unknown, fromVersion: number): S | Promise<S>;
+  destroy(): void;
+  static idleTtlSec?: number;
+}
+
 export interface ScriptContext {
+  /** Frozen caller identity supplied by the host. */
+  caller: ScriptCaller;
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
   swarm: SwarmSdk & { config: SwarmConfig };
@@ -1593,19 +1615,22 @@ export async function typecheckScript(
 ): Promise<ScriptTypecheckResult> {
   const apiTypes = getScriptApiTypes(context);
   const mcpTypes = getScriptMcpTypes(context);
-  const appTypes = await getScriptAppTypes(context);
+  const appTypesReport = await getScriptAppTypesReport(context, source);
+  const appTypes = appTypesReport.source;
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
   const stdlibTypes = appTypes
     ? await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
     : SCRIPT_STDLIB_TYPES;
-  return typecheckWithAmbient({
+  const result = await typecheckWithAmbient({
     source,
     modules: { "swarm-sdk": sdkTypes, stdlib: stdlibTypes },
     checkFile: `/// <reference path="./runtime-globals.d.ts" />
 import run from "./user-script";
-import type { ScriptMain } from "swarm-sdk";
-const _scriptMain: ScriptMain = run;
+import type { ScriptMain, DurableObject } from "swarm-sdk";
+const _scriptMain: ScriptMain | (abstract new (id: string) => DurableObject<any>) = run;
 void _scriptMain;
 `,
   });
+  const warnings = scriptAppTypesWarnings(source, appTypesReport.omitted);
+  return result.ok && warnings.length > 0 ? { ok: true, warnings } : result;
 }

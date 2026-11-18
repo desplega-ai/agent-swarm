@@ -71,9 +71,18 @@ describe("sessionComposerTarget", () => {
     expect(sessionComposerTarget(chain)?.id).toBe("turn-2");
   });
 
-  test("with nothing live, the newest task is the follow-up parent", () => {
+  test("with nothing live, the newest lead task is the follow-up parent", () => {
     const chain = [
       lead("root", "completed", "2026-10-30 09:00:00"),
+      lead("turn-2", "completed", "2026-10-30 09:05:00"),
+      worker("child", "completed", "2026-10-30 09:06:00"),
+    ];
+    expect(sessionComposerTarget(chain)?.id).toBe("turn-2");
+  });
+
+  test("with no lead task, the newest task is the follow-up parent", () => {
+    const chain = [
+      worker("root", "completed", "2026-10-30 09:00:00"),
       worker("child", "completed", "2026-10-30 09:06:00"),
     ];
     expect(sessionComposerTarget(chain)?.id).toBe("child");

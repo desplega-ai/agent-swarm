@@ -61,6 +61,7 @@ import {
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { type ComposerCitations, messageWithCitations } from "@/lib/composer-citations";
 import { useComposerDraft } from "@/lib/composer-drafts";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
@@ -106,6 +107,7 @@ export interface TaskComposerProps {
    */
   draftKey?: string;
   onValueChange?: (next: string) => void;
+  citations?: ComposerCitations;
   /**
    * Extra action-row buttons (the session panel's "Add screenshot"). Receives
    * a callback that adds a file to this composer's attachments.
@@ -261,6 +263,7 @@ export function TaskComposer({
   value,
   onValueChange,
   draftKey,
+  citations,
   renderActions,
   fullWidth,
   bar,
@@ -379,6 +382,7 @@ export function TaskComposer({
       }
       invalidateSent(created.id, input.parentTaskId);
       setDraft("");
+      citations?.clear();
       setAttachments(failed);
       setAttachmentError(startedWithout);
       // Stay put while files wait in the box: navigating would drop them.
@@ -403,14 +407,14 @@ export function TaskComposer({
   const sending = onFollowUp ? callerFollowUp : createTask;
 
   const submit = () => {
-    const trimmed = draft.trim();
-    if (trimmed.length === 0 || sending.isPending) return;
+    const message = messageWithCitations(draft, citations);
+    if (!message || sending.isPending) return;
     if (onFollowUp) {
-      callerFollowUp.mutate({ text: trimmed, parentTaskId: targetTask?.id ?? rootTaskId });
+      callerFollowUp.mutate({ text: message, parentTaskId: targetTask?.id ?? rootTaskId });
       return;
     }
     createTask.mutate({
-      task: trimmed,
+      task: message,
       parentTaskId: targetTask?.id ?? rootTaskId,
       requestedByUserId: userId ?? undefined,
       attachments,
@@ -464,6 +468,7 @@ export function TaskComposer({
         taskStatus={steerTarget.status}
         value={draft}
         onValueChange={setDraft}
+        citations={citations}
         extraActions={extraActions}
         fullWidth={fullWidth}
         bar={bar}
@@ -480,6 +485,7 @@ export function TaskComposer({
     <ComposerDock
       value={draft}
       onChange={setDraft}
+      citations={citations}
       onSubmit={submit}
       isPending={sending.isPending}
       isError={sending.isError}

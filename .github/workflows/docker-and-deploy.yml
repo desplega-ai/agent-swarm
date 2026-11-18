@@ -133,6 +133,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -179,6 +182,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -224,6 +230,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Create manifest list and push
         id: manifest
@@ -275,6 +284,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -322,6 +334,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -368,6 +383,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Create manifest list and push
         id: manifest
@@ -422,6 +440,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -472,6 +493,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push by digest
         id: build
@@ -520,6 +544,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Create manifest list and push
         id: manifest
@@ -577,6 +604,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       - name: Build and push
         id: build
@@ -681,6 +711,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       # Skip only when a newer main commit touches on.push.paths, so it starts its
       # own run and promotion. A newer docs-only commit starts no run; skipping for
@@ -739,6 +772,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The hosted runner is discarded after the job. Removing the builder took 14 to 23 s.
+          cleanup: false
 
       # Same guard as promote-main-tags: scripts/deploy-guard.sh.
       - name: Check running commit is main tip

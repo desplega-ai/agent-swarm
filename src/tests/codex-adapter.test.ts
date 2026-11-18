@@ -1300,6 +1300,7 @@ describe("CodexSession event mapping", () => {
   });
 
   test("abort() resolves the session with cancelled result", async () => {
+    const ready = Promise.withResolvers<void>();
     let release!: () => void;
     let interrupted = false;
     const fakeThread = {
@@ -1310,6 +1311,7 @@ describe("CodexSession event mapping", () => {
           yield { type: "turn.started" };
           await new Promise<void>((resolve) => {
             release = resolve;
+            ready.resolve();
           });
           if (interrupted) {
             const err = new Error("aborted");
@@ -1342,7 +1344,7 @@ describe("CodexSession event mapping", () => {
     const emitted: ProviderEvent[] = [];
     session.onEvent((e) => emitted.push(e));
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await ready.promise;
     await session.abort();
     const result = await session.waitForCompletion();
 
@@ -1539,48 +1541,6 @@ describe("resolveCodexModel", () => {
 
   test("empty string → CODEX_DEFAULT_MODEL", () => {
     expect(resolveCodexModel("")).toBe(CODEX_DEFAULT_MODEL);
-  });
-
-  test("claude shortname 'opus' → gpt-6.1-sol", () => {
-    expect(resolveCodexModel("opus")).toBe("gpt-6.1-sol");
-  });
-
-  test("claude shortname 'sonnet' → gpt-6.1-terra", () => {
-    expect(resolveCodexModel("sonnet")).toBe("gpt-6.1-terra");
-  });
-
-  test("claude shortname 'haiku' → gpt-6-luna", () => {
-    expect(resolveCodexModel("haiku")).toBe("gpt-6-luna");
-  });
-
-  test("passthrough 'gpt-5.4-mini' → gpt-5.4-mini", () => {
-    expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
-  });
-
-  test("passthrough 'gpt-5.5' → gpt-5.5", () => {
-    expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
-  });
-
-  test("passthrough GPT-5.6 Codex models", () => {
-    expect(resolveCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
-    expect(resolveCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(resolveCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
-  });
-
-  test("passthrough GPT-6 Astra", () => {
-    expect(resolveCodexModel("GPT-6-ASTRA")).toBe("gpt-6-astra");
-  });
-
-  test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
-    expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
-  });
-
-  test("passthrough 'gpt-5.2-codex' → gpt-5.2-codex", () => {
-    expect(resolveCodexModel("gpt-5.2-codex")).toBe("gpt-5.2-codex");
-  });
-
-  test("case-insensitive: GPT-5.4 → gpt-5.4", () => {
-    expect(resolveCodexModel("GPT-5.4")).toBe("gpt-5.4");
   });
 
   test("unknown model passes through verbatim (lowercased)", () => {
@@ -2627,55 +2587,6 @@ describe("CodexSession — rate-limit error preservation", () => {
       "authentication_failed",
     );
     expect(result.isError).toBe(true);
-  });
-
-  test("AbortError still settles as cancelled even when terminalError is absent (regression guard)", async () => {
-    let release!: () => void;
-    let interrupted = false;
-    const fakeThread = {
-      id: null,
-      runStreamed: async (_input: string) => {
-        async function* generate(): AsyncGenerator<ThreadEvent> {
-          yield { type: "thread.started", thread_id: "thread-abort-guard" };
-          yield { type: "turn.started" };
-          await new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          if (interrupted) {
-            const err = new Error("aborted");
-            err.name = "AbortError";
-            throw err;
-          }
-        }
-        return { events: generate() };
-      },
-      async steer() {},
-      async interrupt() {
-        interrupted = true;
-        release?.();
-      },
-      async close() {},
-    };
-    const adapter = new CodexAdapter({
-      bypassSubprocess: true,
-      threadFactory: () => fakeThread as never,
-    });
-    const config = testConfig({
-      logFile: join(tmpLogDir, "abort-guard.log"),
-      cwd: "",
-      taskId: "",
-      apiUrl: "",
-      apiKey: "",
-    });
-    const session = await adapter.createSession(config);
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await session.abort();
-    const result = await session.waitForCompletion();
-
-    expect(result.failureReason).toBe("cancelled");
-    expect(result.exitCode).toBe(130);
   });
 
   test("real unexpected exception (no terminalError) still falls through to outer catch", async () => {

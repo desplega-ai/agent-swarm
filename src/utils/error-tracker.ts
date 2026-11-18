@@ -39,6 +39,12 @@ export interface RateLimitWindowInfo {
 export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
 
 /**
+ * Name of the `custom` provider event that carries a session's merged window
+ * snapshot after each `rate_limit_event`. The runner streams it to the API.
+ */
+export const RATE_LIMIT_WINDOWS_EVENT = "rate_limit_windows";
+
+/**
  * A key that hit its provider spend limit (OpenRouter key limit or credits).
  * `resetsAt` is null when the provider names no reset: the key stays benched
  * until someone edits it.

@@ -10,12 +10,12 @@ import {
   soloVariantId,
 } from "./baseline.ts";
 import { validateBaselinePairs } from "./registry.ts";
-import type { Scenario } from "./types.ts";
+import type { Scenario, TokenTotals } from "./types.ts";
 
 function attempt(opts: {
   status?: "passed" | "failed" | "error";
   dims: Record<string, [number, number]>;
-  tokens?: number;
+  tokens?: Partial<TokenTotals>;
   tasksMs?: number;
 }): BaselineAttempt {
   return {
@@ -26,10 +26,11 @@ function attempt(opts: {
           ? null
           : {
               model: null,
-              inputTokens: opts.tokens,
+              inputTokens: 0,
               outputTokens: 0,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
+              ...opts.tokens,
             },
       timings:
         opts.tasksMs === undefined
@@ -81,25 +82,32 @@ describe("compareSwarmSolo", () => {
     const swarm = [
       attempt({
         dims: { correctness: [3, 1], communication: [1, 1] },
-        tokens: 3000,
+        tokens: {
+          inputTokens: 1200,
+          outputTokens: 900,
+          cacheReadTokens: 600,
+          cacheWriteTokens: 300,
+        },
         tasksMs: 200_000,
       }),
       attempt({
+        status: "failed",
         dims: { correctness: [3, 1], communication: [1, 0] },
-        tokens: 5000,
+        tokens: { inputTokens: 5000 },
         tasksMs: 240_000,
       }),
-      attempt({ status: "error", dims: {}, tokens: 99_999 }),
+      attempt({ status: "error", dims: { correctness: [3, 0] }, tokens: { inputTokens: 99_999 } }),
+      attempt({ dims: {}, tokens: { inputTokens: 99_999 } }),
     ];
     const solo = [
       attempt({
         dims: { correctness: [3, 0.5], communication: [1, 1] },
-        tokens: 1000,
+        tokens: { inputTokens: 1000 },
         tasksMs: 300_000,
       }),
       attempt({
         dims: { correctness: [3, 0.5], communication: [1, 0] },
-        tokens: 1000,
+        tokens: { inputTokens: 1000 },
         tasksMs: 300_000,
       }),
     ];

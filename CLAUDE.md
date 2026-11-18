@@ -337,7 +337,9 @@ Hard rules:
 
 Mirror what `.github/workflows/merge-gate.yml` runs. Full job-by-job breakdown, drift checks, lockfile rules, and "why CI fails" list: [runbooks/ci.md](./runbooks/ci.md).
 
-Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, the drift generators whose inputs changed, the tests affected by your change (the pre-push hook's scoping), and the E2E Contract scenarios your change reaches (`scripts/e2e/scope.ts`; the full suite when it cannot scope the diff). It prints the wall time of each step. Run it before every push. Secrets scanning stays with the prek hooks.
+Inner loop: `bun run check:local` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, `bun check`, the drift generators whose inputs changed, the nearest affected tests (the pre-push hook's scoping), and the E2E Contract scenarios your change reaches (`scripts/e2e/scope.ts`; the full suite when it cannot scope the diff). It prints the wall time of each step. Run it before every push. Secrets scanning stays with the prek hooks.
+
+The pre-push hook is a fast smoke check, not the full suite: it runs the nearest affected tests and lints changed files only. CI is authoritative: PRs run the `--changed` test set, and the merge queue runs the full suite. A CI or merge-queue test failure the hook never ran is expected, not a hook bug: fix that test on the PR and push again. Never bypass the hooks. Set `PRE_PUSH_FULL=1` only to reproduce a CI failure locally or when you touch shared test infrastructure.
 
 Before opening the PR, mirror the rest of the gate (run from repo root):
 

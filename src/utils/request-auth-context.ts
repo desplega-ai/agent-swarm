@@ -2,6 +2,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage } from "node:http";
 import type { User } from "../types";
 
+/** Provenance carried by a script run's credential. */
+export type ScriptRunProvenance = {
+  sourceStepId?: string;
+  sourceScriptRunId?: string;
+  objectChain?: string[];
+  depth?: number;
+};
+
 export type HttpRequestAuth = (
   | { kind: "operator"; fingerprint: string }
   /**
@@ -14,7 +22,7 @@ export type HttpRequestAuth = (
   | { kind: "guest" }
   | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
   /** Session token bound to an ACP task, a worker runtime, or only its agent (aseph_ prefix). */
-  | {
+  | ({
       kind: "agent";
       tokenKind: "task" | "runtime" | "agent";
       agentId: string;
@@ -22,14 +30,7 @@ export type HttpRequestAuth = (
       runtimeId: string | null;
       tokenId: string;
       expiresAt: string;
-      /**
-       * Set on a script run's per-run token (`mintScriptRunToken`): the
-       * swarm-script workflow step that started the run, and the run's own
-       * `script_runs` row. Rows the request creates are stamped with them.
-       */
-      sourceStepId?: string | null;
-      sourceScriptRunId?: string | null;
-    }
+    } & ScriptRunProvenance)
 ) & {
   /** Verified page context for agent-scoped operations. This does not identify the viewer. */
   page?: { id: string; executionAgentId: string };
@@ -104,19 +105,17 @@ export function getCurrentRequestUserId(): string | undefined {
   return authUserId(getCurrentRequestAuth());
 }
 
-/** Where the current request's script run came from, when it presents a script-run token. */
-export type RunProvenance = { sourceStepId: string | null; sourceScriptRunId: string | null };
-
 /**
  * Provenance of the current request: set only when it authenticated with a
  * script run's per-run token that recorded a step or a script run. Async work
  * started inside the request inherits it (the workflow engine continuing a run
  * it triggered), so callers stamp only rows a script can create directly.
  */
-export function getCurrentRunProvenance(): RunProvenance | null {
+export function getCurrentRunProvenance(): ScriptRunProvenance | null {
   const auth = getCurrentRequestAuth();
   if (auth?.kind !== "agent") return null;
-  const sourceStepId = auth.sourceStepId ?? null;
-  const sourceScriptRunId = auth.sourceScriptRunId ?? null;
-  return sourceStepId || sourceScriptRunId ? { sourceStepId, sourceScriptRunId } : null;
+  const { sourceStepId, sourceScriptRunId, objectChain, depth } = auth;
+  return sourceStepId || sourceScriptRunId || objectChain !== undefined || depth
+    ? { sourceStepId, sourceScriptRunId, objectChain, depth }
+    : null;
 }

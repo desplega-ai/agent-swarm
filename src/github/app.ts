@@ -1,3 +1,4 @@
+import { getSwarmRepos } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { githubApiUrl, resolveGitHubHost } from "../utils/github-host";
 
@@ -8,6 +9,15 @@ let privateKey: string | null = null;
 
 // Token cache: installationId -> { token, expiresAt }
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
+
+// Repo -> installation cache, so a worker's every git/gh call does not cost a
+// `GET /repos/{owner}/{repo}/installation`. A "no installation" answer is kept
+// for a minute only: a registered repo that GitHub refuses cannot turn each mint
+// request into an App JWT plus a GitHub call, and an installation added later
+// still works without restarting the API.
+const INSTALLATION_CACHE_TTL_MS = 10 * 60_000;
+const NO_INSTALLATION_CACHE_TTL_MS = 60_000;
+const installationCache = new Map<string, { id: number | null; expiresAt: number }>();
 
 /** Raw PEM (with literal `\\n` escapes) or base64-encoded PEM. */
 function decodePrivateKey(raw: string): string {
@@ -31,6 +41,7 @@ export function resetGitHub(): void {
   appId = null;
   privateKey = null;
   tokenCache.clear();
+  installationCache.clear();
 }
 
 export function initGitHub(): boolean {
@@ -264,30 +275,183 @@ async function mintInstallationToken(
 export type WorkerInstallationToken =
   | { status: "ok"; token: string; expiresAt: string }
   | { status: "unconfigured" }
+  | { status: "forbidden" }
   | { status: "error" };
 
 /**
- * Installation token for worker `git` / `gh`, minted for the one installation
- * named by `GITHUB_APP_INSTALLATION_ID`. Callers never pick the installation, so
- * no request can get a token for an installation the swarm is not configured for.
+ * `owner/name`, lowercased, from a swarm repo URL (`https://github.com/o/r.git`),
+ * an scp-like remote (`git@host:o/r`) or the shorthand itself. GitHub treats
+ * owner and repo names case-insensitively, so the `swarm_repos` comparison does
+ * too; the last two path segments are the identity, whichever form the caller got.
+ * A `.`/`..` segment returns `""`, which matches no registered repo, so a caller
+ * cannot aim the installation lookup at another API path.
+ */
+export function normalizeRepo(repo: string): string {
+  const trimmed = repo.trim().replace(/\/+$/, "");
+  const lastTwo = trimmed.replace(/\.git$/i, "").match(/([^/:]+\/[^/:]+)$/);
+  if (!lastTwo) return trimmed.toLowerCase();
+  const [owner, name] = lastTwo[1]!.split("/") as [string, string];
+  if (owner === "." || owner === ".." || name === "." || name === "..") return "";
+  return lastTwo[1]!.toLowerCase();
+}
+
+/**
+ * Owners (GitHub user or org logins, lowercased) whose repos may get a token for
+ * their own installation, from the deployment env `GITHUB_APP_REPO_OWNERS`
+ * (comma-separated). It is a reserved key, so no config writer can extend it.
+ * Empty: every call mints for `GITHUB_APP_INSTALLATION_ID`, as before.
+ */
+function allowedRepoOwners(): Set<string> {
+  return new Set(
+    (process.env.GITHUB_APP_REPO_OWNERS ?? "")
+      .split(",")
+      .map((owner) => owner.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * `owner/name` of a `swarm_repos` URL when it points at the configured GitHub
+ * host (https, ssh or scp-like) or is the bare `owner/name` shorthand; `null`
+ * for any other host or shape. A URL on another host whose path merely ends in
+ * `owner/name` is not that repository.
+ */
+function registeredSlugOnHost(url: string, host: string): string | null {
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
+  let urlHost: string | null = null;
+  let path: string;
+  const scp = trimmed.match(/^[^@/:]+@([^:/]+):(.+)$/);
+  if (scp) {
+    urlHost = scp[1]!.toLowerCase();
+    path = scp[2]!;
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      urlHost = parsed.host.toLowerCase();
+      path = parsed.pathname;
+    } catch {
+      return null;
+    }
+  } else {
+    path = trimmed;
+  }
+  if (
+    urlHost !== null &&
+    urlHost !== host &&
+    !(host === "github.com" && urlHost === "www.github.com")
+  ) {
+    return null;
+  }
+  const segments = path.replace(/^\/+/, "").split("/");
+  if (segments.length !== 2) return null;
+  const slug = normalizeRepo(segments.join("/"));
+  return slug || null;
+}
+
+/**
+ * The App installation that owns `repo`, asked of GitHub with an App JWT
+ * (`GET /repos/{owner}/{repo}/installation`). Cached for ten minutes because a
+ * worker asks once per git/gh call. `null` when GitHub does not answer 200:
+ * no installation, a revoked one, or an App that cannot see the repository.
+ * Also `null` when the installation's account is not an allowed owner (a
+ * transferred repo redirects to its new owner's installation).
+ */
+async function resolveInstallationId(
+  repo: string,
+  creds: { appId: string | null; privateKey: string | null },
+  owners: Set<string>,
+): Promise<number | null> {
+  const cached = installationCache.get(repo);
+  if (cached && cached.expiresAt > Date.now()) return cached.id;
+
+  const jwt = await generateAppJWT(creds);
+  if (!jwt) return null;
+
+  const refuse = (): null => {
+    installationCache.set(repo, { id: null, expiresAt: Date.now() + NO_INSTALLATION_CACHE_TTL_MS });
+    return null;
+  };
+  try {
+    const response = await fetch(githubApiUrl(`/repos/${repo}/installation`), {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${jwt}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (response.status !== 200) {
+      console.log(`[GitHub] No installation for ${repo}: ${response.status}`);
+      return refuse();
+    }
+    const data = (await response.json()) as { id?: unknown; account?: { login?: unknown } };
+    if (typeof data.id !== "number") return refuse();
+    const account = typeof data.account?.login === "string" ? data.account.login.toLowerCase() : "";
+    if (!owners.has(account)) {
+      console.log(`[GitHub] Installation for ${repo} belongs to an owner that is not allowed`);
+      return refuse();
+    }
+    installationCache.set(repo, {
+      id: data.id,
+      expiresAt: Date.now() + INSTALLATION_CACHE_TTL_MS,
+    });
+    return data.id;
+  } catch (error) {
+    console.error("[GitHub] Error resolving the repo installation:", error);
+    return null;
+  }
+}
+
+/**
+ * Installation token for worker `git` / `gh`.
+ *
+ * With a `repo` (`owner/name`) whose owner is listed in the deployment env
+ * `GITHUB_APP_REPO_OWNERS`, the token is minted for that repository's App
+ * installation, resolved with the App JWT: one App with an installation per
+ * owner can then serve repos from more than one account. The operator's owner
+ * list is the boundary; the repository must also be registered in `swarm_repos`
+ * on the configured GitHub host.
+ *
+ * Any other call, with no repo or a repo of an unlisted owner, mints for the
+ * fixed `GITHUB_APP_INSTALLATION_ID`, so a single-installation deployment
+ * behaves exactly as before and a caller never picks an installation the
+ * operator did not list.
+ *
  * Reads env on each call: it works without the webhook (`initGitHub` loads App
  * credentials only when `GITHUB_WEBHOOK_SECRET` is set).
  */
-export async function getWorkerInstallationToken(): Promise<WorkerInstallationToken> {
+export async function getWorkerInstallationToken(repo?: string): Promise<WorkerInstallationToken> {
   if (isEnvFlagEnabled("GITHUB_DISABLE", false)) return { status: "unconfigured" };
   const workerAppId = process.env.GITHUB_APP_ID?.trim();
   const rawKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim();
-  const rawInstallation = process.env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
-  if (!workerAppId || !rawKey || !/^[1-9][0-9]{0,15}$/.test(rawInstallation)) {
-    return { status: "unconfigured" };
+  if (!workerAppId || !rawKey) return { status: "unconfigured" };
+  const host = resolveGitHubHost();
+  if (!host.ok) return { status: "error" };
+  const creds = { appId: workerAppId, privateKey: decodePrivateKey(rawKey) };
+
+  const owners = allowedRepoOwners();
+  const target = repo ? normalizeRepo(repo) : "";
+  const owner = target.split("/")[0] ?? "";
+  let installationId: number;
+  if (target && owners.has(owner)) {
+    // An allowed owner: the repo must also be one the swarm manages on this host.
+    const registered = (await getSwarmRepos()).some(
+      (r) => registeredSlugOnHost(r.url, host.config.host) === target,
+    );
+    if (!registered) return { status: "forbidden" };
+    const resolved = await resolveInstallationId(target, creds, owners);
+    if (resolved === null) return { status: "error" };
+    installationId = resolved;
+  } else {
+    const rawInstallation = process.env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
+    if (!/^[1-9][0-9]{0,15}$/.test(rawInstallation)) return { status: "unconfigured" };
+    installationId = Number(rawInstallation);
   }
-  if (!resolveGitHubHost().ok) return { status: "error" };
+
   // Hand out a token with at least 10 minutes left, so a worker can cache it.
-  const minted = await mintInstallationToken(
-    Number(rawInstallation),
-    { appId: workerAppId, privateKey: decodePrivateKey(rawKey) },
-    10 * 60_000,
-  );
+  const minted = await mintInstallationToken(installationId, creds, 10 * 60_000);
   if (!minted) return { status: "error" };
   return { status: "ok", token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
 }

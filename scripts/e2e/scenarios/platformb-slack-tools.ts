@@ -486,19 +486,10 @@ export const platformbSlackTools: Scenario = {
           ),
         "files.getUploadURLExternal did not announce the file",
       );
-      // A file on the API server's disk uploads by path; the name defaults to the basename.
+      // Uploads by path (inside /workspace or the caller's task directory): scenario
+      // slack-upload-path-bounds.
       const diskPath = join(scratchDir, `disk-${ctx.nonce}.txt`);
       await Bun.write(diskPath, `disk body ${marker}`);
-      outcome = expectToolOk(
-        await callTool(leadConn, "slack-upload-file", { channelId, filePath: diskPath }),
-        "slack-upload-file with filePath",
-      );
-      expect(
-        ctx.slack
-          .apiCalls("files.getUploadURLExternal")
-          .some((call) => call.args.filename === `disk-${ctx.nonce}.txt`),
-        "The path upload did not use the file's basename",
-      );
       for (const [args, needle, label] of [
         [{ channelId }, "Must provide either filePath or content (base64).", "no file"],
         [
@@ -534,29 +525,7 @@ export const platformbSlackTools: Scenario = {
         "worker slack-upload-file to a channel",
       );
 
-      // Download by id into a directory, then by URL into a named file.
-      outcome = expectToolOk(
-        await callTool(workerConn, "slack-download-file", { fileId, savePath: `${scratchDir}/` }),
-        "slack-download-file by id",
-      );
-      const savedPath = asString(outcome.data.savedPath, "saved path");
-      expect(savedPath === join(scratchDir, fileName), `File saved at ${savedPath}`);
-      expect((await Bun.file(savedPath).text()) === fileBody, "The downloaded bytes differ");
-      expect(
-        asRecord(outcome.data.fileInfo).name === fileName &&
-          asRecord(outcome.data.fileInfo).id === fileId,
-        "Download result lacks the file info",
-      );
-      const downloadUrl = ctx.slack.store.file(fileId).url_private_download;
-      const byUrlPath = join(scratchDir, `by-url-${ctx.nonce}.txt`);
-      expectToolOk(
-        await callTool(workerConn, "slack-download-file", {
-          url: downloadUrl,
-          savePath: byUrlPath,
-        }),
-        "slack-download-file by url",
-      );
-      expect((await Bun.file(byUrlPath).text()) === fileBody, "The URL download bytes differ");
+      // No-task saves on the API disk: scenario slack-file-download-bounds.
       expectToolError(
         await callTool(workerConn, "slack-download-file", {}),
         "Must provide either fileId or url.",

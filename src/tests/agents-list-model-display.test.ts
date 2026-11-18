@@ -4,6 +4,10 @@ import {
   getAgentModelDisplay,
   getAgentModelPresentation,
 } from "../../apps/ui/src/lib/agents-list-model-display";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 const liveCatalog: LiveModelsCatalog = {
   openrouter: {

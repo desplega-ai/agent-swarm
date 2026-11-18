@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
   createSessionLogs,
@@ -8,104 +7,12 @@ import {
   getDbClient,
   getSessionLogsBySession,
   getSessionLogsByTaskId,
-  getTaskById,
   initDb,
 } from "../be/db";
-import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-logs.sqlite";
 
-// Helper to parse path segments
-function getPathSegments(url: string): string[] {
-  const pathEnd = url.indexOf("?");
-  const path = pathEnd === -1 ? url : url.slice(0, pathEnd);
-  return path.split("/").filter(Boolean);
-}
-
-// Minimal HTTP handler for session logs endpoints
-async function handleRequest(
-  req: { method: string; url: string },
-  body: string,
-): Promise<{ status: number; body: unknown }> {
-  const pathSegments = getPathSegments(req.url || "");
-
-  // POST /api/session-logs - Store session logs (batch)
-  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-logs") {
-    const parsedBody = JSON.parse(body);
-
-    // Validate required fields
-    if (!parsedBody.sessionId || typeof parsedBody.sessionId !== "string") {
-      return { status: 400, body: { error: "Missing or invalid 'sessionId' field" } };
-    }
-
-    if (typeof parsedBody.iteration !== "number" || parsedBody.iteration < 1) {
-      return { status: 400, body: { error: "Missing or invalid 'iteration' field" } };
-    }
-
-    if (!Array.isArray(parsedBody.lines) || parsedBody.lines.length === 0) {
-      return { status: 400, body: { error: "Missing or invalid 'lines' array" } };
-    }
-
-    try {
-      await createSessionLogs({
-        taskId: parsedBody.taskId || undefined,
-        sessionId: parsedBody.sessionId,
-        iteration: parsedBody.iteration,
-        cli: parsedBody.cli || "claude",
-        lines: parsedBody.lines,
-      });
-
-      return { status: 201, body: { success: true, count: parsedBody.lines.length } };
-    } catch (error) {
-      console.error("[TEST] Failed to create session logs:", error);
-      return { status: 500, body: { error: "Failed to store session logs" } };
-    }
-  }
-
-  // GET /api/tasks/:id/session-logs - Get session logs for a task
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "tasks" &&
-    pathSegments[2] &&
-    pathSegments[3] === "session-logs"
-  ) {
-    const taskId = pathSegments[2];
-    const task = await getTaskById(taskId);
-
-    if (!task) {
-      return { status: 404, body: { error: "Task not found" } };
-    }
-
-    const logs = await getSessionLogsByTaskId(taskId);
-    return { status: 200, body: { logs } };
-  }
-
-  return { status: 404, body: { error: "Not found" } };
-}
-
-// Create test HTTP server
-function createTestServer(): Server {
-  return createHttpServer(async (req, res) => {
-    res.setHeader("Content-Type", "application/json");
-
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = Buffer.concat(chunks).toString();
-
-    const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" }, body);
-
-    res.writeHead(result.status);
-    res.end(JSON.stringify(result.body));
-  });
-}
-
-describe("Session Logs API", () => {
-  let server: Server;
-  let baseUrl = "";
-
+describe("Session Logs Storage", () => {
   beforeAll(async () => {
     // Clean up any existing test database
     try {
@@ -116,20 +23,9 @@ describe("Session Logs API", () => {
 
     // Initialize test database
     initDb(TEST_DB_PATH);
-
-    // Start test server
-    server = createTestServer();
-    const port = await listenOnFreePort(server);
-    baseUrl = `http://localhost:${port}`;
-    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {
-    // Close server
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-    });
-
     // Close database
     closeDb();
 
@@ -378,161 +274,6 @@ describe("Session Logs API", () => {
 
       const bySession = await getSessionLogsBySession("legacy-session", 1);
       expect(bySession.map((l) => l.content)).toEqual(written);
-    });
-  });
-
-  describe("POST /api/session-logs", () => {
-    test("should return 400 if sessionId is missing", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ iteration: 1, lines: ["test"] }),
-      });
-
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("sessionId");
-    });
-
-    test("should return 400 if iteration is missing", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: "test", lines: ["test"] }),
-      });
-
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("iteration");
-    });
-
-    test("should return 400 if iteration is less than 1", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: "test", iteration: 0, lines: ["test"] }),
-      });
-
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("iteration");
-    });
-
-    test("should return 400 if lines is missing", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: "test", iteration: 1 }),
-      });
-
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("lines");
-    });
-
-    test("should return 400 if lines is empty array", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: "test", iteration: 1, lines: [] }),
-      });
-
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("lines");
-    });
-
-    test("should return 201 on successful POST", async () => {
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "api-test-session",
-          iteration: 1,
-          cli: "claude",
-          lines: ['{"type":"system"}', '{"type":"result"}'],
-        }),
-      });
-
-      expect(response.status).toBe(201);
-      const data = (await response.json()) as { success: boolean; count: number };
-      expect(data.success).toBe(true);
-      expect(data.count).toBe(2);
-    });
-
-    test("should store logs with taskId", async () => {
-      const task = await createTaskExtended("API test task");
-
-      const response = await fetch(`${baseUrl}/api/session-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "api-task-session",
-          iteration: 1,
-          taskId: task.id,
-          cli: "claude",
-          lines: ['{"type":"test"}'],
-        }),
-      });
-
-      expect(response.status).toBe(201);
-
-      // Verify it was stored correctly
-      const logs = await getSessionLogsByTaskId(task.id);
-      expect(logs.length).toBe(1);
-      expect(logs[0]?.taskId).toBe(task.id);
-    });
-  });
-
-  describe("GET /api/tasks/:id/session-logs", () => {
-    test("should return 404 if task does not exist", async () => {
-      const response = await fetch(`${baseUrl}/api/tasks/non-existent-task/session-logs`);
-
-      expect(response.status).toBe(404);
-      const data = (await response.json()) as { error: string };
-      expect(data.error).toContain("Task not found");
-    });
-
-    test("should return empty logs array for task with no logs", async () => {
-      const task = await createTaskExtended("Task without logs");
-
-      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session-logs`);
-
-      expect(response.status).toBe(200);
-      const data = (await response.json()) as { logs: unknown[] };
-      expect(data.logs).toEqual([]);
-    });
-
-    test("should return session logs for a task", async () => {
-      const task = await createTaskExtended("Task with logs for GET test");
-
-      // Create some logs
-      await createSessionLogs({
-        taskId: task.id,
-        sessionId: "get-test-session",
-        iteration: 1,
-        cli: "claude",
-        lines: ['{"type":"system"}', '{"type":"assistant"}'],
-      });
-
-      const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session-logs`);
-
-      expect(response.status).toBe(200);
-      const data = (await response.json()) as {
-        logs: Array<{
-          id: string;
-          taskId: string;
-          sessionId: string;
-          iteration: number;
-          cli: string;
-          content: string;
-          lineNumber: number;
-          createdAt: string;
-        }>;
-      };
-      expect(data.logs.length).toBe(2);
-      expect(data.logs[0]?.content).toBe('{"type":"system"}');
-      expect(data.logs[1]?.content).toBe('{"type":"assistant"}');
     });
   });
 });

@@ -42,21 +42,21 @@ This is an illustrative custom setup, not a built-in credentialing integration a
 
 ## A fictional example
 
-Nordhaven Field Services is invented, and so is the contractor. It is a field-service provider that installs and services commercial kitchen equipment; the contractor is a refrigeration technician under consideration for a two-week assignment at a client site. Nothing below reports a real person, a real certificate or a measured result.
+Nordhaven Field Services is invented, and so are the contractor and Ana Ferreira, Nordhaven's field operations manager. It is a field-service provider that installs and services commercial kitchen equipment; the contractor is a refrigeration technician under consideration for a two-week assignment at a client site. Nothing below reports a real person, a real certificate or a measured result.
 
-The assignment runs from 3 to 16 March 2027 and requires four items: a refrigerant handling certificate, a working-at-height certificate, a public liability insurance certificate and photo identification. The technician's record was read on 9 February 2027. In the packet each line carries a link to the record it came from and the time it was read; the labels below name that record.
+The assignment runs from 3 to 16 March 2027 and requires four items: a refrigerant handling certificate, a working-at-height certificate, a public liability insurance certificate and photo identification. The technician's record was read on 9 February 2027. In the packet each line carries a link to the record it came from and the time it was read; the addresses below are illustrative placeholders, not real records.
 
-| Field | Record says | Requirement / certificate says | Flag |
-| --- | --- | --- | --- |
-| Refrigerant handling certificate | Expires 11 March 2027 | Required for the whole assignment, 3 to 16 March 2027 | Expiry falls inside the assignment window, five days before it ends (certificate record, read 09:14) |
-| Name on the working-at-height certificate | `M. Okonjo` | Contractor record is `Michael Okonjo`, date of birth agrees | An abbreviation the workflow cannot confirm as the same person (certificate upload, read 09:14) |
-| Public liability insurance | No certificate on file | Required for every client-site assignment | Required document missing (contractor record, read 09:11) |
-| Issuer of the working-at-height certificate | `Ridgeway Training Ltd` | Approved issuer list names `Ridgeway Training` and three others | Issuer does not match an approved entry (certificate upload, read 09:14) |
-| Photo identification | Passport, expires August 2029 | Valid identification for the assignment period | No flag (contractor record, read 09:11) |
+| Field | Record says | Requirement / certificate says | Flag | Source |
+| --- | --- | --- | --- | --- |
+| Refrigerant handling certificate | Expires 11 March 2027 | Required for the whole assignment, 3 to 16 March 2027 | Expiry falls inside the assignment window, five days before it ends | `https://docs.nordhaven.example/uploads/MO-0417/refrigerant-handling.pdf` read 09:14 |
+| Name on the working-at-height certificate | `M. Okonjo` | Contractor record is `Michael Okonjo`, date of birth agrees | An abbreviation the workflow cannot confirm as the same person | `https://docs.nordhaven.example/uploads/MO-0417/working-at-height.pdf` read 09:14 |
+| Public liability insurance | No certificate on file | Required for every client-site assignment | Required document missing | `https://records.nordhaven.example/contractors/MO-0417` read 09:11 |
+| Issuer of the working-at-height certificate | `Ridgeway Training Ltd` | Approved issuer list names `Ridgeway Training` and three others | Issuer does not match an approved entry | `https://docs.nordhaven.example/uploads/MO-0417/working-at-height.pdf` read 09:14 |
+| Photo identification | Passport, expires August 2029 | Valid identification for the assignment period | No flag | `https://records.nordhaven.example/contractors/MO-0417` read 09:11 |
 
-What the packet hands the operations owner: the records with their links and read timestamps, each requirement beside the contractor's documents, the missing insurance certificate named as a gap with the party who can supply it, and the certificate's own wording behind each date. It does not say whether the technician may be dispatched. The owner may know the refrigerant certificate is being renewed that week, or may need the training provider to confirm the abbreviated name. Either way the answer comes from a person who saw the evidence in one place.
+What the packet hands Ferreira: the records with their links and read timestamps, each requirement beside the contractor's documents, the missing insurance certificate named as a gap with the party who can supply it, and the certificate's own wording behind each date. It does not say whether the technician may be dispatched. Ferreira may know the refrigerant certificate is being renewed that week, or may need the training provider to confirm the abbreviated name. Either way the answer comes from a person who saw the evidence in one place.
 
-When a document is missing or has expired, the order does not change. The packet names the gap and who can supply it: the contractor, the agency that placed them, or the training provider. The owner holds the assignment. The owner, not the agent, asks the contractor for the document. Anything unresolved, or turning on what the client's site requires, goes to whoever owns credential policy; a question about what a certificate legally permits goes to counsel.
+When a document is missing or has expired, the order does not change. The packet names the gap and who can supply it: the contractor, the agency that placed them, or the training provider. Ferreira holds the assignment. Ferreira, not the agent, asks the contractor for the document. Anything unresolved, or turning on what the client's site requires, goes to whoever owns credential policy; a question about what a certificate legally permits goes to counsel.
 
 ## Limits and escalation
 

@@ -63,7 +63,7 @@ describe("formatRunSummary", () => {
         ...nights("luna", "tool-routing"),
       ],
     });
-    const text = formatRunSummary(run, report, ["sql-audit", "tool-routing"]);
+    const text = formatRunSummary(run, report, ["tool-routing", "sql-audit"]);
     expect(text.split("\n")[0]).toBe(":white_check_mark: *Nightly canary: clean*");
     expect(text).toContain(
       "<https://evals.example.test/#/runs/run-1|Nightly 2026-10-01> · 12 attempts: 11 passed, 1 failed, 0 errored · $0.60 metered of $2.00 cap · $1.20 notional",
@@ -73,8 +73,8 @@ describe("formatRunSummary", () => {
     expect(lines.slice(start, start + 5)).toEqual([
       "```",
       "scenario      opus  luna",
-      "sql-audit     3/3   3/3",
       "tool-routing  2/3   3/3",
+      "sql-audit     3/3   3/3",
       "```",
     ]);
     expect(text).not.toContain("*Flags*");
@@ -116,15 +116,15 @@ describe("formatRunSummary", () => {
 
   test("cost drift is called out per config", () => {
     const report = evaluateRegression({
-      current: cell("r", "opus", "sql-audit", ["passed"], { meteredUsd: 5, notionalUsd: 5 }),
+      current: cell("r", "opus", "sql-audit", ["passed"], { meteredUsd: 5, notionalUsd: 8 }),
       baseline: Array.from({ length: 5 }, (_, i) =>
-        attempt(`night-${i}`, "opus", "sql-audit", "passed", { meteredUsd: 1, notionalUsd: 1 }),
+        attempt(`night-${i}`, "opus", "sql-audit", "passed", { meteredUsd: 1, notionalUsd: 2 }),
       ),
     });
     const text = formatRunSummary(run, report);
     expect(text).toContain("*Cost drift*");
     expect(text).toContain("opus: metered $5.00 vs $1.00 median (over 1.5x)");
-    expect(text).toContain("opus: notional $5.00 vs $1.00 median (over 1.5x)");
+    expect(text).toContain("opus: notional $8.00 vs $2.00 median (over 1.5x)");
     expect(text.split("\n")[0]).toBe(":warning: *Nightly canary: flags to look at*");
   });
 

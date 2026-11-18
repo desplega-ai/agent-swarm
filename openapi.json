@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.3",
+    "version": "2.13.5",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -257,6 +257,27 @@
           "notifiedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "statusKind": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "runner",
+              "deferred",
+              "error",
+              "cascade",
+              "external",
+              "user",
+              "workflow",
+              "system",
+              "graceful_shutdown",
+              "context_limits",
+              "manual_supersede",
+              "crash_recovery",
+              "provider_fallback",
+              "workflow_retry"
+            ],
+            "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
           },
           "failureReason": {
             "type": "string"
@@ -533,6 +554,10 @@
             "default": false
           },
           "deferredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deferredUntil": {
             "type": "string",
             "format": "date-time"
           },
@@ -4550,6 +4575,15 @@
       "ScriptRun": {
         "type": "object",
         "properties": {
+          "objectScriptId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "objectMethod": {
+            "type": "string"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -5716,6 +5750,82 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "avatar": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "lucide"
+                    ]
+                  },
+                  "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "icon"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
+              }
             ]
           },
           "createdAt": {
@@ -9240,7 +9350,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -9785,7 +9895,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -10342,7 +10452,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -10735,7 +10845,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -15044,7 +15154,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Map of key -> boolean (true iff set in process.env)",
+            "description": "Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21293,6 +21403,32 @@
                     },
                     "authFailureFence": {
                       "type": "integer"
+                    },
+                    "keyUsage": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "keyPace": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "selectionStrategy": {
+                      "type": "string",
+                      "enum": [
+                        "pace",
+                        "usage"
+                      ]
+                    },
+                    "activeSessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   },
                   "required": [
@@ -21300,7 +21436,11 @@
                     "availableIndices",
                     "totalKeys",
                     "spendCappedIndices",
-                    "authFailureFence"
+                    "authFailureFence",
+                    "keyUsage",
+                    "keyPace",
+                    "selectionStrategy",
+                    "activeSessions"
                   ]
                 }
               }
@@ -27104,7 +27244,7 @@
     "/api/github/installation-token": {
       "post": {
         "summary": "Mint a GitHub App installation token for worker git and gh",
-        "description": "Internal worker endpoint. Returns a short-lived installation token for the installation in `GITHUB_APP_INSTALLATION_ID`, minted with the API server's GitHub App credentials. The caller cannot choose the installation. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App or the installation id is not configured, so workers fall back to `GITHUB_TOKEN`.",
+        "description": "Internal worker endpoint. Returns a short-lived installation token for worker `git` and `gh`. With a `repo` (`owner/name`) whose owner is listed in the deployment env `GITHUB_APP_REPO_OWNERS`, the API resolves that repository's App installation with the App JWT and mints for it; the repository must also be registered in `swarm_repos` on the configured GitHub host (403 otherwise). Any other call mints for the installation in `GITHUB_APP_INSTALLATION_ID`, so single-installation deployments are unchanged and a caller never picks an installation the operator did not list. Only a registered agent (swarm API key plus X-Agent-ID, or an agent or runtime token) may call it; user, guest and ACP task tokens are refused. 404 when the App is not configured, so workers fall back to `GITHUB_TOKEN`.",
         "tags": [
           "GitHub"
         ],
@@ -27118,7 +27258,13 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                  }
+                }
               }
             }
           }
@@ -27147,7 +27293,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a registered agent",
+            "description": "Caller is not a registered agent, or the repo of a listed owner is not registered in the swarm",
             "content": {
               "application/json": {
                 "schema": {
@@ -27167,7 +27313,7 @@
             }
           },
           "502": {
-            "description": "GitHub refused or failed to mint the token",
+            "description": "GitHub refused or failed to mint the token, or the repo has no App installation",
             "content": {
               "application/json": {
                 "schema": {
@@ -39484,6 +39630,33 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "runner",
+                "deferred",
+                "error",
+                "cascade",
+                "external",
+                "user",
+                "workflow",
+                "system",
+                "graceful_shutdown",
+                "context_limits",
+                "manual_supersede",
+                "crash_recovery",
+                "provider_fallback",
+                "workflow_retry"
+              ],
+              "description": "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts."
+            },
+            "required": false,
+            "description": "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts.",
+            "name": "statusKind",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "required": false,
@@ -39868,6 +40041,27 @@
                               "finishedAt": {
                                 "type": "string",
                                 "format": "date-time"
+                              },
+                              "statusKind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent",
+                                  "runner",
+                                  "deferred",
+                                  "error",
+                                  "cascade",
+                                  "external",
+                                  "user",
+                                  "workflow",
+                                  "system",
+                                  "graceful_shutdown",
+                                  "context_limits",
+                                  "manual_supersede",
+                                  "crash_recovery",
+                                  "provider_fallback",
+                                  "workflow_retry"
+                                ],
+                                "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
                               },
                               "peakContextPercent": {
                                 "type": "number",
@@ -41536,6 +41730,27 @@
                           "finishedAt": {
                             "type": "string",
                             "format": "date-time"
+                          },
+                          "statusKind": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "runner",
+                              "deferred",
+                              "error",
+                              "cascade",
+                              "external",
+                              "user",
+                              "workflow",
+                              "system",
+                              "graceful_shutdown",
+                              "context_limits",
+                              "manual_supersede",
+                              "crash_recovery",
+                              "provider_fallback",
+                              "workflow_retry"
+                            ],
+                            "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
                           },
                           "peakContextPercent": {
                             "type": "number",
@@ -55412,6 +55627,15 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "objectScriptId": {
+                            "type": "string"
+                          },
+                          "objectId": {
+                            "type": "string"
+                          },
+                          "objectMethod": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string",
                             "format": "uuid"
@@ -60423,6 +60647,27 @@
                                     "type": "string",
                                     "format": "date-time"
                                   },
+                                  "statusKind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent",
+                                      "runner",
+                                      "deferred",
+                                      "error",
+                                      "cascade",
+                                      "external",
+                                      "user",
+                                      "workflow",
+                                      "system",
+                                      "graceful_shutdown",
+                                      "context_limits",
+                                      "manual_supersede",
+                                      "crash_recovery",
+                                      "provider_fallback",
+                                      "workflow_retry"
+                                    ],
+                                    "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
+                                  },
                                   "peakContextPercent": {
                                     "type": "number",
                                     "minimum": 0,
@@ -64353,7 +64598,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings. Never blocks the save."
+                      "description": "Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save."
                     }
                   },
                   "required": [
@@ -64428,6 +64673,25 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "object": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "method"
+                    ]
+                  },
                   "args": {},
                   "intent": {
                     "type": "string",
@@ -64477,6 +64741,25 @@
                   "type": "object",
                   "properties": {
                     "result": {},
+                    "object": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "stateVersion": {
+                          "type": "number"
+                        },
+                        "destroyed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "stateVersion",
+                        "destroyed"
+                      ]
+                    },
                     "autoSaved": {
                       "type": "object",
                       "properties": {
@@ -64630,6 +64913,16 @@
               }
             }
           },
+          "409": {
+            "description": "Object busy, re-entry, or lease lost",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "501": {
             "description": "workspace-rw scripts are not supported in v1",
             "content": {
@@ -64703,6 +64996,34 @@
                           "signature": {
                             "type": "object",
                             "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "durable"
+                                ]
+                              },
+                              "methods": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "argsType": {
+                                      "type": "string"
+                                    },
+                                    "resultType": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "argsType",
+                                    "resultType",
+                                    "description"
+                                  ]
+                                }
+                              },
                               "argsType": {
                                 "type": "string"
                               },
@@ -64899,6 +65220,34 @@
                     "signature": {
                       "type": "object",
                       "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "durable"
+                          ]
+                        },
+                        "methods": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "argsType": {
+                                "type": "string"
+                              },
+                              "resultType": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "argsType",
+                              "resultType",
+                              "description"
+                            ]
+                          }
+                        },
                         "argsType": {
                           "type": "string"
                         },
@@ -65301,6 +65650,34 @@
                         "signature": {
                           "type": "object",
                           "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "durable"
+                              ]
+                            },
+                            "methods": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "argsType": {
+                                    "type": "string"
+                                  },
+                                  "resultType": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "argsType",
+                                  "resultType",
+                                  "description"
+                                ]
+                              }
+                            },
                             "argsType": {
                               "type": "string"
                             },
@@ -71000,6 +71377,85 @@
                       "suspended"
                     ]
                   },
+                  "avatar": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "lucide"
+                            ]
+                          },
+                          "icon": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9-]+$"
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#[0-9a-fA-F]{6}$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "identities": {
                     "type": "array",
                     "items": {
@@ -72031,6 +72487,85 @@
                       "invited",
                       "active",
                       "suspended"
+                    ]
+                  },
+                  "avatar": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "lucide"
+                            ]
+                          },
+                          "icon": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9-]+$"
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#[0-9a-fA-F]{6}$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "identities": {

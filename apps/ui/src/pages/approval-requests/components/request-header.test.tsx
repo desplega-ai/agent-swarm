@@ -22,6 +22,8 @@ mock.module("@/components/shared/status-icon", () =>
   require("../../../components/shared/status-icon"),
 );
 mock.module("@/components/shared/user-chip", () => require("../../../components/shared/user-chip"));
+mock.module("@/lib/user-initials", () => require("../../../lib/user-initials"));
+mock.module("@/components/shared/user-avatar", () => ({ UserAvatar: () => null }));
 mock.module("@/components/ui/tooltip", () => require("../../../components/ui/tooltip"));
 mock.module("@/hooks/use-user-name", () => require("../../../hooks/use-user-name"));
 mock.module("@/hooks/use-mobile", () => require("../../../hooks/use-mobile"));

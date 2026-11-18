@@ -135,6 +135,8 @@ When a swarm task has `vcsRepo` set, the adapter passes it to Anthropic via the 
 }
 ```
 
+`vcsRepo` must be `owner/repo` shorthand or an `https://github.com/<owner>/<repo>` URL (optional `.git`, no user info, no port). The adapter refuses every other URL, so the token is never paired with another host.
+
 Anthropic's sandbox clones the repo into `/workspace/<repo-name>` before the agent runs. The SDK requires `authorization_token` on the resource; supply it one of two ways:
 
 **Option A — vault (recommended for prod):** the operator creates a vault entry in their Anthropic account holding a GitHub PAT, then sets the vault ID in the worker env:

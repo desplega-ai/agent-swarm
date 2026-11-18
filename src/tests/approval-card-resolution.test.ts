@@ -137,6 +137,7 @@ describe("resolved approval Slack card", () => {
     await settle(1);
 
     expect(updates).toHaveLength(1);
+    expect(posts).toHaveLength(0);
     const call = updates[0]!;
     expect(call.channel).toBe("C0CHAN");
     expect(call.ts).toBe("1700000000.000100");
@@ -151,14 +152,6 @@ describe("resolved approval Slack card", () => {
     expect(text).not.toContain("primary");
     expect(text).not.toContain("Timeout");
     expect(text).not.toContain("Approval Required");
-  });
-
-  test("rejected: header names the responder", async () => {
-    const approval = await createPosted();
-    await resolveApprovalRequest(approval.id, { status: "rejected", resolvedBy: "operator" });
-    await settle(1);
-    expect(updates).toHaveLength(1);
-    expect(cardText(updates[0]!)).toContain("❌ *Rejected by operator*");
   });
 
   for (const status of ["approved", "rejected"] as const) {
@@ -199,7 +192,7 @@ describe("resolved approval Slack card", () => {
               : `operator key (as ${user.name})`;
         expect(updates).toHaveLength(1);
         expect(cardText(updates[0]!)).toContain(
-          `*${status === "approved" ? "Approved" : "Rejected"} by ${expected}*`,
+          `${status === "approved" ? "✅ *Approved" : "❌ *Rejected"} by ${expected}*`,
         );
         expect(resolved?.resolvedBy).toBe("operator");
         expect(resolved?.approvals?.[1]?.responder).toBe("operator");
@@ -390,13 +383,5 @@ describe("resolved approval Slack card", () => {
     expect(updates[0]!.channel).toBe(botDm("U0NEW"));
     expect(posts).toHaveLength(1);
     expect(posts[0]!).toMatchObject({ channel: botDm("U0NEW"), thread_ts: "1700000000.000200" });
-  });
-
-  test("a stored channelId or a channel target is edited in place", async () => {
-    await resolveApprovalRequest((await createPosted()).id, { status: "approved" });
-    await settle(1);
-    expect(updates).toHaveLength(1);
-    expect(updates[0]!.channel).toBe("C0CHAN");
-    expect(posts).toHaveLength(0);
   });
 });

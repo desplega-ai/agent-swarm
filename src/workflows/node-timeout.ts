@@ -1,4 +1,5 @@
 import type { WorkflowNode } from "../types";
+import type { BaseExecutor, ExecutorInput } from "./executors/base";
 
 /** Watchdog budget for a node that configures none. */
 export const DEFAULT_NODE_TIMEOUT_MS = 30_000;
@@ -48,4 +49,21 @@ export function startStepDeadline(timeoutMs: number): StepDeadline {
     }, timeoutMs);
   });
   return { signal: controller.signal, expired, clear: () => clearTimeout(timer) };
+}
+
+/** Give each executor invocation its own deadline, including retries. */
+export async function runWithNodeDeadline(
+  node: Pick<WorkflowNode, "type" | "config">,
+  executor: BaseExecutor,
+  input: ExecutorInput,
+) {
+  const deadline = startStepDeadline(resolveNodeTimeoutMs(node));
+  try {
+    return await Promise.race([
+      executor.run({ ...input, meta: { ...input.meta, signal: deadline.signal } }),
+      deadline.expired,
+    ]);
+  } finally {
+    deadline.clear();
+  }
 }

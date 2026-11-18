@@ -13,7 +13,7 @@ const REDIRECTS: Array<[string, string]> = [
     "/mcp-servers?new=1&name=foo&url=https%3A%2F%2Fx",
     "/integrations/tools?tab=mcp&new=1&name=foo&url=https%3A%2F%2Fx",
   ],
-  ["/mcp-servers/m1?oauth=success#top", "/integrations/tools/mcp-servers/m1?oauth=success#top"],
+  ["/mcp-servers/m1?probe=keep#top", "/integrations/tools/mcp-servers/m1?probe=keep#top"],
   ["/settings/api-keys", "/integrations/ai"],
   ["/integrations", "/integrations/tools"],
 ];

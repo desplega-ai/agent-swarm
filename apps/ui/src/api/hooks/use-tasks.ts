@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  type Query,
   type QueryClient,
   useMutation,
   useQuery,
@@ -75,7 +76,10 @@ export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
   });
 }
 
-export function useTask(id: string, opts?: { refetchInterval?: number | false }) {
+export function useTask(
+  id: string,
+  opts?: { refetchInterval?: number | false | ((query: Query<TaskWithLogs>) => number | false) },
+) {
   return useQuery({
     queryKey: ["task", id],
     queryFn: () => api.fetchTask(id),

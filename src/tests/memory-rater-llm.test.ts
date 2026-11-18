@@ -12,7 +12,7 @@
  *      by feeding the parsed object directly into `buildRatingsFromLlm`),
  *      and assert `agent_memory.alpha/beta` move + `memory_rating` rows are
  *      written.
- *   4. Negative path: `MEMORY_RATERS` unset → no `/api/memory/rate` call.
+ *   4. Empty rating batches do not send requests.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -233,21 +233,33 @@ describe("buildRatingsFromLlm", () => {
 describe("postRatings model forwarding", () => {
   test("sends model in the POST body only when the event carries one", async () => {
     let sent: { events: Array<Record<string, unknown>> } | null = null;
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      expect(url).toBe("http://localhost:3013/api/memory/rate");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({
+        "Content-Type": "application/json",
+        "X-Agent-ID": "agent-1",
+        Authorization: "Bearer k",
+      });
       sent = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ applied: 2, rejected: [] }), { status: 200 });
     }) as unknown as typeof fetch;
-    await postRatings({
+    const result = await postRatings({
       apiUrl: "http://localhost:3013",
       apiKey: "k",
       agentId: "agent-1",
+      taskId: "task-1",
       events: [
         { memoryId: "m1", signal: 1, weight: 0.8, source: "llm", model: "p/m" },
         { memoryId: "m2", signal: 1, weight: 0.8, source: "llm" },
       ],
       fetchImpl,
     });
-    expect(sent!.events[0]).toMatchObject({ memoryId: "m1", model: "p/m" });
+    expect(result).toEqual({ ok: true, status: 200 });
+    expect(sent!.events).toEqual([
+      { memoryId: "m1", signal: 1, weight: 0.8, source: "llm", model: "p/m", taskId: "task-1" },
+      { memoryId: "m2", signal: 1, weight: 0.8, source: "llm", taskId: "task-1" },
+    ]);
     expect("model" in sent!.events[1]!).toBe(false);
   });
 });
@@ -587,7 +599,7 @@ describe("LlmRater.rate(ctx) — per-memory path with MockLlmRaterClient", () =>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. HTTP integration — hook-piggyback dry-run.
-// 4. Negative path — MEMORY_RATERS unset → no rate call.
+// 4. Empty rating batches do not send requests.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let TEST_PORT = 0;
@@ -848,43 +860,22 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(await getRatings(taskB)).toHaveLength(1);
   });
 
-  test("negative path: simulated hook with MEMORY_RATERS unset → no /api/memory/rate call", async () => {
-    const m = await makeMemory("piggyback-negative");
-    await insertRetrieval(taskA, m.id);
-
-    const prev = process.env.MEMORY_RATERS;
-    delete process.env.MEMORY_RATERS;
-    try {
-      // Mirror the hook's gate: when isLlmRaterEnabled() is false, the hook
-      // never calls fetchRetrievalsForTask / generateObject / postRatings —
-      // it falls back to the existing summary-only path.
-      let postCalled = false;
-      const fakeFetch: typeof fetch = async () => {
-        postCalled = true;
-        return new Response("{}", { status: 200 });
-      };
-      if (!isLlmRaterEnabled()) {
-        // No call at all — assertion is "we did not invoke postRatings".
-        expect(postCalled).toBe(false);
-      }
-      // Sanity: if we DID call postRatings, nothing got applied because no events.
-      const r = await postRatings({
-        apiUrl: BASE,
-        apiKey: API_KEY,
-        agentId: agentA,
-        taskId: taskA,
-        events: [],
-        fetchImpl: fakeFetch,
-      });
-      expect(r.ok).toBe(true);
-      expect(postCalled).toBe(false); // events=[] short-circuits before fetch
-    } finally {
-      if (prev !== undefined) process.env.MEMORY_RATERS = prev;
-    }
-
-    // No memory_rating rows for taskA in this test.
-    expect(await getRatings(taskA)).toHaveLength(0);
-    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+  test("postRatings with no events does not fetch", async () => {
+    let postCalled = false;
+    const fakeFetch: typeof fetch = async () => {
+      postCalled = true;
+      return new Response("{}", { status: 200 });
+    };
+    const result = await postRatings({
+      apiUrl: BASE,
+      apiKey: API_KEY,
+      agentId: agentA,
+      taskId: taskA,
+      events: [],
+      fetchImpl: fakeFetch,
+    });
+    expect(result).toEqual({ ok: true, status: 0 });
+    expect(postCalled).toBe(false);
   });
 
   test("postRatings logs but does not throw on 4xx (best-effort)", async () => {
@@ -910,112 +901,5 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(r.status).toBeGreaterThanOrEqual(400);
     // Posterior unchanged — 400 means nothing was applied.
     expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
-  });
-
-  test("OPENROUTER_API_KEY unset → hook is a no-op (no fetch, no index, no rate POST)", async () => {
-    const m = await makeMemory("piggyback-openrouter-unset");
-    await insertRetrieval(taskA, m.id);
-
-    // Mirror the hook's outer gate exactly: when OPENROUTER_API_KEY is unset,
-    // the entire summary + rating block must early-return. No call to
-    // /api/memory/index, no call to /api/memory/rate, no LLM invocation.
-    const prev = process.env.OPENROUTER_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
-    try {
-      let anyFetchCalled = false;
-      const fakeFetch: typeof fetch = async () => {
-        anyFetchCalled = true;
-        return new Response("{}", { status: 200 });
-      };
-
-      const skip = !process.env.OPENROUTER_API_KEY;
-      expect(skip).toBe(true);
-
-      // The hook block is entirely guarded — no fetch, no postRatings.
-      // We never reach fetchRetrievalsForTask or postRatings, so neither is
-      // exercised in this branch.
-      if (!skip) {
-        // Unreachable in this test — defensive assertion only.
-        await fetchRetrievalsForTask({
-          apiUrl: BASE,
-          apiKey: API_KEY,
-          agentId: agentA,
-          taskId: taskA,
-          fetchImpl: fakeFetch,
-        });
-      }
-      expect(anyFetchCalled).toBe(false);
-    } finally {
-      if (prev !== undefined) process.env.OPENROUTER_API_KEY = prev;
-    }
-
-    // No memory_rating rows for taskA, posterior unchanged.
-    expect(await getRatings(taskA)).toHaveLength(0);
-    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
-  });
-
-  test("happy path: mocked generateObject result → postRatings called with expected events", async () => {
-    const useful = await makeMemory("happy-useful");
-    const misleading = await makeMemory("happy-misleading");
-
-    await insertRetrieval(taskB, useful.id);
-    await insertRetrieval(taskB, misleading.id);
-
-    const retrievals = await fetchRetrievalsForTask({
-      apiUrl: BASE,
-      apiKey: API_KEY,
-      agentId: agentA,
-      taskId: taskB,
-    });
-    expect(retrievals).toHaveLength(2);
-
-    // Stand in for `const { object } = await generateObject(...)` — the AI
-    // SDK guarantees `object` is already validated against the Zod schema.
-    const generateObjectResult: {
-      object: { summary: string; ratings: Array<{ id: string; score: number; reasoning: string }> };
-    } = {
-      object: {
-        summary: "Two patterns surfaced; one was misleading.",
-        ratings: [
-          { id: useful.id, score: 1, reasoning: "directly answered" },
-          { id: misleading.id, score: 0, reasoning: "contradicted the docs" },
-        ],
-      },
-    };
-
-    // Schema gate is implicit in the SDK, but assert here so a future schema
-    // change doesn't silently make this test pass on garbage data.
-    const validated = SummaryWithRatingsSchema.parse(generateObjectResult.object);
-
-    const events = buildRatingsFromLlm(validated.ratings, retrievals);
-    expect(events).toHaveLength(2);
-    const usefulEvent = events.find((e) => e.memoryId === useful.id)!;
-    const misleadingEvent = events.find((e) => e.memoryId === misleading.id)!;
-    expect(usefulEvent.signal).toBeCloseTo(1, 6);
-    expect(misleadingEvent.signal).toBeCloseTo(-1, 6);
-    expect(usefulEvent.source).toBe("llm");
-    expect(misleadingEvent.source).toBe("llm");
-
-    // Track that postRatings actually attempts the POST with our events.
-    let postedEvents: RatingEvent[] | null = null;
-    const trackingFetch: typeof fetch = async (url, init) => {
-      if (typeof url === "string" && url.endsWith("/api/memory/rate")) {
-        const body = JSON.parse(String(init?.body ?? "{}"));
-        postedEvents = body.events;
-      }
-      return new Response("{}", { status: 200 });
-    };
-    const r = await postRatings({
-      apiUrl: BASE,
-      apiKey: API_KEY,
-      agentId: agentA,
-      taskId: taskB,
-      events,
-      fetchImpl: trackingFetch,
-    });
-    expect(r.ok).toBe(true);
-    expect(postedEvents).not.toBeNull();
-    expect(postedEvents!).toHaveLength(2);
-    expect(postedEvents!.map((e) => e.memoryId).sort()).toEqual([useful.id, misleading.id].sort());
   });
 });

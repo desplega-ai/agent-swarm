@@ -9,6 +9,7 @@ import { registerApprovalActionHandlers } from "./approval-actions";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
+import { isUserAllowed } from "./handlers";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
 import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
@@ -141,6 +142,11 @@ export function registerActionHandlers(app: App): void {
       return ignoreSlackInbound("external_channel");
     }
 
+    if (!(await isUserAllowed(client, body.user.id, body.user.team_id))) {
+      console.log(`[Slack] Ignoring follow-up from unauthorized user ${body.user.id}`);
+      return ignoreSlackInbound("unauthorized_user");
+    }
+
     const lead = await getLeadAgent();
     // Resolve via the shared cascade. Sample context = the modal callback ID
     // so operators can see *which* modal-submit triggered an unmapped entry.
@@ -254,8 +260,26 @@ export function registerActionHandlers(app: App): void {
     const task = await getTaskById(taskId);
     if (!task) return;
 
+    // The click must come from the channel the task belongs to, from a sender the
+    // message handler would accept.
+    const channelId = "channel" in body ? body.channel?.id : undefined;
+    if (!channelId || channelId !== task.slackChannelId) {
+      console.log(`[Slack] Ignoring cancel of task ${taskId} from channel ${channelId}`);
+      return ignoreSlackInbound("cancel_channel_mismatch");
+    }
+    if (await shouldBlockChannel(client, channelId)) {
+      await postExternalChannelNotice(client, channelId, body.user.id);
+      return ignoreSlackInbound("external_channel");
+    }
+    if (!(await isUserAllowed(client, body.user.id, body.user.team_id))) {
+      console.log(
+        `[Slack] Ignoring cancel of task ${taskId} from unauthorized user ${body.user.id}`,
+      );
+      return ignoreSlackInbound("unauthorized_user");
+    }
+
     // Cancel the task in DB
-    const cancelled = await cancelTask(taskId, "Cancelled via Slack");
+    const cancelled = await cancelTask(taskId, "Cancelled via Slack", { statusKind: "user" });
     if (!cancelled) {
       // Task was already in a terminal state
       return;

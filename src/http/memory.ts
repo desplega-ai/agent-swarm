@@ -47,7 +47,7 @@ import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { agentFirstPrincipal, rejectGuest } from "./request-principal";
+import { agentFirstPrincipal, rejectGuest, requestPrincipal } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -831,6 +831,22 @@ export async function handleMemory(
       contextKey,
     } = parsed.body;
     const memoryAgentId = agentId ?? (scope === "agent" ? myAgentId : undefined);
+    // An agent-bound token writes its own memory. Another agent's needs a lead.
+    const auth = getRequestAuth(req);
+    if (
+      auth?.kind === "agent" &&
+      memoryAgentId !== undefined &&
+      memoryAgentId !== auth.agentId &&
+      !can({
+        principal: await ingestPrincipal(req, myAgentId),
+        verb: "memory.edit.any",
+        resource: { kind: "owned", ownerAgentId: memoryAgentId },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(res, "An agent token can index memory only for its own agent", 403);
+      return true;
+    }
 
     if (source === "session_summary" && sourceTaskId) {
       const sourceTask = await getTaskById(sourceTaskId);
@@ -1370,6 +1386,17 @@ export async function handleMemory(
   if (reEmbedMemory.match(req.method, pathSegments)) {
     const parsed = await reEmbedMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
+    // Operator-first: the shared key stays the operator even with X-Agent-ID.
+    // An agent session token must belong to a lead.
+    const reembedDecision = can({
+      principal: await requestPrincipal(req, myAgentId, { unauthenticatedFallback: "operator" }),
+      verb: "memory.reembed",
+      source: "http",
+    });
+    if (!reembedDecision.allow) {
+      jsonError(res, `Forbidden: ${reembedDecision.reason}`, 403);
+      return true;
+    }
 
     const { agentId, batchSize } = parsed.body;
     const store = getMemoryStore();

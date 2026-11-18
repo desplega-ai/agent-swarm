@@ -72,7 +72,29 @@ function loadMultiConfig(): MultiConfig {
   try {
     const stored = localStorage.getItem(CONNECTIONS_KEY);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        Array.isArray(parsed.connections) &&
+        (parsed.activeId === null || typeof parsed.activeId === "string") &&
+        parsed.connections.every(
+          (connection: unknown) =>
+            connection !== null &&
+            typeof connection === "object" &&
+            "id" in connection &&
+            typeof connection.id === "string" &&
+            "name" in connection &&
+            typeof connection.name === "string" &&
+            "apiUrl" in connection &&
+            typeof connection.apiUrl === "string" &&
+            "apiKey" in connection &&
+            typeof connection.apiKey === "string",
+        )
+      ) {
+        return parsed;
+      }
+      return { connections: [], activeId: null };
     }
   } catch (e) {
     console.error("Failed to load connections:", e);

@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
@@ -346,11 +347,12 @@ export const registerSlackReadTool = (server: McpServer) => {
                 toAttach.push({ raw: f, info: fileInfo });
               } else if (token && f.url_private_download) {
                 // Auto-download file if token is available
-                const savePath = `${AUTO_DOWNLOAD_DIR}/${f.id}_${f.name}`;
                 try {
+                  const savePath = `${AUTO_DOWNLOAD_DIR}/${f.id}_${basename(f.name)}`;
                   const downloadResult = await downloadFile({
                     file: f.url_private_download,
                     savePath,
+                    root: AUTO_DOWNLOAD_DIR,
                     token,
                   });
                   if (downloadResult.success && downloadResult.savedPath) {

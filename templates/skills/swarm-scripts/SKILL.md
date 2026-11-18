@@ -70,6 +70,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - Both `zod` and `zod/mini` imports work. Use `import * as z from "zod/mini"` for smaller QuickJS bundles. Mini uses functional forms: `z.optional(z.string())`, `z._default(z.number(), 10)`, and `z.string().check(z.minLength(1))`; its schemas still have `.parse()` and `.safeParse()`.
 - Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works. A worker's `script-upsert` saves at agent scope; a global-scope upsert is rejected unless you are the lead. To share a script, send the lead its name and `contentHash` to promote.
 - SDK methods return `Promise<unknown>`. Responses are usually wrapped: read `res?.data ?? res`. Exception: `app_query` with a literal `appId` and `query` returns rows typed from the app's columns.
+- To fail a run, throw an `Error` whose message starts with a stable reason code (for example `JOB_FAILED: ...`) and carries a JSON payload. A returned `{ ok: false }` still ends the run as `completed`, so a schedule never surfaces the failure; never return `ok: false` when the run must fail.
 - When a script returns an array, return a scalar count beside it (for example `{ count, rows }`). A bounded or elided reply can show an empty array as a clean zero; the count is the only reliable signal that rows existed.
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
 - A script invoked from a workflow node may run under a workflow identity. The node may also supply arguments the script needs: when you run that script directly, pass the same arguments the node maps. A script without a strict `argsSchema` then fails deeper in, often as a not-found or resource error instead of a validation error.
@@ -100,6 +101,7 @@ The route runs the same typecheck and scope rules as the tool.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
 - Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
+- `ctx.caller`: who started this run. `{ kind: "agent", agentId }` for a direct call, `{ kind: "script", agentId }` for a call from another script. Frozen.
 
 ### Files and shell
 
@@ -124,6 +126,49 @@ const { stdout, exitCode } = await ctx.sh("grep -rn TODO /afs/notes | sort | hea
 
 - Each `ctx.step.agentTask` step is a normal worker task (`taskType: "script-run-step"`). When it finishes, the lead gets the usual "Worker task completed — review needed" follow-up, even while the run is still awaiting that step. The step config has no `followUpConfig` field, so a value passed there is dropped. Let the script's own judge step be the gate and close those follow-ups with a one-line accept.
 - When a crash supersedes an in-flight step and resumes it as a new task, the run does not follow the new task id: it can stay `failed` (for example `write EPIPE`) while the resumed task completes. Check the resumed task's output before you re-launch the run.
+
+### Durable objects
+
+A durable object is a named instance of a global script class. Each instance keeps its own JSON state between calls. Only one call runs on an instance at a time, so you do not need your own KV locks.
+
+```ts
+import { DurableObject } from "swarm-sdk";
+
+export default class Counter extends DurableObject<{ n: number }> {
+  initialState() { return { n: 0 }; }
+  async add(args: { by: number }) { this.state.n += args.by; return this.state.n; }
+}
+```
+
+Save it with `script_upsert` in `scope: "global"`. The API refuses a DurableObject class in agent scope and in an inline `script_run`. Call one instance by id:
+
+```ts
+script_run({ name: "counter", object: { id: "team-a", method: "add" }, args: { by: 2 } })
+// → result: 2, object: { id: "team-a", stateVersion: 1, destroyed: false }
+```
+
+- **Methods**: each callable method takes `(args, ctx)` and returns a JSON value. You cannot call `constructor`, `initialState`, `migrate`, `destroy`, a name that starts with `_`, a static method, a getter or an arrow-function field. The API refuses such a call before it runs any code.
+- **First call**: an id with no state starts from `initialState()`.
+- **State rules**:
+  - `this.state` must be JSON, at most 2 MiB.
+  - The API saves it only when the method returns without an error. A thrown error keeps the old state.
+  - The API saves `this.state` as it is when the method returns. A change made later, by work the method did not await, is lost.
+- **Versions**: every call runs the latest saved version of the script. When the stored state comes from an older version, `migrate(state, fromVersion)` runs once before the method, if you define it.
+- **Destroy**: `this.destroy()` deletes the state when the method returns. The next call on that id starts again from `initialState()`.
+- **Idle expiry**: `static idleTtlSec = 3600` deletes the state after 1 hour with no call. Without it, state is kept until `destroy()`.
+- **Read the state**: `kv_get({ namespace: "durable:<scriptId>", key: "state/<id>" })` returns `{ codeVersion, stateVersion, state }`, with secrets scrubbed. KV writes on a `durable:` namespace are refused. Change state only through a method.
+- **Errors**:
+  - `object busy` (409): another call held the instance for 30 s (5 s for a call from a script). Retry the call later. Do not loop.
+  - `already in this call chain` (409): a method called its own instance, directly or through other scripts. Restructure the call. Do not retry.
+  - `call depth exceeds 16` (400): a chain of nested script runs is too deep.
+
+| Cloudflare Durable Objects | Swarm durable objects |
+|---|---|
+| `this.ctx.storage` key-value API | One JSON `this.state` snapshot per instance |
+| `fetch()` and RPC from a Worker | `script_run` with `object: { id, method }` |
+| `env` bindings | `ctx` (the same `ctx` as other scripts), passed to each method |
+| Alarms | Not available yet |
+| Methods take any arguments | Methods take `(args, ctx)` |
 
 ## Inline script pattern
 

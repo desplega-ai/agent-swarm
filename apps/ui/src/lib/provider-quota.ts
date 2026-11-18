@@ -44,6 +44,32 @@ export function quotaIsHigh(percent: number | null): boolean {
   return percent !== null && percent >= 75;
 }
 
+/** A window observed longer ago than this reads as stale in the pool row. */
+export const QUOTA_STALE_MS = 15 * MINUTE_MS;
+
+/** The window's utilization arrived more than 15 minutes ago (or never parses). */
+export function quotaIsStale(window: Pick<QuotaWindow, "observedAt">, nowMs: number): boolean {
+  const seenMs = Date.parse(window.observedAt);
+  return !Number.isFinite(seenMs) || nowMs - seenMs > QUOTA_STALE_MS;
+}
+
+/**
+ * Why the row shows a warning icon. A provider rejection wins over disabled
+ * usage credits: it is the one that stops requests now.
+ */
+export type QuotaWarning =
+  | { kind: "limited"; untilMs: number | null }
+  | { kind: "overage-rejected" }
+  | null;
+
+export function quotaWarning(
+  window: Pick<QuotaWindow, "limited" | "resetsAtMs" | "overageStatus">,
+): QuotaWarning {
+  if (window.limited) return { kind: "limited", untilMs: window.resetsAtMs };
+  if (window.overageStatus === "rejected") return { kind: "overage-rejected" };
+  return null;
+}
+
 export function quotaRemaining(percent: number): number {
   return Math.min(100, Math.max(0, 100 - percent));
 }
@@ -61,6 +87,59 @@ export function quotaResetIn(resetsAtMs: number, nowMs: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
   return `${Math.floor(hours / 24)}d${hours % 24 ? ` ${hours % 24}h` : ""}`;
+}
+
+/** Use within this many percentage points of even use reads as on pace. */
+export const QUOTA_PACE_TOLERANCE = 5;
+
+export interface QuotaPace {
+  /** Whole percent of the window elapsed: the use that spreads the quota evenly to the reset. */
+  expected: number;
+  /** Used minus expected, in percentage points. */
+  delta: number;
+  /** Shortage: quota will go unused by the reset. Overage: on track to run out before it. */
+  status: "shortage" | "on-pace" | "overage";
+  /** "Overage +12%", "Shortage -20%" or "On pace". */
+  label: string;
+  /** One-sentence explanation for a tooltip. */
+  tip: string;
+}
+
+/**
+ * Actual use against even use, where the window started one length before
+ * its reset. Null when the use, the window length or the reset is unknown.
+ */
+export function quotaPace(
+  window: Pick<QuotaWindow, "percent" | "durationMins" | "resetsAtMs">,
+  nowMs: number,
+): QuotaPace | null {
+  const { percent, durationMins, resetsAtMs } = window;
+  if (percent === null || resetsAtMs === null || !durationMins || durationMins <= 0) return null;
+  const elapsed = 1 - (resetsAtMs - nowMs) / (durationMins * MINUTE_MS);
+  const expected = Math.round(Math.min(1, Math.max(0, elapsed)) * 100);
+  const delta = percent - expected;
+  const status =
+    delta > QUOTA_PACE_TOLERANCE
+      ? "overage"
+      : delta < -QUOTA_PACE_TOLERANCE
+        ? "shortage"
+        : "on-pace";
+  const passed = `${expected}% of the window has passed and ${percent}% is used`;
+  return {
+    expected,
+    delta,
+    status,
+    label:
+      status === "on-pace"
+        ? "On pace"
+        : `${status === "overage" ? "Overage" : "Shortage"} ${delta > 0 ? "+" : ""}${delta}%`,
+    tip:
+      status === "overage"
+        ? `${passed}: on track to run out before the reset.`
+        : status === "shortage"
+          ? `${passed}: at this pace, quota will go unused by the reset.`
+          : `${passed}: within ${QUOTA_PACE_TOLERANCE} points of even use.`,
+  };
 }
 
 export interface QuotaWindow {
