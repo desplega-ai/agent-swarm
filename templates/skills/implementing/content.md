@@ -179,7 +179,7 @@ When all phases are complete and verified:
 2. Ensure automated verification checkboxes are updated.
 3. Leave manual verification checkboxes unchecked until the user confirms completion.
 4. Offer post-implementation auditing: "Would you like me to run `/verify-plan` for a post-implementation audit, then `/review` for a final quality check?"
-5. If the work ships as a GitHub PR: once review comments land, address them with `desplega:tackle-gh-comments` (fetch threads, verify each claim, fix, reply, resolve — push last).
+5. If the work ships as a GitHub PR: the pushed, open PR is the deliverable. Follow `code-quality`, "After you open a PR", on whether to wait for CI. Once review comments land, address them with `desplega:tackle-gh-comments` (fetch threads, verify each claim, fix, reply, resolve — push last).
 
 Remember: You're implementing a solution, not just checking boxes. Keep the end goal in mind.
 
