@@ -687,6 +687,10 @@
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
     },
+    "platform-secret-egress": {
+      "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
+      "scenarios": ["platform-secret-egress"]
+    },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
       "scenarios": [
