@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CiteOutcomeSelection } from "./cite-outcome-selection";
 import { ComposerReadOnlyNotice } from "./composer-dock";
+import { PendingFollowUps, usePendingFollowUps } from "./pending-follow-ups";
 import { useSessionPresenceContext } from "./session-presence";
 import { SessionTimeline } from "./session-timeline";
 
@@ -146,14 +147,19 @@ export function SessionConversation({
     steeringEnabled &&
     (anyAgent ? canSteerAnyAgentTask(latestLeafTask) : canSteerSessionTask(latestLeafTask));
 
+  // Optimistic follow-ups (text only, never with `onFollowUp`): sending or failed.
+  const pendingFollowUps = usePendingFollowUps(rootTaskId, detail?.chain);
+  const pendingSignature = pendingFollowUps
+    .map((item) => `${item.mutationId}:${item.status}`)
+    .join(",");
   const canCite = canType && !onFollowUp;
   const composerRef = useRef<HTMLDivElement>(null);
   const citations = useComposerCitations(canCite ? rootTaskId : undefined);
 
   // The turn timeline also grows with a typing bubble and an approval line.
   const flowSignature = turns
-    ? `${typingViewers.map((viewer) => viewer.id).join(",")}|${(detail?.approvals ?? []).map((approval) => approval.id).join(",")}`
-    : "";
+    ? `${typingViewers.map((viewer) => viewer.id).join(",")}|${(detail?.approvals ?? []).map((approval) => approval.id).join(",")}|${pendingSignature}`
+    : pendingSignature;
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom, recheck } = useAutoScroll(scrollEl, [
@@ -243,6 +249,13 @@ export function SessionConversation({
               Couldn't load this session. It may have been deleted, or the API server is offline.
             </p>
           )}
+          {noAccess ? null : (
+            <PendingFollowUps
+              rootTaskId={rootTaskId}
+              items={pendingFollowUps}
+              draftKey={`session:${rootTaskId}`}
+            />
+          )}
         </div>
         {canCite && scrollEl ? (
           <CiteOutcomeSelection
@@ -326,6 +339,7 @@ export function SessionConversation({
             value={value}
             citations={canCite ? citations : undefined}
             // Uncontrolled: the draft persists per session (`lib/composer-drafts.ts`).
+            // `PendingFollowUps` writes Edit's text back under the same key.
             draftKey={`session:${rootTaskId}`}
             onValueChange={(next) => {
               composer.current.hasText = next.trim().length > 0;

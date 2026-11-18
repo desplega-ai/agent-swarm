@@ -658,6 +658,10 @@
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
       "scenarios": ["poll-concurrent-claim"]
     },
+    "task-create-idempotency": {
+      "description": "POST /api/tasks with an Idempotency-Key: a retry and a three-way race on one key return one task, a different body under the key is a 409, unkeyed creates stay separate, a malformed key is a 400",
+      "scenarios": ["task-create-idempotency"]
+    },
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
