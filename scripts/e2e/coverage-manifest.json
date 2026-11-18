@@ -661,6 +661,7 @@
       "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
+        "workflow-retry-deadline",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",
