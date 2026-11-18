@@ -3,8 +3,7 @@
  * DB helpers. Generic HTTP/MCP KV callers may read these namespaces for
  * inspection, but must not mutate them. A family is `<name>` and `<name>:*`,
  * mapped here to the error a generic write gets. A name may span segments
- * (`integrations:kapso`), so a sibling such as `integrations:chat:channel-settings`
- * stays writable.
+ * (`integrations:kapso`), so its siblings under `integrations:` stay writable.
  */
 const RESERVED_FAMILIES = new Map([
   ["apps", "namespace is reserved for swarm apps; use the app row endpoints"],
@@ -32,11 +31,6 @@ const RESERVED_FAMILIES = new Map([
   [
     "integrations:kapso",
     "namespace is reserved for Kapso routing; use register-kapso-number or unregister-kapso-number",
-  ],
-  // Chat SDK channel routing (src/integrations/chat-sdk/router.ts).
-  [
-    "integrations:chat:channels",
-    "namespace is reserved for chat channel routing; use register-chat-channel or unregister-chat-channel",
   ],
 ]);
 

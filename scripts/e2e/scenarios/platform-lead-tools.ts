@@ -389,7 +389,7 @@ export const platformLeadTools: Scenario = {
       );
       expect(JSON.parse(mapping()?.value ?? "{}").agentId === workerId, "the mapping is stored");
 
-      // The routing namespaces are written only by their lead tools; generic KV may read them.
+      // The Kapso routing namespace is written only by its lead tools; generic KV may read it.
       const kapsoNs = "integrations:kapso:numbers";
       expectToolError(
         await callTool(worker, "kv-set", {
@@ -430,15 +430,6 @@ export const platformLeadTools: Scenario = {
         "worker kv-get on the Kapso routing namespace",
       );
       expect(kapsoRead.text.includes(workerId), "generic KV still reads the Kapso mapping");
-      expectToolError(
-        await callTool(worker, "kv-set", {
-          namespace: "integrations:chat:channels",
-          key: `telegram:-${ctx.nonce}`,
-          value: { agentId: workerId },
-        }),
-        "worker kv-set on the chat channel routing namespace",
-        "reserved for chat channel routing",
-      );
       const settingsKey = `telegram:-${ctx.nonce}`;
       expectToolOk(
         await callTool(worker, "kv-set", {
