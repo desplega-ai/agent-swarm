@@ -80,6 +80,10 @@ export interface OpenAICompatibleProvider {
 }
 
 const DEVELOPER_ROLE = { supportsDeveloperRole: true } as const;
+// Z.ai's coding endpoint rejects the OpenAI `developer` role with
+// `400 {"code":"1214","message":"Incorrect role information"}`; the system
+// prompt must go as a `system` message.
+const SYSTEM_ROLE = { supportsDeveloperRole: false } as const;
 const TEXT_IMAGE = ["text", "image"] as const;
 const TEXT_ONLY = ["text"] as const;
 const EFFORTS = ["low", "medium", "high", "max"] as const;
@@ -237,6 +241,79 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         compat: DEVELOPER_ROLE,
         family: "gemma",
         reasoningEfforts: EFFORTS_WITH_NONE,
+      },
+    ],
+  },
+  "zai-coding-plan": {
+    id: "zai-coding-plan",
+    displayName: "Z.ai Coding Plan",
+    description:
+      "Z.ai's GLM models (GLM-5.3-Flash, GLM-5.3 and more) for the pi and opencode harnesses, billed to a flat-rate coding plan.",
+    // The GLM Coding Plan's OpenAI-compatible endpoint:
+    // docs.z.ai/devpack/quick-start#openai-chat-completions
+    baseUrl: "https://api.z.ai/api/coding/paas/v4",
+    baseUrlLocked: true,
+    docsUrl: "https://docs.z.ai/devpack/quick-start",
+    envVar: "ZAI_API_KEY",
+    aliasEnvVars: [],
+    keyNote:
+      "Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.",
+    catalog: "models.dev",
+    npm: "@ai-sdk/openai-compatible",
+    // Ids the coding endpoint actually serves (GET /models on the base URL,
+    // 2026-11-18) intersected with models.dev's `zai-coding-plan` section —
+    // GLM-5.3-Flash first (the plan's everyday workhorse). The section's
+    // `*-highspeed` ids are not served and the newer `glm-5.3-flashx` pair is
+    // not on models.dev yet, so both stay out until the catalog catches up;
+    // the 4.x generation is previous-gen, like NaN's delisted ids. Video and
+    // PDF input modes are dropped: pi and opencode only take text and image.
+    // `family`/`reasoningEfforts` stay unset: the section is a models.dev one,
+    // so the catalog's own facts drive efforts.
+    models: [
+      {
+        id: "glm-5.3-flash",
+        name: "GLM-5.3-Flash",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_IMAGE,
+        reasoning: true,
+        compat: SYSTEM_ROLE,
+      },
+      {
+        id: "glm-5.3",
+        name: "GLM-5.3",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: SYSTEM_ROLE,
+      },
+      {
+        id: "glm-5.2",
+        name: "GLM-5.2",
+        contextWindow: 1000000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: SYSTEM_ROLE,
+      },
+      {
+        id: "glm-5.1",
+        name: "GLM-5.1",
+        contextWindow: 200000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: SYSTEM_ROLE,
+      },
+      {
+        id: "glm-5-turbo",
+        name: "GLM-5-Turbo",
+        contextWindow: 200000,
+        maxOutputTokens: 131072,
+        input: TEXT_ONLY,
+        reasoning: true,
+        compat: SYSTEM_ROLE,
       },
     ],
   },

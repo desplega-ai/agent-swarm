@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAgentById } from "../be/db";
-import type { RbacPrincipal } from "../rbac";
+import { can, type PermissionVerb, type RbacPrincipal, type RbacResource } from "../rbac";
 import {
   authUser,
   authUserId,
@@ -166,5 +166,31 @@ export function requireAuthKind<const K extends HttpRequestAuth["kind"]>(
 export function rejectGuest(req: IncomingMessage, res: ServerResponse): boolean {
   if (getRequestAuth(req)?.kind !== "guest") return false;
   jsonError(res, "Forbidden", 403);
+  return true;
+}
+
+/**
+ * Refuse an agent-bound session token (`aseph_`) whose agent may not do `verb`
+ * on `resource`. Only that credential is checked here: the shared API key,
+ * user tokens and page sessions keep the route's other checks, so a worker on
+ * the shared key behaves as before. Writes a 403 and returns true on refusal.
+ */
+export async function refuseAgentTokenWithout(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: PermissionVerb,
+  resource: RbacResource = { kind: "none" },
+): Promise<boolean> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind !== "agent") return false;
+  const agent = await getAgentById(auth.agentId);
+  const decision = can({
+    principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead === true },
+    verb,
+    resource,
+    source: "http",
+  });
+  if (decision.allow) return false;
+  jsonError(res, `Forbidden: ${decision.reason}`, 403);
   return true;
 }

@@ -34,6 +34,7 @@ import {
 } from "../oauth/mcp-wrapper";
 import { McpAuthMethodSchema } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
+import { refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -343,6 +344,7 @@ const refreshRoute = route({
   tags: ["MCP OAuth"],
   auth: { apiKey: true },
   params: z.object({ mcpServerId: z.string() }),
+  rbac: { permission: "mcp-oauth.manage" },
   body: z
     .object({
       userId: z.string().optional(),
@@ -365,6 +367,7 @@ const disconnectRoute = route({
   tags: ["MCP OAuth"],
   auth: { apiKey: true },
   params: z.object({ mcpServerId: z.string() }),
+  rbac: { permission: "mcp-oauth.manage" },
   query: z.object({ userId: z.string().optional() }),
   responses: {
     200: { description: "Token revoked/deleted", schema: OkResponseSchema },
@@ -380,6 +383,7 @@ const manualClientRoute = route({
   tags: ["MCP OAuth"],
   auth: { apiKey: true },
   params: z.object({ mcpServerId: z.string() }),
+  rbac: { permission: "mcp-oauth.manage" },
   body: z.object({
     clientId: z.string().min(1),
     clientSecret: z.string().optional(),
@@ -927,6 +931,7 @@ export async function handleMcpOAuth(
   if (refreshRoute.match(req.method, pathSegments)) {
     const parsed = await refreshRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "mcp-oauth.manage")) return true;
 
     const userId = parsed.body?.userId ?? null;
     const existing = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
@@ -974,6 +979,7 @@ export async function handleMcpOAuth(
   if (disconnectRoute.match(req.method, pathSegments)) {
     const parsed = await disconnectRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "mcp-oauth.manage")) return true;
 
     const userId = parsed.query.userId ?? null;
     const token = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
@@ -1011,6 +1017,7 @@ export async function handleMcpOAuth(
   if (manualClientRoute.match(req.method, pathSegments)) {
     const parsed = await manualClientRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "mcp-oauth.manage")) return true;
 
     const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;

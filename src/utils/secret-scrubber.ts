@@ -61,7 +61,7 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * LangSmith, CircleCI, Google `AQ.`, HubSpot, New Relic and Sentry DSN
  * shapes; pass 4 redacts a PEM private key cut off before its END line.
  */
-export const SCRUBBER_RULES_VERSION = 15;
+export const SCRUBBER_RULES_VERSION = 16;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([

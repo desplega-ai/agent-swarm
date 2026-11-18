@@ -474,18 +474,43 @@ export interface DeferralText {
 const WAITING_ON = /^Waiting on (.+?) \u2014 or (.+) at the latest$/;
 const CHECKING_BACK = /^Checking back (.+)$/;
 
-/** The parts of a deferral's text. Both null for an output in another shape (an outputSchema). */
-export function deferralText(output: string | undefined): DeferralText {
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** "17:50", "tomorrow 09:00" or "11-02 09:00", in the viewer's local timezone. */
+export function localResumeTime(iso: string, now: Date = new Date()): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(at) - day(now)) / 86_400_000);
+  if (days === 0) return time;
+  if (days === 1) return `tomorrow ${time}`;
+  return `${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ${time}`;
+}
+
+/**
+ * The parts of a deferral's text. Both null for an output in another shape (an outputSchema).
+ * With `deferredUntil`, `by` is that ceiling in the viewer's timezone; the text's own time
+ * is in the requester's.
+ */
+export function deferralText(
+  output: string | undefined,
+  deferredUntil?: string,
+  now?: Date,
+): DeferralText {
   const text = output?.trim() ?? "";
   const waiting = WAITING_ON.exec(text);
   const when = waiting?.[2] ?? CHECKING_BACK.exec(text)?.[1] ?? null;
+  const local = when && deferredUntil ? localResumeTime(deferredUntil, now) : null;
   return {
     who: waiting?.[1] ?? null,
     by:
+      local ??
       when
         ?.replace(/^today at /, "")
         .replace(/^on /, "")
-        .replace(" at ", " ") ?? null,
+        .replace(" at ", " ") ??
+      null,
   };
 }
 

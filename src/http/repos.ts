@@ -6,7 +6,7 @@ import { changesMergePolicy } from "../be/repo-merge-policy";
 import { can } from "../rbac";
 import { emitIntegrationConnected } from "../telemetry";
 import { RepoGuidelinesInputSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
-import { agentFirstPrincipal } from "./request-principal";
+import { agentFirstPrincipal, refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -110,6 +110,7 @@ const deleteRepo = route({
     200: { description: "Repo deleted", schema: z.object({ success: z.boolean() }) },
     404: { description: "Repo not found", schema: z.object({ error: z.string() }) },
   },
+  rbac: { permission: "repo.delete" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -237,6 +238,7 @@ export async function handleRepos(
   if (deleteRepo.match(req.method, pathSegments)) {
     const parsed = await deleteRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "repo.delete")) return true;
     const deleted = await deleteSwarmRepo(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Repo not found", 404);

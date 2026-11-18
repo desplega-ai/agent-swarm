@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.326
+ARG CLAUDE_CODE_VERSION=2.1.327
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.169.0
+ARG CODEX_VERSION=0.170.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.3.0
+ARG OPENCODE_VERSION=2.3.2
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -399,6 +399,7 @@ FROM worker-base AS worker-slim
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
+COPY src/commands/entrypoint-mcp-config.ts /usr/local/lib/agent-swarm/entrypoint-mcp-config.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)
@@ -551,8 +552,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.3
-ARG DSH_SHA512=4bee2851854a5ae73548230ca759a951ada5971572d28f60220a7b4c383f11aecfbaf5d59007e7ca4a921f5fe80d7541fb2e55cc49b440826e968d4b201dea46
+ARG DSH_VERSION=0.2.2-rc.4
+ARG DSH_SHA512=0d125a4d6224e0e6e40ce1f195df978c580774acd7e5402913b3e3cc4fc4b29cb8e26d5f4f8a58ecb44908c0c2143f80ac827e1b097514bf60d7f52533036fa7
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -567,9 +568,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794916837-g564d50
-ARG AMP_SHA512_AMD64=97b1b6c5aedc4377311df010849c50f1489c258546cb0e16182505f5258b15c41cb9c18b8cf5650df436200a0a2c84a06bc0ac43333f99768e243a70ad625581
-ARG AMP_SHA512_ARM64=831a500eab57a1aabba2bc665dbcf4d9f2e780846796f0fb948fdb99b8f752096c07dc70926f7d2083bffb3b0fccc17297d775fba42492556c2dcd7fa721ea0a
+ARG AMP_VERSION=0.0.1794974444-g035056
+ARG AMP_SHA512_AMD64=dbccf1f790e4e9125072b497c0e5e90da7db7f55dd7fd0130b59b884eab16f827797970599e8f5d9e1cf01820bd23b138ce9f42882f643358de5602dd36c172d
+ARG AMP_SHA512_ARM64=9ffd2f943caf757c75792dbb59b493b330fa9e9d67332d5fd967c2723f485915ca84657a3f91284463074ff18d167306ad87864ed8ae15488476df1681bd3578
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -585,7 +586,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.4.0
+ARG CURSOR_SDK_VERSION=1.4.1
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -617,7 +618,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.112
+ARG COPILOT_CLI_VERSION=1.0.113
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -638,9 +639,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.59.2
-ARG GOOSE_SHA256_AMD64=c63cf82953e968d84b7542eb38a621dfdb5050b967728ed363517be5cdc666ea
-ARG GOOSE_SHA256_ARM64=ec2e0aded1e2aba8d310727a5138f2e3cce0769f2611fbe196ed014c31ce370a
+ARG GOOSE_VERSION=1.60.1
+ARG GOOSE_SHA256_AMD64=0327b1857f8030343f59b77503e0455629bbf472c2901cb94b88389d6278635a
+ARG GOOSE_SHA256_ARM64=6a962a0ba55829e00f6f297dff736d53b9bdc8da84f0f49c4768e2557ac39cbe
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -678,9 +679,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.88
-ARG GROK_SHA512_AMD64=8205d1653af1565040b5ae18d46def27ba17a7ff305c6b205a529e067f52c24038177d01ef6d710e38640c601eac9140f5900113eb11edd8651dfa05844331d1
-ARG GROK_SHA512_ARM64=0d27e5cd8720886b4e9fc1e9aa074877407d3fae0c116a0a32983411ba7848b357b17a4a286aa8ea76528f5ad6a7c3ef5e4fee8277bc585af26054b46de5bda8
+ARG GROK_VERSION=1.0.89
+ARG GROK_SHA512_AMD64=3e7f0598112997faffac69a729b1c51e639d25dcbf713d206893433baedb3c817462a0835afa51a3f31d0e7cd2fb51760d5233ba7ca9b0c45311d11207c1fbcf
+ARG GROK_SHA512_ARM64=80aa518138dd5a80d62322bb0a0aa0aff5f3b31edee8238af3708100eb71bac4fad99036ad5d4a692bb7f31b153c91111958a7490a7595af3fe4e99b52f8b8b6
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
@@ -826,6 +827,7 @@ FROM worker-full-base AS worker-full
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY src/commands/entrypoint-api-readiness.ts /usr/local/lib/agent-swarm/entrypoint-api-readiness.ts
+COPY src/commands/entrypoint-mcp-config.ts /usr/local/lib/agent-swarm/entrypoint-mcp-config.ts
 
 # Optional helpers (postgres/redis only exist in the full image; the
 # entrypoint guards on the binaries before invoking these)

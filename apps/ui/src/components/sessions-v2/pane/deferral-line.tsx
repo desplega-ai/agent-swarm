@@ -62,15 +62,19 @@ function WaitRow({
 
 /**
  * A reply that only says the swarm waits (the lead deferred): one muted line,
- * "Waiting on Picateclas · by 17:50 · worked 2m 56s" or "Checking back at
+ * "Waiting on Picateclas · resumes by 17:50 · worked 2m 56s" or "Checking back at
  * 19:20 · worked 1m 29s". A click opens the reply as usual: its work and its
  * full text.
  */
 export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: () => void }) {
-  const { who, by } = deferralText(task.output);
+  const { who, by } = deferralText(task.output, task.deferredUntil);
   // A time alone reads "at 16:12"; a day reads as is ("tomorrow 09:00", "11-02 09:00").
   const back = by ? `Checking back ${/^\d{1,2}:\d{2}$/.test(by) ? "at " : ""}${by}` : "Waiting";
-  const label = [who ? `Waiting on ${who}` : back, who && by ? `by ${by}` : null, workedFor(task)]
+  const label = [
+    who ? `Waiting on ${who}` : back,
+    who && by ? `resumes by ${by}` : null,
+    workedFor(task),
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -87,7 +91,10 @@ export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: (
  * Picateclas) · latest by 17:50". It opens one `DeferralLine` per wait.
  */
 export function DeferralGroup({ parts, onToggle }: { parts: TurnPart[]; onToggle?: () => void }) {
-  const texts = parts.map((part) => deferralText(shownTry(part.answer).output));
+  const texts = parts.map((part) => {
+    const answer = shownTry(part.answer);
+    return deferralText(answer.output, answer.deferredUntil);
+  });
   const names = [...new Set(texts.flatMap((text) => (text.who ? [text.who] : [])))];
   const latest = texts.at(-1)?.by;
   const label = `Waited ${parts.length} times${names.length ? ` (${names.join(", ")})` : ""}${

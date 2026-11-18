@@ -14,7 +14,34 @@ import { resolveAgentFsIdentity } from "./agent-fs-identity";
 import { getResolvedConfig } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
-import { isApiOnlyConfigKey, isInternalConfigKey } from "./swarm-config-guard";
+import { isApiOnlyConfigKey, isInternalConfigKey, isReservedConfigKey } from "./swarm-config-guard";
+
+/**
+ * Binding keys that may also resolve from the API process env when no config
+ * row holds them. Only the documented default GitHub binding. Every other
+ * binding resolves from swarm_config rows alone.
+ */
+const ENV_FALLBACK_CONFIG_KEYS = new Set(["GITHUB_TOKEN"]);
+
+/**
+ * The value a config binding substitutes. Reserved, API-only and internal keys
+ * never resolve, from config or from the env.
+ */
+function resolveBindingConfigValue(
+  configMap: Map<string, string>,
+  configKey: string,
+): string | undefined {
+  if (
+    isReservedConfigKey(configKey) ||
+    isApiOnlyConfigKey(configKey) ||
+    isInternalConfigKey(configKey)
+  ) {
+    return undefined;
+  }
+  const value = configMap.get(configKey);
+  if (value !== undefined) return value;
+  return ENV_FALLBACK_CONFIG_KEYS.has(configKey) ? process.env[configKey] : undefined;
+}
 
 // Relational-only credential binding store. The legacy SCRIPT_CREDENTIAL_BINDINGS
 // swarm-config JSON blob is retired (migrated to relational rows at boot), so
@@ -103,7 +130,7 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore(),
-    (configKey) => configMap.get(configKey) ?? process.env[configKey],
+    (configKey) => resolveBindingConfigValue(configMap, configKey),
     defaultCredentialBindings(),
     (oauthAuthorizationId) => resolveOAuthBindingToken(oauthAuthorizationId),
   );
