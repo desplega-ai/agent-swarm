@@ -9317,7 +9317,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -9862,7 +9862,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -10419,7 +10419,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -10812,7 +10812,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings for the app's scripts."
+                      "description": "Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget."
                     }
                   },
                   "required": [
@@ -64348,7 +64348,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Advisory quickjs-executor compatibility findings. Never blocks the save."
+                      "description": "Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save."
                     }
                   },
                   "required": [

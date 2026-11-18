@@ -1181,6 +1181,36 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "262144",
         docsUrl: `${DOCS}apps/concepts`,
       },
+      {
+        key: "APPS_MAX_MODELS",
+        label: "App table cap",
+        description:
+          "Maximum number of models (tables) in one Swarm Apps definition. Default 50; accepts 1 through 1000. Checked when a definition is saved; saved apps over a lowered cap keep working. Applies on the next config reload.",
+        kind: "number",
+        defaultValue: "50",
+        placeholder: "50",
+        docsUrl: `${DOCS}apps/concepts`,
+      },
+      {
+        key: "APPS_MAX_COLUMNS_PER_MODEL",
+        label: "App column cap",
+        description:
+          "Maximum number of columns per Swarm Apps model (table). Default 200; accepts 1 through 1000. Checked when a definition is saved. Applies on the next config reload.",
+        kind: "number",
+        defaultValue: "200",
+        placeholder: "200",
+        docsUrl: `${DOCS}apps/concepts`,
+      },
+      {
+        key: "APPS_MAX_ACTIONS",
+        label: "App action cap",
+        description:
+          "Maximum number of actions in one Swarm Apps definition. Default 100; accepts 1 through 1000. Checked when a definition is saved. Applies on the next config reload.",
+        kind: "number",
+        defaultValue: "100",
+        placeholder: "100",
+        docsUrl: `${DOCS}apps/concepts`,
+      },
     ],
   },
   {

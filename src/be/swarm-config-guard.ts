@@ -255,6 +255,14 @@ export const DB_RETENTION_TUNING_BOUNDS = {
 export const APPS_JSON_COLUMN_MAX_BYTES_BOUNDS = { min: 1_024, max: 16_777_216 } as const;
 
 /**
+ * Bounds for the Swarm Apps definition size caps (`APPS_MAX_MODELS`,
+ * `APPS_MAX_COLUMNS_PER_MODEL`, `APPS_MAX_ACTIONS`). `src/apps/definition.ts`
+ * reads each knob against the same bounds at write time and falls back to its
+ * default outside them; VALIDATED_KEYS rejects out-of-range writes.
+ */
+export const APPS_DEFINITION_LIMIT_BOUNDS = { min: 1, max: 1_000 } as const;
+
+/**
  * Bounds for the Codex OAuth keep-warm age threshold
  * (`CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`).
  *
@@ -798,6 +806,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ["APPS_JSON_COLUMN_MAX_BYTES"],
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.min,
     APPS_JSON_COLUMN_MAX_BYTES_BOUNDS.max,
+  ),
+  ...boundedIntegerValidators(
+    ["APPS_MAX_MODELS", "APPS_MAX_COLUMNS_PER_MODEL", "APPS_MAX_ACTIONS"],
+    APPS_DEFINITION_LIMIT_BOUNDS.min,
+    APPS_DEFINITION_LIMIT_BOUNDS.max,
   ),
   // The scheduler tick is bounded at both ends, and src/scheduler/scheduler.ts
   // parses the boot value against the same range: a delay above the timer ceiling
