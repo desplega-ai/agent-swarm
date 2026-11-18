@@ -38,8 +38,20 @@ mock.module("@/components/sessions/compose-attachment-upload", () =>
   require("../sessions/compose-attachment-upload"),
 );
 mock.module("@/components/sessions/audio-recorder", () => require("../sessions/audio-recorder"));
+mock.module("@/lib/uuid", () => require("../../lib/uuid"));
+mock.module("@/api/hooks/session-query-keys", () => require("../../api/hooks/session-query-keys"));
+mock.module("@/components/shared/transcript/message-text", () => ({
+  MessageText: ({ text }: { text: string }) => text,
+}));
+mock.module("@/components/sessions/pending-follow-ups", () =>
+  require("../sessions/pending-follow-ups"),
+);
 
 const createdTasks: Array<Record<string, unknown>> = [];
+// The second argument of each create (the Sessions follow-up's idempotency key).
+const createOpts: Array<{ idempotencyKey?: string } | undefined> = [];
+// Creates that fail before the server commits them.
+let rejectCreates = 0;
 const uploads: Array<{ taskId: string; file: File }> = [];
 // Promotions the server committed, and every promotion request sent.
 const promoted: string[] = [];
@@ -59,8 +71,13 @@ let rejectUploads = false;
 let nextTaskId = 0;
 mock.module("@/api/client", () => ({
   api: {
-    createTask: async (input: Record<string, unknown>) => {
+    createTask: async (input: Record<string, unknown>, opts?: { idempotencyKey?: string }) => {
       createdTasks.push(input);
+      createOpts.push(opts);
+      if (rejectCreates > 0) {
+        rejectCreates -= 1;
+        throw new Error("network error");
+      }
       nextTaskId += 1;
       return { id: nextTaskId === 1 ? "follow-up" : `follow-up-${nextTaskId}`, ...input };
     },
@@ -212,6 +229,8 @@ const sendButton = (container: HTMLElement) =>
 
 beforeEach(() => {
   createdTasks.length = 0;
+  createOpts.length = 0;
+  rejectCreates = 0;
   uploads.length = 0;
   promoted.length = 0;
   promoteCalls.length = 0;
@@ -318,6 +337,55 @@ describe("TaskComposer on Sessions", () => {
     await act(async () => {});
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
 
+    await unmount();
+  });
+
+  test("a Sessions follow-up clears the box at once; a failed one keeps its text, Retry resends its key, Edit takes it back", async () => {
+    rejectCreates = 2;
+    const { PendingFollowUps, usePendingFollowUps } = await import("../sessions/pending-follow-ups");
+    function Session() {
+      const items = usePendingFollowUps("root-1", []);
+      return (
+        <>
+          <PendingFollowUps rootTaskId="root-1" items={items} draftKey="session:root-1" />
+          <TaskComposer
+            rootTaskId="root-1"
+            targetTask={null}
+            canSteer={false}
+            draftKey="session:root-1"
+          />
+        </>
+      );
+    }
+    const { container, unmount } = await mount(<Session />);
+    const bubbleText = () =>
+      container.querySelector('section[aria-label="Your message"]')?.textContent ?? null;
+    const action = (name: string) =>
+      [...container.querySelectorAll("button")].find((b) => b.textContent === name);
+
+    await type(container, "ship it");
+    await send(container);
+    // The box is empty and editable while the send runs or after it fails.
+    expect(textOf(container)).toBe("");
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(false);
+    await waitFor(() => action("Retry") !== undefined);
+    expect(bubbleText()).toContain("ship it");
+    expect(bubbleText()).toContain("Not sent");
+
+    await act(async () => action("Retry")?.click());
+    await waitFor(() => createdTasks.length === 2);
+    // useMutationState notifies on a later tick: let the retried bubble replace the first.
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(action("Retry")).toBeDefined();
+    // One key per bubble: the retry can only ever give back the first task.
+    expect(createOpts[0]?.idempotencyKey).toBeString();
+    expect(createOpts[1]?.idempotencyKey).toBe(createOpts[0]?.idempotencyKey as string);
+
+    await act(async () => action("Edit")?.click());
+    // useMutationState notifies on the next tick.
+    await waitFor(() => bubbleText() === null);
+    expect(bubbleText()).toBeNull();
+    expect(textOf(container)).toBe("ship it");
     await unmount();
   });
 
@@ -926,7 +994,7 @@ describe("composer audio recording", () => {
     );
     await type(container, "typed instead");
     await send(container);
-    expect(createdTasks[0]).toMatchObject({ task: "typed instead", draft: false });
+    expect(createdTasks[0]).toMatchObject({ task: "typed instead", source: "ui" });
     await unmount();
   });
 

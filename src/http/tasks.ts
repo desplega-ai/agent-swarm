@@ -6,6 +6,7 @@ import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
+  createTaskExtended,
   ExtensionAgentAssignmentError,
   failTask,
   getAgentById,
@@ -47,6 +48,12 @@ import {
   modelProfileRefError,
   taskProfileError,
 } from "../be/db/model-profiles";
+import {
+  findAcceptedTaskCreate,
+  recordAcceptedTaskCreate,
+  type TaskIdempotencyClaim,
+} from "../be/db/task-idempotency";
+import { IdempotencyKeyTakenError, requestFingerprint } from "../be/db/workflow-idempotency";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
@@ -63,7 +70,7 @@ import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rb
 import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { prepareTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import {
@@ -106,6 +113,11 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { readsRepoSecrets } from "./config";
+import {
+  IDEMPOTENT_REPLAYED_HEADER,
+  idempotencyKeyHeader,
+  readIdempotencyKey,
+} from "./idempotency-key";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
@@ -344,6 +356,7 @@ const createTask = route({
   rbac: { permission: "task.create.own" },
   summary: "Create a new task",
   tags: ["Tasks"],
+  headers: idempotencyKeyHeader("creates one task (a replay returns that task as it is now)"),
   body: z
     .object({
       task: z.string().min(1),
@@ -407,8 +420,10 @@ const createTask = route({
     201: { description: "Task created", schema: AgentTaskSchema },
     400: {
       description:
-        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key",
     },
+    409: { description: "Idempotency-Key was already used for a different request" },
+    410: { description: "The task created under this Idempotency-Key was deleted" },
     403: {
       description:
         "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
@@ -1143,8 +1158,33 @@ export async function handleTasks(
   }
 
   if (createTask.match(req.method, pathSegments)) {
+    const idempotency = readIdempotencyKey(req, res, myAgentId);
+    if (idempotency === null) return true;
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const claim: TaskIdempotencyClaim | undefined = idempotency && {
+      ...idempotency,
+      fingerprint: requestFingerprint("task.create", parsed.body),
+    };
+    // Answer from the task this key already created, if any. Before the
+    // routing and access checks: the key is scoped to this caller, and a retry
+    // gets the original task even if the same request would no longer pass.
+    const replayCreate = async (): Promise<boolean> => {
+      const accepted = claim && (await findAcceptedTaskCreate(claim));
+      if (!accepted) return false;
+      const task =
+        accepted.fingerprint === claim.fingerprint ? await getTaskById(accepted.taskId) : null;
+      if (accepted.fingerprint !== claim.fingerprint) {
+        jsonError(res, "Idempotency-Key was already used for a different request", 409);
+      } else if (!task) {
+        jsonError(res, "The task this Idempotency-Key created was deleted", 410);
+      } else {
+        res.setHeader(IDEMPOTENT_REPLAYED_HEADER, "true");
+        createTask.respond(res, 201, task);
+      }
+      return true;
+    };
+    if (await replayCreate()) return true;
 
     // Trusted identity first, then the body hint; see resolveTaskRequester.
     const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
@@ -1258,7 +1298,7 @@ export async function handleTasks(
     }
 
     try {
-      const task = await createTaskWithSiblingAwareness(
+      const prepared = await prepareTaskWithSiblingAwareness(
         parsed.body.task,
         {
           key: assetKey,
@@ -1307,6 +1347,17 @@ export async function handleTasks(
         },
         { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );
+      // Extension pre-hooks ran above, outside the transaction; the key record
+      // commits with the task, so a rollback drops both.
+      const task = claim
+        ? await getDbClient().transaction(async () => {
+            // A concurrent request with this key committed while this one got ready.
+            if (await findAcceptedTaskCreate(claim)) throw new IdempotencyKeyTakenError();
+            const created = await createTaskExtended(prepared.description, prepared.options);
+            await recordAcceptedTaskCreate(claim, created.id);
+            return created;
+          })
+        : await createTaskExtended(prepared.description, prepared.options);
 
       ensure({
         id: "created",
@@ -1331,6 +1382,8 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      // A concurrent request with this key committed first; nothing of this one did.
+      if (error instanceof IdempotencyKeyTakenError && (await replayCreate())) return true;
       if (error instanceof TaskRoutingAuthorizationError) {
         console.warn(
           "[HTTP] Task assignment rejected:",

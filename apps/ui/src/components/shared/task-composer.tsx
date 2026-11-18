@@ -43,6 +43,11 @@
  * from the mic button is one such file: its upload to the draft task puts its
  * transcript in the task text.
  *
+ * In Sessions (`rootTaskId` set) a text-only follow-up is optimistic: the box
+ * clears at once and stays editable, and `SessionConversation` shows the
+ * message as a pending bubble, with Retry and Edit if it fails
+ * (`sessions/pending-follow-ups.tsx`).
+ *
  * A json-render app page (`SessionThread`) passes `onFollowUp`: its follow-up
  * runs the page's action chain instead of `POST /api/tasks`, so the box drops
  * attachments and the mic. Its steers carry `steerSource: "app-page"`.
@@ -59,11 +64,13 @@ import {
   uploadComposeAttachments,
 } from "@/components/sessions/compose-attachment-upload";
 import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
+import { useSendFollowUp } from "@/components/sessions/pending-follow-ups";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useComposerDraft } from "@/lib/composer-drafts";
 import { taskListTitle } from "@/lib/task-title";
 import { useCan } from "@/lib/use-can";
+import { randomUUID } from "@/lib/uuid";
 
 export interface TaskComposerProps {
   /**
@@ -75,7 +82,8 @@ export interface TaskComposerProps {
   canSteer: boolean;
   /**
    * The session root (Sessions). Its chain refreshes after a send, and it is
-   * the follow-up parent until `targetTask` loads.
+   * the follow-up parent until `targetTask` loads. Set, a text-only follow-up
+   * is optimistic: the caller renders `PendingFollowUps` for it.
    */
   rootTaskId?: string;
   /**
@@ -401,12 +409,29 @@ export function TaskComposer({
     onSuccess: () => setDraft(""),
   });
   const sending = onFollowUp ? callerFollowUp : createTask;
+  const optimisticFollowUp = useSendFollowUp(rootTaskId ?? "");
 
   const submit = () => {
     const trimmed = draft.trim();
     if (trimmed.length === 0 || sending.isPending) return;
     if (onFollowUp) {
       callerFollowUp.mutate({ text: trimmed, parentTaskId: targetTask?.id ?? rootTaskId });
+      return;
+    }
+    if (rootTaskId && attachments.length === 0) {
+      optimisticFollowUp.mutate(
+        {
+          task: trimmed,
+          parentTaskId: targetTask?.id ?? rootTaskId,
+          ...(followUpAgentId
+            ? { agentId: followUpAgentId, routingReason: "continuity" as const }
+            : {}),
+          requestedByUserId: userId ?? undefined,
+          idempotencyKey: randomUUID(),
+        },
+        { onSuccess: (created) => onCreated?.(created) },
+      );
+      setDraft("");
       return;
     }
     createTask.mutate({
