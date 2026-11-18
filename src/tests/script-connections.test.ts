@@ -732,8 +732,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "342_script_run_sources.sql");
       // 354 alters session_tokens and script_runs, which this fixture does not create.
       markMigrationApplied(database, "354_durable_objects.sql");
-      // 355 alters pages, which this fixture does not create (see 269).
-      markMigrationApplied(database, "355_page_kit.sql");
+      // 358 alters pages, which this fixture does not create (see 269).
+      markMigrationApplied(database, "358_page_kit.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
