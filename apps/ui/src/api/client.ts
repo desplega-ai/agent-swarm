@@ -815,42 +815,49 @@ class ApiClient {
     return res.json();
   }
 
-  async createTask(data: {
-    task: string;
-    key?: string;
-    agentId?: string;
-    routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
-    routingNote?: string;
-    taskType?: string;
-    tags?: string[];
-    priority?: number;
-    dependsOn?: string[];
-    /** Phase 3 (≥1.76.0): parent task for grouped/parallel sub-tasks. */
-    parentTaskId?: string;
-    /** Phase 3 (≥1.76.0): override the wire `source` ("api"|"mcp"|"slack"). */
-    source?: string;
-    /** Phase 3 (≥1.76.0): identity of the requesting user. */
-    requestedByUserId?: string;
-    /** Phase 3 (≥1.76.0): cross-ingress conversation/thread context key. */
-    contextKey?: string;
-    model?: string;
-    modelTier?: string;
-    effort?: string;
-    /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
-    vcsRepo?: string;
-    /**
-     * Create in `draft` status (#1240) — visible to the owner but not
-     * dispatch-eligible. Used while attachments are still uploading; the
-     * caller must follow up with `promoteDraftTask` once the batch settles.
-     */
-    draft?: boolean;
-  }): Promise<TaskWithLogs> {
+  async createTask(
+    data: {
+      task: string;
+      key?: string;
+      agentId?: string;
+      routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
+      routingNote?: string;
+      taskType?: string;
+      tags?: string[];
+      priority?: number;
+      dependsOn?: string[];
+      /** Phase 3 (≥1.76.0): parent task for grouped/parallel sub-tasks. */
+      parentTaskId?: string;
+      /** Phase 3 (≥1.76.0): override the wire `source` ("api"|"mcp"|"slack"). */
+      source?: string;
+      /** Phase 3 (≥1.76.0): identity of the requesting user. */
+      requestedByUserId?: string;
+      /** Phase 3 (≥1.76.0): cross-ingress conversation/thread context key. */
+      contextKey?: string;
+      model?: string;
+      modelTier?: string;
+      effort?: string;
+      /** A registered repo (`owner/repo` or its URL); the server stores the repo path. */
+      vcsRepo?: string;
+      /**
+       * Create in `draft` status (#1240) — visible to the owner but not
+       * dispatch-eligible. Used while attachments are still uploading; the
+       * caller must follow up with `promoteDraftTask` once the batch settles.
+       */
+      draft?: boolean;
+    },
+    opts?: {
+      /**
+       * Sent as `Idempotency-Key`: a retry with the same key and body gets the
+       * task the first request created, never a second one.
+       */
+      idempotencyKey?: string;
+    },
+  ): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(data),
-    });
+    const headers = new Headers(this.getHeaders());
+    if (opts?.idempotencyKey) headers.set("Idempotency-Key", opts.idempotencyKey);
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(data) });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to create task" }));
       throw new Error(error.error || `Failed to create task: ${res.status}`);

@@ -19,7 +19,7 @@
   --ag-secondary-border-color: var(--color-border);
   --ag-row-border-color: var(--color-border-subtle);
   --ag-header-column-separator-color: var(--color-border-subtle);
-  --ag-font-family: "Space Grotesk", system-ui, sans-serif;
+  --ag-font-family: var(--font-sans);
   --ag-font-size: 13px;
   --ag-header-column-resize-handle-color: var(--color-border);
   --ag-range-selection-border-color: var(--color-primary);
