@@ -166,7 +166,7 @@ async function scriptApiEndpointIds(ctx: ScenarioContext, leadId: string): Promi
  */
 export const coreCallerScopedWrites: Scenario = {
   name: "core-caller-scoped-writes",
-  order: 228,
+  order: 229,
   async run(ctx) {
     await taskSessionWrites(ctx);
     const leadId = await registerLead(ctx, "caller-scoped");
