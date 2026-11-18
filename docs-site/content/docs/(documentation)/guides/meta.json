@@ -41,6 +41,7 @@
     "asset-namespaces",
     "agent-fs-co-deployment",
     "self-hosted-sso",
+    "ai-demand-forecast-accuracy-review",
     "ai-operations-governance",
     "repo-merge-policy",
     "e2b-provider-smoke-tests",
