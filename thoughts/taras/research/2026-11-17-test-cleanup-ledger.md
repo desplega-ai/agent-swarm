@@ -15,7 +15,7 @@ Pending inventory rows do not imply an audit. Reconcile this inventory against m
 
 Taras requested coverage and CI timing tracking alongside deletion totals.
 See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
-The current checkpoint contains 2067 net test lines and 106 cases removed across 39 merged changes at `9534b518f5`.
+The current checkpoint contains 2117 net test lines and 110 cases removed across 40 merged changes at `2c17d2c01c`.
 The recorded C22 through C27 coverage pairs lost no covered production lines within their named final scopes.
 C25 cards, HTTP, fallback, executor, index, and follow-up slices landed in PRs #3299, #3301, #3304, #3305, #3306, and #3307.
 Complete post-cleanup coverage and controlled CI savings remain unmeasured.
@@ -695,7 +695,7 @@ The audit compared all five suites below with their direct production modules. S
 | Registry | Dependency bounds, transitive and forward references, duplicate references, self references and cycles. | PR #3326 landed and consolidated six cases. Some dimension-weight fixtures can fail on the aggregate weight alone. |
 | Outcome normalization | Legacy judge fallback, explicit dimension precedence, and the default threshold. | PR #3329 established that an explicit empty list suppresses the legacy judge. |
 | Baseline comparison | Shared quality dimensions, weighted results, empty sides, and scenario pairing. | PR #3330 separates error status from missing score and exercises four token components. |
-| Scoring | Rubric scoring, efficiency decay, and normalization followed by score finalization. | Hand-calculated examples leave the runner's choice between two budgets untested. |
+| Scoring | Rubric scoring, efficiency decay, and normalization followed by score finalization. | PR #3332 removed manual examples. Two runner decisions remain unguarded: choosing the lower budget score and omitting unpriced efficiency. |
 | Benchmark publication | Refusal rules, held-out cells and exclusion of private fields. | The environment fixture lacks a secret sentinel. Preserve database and publication checks separately. |
 
 PR #3327 removes three benchmark mapping cases. The catalog partition, ID uniqueness, production TSV join and exact Gemini benchmark object retain their checks.
@@ -707,10 +707,19 @@ The inventory records all 17 runner test files. The audit compared their asserti
 Some direct dependencies outside that directory received inspection after the tests. These included polling, sandbox boot, server startup, validation and database helpers.
 The inventory records partial audit status for this pass. It supplied no runtime or mutation evidence.
 
-Two judge-error examples reproduce message selection and manually persist the expected outcome. Before deleting them, verify the stored result through the real retry executor.
+PR #3333 replaces two manual judge-error examples. The retained test reads the message, score and verdict that the retry handler wrote to SQLite.
 The spawned-task merge and worker-failure selection fixtures also copy runner logic. Their tests can stay green when production diverges.
 Preserve the direct origin classifier, actual scenario validation, database state transitions, startup wiring and rubric execution.
 Runtime candidates include checking cancellation with an in-flight request and distinguishing configuration IDs when two scheduled attempts otherwise tie.
+
+### Eval statistics and summaries
+
+The audit covered every test body in the statistics, results and regression-summary suites. Each direct implementation received inspection before its tests.
+The formatter also invokes the regression classifier. That supporting implementation received partial inspection after the tests.
+
+- Retain independent and paired resampling, scenario weighting, rank spreads, Wilson intervals and pass-at-k estimators. The separate significance formula repeats production. A fractional rank for tied groups lacks an explicit assertion.
+- Run-summary PR #3334 consolidates empty cells and compares fresh rows in reverse order. Its interval-width test now doubles the same score distribution. The pure statistics suite still varies both distribution and size.
+- Retain the report formatting checks for pages, warnings, drift, cancellations and failed runs. Its requested scenario order matches discovery order. Metered and notional costs also share the same fixture values. Use distinct values and orders to test these contracts.
 
 ### Newly added main tests
 
@@ -729,8 +738,8 @@ The new core-task-status-kind scenario remains outside the unit-file denominator
 
 ## Resume order
 
-1. Complete review and merge validation for the baseline comparison fixture in #3330.
-2. Verify the scoring cleanup and compare the manual judge-error fixtures with persisted results from the retry executor.
+1. Track merge validation for #3330, #3333 and #3334.
+2. Check whether the report formatting suite detects exchanged cost fields and ignored scenario ordering.
 3. Continue remaining approval and memory repairs. Reconcile inventory after merges.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
@@ -775,6 +784,7 @@ Scenario registry: #3324 merged (+3/-64, three cases removed).
 Eval dependencies: #3326 merged (+7/-47, six cases removed).
 Benchmark mapping: #3327 merged (+1/-22, three cases removed).
 Outcome normalization: #3329 merged (+3/-13, one case removed). The retained test now detects a fallback from explicit empty dimensions to a legacy judge.
+Scoring arithmetic: #3332 merged (+2/-52, four cases removed).
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
@@ -848,12 +858,12 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/logs-parser-ui.test.ts | pending | |
 | apps/evals/src/normalize-outcome.test.ts | landed | #3329. Legacy fallback, explicit dimension precedence and default threshold. |
 | apps/evals/src/registry.test.ts | landed | #3326 dependency consolidation. Weight validation and serialization risks remain. |
-| apps/evals/src/regression-summary.test.ts | pending | |
+| apps/evals/src/regression-summary.test.ts | test audit complete, production partial | Alert and failure rendering. Order and cost fixtures need distinct inputs. |
 | apps/evals/src/regression.test.ts | pending | |
-| apps/evals/src/results.test.ts | pending | |
+| apps/evals/src/results.test.ts | candidate validated | #3334: empty metrics, finite totals, repeatable score intervals and interval width at fixed distribution. |
 | apps/evals/src/runner/harness-crash.test.ts | partial audit | Crash signatures, retryability and clipped messages. No actual retry execution. |
 | apps/evals/src/runner/human-input.test.ts | partial audit | Answer serialization and polling settlement. Approval HTTP validation is separate. |
-| apps/evals/src/runner/hygiene.test.ts | partial audit | Database transitions, retry classification and cancellation. Executors and sweepers are injected. |
+| apps/evals/src/runner/hygiene.test.ts | partial audit | Database transitions, retry classification and cancellation. #3333 adds judge-error persistence checks with an injected executor. |
 | apps/evals/src/runner/member-seeding.test.ts | partial audit | Strict profile failures, worker routing and command order. Shell execution is outside scope. |
 | apps/evals/src/runner/orphaned-runs.test.ts | partial audit | Reaping, startup snapshot handoff and scheduled resume. No process restart. |
 | apps/evals/src/runner/progress.test.ts | partial audit | Abort behavior for polling and sandbox boot. In-flight request cancellation needs verification. |
@@ -862,14 +872,14 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/runner/run-configs.test.ts | partial audit | Stored model pins and reuse. Concurrent insertion remains unverified. |
 | apps/evals/src/runner/run-efforts.test.ts | partial audit | Override precedence, snapshot application, storage and legacy NULL. |
 | apps/evals/src/runner/schedule.test.ts | partial audit | Public-first and attempt ordering. Config-ID tie breaking lacks a discriminating fixture. |
-| apps/evals/src/runner/scoring.test.ts | partial audit | Dimension execution and persistence. Manual judge-error cases bypass the retry executor. |
+| apps/evals/src/runner/scoring.test.ts | partial audit | Dimension execution and persistence. #3333 removes manual judge-error cases and retains the producer test. |
 | apps/evals/src/runner/seeding.test.ts | partial audit | SQL restrictions, serialized sandbox fields and expiry. Real import remains separate. |
 | apps/evals/src/runner/spawned-tasks.test.ts | partial audit | Origin classification uses production. Local merge fixtures duplicate behavior. |
 | apps/evals/src/runner/task-net.test.ts | partial audit | Cascade skip recognition and failure classification. Server cascades remain separate. |
 | apps/evals/src/runner/topo.test.ts | partial audit | Deterministic ordering, invalid edges and cycle discovery. Persisted task order remains separate. |
 | apps/evals/src/runner/worker-failures.test.ts | partial audit | Real validator acceptance. Local target-selection logic bypasses runner injection. |
-| apps/evals/src/scoring.test.ts | static audit complete | Scoring and efficiency decay. Manual arithmetic does not exercise runner budget selection. |
-| apps/evals/src/stats.test.ts | pending | |
+| apps/evals/src/scoring.test.ts | landed | #3332: scoring and efficiency decay. Runner budget selection remains unverified. |
+| apps/evals/src/stats.test.ts | static audit complete | Interval bounds, seed behavior, signed differences, rank and pass-at-k estimates. Exact ties lack a median-rank assertion. |
 | apps/evals/src/swarm/api-extension.test.ts | pending | |
 | apps/evals/src/swarm/client.test.ts | pending | |
 | apps/evals/src/swarm/codex-auth.test.ts | pending | |

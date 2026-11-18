@@ -289,3 +289,15 @@ PR #3330 preserves 18 cases and 28 assertions. Rejecting failed attempts, accept
 Ignoring output, cache-read or cache-write tokens also failed it. All six regressions survived on the baseline.
 The package passed 1,181 cases with one opt-in skip on its separate base. Package typechecking and root local checks passed.
 An initial mutation driver failed to load a root import. Only the corrected driver supplied control evidence. Independent review was pending at this checkpoint.
+
+## Scoring and result summaries
+
+PR #3332 retained all ten previously detected regressions. Both versions missed a runner that chooses the higher budget score or assigns zero to unpriced efficiency.
+The three affected suites passed 44 cases before and 40 after on the parent checkout. The eval package passed 1,176 cases with one opt-in skip.
+
+PR #3333 made the retry test read the exact judge-error message and null score and verdict from SQLite.
+The old suites missed three judge-specific regressions: saving a stack, assigning a zero score and recording a false verdict. Both versions caught wrong terminal status and exclusion.
+An initial control assigned zero to every terminal error, which the original harness-crash test already caught. The judge-specific zero-score control isolated the missing behavior.
+
+PR #3334 detected seven result-summary regressions. The original suite missed the removal of attempt ordering. Both versions rejected fixed-width intervals, four wrong empty-cell metrics and a nonfinite duration total.
+On their respective candidate bases, #3333 and #3334 each passed 1,178 eval tests with one opt-in skip. All three PRs passed eval typechecking and the root local checks.
