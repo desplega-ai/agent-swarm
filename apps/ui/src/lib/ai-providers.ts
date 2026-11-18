@@ -563,7 +563,12 @@ export const AI_PROVIDERS: AiProvider[] = [
     note: "A coding-plan key is not interchangeable with a pay-as-you-go Z.ai key.",
     docs: { label: "Model gateways guide", href: `${DOCS}/provider-auth/model-gateways` },
     fields: [
-      { key: "ZHIPU_API_KEY", label: "API key", kind: "pool", placeholder: "Paste the coding plan key" },
+      {
+        key: "ZHIPU_API_KEY",
+        label: "API key",
+        kind: "pool",
+        placeholder: "Paste the coding plan key",
+      },
     ],
   },
   {

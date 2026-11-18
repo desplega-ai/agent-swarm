@@ -435,7 +435,7 @@ Nothing else changes. These surfaces derive from the entry: credential routing a
 - **Entering keys**: use the Z.ai Coding Plan card on the dashboard Connect → AI providers page, or set `ZHIPU_API_KEY` on the worker. A key saved on the dashboard needs no restart.
 - **Key kind**: Z.ai keys are product-specific. Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.
 - **Catalog**: models.dev lists the plan (`zai-coding-plan` section); the picker shows its tool-calling chat models.
-- **Pricing**: plan billing is flat. Sessions record per-token costs priced from the models.dev rates, so the row is an estimate of pay-as-you-go equivalence, tagged `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
+- **Pricing**: plan billing is flat. models.dev lists every plan model at cost 0, so sessions record $0 with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
 - **Default harness**: when `HARNESS_PROVIDER` is unset and a Z.ai key is the worker's only LLM credential, the worker defaults to `pi`. Set `MODEL_OVERRIDE=zai-coding-plan/glm-5.3-flash` on those agents, or retarget the tier config keys (`MODEL_TIER_PI_*`, `MODEL_TIER_OPENCODE_*`) as in the NaN and Helmcode section above.
 
 ---
