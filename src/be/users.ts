@@ -413,6 +413,14 @@ export async function findOrCreateUserByEmail(
   return { user: created, created: true };
 }
 
+/** A profile lookup can finish after a manual edit. Test the stored value in the write. */
+export async function fillMissingUserTimezone(id: string, timezone: string): Promise<void> {
+  await getDbClient().run(
+    "UPDATE users SET timezone = ?, lastUpdatedAt = ? WHERE id = ? AND (timezone IS NULL OR timezone = '')",
+    [timezone, new Date().toISOString(), id],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Identity link/unlink
 // ---------------------------------------------------------------------------

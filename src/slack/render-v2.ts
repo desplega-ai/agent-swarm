@@ -1126,11 +1126,11 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
   // was answered when it was only parked.
   if (isDeferred) {
-    return withStatusLead("⏳", outcomeText(slackTaskOutput(task), "Deferred."));
+    return withStatusLead("⏳", outcomeText(await slackTaskOutput(task), "Deferred."));
   }
   return withStatusLead(
     completedStatusIcon(),
-    outcomeText(slackTaskOutput(task), "Task completed."),
+    outcomeText(await slackTaskOutput(task), "Task completed."),
   );
 }
 
@@ -1166,12 +1166,12 @@ export async function childOutcomeContent(
   if (isDeferredTask(task)) {
     return withStatusLead(
       `↳ ⏳ ${agentName} — deferred:`,
-      outcomeText(slackTaskOutput(task), "Deferred."),
+      outcomeText(await slackTaskOutput(task), "Deferred."),
     );
   }
   return withStatusLead(
     `↳ ${iconPrefix(completedStatusIcon())}${agentName} — result:`,
-    outcomeText(slackTaskOutput(task), "Task completed."),
+    outcomeText(await slackTaskOutput(task), "Task completed."),
   );
 }
 
@@ -1395,7 +1395,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       continue;
     }
     const raw = outcomeText(
-      member.status === "failed" ? member.failureReason : slackTaskOutput(member),
+      member.status === "failed" ? member.failureReason : await slackTaskOutput(member),
       "",
     );
     const digest =

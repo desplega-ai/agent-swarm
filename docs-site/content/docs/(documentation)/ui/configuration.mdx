@@ -740,6 +740,14 @@ A saved `http` value uses the native signed HTTP receiver. The setup wizard conf
 Socket Mode and selects `socket` whenever you save its Slack tokens.
 See [Slack integration](/docs/integrations/slack) for the request URL and app manifest setup.
 
+### Slack deferral timezone
+
+Slack deferral cards show wake-up times in the requester's saved timezone. A Slack message
+fills an empty user timezone from the sender's Slack profile. If the requester has no
+timezone, **Default Slack deferral timezone** (`SLACK_DEFAULT_TIMEZONE`) supplies an IANA
+zone such as `America/New_York`. The default is UTC. Cards label fallback times with the
+zone abbreviation or UTC offset at the wake-up instant.
+
 ### Slack task-tree visibility
 
 **Show task tree in Slack threads** (`SLACK_RENDER_V2_TASK_TREE_ENABLED`) is On by default,
