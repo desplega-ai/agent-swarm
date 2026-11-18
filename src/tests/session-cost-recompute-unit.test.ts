@@ -98,6 +98,45 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     );
     expect(openai.totalCostUsd).toBe((600 * 2 + 400 * 0.2) / 1_000_000);
 
+    // On an OpenAI API key codex also reports cache writes, and they are inside
+    // input too: a real gpt-5.6-terra session had input 385,142 = 341,438 read +
+    // 43,674 written + 30 uncached. Written tokens bill once, at cache_write.
+    const codexRates = lookupFrom({
+      "codex:m:input": 2,
+      "codex:m:output": 12,
+      "codex:m:cached_input": 0.2,
+      "codex:m:cache_write": 2.5,
+    });
+    const written = await recomputeSessionCost(
+      {
+        ...BASE,
+        model: "m",
+        provider: "codex",
+        inputTokens: 385_142,
+        cacheReadTokens: 341_438,
+        cacheWriteTokens: 43_674,
+        outputTokens: 2_037,
+      },
+      codexRates,
+    );
+    expect(written.totalCostUsd).toBeCloseTo(
+      (30 * 2 + 341_438 * 0.2 + 43_674 * 2.5 + 2_037 * 12) / 1_000_000,
+      12,
+    );
+    // Reads + writes above input clamp the uncached part at zero.
+    const clamped = await recomputeSessionCost(
+      {
+        ...BASE,
+        model: "m",
+        provider: "codex",
+        inputTokens: 1_000,
+        cacheReadTokens: 800,
+        cacheWriteTokens: 300,
+      },
+      codexRates,
+    );
+    expect(clamped.totalCostUsd).toBeCloseTo((800 * 0.2 + 300 * 2.5) / 1_000_000, 12);
+
     // Opencode reports input disjoint from cache reads (prod-verified:
     // input < cacheRead on every cached message) — no subtraction.
     const opencode = await recomputeSessionCost(
