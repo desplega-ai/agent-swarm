@@ -1011,6 +1011,18 @@ describe("deferrals", () => {
       by: "11-02 09:00",
     });
     expect(deferralText('{"status":"pending"}')).toEqual({ who: null, by: null });
+    // `deferredUntil` wins over the text's time, rendered in the viewer's local timezone.
+    const now = new Date(2030, 0, 15, 12, 0);
+    const until = (h: number, day = 15) => new Date(2030, 0, day, h, 5).toISOString();
+    expect(deferralText(waiting("Picateclas", "17:50"), until(16), now)).toEqual({
+      who: "Picateclas",
+      by: "16:05",
+    });
+    expect(deferralText("Checking back today at 18:38", until(9, 16), now).by).toBe(
+      "tomorrow 09:05",
+    );
+    expect(deferralText("Checking back today at 18:38", until(9, 20), now).by).toBe("01-20 09:05");
+    expect(deferralText('{"status":"pending"}', until(16), now)).toEqual({ who: null, by: null });
   });
 
   test("a deferred task whose output is schema JSON is not a wait line", () => {

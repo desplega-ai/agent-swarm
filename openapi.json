@@ -557,6 +557,10 @@
             "type": "string",
             "format": "date-time"
           },
+          "deferredUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
           "compactionCount": {
             "type": "integer",
             "minimum": 0

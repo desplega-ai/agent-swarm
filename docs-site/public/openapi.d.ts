@@ -32665,6 +32665,8 @@ export interface components {
             wasPaused: boolean;
             /** Format: date-time */
             deferredAt?: string;
+            /** Format: date-time */
+            deferredUntil?: string;
             compactionCount?: number;
             peakContextPercent?: number;
             peakContextTokens?: number;

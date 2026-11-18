@@ -476,6 +476,8 @@ export interface AgentTask {
   routingSource?: "declared" | "engine_default";
   /** Set by `defer-task`: the task ended waiting on something else. */
   deferredAt?: string;
+  /** The deferral's wake-up ceiling (ISO); the awaited event can resume it sooner. */
+  deferredUntil?: string;
   routingNote?: string;
   taskType?: string;
   tags: string[];
