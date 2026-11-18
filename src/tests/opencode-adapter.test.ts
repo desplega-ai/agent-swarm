@@ -855,6 +855,30 @@ describe("OpencodeSession — persisted bytes stay bounded", () => {
     expect(storedBytes(emitted)).toBeLessThan(JSON.stringify(nested).length);
   });
 
+  test("a control-heavy payload is bounded after JSON escaping", async () => {
+    // 50k NUL bytes are 50 KB raw but 300 KB once escaped, which the API's
+    // row cap would cut into invalid JSON the dashboard parser drops.
+    const control = "\u0000".repeat(50_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { body: control } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: control }],
+      }),
+      succeeded,
+    ]);
+
+    for (const event of emitted) {
+      const row = event as { type: string; content?: string };
+      if (row.type !== "raw_log" || !row.content) continue;
+      expect(new TextEncoder().encode(row.content).length).toBeLessThan(256 * 1024);
+      // Whatever is stored must still parse: a cut row would not.
+      expect(() => JSON.parse(row.content as string)).not.toThrow();
+    }
+  });
+
   test("a multi-byte payload is bounded in bytes, not characters", async () => {
     // 80k UTF-16 units is under a character-based 100k cap, but 160 KB of
     // UTF-8 — which the API's row cap would then cut mid-value.

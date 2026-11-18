@@ -149,7 +149,10 @@ const createSessionLogsRoute = route({
   tags: ["Session Data"],
   maxBodyBytes: SESSION_LOGS_MAX_BODY_BYTES,
   body: z.object({
-    sessionId: z.string().min(1),
+    // Bounded, not just non-empty: the id repeats in every row and in the
+    // session index, and the per-session byte budget charges only `content`.
+    // Real ids are a UUID or a short harness session id.
+    sessionId: z.string().min(1).max(200),
     iteration: z.number().int().min(1),
     lines: z.array(z.string()).min(1),
     taskId: z.string().optional(),

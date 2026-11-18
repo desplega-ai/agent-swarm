@@ -611,6 +611,24 @@ export function measureOpencodeContext(
 }
 
 /**
+ * A serialized mirror, bounded to stay inside one `session_logs` row. The
+ * payload caps apply to raw text, but JSON escaping can multiply it — 50k NUL
+ * bytes serialize to 300 KB — and a row cut by the API would be invalid JSON
+ * the dashboard's parser drops. Over the bound the mirror is replaced by a
+ * marker rather than emitted broken.
+ */
+const MIRROR_MAX_BYTES = 200 * 1024;
+
+function boundedMirror(value: string): string {
+  if (textEncoder.encode(value).length <= MIRROR_MAX_BYTES) return value;
+  return JSON.stringify({
+    type: "raw_log_truncated",
+    reason: "serialized event exceeded the session-log row bound",
+    bytes: textEncoder.encode(value).length,
+  });
+}
+
+/**
  * Truncate to {@link TOOL_PAYLOAD_MAX_BYTES} UTF-8 bytes — the unit the row cap
  * downstream counts. Bounding characters instead would let 100k 4-byte
  * characters through as 400 KB, which the API then cuts mid-value. The cut
@@ -777,7 +795,10 @@ export class OpencodeSession implements ProviderSession {
   /** Emit `event` plus its scrubbed `raw_log` mirror. */
   private emit(event: ProviderEvent): void {
     this.emitDirect(event);
-    this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(event)) });
+    this.emitDirect({
+      type: "raw_log",
+      content: boundedMirror(scrubSecrets(JSON.stringify(event))),
+    });
   }
 
   /** Process one OpenCode 2 event. */
@@ -796,7 +817,10 @@ export class OpencodeSession implements ProviderSession {
     // bounded mirror doubled the largest rows in session_logs for a copy the
     // parser discards; streaming deltas are discarded the same way.
     if (!UNRENDERED_EVENT_TYPES.has(ev.type)) {
-      this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(ev)) });
+      this.emitDirect({
+        type: "raw_log",
+        content: boundedMirror(scrubSecrets(JSON.stringify(ev))),
+      });
     }
 
     switch (ev.type) {
