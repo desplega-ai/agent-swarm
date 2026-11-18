@@ -1787,6 +1787,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "500",
       },
       {
+        key: "WORKFLOW_INPUT_ENV_ALLOWLIST",
+        label: "Workflow env allowlist",
+        description:
+          "Comma-separated API server env vars that workflow inputs and webhook HMAC secrets can reference. This does not limit script nodes. Unset means no limit; an explicitly empty or blank list blocks all env references in those fields. Config changes require a user token or dashboard user session, with admin access when RBAC is on. Agents (including the lead) and the shared key cannot change it directly. A stored value overrides the deployment env.",
+        kind: "string",
+        placeholder: "MCP_BASE_URL,GITLAB_URL",
+        docsUrl: `${DOCS}ui/configuration#workflow-env-allowlist`,
+      },
+      {
         key: "SCHEDULER_INTERVAL_MS",
         label: "Scheduler tick",
         description: "How often the scheduler wakes up to evaluate due schedules.",

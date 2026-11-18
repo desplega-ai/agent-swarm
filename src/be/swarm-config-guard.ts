@@ -124,27 +124,38 @@ export function internalConfigKeyError(key: string): Error {
 }
 
 /**
- * Keys only an admin user (a user token or dashboard session) may write or
- * delete: never an agent, the Lead included, a guest, or the shared operator
- * key, which every worker holds. The deployment env can still seed them.
+ * Keys only a user (a user token or dashboard session) may write or delete.
+ * With RBAC enabled, that user must be an admin. Agents, including the lead,
+ * guests and the shared operator key cannot change them. The deployment env
+ * can still seed them.
  * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
  *
  * shortcut: this stops direct writes, not a determined holder of the
  * operator key. That key is root: it can create an admin user and mint a
  * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
- * nothing from a pin, because a script action runs as the card's own agent,
- * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * nothing from a pin on `UI_SPEC_SCRIPT_ACTIONS`, because a script action
+ * runs as the card's own agent, which the key can already act as. That does
+ * not hold for `WORKFLOW_INPUT_ENV_ALLOWLIST`: a holder of the operator key can
+ * mint an admin token and widen the list, so the pin there only stops agents
+ * and the shared key from changing it through config. A stored value also
+ * overrides the deployment env, so an env-set list can be replaced by a stored
+ * row. Upgrade to an anchor the key cannot mint
  * (deployment-env only, or an out-of-band human approval) if workers stop
  * holding the operator key.
  */
-const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+// WORKFLOW_INPUT_ENV_ALLOWLIST limits which server env vars a workflow can read, so an agent
+// (the lead included) must not widen it.
+const HUMAN_ONLY_CONFIG_KEYS = new Set([
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  "WORKFLOW_INPUT_ENV_ALLOWLIST",
+]);
 
 export function isHumanOnlyConfigKey(key: string): boolean {
   return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
 }
 
 export function humanOnlyConfigKeyError(key: string): string {
-  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
+  return `Changing key '${key}' requires a user token or dashboard user session. With RBAC enabled, the user must be an admin. Agents and the shared API key cannot change it.`;
 }
 
 /** A page session acts for its viewer but runs the page author's code. */
@@ -433,7 +444,19 @@ export const validateControllerGraceSec = boundedIntegerValidators(
   86_400,
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
+/** Comma-separated env var names; blank entries are ignored. No names means deny all. */
+function validateWorkflowInputEnvAllowlist(value: unknown): string | null {
+  if (typeof value !== "string") return "WORKFLOW_INPUT_ENV_ALLOWLIST must be a string";
+  for (const name of value.split(",").map((part) => part.trim())) {
+    if (name !== "" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      return `WORKFLOW_INPUT_ENV_ALLOWLIST: "${name}" is not an env var name (use comma-separated NAME values)`;
+    }
+  }
+  return null;
+}
+
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  WORKFLOW_INPUT_ENV_ALLOWLIST: validateWorkflowInputEnvAllowlist,
   [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
   DOCKER_RUNTIME: validateDockerRuntime,

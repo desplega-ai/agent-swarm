@@ -3933,7 +3933,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Map of key -> boolean (true iff set in process.env) */
+                /** @description Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present. */
                 200: {
                     headers: {
                         [name: string]: unknown;
