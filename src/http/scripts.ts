@@ -57,8 +57,9 @@ import {
   ScriptScopeSchema,
   ScriptVersionRecordSchema,
 } from "../types";
-import { getCurrentRunProvenance } from "../utils/request-auth-context";
+import { getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { refuseAgentTokenWithout } from "./request-principal";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -1149,6 +1150,25 @@ export async function handleScripts(
       jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
       return true;
     }
+    // An agent-bound token must hold the route permission, as the script-apis
+    // tool requires, and must name a registered agent to run as.
+    const auth = getRequestAuth(req);
+    if (auth?.kind === "agent") {
+      const caller = await getAgentById(auth.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: auth.agentId, isLead: caller?.isLead === true },
+        verb: "script.api.create",
+        source: "http",
+      });
+      if (!decision.allow) {
+        jsonError(res, `Forbidden: ${decision.reason}`, 403);
+        return true;
+      }
+      if (!(await getAgentById(runAsAgentId))) {
+        jsonError(res, `agentId "${runAsAgentId}" is not a registered agent`, 400);
+        return true;
+      }
+    }
     const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: runAsAgentId,
@@ -1182,6 +1202,7 @@ export async function handleScripts(
   if (revealScriptApiSecretRoute.match(req.method, pathSegments)) {
     const parsed = await revealScriptApiSecretRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.read.secrets")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1194,6 +1215,7 @@ export async function handleScripts(
   if (rotateScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await rotateScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.rotate")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1214,6 +1236,7 @@ export async function handleScripts(
   if (patchScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await patchScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.update")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1231,6 +1254,7 @@ export async function handleScripts(
   if (deleteScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await deleteScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.delete")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);

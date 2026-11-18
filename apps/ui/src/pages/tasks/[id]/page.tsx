@@ -995,6 +995,15 @@ export default function TaskDetailPage() {
       </Tooltip>
     ) : null;
 
+  // Why a terminal task ended (a failed task: the agent's call or an error),
+  // shown next to the status. Older rows have no kind and show nothing.
+  const statusKindChip = task.statusKind ? (
+    <Badge variant="outline" className="h-6 px-2 text-[10px] font-medium text-muted-foreground">
+      <span className="sr-only">Ended by: </span>
+      {task.statusKind.replaceAll("_", " ")}
+    </Badge>
+  ) : null;
+
   // The tags as a chip with their count. The list opens in a popover.
   const tagsChip =
     task.tags && task.tags.length > 0 ? (
@@ -1130,6 +1139,7 @@ export default function TaskDetailPage() {
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
             {tagsChip}
             <StatusBadge status={task.status} size="md" />
+            {statusKindChip}
             {costChip}
             {wideModelChip}
             {wideProfileChip}
@@ -1170,6 +1180,7 @@ export default function TaskDetailPage() {
         <div className="min-w-0 max-w-full">{sourceLine}</div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           <StatusBadge status={task.status} size="md" />
+          {statusKindChip}
           {costChip}
           {narrowModelChip}
           {narrowProfileChip}

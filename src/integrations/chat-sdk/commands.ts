@@ -163,7 +163,9 @@ async function cancelActiveTasks(
     for (let i = 0; i < CANCEL_LIMIT; i++) {
       const active = await getLatestActiveTaskByContextKey(contextKey, "chat", target.owner);
       if (!active) break;
-      const task = await cancelTask(active.id, `Cancelled from chat by ${requestedBy}`);
+      const task = await cancelTask(active.id, `Cancelled from chat by ${requestedBy}`, {
+        statusKind: "user",
+      });
       if (!task) break;
       if (task.agentId) await updateAgentStatusFromCapacity(task.agentId);
       cancelled.push(task);

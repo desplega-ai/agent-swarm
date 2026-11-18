@@ -61,7 +61,7 @@ export function UserPromptBubble({
             "text-sm leading-relaxed text-foreground/95",
             // `wrap-anywhere`, not `break-words`: a long URL or id must shrink
             // the bubble's min-content width, or it overflows a narrow panel.
-            "whitespace-pre-wrap wrap-anywhere text-left w-full max-w-full min-w-0 md:w-fit md:min-w-1/2",
+            "whitespace-pre-wrap wrap-anywhere text-left w-full max-w-full min-w-0 md:w-fit md:min-w-32",
           )}
         >
           <PromptContext display={prompt} className={prompt.ask ? "mb-2" : undefined} />

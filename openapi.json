@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.4",
+    "version": "2.13.5",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -257,6 +257,27 @@
           "notifiedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "statusKind": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "runner",
+              "deferred",
+              "error",
+              "cascade",
+              "external",
+              "user",
+              "workflow",
+              "system",
+              "graceful_shutdown",
+              "context_limits",
+              "manual_supersede",
+              "crash_recovery",
+              "provider_fallback",
+              "workflow_retry"
+            ],
+            "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
           },
           "failureReason": {
             "type": "string"
@@ -533,6 +554,10 @@
             "default": false
           },
           "deferredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deferredUntil": {
             "type": "string",
             "format": "date-time"
           },
@@ -5683,6 +5708,82 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "avatar": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "lucide"
+                    ]
+                  },
+                  "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "icon"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "url"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "agent-fs"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 1024
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "path"
+                ]
+              }
             ]
           },
           "createdAt": {
@@ -21267,6 +21368,19 @@
                         "type": "number"
                       }
                     },
+                    "keyPace": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "selectionStrategy": {
+                      "type": "string",
+                      "enum": [
+                        "pace",
+                        "usage"
+                      ]
+                    },
                     "activeSessions": {
                       "type": "array",
                       "items": {
@@ -21282,6 +21396,8 @@
                     "spendCappedIndices",
                     "authFailureFence",
                     "keyUsage",
+                    "keyPace",
+                    "selectionStrategy",
                     "activeSessions"
                   ]
                 }
@@ -39472,6 +39588,33 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "runner",
+                "deferred",
+                "error",
+                "cascade",
+                "external",
+                "user",
+                "workflow",
+                "system",
+                "graceful_shutdown",
+                "context_limits",
+                "manual_supersede",
+                "crash_recovery",
+                "provider_fallback",
+                "workflow_retry"
+              ],
+              "description": "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts."
+            },
+            "required": false,
+            "description": "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts.",
+            "name": "statusKind",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "required": false,
@@ -39856,6 +39999,27 @@
                               "finishedAt": {
                                 "type": "string",
                                 "format": "date-time"
+                              },
+                              "statusKind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent",
+                                  "runner",
+                                  "deferred",
+                                  "error",
+                                  "cascade",
+                                  "external",
+                                  "user",
+                                  "workflow",
+                                  "system",
+                                  "graceful_shutdown",
+                                  "context_limits",
+                                  "manual_supersede",
+                                  "crash_recovery",
+                                  "provider_fallback",
+                                  "workflow_retry"
+                                ],
+                                "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
                               },
                               "peakContextPercent": {
                                 "type": "number",
@@ -41524,6 +41688,27 @@
                           "finishedAt": {
                             "type": "string",
                             "format": "date-time"
+                          },
+                          "statusKind": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "runner",
+                              "deferred",
+                              "error",
+                              "cascade",
+                              "external",
+                              "user",
+                              "workflow",
+                              "system",
+                              "graceful_shutdown",
+                              "context_limits",
+                              "manual_supersede",
+                              "crash_recovery",
+                              "provider_fallback",
+                              "workflow_retry"
+                            ],
+                            "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
                           },
                           "peakContextPercent": {
                             "type": "number",
@@ -60194,6 +60379,27 @@
                                     "type": "string",
                                     "format": "date-time"
                                   },
+                                  "statusKind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent",
+                                      "runner",
+                                      "deferred",
+                                      "error",
+                                      "cascade",
+                                      "external",
+                                      "user",
+                                      "workflow",
+                                      "system",
+                                      "graceful_shutdown",
+                                      "context_limits",
+                                      "manual_supersede",
+                                      "crash_recovery",
+                                      "provider_fallback",
+                                      "workflow_retry"
+                                    ],
+                                    "description": "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed."
+                                  },
                                   "peakContextPercent": {
                                     "type": "number",
                                     "minimum": 0,
@@ -70771,6 +70977,85 @@
                       "suspended"
                     ]
                   },
+                  "avatar": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "lucide"
+                            ]
+                          },
+                          "icon": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9-]+$"
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#[0-9a-fA-F]{6}$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "identities": {
                     "type": "array",
                     "items": {
@@ -71802,6 +72087,85 @@
                       "invited",
                       "active",
                       "suspended"
+                    ]
+                  },
+                  "avatar": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "lucide"
+                            ]
+                          },
+                          "icon": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9-]+$"
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#[0-9a-fA-F]{6}$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "icon"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "url"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "agent-fs"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 1024
+                          },
+                          "orgId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "driveId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "path"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "identities": {

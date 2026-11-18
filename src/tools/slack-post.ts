@@ -15,7 +15,7 @@ import {
 } from "@/integrations/cards";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
-import { buildMrkdwnSectionBlocks, getTaskLink } from "@/slack/blocks";
+import { buildMrkdwnSectionBlocks, findReservedActionId, getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { resolveSlackConversationId } from "@/slack/dm";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
@@ -90,6 +90,12 @@ export const registerSlackPostTool = (server: McpServer) => {
         return toolErr("Posting to Slack channels requires lead privileges.");
       }
       if (blocks && card) return toolErr("Provide either blocks or card, not both.");
+      const reservedActionId = findReservedActionId(blocks);
+      if (reservedActionId) {
+        return toolErr(
+          `blocks use the action_id "${reservedActionId}", which the swarm reserves for its own buttons. Use another action_id.`,
+        );
+      }
       if (!message && !card) return toolErr("Provide a message or a card.");
       let cardSlack: { blocks: Record<string, unknown>[]; text: string } | undefined;
       if (card) {

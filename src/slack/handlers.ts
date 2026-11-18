@@ -81,17 +81,6 @@ const SlackRouteModifySchema = z
   })
   .strict();
 
-// User filtering configuration from environment variables
-const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
-  .split(",")
-  .map((d) => d.trim().toLowerCase())
-  .filter(Boolean);
-
-const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean);
-
 /**
  * Configuration for user filtering.
  */
@@ -100,7 +89,19 @@ export interface UserFilterConfig {
   allowedUserIds: string[];
 }
 
-const envUserFilterConfig: UserFilterConfig = { allowedEmailDomains, allowedUserIds };
+/** The SLACK_ALLOWED_* env vars, read on each call so a config reload applies at once. */
+function envUserFilterConfig(): UserFilterConfig {
+  return {
+    allowedEmailDomains: (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean),
+    allowedUserIds: (process.env.SLACK_ALLOWED_USER_IDS || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  };
+}
 
 /**
  * Core logic for checking if a user is allowed based on email and/or user ID.
@@ -158,14 +159,14 @@ export const LOOKUP_USER_TEAM: unique symbol = Symbol.for("agent-swarm.slack.loo
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
  * The allow/deny decision is `checkUserAccess`; this wrapper only adds the lazy email lookup
- * and the deny logs. The config comes from the SLACK_ALLOWED_* env vars, read at module load.
+ * and the deny logs. The config comes from the SLACK_ALLOWED_* env vars, read on each call.
  */
 export async function isUserAllowed(
   client: WebClient,
   userId: string,
   userTeam?: string | typeof LOOKUP_USER_TEAM,
 ): Promise<boolean> {
-  const config = envUserFilterConfig;
+  const config = envUserFilterConfig();
   // Decide without an email first: filtering off and allowlisted IDs pass, and with no
   // email domains configured an unlisted ID is denied. Only domain checks need a lookup.
   const allowedWithoutEmail = checkUserAccess(userId, null, config);

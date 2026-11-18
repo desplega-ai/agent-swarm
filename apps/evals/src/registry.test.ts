@@ -104,46 +104,6 @@ describe("validateScenario (v6 §0.11 frozen rules)", () => {
     expect(validateScenario(scenario({ seed: { memories: [""] } }))).not.toEqual([]);
     expect(validateScenario(scenario({ seed: { memories: ["ok", "   "] } }))).not.toEqual([]);
   });
-
-  describe("dependsOn rules (round 10: range + self + whole-graph cycle check)", () => {
-    const tasks3 = (deps: { [i: number]: number[] }) =>
-      scenario({
-        tasks: [
-          { title: "t0", description: "d", dependsOn: deps[0] },
-          { title: "t1", description: "d", dependsOn: deps[1] },
-          { title: "t2", description: "d", dependsOn: deps[2] },
-        ],
-      });
-
-    test("a valid 3-task chain is accepted", () => {
-      expect(validateScenario(tasks3({ 1: [0], 2: [0, 1] }))).toEqual([]);
-    });
-
-    test("out-of-range index rejected", () => {
-      expect(validateScenario(tasks3({ 1: [-1] }))).not.toEqual([]);
-      expect(validateScenario(tasks3({ 1: [5] }))).not.toEqual([]);
-    });
-
-    test("acyclic forward reference accepted (round 10 relaxation)", () => {
-      expect(validateScenario(tasks3({ 1: [2] }))).toEqual([]);
-    });
-
-    test("self-reference rejected", () => {
-      expect(validateScenario(tasks3({ 1: [1] }))).not.toEqual([]);
-      // task 0 can never have deps (no earlier task exists)
-      expect(validateScenario(tasks3({ 0: [0] }))).not.toEqual([]);
-    });
-
-    test("duplicates rejected", () => {
-      const errors = validateScenario(tasks3({ 2: [0, 0] }));
-      expect(errors).not.toEqual([]);
-      expect(errors.join("\n")).toContain("duplicate");
-    });
-
-    test("non-integer entries rejected", () => {
-      expect(validateScenario(tasks3({ 1: [0.5] }))).not.toEqual([]);
-    });
-  });
 });
 
 describe("validateScenario — WorkerSpec[] + lead (v7 §9/§12 frozen rules)", () => {
@@ -633,19 +593,15 @@ describe("serializeConfig — AA benchmark block (v7.6 item D)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Round 10 (RUNNER-TOPO) — appended block. validateScenario dependsOn rules:
-// forward refs legal, range/self/duplicate per-entry errors, whole-graph
-// cycle detection naming the offending chain with indices + titles.
-// ---------------------------------------------------------------------------
-describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain errors)", () => {
+describe("validateScenario task dependencies", () => {
   const withDeps = (titles: string[], deps: { [i: number]: number[] }) =>
     scenario({
       tasks: titles.map((title, i) => ({ title, description: "d", dependsOn: deps[i] })),
     });
 
-  test("chain, diamond, and independent roots are all valid", () => {
+  test("accepts chains, transitive dependencies, diamonds, and independent roots", () => {
     expect(validateScenario(withDeps(["A", "B", "C"], { 1: [0], 2: [1] }))).toEqual([]);
+    expect(validateScenario(withDeps(["A", "B", "C"], { 1: [0], 2: [0, 1] }))).toEqual([]);
     expect(validateScenario(withDeps(["A", "B", "C", "D"], { 1: [0], 2: [0], 3: [1, 2] }))).toEqual(
       [],
     );
@@ -654,6 +610,7 @@ describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain e
 
   test("acyclic forward reference is legal", () => {
     expect(validateScenario(withDeps(["A", "B", "C"], { 0: [2] }))).toEqual([]);
+    expect(validateScenario(withDeps(["A", "B", "C"], { 1: [2] }))).toEqual([]);
   });
 
   test("unknown ref keeps the frozen per-task error shape", () => {
@@ -666,6 +623,9 @@ describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain e
   });
 
   test("self-dependency gets its own explicit error (not the range error)", () => {
+    expect(validateScenario(withDeps(["A", "B"], { 0: [0] }))).toEqual([
+      'task 0 ("A"): dependsOn entry 0 is a self-dependency',
+    ]);
     expect(validateScenario(withDeps(["A", "B"], { 1: [1] }))).toEqual([
       'task 1 ("B"): dependsOn entry 1 is a self-dependency',
     ]);

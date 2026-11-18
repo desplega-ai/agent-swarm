@@ -19,6 +19,7 @@ import {
 } from "@/be/users";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { UserAvatarSchema } from "@/types";
 
 // Loose mirror of UserSchema for tool output: every field optional, no
 // datetime format pins.
@@ -34,6 +35,7 @@ const userOutputShape = z.looseObject({
   metadata: z.record(z.string(), z.unknown()).optional(),
   dailyBudgetUsd: z.number().nullable().optional(),
   status: z.enum(["invited", "active", "suspended"]).optional(),
+  avatar: z.looseObject({}).nullable().optional(),
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
 });
@@ -84,6 +86,11 @@ const InputSchema = z.object({
     .nullable()
     .optional()
     .describe("Free-form JSON metadata (null clears the field)"),
+  avatar: UserAvatarSchema.nullable()
+    .optional()
+    .describe(
+      "Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/users/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). Pass null to reset to initials.",
+    ),
   comms: z
     .object({
       tone: z.string().nullable().optional(),
@@ -206,6 +213,7 @@ export const registerManageUserTool = (server: McpServer) => {
                 timezone: input.timezone,
                 dailyBudgetUsd: input.dailyBudgetUsd ?? undefined,
                 status: input.status,
+                avatar: input.avatar,
                 metadata,
               });
               for (const ident of input.identities ?? []) {
@@ -268,6 +276,7 @@ export const registerManageUserTool = (server: McpServer) => {
                 timezone: input.timezone,
                 dailyBudgetUsd: input.dailyBudgetUsd,
                 status: input.status,
+                avatar: input.avatar,
                 metadata,
               });
               if (!updated) return null;

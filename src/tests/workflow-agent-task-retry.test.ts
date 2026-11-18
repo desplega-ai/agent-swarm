@@ -343,6 +343,7 @@ describe("implicit retry for a superseded task on a node without retry", () => {
     expect(cut.workflowRunStepId).toBeFalsy();
     // A cut with a queued retry is not a real failure.
     expect(cut.status).toBe("superseded");
+    expect(cut.statusKind).toBe("workflow_retry");
     expect(cut.failureReason).toBe(SUPERSEDED_WORKFLOW_TASK_REASON);
     // It never gets a resume: the heartbeat orphan repair must not see it.
     const orphans = await getSupersededTasksWithoutResume(

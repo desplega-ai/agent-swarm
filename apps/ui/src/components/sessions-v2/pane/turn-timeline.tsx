@@ -17,8 +17,10 @@ import {
   foldWaits,
   isDeferral,
   keepSeenApprovals,
+  type LeadStep,
   onlyWaits,
   partSteps,
+  shownTry,
   type TurnPart,
   type WorkerSummary,
   workerSummary,
@@ -200,7 +202,7 @@ export function TurnTimeline({
     turn.parts.some(
       (part) =>
         !!part.live ||
-        !TERMINAL_STATUSES.has(part.reply.status) ||
+        !TERMINAL_STATUSES.has(shownTry(part.answer).status) ||
         partSteps(part).some(
           (step) => !TERMINAL_STATUSES.has(step.tries[step.tries.length - 1].status),
         ),
@@ -375,7 +377,7 @@ function PartView({
       {card ? (
         <TaskCard task={part.reply} className="pb-0" />
       ) : (
-        <Reply task={part.reply} onToggle={onStepToggle} />
+        <Reply step={part.answer} onToggle={onStepToggle} />
       )}
       {summary && steps.length > 1 ? (
         <div className="flex min-w-0 flex-col gap-1">
@@ -401,7 +403,7 @@ function PartView({
       ) : null}
       {part.result ? (
         <div className={rows.length > 0 ? "mt-3" : undefined}>
-          <Reply task={part.result} onToggle={onStepToggle} />
+          <Reply step={part.result} onToggle={onStepToggle} />
         </div>
       ) : null}
       {approvals.map((approval) => (
@@ -414,11 +416,12 @@ function PartView({
 }
 
 /** A swarm reply, or one muted line when the reply only says the swarm waits. */
-function Reply({ task, onToggle }: { task: AgentTask; onToggle: () => void }) {
+function Reply({ step, onToggle }: { step: LeadStep; onToggle: () => void }) {
+  const task = shownTry(step);
   return isDeferral(task) ? (
     <DeferralLine task={task} onToggle={onToggle} />
   ) : (
-    <SwarmReply task={task} />
+    <SwarmReply task={task} earlier={step.tries.slice(0, -1)} />
   );
 }
 

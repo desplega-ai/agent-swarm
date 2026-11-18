@@ -20,7 +20,7 @@ import {
   checkUserAccess,
   isBotMessage,
   isSwarmThreadRoot,
-  type isUserAllowed,
+  isUserAllowed,
   LOOKUP_USER_TEAM,
   registerMessageHandler,
   type UserFilterConfig,
@@ -198,30 +198,28 @@ describe("isUserAllowed", () => {
   let enrichSpy: ReturnType<typeof spyOn<typeof slackEnrichModule, "enrichSlackUserEmail">>;
   let logSpy: ReturnType<typeof spyOn<typeof console, "log">>;
 
-  // handlers.ts reads SLACK_ALLOWED_* once at module load, so each case evaluates a fresh
-  // copy under its own env and calls the production two-argument isUserAllowed. The copy
-  // shares ./enrich with this file, so the enrichSlackUserEmail spy still applies.
+  // isUserAllowed reads SLACK_ALLOWED_* on each call, so each case gets a wrapper that
+  // applies its own env for the duration of the call and then restores the old values.
   const ENV_KEYS = ["SLACK_ALLOWED_EMAIL_DOMAINS", "SLACK_ALLOWED_USER_IDS"] as const;
-  let loadCount = 0;
   async function loadIsUserAllowed(env: {
     SLACK_ALLOWED_EMAIL_DOMAINS?: string;
     SLACK_ALLOWED_USER_IDS?: string;
   }): Promise<typeof isUserAllowed> {
-    const saved = ENV_KEYS.map((key) => [key, process.env[key]] as const);
-    try {
-      for (const key of ENV_KEYS) {
-        if (env[key] === undefined) delete process.env[key];
-        else process.env[key] = env[key];
+    return async (...args) => {
+      const saved = ENV_KEYS.map((key) => [key, process.env[key]] as const);
+      try {
+        for (const key of ENV_KEYS) {
+          if (env[key] === undefined) delete process.env[key];
+          else process.env[key] = env[key];
+        }
+        return await isUserAllowed(...args);
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
       }
-      loadCount += 1;
-      const fresh = (await import(`./handlers?env=${loadCount}`)) as typeof import("./handlers");
-      return fresh.isUserAllowed;
-    } finally {
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
+    };
   }
 
   beforeEach(() => {

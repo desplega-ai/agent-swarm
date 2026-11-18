@@ -6,8 +6,19 @@ Status: active. Baseline: 20c45be1a9. No releases.
 
 Audit every tracked test subsystem, plus its fixtures, mocks, helpers, and runner configuration.
 Read production before judging tests. Preserve distinct platform and integration contracts.
+Default changes affect tests, specs, fixtures, test helpers, and documentation.
+Taras permits concrete production-defect exceptions when identified explicitly and isolated in separate PRs. C15 is the existing exception.
 A completed row needs contract reasoning, validation evidence, and a landed PR or a precise blocker.
 Pending inventory rows do not imply an audit. Reconcile this inventory against main after each merge.
+
+## Measurements
+
+Taras requested coverage and CI timing tracking alongside deletion totals.
+See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
+The current checkpoint contains 2117 net test lines and 110 cases removed across 40 merged changes at `2c17d2c01c`.
+The recorded C22 through C27 coverage pairs lost no covered production lines within their named final scopes.
+C25 cards, HTTP, fallback, executor, index, and follow-up slices landed in PRs #3299, #3301, #3304, #3305, #3306, and #3307.
+Complete post-cleanup coverage and controlled CI savings remain unmeasured.
 
 ## Budget
 
@@ -20,7 +31,7 @@ Record additions and deletions separately for each slice.
 ## Current work
 
 - Inventory and rule audit: complete. Taras requested a new budget. See runbooks/testing.md.
-- Additional scope: 159 black-box scenario files, runner scripts, fixture trees, shell checks, and chart tests.
+- Additional scope includes black-box scenarios, runner scripts, fixtures, shell checks, and chart tests. The scenarios directory has 164 tracked files at da88ba4a02, including helpers.
 - Prioritize workflow, Slack, apps, memory, runtime, providers, task/session, extensions, authentication, and dashboard groups.
 - Helper duplication candidates require behavioral review. Repeated names alone do not justify deletion.
 - C01 merged through the queue as fddcc526172b9e751877817547da32c1f18718d2.
@@ -183,16 +194,17 @@ The optional-taskId persistence check overlaps DB mapping coverage but also guar
 
 ### C08: Native script stderr diagnosis
 
-State: implemented and independently reviewed. Diff +46/-78 lines. Cases decreased from 89 to 84, with no new calls.
+State: landed through PR #3291 as b2ae0d76bf. Independent review passed. Diff +46/-78 lines. Cases decreased from 89 to 84, with no new calls.
 The script returned exitCode 0 and Bash startup stderr from /Users/taras/.bashrc attempting to source /.turso/env.
-Inline sandbox mode uses plain bash -c before env -i. Spawn mode already uses --noprofile --norc -p.
+The original inline sandbox used plain bash -c before env -i. Spawn mode already used --noprofile --norc -p.
 A shell probe with open stdin reproduced the warning. The protective flags removed it.
 Retain the clean-stderr assertion. This is a production environment-isolation defect, not obsolete test coverage.
-Follow-up: isolate an inline-wrapper fix with a controlled startup-file regression check, outside test-only cleanup slices.
+C15 isolated and merged the inline-wrapper fix with controlled startup-file checks, outside this test-only slice.
 Removed four fabricated executor cases and one repeated classifier case. All 15 distinct classifier inputs remain.
 Corrected three child-process budgets. Scenario assertions compare fields and reject extra keys. The stderr guard now reports scrubbed evidence.
 Affected units: 84 passed, 276 assertions. Nine classifier mutations failed. E2E typecheck, boundary checks, allowlist, Biome, and diff checks passed.
-The unchanged wrapper still caused E2E failure during this slice. C15 subsequently made script-inline-run pass with 30 HTTP calls.
+The original wrapper caused E2E failure during preparation. After C15 merged, parent validation passed 84 unit cases and script-inline-run with 30 HTTP calls.
+Parent check:local and E2E typechecking passed before C08 landed. Paired C08 line coverage remains unmeasured.
 
 ### C09: QuickJS pool timing
 
@@ -210,7 +222,11 @@ Controlled worker boot failure now fails promptly with peak 0 instead of waiting
 
 ### C10: Slack rendering
 
-State: PR https://github.com/desplega-ai/agent-swarm/pull/3274 passed PR checks, then left the merge queue after run 44125275220 failed Run Tests (2/8). The unchanged DB timing guard measured 364.037399ms against its 300ms ceiling. C22 must resolve this before another queue attempt. Independent review passed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
+State: landed through PR https://github.com/desplega-ai/agent-swarm/pull/3274 as 7be110da2c264e6ba3e68879818f7ad0d168c5bd.
+Queue run 44125275220 failed the original 300ms DB ceiling at 364.037399ms.
+Run 44131652948 failed the replacement 200ms ceiling from PR #3277 at 201.530818ms.
+After C22 merged, queue run 44146720160 was cancelled. Run 44147151008 then passed required merge validation.
+Independent review passed. Final diff +5/-148 lines. Three duplicate tests removed. No live Slack operations.
 Candidates: three repeated delivery tests, substring checks following exact equality, and payload key lists that reject harmless additions.
 Retain recovery stop-before-update order, native Markdown, truncation, child-before-conclusion delivery, visibility, caption limits, and stale UI-spec fixtures.
 All five controls failed: answer replacement, finalized-child repetition, early conclusions, unwanted Markdown conversion, and missing recovery updates.
@@ -232,7 +248,7 @@ No deletion justified. No mocks or fixtures require removal. This audit does not
 
 ### C12: MCP enabled-tool selection
 
-State: implemented and independently reviewed. Removed two repeated server registrations, +0/-2 lines. All 17 tests pass with 26 assertions.
+State: landed through PR #3285 as 98ca0e707f3f1666801e7965fb3ce3d21bf583b4. Independent review passed. Removed two repeated server registrations, +0/-2 lines. All 17 tests pass with 26 assertions.
 Read parser, server allowlist resolution and pruning, capability and scripts-only selection, MCP session option resolution, and configuration injection.
 Retain parser formats, invalid config refusal, deployment fallback, capability override, scripts-only override, full-surface bypass, warnings, and per-agent session reload.
 The HTTP helper delegates to real handleMcp. It does not copy routing logic. It omits core authentication, so it does not establish authentication coverage.
@@ -269,7 +285,7 @@ These gaps do not justify replacing the compact suite or deleting distinct routi
 
 ### C15: Sandbox startup isolation follow-up
 
-State: PR https://github.com/desplega-ai/agent-swarm/pull/3269 passed PR checks, then left the merge queue after an unrelated DB timing failure. C22 must resolve that failure before another queue attempt. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
+State: landed through PR https://github.com/desplega-ai/agent-swarm/pull/3269 as 6a41ba92ae243ba181b1f1253a4d0ac77f123abf. An earlier queue attempt failed the unrelated database timing fixture. PR #3277 repaired that fixture before the successful queue run. Independent review passed. Production diff +1/-0. Test/helper diff +31/-23.
 Production and existing sandbox tests were read first. A controlled startup file confirms the C08 production defect independently.
 With BASH_ENV pointing at a task-owned file that exits 37, inline mode executes it and exits 37. Spawn mode exits 0.
 Adding --noprofile --norc -p to the inline command exits 0, forwards stdin, and produces no stderr.
@@ -391,7 +407,8 @@ Candidate skips redundant flag writes and restarts after required config changes
 Final diff +33/-22, net +11, all for dispatch readiness. Existing skipped-task assertions remain unchanged. No retry was added.
 Paired baseline, revised, delayed-socket, and restored runs passed without reruns. Removing override barriers under delayed reconnect failed both existing attempts.
 Independent review found no correctness blocker. Legacy caller and first full-shard writer passed without retries. All 16 legacy PNGs remained valid.
-Parent check:local passed all 35 affected scenarios: zero failures, skips, or flaky results, with 553 HTTP calls. PR #3278 is submitted with auto-merge requested.
+Parent check:local passed all 35 affected scenarios: zero failures, skips, or flaky results, with 553 HTTP calls.
+PR #3278 merged as ae52a1c0a487516c9b923cf1179f90c5ea194696.
 Earlier unrelated config writes can still leave a reload pending on the helper skip path. This limitation predates the repair.
 
 ### C21: Remaining Codex provider audit
@@ -404,31 +421,326 @@ Preserve transport, subprocess, SQLite locking, device lease, storage recovery, 
 Weak guards: last-call-wins checks only defined values, PKCE omits SHA256 relation, refresh overlap uses sleep, and app-server shutdown asserts a one-second ceiling.
 Unexpected auth/network resolution and copied ratings conversion remain fixture risks. No live provider or runtime audit evidence yet.
 Cancellation cleanup changes only codex-adapter and codex-swarm-events: final +14/-104 lines, 126 to 123 cases.
-PR #3281 is submitted with auto-merge requested. Parent check:local passed in 12 seconds, including all 123 affected cases.
+PR #3281 merged as 5bd1ab40da5449f1278e367df2a8b3ed815a2ab7.
+Parent check:local passed in 12 seconds, including all 123 affected cases.
 Seven controls failed. Removing name-only AbortError classification survived both original and candidate, because explicit abort state covers that branch.
 Independent review found no lost guard. A refinement restores console.log from afterEach even when the abort event never arrives.
 Scoped test typechecking reports the same 13 errors on baseline and candidate. The configured root typecheck passes.
 
-### C22: DB busy timing flake
+### C22: DB timing ceilings and failed-attempt accounting
 
 C15 merge-group run 44123585250 failed only Run Tests (2/8). The unchanged db-client-busy-retry guard measured executionMs 371.386837 against a 300ms ceiling.
-PR checks passed. The merge queue removed C15 for failed_checks. Do not count that PR as landed.
+PR checks passed. The merge queue removed that attempt for failed_checks. C15 landed later.
 An isolated repair must preserve real contention and detect backoff incorrectly included in execution time. Merely raising the ceiling or adding retries is not acceptable.
 The first candidate added 71 and removed 15 lines, with three spies. Its two accounting mutants failed, and 53 affected checks passed.
 Independent review found no correctness defect, but rejected the maintenance cost of global clock and timer spies.
-A smaller real-clock alternative is under validation. No retry of the queue was requested after this failure.
+A smaller real-clock candidate added 48 and removed 15 lines against the old fixture.
+It detects complete omission of failed-attempt costs, including when successful-attempt overhead masks the simpler comparison.
+It has no global clock or timer spies. A caller pause can still mask backoff inclusion, and partial undercounts remain unproven.
+Independent review then identified base drift. PR #3277 already replaced the old fixture with a zero-spin client and a 200ms ceiling.
+That PR merged as 7d5ad4e75d396bebb57e460f40f7c72432531a6d and removed the original nonzero-spin fixture.
+C15 and C10 returned to normal queue validation after that merge. C15 subsequently landed.
+C10 run 44131652948 failed the new zero-spin test: executionMs 201.530818ms against its 200ms ceiling.
+Check 134210204331 identifies db-client-busy-retry.test.ts:113. This directly reproduces the remaining ceiling flake.
+The final candidate targets d67d322570, which includes PR #3277. PR #3293 contains only the existing busy-retry test file.
+Its diff is +48/-26 lines, net +22. All 18 existing test calls remain. Independent review found no blockers.
+Fresh baseline checks passed 53 cases. The candidate busy suite passed 18 cases.
+The combined candidate run had 52 passes and one unrelated db-client.test.ts timer-gap failure at 218.9ms against 150ms.
+Its isolated diagnostic passed, but the combined run remains recorded as failed. No sibling test changed.
+Controls rejected included backoff and omitted failed-attempt costs, including an 80ms successful-overhead masking variant.
+Correct accounting with that overhead passed. Parent check:local subsequently passed all 18 selected cases.
+Paired coverage lost no source lines. Timing-dependent warning and scrubber coverage increased, without a claim of new regression coverage.
+A parent overlap between two fixture consumers caused invalid lock failures. Sequential reruns passed, as recorded in the measurements document.
+A caller pause can hide backoff inclusion. Partial undercounts and the recorder dependency remain limits.
+PR #3293 merged as bbbc5b029192574bd4b2c145acb8f1b0a8b71534. Its required merge validation completed before landing.
+C10 passed queue validation after this repair reached main and merged as 7be110da2c264e6ba3e68879818f7ad0d168c5bd.
+Its justification is removal of the reproduced timing ceiling, counted failed-attempt cost, and observed contention.
+The retention batch sizer consumes executionMs. Omitted failed-attempt cost can therefore understate event-loop blocking.
 
 ### C23: Codex pool selection
 
-Implementation is in progress in an isolated worktree. Remove copied slot selection only after the exported resolver protects its contracts.
-Preserve exhaustion, availability, sparse slot identity, actual credential files, blank refresh tokens, and nonzero-slot persistence forwarding.
-No deletion or runtime result is claimed yet.
+PR #3286 merged as 048178fb7407778046bd8d23750d91f3db8569b1. Diff +40/-232 lines, net -192, across two existing test files.
+Removed the copied slot-selection algorithm and its scenarios. Existing resolver cases now read actual credential files.
+Retained guards cover exhaustion, availability, sparse slot identity, selected metadata, blank refresh tokens, and nonzero-slot persistence forwarding.
+Baseline 17 cases passed. The candidate passed 13 cases, with no new test call sites. All seven controls failed.
+The baseline missed exhaustion, refresh-token leakage, missing files, and incorrect file contents. Those controls justify resolver growth.
+Independent review found no blockers. Parent check:local passed, and five unchanged filesystem cases passed with 16 assertions.
+Scoped type diagnostics decreased from ten to four existing errors. Configured root typechecking passed.
+Availability with only unconfigured IDs, failed fetches, and non-ok responses remain uncovered branches. No live provider ran.
+
+### C24: Heartbeat audit and obsolete checklist parsing
+
+All 13 heartbeat-prefixed suites received complete static assertion review, plus extensions-heartbeat and the core-session-data scenario.
+Production review covered sweep orchestration, receipts, gate execution, expiry, recovery, rerouting, and probe cancellation.
+Some auxiliary production reads followed the initial test read. Transitive broker, runtime, workflow, and database implementations remain partial.
+The strongest candidate removes historical previous-checklist prompt-parser variants. Production reads receipts containing full task IDs instead.
+Preserve current multiline failure titles, receipt validation, and actual SQL selection of previous checklists.
+PR #3294 changes only heartbeat-jev-gate.test.ts: +9/-241 lines, net -232.
+It merged as 5ee2b27ad8ffc9d089a7f59ffce89396a95b2673.
+It removes 11 executed cases: nine historical variants and two hollow or redundant cases, plus unused fixture plumbing.
+One mixed-array row adds an executed case to an existing parameter table. No new test call site was added.
+The case count is 43 - 11 + 1 = 33. All 33 final cases, formatting, allowlist, and patch checks passed.
+Ignoring receipts caused four failures. Suppression by creation time caused seven failures.
+Malformed-array acceptance initially survived. A mixed string/number row in the existing table now detects it with one failure.
+All original malformed-input cases remain. A single-line regex control failed the retained multiline total assertion.
+Final independent review found no blockers. Parent check:local passed with 33 cases and configured root typechecking.
+Paired coverage retained every covered source location across 744 loaded production files, with a fixed 113518-line denominator.
+The pair does not establish branch coverage or full-suite coverage. The full suite and separate producer suite were not run locally.
+The failure-query mock still copies filtering. Competing completed-checklist selection and shared-prefix ID collisions remain unproven.
+Further candidates include repeated basic stall cases, checklist rendering, and reboot task-type exclusions.
+Preserve full-sweep dispatch, workflow ownership, tracker ownership, live-session protection, boot epochs, and interrupted-write recovery separately.
+The concurrency case uses nested awaits and proves sequential idempotency, not overlapping sweeps.
+The startup timer remains active after heartbeat stops. It can reach a closed or replaced database in lifecycle tests.
+Gate setup can await an unresolved readiness signal after its deadline. The fake gate context also reproduces SQL filtering.
+Reroute rollback and actual process-restart recovery remain unproven. No unused external fixture was found.
+
+### C25: Approval audit and card consolidation
+
+The complete approval-card-resolution test received review against notification rendering, dispatch, and relevant database production paths.
+PR #3299 removes the final stored-channel case and the separate rejected/operator header case: +2/-17 lines, net -15.
+It moves the zero-post assertion into the first approved case and requires outcome icons throughout the existing operator matrix.
+Six affected suites passed: 151 baseline cases and 149 candidate cases. The changed suite decreases from 22 to 20 cases.
+Four temporary controls detected a wrong channel, an unwanted reply, a wrong rejection icon, and a missing operator fallback.
+Parent check:local passed on main at 7be110da2c, including 20 card cases, formatting, lint, and configured root typechecking.
+Independent review found no lost behavior guard or correctness blocker. PR #3299 merged as 2204b5c8fa41ec45a9bac915c5abe40b527598d3.
+Paired coverage lost no covered source locations across 224 measured production files and a fixed 40097-line denominator.
+The four relevant production files retain identical covered lines. Seven incidental scrubber hits do not establish stronger coverage.
+The retained late-resolution and legacy-DM cases still exercise null votes with an operator responder.
+Neither version tests a stored channel target without channelId. The wrong-channel control does not prove that fallback.
+Preserve cancellation entry points, failed-delivery claim release, deduplication, quorum silence, late delivery, and legacy versus current DM routing.
+Fixed negative waits and call-recording readiness do not prove completion of persistence work.
+The run-cancellation fixture contains one request despite its broader title. The DM message fake persists between cases.
+The config-question helper and all 702 lines of its test now have a complete read.
+The helper, HTTP normalization and answer transaction, MCP creation, and HITL executor were compared with the assertions.
+Supporting authentication, config storage, workflow resume, and notification internals remain partial. This is not a complete subsystem audit.
+No whole-test deletion is justified in the config-question suite. The three creation entry points protect separate normalization wiring.
+Retain secret downgrade refusal, API-only key hiding, plain option validation, rejection without writes, and the user/agent authorization checks.
+Retain standalone secret scanning, its positive text control, and workflow output/context scanning as separate boundaries.
+The metadata test claims envPath preservation but sets and checks only description. Rename it or supply a discriminating envPath fixture.
+The keep test checks the unchanged timestamp, not the stored value or write count. Same-tick rewrites could evade that check.
+The reload spy proves one invocation, not post-commit ordering. No injected failure proves rollback after an earlier config write.
+No case removes a kept key between validation and the transaction, or resolves the request after a config write begins.
+The scanner skips unreadable columns. Its positive control proves two important paths, but not exhaustive scanning of every possible column.
+The local HTTP server resolves credentials and calls the handler. It does not exercise every full-server admission layer.
+The event listener and Slack module mock remain installed for the file's process. Workflow readiness uses a bounded polling loop.
+No tests or controls ran during this static continuation. No production or test source changed.
+
+The six remaining approval suites now have complete assertion reviews against their direct production paths.
+These are approval-respond-auth, approval-requests, approval-requests-notifications, approval-sweeps, and both approval cancellation migration suites.
+The audit ran no tests or controls. Full HTTP admission, token storage internals, workflow helpers, and migration interactions remain partial.
+The copied HTTP handler in approval-requests implements obsolete body-derived identity and bypasses production quorum, deadlines, and follow-ups.
+PR #3301 replaces that copy with the production handler and consolidates server lifecycle: +43/-208 lines, with all 87 cases retained.
+Independent review found no lost guards. Parent check:local passed after rebasing onto main at 498e8d3542.
+Paired parent coverage gained 29 production route lines and lost none across 751 files and 114917 fixed line locations.
+Five failing controls cover filtering before limit, required and optional validation, and identity through both affected suites.
+The approval harness uses an operator fallback without request authentication. The separate auth suite resolves credentials but bypasses full-server admission.
+One baseline returned 404 instead of 409. Its response body and listener were not captured, so its cause remains an open observation.
+Subsequent passes do not prove a repair. PR #3301 merged as 5a79d5be5594563fe5434084351884aea7c7266d.
+Preserve filter-before-limit, text-only answers, rejection reasons, cancelled-request refusal, defaults, and optional-answer validation.
+Other candidates include empty assertions, unused executor input, reconstructed follow-up predicates, and copied tool fallback logic.
+Replace those simulations only after the real entry point preserves their meaningful behavior. Keep parent metadata inheritance separately.
+The original executor creation fixtures omitted the workflow run and passed despite creating cancelled approval rows.
+PR #3305 repairs those fixtures with a live run, a running step, pending status, and correlated request identity.
+The review-requested refinement removes repeated assertions and reuses setup: +50/-49 lines, with 87 cases reduced to 86.
+Four controls fail, and paired coverage gains eight lines with no losses. Parent check:local and composed fallback validation passed.
+PR #3305 merged as ae4bcaab8cfd30a9856041109c0f79dfa6bdb485.
+PR #3304 removes the copied source-task fallback case: -30 lines and one case, with unchanged measured production coverage.
+The original case missed a disabled production fallback. The retained MCP scenario failed both attempts, then passed after restoration.
+Its parent check:local passed. Independent review found no lost guards.
+PR #3304 merged as f9a8fc75b0bfdf629f76f16d5397a646921936ba. Both slices now contribute to merged totals.
+The fallback scenario depends on connectMcp omitting the source-task header. It does not prove header precedence.
+PR #3306 strengthens migration 166's index definition and complete-row checks: +8/-19 lines, with the existing case retained.
+All four controls survive the baseline and fail the candidate. Parent check:local and both migration tests passed.
+Paired coverage is unchanged across 153 production files and 31215 locations. SQL itself is not instrumented.
+Independent review approved the exact normalized DDL assertion. Equivalent SQL spelling can require an explicit assertion update.
+PR #3306 merged as c4ab35afe10f324b4f15ecb103499d53ab1a62db.
+The follow-up candidate now replaces copied predicates with accepted HTTP answers and a global task-set observation.
+It reuses existing helpers after review: +44/-64 lines, with 85 current-main cases reduced to 84.
+Eight behavior controls fail. The redundant source-free early guard survives because the later lookup also prevents creation.
+The final current-main coverage pair gains two handler lines and loses none across 752 files and 114945 locations.
+The earlier pair lost six timing-threshold logging lines. That result remains recorded and is not treated as a retry failure.
+Independent review found no lost guards. The parent completed helper reuse and repeated all controls, coverage, and check:local.
+PR #3307 merged as 9a61e25bbd125a9bc10c622a58382430478cb0f2 and contributes to merged totals.
+Notification synchronization is published as PR #3308: +41/-27 lines, with all six cases and every existing assertion retained.
+Independent review found no blockers. PR checks passed, but merge-queue run 44161166221 failed an unchanged mobile-preview test.
+The failure at link-preview-sheet.test.ts:146 occurred before the toast assertions because Re-run did not render.
+GitHub removed PR #3308 for failed_checks on November 17 at 20:48 BCN.
+After PR #3312 repaired the preview fixture on main, the parent requested fresh queue validation.
+PR #3308 merged as 531c9fb1f9c97cb2740a21deebf3388b4db28b05 on November 18 at 00:06 BCN.
+The call-through spy observes dispatch completion and replaces silent polling and fixed sleeps.
+Four behavior controls fail as expected. Delayed unwanted email posting passes the baseline but fails the candidate.
+Paired coverage matches across 778 production files and 116221 locations. Parent check:local passed.
+This slice does not establish that the HTTP response precedes Slack completion. A hung dispatch can still time out teardown.
+A separate reviewed deletion candidate removes two list and expiry cases, with 18 deleted lines and no additions.
+The retained sweep guard detects NULL-deadline inclusion. The removed loop also detects that mutation, so detection is redundant.
+The request suite loses six selector lines, but the retained sweep suite covers them. Their union loses no covered location.
+PR #3310 merged as 503dfe00995a4fd05ecbf2c1a0fef652d6038498 and contributes to merged totals.
+Its composition with current main passed 111 affected cases. The request suite now has 82 cases.
+Preserve authentication and quorum cases, stale-lease ownership, actionable-workflow conditions, cancellation triggers, and actual timeout recovery.
+Preserve sweep rollback controls. Notification failures, request latency, and asynchronous dispatch completion need separate observations.
+Polling helpers can silently expire. Token expiry, timeout tolerances, and environment restoration also need bounded repairs.
+Migration 140 reconstructs a historical table while retaining later migration records. Migration 166 now checks its exact index predicate.
+Keep migration reconstruction and additive-index behavior separate. Neither fixture proves a complete historical upgrade.
+
+### C26: Approval dashboard audit
+
+The initial audit reviewed all seven scoped files and 58 cases without executing them. Subsequent bounded implementation and validation follow.
+The improvement test mounts a header component that was identified and read after the initial test read. This ordering limit remains explicit.
+Candidates are one duplicate unmodified-Enter assertion and one repeated initial improvement render. Preserve both payload-privacy assertions when consolidating.
+Retain display and response validation separately, inline eligibility, keyboard surface differences, identity restrictions, banners, and list layout tokens.
+The mocks do not establish native focus, overlay discovery, responsive geometry, server authorization, or network failure behavior.
+Module mocks and Happy DOM persist within the process. Exact expiry, retry arguments, and several banner branches lack discriminating guards.
+No whole-file deletion or unused fixture is justified.
+PR #3311 implements both consolidations: +2/-7 lines and one removed case. It merged as bcc13793189670179ad39a2e32419c6576a73544 and contributes to merged totals.
+Baseline and candidate pass 58 and 57 cases across seven isolated files. All three controls fail retained assertions.
+The typing-target matrix retains the exact Enter input. Both privacy assertions run before the retained approval click.
+Paired dashboard coverage matches: 49 files, 6258 locations, 1478 covered locations on both sides.
+Independent review found no blockers. Parent check:local, root and UI TypeScript, allowlist, and whitespace checks pass.
+A local browser displayed the seeded pending draft. Captures use identical production source and do not claim a visual change.
+No server authorization, native form behavior, branch coverage, or full-suite timing claim follows from these tests.
+
+### C27: Memory rating consolidation
+
+PR #3313 changes only memory-rater-llm.test.ts: +33/-149 lines, with 47 cases reduced to 45.
+The two-file baseline and candidate pass 63 and 61 cases. Parent verification uses a checkout-local frozen installation.
+Removed copied OpenRouter and disabled-hook predicates. The real empty-batch no-fetch guard remains.
+The retained HTTP flow verifies persisted ratings. The forwarding case now pins task ID, optional model, request metadata, and exact events.
+Independent review found no lost production guard but rejected two controls that failed to parse.
+The parent replaced those mutations with valid empty spreads. Both selected tests fail at their event-array assertions.
+The corrected evidence records 24 detected mutations and one existing disabled-hook gap. Invalid original probes remain excluded from behavioral evidence.
+Forcing disabled-hook gating on still passes because the existing hook fixture has no nonempty ratings in that path.
+Paired production LCOV retains 23056 covered locations out of 113212 across 744 files. The API child is not instrumented.
+Parent check:local, allowlist, whitespace, and pre-push checks pass. No production file changes.
+The initial shared dependency setup and failed loader probes remain documented. New parent baseline and candidate runs use the canonical wrapper.
+No full repository suite, live credential transport, or branch-coverage claim is made. PR #3313 merged as 52452f001f69fff9106b276ce127f641b46339ba and contributes to merged totals.
+
+### C28: Preview readiness diagnosis and superseded candidate
+
+The failed #3308 queue run stopped before the original modal and toast assertions.
+A controlled pending import reproduced the missing-button guard. The exact historical CI cause remains unconfirmed.
+The parent prepared a preload alternative, with +2/-3 test lines and no changed cases or behavior assertions.
+Baseline and candidate passed 47 cases. Delayed module evaluation failed the baseline and passed the candidate.
+Pointer and navigation controls failed retained assertions. Target LCOV retained 901 covered locations out of 2839 across 36 production files.
+Independent review found no blockers, and parent check:local passed.
+Before publication, fetched main contained PR #3312 at 6e8e740354b689f8ad2e2a351962b5b98c884aab.
+That separate repair waits for the rendered button. The parent retired the unpublished preload alternative and preserved its evidence.
+No alternative diff enters campaign totals. PR #3312 is external work and also remains outside those totals.
+The merged test passed locally. This does not establish full-shard reliability or the historical cause.
+Screenshots show the shared task body on a phone preview screen, not the Radix sheet or browser hit testing.
+
+### C29: Scheduling audit and bounded consolidation
+
+All six scheduling test files received complete assertion inspection and direct production comparison.
+Transitive authentication, workflow, provider, migration-history, and process boundaries remain partial.
+The audit preserves occurrence claims, committed visibility, stale completion, recovery, cadence, migrations, profiles, and real script execution separately.
+The refined candidate changes only scheduled-tasks.test.ts: +2/-44 lines, with two duplicate cases removed.
+It retains task insertion, manual timestamps, and cadence-free one-time creation.
+Independent review rejected the pinned-target deletion because its target-only fixture distinguishes assignment from creator attribution.
+The parent restored that case and removed the redundant status transfer. A creator-as-target control now fails that retained case.
+The removed success-only atomicity case did not prove atomicity. Manual dispatch and schedule updates remain separate operations.
+Fresh baseline and refined candidate passed 33 and 31 cases. Earlier adjacent runs passed 72 cases, including three real script cases. Those runs preceded restoration of the target-only case.
+Five fresh controls failed retained assertions after refinement: insertion, manual timestamp, cadence, mapped type, and creator-versus-target assignment.
+The earlier eight-control record describes the rejected three-case candidate. Literal cadence rejection remains separate from assertion-level controls.
+All mutations were restored.
+Scoped production LCOV retains equal executable locations and covered lines. Child scripts and branches remain unmeasured.
+Parent check:local and pre-push checks passed after refinement. Independent review accepted the two remaining deletions.
+PR #3318 publishes the refined patch. Run 44197560217 passed eight root shards and four E2E Contract shards.
+Three unchanged eval timestamp tests exceeded five seconds. The aggregate Merge Gate failed. PR #3320 repaired that fixture. On the updated #3318 head, all eight affected root shards and the eval package passed.
+PR #3318 merged as `2a851add58`. Refined evidence is /tmp/test-cleanup-scheduling-refined/report.md.
+PR #3323 repaired the empty-result and error-threshold fixtures. Profile clearing and deferral authorization still need review.
+Existing sleeps, shared fixture state, manual atomicity, and cross-process claim coverage require separate assessment.
+Audit: /tmp/test-cleanup-scheduling-audit.md. The original candidate report remains historical evidence at /tmp/test-cleanup-scheduling-duplicates/report.md.
+
+PR #3323 changes three existing filter cases, adding 24 lines and deleting 16.
+Enabled and disabled queries must each return the matching fixture. Every returned row must still have the requested flag.
+A fixed two-error schedule must appear at a minimum of two and disappear at three.
+A status-only HTTP request distinguishes a missing status parameter from a missing minimum. The database checks each predicate separately.
+All 36 cases passed. Six of eight temporary regressions passed on the baseline. All eight failed assertions after the change.
+Both coverage runs hit the same 24,709 of 115,377 executable lines across 783 production files.
+The HTTP test uses the schedule handler and a local listener. Full-server authentication and branch coverage remain outside this measurement.
+
+### Eval timestamp subprocess and Codex duplicate checks
+
+PR #3320 gives each of four timestamp cases the shared subprocess budget. The helper drains both output streams. Each test rejects signal termination.
+The test diff adds 47 lines and deletes 32. A six-second startup delay exceeded the original deadline and passed the revised test.
+Four independent shell changes failed the prefix, unterminated-line, stderr, and exit assertions respectively.
+The eval package passed 1,193 cases and skipped one. All 27 production LCOV records matched. Generated shell execution has no LCOV instrumentation.
+A pipeline descendant can retain a pipe after the direct shell dies and cause the 35-second test deadline to expire.
+The historical CI cause remains unknown. Independent review approved the patch. PR #3320 merged as `f2f126278b`.
+
+PR #3321 removes two duplicate Codex cases and 13 test lines. The retained parser case uses the same message, clock, and expected reset time.
+The retained OAuth constants case checks the same public client ID. The deleted case did not inspect source files for secrets.
+Both suites passed, with 85 cases before removal and 83 after removal. Each retained assertion failed its respective production regression.
+The paired scopes covered identical source locations. Independent review approved both deletions. PR #3321 merged as `62b976de6e`.
+
+### Eval configuration and scenario catalog
+
+The static audit covered two configuration suites and three scenario suites. The inventory records the contracts for each.
+Benchmark parsing, model selection, version hashes, scenario grading, and recovery have independent failure modes.
+A missing lead in the judge fixture can cause recovery grading to exit early. Seed row counts also depend on SQL formatting.
+Keep the recovery rubric, independent answer values, both symlink rejection paths, and separate file and aggregate hash limits.
+
+PR #3324 consolidates three catalog cases and removes 61 net test lines.
+Exact registry membership catches missing and retired IDs. Source-array uniqueness catches duplicates hidden by the map.
+A fourth control gave a bundled scenario version zero. Production registry loading rejected it during the retained test.
+The affected suite went from 21 to 18 cases. Both runs covered 7,158 of 15,503 executable lines across 76 production files.
+The eval package passed 1,190 cases and skipped the opt-in replica case. Live provider execution remains outside this scope.
+
+### Eval engine audit
+
+The audit compared all five suites below with their direct production modules. Supporting runner and storage paths received partial inspection.
+
+| Suite | Retained contract | Remaining work |
+| --- | --- | --- |
+| Registry | Dependency bounds, transitive and forward references, duplicate references, self references and cycles. | PR #3326 landed and consolidated six cases. Some dimension-weight fixtures can fail on the aggregate weight alone. |
+| Outcome normalization | Legacy judge fallback, explicit dimension precedence, and the default threshold. | PR #3329 established that an explicit empty list suppresses the legacy judge. |
+| Baseline comparison | Shared quality dimensions, weighted results, empty sides, and scenario pairing. | PR #3330 separates error status from missing score and exercises four token components. |
+| Scoring | Rubric scoring, efficiency decay, and normalization followed by score finalization. | PR #3332 removed manual examples. Two runner decisions remain unguarded: choosing the lower budget score and omitting unpriced efficiency. |
+| Benchmark publication | Refusal rules, held-out cells and exclusion of private fields. | The environment fixture lacks a secret sentinel. Preserve database and publication checks separately. |
+
+PR #3327 removes three benchmark mapping cases. The catalog partition, ID uniqueness, production TSV join and exact Gemini benchmark object retain their checks.
+Both versions detected 13 regressions, including a missing source row that failed during module loading.
+
+### Eval runner audit
+
+The inventory records all 17 runner test files. The audit compared their assertions with seven runner implementation files.
+Some direct dependencies outside that directory received inspection after the tests. These included polling, sandbox boot, server startup, validation and database helpers.
+The inventory records partial audit status for this pass. It supplied no runtime or mutation evidence.
+
+PR #3333 replaces two manual judge-error examples. The retained test reads the message, score and verdict that the retry handler wrote to SQLite.
+The spawned-task merge and worker-failure selection fixtures also copy runner logic. Their tests can stay green when production diverges.
+Preserve the direct origin classifier, actual scenario validation, database state transitions, startup wiring and rubric execution.
+Runtime candidates include checking cancellation with an in-flight request and distinguishing configuration IDs when two scheduled attempts otherwise tie.
+
+### Eval statistics and summaries
+
+The audit covered every test body in the statistics, results and regression-summary suites. Each direct implementation received inspection before its tests.
+The formatter also invokes the regression classifier. That supporting implementation received partial inspection after the tests.
+
+- Retain independent and paired resampling, scenario weighting, rank spreads, Wilson intervals and pass-at-k estimators. The separate significance formula repeats production. A fractional rank for tied groups lacks an explicit assertion.
+- Run-summary PR #3334 consolidates empty cells and compares fresh rows in reverse order. Its interval-width test now doubles the same score distribution. The pure statistics suite still varies both distribution and size.
+- Retain the report formatting checks for pages, warnings, drift, cancellations and failed runs. Its requested scenario order matches discovery order. Metered and notional costs also share the same fixture values. Use distinct values and orders to test these contracts.
+
+### Newly added main tests
+
+The pre-push selector test received a full production-first audit. Its four cases passed with 39 assertions and remain unchanged.
+Retain self/deleted selection, real repository integration, deterministic capped graph traversal, and migration fallback.
+Child termination, inherited budgets, alias/index fallback, and the complete shell hook remain verification limits.
+The saved UI configuration test received a complete assertion read, with some supporting production reads afterward.
+Its 25 cases passed with 110 assertions under explicitly cleared deployment settings. No deletion is justified.
+Retain malformed storage, field validation, active-ID repair, empty state, and legacy migration as distinct contracts.
+Multiple-connection selection, malformed modern plus valid legacy storage, and the migrated persisted payload lack discriminating assertions.
+Neither audit ran mutation controls. The UI audit did not run a browser or complete the surrounding configuration subsystem.
+
+The object viewer audit retains both Board autosave cases. One saves without a view change. The other switches to Source before the save and checks the scene on return.
+The transport mock counts requests. Persistence after reload and the request body remain unverified. Supporting BoardView and useObject reads followed the test read.
+The new core-task-status-kind scenario remains outside the unit-file denominator and awaits separate scenario review.
 
 ## Resume order
 
-1. Resolve C22, then return C15 and any related failed queue entries to the queue. Land C08 after its production dependency.
-2. Complete queued C20 and C21, remaining C12, and the isolated C23 implementation.
-3. Update the landed ledger and reconcile its inventory against merged main.
+1. Track merge validation for #3330, #3333 and #3334.
+2. Check whether the report formatting suite detects exchanged cost fields and ignored scenario ordering.
+3. Continue remaining approval and memory repairs. Reconcile inventory after merges.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
 
@@ -440,21 +752,54 @@ C03: PR #3258 merged. Test diff +42/-94. Exact retry limits and fixture isolatio
 C04: PR #3255 merged. Test diff +1/-1. Browser query/hash forwarding retained without the OAuth race.
 C05: PR #3257 merged. Test diff +2/-2. Canonical fixture paths preserve 21 reaper guards.
 C07: PR #3259 merged. Test diff +59/-314. Copied HTTP layer removed after real-handler coverage retained its contracts.
+C08: PR #3291 merged. Test diff +46/-78. Removed fabricated executor cases and duplicate classifiers while preserving 15 distinct inputs.
 C09: PR #3266 merged. Test diff +9/-7. Actual request readiness replaces the premature cutoff. All seven guards remain.
+C10: PR #3274 merged. Test diff +5/-148. Three duplicate rendering cases removed while retaining native Markdown and delivery boundaries.
 C14: PR #3271 merged. Test diff +17/-32. Literal expectations and discriminating fixtures replace weak oracles.
 C16: PR #3275 merged. Test diff +1/-47. Removed mock-only no-op and repeated service-name checks.
 C17 storage slice: PR #3276 merged. Test diff +89/-328. Removed duplicate fixtures and repaired access-time and rollback guards.
 C18 migration slice: PR #3272 merged. Test diff +44/-120. Replaced copied merge algorithms with production behavior.
 C19: PR #3273 merged. Test diff +0/-139. Two duplicate example suites removed, with all fixtures retained.
+C20: PR #3278 merged. Test diff +33/-22. Config changes now await restart and socket readiness before dispatch.
+C21 cancellation slice: PR #3281 merged. Test diff +14/-104. Duplicate cancellation cases consolidated around explicit readiness and abort events.
+C22: PR #3293 merged. Test diff +48/-26. Real contention replaces a timing ceiling and protects failed-attempt accounting.
+C12: PR #3285 merged. Test diff +0/-2. Removed repeated server registrations while preserving parser and selection contracts.
+C15: PR #3269 merged. Test/helper diff +31/-23, production +1/-0. Both sandbox modes now suppress Bash startup files.
+C23: PR #3286 merged. Test diff +40/-232. Production resolver checks replace copied pool selection.
+C24: PR #3294 merged. Test diff +9/-241. Removed obsolete prompt-parser cases while retaining receipt and multiline-title guards.
+C25 cards: PR #3299 merged. Test diff +2/-17. Two duplicate cases consolidated with no measured production coverage loss.
+C25 HTTP: PR #3301 merged. Test diff +43/-208. Production handler replaces copied logic, with all 87 cases retained.
+C25 fallback: PR #3304 merged. Test diff +0/-30. Real MCP fallback coverage replaces the copied predicate case.
+C25 executor: PR #3305 merged. Test diff +50/-49. Actionable fixtures detect cancelled creation and incorrect correlation.
+C25 index: PR #3306 merged. Test diff +8/-19. Exact index and complete row checks detect four previously missed regressions.
+C25 follow-up: PR #3307 merged. Test diff +44/-64. Real HTTP answers replace copied predicates and Slack metadata simulation.
+C25 list/expiry: PR #3310 merged. Test diff +0/-18. Two duplicate cases removed, with selector coverage retained through the sweep suite.
+C25 notifications: PR #3308 merged. Test diff +41/-27. Dispatch completion replaces premature observations.
+C26: PR #3311 merged. Test diff +2/-7. Dashboard duplicate assertions consolidated.
+C27: PR #3313 merged. Test diff +33/-149. Real behavior guards replace copied rating predicates.
+Eval timestamps: #3320 merged, +47/-32. Four shell cases retain their original behavior checks.
+Codex duplicates: #3321 merged, +0/-13. The retained cases detect both regressions.
+Scheduling: #3318 merged (+2/-44, two cases removed). #3323 merged (+24/-16, same case count).
+Scenario registry: #3324 merged (+3/-64, three cases removed).
+Eval dependencies: #3326 merged (+7/-47, six cases removed).
+Benchmark mapping: #3327 merged (+1/-22, three cases removed).
+Outcome normalization: #3329 merged (+3/-13, one case removed). The retained test now detects a fallback from explicit empty dimensions to a legacy judge.
+Scoring arithmetic: #3332 merged (+2/-52, four cases removed).
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
 
-- Test-line policy merged in PR #3254. Campaign ledger merged through PR #3270 as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
+- Test-line policy merged in PR #3254. Initial ledger PR #3270 merged as 5243b1c93a6dcdde2680238256df8de70d8bfe1c.
+- Ledger wave 5 merged through PR #3284 as cbd5f90e7ca96edefef0af7f07fe2bed6c6c7733.
+- Ledger wave 6 merged through PR #3290 as 37d3a1bc856a45ca240fff1fb0163d6eefdc069f.
+- Coverage checkpoint PR #3295 merged as 36a09fbd30ed871c2b47627942441324b8aae323.
+- Approval checkpoint PR #3309 merged as e527abfb5aff164192762c30562a9ed36bf430a6.
+- Dashboard and memory checkpoint PR #3314 merged as 1a2fcbb67a41b10999db88f447f65eb35ddf31d2.
 - Live provider, Linux sandbox, Docker, and browser boundaries require distinct evidence.
 - Broad app-shell failure did not reproduce alone. QuickJS readiness failure reproduced under controlled boot delay. Its repair merged in PR #3266.
 - Reviewer noted an existing missing fable alias guard. This slice did not delete that contract.
-- Initial inventory contained 1616 tracked test files. Three files were deleted through C18 and C19. All 1613 remaining tracked test files have ledger rows. Package tests remain in scope.
+- Initial inventory contained 1616 tracked test files. Three files were deleted through C18 and C19, and three appeared on main.
+- The checkpoint contains 1616 current file rows and three historical removed rows. Package tests remain in scope.
 
 ## File audit inventory
 
@@ -464,8 +809,8 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 
 | Test file | Status | Slice or evidence |
 |---|---|---|
-| apps/evals/configs/aa.test.ts | pending | |
-| apps/evals/configs/index.test.ts | pending | |
+| apps/evals/configs/aa.test.ts | landed | #3327: benchmark row mappings, nulls, independent numeric pins and parser errors. |
+| apps/evals/configs/index.test.ts | static audit complete | Provider prefixes, model catalog membership, default selection, and alias boundaries. |
 | apps/evals/scenarios/capability-routing.test.ts | pending | |
 | apps/evals/scenarios/delegation-probe.test.ts | pending | |
 | apps/evals/scenarios/docs-suggestion.test.ts | pending | |
@@ -475,9 +820,9 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/scenarios/implement-review.test.ts | pending | |
 | apps/evals/scenarios/orchestration-scenarios.test.ts | pending | |
 | apps/evals/scenarios/real-diff-agent-fs.test.ts | pending | |
-| apps/evals/scenarios/scenarios.test.ts | pending | |
-| apps/evals/scenarios/versioning.test.ts | pending | |
-| apps/evals/scenarios/worker-recovery.test.ts | pending | |
+| apps/evals/scenarios/scenarios.test.ts | landed | #3324: exact catalog membership and source uniqueness. Serialization and grading checks remain. |
+| apps/evals/scenarios/versioning.test.ts | static audit complete | Suite pins, fixture hashing, symlink rejection, and independent byte limits. |
+| apps/evals/scenarios/worker-recovery.test.ts | static audit complete | Independent answer pins, adversarial totals, scoring gates, and solo parity. |
 | apps/evals/scripts/backfill-resolved-model.test.ts | pending | |
 | apps/evals/scripts/calibration-report.test.ts | pending | |
 | apps/evals/src/api/analytics-sql.test.ts | pending | |
@@ -493,8 +838,8 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/api/suite-analytics-http.test.ts | pending | |
 | apps/evals/src/api/suite-analytics-routes.test.ts | pending | |
 | apps/evals/src/api/suite-analytics.test.ts | pending | |
-| apps/evals/src/baseline.test.ts | pending | |
-| apps/evals/src/benchmark.test.ts | pending | |
+| apps/evals/src/baseline.test.ts | candidate validated | #3330 separates status and shared-score exclusions and tests token composition. |
+| apps/evals/src/benchmark.test.ts | static audit complete | Publication refusal, held-out cells, private fields and serialization. |
 | apps/evals/src/check-display.test.ts | pending | |
 | apps/evals/src/cli-show.test.ts | pending | |
 | apps/evals/src/cost/billing.test.ts | pending | |
@@ -511,36 +856,36 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/judge/trace.test.ts | pending | |
 | apps/evals/src/live/attempt-progress.test.ts | pending | |
 | apps/evals/src/logs-parser-ui.test.ts | pending | |
-| apps/evals/src/normalize-outcome.test.ts | pending | |
-| apps/evals/src/registry.test.ts | pending | |
-| apps/evals/src/regression-summary.test.ts | pending | |
+| apps/evals/src/normalize-outcome.test.ts | landed | #3329. Legacy fallback, explicit dimension precedence and default threshold. |
+| apps/evals/src/registry.test.ts | landed | #3326 dependency consolidation. Weight validation and serialization risks remain. |
+| apps/evals/src/regression-summary.test.ts | test audit complete, production partial | Alert and failure rendering. Order and cost fixtures need distinct inputs. |
 | apps/evals/src/regression.test.ts | pending | |
-| apps/evals/src/results.test.ts | pending | |
-| apps/evals/src/runner/harness-crash.test.ts | pending | |
-| apps/evals/src/runner/human-input.test.ts | pending | |
-| apps/evals/src/runner/hygiene.test.ts | pending | |
-| apps/evals/src/runner/member-seeding.test.ts | pending | |
-| apps/evals/src/runner/orphaned-runs.test.ts | pending | |
-| apps/evals/src/runner/progress.test.ts | pending | |
-| apps/evals/src/runner/resolve-attempt-cost.test.ts | pending | |
-| apps/evals/src/runner/roster.test.ts | pending | |
-| apps/evals/src/runner/run-configs.test.ts | pending | |
-| apps/evals/src/runner/run-efforts.test.ts | pending | |
-| apps/evals/src/runner/schedule.test.ts | pending | |
-| apps/evals/src/runner/scoring.test.ts | pending | |
-| apps/evals/src/runner/seeding.test.ts | pending | |
-| apps/evals/src/runner/spawned-tasks.test.ts | pending | |
-| apps/evals/src/runner/task-net.test.ts | pending | |
-| apps/evals/src/runner/topo.test.ts | pending | |
-| apps/evals/src/runner/worker-failures.test.ts | pending | |
-| apps/evals/src/scoring.test.ts | pending | |
-| apps/evals/src/stats.test.ts | pending | |
+| apps/evals/src/results.test.ts | candidate validated | #3334: empty metrics, finite totals, repeatable score intervals and interval width at fixed distribution. |
+| apps/evals/src/runner/harness-crash.test.ts | partial audit | Crash signatures, retryability and clipped messages. No actual retry execution. |
+| apps/evals/src/runner/human-input.test.ts | partial audit | Answer serialization and polling settlement. Approval HTTP validation is separate. |
+| apps/evals/src/runner/hygiene.test.ts | partial audit | Database transitions, retry classification and cancellation. #3333 adds judge-error persistence checks with an injected executor. |
+| apps/evals/src/runner/member-seeding.test.ts | partial audit | Strict profile failures, worker routing and command order. Shell execution is outside scope. |
+| apps/evals/src/runner/orphaned-runs.test.ts | partial audit | Reaping, startup snapshot handoff and scheduled resume. No process restart. |
+| apps/evals/src/runner/progress.test.ts | partial audit | Abort behavior for polling and sandbox boot. In-flight request cancellation needs verification. |
+| apps/evals/src/runner/resolve-attempt-cost.test.ts | partial audit | Harness prices, recomputation and zero-token handling. Pricing inputs are injected. |
+| apps/evals/src/runner/roster.test.ts | partial audit | Per-member configuration, matching and costs. Two fixtures construct similar sandbox handles. |
+| apps/evals/src/runner/run-configs.test.ts | partial audit | Stored model pins and reuse. Concurrent insertion remains unverified. |
+| apps/evals/src/runner/run-efforts.test.ts | partial audit | Override precedence, snapshot application, storage and legacy NULL. |
+| apps/evals/src/runner/schedule.test.ts | partial audit | Public-first and attempt ordering. Config-ID tie breaking lacks a discriminating fixture. |
+| apps/evals/src/runner/scoring.test.ts | partial audit | Dimension execution and persistence. #3333 removes manual judge-error cases and retains the producer test. |
+| apps/evals/src/runner/seeding.test.ts | partial audit | SQL restrictions, serialized sandbox fields and expiry. Real import remains separate. |
+| apps/evals/src/runner/spawned-tasks.test.ts | partial audit | Origin classification uses production. Local merge fixtures duplicate behavior. |
+| apps/evals/src/runner/task-net.test.ts | partial audit | Cascade skip recognition and failure classification. Server cascades remain separate. |
+| apps/evals/src/runner/topo.test.ts | partial audit | Deterministic ordering, invalid edges and cycle discovery. Persisted task order remains separate. |
+| apps/evals/src/runner/worker-failures.test.ts | partial audit | Real validator acceptance. Local target-selection logic bypasses runner injection. |
+| apps/evals/src/scoring.test.ts | landed | #3332: scoring and efficiency decay. Runner budget selection remains unverified. |
+| apps/evals/src/stats.test.ts | static audit complete | Interval bounds, seed behavior, signed differences, rank and pass-at-k estimates. Exact ties lack a median-rank assertion. |
 | apps/evals/src/swarm/api-extension.test.ts | pending | |
 | apps/evals/src/swarm/client.test.ts | pending | |
 | apps/evals/src/swarm/codex-auth.test.ts | pending | |
 | apps/evals/src/swarm/cost-wait.test.ts | pending | |
 | apps/evals/src/swarm/sandbox.test.ts | pending | |
-| apps/evals/src/swarm/timestamps.test.ts | pending | |
+| apps/evals/src/swarm/timestamps.test.ts | landed | #3320: four shell controls and a controlled startup delay |
 | apps/evals/src/swarm/version.test.ts | pending | |
 | apps/evals/src/ui-attempt-outcome.test.ts | pending | |
 | apps/evals/src/ui-heatmap-reliability.test.ts | pending | |
@@ -583,6 +928,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/components/comb/use-dom-text-space.test.ts | pending | |
 | apps/ui/src/components/comb/viewers/comb-markdown-update.test.tsx | pending | |
 | apps/ui/src/components/comb/viewers/comb-markdown.test.tsx | pending | |
+| apps/ui/src/components/comb/viewers/object-viewer.test.tsx | test audit complete, production partial | Board autosave and Source-switch preservation retained. Static review only. |
 | apps/ui/src/components/comb/viewers/text-viewer.test.tsx | pending | |
 | apps/ui/src/components/configuration/configuration-row.test.tsx | pending | |
 | apps/ui/src/components/configuration/improvements-row.test.tsx | pending | |
@@ -597,7 +943,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/components/feedback/feedback-dialog.test.tsx | pending | |
 | apps/ui/src/components/home/favorites.test.tsx | pending | |
 | apps/ui/src/components/home/needs-you.test.tsx | pending | |
-| apps/ui/src/components/improvements/improvement-approval-list.test.tsx | pending | |
+| apps/ui/src/components/improvements/improvement-approval-list.test.tsx | landed | C26 #3311; privacy checks consolidated before approval, controls and scoped coverage pass |
 | apps/ui/src/components/improvements/improvement-dialog.test.tsx | pending | |
 | apps/ui/src/components/integrations/chat-sdk-section.test.tsx | pending | |
 | apps/ui/src/components/integrations/chat-sdk-setup.test.tsx | pending | |
@@ -608,7 +954,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/components/layout/task-trail.test.ts | pending | |
 | apps/ui/src/components/layout/use-access-check.test.tsx | pending | |
 | apps/ui/src/components/link-preview/link-preview-panel.test.tsx | pending | |
-| apps/ui/src/components/link-preview/link-preview-sheet.test.tsx | pending | |
+| apps/ui/src/components/link-preview/link-preview-sheet.test.tsx | audited, retained | C28: external repair #3312 supersedes unpublished preload candidate; modal and toast guards retained |
 | apps/ui/src/components/link-preview/link-preview-state.test.tsx | pending | |
 | apps/ui/src/components/notifications/notification-bell.test.tsx | pending | |
 | apps/ui/src/components/notifications/slack-connect-invite-card.test.tsx | pending | |
@@ -700,10 +1046,10 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/lib/ai-providers.test.ts | pending | |
 | apps/ui/src/lib/all-users-scope.test.ts | pending | |
 | apps/ui/src/lib/app-version.test.ts | pending | |
-| apps/ui/src/lib/approval-format.test.tsx | pending | |
-| apps/ui/src/lib/approval-inline.test.ts | pending | |
-| apps/ui/src/lib/approval-responses.test.tsx | pending | |
-| apps/ui/src/lib/approval-shortcuts.test.tsx | pending | |
+| apps/ui/src/lib/approval-format.test.tsx | static audit complete | C26: retained after assertion review; included in seven-file validation and paired coverage, no file-specific mutation claim |
+| apps/ui/src/lib/approval-inline.test.ts | static audit complete | C26: retained after assertion review; included in seven-file validation and paired coverage, no file-specific mutation claim |
+| apps/ui/src/lib/approval-responses.test.tsx | static audit complete | C26: retained after assertion review; included in seven-file validation and paired coverage, no file-specific mutation claim |
+| apps/ui/src/lib/approval-shortcuts.test.tsx | landed | C26 #3311; duplicate typing assertion removed, retained matrix detects the control |
 | apps/ui/src/lib/auto-review.test.ts | pending | |
 | apps/ui/src/lib/azure-embeddings.test.ts | pending | |
 | apps/ui/src/lib/chat-sdk-form.test.ts | pending | |
@@ -752,6 +1098,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/lib/composer-drafts.test.ts | pending | |
 | apps/ui/src/lib/composer-mentions.test.ts | pending | |
 | apps/ui/src/lib/composer-paste.test.ts | pending | |
+| apps/ui/src/lib/config.test.tsx | test audit complete, production partial | New main file: 25 cases and 110 assertions pass, no justified deletion, limits recorded |
 | apps/ui/src/lib/configuration-values.test.tsx | pending | |
 | apps/ui/src/lib/connection-url-params.test.ts | pending | |
 | apps/ui/src/lib/context-display.test.tsx | pending | |
@@ -857,8 +1204,8 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/ui/src/lib/use-case-overview.test.ts | pending | |
 | apps/ui/src/lib/uuid.test.ts | pending | |
 | apps/ui/src/pages/agents/[id]/runtime-instances-section.test.tsx | pending | |
-| apps/ui/src/pages/approval-requests/components/request-header.test.tsx | pending | |
-| apps/ui/src/pages/approval-requests/components/request-list.test.tsx | pending | |
+| apps/ui/src/pages/approval-requests/components/request-header.test.tsx | static audit complete | C26: retained after assertion review; included in seven-file validation and paired coverage, no file-specific mutation claim |
+| apps/ui/src/pages/approval-requests/components/request-list.test.tsx | static audit complete | C26: retained after assertion review; included in seven-file validation and paired coverage, no file-specific mutation claim |
 | apps/ui/src/pages/config/description-cell.test.ts | pending | |
 | apps/ui/src/pages/connect-pages/ai-embeddings-tab.test.tsx | pending | |
 | apps/ui/src/pages/connect-pages/ai-system-one-tab.test.tsx | pending | |
@@ -979,14 +1326,14 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/api-keys-validation.test.ts | pending | |
 | src/tests/app-action-run-tool.test.ts | pending | |
 | src/tests/app-row-tools.test.ts | pending | |
-| src/tests/approval-auto-cancellation-migration.test.ts | pending | |
-| src/tests/approval-cancellation-migration.test.ts | pending | |
-| src/tests/approval-card-resolution.test.ts | pending | |
-| src/tests/approval-config-question.test.ts | pending | |
-| src/tests/approval-requests-notifications.test.ts | pending | |
-| src/tests/approval-requests.test.ts | pending | |
-| src/tests/approval-respond-auth.test.ts | pending | |
-| src/tests/approval-sweeps.test.ts | pending | |
+| src/tests/approval-auto-cancellation-migration.test.ts | landed | C25 PR #3306: +8/-19, four controls, selective replay and uninstrumented SQL limits |
+| src/tests/approval-cancellation-migration.test.ts | test audit complete, production partial | C25: table reconstruction and field preservation, no runtime controls |
+| src/tests/approval-card-resolution.test.ts | landed | C25 PR #3299: +2/-17, 20 cases, four controls, zero lost measured production lines |
+| src/tests/approval-config-question.test.ts | test audit complete, production partial | C25: all 702 lines reviewed, direct normalization and answer paths compared, preserve separate secret and ingress contracts |
+| src/tests/approval-requests-notifications.test.ts | landed | C25 #3308 landed after external preview repair #3312; dispatch and latency limits remain |
+| src/tests/approval-requests.test.ts | test audit complete, production partial | C25 PRs #3301, #3304, #3305, #3307, #3310 landed; preserve transaction boundaries |
+| src/tests/approval-respond-auth.test.ts | test audit complete, production partial | C25: preserve principals, attribution, quorum, and concurrency, full-server admission remains separate |
+| src/tests/approval-sweeps.test.ts | test audit complete, production partial | C25: rollback and recovery retained; list/expiry controls and union coverage support #3310 |
 | src/tests/apps-action-parent-task.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/apps-card-grid.test.ts | static audit complete | C18: controls and consolidation pending |
 | src/tests/apps-catalog-additions.test.ts | static audit complete | C18: controls and consolidation pending |
@@ -1110,7 +1457,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/claude-worker-parity.test.ts | pending | |
 | src/tests/codex-adapter-otel.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-adapter-pool-auth-revalidate.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-adapter.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
+| src/tests/codex-adapter.test.ts | static audit complete | C21: cancellation landed through PR #3281 |
 | src/tests/codex-app-server.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-auth-failure.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-credential-pools.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
@@ -1121,22 +1468,22 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/codex-oauth-adapter.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-auth-json-fs.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-auth-timestamps.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-oauth-credential-info.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth-credential-info.test.ts | landed | C23: PR #3286, production resolver and persistence contracts retained |
 | src/tests/codex-oauth-device.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-env-keys.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-keep-warm.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-refresh-egress.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-refresh-lock.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-oauth-storage.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-oauth.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-pool.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-rate-limit-parse.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
+| src/tests/codex-oauth.test.ts | landed | #3321: one exact duplicate removed. Retained assertion fails its control. |
+| src/tests/codex-pool.test.ts | landed | C23: PR #3286, production resolver and persistence contracts retained |
+| src/tests/codex-rate-limit-parse.test.ts | landed | #3321: one exact duplicate removed. Retained assertion fails its control. |
 | src/tests/codex-rate-limits.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-rollouts.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-skill-resolver.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-steering-hook.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
 | src/tests/codex-subprocess-steering.test.ts | static audit complete | C21: retained boundaries and remaining candidates recorded above |
-| src/tests/codex-swarm-events.test.ts | static audit complete | C21: cancellation validated and reviewed, PR #3281 pending merge |
+| src/tests/codex-swarm-events.test.ts | static audit complete | C21: cancellation landed through PR #3281 |
 | src/tests/comb-config-guard.test.ts | pending | |
 | src/tests/comb-default.test.ts | pending | |
 | src/tests/comb-links.test.ts | pending | |
@@ -1179,7 +1526,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/cursor-adapter.test.ts | pending | |
 | src/tests/db-agents.test.ts | pending | |
 | src/tests/db-capacity.test.ts | pending | |
-| src/tests/db-client-busy-retry.test.ts | partial audit, repair in progress | C22: queue failure and smaller timing repair under validation |
+| src/tests/db-client-busy-retry.test.ts | landed | C22 PR #3293: +48/-26, 18 cases, accounting controls detected, scoped coverage loses no lines |
 | src/tests/db-client.test.ts | pending | |
 | src/tests/db-extraction-contract.test.ts | pending | |
 | src/tests/db-queries-oauth.test.ts | pending | |
@@ -1234,7 +1581,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/e2e-visuals-verify-pr.test.ts | pending | |
 | src/tests/egress-guard.test.ts | pending | |
 | src/tests/empty-output-schema.test.ts | pending | |
-| src/tests/enabled-tools.test.ts | implemented, reviewed | C12: two repeated registrations removed |
+| src/tests/enabled-tools.test.ts | landed | C12: PR #3285, two repeated registrations removed |
 | src/tests/ensure-token.test.ts | pending | |
 | src/tests/entrypoint-api-readiness.test.ts | pending | |
 | src/tests/entrypoint-chown-no-follow.test.ts | audited, retained | C06. GNU tooling verified. Linux container boundary pending. |
@@ -1317,19 +1664,19 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/harness-model-support.test.ts | pending | |
 | src/tests/harness-provider-resolution.test.ts | pending | |
 | src/tests/harness-version.test.ts | pending | |
-| src/tests/heartbeat-checklist-config.test.ts | pending | |
-| src/tests/heartbeat-checklist.test.ts | pending | |
-| src/tests/heartbeat-expiry.test.ts | pending | |
-| src/tests/heartbeat-jev-gate-credentials.test.ts | pending | |
-| src/tests/heartbeat-jev-gate.test.ts | pending | |
-| src/tests/heartbeat-orphan-resume.test.ts | pending | |
-| src/tests/heartbeat-reboot-live.test.ts | pending | |
-| src/tests/heartbeat-reroute-decision.test.ts | pending | |
-| src/tests/heartbeat-script-runner-probe.test.ts | pending | |
-| src/tests/heartbeat-stall-cas.test.ts | pending | |
-| src/tests/heartbeat-stall-thresholds.test.ts | pending | |
-| src/tests/heartbeat-supersede-resume.test.ts | pending | |
-| src/tests/heartbeat.test.ts | pending | |
+| src/tests/heartbeat-checklist-config.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-checklist.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-expiry.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-jev-gate-credentials.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-jev-gate.test.ts | landed | C24 PR #3294: +9/-241, 33 cases, four controls, identical scoped source coverage |
+| src/tests/heartbeat-orphan-resume.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-reboot-live.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-reroute-decision.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-script-runner-probe.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-stall-cas.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-stall-thresholds.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat-supersede-resume.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
+| src/tests/heartbeat.test.ts | static audit complete | C24: candidates and risks recorded, runtime controls pending |
 | src/tests/helper-credentials.test.ts | pending | |
 | src/tests/hook-mcp-config.test.ts | pending | |
 | src/tests/hook-ping-me-order.test.ts | pending | |
@@ -1430,7 +1777,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/memory-rater-e2e.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-rater-implicit-citation.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-rater-llm-summarizer.test.ts | static audit complete | C17: implementation and controls pending |
-| src/tests/memory-rater-llm.test.ts | static audit complete | C17: implementation and controls pending |
+| src/tests/memory-rater-llm.test.ts | landed | C27 #3313; copied predicates removed, corrected controls and scoped coverage pass |
 | src/tests/memory-rater-store.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-reranker.test.ts | static audit complete | C17: implementation and controls pending |
 | src/tests/memory-review-recall-filter.test.ts | static audit complete | C17: implementation and controls pending |
@@ -1556,6 +1903,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/pool-session-logs.test.ts | audited and tested | C07. Idempotency consolidated, isolation and late arrivals retained. PR #3259. |
 | src/tests/pr-body-leaks.test.ts | pending | |
 | src/tests/pr-room-guard.test.ts | pending | |
+| src/tests/pre-push-affected-tests.test.ts | audited, retained | New main file: production-first review, four cases and 39 assertions pass, no justified deletion |
 | src/tests/preload-env.test.ts | pending | |
 | src/tests/pricing-refresh.test.ts | pending | |
 | src/tests/pricing-routes.test.ts | pending | |
@@ -1691,7 +2039,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/runtime-supervisor-failures.test.ts | pending | |
 | src/tests/runtime-supervisor.test.ts | pending | |
 | src/tests/runtime-token-auth.test.ts | pending | |
-| src/tests/sandboxed-process.test.ts | implemented, reviewed | C15: startup isolation in both modes |
+| src/tests/sandboxed-process.test.ts | landed | C15: PR #3269, startup isolation in both modes |
 | src/tests/savings-calibration-api.test.ts | pending | |
 | src/tests/savings-calibration.test.ts | pending | |
 | src/tests/savings-compound.test.ts | pending | |
@@ -1704,25 +2052,25 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/savings-read.test.ts | pending | |
 | src/tests/savings-rollup.test.ts | pending | |
 | src/tests/savings-scripts.test.ts | pending | |
-| src/tests/schedule-http-triage-tools.test.ts | pending | |
-| src/tests/schedule-profile.test.ts | pending | |
-| src/tests/schedule-target-type.test.ts | pending | |
-| src/tests/scheduled-task-required-params-migration.test.ts | pending | |
-| src/tests/scheduled-tasks.test.ts | pending | |
-| src/tests/scheduler-occurrence.test.ts | pending | |
+| src/tests/schedule-http-triage-tools.test.ts | landed | C29 #3323: inclusive minimum, exclusion above the fixture count, and independent status forwarding. |
+| src/tests/schedule-profile.test.ts | test audit complete, production partial | C29: direct contracts inspected; transitive limits and candidate controls recorded |
+| src/tests/schedule-target-type.test.ts | test audit complete, production partial | C29: direct contracts inspected; transitive limits and candidate controls recorded |
+| src/tests/scheduled-task-required-params-migration.test.ts | test audit complete, production partial | C29: direct contracts inspected; transitive limits and candidate controls recorded |
+| src/tests/scheduled-tasks.test.ts | landed | C29 #3318 retains target-only routing. #3323 tests enabled membership, status, and the inclusive error threshold. |
+| src/tests/scheduler-occurrence.test.ts | test audit complete, production partial | C29: direct contracts inspected; transitive limits and candidate controls recorded |
 | src/tests/script-api-credential.test.ts | pending | |
 | src/tests/script-apis-mcp.test.ts | pending | |
 | src/tests/script-connections-http.test.ts | pending | |
 | src/tests/script-connections-mcp.test.ts | pending | |
 | src/tests/script-connections-sql.test.ts | pending | |
 | src/tests/script-connections.test.ts | pending | |
-| src/tests/script-executor-conformance.test.ts | pending | |
+| src/tests/script-executor-conformance.test.ts | landed | C08 PR #3291: real executors retained, fabricated cases removed, distinct classifier inputs retained |
 | src/tests/script-executor-quickjs-pool.test.ts | landed | C09: PR #3266, readiness and full-run peak |
 | src/tests/script-executor-quickjs.test.ts | pending | |
 | src/tests/script-executor-registry.test.ts | pending | |
 | src/tests/script-host-validated-args-native.test.ts | pending | |
 | src/tests/script-native-sandbox-identity.test.ts | pending | |
-| src/tests/script-native-startup.test.ts | pending | |
+| src/tests/script-native-startup.test.ts | landed | C08 PR #3291: duplicate classifier removed, budgets derived from executor limits |
 | src/tests/script-native-unawaited-drain.test.ts | pending | |
 | src/tests/script-per-script-executor.test.ts | pending | |
 | src/tests/script-run-config-scope.test.ts | pending | |
@@ -1855,7 +2203,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | src/tests/slack-render-v2-delegation.test.ts | pending | |
 | src/tests/slack-render-v2-query-plans.test.ts | pending | |
 | src/tests/slack-render-v2-reconcile.test.ts | pending | |
-| src/tests/slack-render-v2.test.ts | partial audit, cleanup reviewed | C10: PR #3274, six controls, remaining sections listed above |
+| src/tests/slack-render-v2.test.ts | partial audit, cleanup landed | C10 PR #3274: +5/-148, six controls, remaining sections listed above |
 | src/tests/slack-router-require-mention.test.ts | pending | |
 | src/tests/slack-router.test.ts | pending | |
 | src/tests/slack-routing-guard.test.ts | pending | |
@@ -2185,7 +2533,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/script-connections.ts | pending | |
 | scripts/e2e/scenarios/script-credential-bindings.ts | pending | |
 | scripts/e2e/scenarios/script-helpers.ts | pending | |
-| scripts/e2e/scenarios/script-inline-run.ts | pending | |
+| scripts/e2e/scenarios/script-inline-run.ts | landed | C08 PR #3291: field checks preserve shape, stderr guard retained, scenario passes after C15 |
 | scripts/e2e/scenarios/script-kv.ts | pending | |
 | scripts/e2e/scenarios/script-limits.ts | pending | |
 | scripts/e2e/scenarios/script-memory-rate.ts | static audit complete | C17: retain transport and authorization contracts |
@@ -2209,7 +2557,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-delegation-late-child.ts | pending | |
 | scripts/e2e/scenarios/slack-failed-task.ts | pending | |
 | scripts/e2e/scenarios/slack-follow-up.ts | pending | |
-| scripts/e2e/scenarios/slack-helpers.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
+| scripts/e2e/scenarios/slack-helpers.ts | landed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-http-command.ts | pending | |
 | scripts/e2e/scenarios/slack-http-cross-team-identity.ts | pending | |
 | scripts/e2e/scenarios/slack-http-helpers.ts | pending | |
@@ -2224,7 +2572,7 @@ Audit each fixture with its callers before deletion.
 | scripts/e2e/scenarios/slack-relay-restart.ts | pending | |
 | scripts/e2e/scenarios/slack-reply-card.ts | pending | |
 | scripts/e2e/scenarios/slack-session-mirror.ts | pending | |
-| scripts/e2e/scenarios/slack-skipped-task.ts | validated, reviewed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
+| scripts/e2e/scenarios/slack-skipped-task.ts | landed | C20: PR #3278, 35 affected scenarios and delayed-reconnect control |
 | scripts/e2e/scenarios/slack-task-output-citations.ts | pending | |
 | scripts/e2e/scenarios/slack-task-output-ui-spec.ts | pending | |
 | scripts/e2e/scenarios/slack-task-tree-toggle.ts | pending | |

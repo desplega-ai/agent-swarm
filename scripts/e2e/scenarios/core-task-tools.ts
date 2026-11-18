@@ -234,7 +234,9 @@ async function delegation(
   expect(asRecord(cancelled.data.task).status === "cancelled", "cancel-task returned a live task");
   const afterCancel = await readTask(ctx, childId);
   expect(
-    afterCancel.status === "cancelled" && String(afterCancel.failureReason).includes(ctx.nonce),
+    afterCancel.status === "cancelled" &&
+      afterCancel.statusKind === "agent" &&
+      String(afterCancel.failureReason).includes(ctx.nonce),
     `Cancelled task is wrong: ${JSON.stringify(afterCancel)}`,
   );
   await expectToolError(

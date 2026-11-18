@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import {
   deleteOAuthTokens,
   getOAuthApp,
@@ -96,6 +96,7 @@ async function cleanupRows(): Promise<void> {
   const client = getDbClient();
   await client.run("DELETE FROM script_credential_bindings WHERE config_key LIKE 'PHASE2_%'");
   await client.run("DELETE FROM oauth_apps WHERE provider LIKE 'phase2-%'");
+  await client.run("DELETE FROM swarm_config WHERE key LIKE 'PHASE2_%'");
 }
 
 beforeAll(async () => {
@@ -395,7 +396,12 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_HEALTHY_CONFIG]",
     });
-    process.env.PHASE2_HEALTHY_CONFIG = "healthy-config-value";
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "PHASE2_HEALTHY_CONFIG",
+      value: "healthy-config-value",
+      isSecret: true,
+    });
 
     const fetchSpy = mock((input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : input.toString();
@@ -415,7 +421,6 @@ describe("OAuth credential bindings", () => {
         value: "healthy-config-value",
       }),
     );
-    delete process.env.PHASE2_HEALTHY_CONFIG;
   });
 
   test("revoked OAuth token skips binding resolution and list reports revoked", async () => {

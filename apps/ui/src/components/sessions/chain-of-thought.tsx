@@ -28,11 +28,14 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useTask, useTaskSessionLogs, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
-import { Transcript } from "@/components/shared/transcript/transcript";
+import { RelativeTime } from "@/components/shared/relative-time";
+import { resumeLabel, Transcript } from "@/components/shared/transcript/transcript";
 import {
   buildTranscriptRows,
   workedForLabel,
+  workedForTotalLabel,
 } from "@/components/shared/transcript/transcript-rows";
+import { formatRelative } from "@/lib/relative-time";
 import { parseSessionLogs } from "@/logs-parser";
 
 const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
@@ -69,12 +72,28 @@ export interface ChainOfThoughtProps {
   status: AgentTaskStatus;
   /** The task row the caller already has (a session chain row): it labels a closed fold. */
   task?: AgentTask;
+  /**
+   * The earlier tries of the same answer, oldest first: a deploy or a crash
+   * cut each one, and the server resumed the work in the next. The fold
+   * counts every try, and open, shows each try's activity over a line that
+   * says why the next one started.
+   */
+  earlier?: AgentTask[];
+  /** Rendered inside another task's fold: no fold of its own, every row shown. */
+  embedded?: boolean;
   className?: string;
 }
 
-export function ChainOfThought({ taskId, status, task: known, className }: ChainOfThoughtProps) {
+export function ChainOfThought({
+  taskId,
+  status,
+  task: known,
+  earlier = [],
+  embedded = false,
+  className,
+}: ChainOfThoughtProps) {
   const isActive = ACTIVE_STATUSES.has(status);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(embedded);
   // Poll while the task is active so new activity rows flow in. Stop polling
   // once the task reaches a terminal state. A closed fold over a known row
   // needs no task fetch (an empty id disables the query).
@@ -141,14 +160,55 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
           : waitingLabelFor(liveStatus)
       }
       fold={
-        task
+        task && !embedded
           ? {
-              label: workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
+              label:
+                earlier.length > 0
+                  ? workedForTotalLabel([...earlier, task])
+                  : workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
               open: expanded,
               onOpenChange: setExpanded,
             }
           : null
       }
+      earlier={
+        task && earlier.length > 0 ? <EarlierTries tries={earlier} last={task} /> : undefined
+      }
     />
+  );
+}
+
+/**
+ * The earlier tries of an answer, each its own activity, then a line that
+ * says why the next try started ("Resumed after a shutdown · 4m ago").
+ */
+function EarlierTries({ tries, last }: { tries: AgentTask[]; last: AgentTask }) {
+  return (
+    <>
+      {tries.map((attempt, index) => {
+        const next = tries[index + 1] ?? last;
+        return (
+          <div key={attempt.id} className="flex min-w-0 flex-col gap-3">
+            <ChainOfThought taskId={attempt.id} status={attempt.status} task={attempt} embedded />
+            <ResumeRule next={next} />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** A rule between two tries: why the later one started, and when. */
+function ResumeRule({ next }: { next: AgentTask }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 font-mono text-meta tracking-wider text-muted-foreground uppercase">
+      <span aria-hidden className="h-px flex-1 bg-border" />
+      <span className="truncate">{resumeLabel(next.tags)}</span>
+      <span aria-hidden>·</span>
+      <RelativeTime at={next.createdAt} focusable={false} className="shrink-0 whitespace-nowrap">
+        {formatRelative(next.createdAt)}
+      </RelativeTime>
+      <span aria-hidden className="h-px flex-1 bg-border" />
+    </div>
   );
 }

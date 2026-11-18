@@ -40,7 +40,7 @@ Conventions:
 - **A spawned Bun child must not outlive its run.** `afterAll` does not run when the run is killed. The preload sets `BUN_FEATURE_FLAG_NO_ORPHANS=1`, so a Bun child that inherits `process.env` exits when its parent dies. A spawn that builds its env from scratch passes `--no-orphans` itself, as `scripts/e2e/sut.ts` does.
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 - **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
-- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, the preload or its preload-only `hang-watchdog*.ts` helpers, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
+- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs only the test files nearest to the change, picked by `scripts/pre-push-affected-tests.ts`: changed tests, then importers outward up to 40 test files per changed file (`PRE_PUSH_TESTS_BUDGET`), then tests that name a changed non-code file (and every `*migration*` test for a migration). It does not walk the whole `--changed` import graph, which reaches ~800 files from `src/types.ts`. It runs the full `--parallel=4` suite when `PRE_PUSH_FULL=1` is set, when the preload or its preload-only `hang-watchdog*.ts` helpers, `bunfig.toml` or `tsconfig.json` changed, or when `origin/main` is missing. The Biome and Oxlint hooks (`scripts/pre-push-lint.sh`) lint only changed files unless `PRE_PUSH_FULL=1` or a linter config, `package.json` or `bun.lock` changed. If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative: PRs run the `--changed` set and the merge queue runs the full suite.
 
 Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
 
@@ -194,7 +194,7 @@ Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), a
 Fx needs a preinstalled `fx` executable (worker-full ships the pinned release) and defaults to `openrouter/openai/gpt-5-mini` on `OPENROUTER_API_KEY`. A bare `E2E_MODEL_FX=gpt-5-mini` needs `OPENAI_API_KEY`, and `vercel/<vendor>/<id>` needs `AI_GATEWAY_API_KEY`. Run `bun run e2e --only health --harness fx`.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.3` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.4` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.

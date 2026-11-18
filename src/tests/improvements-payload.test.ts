@@ -53,7 +53,7 @@ describe("improvement payload whitelist", () => {
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       sent.push({
         url: String(url),
-        headers: { ...(init?.headers as Record<string, string>) },
+        headers: Object.fromEntries(new Headers(init?.headers)),
         body: JSON.parse(String(init?.body ?? "{}")),
       });
       return new Response(JSON.stringify({ status: "accepted", id: "proxy-1" }), { status: 202 });
@@ -114,7 +114,7 @@ describe("improvement payload whitelist", () => {
       text: "Please add bulk retry to the tasks page",
       email: "person@example.com",
     });
-    expect(Object.keys(request?.headers ?? {})).toEqual(["Content-Type"]);
+    expect(Object.keys(request?.headers ?? {})).toEqual(["content-type"]);
     const wire = JSON.stringify(request?.body);
     for (const leaked of [AGENT_ID, "operator", "Acme Corp", "secret-repo", "mcp"]) {
       expect(wire).not.toContain(leaked);

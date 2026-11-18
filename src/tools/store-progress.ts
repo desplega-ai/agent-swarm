@@ -671,7 +671,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // Handle status change
         if (status === "completed") {
-          const result = await completeTask(taskId, output);
+          const result = await completeTask(taskId, output, { statusKind: "agent" });
           if (result && uiSpecToStore) await upsertTaskUiSpec(taskId, uiSpecToStore);
           if (result) {
             updatedTask = result;
@@ -704,7 +704,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
             }
           }
         } else if (status === "failed") {
-          const result = await failTask(taskId, failureReason ?? "Unknown failure");
+          const result = await failTask(taskId, failureReason ?? "Unknown failure", {
+            statusKind: "agent",
+          });
           if (result) {
             updatedTask = result;
 
@@ -735,7 +737,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             }
           }
         } else if (status === "skipped") {
-          const result = await skipTask(taskId, skipReason!);
+          const result = await skipTask(taskId, skipReason!, { statusKind: "agent" });
           if (result) {
             updatedTask = result;
             if (existingTask.agentId) {

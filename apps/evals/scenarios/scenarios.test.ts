@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { normalizeOutcome } from "../src/normalize-outcome.ts";
-import { loadRegistry, serializeScenario, validateScenario } from "../src/registry.ts";
+import { loadRegistry, serializeScenario } from "../src/registry.ts";
 import { validateSqlDumpText } from "../src/runner/index.ts";
 import { type JudgeContext, type JudgeWorkerContext, scenarioWorkerCount } from "../src/types.ts";
 import { DEFAULT_SCENARIO_IDS, scenarios } from "./index.ts";
@@ -25,20 +25,7 @@ function stubJudgeContext(workerCount: number): JudgeContext {
   return { tasks: [], transcript: "", exec, readFile, apiGet: async () => null, workers };
 }
 
-/**
- * Registry-load gate for the bundled scenarios. The v8.0 round-11 catalog
- * replaces the 7 old scenarios with the 7 new discriminating ones; this file is
- * EXTENDED as each new scenario is authored (one `spec'd scenario shapes`
- * describe block per scenario). The generic assertions iterate `scenarios`, so
- * they hold for whatever subset of the round-11 catalog is currently registered.
- */
-
-// Currently-registered round-11 scenario ids. The swarm-redesign prune (Plan A)
-// removed the four clearly-measured non-discriminators (memory-coordination,
-// failure-recovery, failure-recovery-mixed, cross-worker-invent); a follow-up
-// scenario audit additionally killed plan-implement-review (expensive lead+2; only
-// a noisy weight-1 judge moved the aggregate). What remains still discriminates
-// harness+model or swarm mechanics.
+// Keep the expected catalog independent of the production registry.
 const EXPECTED_IDS = [
   "sql-audit",
   "delegation-probe",
@@ -60,47 +47,9 @@ const EXPECTED_IDS = [
 ];
 
 describe("scenario registry", () => {
-  test("loadRegistry() validates and includes all bundled scenarios", () => {
+  test("loadRegistry() exposes exactly the bundled scenario IDs", () => {
     const registry = loadRegistry();
-    for (const id of EXPECTED_IDS) {
-      expect(registry.scenarios.has(id)).toBe(true);
-    }
-    // Exactly the registered round-11 scenarios — no leftover old ids.
     expect([...registry.scenarios.keys()].sort()).toEqual([...EXPECTED_IDS].sort());
-  });
-
-  test("the deleted old scenarios are gone", () => {
-    const registry = loadRegistry();
-    for (const dead of [
-      "sql-seeded-history",
-      "memory-seeded-recall",
-      "memory-pipeline",
-      "two-workers",
-      "relay-handoff",
-      "build-verify-fix",
-      "roster-demo",
-      "hello-file",
-      "quick-reasoning",
-      // Plan A swarm-redesign prune: clearly-measured non-discriminators.
-      "memory-coordination",
-      "failure-recovery",
-      "failure-recovery-mixed",
-      "cross-worker-invent",
-      // Follow-up scenario audit KILL: expensive lead+2, only a noisy weight-1
-      // judge moved the aggregate.
-      "plan-implement-review",
-      // v9 orchestration-substrate cleanup: saturated or zero-pilot legacy axes
-      // are demoted from the active registry. Source files may remain for
-      // historical reference, but they must not run by default.
-      "bug-ladder",
-      "memory-distractor",
-      "relay-pipeline",
-      "distributed-audit",
-      // Folded into tool-routing as a structured-output gate (phase 2).
-      "structured-output-adherence",
-    ]) {
-      expect(registry.scenarios.has(dead)).toBe(false);
-    }
   });
 
   test("DEFAULT_SCENARIO_IDS all resolve in the registry", () => {
@@ -113,12 +62,6 @@ describe("scenario registry", () => {
   test("scenario ids are unique", () => {
     const ids = scenarios.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  test("every bundled scenario passes validateScenario individually", () => {
-    for (const s of scenarios) {
-      expect({ id: s.id, errors: validateScenario(s) }).toEqual({ id: s.id, errors: [] });
-    }
   });
 
   test("every bundled scenario serializes (API/UI shape)", () => {
@@ -289,10 +232,6 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
       "followUpCreated",
     ]);
     expect(s.outcome.gates?.map((g) => g.name)).toContain("routing-structured-output");
-  });
-
-  test("registry lists 17 active scenarios (13 + 4 solo baselines of the swarm ones)", () => {
-    expect(scenarios.map((x) => x.id)).toHaveLength(17);
   });
 });
 

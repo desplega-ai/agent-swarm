@@ -201,7 +201,8 @@ jobs:
       # (the preload's DB template), templates/ (seeders), the preload and its preload-only
       # helpers (hang-watchdog*.ts; `--changed` ignores preload imports), bunfig.toml,
       # tsconfig.json, bun.lock, a package.json change beyond the version, or this
-      # workflow. scripts/pre-push-tests.sh uses the same list, minus this workflow.
+      # workflow. scripts/pre-push-tests.sh keeps only the preload, bunfig.toml and
+      # tsconfig.json from this list; it leaves the rest to CI.
       # src/tests/merge-gate-detect-changes.test.ts runs this step.
       - name: Compute unit-test scope
         id: test-scope

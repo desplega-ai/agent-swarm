@@ -16,20 +16,8 @@ async function removeDb(): Promise<void> {
 
 afterEach(removeDb);
 
-type Row = {
-  id: string;
-  status: string;
-  resolvedBy: string | null;
-  resolvedAt: string | null;
-  resolutionReason: string | null;
-};
-
-function readRows(db: Database): Row[] {
-  return db
-    .query<Row, []>(
-      "SELECT id, status, resolvedBy, resolvedAt, resolutionReason FROM approval_requests ORDER BY id",
-    )
-    .all();
+function readRows(db: Database) {
+  return db.query("SELECT * FROM approval_requests ORDER BY id").all();
 }
 
 describe("migration 166 approval auto-cancellation index", () => {
@@ -38,7 +26,7 @@ describe("migration 166 approval auto-cancellation index", () => {
     const db = new Database(DB_PATH, { create: true });
     try {
       runMigrations(db);
-      // Roll the database back to the state before migration 166.
+      // Replay migration 166 on the current schema with its index removed.
       db.run("DROP INDEX idx_approval_requests_pending_created");
       db.run("DELETE FROM _migrations WHERE version = 166");
       db.run(`INSERT INTO approval_requests
@@ -73,13 +61,14 @@ describe("migration 166 approval auto-cancellation index", () => {
         ]),
       );
 
-      const tableSql = db
+      const indexSql = db
         .query<{ sql: string }, []>(
-          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'approval_requests'",
+          "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_approval_requests_pending_created'",
         )
         .get()?.sql;
-      expect(tableSql).toContain("'cancelled'");
-      expect(tableSql).toContain("'timeout'");
+      expect(indexSql?.replace(/\s+/g, " ").trim()).toBe(
+        "CREATE INDEX idx_approval_requests_pending_created ON approval_requests(createdAt) WHERE status = 'pending' AND expiresAt IS NULL",
+      );
 
       const insert = (id: string, status: string) =>
         db.run(

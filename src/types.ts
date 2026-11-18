@@ -354,6 +354,80 @@ export function isTerminalTaskStatus(status: string): status is TerminalTaskStat
 }
 
 /**
+ * Why a task reached its terminal status, stored in `agent_tasks.statusKind`.
+ * It refines `status` and never replaces it: every reader of `status` keeps
+ * working, and a NULL kind (rows written before the column existed) means
+ * unknown. The values are validated here, not by a DB CHECK, so a new kind
+ * is one entry in this registry and needs no migration.
+ *
+ * - `agent`: the agent decided (store-progress, the cancel-task tool).
+ * - `error`: the system gave up on the run (runner exit, crash, provider
+ *   error, stall, provisioning, reboot) without the agent deciding.
+ * - `cascade`: a task it depends on ended without completing.
+ * - `external`: a tracker or VCS event ended it (PR merged, issue deleted).
+ * - `runner`: the runner wrapper finished it after the session ended.
+ * - `deferred`: defer-task completed it and a wake-up task continues it.
+ * - `user`: a person ended it from the dashboard, Slack, chat or a tracker.
+ * - `workflow`: the workflow engine ended it (run or step cancelled).
+ * - `system`: the heartbeat ended it as housekeeping.
+ * - superseded kinds mirror `ResumeReasonSchema`, plus `workflow_retry` for a
+ *   workflow step the engine queued a retry for.
+ */
+export const TASK_STATUS_KINDS = {
+  completed: ["agent", "runner", "deferred"],
+  failed: ["agent", "error", "cascade", "external"],
+  cancelled: ["user", "agent", "workflow", "external", "system"],
+  skipped: ["agent", "runner"],
+  superseded: [
+    "graceful_shutdown",
+    "context_limits",
+    "manual_supersede",
+    "crash_recovery",
+    "provider_fallback",
+    "workflow_retry",
+  ],
+} as const satisfies Record<TerminalTaskStatus, readonly string[]>;
+
+/** The kinds valid for one terminal status, e.g. `TaskStatusKindFor<"failed">`. */
+export type TaskStatusKindFor<S extends TerminalTaskStatus> = (typeof TASK_STATUS_KINDS)[S][number];
+export type TaskStatusKind = TaskStatusKindFor<TerminalTaskStatus>;
+
+// Literal list so scripts/generate-mcp-docs.ts can render the values; the
+// assertion below fails tsc when it drifts from TASK_STATUS_KINDS.
+export const TaskStatusKindSchema = z.enum([
+  "agent",
+  "runner",
+  "deferred",
+  "error",
+  "cascade",
+  "external",
+  "user",
+  "workflow",
+  "system",
+  "graceful_shutdown",
+  "context_limits",
+  "manual_supersede",
+  "crash_recovery",
+  "provider_fallback",
+  "workflow_retry",
+]);
+type TaskStatusKindSchemaMatchesRegistry = [TaskStatusKind] extends [
+  z.infer<typeof TaskStatusKindSchema>,
+]
+  ? [z.infer<typeof TaskStatusKindSchema>] extends [TaskStatusKind]
+    ? true
+    : false
+  : false;
+true satisfies TaskStatusKindSchemaMatchesRegistry;
+
+export function isTaskStatusKindFor<S extends TerminalTaskStatus>(
+  status: S,
+  kind: string | null | undefined,
+): kind is TaskStatusKindFor<S> {
+  return (TASK_STATUS_KINDS[status] as readonly string[]).includes(kind ?? "");
+}
+
+/**
  * Every status that is not terminal, derived so a new status lands here unless
  * it is added to `TERMINAL_TASK_STATUSES`. Open tasks are a handful of rows,
  * so hot queries filter `status IN (open)` (an index seek) rather than
@@ -853,6 +927,9 @@ export const AgentTaskSchema = z
     notifiedAt: z.iso.datetime().optional(),
 
     // Completion data
+    statusKind: TaskStatusKindSchema.optional().describe(
+      "Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.",
+    ),
     failureReason: z.string().optional(),
     output: z.string().optional(),
     progress: z.string().optional(),
@@ -956,6 +1033,8 @@ export const AgentTaskSchema = z
     // wake-up task" apart from "done" — see `isDeferredTask` in
     // src/slack/task-output.ts.
     deferredAt: z.iso.datetime().optional(),
+    // The wake-up ceiling `defer-task` booked; the wake event can come sooner.
+    deferredUntil: z.iso.datetime().optional(),
 
     // Context usage aggregates
     compactionCount: z.number().int().min(0).optional(),
@@ -1255,6 +1334,12 @@ export const UserSchema = z
     // user's rows into the target. Such a user cannot authenticate, and
     // identity lookups resolve to the target. Absent once the job deletes it.
     mergedIntoUserId: z.string().nullable().optional(),
+    // Custom avatar, same shapes as an agent's. Null/missing = initials.
+    // Migration 344 adds the column.
+    avatar: z
+      .lazy(() => UserAvatarSchema)
+      .nullable()
+      .optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
@@ -1547,6 +1632,10 @@ export type MediaIcon = z.infer<typeof MediaIconSchema>;
 // Agent avatars accept the same shapes as app icons.
 export const AgentAvatarSchema = MediaIconSchema;
 export type AgentAvatar = MediaIcon;
+
+// User avatars accept the same shapes as agent avatars.
+export const UserAvatarSchema = MediaIconSchema;
+export type UserAvatar = MediaIcon;
 
 /**
  * Icon shown for an app on the dashboard Apps page: a lucide glyph, an https
@@ -2020,6 +2109,11 @@ export const ResumeReasonSchema = z.enum([
   "provider_fallback", // Provider error; the resume runs the next fallback profile
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
+// A supersede stores its resume reason as the task's statusKind: a new reason
+// must also be a `superseded` entry in TASK_STATUS_KINDS (compile error here).
+const _resumeReasonsAreSupersededKinds: readonly TaskStatusKindFor<"superseded">[] =
+  ResumeReasonSchema.options;
+void _resumeReasonsAreSupersededKinds;
 
 export const AgentLogSchema = z
   .object({
@@ -3515,6 +3609,7 @@ export type AgentTaskSummary = Pick<
   | "createdAt"
   | "lastUpdatedAt"
   | "finishedAt"
+  | "statusKind"
   | "peakContextPercent"
   | "totalCostUsd"
 >;

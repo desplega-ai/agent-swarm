@@ -7465,14 +7465,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(resumePrompt).slice(0, 100)}...`);
 
         const metadata = {
           type: metadataType,
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: resumePrompt,
+          prompt: scrubSecrets(resumePrompt),
           trigger: "task_resumed",
           resumedTaskId: task.id,
         };
@@ -8163,7 +8163,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Iteration ${iteration} ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(triggerPrompt).slice(0, 100)}...`);
         if (effectiveCwd) {
           console.log(`[${role}] Working directory: ${effectiveCwd}`);
         }
@@ -8173,7 +8173,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: triggerPrompt,
+          prompt: scrubSecrets(triggerPrompt),
           trigger: trigger.type,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);

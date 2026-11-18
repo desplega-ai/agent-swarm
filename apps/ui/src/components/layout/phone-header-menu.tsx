@@ -24,6 +24,7 @@ import {
   ActionSheetSeparator,
   ActionSheetSwitch,
 } from "@/components/sessions-v2/mobile/action-sheet";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -87,7 +88,9 @@ export function PhoneHeaderMenu() {
         aria-label={attention ? "Menu, needs attention" : "Menu"}
         onClick={() => setOpen(true)}
       >
-        {user ? (
+        {user?.avatar ? (
+          <UserAvatar id={user.id} name={user.name} avatar={user.avatar} className="size-7" />
+        ) : user ? (
           // The sidebar's identity chip, one size up.
           <span
             aria-hidden="true"

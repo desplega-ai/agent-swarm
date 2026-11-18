@@ -676,7 +676,7 @@ export async function handleWorkItemDeleted(event: WorkItemDeletedEvent): Promis
     const task =
       sync.swarmId && !sync.swarmId.startsWith("pending:") ? await getTaskById(sync.swarmId) : null;
     if (task && !isTerminalTaskStatus(task.status)) {
-      await cancelTask(task.id, DELETED_REASON);
+      await cancelTask(task.id, DELETED_REASON, { statusKind: "external" });
       console.log(`[AzureDevOps] Cancelled task ${task.id} (work item #${item.id} deleted)`);
     }
     await markTrackerDelivery(PROVIDER, "task", externalId, event.id);

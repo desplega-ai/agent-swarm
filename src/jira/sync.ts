@@ -531,7 +531,7 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
 
   const task = sync.swarmId ? await getTaskById(sync.swarmId) : null;
   if (task && !isTerminalTaskStatus(task.status)) {
-    await cancelTask(sync.swarmId, "Jira issue deleted");
+    await cancelTask(sync.swarmId, "Jira issue deleted", { statusKind: "external" });
     console.log(
       `[Jira Sync] Cancelled task ${sync.swarmId} (Jira issue ${issue.key ?? issue.id} deleted)`,
     );

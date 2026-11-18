@@ -15,7 +15,12 @@ const scriptApisInputSchema = z.object({
       "list: endpoints for a script, tokens masked unless includeSecrets=true. create: expose the script as a new endpoint (returns the plaintext token once). update: enable/disable or relabel an endpoint. rotate: issue a new token (returns it once). delete: remove an endpoint.",
     ),
   scriptId: z.string().uuid().describe("The script the endpoint(s) belong to."),
-  endpointId: z.string().optional().describe("Required for update, rotate, and delete."),
+  // Endpoint ids are short alphanumeric ids; the id goes into the API path.
+  endpointId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]+$/, "endpointId must be an endpoint id")
+    .optional()
+    .describe("Required for update, rotate, and delete."),
   authMode: z
     .enum(["none", "bearer"])
     .optional()
@@ -180,7 +185,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
         const result = await proxyScriptsApi({
           method: "POST",
-          path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}/rotate`,
+          path: `/api/scripts/${args.scriptId}/apis/${encodeURIComponent(args.endpointId)}/rotate`,
           requestInfo,
           successMessage: () => "Token rotated.",
           successDetails: (data) => {
@@ -209,7 +214,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
         return proxyScriptsApi({
           method: "PATCH",
-          path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}`,
+          path: `/api/scripts/${args.scriptId}/apis/${encodeURIComponent(args.endpointId)}`,
           body: { enabled: args.enabled, label: args.label },
           requestInfo,
           successMessage: () => "Endpoint updated.",
@@ -227,7 +232,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
         return proxyScriptsApi({
           method: "DELETE",
-          path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}`,
+          path: `/api/scripts/${args.scriptId}/apis/${encodeURIComponent(args.endpointId)}`,
           requestInfo,
           successMessage: () => "Endpoint deleted.",
         });
