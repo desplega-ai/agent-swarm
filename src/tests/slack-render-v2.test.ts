@@ -3736,8 +3736,10 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     });
     await startTask(ask.id);
 
+    // A worker-owned follow-up isolates the child-card filter: a Lead
+    // follow-up gets its own outcome card (e2e slack-lead-follow-up-card).
     const followUp = await createTaskExtended("[Thread follow-up] wrap up", {
-      agentId: lead.id,
+      agentId: worker.id,
       source: "system",
       taskType: "follow-up",
       parentTaskId: ask.id,
