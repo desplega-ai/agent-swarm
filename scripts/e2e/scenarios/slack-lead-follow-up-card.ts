@@ -24,7 +24,7 @@ import {
 
 const GENERAL = "C0GENERAL0";
 
-type DelegatedAsk = { leadId: string; threadTs: string; followUpId: string };
+type DelegatedAsk = { leadId: string; threadTs: string; askTaskId: string; followUpId: string };
 
 function threadMessages(
   ctx: ScenarioContext,
@@ -100,7 +100,7 @@ async function delegatedAsk(
   });
   const followUpId = await findWorkerFollowUp(ctx, leadId, childId);
   await claim(ctx, leadId, followUpId);
-  return { leadId, threadTs: message.ts, followUpId };
+  return { leadId, threadTs: message.ts, askTaskId, followUpId };
 }
 
 export const slackLeadFollowUpCard: Scenario = {
@@ -269,6 +269,62 @@ export const slackLeadFollowUpCard: Scenario = {
     expect(!doubled, "The Lead follow-up posted a card after it already sent slack-reply");
     const replies = threadMessages(ctx, GENERAL, replied.threadTs, replyText).length;
     expect(replies === 1, `The Lead's slack-reply landed ${replies} times, expected 1`);
+
+    // 4b. No card either when the Lead's reply during the follow-up names
+    // another task of the thread. In production the Lead passed the reviewed
+    // task's id, so slackReplySent stayed 0 on the follow-up and its card
+    // repeated the reply.
+    const misattributed = await delegatedAsk(ctx, GENERAL, workerId, "misattributed");
+    const misattributedReply = `follow-up reply on the ask task ${ctx.nonce}`;
+    const misConn = await ctx.connectMcp(misattributed.leadId);
+    try {
+      expectToolOk(
+        await callTool(misConn, "slack-reply", {
+          taskId: misattributed.askTaskId,
+          message: misattributedReply,
+        }),
+        "slack-reply under the ask task during the Lead follow-up",
+      );
+    } finally {
+      await misConn.close();
+    }
+    const misattributedOutput = `follow-up review misattributed ${ctx.nonce}`;
+    await finish(ctx, misattributed.leadId, misattributed.followUpId, {
+      status: "completed",
+      output: misattributedOutput,
+    });
+    const misattributedSettled = await pollUntil(
+      () =>
+        ctx.db.get<{ delivery_abandoned_at: string | null }>(
+          "SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+          [misattributed.followUpId],
+        )?.delivery_abandoned_at != null,
+      30_000,
+    );
+    expect(
+      misattributedSettled,
+      "The follow-up's card was not settled after a Lead reply under another task",
+    );
+    const misattributedCards = threadMessages(
+      ctx,
+      GENERAL,
+      misattributed.threadTs,
+      misattributedOutput,
+    ).length;
+    expect(
+      misattributedCards === 0,
+      "The Lead follow-up posted a card after a Lead reply under another task",
+    );
+    const misattributedReplies = threadMessages(
+      ctx,
+      GENERAL,
+      misattributed.threadTs,
+      misattributedReply,
+    ).length;
+    expect(
+      misattributedReplies === 1,
+      `The Lead's reply under the ask task landed ${misattributedReplies} times, expected 1`,
+    );
 
     // 5. No card in a Slack Connect channel. The mock always reports channels
     // as internal, so one injected conversations.info answer marks this fresh

@@ -32,6 +32,7 @@ import {
   getSlackProcessingThreads,
   getSlackThreadsOfTasks,
   type SlackOutcomeWindow,
+  slackThreadHasAgentReplySince,
   slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
@@ -1253,7 +1254,7 @@ async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): P
 /**
  * Gates a new outcome card for a Lead follow-up; every other task passes.
  * No card when the Lead already answered with `slack-reply` (it would repeat
- * that answer), when the delegation child pass owns the card, or when Slack
+ * that answer), also when the reply names another task, when the delegation child pass owns the card, or when Slack
  * does not confirm the channel is internal: a Slack Connect channel is a
  * customer's, and posting there needs a person's explicit yes. An external
  * verdict settles the card as abandoned so the thread can close.
@@ -1272,6 +1273,24 @@ async function mayPostLeadFollowUpCard(
     if (await getSlackOutcomeMessage(task.id)) {
       await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
     }
+    return false;
+  }
+  if (
+    task.agentId &&
+    task.slackChannelId &&
+    task.slackThreadTs &&
+    (await slackThreadHasAgentReplySince(
+      task.slackChannelId,
+      task.slackThreadTs,
+      task.createdAt,
+      task.agentId,
+    ))
+  ) {
+    // The Lead replied in the thread during the follow-up, but attributed the
+    // reply to another task, so slackReplySent stays 0. The card would repeat
+    // that reply. The reconcile SQL counts this task as outcome work until its
+    // card is settled, so always settle it.
+    await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }
   const askId = ownerAskId.get(task.id);
