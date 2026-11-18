@@ -65,6 +65,19 @@ async function expectFinalizedCard(
   );
 }
 
+/** Lets `leadId` hold several tasks at once, through agent re-registration. */
+async function allowSeveralTasks(ctx: ScenarioContext, leadId: string): Promise<void> {
+  const name = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId])?.name;
+  expectStatus(
+    await ctx.api("POST", "/api/agents", {
+      agentId: leadId,
+      body: { name, isLead: true, maxTasks: 3 },
+    }),
+    [200, 201],
+    `let Lead ${leadId} hold several tasks`,
+  );
+}
+
 /** Ask in channel id `channel`, delegate to a worker, finish both, and claim the Lead's follow-up. */
 async function delegatedAsk(
   ctx: ScenarioContext,
@@ -270,13 +283,16 @@ export const slackLeadFollowUpCard: Scenario = {
     const replies = threadMessages(ctx, GENERAL, replied.threadTs, replyText).length;
     expect(replies === 1, `The Lead's slack-reply landed ${replies} times, expected 1`);
 
-    // 4b. No card either when the Lead's reply during the follow-up names
-    // another task of the thread. In production the Lead passed the reviewed
-    // task's id, so slackReplySent stayed 0 on the follow-up and its card
-    // repeated the reply.
+    // 4b. No card either when the Lead, working on its follow-up, replies
+    // under another task of the thread. In production the Lead passed the
+    // reviewed task's id, so slackReplySent stayed 0 on the follow-up and its
+    // card repeated the reply. The worker sends the follow-up as the source
+    // task (X-Source-Task-Id), so slack-reply marks the follow-up too.
     const misattributed = await delegatedAsk(ctx, GENERAL, workerId, "misattributed");
     const misattributedReply = `follow-up reply on the ask task ${ctx.nonce}`;
-    const misConn = await ctx.connectMcp(misattributed.leadId);
+    const misConn = await ctx.connectMcp(misattributed.leadId, {
+      headers: { "X-Source-Task-Id": misattributed.followUpId },
+    });
     try {
       expectToolOk(
         await callTool(misConn, "slack-reply", {
@@ -288,31 +304,25 @@ export const slackLeadFollowUpCard: Scenario = {
     } finally {
       await misConn.close();
     }
+    const sourceMarked = ctx.db.get<{ slackReplySent: number }>(
+      "SELECT slackReplySent FROM agent_tasks WHERE id = ?",
+      [misattributed.followUpId],
+    );
+    expect(
+      sourceMarked?.slackReplySent === 1,
+      "slack-reply did not mark the source follow-up task as replied",
+    );
     const misattributedOutput = `follow-up review misattributed ${ctx.nonce}`;
     await finish(ctx, misattributed.leadId, misattributed.followUpId, {
       status: "completed",
       output: misattributedOutput,
     });
-    const misattributedSettled = await pollUntil(
-      () =>
-        ctx.db.get<{ delivery_abandoned_at: string | null }>(
-          "SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-          [misattributed.followUpId],
-        )?.delivery_abandoned_at != null,
-      30_000,
+    const misattributedPosted = await pollUntil(
+      () => threadMessages(ctx, GENERAL, misattributed.threadTs, misattributedOutput).length > 0,
+      slackAbsenceWindowMs(ctx),
     );
     expect(
-      misattributedSettled,
-      "The follow-up's card was not settled after a Lead reply under another task",
-    );
-    const misattributedCards = threadMessages(
-      ctx,
-      GENERAL,
-      misattributed.threadTs,
-      misattributedOutput,
-    ).length;
-    expect(
-      misattributedCards === 0,
+      !misattributedPosted,
       "The Lead follow-up posted a card after a Lead reply under another task",
     );
     const misattributedReplies = threadMessages(
@@ -331,17 +341,7 @@ export const slackLeadFollowUpCard: Scenario = {
     // the thread while the follow-up runs, and the Lead (now allowed several
     // tasks at once) answers that new task with slack-reply.
     const concurrent = await delegatedAsk(ctx, GENERAL, workerId, "concurrent");
-    const leadName = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [
-      concurrent.leadId,
-    ])?.name;
-    expectStatus(
-      await ctx.api("POST", "/api/agents", {
-        agentId: concurrent.leadId,
-        body: { name: leadName, isLead: true, maxTasks: 3 },
-      }),
-      [200, 201],
-      "let the Lead hold several tasks",
-    );
+    await allowSeveralTasks(ctx, concurrent.leadId);
     const mention = await ctx.slack.postMessage({
       channel: GENERAL,
       user: "alice",
@@ -356,7 +356,9 @@ export const slackLeadFollowUpCard: Scenario = {
     );
     await claim(ctx, concurrent.leadId, otherTaskId);
     const otherReply = `reply to the other question ${ctx.nonce}`;
-    const otherConn = await ctx.connectMcp(concurrent.leadId);
+    const otherConn = await ctx.connectMcp(concurrent.leadId, {
+      headers: { "X-Source-Task-Id": otherTaskId },
+    });
     try {
       expectToolOk(
         await callTool(otherConn, "slack-reply", { taskId: otherTaskId, message: otherReply }),
@@ -382,6 +384,65 @@ export const slackLeadFollowUpCard: Scenario = {
       status: "completed",
       output: `other question answered ${ctx.nonce}`,
     });
+
+    // 4d. Sibling fan-out: one ask, two workers, two Lead follow-ups. Follow-up
+    // B answers under the ask; follow-up A has nothing to do with that reply
+    // and still posts its card. B's own card is suppressed.
+    const fanAsk = await ctx.slack.postMessage({
+      channel: GENERAL,
+      user: "alice",
+      text: `<@${ctx.slack.bot.userId}> fan-out: get two specialists on it`,
+    });
+    ctx.markThread("lead-follow-up-fan-out", GENERAL, fanAsk.ts);
+    const fanAskTask = await findSlackTask(ctx, fanAsk.ts);
+    const fanAskId = String(fanAskTask.id);
+    const fanLeadId = String(fanAskTask.agentId);
+    await allowSeveralTasks(ctx, fanLeadId);
+    await claim(ctx, fanLeadId, fanAskId);
+    const childA = await createChildTask(ctx, fanAskId, workerId, `fan-out A ${ctx.nonce}`);
+    const childB = await createChildTask(ctx, fanAskId, workerId, `fan-out B ${ctx.nonce}`);
+    await finish(ctx, fanLeadId, fanAskId, {
+      status: "completed",
+      output: `fan-out ask answer ${ctx.nonce}`,
+    });
+    const followUps: string[] = [];
+    for (const [label, childId] of [
+      ["A", childA],
+      ["B", childB],
+    ] as const) {
+      await claim(ctx, workerId, childId);
+      await finish(ctx, workerId, childId, {
+        status: "completed",
+        output: `fan-out worker ${label} ${ctx.nonce}`,
+      });
+      followUps.push(await findWorkerFollowUp(ctx, fanLeadId, childId));
+    }
+    const [followUpA, followUpB] = followUps as [string, string];
+    await claim(ctx, fanLeadId, followUpA);
+    await claim(ctx, fanLeadId, followUpB);
+    const fanReply = `follow-up B reply on the ask ${ctx.nonce}`;
+    const fanConn = await ctx.connectMcp(fanLeadId, {
+      headers: { "X-Source-Task-Id": followUpB },
+    });
+    try {
+      expectToolOk(
+        await callTool(fanConn, "slack-reply", { taskId: fanAskId, message: fanReply }),
+        "slack-reply under the ask from follow-up B",
+      );
+    } finally {
+      await fanConn.close();
+    }
+    const outputB = `follow-up review fan-out B ${ctx.nonce}`;
+    await finish(ctx, fanLeadId, followUpB, { status: "completed", output: outputB });
+    const outputA = `follow-up review fan-out A ${ctx.nonce}`;
+    await finish(ctx, fanLeadId, followUpA, { status: "completed", output: outputA });
+    const postedA = await pollUntil(
+      () => threadMessages(ctx, GENERAL, fanAsk.ts, outputA).length > 0,
+      30_000,
+    );
+    expect(postedA, "Follow-up A's card was suppressed by follow-up B's reply on the ask");
+    const postedB = threadMessages(ctx, GENERAL, fanAsk.ts, outputB).length;
+    expect(postedB === 0, "Follow-up B posted a card after its own slack-reply");
 
     // 5. No card in a Slack Connect channel. The mock always reports channels
     // as internal, so one injected conversations.info answer marks this fresh
