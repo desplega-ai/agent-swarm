@@ -33,6 +33,7 @@ import {
   CreateTaskOptionsSchema,
   type FallbackHop,
   type ProviderErrorClass,
+  parseModelTier,
   type ResumeReason,
   type RoutingAffinity,
   type TaskAttachment,
@@ -232,6 +233,8 @@ type FallbackParent = Pick<
   | "resolvedProfile"
   | "resolvedModel"
   | "modelGroup"
+  | "modelSource"
+  | "modelTier"
   | "fallbackHops"
   | "vcsRepo"
   | "routingAffinity"
@@ -239,6 +242,21 @@ type FallbackParent = Pick<
   | "credentialKeyType"
   | "credentialKeySuffix"
 >;
+
+/**
+ * The group whose order a provider-error hop walks: the task's own
+ * `modelGroup` (a group task, or the resume of a group hop), else the group
+ * named after the tier when claim resolved the tier through it
+ * (`modelSource = profile:group`). A worker-env, tier-config or seeded
+ * tier-alias claim records another source, so it never hops through a group.
+ */
+export function fallbackGroupOf(
+  task: Pick<AgentTask, "modelGroup" | "modelSource" | "modelTier">,
+): string | undefined {
+  if (task.modelGroup) return task.modelGroup;
+  if (task.modelSource !== "profile:group") return undefined;
+  return parseModelTier(task.modelTier) ?? undefined;
+}
 
 /**
  * The key pool the failed run drew from, as the worker's next claim will see
@@ -307,7 +325,8 @@ async function keyPoolOf(
  * profile to the visited set and the saved fallback graph is acyclic, so the
  * walk ends once every reachable profile has run.
  *
- * On a model group task the group order is the chain instead: the members
+ * On a model group task (or a tier task its group resolved,
+ * `fallbackGroupOf`) the group order is the chain instead: the members
  * after the current one that run on this agent's harness, minus the profiles
  * the work already ran on. Member fallbacks are ignored, so the one order the
  * group shows decides every hop.
@@ -336,10 +355,12 @@ export async function nextFallback(
   const judged = new Set<string>();
   let configured = profileHops.length > 0;
 
+  const group = fallbackGroupOf(parent);
+
   if (parent.routingAffinity?.leadOnly) {
     const agent = await getAgentById(parent.agentId);
     if (!agent?.isLead || !isAgentEligibleForTask(agent, parent)) {
-      const listsFallbacks = parent.modelGroup
+      const listsFallbacks = group
         ? 1
         : ((await getModelProfileByName(current))?.fallbacks.length ?? 0);
       if (!configured && listsFallbacks === 0) return { kind: "none", message: null };
@@ -370,8 +391,8 @@ export async function nextFallback(
     }
   }
 
-  if (parent.modelGroup) {
-    const resolution = await resolveGroupForAgent(parent.modelGroup, parent.agentId, {
+  if (group) {
+    const resolution = await resolveGroupForAgent(group, parent.agentId, {
       vcsRepo: parent.vcsRepo,
       includeRepoSecrets: options.includeRepoSecrets,
       skip: visited,
@@ -396,7 +417,7 @@ export async function nextFallback(
       skipped.push(...resolution.skipped);
     }
   }
-  for (let i = path.length - 1; !parent.modelGroup && i >= 0; i--) {
+  for (let i = path.length - 1; !group && i >= 0; i--) {
     const profile = await getModelProfileByName(path[i]!);
     for (const name of profile?.fallbacks ?? []) {
       configured = true;
@@ -1060,12 +1081,11 @@ function resumeModelSelection(
   fallback: { profile: string; hop: FallbackHop } | undefined,
 ): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "modelGroup" | "fallbackHops"> {
   const hops = [...(parent.fallbackHops ?? []), ...(fallback ? [fallback.hop] : [])];
-  // A group task keeps its group, so its next hop walks the same order.
+  // A group task, or a tier task its group resolved, keeps the group, so its
+  // next hop or key retry walks the same order.
+  const group = fallback ? fallbackGroupOf(parent) : undefined;
   const selection = fallback
-    ? {
-        profile: fallback.profile,
-        ...(parent.modelGroup ? { modelGroup: parent.modelGroup } : {}),
-      }
+    ? { profile: fallback.profile, ...(group ? { modelGroup: group } : {}) }
     : inheritedModelSelection(parent);
   return { ...selection, ...(hops.length > 0 ? { fallbackHops: hops } : {}) };
 }

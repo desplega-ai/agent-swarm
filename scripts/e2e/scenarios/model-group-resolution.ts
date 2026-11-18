@@ -63,7 +63,12 @@ export const modelGroupResolution: Scenario = {
 
       // ===== create-time gates =====
       let response = await ctx.api("POST", "/api/tasks", {
-        body: { task: `mgr excl ${ctx.nonce}`, source: "api", modelGroup: mixed, profile: "codex-smol" },
+        body: {
+          task: `mgr excl ${ctx.nonce}`,
+          source: "api",
+          modelGroup: mixed,
+          profile: "codex-smol",
+        },
       });
       expectStatus(response, [400], "modelGroup beside profile");
       expect(
@@ -71,7 +76,11 @@ export const modelGroupResolution: Scenario = {
         `Exclusivity error is ${String(asRecord(response.json).error)}`,
       );
       response = await ctx.api("POST", "/api/tasks", {
-        body: { task: `mgr unknown ${ctx.nonce}`, source: "api", modelGroup: `no-such-${ctx.nonce}` },
+        body: {
+          task: `mgr unknown ${ctx.nonce}`,
+          source: "api",
+          modelGroup: `no-such-${ctx.nonce}`,
+        },
       });
       expectStatus(response, [400], "unknown model group");
       expect(
@@ -176,7 +185,10 @@ export const modelGroupResolution: Scenario = {
       expectStatus(response, [201], "group task to hop");
       const hopId = String(asRecord(response.json).id);
       task = await claim(codexId, hopId, "codex claims the hop task");
-      expect(task.resolvedProfile === "codex-smol", `Hop task started on ${String(task.resolvedProfile)}`);
+      expect(
+        task.resolvedProfile === "codex-smol",
+        `Hop task started on ${String(task.resolvedProfile)}`,
+      );
       response = await ctx.api("POST", `/api/tasks/${hopId}/supersede`, {
         agentId: codexId,
         body: { reason: "provider_fallback", errorClass: "model_window" },
@@ -218,6 +230,197 @@ export const modelGroupResolution: Scenario = {
         "finish the hop resume",
       );
 
+      // ===== a tier task its group resolved hops through the group order =====
+      // The tier group is a boot seed shared by the run: restore its members and
+      // the seeded profiles' fallbacks whatever happens below.
+      const readJson = async (path: string, label: string) => {
+        const read = await ctx.api("GET", path);
+        expectStatus(read, [200], label);
+        return asRecord(read.json);
+      };
+      const tierMembers = (await readJson("/api/model-groups/ultra", "read the ultra group"))
+        .members as string[];
+      const savedFallbacks = new Map<string, string[]>();
+      for (const name of ["codex-regular", "claude-ultra"]) {
+        const profile = await readJson(`/api/model-profiles/${name}`, `read ${name}`);
+        savedFallbacks.set(name, (profile.fallbacks as string[] | undefined) ?? []);
+      }
+      cleanup.add("restore the ultra group and seeded fallbacks", async () => {
+        await ctx.api("PUT", "/api/model-groups/ultra/members", { body: { members: tierMembers } });
+        for (const [name, fallbacks] of savedFallbacks) {
+          await ctx.api("PATCH", `/api/model-profiles/${name}`, { body: { fallbacks } });
+        }
+      });
+      expectStatus(
+        await ctx.api("PUT", "/api/model-groups/ultra/members", {
+          body: { members: ["codex-regular", "codex-smart", "codex-ultra"] },
+        }),
+        [200],
+        "edit the ultra group",
+      );
+      // A member fallback the group order must override.
+      expectStatus(
+        await ctx.api("PATCH", "/api/model-profiles/codex-regular", {
+          body: { fallbacks: ["codex-ultra"] },
+        }),
+        [200],
+        "give codex-regular a fallback outside the group order",
+      );
+      const tierCodexId = await register(`e2e-mgr-tier-${ctx.nonce}`, "codex");
+      // Two pooled keys, so a rate limit retries the profile on the other key first.
+      const poolKeys = [`sk-e2e-mgr-${ctx.nonce}-k1aaa`, `sk-e2e-mgr-${ctx.nonce}-k2bbb`];
+      response = await ctx.api("PUT", "/api/config", {
+        body: {
+          scope: "agent",
+          scopeId: tierCodexId,
+          key: "OPENAI_API_KEY",
+          value: poolKeys.join(","),
+          isSecret: true,
+        },
+      });
+      expectStatus(response, [200], "pool two OpenAI keys on the tier worker");
+      const poolConfigId = String(asRecord(response.json).id);
+      cleanup.add("delete the pooled keys", () => ctx.api("DELETE", `/api/config/${poolConfigId}`));
+
+      const supersede = async (agentId: string, taskId: string, errorClass: string) => {
+        const res = await ctx.api("POST", `/api/tasks/${taskId}/supersede`, {
+          agentId,
+          body: { reason: "provider_fallback", errorClass },
+        });
+        expectStatus(res, [200], `supersede ${taskId} on ${errorClass}`);
+        return asRecord(res.json);
+      };
+      const finish = async (agentId: string, taskId: string, label: string) =>
+        expectStatus(
+          await ctx.api("POST", `/api/tasks/${taskId}/finish`, {
+            agentId,
+            body: { status: "completed", output: "done" },
+          }),
+          [200],
+          label,
+        );
+      const createTierTask = async (agentId: string, label: string) => {
+        const res = await ctx.api("POST", "/api/tasks", {
+          body: {
+            task: `mgr ${label} ${ctx.nonce}`,
+            source: "api",
+            agentId,
+            routingReason: "human_pinned",
+            modelTier: "ultra",
+          },
+        });
+        expectStatus(res, [201], `create ${label}`);
+        return String(asRecord(res.json).id);
+      };
+      // One hop: the resume carries the group and the expected profile.
+      const hopTo = async (
+        agentId: string,
+        taskId: string,
+        errorClass: string,
+        profile: string,
+        hopCount: number,
+      ) => {
+        const result = await supersede(agentId, taskId, errorClass);
+        expect(
+          result.kind === "resumed" && typeof result.resumeTaskId === "string",
+          `${errorClass} on ${taskId} did not resume: ${JSON.stringify(result).slice(0, 300)}`,
+        );
+        const resume = await readJson(`/api/tasks/${String(result.resumeTaskId)}`, "read resume");
+        const hops = resume.fallbackHops as { from: string; profile: string }[] | undefined;
+        expect(
+          resume.profile === profile && resume.modelGroup === "ultra" && hops?.length === hopCount,
+          `Resume after ${errorClass} is ${JSON.stringify({ profile: resume.profile, modelGroup: resume.modelGroup, hops })}`,
+        );
+        const claimed = await claim(agentId, String(resume.id), `claim the ${profile} resume`);
+        expect(
+          claimed.resolvedProfile === profile && claimed.modelSource === "profile:task",
+          `Resume resolved to ${String(claimed.resolvedProfile)} (${String(claimed.modelSource)})`,
+        );
+        return String(resume.id);
+      };
+
+      const tierId = await createTierTask(tierCodexId, "tier hop");
+      task = await claim(tierCodexId, tierId, "codex claims the tier task");
+      expect(
+        task.resolvedProfile === "codex-regular" && task.modelSource === "profile:group",
+        `Tier task resolved to ${String(task.resolvedProfile)} (${String(task.modelSource)})`,
+      );
+      // Key retry first: same profile on the other key, still in the group.
+      expectStatus(
+        await ctx.api("POST", "/api/keys/report-usage", {
+          agentId: tierCodexId,
+          body: {
+            keyType: "OPENAI_API_KEY",
+            keySuffix: poolKeys[0]!.slice(-5),
+            keyIndex: 0,
+            taskId: tierId,
+          },
+        }),
+        [200],
+        "record the key the tier task drew",
+      );
+      let tierResume = await hopTo(tierCodexId, tierId, "rate_limit", "codex-regular", 1);
+      // Then the group order: codex-smart (not codex-regular's own fallback), codex-ultra, stop.
+      tierResume = await hopTo(tierCodexId, tierResume, "model_window", "codex-smart", 2);
+      tierResume = await hopTo(tierCodexId, tierResume, "model_window", "codex-ultra", 3);
+      const lastTier = await supersede(tierCodexId, tierResume, "model_window");
+      expect(
+        lastTier.kind === "noFallback",
+        `The tier task hopped past the group: ${JSON.stringify(lastTier).slice(0, 300)}`,
+      );
+      await finish(tierCodexId, tierResume, "finish the last tier resume");
+
+      // ===== a worker-env override still wins and never hops through the group =====
+      response = await ctx.api("POST", "/api/agents", {
+        body: {
+          name: `e2e-mgr-env-${ctx.nonce}`,
+          role: "worker",
+          status: "online",
+          harness_provider: "codex",
+          modelTierOverrides: { codex: { ultra: "gpt-6.1-sol" } },
+        },
+      });
+      expectStatus(response, [201], "register a codex worker with a tier override");
+      const envId = String(asRecord(response.json).id);
+      agents.push(envId);
+      const envTask = await createTierTask(envId, "tier env");
+      task = await claim(envId, envTask, "the override worker claims the tier task");
+      expect(
+        task.modelSource === "worker-env" && task.resolvedModel === "gpt-6.1-sol",
+        `Override tier task resolved to ${String(task.resolvedModel)} (${String(task.modelSource)})`,
+      );
+      const envResult = await supersede(envId, envTask, "model_window");
+      expect(
+        envResult.kind === "noFallback",
+        `A worker-env tier task hopped: ${JSON.stringify(envResult).slice(0, 300)}`,
+      );
+      await finish(envId, envTask, "finish the override tier task");
+
+      // ===== no member on the harness: the seeded profile and its own fallbacks =====
+      expectStatus(
+        await ctx.api("PATCH", "/api/model-profiles/claude-ultra", {
+          body: { fallbacks: ["claude-smart"] },
+        }),
+        [200],
+        "give claude-ultra a fallback",
+      );
+      const seededTask = await createTierTask(claudeId, "tier seeded");
+      task = await claim(claudeId, seededTask, "claude claims the tier task");
+      expect(
+        task.resolvedProfile === "claude-ultra" && task.modelSource === "profile:tier-alias",
+        `Seeded tier task resolved to ${String(task.resolvedProfile)} (${String(task.modelSource)})`,
+      );
+      const seededResult = await supersede(claudeId, seededTask, "model_window");
+      const seededResume = await readJson(
+        `/api/tasks/${String(seededResult.resumeTaskId)}`,
+        "read the seeded resume",
+      );
+      expect(
+        seededResume.profile === "claude-smart" && seededResume.modelGroup === undefined,
+        `Seeded resume is ${JSON.stringify({ profile: seededResume.profile, modelGroup: seededResume.modelGroup })}`,
+      );
+      await ctx.api("POST", `/api/tasks/${String(seededResume.id)}/cancel`, { body: {} });
+
       // ===== schedules carry the group =====
       const scheduleBody = {
         name: `e2e-mgr-sched-${ctx.nonce}`,
@@ -240,7 +443,10 @@ export const modelGroupResolution: Scenario = {
       const schedule = asRecord(response.json);
       const scheduleId = String(schedule.id);
       scheduleIds.push(scheduleId);
-      expect(schedule.modelGroup === mixed, `Schedule modelGroup is ${String(schedule.modelGroup)}`);
+      expect(
+        schedule.modelGroup === mixed,
+        `Schedule modelGroup is ${String(schedule.modelGroup)}`,
+      );
       response = await ctx.api("POST", `/api/schedules/${scheduleId}/run`);
       expectStatus(response, [200], "run the schedule now");
       const fired = asRecord(asRecord(response.json).task ?? {});

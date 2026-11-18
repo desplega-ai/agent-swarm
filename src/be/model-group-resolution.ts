@@ -14,8 +14,17 @@ export type GroupMemberSkip = { profile: string; reason: string };
 export type GroupResolution =
   /** No group has this name. */
   | { kind: "missing" }
-  /** `member` is the first passing member, at `index` in the group order. */
-  | { kind: "resolved"; member: string; index: number; skipped: GroupMemberSkip[] }
+  /**
+   * `member` is the first passing member, at `index` in the group order.
+   * `onHarness` lists every member on the agent's harness, in order.
+   */
+  | {
+      kind: "resolved";
+      member: string;
+      index: number;
+      skipped: GroupMemberSkip[];
+      onHarness: string[];
+    }
   /** The group exists but no member runs on the agent. */
   | { kind: "none"; skipped: GroupMemberSkip[] };
 
@@ -85,7 +94,10 @@ export async function resolveGroupForAgent(
       includeRepoSecrets: options.includeRepoSecrets,
       fallbacks: false,
     });
-    if (result?.ok) return { kind: "resolved", member: member.profile, index, skipped };
+    if (result?.ok) {
+      const onHarness = members.filter((m) => m.harness === harness).map((m) => m.profile);
+      return { kind: "resolved", member: member.profile, index, skipped, onHarness };
+    }
     skipped.push({
       profile: member.profile,
       reason: result ? firstFailingCheck(result) : "not found",

@@ -12,9 +12,11 @@
  *      runs on the claiming agent (`resolveGroupForAgent`); none is a hard stop
  *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
  *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
- *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:tier-alias" when the
- *      model group named after the tier has a member that runs on the agent, else when the
- *      seeded `<harness>-<tier>` profile exists (its model, same as the map unless edited).
+ *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:group" when the
+ *      model group named after the tier has a member that runs on the agent (an untouched
+ *      seed, which lists only `<harness>-<tier>` there, stays "profile:tier-alias"), else
+ *      "profile:tier-alias" when the seeded `<harness>-<tier>` profile exists (its model,
+ *      same as the map unless edited).
  *      A worker-env or tier-config win logs a deprecation line: edit the profile instead.
  *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
  *      no repo-scoped MODEL_OVERRIDE on the task's repo)
@@ -664,7 +666,14 @@ async function resolveTierAlias(
     picked = await resolveClaimProfile(group.member, "profile:tier-alias", harness);
     if (picked && "profile" in picked) {
       name = group.member;
-      // An untouched seed resolves to the seeded profile: nothing to log.
+      // An untouched seed lists only the seeded profile on this harness: it
+      // stays a tier alias, so its hops keep walking the profile's fallbacks.
+      // Anything else is a group resolution, recorded as `profile:group` so a
+      // provider-error hop walks the group order (`fallbackGroupOf`).
+      const untouched = group.onHarness.length === 1 && group.onHarness[0] === seeded;
+      if (!untouched) {
+        picked = { ...picked, resolution: { ...picked.resolution, modelSource: "profile:group" } };
+      }
       if (group.member !== seeded) {
         await logGroupResolution(task.id, agentId, tier, group.member, group.skipped);
       }
