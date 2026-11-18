@@ -36,10 +36,17 @@
  * without the failed files, which stay in the box for a new follow-up. With
  * no answer at all, the send fails and names the task to check.
  *
+ * Such a send shows at once: the box clears as soon as the draft exists, and
+ * in Sessions the draft goes straight into the session cache, so its turn
+ * shows while the files upload (the bubble says "Uploading files…"). A failed
+ * send puts the text and the files back in the box.
+ *
  * Attachments go out on the follow-up path only: steering carries text. They
- * also survive the swap. A file added through `renderActions` (the session
- * panel's "Add screenshot") while steering is up switches to the follow-up
- * path, so the message goes out as a follow-up task with the file. A clip
+ * also survive the swap, and so does focus: the incoming box takes it when
+ * the outgoing one had it (a task that ends under a typing user). A file
+ * added through `renderActions` (the session panel's "Add screenshot") while
+ * steering is up switches to the follow-up path, so the message goes out as
+ * a follow-up task with the file. A clip
  * from the mic button is one such file: its upload to the draft task puts its
  * transcript in the task text.
  *
@@ -49,10 +56,11 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
-import type { AgentTask, SteeringSource } from "@/api/types";
+import { sessionDetailKey } from "@/api/hooks/session-query-keys";
+import type { AgentTask, SessionDetailResponse, SteeringSource } from "@/api/types";
 import { RecordAudioButton, useAudioRecorder } from "@/components/sessions/audio-recorder";
 import {
   type ComposeAttachmentUploadResult,
@@ -306,6 +314,23 @@ export function TaskComposer({
     }
   };
 
+  // A follow-up with files: its draft shows now, not after the uploads. The
+  // box stays locked until they settle, so nothing new is typed meanwhile.
+  const showDraft = (created: AgentTask) => {
+    if (rootTaskId) {
+      queryClient.setQueryData<SessionDetailResponse>(
+        sessionDetailKey(rootTaskId, userId ?? null),
+        (detail) =>
+          detail && !detail.chain.some((task) => task.id === created.id)
+            ? { ...detail, chain: [...detail.chain, created] }
+            : detail,
+      );
+    }
+    setDraft("");
+    citations?.clear();
+    setAttachments([]);
+  };
+
   const createTask = useMutation({
     mutationFn: async (input: {
       task: string;
@@ -329,6 +354,7 @@ export function TaskComposer({
         source: "ui",
         draft: isDraft,
       });
+      if (isDraft) showDraft(created);
       // Per-file failures come back in the result; the upload never throws.
       const uploadResult = await uploadComposeAttachments({
         taskId: created.id,
@@ -391,6 +417,9 @@ export function TaskComposer({
     onError: (error, input) => {
       if (!(error instanceof UnsentFollowUpError)) return;
       toast.error(error.message);
+      // `showDraft` cleared the box; the send failed, so it all comes back.
+      setDraft(input.task);
+      setAttachments(input.attachments);
       // The draft shows in the session.
       invalidateSent(error.taskId, input.parentTaskId);
     },
@@ -421,10 +450,12 @@ export function TaskComposer({
     });
   };
 
+  // The files being sent: the box itself is already empty (`showDraft`).
+  const sendingFiles = createTask.isPending ? (createTask.variables?.attachments.length ?? 0) : 0;
   const pendingLabel =
-    createTask.isPending && attachments.length > 0
+    sendingFiles > 0
       ? uploadedCount > 0
-        ? `Uploading ${uploadedCount}/${attachments.length}…`
+        ? `Uploading ${uploadedCount}/${sendingFiles}…`
         : "Creating task…"
       : "Sending…";
 
@@ -454,6 +485,18 @@ export function TaskComposer({
     </>
   );
 
+  // The steer box and the dock are different trees, so a swap (a task that
+  // ends under a typing user) remounts the editor. The new one takes focus
+  // when the old one had it: read at the swap's render, before the unmount.
+  const shell = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState({ steer: !!steerTarget, focus: false });
+  if (shown.steer !== !!steerTarget) {
+    setShown({
+      steer: !!steerTarget,
+      focus: !!shell.current?.contains(document.activeElement),
+    });
+  }
+
   const mode = composerMode(steerTarget);
   const sendLabel = COMPOSER_SEND_LABEL[mode];
   const shownTarget = showTarget ? (steerTarget ?? targetTask) : null;
@@ -461,55 +504,61 @@ export function TaskComposer({
 
   if (steerTarget) {
     return (
-      <SteerComposer
-        taskId={steerTarget.id}
-        supportedSteerModes={steerTarget.supportedSteerModes}
-        providerLabel={steerTarget.provider}
-        taskStatus={steerTarget.status}
-        value={draft}
-        onValueChange={setDraft}
-        citations={citations}
-        extraActions={extraActions}
-        fullWidth={fullWidth}
-        bar={bar}
-        sendLabel={sendLabel}
-        routeDetail={routeDetail}
-        source={steerSource}
-        className={className}
-      />
+      <div ref={shell} className="contents">
+        <SteerComposer
+          taskId={steerTarget.id}
+          supportedSteerModes={steerTarget.supportedSteerModes}
+          providerLabel={steerTarget.provider}
+          taskStatus={steerTarget.status}
+          value={draft}
+          onValueChange={setDraft}
+          citations={citations}
+          extraActions={extraActions}
+          fullWidth={fullWidth}
+          bar={bar}
+          sendLabel={sendLabel}
+          routeDetail={routeDetail}
+          source={steerSource}
+          className={className}
+          autoFocus={shown.focus}
+        />
+      </div>
     );
   }
 
   if (!mayCreate) return null;
   return (
-    <ComposerDock
-      value={draft}
-      onChange={setDraft}
-      citations={citations}
-      onSubmit={submit}
-      isPending={sending.isPending}
-      isError={sending.isError}
-      errorMessage={sending.error instanceof Error ? sending.error.message : "Failed to send"}
-      pendingLabel={onFollowUp ? "Sending…" : pendingLabel}
-      placeholder={userId ? placeholder : "Pick an identity above to send messages."}
-      disabled={!userId}
-      routeLabel={routeLabel}
-      routeDetail={routeDetail}
-      sendLabel={sendLabel}
-      attachments={onFollowUp ? undefined : attachments}
-      onAttachmentsChange={
-        onFollowUp
-          ? undefined
-          : (files) => {
-              setAttachments(files);
-              setAttachmentError(null);
-            }
-      }
-      attachmentErrorMessage={onFollowUp ? null : attachmentError}
-      extraActions={extraActions}
-      fullWidth={fullWidth}
-      bar={bar}
-      className={className}
-    />
+    <div ref={shell} className="contents">
+      <ComposerDock
+        value={draft}
+        onChange={setDraft}
+        citations={citations}
+        onSubmit={submit}
+        isPending={sending.isPending}
+        isError={sending.isError}
+        errorMessage={sending.error instanceof Error ? sending.error.message : "Failed to send"}
+        pendingLabel={onFollowUp ? "Sending…" : pendingLabel}
+        placeholder={userId ? placeholder : "Pick an identity above to send messages."}
+        disabled={!userId}
+        routeLabel={routeLabel}
+        routeDetail={routeDetail}
+        sendLabel={sendLabel}
+        attachments={onFollowUp ? undefined : attachments}
+        onAttachmentsChange={
+          onFollowUp
+            ? undefined
+            : (files) => {
+                setAttachments(files);
+                setAttachmentError(null);
+              }
+        }
+        attachmentErrorMessage={onFollowUp ? null : attachmentError}
+        extraActions={extraActions}
+        fullWidth={fullWidth}
+        bar={bar}
+        className={className}
+        autoFocus={shown.focus}
+      />
+    </div>
   );
 }
