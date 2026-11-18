@@ -997,6 +997,19 @@ export async function handleWebhooks(
       );
       return true;
     }
+    // The sender filter matches the From address, which AgentMail did not verify for an
+    // unauthenticated sender. With a filter set, such mail is archived but not routed.
+    if (
+      payload.message &&
+      process.env.AGENTMAIL_SENDER_DOMAIN_FILTER &&
+      (payload.event_type === "message.received.unauthenticated" ||
+        payload.message.labels?.includes("unauthenticated"))
+    ) {
+      console.log(
+        `[AgentMail] Ignoring unauthenticated event ${payload.event_id}: AGENTMAIL_SENDER_DOMAIN_FILTER is set`,
+      );
+      return true;
+    }
     console.log(`[AgentMail] Received ${payload.event_type} event (${payload.event_id})`);
 
     try {
