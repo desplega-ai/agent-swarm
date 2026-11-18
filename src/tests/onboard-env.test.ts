@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import pkg from "../../package.json";
 import { generateEnv } from "../commands/onboard/env-generator.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
 import { BASELINE_CASES, baselineState } from "./fixtures/onboard/baseline-states.ts";
@@ -241,7 +242,7 @@ describe("generateEnv with the agent-fs bundle flag", () => {
       const expected = await Bun.file(
         new URL(`./fixtures/onboard/${name}.env.txt`, import.meta.url),
       ).text();
-      expect(generateEnv(state)).toBe(expected);
+      expect(generateEnv(state, {}, "9.9.9-test")).toBe(expected);
     });
   }
 
@@ -254,6 +255,25 @@ describe("generateEnv with the agent-fs bundle flag", () => {
     for (const s of ["COMB_ENABLED", "EMBEDDING_", "AGENT_FS_", "EMBEDDING_DIMENSIONS"]) {
       expect(on).not.toContain(s);
     }
+  });
+});
+
+describe("generateEnv image version pin", () => {
+  test("pins AGENT_SWARM_VERSION to this CLI's release by default", () => {
+    const env = generateEnv(makeState({}), {});
+    expect(env).toContain(`\nAGENT_SWARM_VERSION=${pkg.version}\n`);
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test("the installer's AGENT_SWARM_VERSION overrides the default", () => {
+    const env = generateEnv(makeState({}), { AGENT_SWARM_VERSION: " latest " }, "1.2.3");
+    expect(env).toContain("\nAGENT_SWARM_VERSION=latest\n");
+    expect(env).not.toContain("AGENT_SWARM_VERSION=1.2.3");
+  });
+
+  test("a blank AGENT_SWARM_VERSION keeps the default pin", () => {
+    const env = generateEnv(makeState({}), { AGENT_SWARM_VERSION: " " }, "1.2.3");
+    expect(env).toContain("\nAGENT_SWARM_VERSION=1.2.3\n");
   });
 });
 

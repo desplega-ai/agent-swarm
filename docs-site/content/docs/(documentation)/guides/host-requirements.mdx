@@ -57,7 +57,7 @@ Docker's containerd image store (`docker info` lists `driver-type: io.containerd
 
 ## Why the disk fills up
 
-- **Each upgrade leaves the old image behind.** Recent upgrades of the worker image added between 2.7 GB and 7.7 GB of new layers. Docker keeps the old layers until you prune them. Releases ship often, and the generated compose file tracks `latest` with `pull_policy: always`, so every `docker compose up` can pull a new image. Without cleanup, a 50 GB disk fills after a handful of upgrades.
+- **Each upgrade leaves the old image behind.** Recent upgrades of the worker image added between 2.7 GB and 7.7 GB of new layers. Docker keeps the old layers until you prune them. Releases ship often. `agent-swarm onboard` pins `AGENT_SWARM_VERSION` in `.env` to its own release, but an install with a blank `AGENT_SWARM_VERSION` tracks `latest` with `pull_policy: always`, so every `docker compose up` can pull a new image. Without cleanup, a 50 GB disk fills after a handful of upgrades.
 - **Pinned versions and variants add images.** Each tag you pull (`latest`, `2.6.0`, `slim`) is a separate image until you prune the ones no container uses.
 - **Build cache.** Building images on the host, for example with `docker-compose.local.yml --build`, leaves build cache behind. A host that only pulls images has little or none.
 - **Container logs.** Docker's default `json-file` log driver does not rotate. Every agent's stdout grows one file under `/var/lib/docker/containers/` for the life of the container.
@@ -95,7 +95,7 @@ docker builder prune -af
 
 `docker image prune -a` keeps every image that a container uses, running or stopped. If the swarm is down when it runs, it also deletes the current images, and the next `docker compose up` downloads them again.
 
-To upgrade on your own schedule instead of on every `up`, pin a release with `AGENT_SWARM_VERSION` in `.env`. See [Pin the Image Version](/docs/guides/deployment#step-4-pin-the-image-version).
+To upgrade on your own schedule instead of on every `up`, pin a release with `AGENT_SWARM_VERSION` in `.env`. `agent-swarm onboard` writes this pin for you. See [Pin the Image Version](/docs/guides/deployment#step-4-pin-the-image-version).
 
 On Podman, use `podman system df` and `podman image prune -af`.
 
