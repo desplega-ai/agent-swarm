@@ -1,7 +1,7 @@
 // A plain agent (own `aseph_` token) writes memories only as itself, and cannot create swarm-scope
 // skills, change skills it does not own, or install skills for another agent over HTTP. The lead
 // and the operator keep access.
-import { asRecord, asString, expect, expectStatus } from "../http";
+import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callTool, createUser, registerLead, retireAgent } from "./core-helpers";
 import { registerWorker } from "./workflow-helpers";
@@ -177,13 +177,6 @@ export const authzMemorySkills: Scenario = {
         [403],
         "A promotes its own skill to swarm scope",
       );
-      // Any promotion is lead-only: systemDefault hands the skill to every agent, and a scope
-      // other than `agent` shares it.
-      expectStatus(
-        await asA("PUT", `/api/skills/${ownSkillId}`, { systemDefault: true }),
-        [403],
-        "A marks its own skill systemDefault",
-      );
       expectStatus(
         await asA("PUT", `/api/skills/${ownSkillId}`, { scope: "global" }),
         [403],
@@ -271,6 +264,63 @@ export const authzMemorySkills: Scenario = {
         await asLead("PUT", `/api/skills/${ownSkillId}`, { isEnabled: true }),
         [200],
         "the lead updates A's skill",
+      );
+      const markedDefault = await asLead("PUT", `/api/skills/${ownSkillId}`, {
+        systemDefault: true,
+      });
+      expectStatus(markedDefault, [200], "the lead marks A's skill systemDefault");
+      expect(
+        asRecord(asRecord(markedDefault.json).skill).systemDefault === true,
+        "skill is default",
+      );
+
+      for (const changes of [{ scope: "swarm" }, { ownerAgentId: b }, { description: "edited" }]) {
+        expectStatus(
+          await asA("PUT", `/api/skills/${ownSkillId}`, { ...changes, systemDefault: false }),
+          [403],
+          `clearing the flag does not allow changing ${Object.keys(changes).join(", ")}`,
+        );
+      }
+      expectStatus(
+        await asA("PUT", `/api/skills/${ownSkillId}`, { systemDefault: "false" }),
+        [400],
+        "systemDefault must be a boolean",
+      );
+      const flagOmitted = await asA("PUT", `/api/skills/${ownSkillId}`, { isEnabled: false });
+      expectStatus(flagOmitted, [200], "A updates its skill without changing systemDefault");
+      expect(
+        asRecord(asRecord(flagOmitted.json).skill).systemDefault === true,
+        "the flag is unchanged",
+      );
+
+      const clearedDefault = await asA("PUT", `/api/skills/${ownSkillId}`, {
+        systemDefault: false,
+      });
+      expectStatus(clearedDefault, [200], "A clears systemDefault on its own skill");
+      expect(
+        asRecord(asRecord(clearedDefault.json).skill).systemDefault === false,
+        "the update returns the cleared flag",
+      );
+      const fetchedSkill = await asA("GET", `/api/skills/${ownSkillId}`);
+      expectStatus(fetchedSkill, [200], "A fetches its own skill after clearing the flag");
+      expect(asRecord(fetchedSkill.json).systemDefault === false, "the cleared flag persists");
+      expectStatus(
+        await asA("PUT", `/api/skills/${ownSkillId}`, { systemDefault: true }),
+        [403],
+        "A cannot mark its own skill systemDefault again",
+      );
+
+      const catalog = await asA("GET", "/api/skills");
+      expectStatus(catalog, [200], "A lists skills");
+      const seeded = asRecords(catalog.json, "skills").find(
+        (skill) => skill.systemDefault === true && skill.ownerAgentId === null,
+      );
+      expect(seeded, "the catalog has an ownerless system default");
+      const seededId = asString(seeded.id, "seeded skill id");
+      expectStatus(
+        await asA("PUT", `/api/skills/${seededId}`, { systemDefault: false }),
+        [403],
+        "A cannot clear systemDefault on an ownerless skill",
       );
       expectStatus(
         await asLead("POST", `/api/skills/${leadSkillId}/install`, { agentId: b }),

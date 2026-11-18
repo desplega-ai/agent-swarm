@@ -24690,6 +24690,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        systemDefault?: boolean;
+                    } & {
                         [key: string]: unknown;
                     };
                 };
@@ -24704,6 +24706,15 @@ export interface paths {
                         "application/json": {
                             skill: components["schemas"]["Skill"];
                         };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description System-managed skills cannot be edited */

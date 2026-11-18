@@ -62748,6 +62748,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "systemDefault": {
+                    "type": "boolean"
+                  }
+                },
                 "additionalProperties": {}
               }
             }
@@ -62768,6 +62773,16 @@
                   "required": [
                     "skill"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

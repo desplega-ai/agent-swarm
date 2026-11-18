@@ -491,9 +491,10 @@ const updateSkillRoute = route({
   auth: { apiKey: true },
   rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string() }),
-  body: z.record(z.string(), z.unknown()),
+  body: z.looseObject({ systemDefault: z.boolean().optional() }),
   responses: {
     200: { description: "Skill updated", schema: skillWrapperResponseSchema },
+    400: { description: "Validation error" },
     403: { description: "System-managed skills cannot be edited" },
     404: { description: "Skill not found" },
   },
@@ -1174,48 +1175,27 @@ export async function handleSkills(
   if (updateSkillRoute.match(req.method, pathSegments)) {
     const parsed = await updateSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    {
-      const target = await getSkillById(parsed.params.id);
-      if (
-        target &&
-        (await denySkillWrite(req, res, myAgentId, "skill.update.any", {
-          kind: "owned",
-          ownerAgentId: target.ownerAgentId,
-          scope: target.scope,
-        }))
-      ) {
-        return true;
-      }
-    }
-    {
-      const target = await getSkillById(parsed.params.id);
-      // Promotion is any change that shares the skill or moves it to another owner: a scope
-      // other than `agent` (MCP allows only agent|swarm), a change of systemDefault (it hands the
-      // skill to every agent through getAgentSkills), or a change of owner.
-      const promotes =
-        target &&
-        ((parsed.body.scope !== undefined &&
-          parsed.body.scope !== "agent" &&
-          parsed.body.scope !== target.scope) ||
-          (parsed.body.systemDefault !== undefined &&
-            parsed.body.systemDefault !== target.systemDefault) ||
-          (parsed.body.ownerAgentId !== undefined &&
-            parsed.body.ownerAgentId !== target.ownerAgentId));
-      if (
-        promotes &&
-        (await denySkillWrite(req, res, myAgentId, "skill.promote.swarm", {
-          kind: "owned",
-          ownerAgentId: target.ownerAgentId,
-          scope: target.scope,
-        }))
-      ) {
-        return true;
-      }
-    }
-
     const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    const resource = {
+      kind: "owned" as const,
+      ownerAgentId: existing.ownerAgentId,
+      scope: existing.scope,
+    };
+    if (await denySkillWrite(req, res, myAgentId, "skill.update.any", resource)) return true;
+
+    const { systemDefault, ...updates } = parsed.body;
+    // Enabling systemDefault shares the skill with every agent; clearing it is not a promotion.
+    const promotes =
+      (updates.scope !== undefined &&
+        updates.scope !== "agent" &&
+        updates.scope !== existing.scope) ||
+      (systemDefault === true && !existing.systemDefault) ||
+      (updates.ownerAgentId !== undefined && updates.ownerAgentId !== existing.ownerAgentId);
+    if (promotes && (await denySkillWrite(req, res, myAgentId, "skill.promote.swarm", resource))) {
       return true;
     }
 
@@ -1239,19 +1219,16 @@ export async function handleSkills(
       "agent",
       "disableModelInvocation",
       "userInvocable",
-      "systemDefault",
     ];
+    // Only the flag can be cleared on an owned default. Ownerless seeded defaults stay locked.
+    const clearsOwnedDefault = systemDefault === false && Boolean(existing.ownerAgentId);
     if (
       existing.systemDefault &&
-      protectedSystemDefaultFields.some((field) => Object.hasOwn(parsed.body, field))
+      ((systemDefault !== undefined && !clearsOwnedDefault) ||
+        protectedSystemDefaultFields.some((field) => Object.hasOwn(updates, field)))
     ) {
       jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
       return true;
-    }
-
-    const updates: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(parsed.body)) {
-      updates[key] = value;
     }
 
     // If content is being updated, re-parse frontmatter
@@ -1271,7 +1248,10 @@ export async function handleSkills(
     updates.updatedBy = actor.userId;
     updates.updatedByAgentId = actor.agentId;
 
-    const skill = await updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
+    const skill = await updateSkill(parsed.params.id, {
+      ...(updates as Parameters<typeof updateSkill>[1]),
+      systemDefault,
+    });
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
