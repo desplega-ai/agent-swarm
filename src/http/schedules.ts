@@ -774,6 +774,10 @@ export async function handleSchedules(
 
     // Recalculate nextRunAt when timing fields or enabled status changes
     const newEnabled = parsed.body.enabled !== undefined ? parsed.body.enabled : existing.enabled;
+    const cronTimezoneChanged =
+      Boolean(existing.cronExpression) &&
+      parsed.body.timezone !== undefined &&
+      parsed.body.timezone !== existing.timezone;
     if (existing.scheduleType === "one_time") {
       if (!newEnabled) {
         body.nextRunAt = null;
@@ -784,6 +788,7 @@ export async function handleSchedules(
       } else if (
         parsed.body.cronExpression !== undefined ||
         parsed.body.intervalMs !== undefined ||
+        cronTimezoneChanged ||
         (parsed.body.enabled === true && !existing.enabled)
       ) {
         const timing = mergeScheduleTiming(
@@ -793,15 +798,18 @@ export async function handleSchedules(
           },
           { cronExpression: parsed.body.cronExpression, intervalMs: parsed.body.intervalMs },
         );
-        const mergedTimezone =
-          parsed.body.timezone !== undefined ? parsed.body.timezone : existing.timezone;
         if (timing.mergedCron || timing.mergedInterval) {
-          body.nextRunAt = calculateNextRun({
-            cronExpression: timing.mergedCron,
-            intervalMs: timing.mergedInterval,
-            timezone: mergedTimezone,
-            // biome-ignore lint/suspicious/noExplicitAny: need partial ScheduledTask for calculateNextRun
-          } as any);
+          try {
+            body.nextRunAt = calculateNextRun({
+              ...existing,
+              cronExpression: timing.mergedCron ?? undefined,
+              intervalMs: timing.mergedInterval ?? undefined,
+              timezone: parsed.body.timezone ?? existing.timezone,
+            });
+          } catch {
+            jsonError(res, "Cannot calculate the next run for this schedule.", 400);
+            return true;
+          }
         }
       }
     }
