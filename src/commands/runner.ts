@@ -547,6 +547,14 @@ export async function ensureRepoForTask(
 
     let warning: string | null = null;
 
+    // git, gh and glab would read a leading "-" as an option (clone, and the fetch of an
+    // existing clone), not as the repo, the target or the branch.
+    if (url.startsWith("-") || clonePath.startsWith("-") || defaultBranch.startsWith("-")) {
+      throw new Error(
+        `Refusing to use repo ${name}: its url, clonePath and defaultBranch must not start with "-"`,
+      );
+    }
+
     if (!gitHeadExists) {
       console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
       const provider = detectVcsProvider(url);
@@ -555,7 +563,7 @@ export async function ensureRepoForTask(
       } else if (provider === "gitlab") {
         await Bun.$`glab repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
       } else {
-        await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
+        await Bun.$`git clone --branch ${defaultBranch} --single-branch -- ${url} ${clonePath}`.quiet();
       }
       // Validate the clone actually created the directory
       if (!existsSync(clonePath)) {

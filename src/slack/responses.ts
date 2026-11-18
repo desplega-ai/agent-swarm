@@ -55,12 +55,12 @@ export function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
 }
 
-export function shouldPostInlineCompletionOutput(task: AgentTask): boolean {
+export async function shouldPostInlineCompletionOutput(task: AgentTask): Promise<boolean> {
   if (task.status !== "completed") return false;
   if (!task.slackChannelId || !task.slackThreadTs) return false;
   if (task.slackReplySent) return false;
 
-  const output = slackTaskOutput(task)?.trim();
+  const output = (await slackTaskOutput(task))?.trim();
   return !!output && isTreeOutputTruncated(markdownToSlack(output));
 }
 
@@ -89,7 +89,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
   const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
-    output: await withUiSpecFallback(task.id, slackTaskOutput(task) ?? ""),
+    output: await withUiSpecFallback(task.id, (await slackTaskOutput(task)) ?? ""),
   });
 
   try {
@@ -131,7 +131,10 @@ export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
     return false;
   }
 
-  const output = await withUiSpecFallback(task.id, slackTaskOutput(task) || "Task completed.");
+  const output = await withUiSpecFallback(
+    task.id,
+    (await slackTaskOutput(task)) || "Task completed.",
+  );
   const body =
     markdownToSlack(output) +
     formatAttachmentsBlockForSlack(await getSlackOutputAttachments(task.id));
@@ -190,7 +193,10 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 
   try {
     if (task.status === "completed") {
-      const output = await withUiSpecFallback(task.id, slackTaskOutput(task) || "Task completed.");
+      const output = await withUiSpecFallback(
+        task.id,
+        (await slackTaskOutput(task)) || "Task completed.",
+      );
       const slackOutput = markdownToSlack(output);
       const attachmentsBlock = formatAttachmentsBlockForSlack(
         await getSlackOutputAttachments(task.id),
@@ -353,7 +359,7 @@ export async function updateToFinal(
   let completionBlockBatches: unknown[][] | undefined;
 
   if (task.status === "completed") {
-    const output = slackTaskOutput(task) || "Task completed.";
+    const output = (await slackTaskOutput(task)) || "Task completed.";
     const slackOutput = markdownToSlack(output);
     const attachmentsBlock = formatAttachmentsBlockForSlack(
       await getSlackOutputAttachments(task.id),

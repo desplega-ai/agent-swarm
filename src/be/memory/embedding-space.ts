@@ -47,7 +47,12 @@
 import { createHash } from "node:crypto";
 import { getDbClient } from "@/be/db";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
-import { getEmbeddingProvider, getMemoryStore } from "./index";
+import {
+  embeddingEndpoint,
+  getEmbeddingProvider,
+  getMemoryStore,
+  setDeploymentEnvReader,
+} from "./index";
 import type { EmbeddingProvider } from "./types";
 
 export const EMBEDDING_SPACE_KEY = "embedding-space";
@@ -92,29 +97,14 @@ export type EmbeddingSpaceOptions = {
   afterBatch?: (info: { table: "memory" | "scripts"; ids: string[] }) => void | Promise<void>;
 };
 
-/**
- * Reads a key's deployment environment value, without stored config. Set by
- * the HTTP server at boot (http/core owns the env injection). Unset, no URL
- * counts as operator config, so every one gets the SSRF check.
- */
-let readDeploymentEnv: (key: string) => string | undefined = () => undefined;
-
-export function setDeploymentEnvReader(read: (key: string) => string | undefined): void {
-  readDeploymentEnv = read;
-}
+export { setDeploymentEnvReader };
 
 /** Checks the URL the provider sends to, in the SDK's precedence order. */
 function endpointAllowed(): boolean {
-  const key = process.env.EMBEDDING_API_BASE_URL
-    ? "EMBEDDING_API_BASE_URL"
-    : process.env.OPENAI_BASE_URL
-      ? "OPENAI_BASE_URL"
-      : null;
-  if (!key) return true;
-  const baseUrl = process.env[key] ?? "";
-  if (baseUrl === readDeploymentEnv(key)) return true;
+  const endpoint = embeddingEndpoint();
+  if (!endpoint || endpoint.fromDeployment) return true;
   try {
-    assertUrlSafe(baseUrl, publicEndpointSsrfOptions());
+    assertUrlSafe(endpoint.baseUrl, publicEndpointSsrfOptions());
     return true;
   } catch {
     return false;

@@ -8,9 +8,9 @@ import {
   getAgentById,
   getDbClient,
   getTaskById,
-  getUserById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
+import { resolveRequesterTimezone } from "@/be/requester-timezone";
 import {
   describeEventWait,
   type EventMatch,
@@ -101,23 +101,6 @@ class DeferAbortedError extends Error {}
 function renderChecks(checks?: string[]): string {
   if (!checks || checks.length === 0) return "";
   return `\n\nChecks:\n${checks.map((c) => `- ${c}`).join("\n")}`;
-}
-
-/**
- * Resolve the requesting human's IANA timezone from `users.timezone` via
- * `task.requestedByUserId`. We do not currently capture a Slack profile `tz`
- * anywhere in the ingest path (checked `src/slack/enrich.ts`, the only place
- * that reads `users.info`) — a user only has a timezone here if someone set
- * it explicitly via `manage-user`. Falls back to UTC, flagged as such.
- */
-async function resolveRequesterTimezone(
-  requestedByUserId: string | undefined,
-): Promise<{ tz: string; isFallback: boolean }> {
-  if (requestedByUserId) {
-    const user = await getUserById(requestedByUserId);
-    if (user?.timezone) return { tz: user.timezone, isFallback: false };
-  }
-  return { tz: "UTC", isFallback: true };
 }
 
 /** "Researcher", "Researcher and Picateclas", "A, B and C". */

@@ -281,6 +281,10 @@
         "audit-attribution-skills"
       ]
     },
+    "repo-exec-config-write": {
+      "description": "a non-lead agent token may not change a repo's url, clonePath or hooks or create one with hooks enabled (HTTP and MCP), the lead, operator and shared-key worker still may, and a url or clonePath that starts with - is refused",
+      "scenarios": ["repo-exec-config-write"]
+    },
     "requester-hint": {
       "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
       "scenarios": ["requester-hint"]
@@ -482,6 +486,10 @@
     "script-inline-run": {
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]
+    },
+    "script-tool-usage": {
+      "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
+      "scenarios": ["script-tool-usage"]
     },
     "script-input-handling": {
       "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
@@ -749,7 +757,7 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, and discovered OAuth endpoints are validated",
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
       "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {

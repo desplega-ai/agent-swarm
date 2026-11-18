@@ -107,6 +107,8 @@ export function PersonBubble({
           {/* Mine: the hover actions sit left of the time, so the hidden buttons leave no gap at the bubble edge. */}
           {mine ? actions : null}
           <MessageTime at={task.createdAt} />
+          {/* A draft waits for its files (`TaskComposer`); it starts once they are in. */}
+          {task.status === "draft" ? <span className="text-meta">· Uploading files…</span> : null}
           {via ? (
             <span className="min-w-0 truncate text-meta" title={via}>
               · {via}
