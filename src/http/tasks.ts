@@ -426,7 +426,7 @@ const createTask = route({
     410: { description: "The task created under this Idempotency-Key was deleted" },
     403: {
       description:
-        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
+        "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -1167,8 +1167,11 @@ export async function handleTasks(
       fingerprint: requestFingerprint("task.create", parsed.body),
     };
     // Answer from the task this key already created, if any. Before the
-    // routing and access checks: the key is scoped to this caller, and a retry
+    // routing and create checks: the key is scoped to this caller, and a retry
     // gets the original task even if the same request would no longer pass.
+    // The replay returns the task as it is now (output included), so it needs
+    // the same session read access as GET /api/tasks/{id}: a revoked share
+    // must not keep reading the task through its old key.
     const replayCreate = async (): Promise<boolean> => {
       const accepted = claim && (await findAcceptedTaskCreate(claim));
       if (!accepted) return false;
@@ -1178,6 +1181,8 @@ export async function handleTasks(
         jsonError(res, "Idempotency-Key was already used for a different request", 409);
       } else if (!task) {
         jsonError(res, "The task this Idempotency-Key created was deleted", 410);
+      } else if (!(await canReadSession(req, myAgentId, task.id))) {
+        jsonError(res, SESSION_READ_DENIED, 403);
       } else {
         res.setHeader(IDEMPOTENT_REPLAYED_HEADER, "true");
         createTask.respond(res, 201, task);
