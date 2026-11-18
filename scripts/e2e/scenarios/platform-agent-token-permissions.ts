@@ -32,7 +32,10 @@ function skillMarkdown(name: string): string {
  */
 export const platformAgentTokenPermissions: Scenario = {
   name: "platform-agent-token-permissions",
-  order: 691,
+  // Before platform-file-import (690), the suite's last restart: the boot sweep fails
+  // in_progress tasks 5 s after a restart, and the strict gate needs that status in the final
+  // database, so nothing may run for long after that restart.
+  order: 666,
   async run(ctx) {
     const worker = await registerWithToken(ctx, "worker");
     const other = await registerWithToken(ctx, "other");
