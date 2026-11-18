@@ -83,6 +83,7 @@ export const KanbanBoard = ({ id, children, className }: KanbanBoardProps) => {
 };
 
 export type KanbanCardProps<T extends KanbanItemProps = KanbanItemProps> = T & {
+  dragEnabled?: boolean;
   children?: ReactNode;
   className?: string;
 };
@@ -92,6 +93,7 @@ export const KanbanCard = <T extends KanbanItemProps = KanbanItemProps>({
   name,
   children,
   className,
+  dragEnabled = true,
 }: KanbanCardProps<T>) => {
   const { attributes, listeners, setNodeRef, transition, transform, isDragging } = useSortable({
     id,
@@ -105,7 +107,12 @@ export const KanbanCard = <T extends KanbanItemProps = KanbanItemProps>({
 
   return (
     <>
-      <div style={style} {...listeners} {...attributes} ref={setNodeRef}>
+      <div
+        style={style}
+        {...(dragEnabled ? listeners : {})}
+        {...(dragEnabled ? attributes : {})}
+        ref={setNodeRef}
+      >
         <Card
           className={cn(
             "cursor-grab gap-4 rounded-md p-3 shadow-sm",
