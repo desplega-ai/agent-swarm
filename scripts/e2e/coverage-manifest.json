@@ -346,6 +346,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "onboarding-embedding-endpoint-guard": {
+      "description": "The embeddings probe goes through the DNS-resolving outbound guard: a loopback endpoint in development, a refused hostname in production, and the deployment's own endpoint still probed",
+      "scenarios": ["onboarding-embedding-endpoint-guard"]
+    },
     "github-app-worker-tokens": {
       "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
       "scenarios": ["github-installation-token-repos"]
@@ -566,6 +570,10 @@
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
       "scenarios": ["slack-skipped-task-legacy", "slack-skipped-task-v2"]
+    },
+    "slack-upload-path-bounds": {
+      "description": "slack-upload-file by filePath reads only files inside /workspace: outside paths, climbs and outward symlinks are refused, /workspace/shared files upload",
+      "scenarios": ["slack-upload-path-bounds"]
     },
     "task-attachments-local-fs": {
       "description": "Upload, list, download byte for byte, delete a task attachment on the local-fs provider",
