@@ -287,6 +287,8 @@ import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import {
+  invalidConfigKeyError,
+  isApiProcessControlEnvKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -6669,46 +6671,6 @@ export function maskSecrets(configs: SwarmConfig[]): SwarmConfig[] {
 }
 
 /**
- * Write config values to .env files on disk when `envPath` is set.
- * Groups configs by envPath, reads existing file, updates/adds matching keys, writes back.
- */
-function writeEnvFile(configs: SwarmConfig[]): void {
-  const { readFileSync, writeFileSync } = require("node:fs");
-
-  const byPath = new Map<string, SwarmConfig[]>();
-  for (const config of configs) {
-    if (!config.envPath) continue;
-    const existing = byPath.get(config.envPath) ?? [];
-    existing.push(config);
-    byPath.set(config.envPath, existing);
-  }
-
-  for (const [envPath, entries] of byPath) {
-    let lines: string[] = [];
-    try {
-      const content = readFileSync(envPath, "utf-8") as string;
-      lines = content.split("\n");
-    } catch {
-      // File doesn't exist yet, start empty
-    }
-
-    for (const entry of entries) {
-      const prefix = `${entry.key}=`;
-      const lineIndex = lines.findIndex((l) => l.startsWith(prefix));
-      const newLine = `${entry.key}=${entry.value}`;
-      if (lineIndex >= 0) {
-        lines[lineIndex] = newLine;
-      } else {
-        lines.push(newLine);
-      }
-    }
-
-    const output = `${lines.filter((l) => l !== "").join("\n")}\n`;
-    writeFileSync(envPath, output, "utf-8");
-  }
-}
-
-/**
  * List config entries with optional filters.
  */
 export async function getSwarmConfigs(filters?: {
@@ -6742,7 +6704,8 @@ export async function getSwarmConfigs(filters?: {
 /**
  * Global configs that are allowed to flow into process.env.
  * Reserved env-only keys are filtered in SQL before decryption so a corrupted
- * legacy reserved row cannot block startup or reload.
+ * legacy reserved row cannot block startup or reload. Process-control keys
+ * (`isApiProcessControlEnvKey`) and keys that cannot be env names stay out too.
  */
 export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
@@ -6751,7 +6714,14 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
          AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
        ORDER BY key ASC`,
   );
-  return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);
+  return rows
+    .filter(
+      (row) =>
+        !isInternalConfigKey(row.key) &&
+        !isApiProcessControlEnvKey(row.key) &&
+        !invalidConfigKeyError(row.key),
+    )
+    .map(rowToSwarmConfig);
 }
 
 /**
@@ -6805,6 +6775,8 @@ export async function upsertSwarmConfig(data: {
   /** Omitted: an update keeps the stored flag; an insert uses `defaultExportToEnv`. */
   exportToEnv?: boolean;
 }): Promise<SwarmConfig> {
+  const keyError = invalidConfigKeyError(data.key);
+  if (keyError) throw new Error(keyError);
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
@@ -6889,17 +6861,8 @@ export async function upsertSwarmConfig(data: {
   if (!row) throw new Error("Failed to upsert swarm config");
 
   // rowToSwarmConfig transparently decrypts `storedValue` back to plaintext so
-  // the returned object (and downstream writeEnvFile) sees the original value.
+  // the returned object sees the original value.
   const config = rowToSwarmConfig(row);
-
-  // Write to envPath if set
-  if (config.envPath) {
-    try {
-      writeEnvFile([config]);
-    } catch (e) {
-      console.error(`Failed to write env file ${config.envPath}:`, e);
-    }
-  }
 
   if (config.isSecret) {
     registerStoredSecret(config.value, configSecretName(config.key));
