@@ -848,7 +848,11 @@ describe("POST /api/comb/review-batches", () => {
     const ids = [fake.add({ body: "@swarm a" }).id, fake.add({ body: "@swarm b" }).id];
 
     const worker = await createAgent({ name: "review-author", status: "idle" });
-    const parent = await createTaskWithSiblingAwareness("Write a review", { agentId: worker.id });
+    await db.updateAgentProfile(worker.id, { capabilities: ["review"] });
+    const parent = await createTaskWithSiblingAwareness("Write a review", {
+      agentId: worker.id,
+      routingAffinity: { capabilities: ["review"] },
+    });
     const input = { ...batch(ids, "/comb-qa/"), parentTaskId: parent.id };
     const other = await createAgent({ name: "other-worker", status: "idle" });
     expect((await post(input, { "X-Agent-ID": other.id })).status).toBe(403);
@@ -860,6 +864,7 @@ describe("POST /api/comb/review-batches", () => {
     expect(child?.task).toContain("Scope: /comb-qa/ (");
     expect(child?.parentTaskId).toBe(parent.id);
     expect(child?.agentId).toBe(worker.id);
+    expect(child?.routingAffinity?.capabilities).toEqual([]);
 
     const again = await post(input);
     expect(again.status).toBe(409);
