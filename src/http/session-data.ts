@@ -350,7 +350,7 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
-      await createSessionLogs({
+      const stored = await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
@@ -367,10 +367,9 @@ export async function handleSessionData(
           console.warn("[HTTP] Failed to refresh session liveness from session logs:", error);
         }
       }
-      createSessionLogsRoute.respond(res, 201, {
-        success: true,
-        count: parsed.body.lines.length,
-      });
+      // The stored count, not the posted one: a session past its byte budget
+      // keeps only a prefix, or nothing at all.
+      createSessionLogsRoute.respond(res, 201, { success: true, count: stored });
     } catch (error) {
       console.error("[HTTP] Failed to create session logs:", error);
       jsonError(res, "Failed to store session logs", 500);

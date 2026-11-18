@@ -18,6 +18,18 @@ export function sessionLogByteLength(value: string): number {
   return encoder.encode(value).length;
 }
 
+/**
+ * What one row costs against the session budget. Floored, because a row of
+ * empty strings still costs a SQLite row and its index entries: charging only
+ * `content` would let a flood of blank lines grow the table forever without
+ * ever exhausting the budget.
+ */
+const SESSION_LOG_ROW_OVERHEAD_BYTES = 128;
+
+export function sessionLogRowCost(content: string): number {
+  return sessionLogByteLength(content) + SESSION_LOG_ROW_OVERHEAD_BYTES;
+}
+
 export function sessionLogBudgetBytes(): number {
   const raw = Number(process.env.SESSION_LOG_SESSION_MAX_MB);
   const mb = Number.isFinite(raw) && raw > 0 ? raw : SESSION_LOG_SESSION_MAX_MB_DEFAULT;

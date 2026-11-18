@@ -231,7 +231,7 @@ import {
   boundSessionLogLine,
   sessionLogBudgetBytes,
   sessionLogBudgetMarker,
-  sessionLogByteLength,
+  sessionLogRowCost,
 } from "./db/session-log-bounds";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
@@ -4891,13 +4891,15 @@ function rowToSessionLog(row: SessionLogRow): SessionLog {
   };
 }
 
+/** Stores a worker log batch. Returns the rows actually stored, which is below
+ * `lines.length` once the session's byte budget runs out. */
 export async function createSessionLogs(logs: {
   taskId?: string;
   sessionId: string;
   iteration: number;
   cli: string;
   lines: string[];
-}): Promise<void> {
+}): Promise<number> {
   // Bounded batches, one short transaction each (reference shape:
   // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
   // counts, and a single transaction across thousands of scrub+INSERT
@@ -4907,6 +4909,7 @@ export async function createSessionLogs(logs: {
   const BATCH_SIZE = 200;
   const budget = sessionLogBudgetBytes();
   let exhausted = false;
+  let stored = 0;
   for (let start = 0; start < logs.lines.length && !exhausted; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
     if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
@@ -4928,25 +4931,27 @@ export async function createSessionLogs(logs: {
       // Budget accounting shares this transaction with the inserts, so two
       // concurrent batches cannot both spend the same remaining bytes: the
       // second one blocks on the write lock and then reads the first's total.
-      const spent =
-        (
-          await tx.get<{ bytes: number; exhaustedAt: string | null }>(
-            "SELECT bytes, exhaustedAt FROM session_log_bytes WHERE sessionId = ?",
-            [logs.sessionId],
-          )
-        )?.bytes ?? 0;
-      if (spent >= budget) {
+      const account = await tx.get<{ bytes: number; exhaustedAt: string | null }>(
+        "SELECT bytes, exhaustedAt FROM session_log_bytes WHERE sessionId = ?",
+        [logs.sessionId],
+      );
+      // `exhaustedAt`, not a byte comparison: the batch stops *before* the row
+      // that would cross, so a spent session's total stays under the bound.
+      if (account?.exhaustedAt) {
         exhausted = true;
         return;
       }
-      let written = spent;
+      let written = account?.bytes ?? 0;
       for (const [index, { content }] of batch.entries()) {
-        written += sessionLogByteLength(content);
-        if (written >= budget) {
-          batch.length = index + 1;
+        const next = written + sessionLogRowCost(content);
+        if (next > budget) {
+          // Stop before the row that crosses, so the stored total never passes
+          // the configured bound.
+          batch.length = index;
           exhausted = true;
           break;
         }
+        written = next;
       }
       if (exhausted) {
         console.warn(
@@ -4954,10 +4959,13 @@ export async function createSessionLogs(logs: {
             budget / (1024 * 1024),
           )} MB budget; dropping further logs for this session`,
         );
+        // The marker is the one row allowed past the bound: it is what tells a
+        // reader the transcript is cut rather than finished.
         const marker = sessionLogBudgetMarker(logs.sessionId, budget);
         batch.push({ content: marker, reasoning: extractReasoning(logs.cli, marker) });
-        written += sessionLogByteLength(marker);
+        written += sessionLogRowCost(marker);
       }
+      stored += batch.length;
       await tx.run(
         `INSERT INTO session_log_bytes (sessionId, bytes, exhaustedAt)
          VALUES (?, ?, ?)
@@ -5016,6 +5024,7 @@ export async function createSessionLogs(logs: {
       }
     });
   }
+  return stored;
 }
 
 // Session log reads order by rowid, which is insert order. Rows written before

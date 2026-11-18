@@ -49,26 +49,34 @@ export const coreSessionLogBounds: Scenario = {
     try {
       const budgetSession = `core-slb-budget-${ctx.nonce}`;
       const chunk = "y".repeat(100 * 1024);
-      expectStatus(
-        await ctx.api("POST", "/api/session-logs", {
-          body: {
-            sessionId: budgetSession,
-            iteration: 1,
-            cli: "opencode",
-            lines: Array.from({ length: 40 }, () => chunk),
-          },
-        }),
-        [201],
-        "store a batch that crosses the budget",
+      const crossing = await ctx.api("POST", "/api/session-logs", {
+        body: {
+          sessionId: budgetSession,
+          iteration: 1,
+          cli: "opencode",
+          lines: Array.from({ length: 40 }, () => chunk),
+        },
+      });
+      expectStatus(crossing, [201], "store a batch that crosses the budget");
+      // The response reports what was stored, not what was posted.
+      const reported = asRecord(crossing.json).count;
+      expect(
+        typeof reported === "number" && reported < 40,
+        `A truncated batch must report fewer than the 40 posted lines, got ${String(reported)}`,
       );
       const written = ctx.db.query<{ content: string }>(
         "SELECT content FROM session_logs WHERE sessionId = ? ORDER BY rowid",
         [budgetSession],
       );
-      const bytes = written.reduce((sum, row) => sum + row.content.length, 0);
+      const bytes =
+        ctx.db.get<{ bytes: number }>(
+          "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
+          [budgetSession],
+        )?.bytes ?? 0;
+      // The marker is the only row allowed past the bound.
       expect(
-        bytes < 4 * 1024 * 1024,
-        `A 1 MB budget must stop well before the 4 MB the batch carries, stored ${bytes}`,
+        bytes <= 1024 * 1024 + 1024,
+        `A 1 MB budget must bound the stored bytes, stored ${bytes}`,
       );
       expect(
         written.at(-1)?.content.includes("session_log_budget_exhausted") === true,

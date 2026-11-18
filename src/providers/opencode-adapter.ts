@@ -615,19 +615,42 @@ function boundedToolText(value: string): string {
 }
 
 /**
- * Bound a tool's input for persistence. String fields are truncated in place so
- * the shape stays usable by the dashboard and the context preamble, both of
- * which read `args` field by field.
+ * A whole `args` object may hold several bounded strings, so its aggregate
+ * ceiling is looser than any single field's. Past it the shape is dropped for a
+ * preview: the alternative is a worker-memory spike on one pathological call.
+ */
+const TOOL_ARGS_MAX_CHARS = 4 * TOOL_PAYLOAD_MAX_CHARS;
+const TOOL_ARGS_MAX_DEPTH = 8;
+
+/** Truncate every string in `input`, at any depth. */
+function boundStringsDeep(input: unknown, depth: number): unknown {
+  if (typeof input === "string") return boundedToolText(input);
+  if (!input || typeof input !== "object") return input;
+  if (depth >= TOOL_ARGS_MAX_DEPTH) return { truncated: true, reason: "max depth" };
+  if (Array.isArray(input)) return input.map((item) => boundStringsDeep(item, depth + 1));
+  const bounded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    bounded[key] = boundStringsDeep(value, depth + 1);
+  }
+  return bounded;
+}
+
+/**
+ * Bound a tool's input for persistence. Strings are truncated in place so the
+ * shape stays usable by the dashboard and the context preamble, both of which
+ * read `args` field by field.
  */
 function boundedToolArgs(input: unknown): unknown {
   if (typeof input === "string") return boundedToolText(input);
   if (!input || typeof input !== "object") return input;
   const serialized = JSON.stringify(input);
   if (serialized === undefined || serialized.length <= TOOL_PAYLOAD_MAX_CHARS) return input;
-  if (Array.isArray(input)) return { truncated: true, preview: boundedToolText(serialized) };
-  const bounded: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    bounded[key] = typeof value === "string" ? boundedToolText(value) : value;
+  const bounded = boundStringsDeep(input, 0);
+  // A wide or deeply nested structure survives per-string truncation and can
+  // still be far over the cap — many fields, or many array items.
+  const reserialized = JSON.stringify(bounded);
+  if (reserialized === undefined || reserialized.length > TOOL_ARGS_MAX_CHARS) {
+    return { truncated: true, preview: boundedToolText(serialized) };
   }
   return bounded;
 }

@@ -837,6 +837,24 @@ describe("OpencodeSession — persisted bytes stay bounded", () => {
     expect(storedBytes(emitted)).toBeLessThan(huge.length);
   });
 
+  test("a tool payload that is wide rather than long is bounded too", async () => {
+    // No single field is over the per-string cap, so only the aggregate
+    // ceiling can catch this one.
+    const nested = {
+      files: Array.from({ length: 400 }, (_, i) => ({
+        path: `/src/file-${i}.ts`,
+        body: "w".repeat(10_000),
+      })),
+    };
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: nested }),
+      succeeded,
+    ]);
+
+    expect(storedBytes(emitted)).toBeLessThan(JSON.stringify(nested).length);
+  });
+
   test("assistant text grows linearly with its parts, not quadratically", async () => {
     const part = "z".repeat(10_000);
     const parts = Array.from({ length: 40 }, (_, ordinal) =>
