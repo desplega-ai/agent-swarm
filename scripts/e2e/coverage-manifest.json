@@ -515,6 +515,10 @@
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
       "scenarios": ["core-sessions", "core-use-case-group"]
     },
+    "session-followup-context": {
+      "description": "The task and session reads a Lead's Sessions follow-up preamble and the composer's parent pick depend on: parentTaskId, isLeadTask, task text and attachments along a Lead / worker / review chain",
+      "scenarios": ["core-session-followup-turns"]
+    },
     "sheets": {
       "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
       "scenarios": [
