@@ -39,7 +39,9 @@
  * Such a send shows at once: the box clears as soon as the draft exists, and
  * in Sessions the draft goes straight into the session cache, so its turn
  * shows while the files upload (the bubble says "Uploading files…"). A failed
- * send puts the text and the files back in the box.
+ * send puts the text and the files back in the box. Until the send settles,
+ * every box on the draft stays the locked follow-up dock, even when the task
+ * ends or starts meanwhile, so nothing is typed that the outcome would erase.
  *
  * Attachments go out on the follow-up path only: steering carries text. They
  * also survive the swap, and so does focus: the incoming box takes it when
@@ -55,7 +57,7 @@
  * attachments and the mic. Its steers carry `steerSource: "app-page"`.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -144,6 +146,17 @@ export interface TaskComposerProps {
 
 /** What a send does: steer the target, or start a follow-up task from it. */
 export type ComposerMode = "steer" | "follow-up";
+
+/** A follow-up send: its text, parent, and the files that ride on its draft. */
+interface SendInput {
+  task: string;
+  parentTaskId?: string;
+  requestedByUserId?: string;
+  attachments: File[];
+}
+
+/** The send's mutation key: one per draft, so every box on it sees the send. */
+const SEND_KEY = (draftKey: string) => ["task-composer", "send", draftKey] as const;
 
 /**
  * The mode the composer is in. Files force a follow-up (steering carries
@@ -332,12 +345,10 @@ export function TaskComposer({
   };
 
   const createTask = useMutation({
-    mutationFn: async (input: {
-      task: string;
-      parentTaskId?: string;
-      requestedByUserId?: string;
-      attachments: File[];
-    }) => {
+    // Every box on this draft (the task page's steer and follow-up boxes, a
+    // session open twice) sees the send, and stays locked while files upload.
+    mutationKey: draftKey ? SEND_KEY(draftKey) : undefined,
+    mutationFn: async (input: SendInput) => {
       setAttachmentError(null);
       setUploadedCount(0);
       // A draft (#1240) until its uploads settle, so no worker claims it
@@ -407,9 +418,13 @@ export function TaskComposer({
         warnNotStarted();
       }
       invalidateSent(created.id, input.parentTaskId);
-      setDraft("");
-      citations?.clear();
-      setAttachments(failed);
+      // A send with files cleared the box at `showDraft`: what is there now
+      // (a file or a citation added since) is new, so it stays.
+      if (input.attachments.length === 0) {
+        setDraft("");
+        citations?.clear();
+      }
+      setAttachments((current) => [...failed, ...current]);
       setAttachmentError(startedWithout);
       // Stay put while files wait in the box: navigating would drop them.
       if (!startedWithout) onCreated?.(created);
@@ -419,7 +434,7 @@ export function TaskComposer({
       toast.error(error.message);
       // `showDraft` cleared the box; the send failed, so it all comes back.
       setDraft(input.task);
-      setAttachments(input.attachments);
+      setAttachments((current) => [...input.attachments, ...current]);
       // The draft shows in the session.
       invalidateSent(error.taskId, input.parentTaskId);
     },
@@ -435,9 +450,28 @@ export function TaskComposer({
   });
   const sending = onFollowUp ? callerFollowUp : createTask;
 
+  // The files of a send in flight on this draft, from this box or another
+  // one (`SEND_KEY`): the box itself is already empty (`showDraft`).
+  const filesInFlight = useMutationState({
+    filters: {
+      mutationKey: draftKey ? SEND_KEY(draftKey) : undefined,
+      status: "pending",
+      // No draft key, no shared send: an unkeyed filter would match every mutation.
+      predicate: () => !!draftKey,
+    },
+    select: (mutation) =>
+      (mutation.state.variables as SendInput | undefined)?.attachments.length ?? 0,
+  });
+  const ownFiles = createTask.isPending ? (createTask.variables?.attachments.length ?? 0) : 0;
+  const sendingFiles = Math.max(ownFiles, ...filesInFlight);
+  // Until those files settle (upload, promotion, or a failed send putting the
+  // text and files back) the box is the locked follow-up dock, whatever the
+  // task does meanwhile: anything typed now would be cleared or overwritten.
+  const holdingFiles = sendingFiles > 0;
+
   const submit = () => {
     const message = messageWithCitations(draft, citations);
-    if (!message || sending.isPending) return;
+    if (!message || sending.isPending || holdingFiles) return;
     if (onFollowUp) {
       callerFollowUp.mutate({ text: message, parentTaskId: targetTask?.id ?? rootTaskId });
       return;
@@ -450,18 +484,19 @@ export function TaskComposer({
     });
   };
 
-  // The files being sent: the box itself is already empty (`showDraft`).
-  const sendingFiles = createTask.isPending ? (createTask.variables?.attachments.length ?? 0) : 0;
-  const pendingLabel =
-    sendingFiles > 0
-      ? uploadedCount > 0
-        ? `Uploading ${uploadedCount}/${sendingFiles}…`
-        : "Creating task…"
-      : "Sending…";
+  // Another box's send shows no upload count here.
+  const pendingLabel = !holdingFiles
+    ? "Sending…"
+    : ownFiles === 0
+      ? "Uploading files…"
+      : uploadedCount > 0
+        ? `Uploading ${uploadedCount}/${ownFiles}…`
+        : "Creating task…";
 
   // Steering carries text only, so a message with attachments goes out as a
   // follow-up task instead.
-  const steerTarget = attachments.length === 0 && canSteer && maySteer ? targetTask : null;
+  const steerTarget =
+    attachments.length === 0 && !holdingFiles && canSteer && maySteer ? targetTask : null;
 
   const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);
@@ -481,7 +516,11 @@ export function TaskComposer({
   const extraActions = onFollowUp ? null : (
     <>
       {renderActions?.(addAttachment)}
-      <RecordAudioButton recorder={recorder} disabled={!userId || createTask.isPending} bar={bar} />
+      <RecordAudioButton
+        recorder={recorder}
+        disabled={!userId || createTask.isPending || holdingFiles}
+        bar={bar}
+      />
     </>
   );
 
@@ -534,7 +573,7 @@ export function TaskComposer({
         onChange={setDraft}
         citations={citations}
         onSubmit={submit}
-        isPending={sending.isPending}
+        isPending={sending.isPending || holdingFiles}
         isError={sending.isError}
         errorMessage={sending.error instanceof Error ? sending.error.message : "Failed to send"}
         pendingLabel={onFollowUp ? "Sending…" : pendingLabel}

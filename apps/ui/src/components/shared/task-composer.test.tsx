@@ -608,6 +608,139 @@ describe("TaskComposer on Sessions, while files upload", () => {
     expect(promoted).toEqual(["follow-up"]);
     await unmount();
   });
+
+  const steerBox = (container: HTMLElement) =>
+    container.querySelector('[data-testid="steer-composer"]') !== null;
+  const boxLocked = (container: HTMLElement) =>
+    (container.querySelector("textarea") as HTMLTextAreaElement | null)?.disabled === true;
+
+  test("a file sent to a running lead keeps the locked dock until the upload settles, even when the task ends", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const composer = (task: never, canSteer: boolean) => (
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={task}
+        canSteer={canSteer}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />
+    );
+    const { container, rerender, unmount } = await mount(composer(runningLeadTask, true));
+    await attachAndSend(container);
+
+    // The box is empty, but the send is not done: no steer box to type into.
+    expect(promoteCalls).toEqual([]);
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+    // The task ends and starts again meanwhile: still the locked dock.
+    await rerender(composer(completedWorkerTask, false));
+    expect(boxLocked(container)).toBe(true);
+    await rerender(composer(runningLeadTask, true));
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+
+    release();
+    await waitFor(() => promoted.length === 1);
+    await act(async () => {});
+    // Sent: steering is back for the running task.
+    expect(steerBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a failed file send to a running lead puts its text and file back in the dock", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={runningLeadTask}
+        canSteer
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+
+    release();
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    await waitFor(() => !boxLocked(container));
+    expect(steerBox(container)).toBe(false);
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a box that mounts on the same draft mid-send stays locked until the send settles", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    // The task page: the steer box sends, the task ends, the follow-up box
+    // under the outcome replaces it on the same draft.
+    const steerSlot = (
+      <TaskComposer
+        key="steer"
+        targetTask={runningLeadTask}
+        canSteer
+        draftKey="task:b1-swap"
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />
+    );
+    const outcomeSlot = (
+      <TaskComposer
+        key="outcome"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        draftKey="task:b1-swap"
+      />
+    );
+    const { container, rerender, unmount } = await mount(steerSlot);
+    await attachAndSend(container);
+    await rerender(outcomeSlot);
+    expect(boxLocked(container)).toBe(true);
+    expect(container.textContent).toContain("Uploading files…");
+
+    release();
+    await waitFor(() => promoted.length === 1);
+    await waitFor(() => !boxLocked(container));
+    expect(textOf(container)).toBe("");
+    await unmount();
+  });
+
+  test("a failed file send keeps the cited passage, quoted in the text, for the retry", async () => {
+    rejectUploads = true;
+    function Cited() {
+      const [quotes, setQuotes] = useState(["quoted passage"]);
+      return (
+        <TaskComposer
+          targetTask={completedWorkerTask}
+          canSteer={false}
+          citations={{ quotes, remove: () => {}, clear: () => setQuotes([]) }}
+          renderActions={(add) => (
+            <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          )}
+        />
+      );
+    }
+    const { container, unmount } = await mount(<Cited />);
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    expect(textOf(container)).toContain("> quoted passage");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
 });
 
 describe("TaskComposer focus across a mode swap", () => {
