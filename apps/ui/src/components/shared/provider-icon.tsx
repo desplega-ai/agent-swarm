@@ -80,6 +80,17 @@ function HelmcodeIcon(props: IconProps) {
   );
 }
 
+// Z.ai logo mark: the glyph of Z.ai's published brand asset
+// (public/provider-logos/zai.svg), drawn in currentColor.
+function ZaiCodingPlanIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
+    <svg aria-hidden {...ICON_BASE} {...props}>
+      <path d="M12.105 2L9.927 4.953H.653L2.83 2h9.276zM23.254 19.048L21.078 22h-9.242l2.174-2.952h9.244zM24 2L9.264 22H0L14.736 2H24z" />
+    </svg>
+  );
+}
+
 function VercelIcon(props: IconProps) {
   return (
     // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, provider label provides accessible name
@@ -98,6 +109,7 @@ const ICON_BY_PROVIDER: Record<ProviderIconKey, (p: IconProps) => ReactElement> 
   amp: AmpMark,
   nan: NanIcon,
   helmcode: HelmcodeIcon,
+  "zai-coding-plan": ZaiCodingPlanIcon,
 };
 
 export interface ProviderIconProps extends IconProps {
