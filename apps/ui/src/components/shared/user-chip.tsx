@@ -1,13 +1,12 @@
 import type { User } from "@/api/types";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { userInitials } from "@/lib/user-initials";
 import { cn } from "@/lib/utils";
 
-export function userInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (name.trim().slice(0, 2) || "?").toUpperCase();
-}
+// Lives in lib so `UserAvatar` can use it without importing this file back.
+export { userInitials };
 
 /**
  * A person, by name, with an initials avatar. The stored reference (user id or
@@ -48,12 +47,16 @@ export function UserChip({
             className,
           )}
         >
-          <span
-            aria-hidden
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-mono text-[10px] font-semibold text-foreground"
-          >
-            {user ? userInitials(name) : "?"}
-          </span>
+          {user?.avatar ? (
+            <UserAvatar id={user.id} name={name} avatar={user.avatar} className="size-5" />
+          ) : (
+            <span
+              aria-hidden
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-mono text-[10px] font-semibold text-foreground"
+            >
+              {user ? userInitials(name) : "?"}
+            </span>
+          )}
           <span className={cn("min-w-0 truncate font-medium", !user && "font-mono text-[11px]")}>
             {name}
           </span>

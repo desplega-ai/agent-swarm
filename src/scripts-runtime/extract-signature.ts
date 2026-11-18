@@ -1,9 +1,15 @@
 import ts from "typescript";
+import { DURABLE_OBJECT_RESERVED_METHODS } from "./durable-object-base";
 
-export type ScriptSignature = {
+type MethodSignature = {
   argsType: string;
   resultType: string;
   description: string;
+};
+
+export type ScriptSignature = MethodSignature & {
+  kind?: "durable";
+  methods?: Record<string, MethodSignature>;
 };
 
 const FALLBACK_SIGNATURE: ScriptSignature = {
@@ -61,7 +67,96 @@ export function extractScriptSignature(source: string): ScriptSignature {
     ).parseDiagnostics;
     if (parseDiagnostics && parseDiagnostics.length > 0) return FALLBACK_SIGNATURE;
 
+    const durableNames = new Set<string>();
+    const durableNamespaces = new Set<string>();
+    const classes = new Map<string, ts.ClassDeclaration>();
     for (const statement of sourceFile.statements) {
+      if (ts.isClassDeclaration(statement) && statement.name) {
+        classes.set(statement.name.text, statement);
+      }
+      if (
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === "swarm-sdk"
+      ) {
+        const bindings = statement.importClause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          durableNamespaces.add(bindings.name.text);
+        }
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const binding of bindings.elements) {
+            if ((binding.propertyName ?? binding.name).text === "DurableObject") {
+              durableNames.add(binding.name.text);
+            }
+          }
+        }
+      }
+    }
+
+    for (const statement of sourceFile.statements) {
+      const exportedClass =
+        ts.isClassDeclaration(statement) && isExportDefault(statement)
+          ? statement
+          : ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)
+            ? classes.get(statement.expression.text)
+            : undefined;
+      const lineage: ts.ClassDeclaration[] = [];
+      let current = exportedClass;
+      let durable = false;
+      while (current && !lineage.includes(current)) {
+        lineage.push(current);
+        const base = current.heritageClauses?.find(
+          (clause) => clause.token === ts.SyntaxKind.ExtendsKeyword,
+        )?.types[0]?.expression;
+        if (
+          base &&
+          ((ts.isIdentifier(base) && durableNames.has(base.text)) ||
+            (ts.isPropertyAccessExpression(base) &&
+              ts.isIdentifier(base.expression) &&
+              durableNamespaces.has(base.expression.text) &&
+              base.name.text === "DurableObject"))
+        ) {
+          durable = true;
+          break;
+        }
+        current = base && ts.isIdentifier(base) ? classes.get(base.text) : undefined;
+      }
+      if (durable && exportedClass) {
+        const methods: Record<string, MethodSignature> = Object.create(null);
+        const seen = new Set<string>();
+        for (const declaration of lineage) {
+          for (const member of declaration.members) {
+            if (
+              (ts.canHaveModifiers(member) &&
+                ts
+                  .getModifiers(member)
+                  ?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)) ||
+              !member.name ||
+              !(ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
+            ) {
+              continue;
+            }
+            const name = member.name.text;
+            if (seen.has(name)) continue;
+            seen.add(name);
+            if (
+              !ts.isMethodDeclaration(member) ||
+              name.startsWith("_") ||
+              DURABLE_OBJECT_RESERVED_METHODS.has(name)
+            ) {
+              continue;
+            }
+            methods[name] = fromFunctionLike(member, sourceFile);
+          }
+        }
+        return {
+          kind: "durable",
+          methods,
+          argsType: "unknown",
+          resultType: "unknown",
+          description: getJsDocDescription(exportedClass, sourceFile),
+        };
+      }
       if (ts.isFunctionDeclaration(statement) && isExportDefault(statement)) {
         return fromFunctionLike(statement, sourceFile);
       }

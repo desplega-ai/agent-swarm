@@ -276,6 +276,7 @@ describe("handlePullRequestClosed", () => {
     expect(result.created).toBe(false);
     const task = await getTaskById(existing.id);
     expect(task?.status).toBe("failed");
+    expect(task?.statusKind).toBe("external");
     expect(task?.failureReason).toBe("PR was merged");
   });
 
@@ -284,6 +285,7 @@ describe("handlePullRequestClosed", () => {
     await handlePullRequestClosed(withPr(rejectedSample, 302), "declined");
     const task = await getTaskById(existing.id);
     expect(task?.status).toBe("failed");
+    expect(task?.statusKind).toBe("external");
     expect(task?.failureReason).toBe("PR was declined");
   });
 

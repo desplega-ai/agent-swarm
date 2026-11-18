@@ -1,6 +1,7 @@
 /**
  * "View all N" on a phone (SPEC R8.5): the group tab's content at full
- * width (its search, filter, pager, and `MobileList`) under a back chevron.
+ * width (its rows as a `MobileList`, then its pager) under one top bar: the
+ * back chevron, the list's title, the search icon, and the filter button.
  * The rows are the list screen's touch rows (one line titles, swipe,
  * long-press), with the same selection bars and Later sheet. A session
  * opened here pushes over it, and back returns to it.
@@ -18,7 +19,7 @@ import type { SwipeSide } from "@/hooks/use-swipe-row";
 import { useUrlSearchState } from "@/hooks/use-url-search-state";
 import { parseGroupPane } from "@/lib/sessions-v2";
 import { sessionDisplayTitle } from "@/lib/utils";
-import { GroupTab } from "../group-tab";
+import { GroupTab, GroupTitle } from "../group-tab";
 import { GroupPanePending, useGroupPane } from "../overview/group-pane";
 import { OverviewTab } from "../overview/overview-tab";
 import { useLastValue } from "../sidebar/point-menu";
@@ -50,6 +51,8 @@ export function MobileGroupScreen({
   onMove: Move;
 }) {
   const backRef = useRef<HTMLButtonElement>(null);
+  // The list draws its title, search, and filter in the top bar.
+  const [bar, setBar] = useState<HTMLElement | null>(null);
   // A use-case group: underline tabs for its Overview and its list (step-10).
   const { searchParams, setParam } = useUrlSearchState();
   const { qualifies, pane } = useGroupPane(view, parseGroupPane(searchParams.get("tab")));
@@ -57,7 +60,8 @@ export function MobileGroupScreen({
     <GroupTab
       view={view}
       onOpen={onOpen}
-      // One page scrolls: the search, the filter, the rows, then the pager.
+      phoneBar={bar}
+      // One page scrolls: the rows, then the pager.
       className="overflow-y-auto overscroll-contain px-4 pt-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       phoneList={(rows, { loading, label }) => (
         <GroupRows
@@ -73,6 +77,8 @@ export function MobileGroupScreen({
     />
   );
   let body: ReactNode = list;
+  // The Overview and the wait for it have no list: the screen draws the title.
+  const listShown = pane !== "pending" && (!qualifies || pane === "list");
   if (pane === "pending") body = <GroupPanePending />;
   else if (qualifies) {
     body = (
@@ -118,7 +124,11 @@ export function MobileGroupScreen({
         backRef={backRef}
         className="border-b-0"
       >
-        <span className="truncate text-base font-medium text-muted-foreground">Sessions</span>
+        {listShown ? (
+          <div ref={setBar} className="flex min-w-0 flex-1 items-center" />
+        ) : (
+          <GroupTitle view={view} />
+        )}
       </MobileTopBar>
       {body}
     </div>
@@ -215,6 +225,7 @@ function GroupRows({
             me={me}
             now={now}
             labels={labels}
+            listGroup={view}
             selected={selection.selected.has(session.root.id)}
             selecting={selection.selectionMode}
             canTriage={triage.canTriage}

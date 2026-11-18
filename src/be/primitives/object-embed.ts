@@ -1,5 +1,5 @@
 import { FilesError } from "@/fs/provider";
-import { buildAgentFsLiveUrl } from "@/utils/constants";
+import { buildAgentFsFileLink } from "@/utils/constants";
 import { agentFsClientFor } from "../agent-fs-identity";
 import { getDbClient, getSwarmConfigs } from "../db";
 import { parseScene } from "./boards/elements";
@@ -73,7 +73,7 @@ async function open(id: string) {
   return { row, owner: row.ownerAgentId, provider: client.provider, scope };
 }
 
-const withLink = (row: Row): PrimitiveObject => ({ ...row, link: buildAgentFsLiveUrl(row) });
+const withLink = (row: Row): PrimitiveObject => ({ ...row, link: buildAgentFsFileLink(row) });
 
 /** agent-fs keeps this drive's rows fresh through `file.changed` (object-webhooks.ts). */
 async function driveWatched(orgId: string, driveId: string): Promise<boolean> {

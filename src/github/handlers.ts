@@ -355,7 +355,9 @@ export async function handlePullRequest(
     }
 
     // Cancel the task
-    const cancelledTask = await failTask(task.id, `Unassigned from GitHub PR #${pr.number}`);
+    const cancelledTask = await failTask(task.id, `Unassigned from GitHub PR #${pr.number}`, {
+      statusKind: "external",
+    });
     if (cancelledTask) {
       console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (unassigned)`);
       return { created: false, taskId: task.id };
@@ -470,6 +472,7 @@ export async function handlePullRequest(
     const cancelledTask = await failTask(
       task.id,
       `Review request removed from GitHub PR #${pr.number}`,
+      { statusKind: "external" },
     );
     if (cancelledTask) {
       console.log(
@@ -756,7 +759,9 @@ export async function handleIssue(
     }
 
     // Cancel the task
-    const cancelledTask = await failTask(task.id, `Unassigned from GitHub issue #${issue.number}`);
+    const cancelledTask = await failTask(task.id, `Unassigned from GitHub issue #${issue.number}`, {
+      statusKind: "external",
+    });
     if (cancelledTask) {
       console.log(`[GitHub] Cancelled task ${task.id} for issue #${issue.number} (unassigned)`);
       return { created: false, taskId: task.id };

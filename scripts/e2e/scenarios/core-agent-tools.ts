@@ -234,12 +234,17 @@ async function userTools(
       { kind: "github", externalId: `octo-${ctx.nonce}` },
     ],
     comms: { language: "es", tone: null },
+    avatar: { type: "lucide", icon: "rocket", color: "#336699" },
   });
   const updated = asRecord(outcome.data.user);
   const comms = asRecord(asRecord(updated.metadata).comms);
   expect(
     updated.role === "cto" && comms.language === "es" && !("tone" in comms),
     `manage-user update merged comms wrongly: ${JSON.stringify(updated.metadata)}`,
+  );
+  expect(
+    asRecord(updated.avatar).icon === "rocket",
+    `manage-user update lost the avatar: ${JSON.stringify(updated.avatar)}`,
   );
   outcome = await expectToolOk(lead, "manage-user", { action: "get", userId });
   expect(asRecord(outcome.data.user).role === "cto", "manage-user get returned a stale user");

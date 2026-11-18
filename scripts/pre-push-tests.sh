@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 # Pre-push unit tests (wired from prek.toml).
 #
-# Runs the root suite under `bun test --parallel=4`, scoped with `--changed` to
-# the test files whose import graph touches what this branch changed since its
-# merge-base with origin/main. Falls back to the FULL suite when:
-#   - origin/main is not available (no merge-base to diff against), or
-#   - the branch touches an input that reaches every test outside the import
-#     graph: migrations (the preload template), templates/ (seeders), the preload
-#     and its preload-only helpers (`--changed` ignores preload imports),
-#     bunfig.toml ([test] config), tsconfig.json (path aliases), bun.lock
-#     (dependency graph), or any package.json change beyond the version field.
-#     merge-gate.yml's "Compute unit-test scope" step uses the same list.
+# Runs, under `bun test --parallel=4`, only the test files nearest to what this
+# branch changed since its merge-base with origin/main, as picked by
+# scripts/pre-push-affected-tests.ts (changed tests, then importers outward up to
+# a per-file budget, then tests that name a non-code file). A push with no
+# affected test runs none. CI stays authoritative: pull requests run the whole
+# `bun test --changed` import graph, and the merge queue runs the full suite.
 #
-# `--changed` must compare against the merge-base, not origin/main itself, or
-# every upstream commit counts as a change. See LOCAL_TESTING.md.
+# Runs the FULL suite instead when:
+#   - PRE_PUSH_FULL=1 is set (the local escape hatch), or
+#   - origin/main is not available (no merge-base to diff against), or
+#   - the branch touches an input every test loads outside the import graph:
+#     the preload and its preload-only helpers, bunfig.toml ([test] config), or
+#     tsconfig.json (path aliases).
+#
 # Keep the explicit 10s timeout in parity with merge-gate.yml and ci.yml;
 # bunfig.toml intentionally sets no global test timeout.
+#
+# One run at a time per user on this machine: the script holds a lock on
+# /tmp/agent-swarm-pre-push-tests-<uid>.lock (flock, or lockf on macOS) for
+# its whole run, and every other worktree waits. Concurrent runs from parallel
+# agents oversubscribe the CPU, and 1 s tests then exceed the 10 s timeout. With
+# no lock tool, the script runs unlocked.
 set -euo pipefail
 
 # git exports GIT_DIR (and friends) to a hook when the push runs from a linked
@@ -25,7 +32,29 @@ set -euo pipefail
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
 
-FULL_RUN_PATHS='^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock)'
+lock_file="/tmp/agent-swarm-pre-push-tests-$(id -u).lock"
+if [[ "${PRE_PUSH_TESTS_LOCKED:-}" != 1 ]]; then
+  try_lock=()
+  hold_lock=()
+  if command -v flock >/dev/null 2>&1; then
+    try_lock=(flock -n "$lock_file" true)
+    hold_lock=(flock "$lock_file")
+  elif command -v lockf >/dev/null 2>&1; then
+    try_lock=(lockf -k -t 0 "$lock_file" true)
+    hold_lock=(lockf -k "$lock_file")
+  fi
+  if [[ "${#hold_lock[@]}" -gt 0 ]]; then
+    if ! "${try_lock[@]}" 2>/dev/null; then
+      echo "[pre-push-tests] waiting for the test run of another worktree ($(cat "$lock_file.owner" 2>/dev/null || echo "owner unknown"))"
+    fi
+    PRE_PUSH_TESTS_LOCKED=1 exec "${hold_lock[@]}" bash "${BASH_SOURCE[0]}" "$@"
+  fi
+fi
+if [[ "${PRE_PUSH_TESTS_LOCKED:-}" == 1 ]]; then
+  echo "pid $$ in $PWD since $(date +%H:%M:%S)" >"$lock_file.owner" 2>/dev/null || true
+fi
+
+FULL_RUN_PATHS='^(src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$)'
 
 # The push compares commits only. `bun run check:local` (scripts/check.sh) sets
 # PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 so uncommitted edits count as changes too.
@@ -94,24 +123,35 @@ elif [[ "$probe_status" -ne 0 ]]; then
   exit "$probe_status"
 fi
 
+if [[ "${PRE_PUSH_FULL:-}" == 1 ]]; then
+  echo "[pre-push-tests] PRE_PUSH_FULL=1; running the full suite"
+  run_full_suite
+fi
+
 if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
   echo "[pre-push-tests] origin/main not found; running the full suite"
   run_full_suite
 fi
 
-if git diff --name-only "$base" ${diff_to:+"$diff_to"} | grep -Eq "$FULL_RUN_PATHS"; then
-  echo "[pre-push-tests] migrations/templates/bunfig/bun.lock changed; running the full suite"
+changed=$(
+  {
+    git diff --name-only "$base" ${diff_to:+"$diff_to"}
+    [[ -n "$diff_to" ]] || git ls-files --others --exclude-standard
+  } | sort -u
+)
+
+if grep -Eq "$FULL_RUN_PATHS" <<<"$changed"; then
+  echo "[pre-push-tests] the preload, bunfig.toml or tsconfig.json changed; running the full suite"
   run_full_suite
 fi
 
-if git diff --name-only "$base" ${diff_to:+"$diff_to"} | grep -qx 'package.json' &&
-  git diff -U0 "$base" ${diff_to:+"$diff_to"} -- package.json |
-    grep -E '^[+-]' |
-    grep -vE '^(\+\+\+|---)' |
-    grep -qvE '^[+-][[:space:]]*"version":'; then
-  echo "[pre-push-tests] package.json changed beyond version; running the full suite"
-  run_full_suite
+# Command substitution, not process substitution: a selector crash must fail the hook.
+selection=$(bun scripts/pre-push-affected-tests.ts <<<"$changed")
+mapfile -t tests <<<"$selection"
+[[ -n "$selection" ]] || tests=()
+if [[ "${#tests[@]}" -eq 0 ]]; then
+  echo "[pre-push-tests] no affected test files since $base; CI runs the rest (PRE_PUSH_FULL=1 runs the full suite)"
+  exit 0
 fi
-
-echo "[pre-push-tests] running tests affected since $base"
-exec bun run test:root -- --timeout 10000 --parallel=4 --changed="$base"
+echo "[pre-push-tests] running ${#tests[@]} affected test file(s) since $base (PRE_PUSH_FULL=1 runs the full suite)"
+exec bun run test:root -- --timeout 10000 --parallel=4 "${tests[@]}"

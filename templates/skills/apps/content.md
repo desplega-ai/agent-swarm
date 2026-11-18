@@ -29,6 +29,8 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 
 For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch` -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. Validation happens before storage, so a rejected update leaves the saved app unchanged. Do not guess at the current definition or use `app-upsert` with a partial definition.
 
+When refreshing row data, write only the diff: read the current rows with `app-rows-list`, then `app-row-patch` the changed rows, `app-rows-create` the new ones, and `app-row-delete` the removed ones. Do not delete every row and recreate it, or recreate the model: a large rewrite can be interrupted partway and leave the app half-populated.
+
 `app-patch` can also change `name`; omit `description` to preserve it or pass `description: null` to clear it.
 
 ### Reading an app's callable surface

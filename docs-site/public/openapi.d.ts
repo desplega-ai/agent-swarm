@@ -6870,6 +6870,9 @@ export interface paths {
                             spendCappedIndices: number[];
                             authFailureFence: number;
                             keyUsage: number[];
+                            keyPace: number[];
+                            /** @enum {string} */
+                            selectionStrategy: "pace" | "usage";
                             activeSessions: number[];
                         };
                     };
@@ -16071,6 +16074,8 @@ export interface paths {
             parameters: {
                 query?: {
                     status?: string;
+                    /** @description Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts. */
+                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                     agentId?: string;
                     scheduleId?: string;
                     workflowRunId?: string;
@@ -16156,6 +16161,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                             }[] | {
@@ -17118,6 +17128,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                                 workflowRunId?: string;
@@ -23629,6 +23644,11 @@ export interface paths {
                                     lastUpdatedAt: string;
                                     /** Format: date-time */
                                     finishedAt?: string;
+                                    /**
+                                     * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                     * @enum {string}
+                                     */
+                                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                     peakContextPercent?: number;
                                     totalCostUsd?: number;
                                 };
@@ -28592,6 +28612,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -29084,6 +29121,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -32528,6 +32582,11 @@ export interface components {
             finishedAt?: string;
             /** Format: date-time */
             notifiedAt?: string;
+            /**
+             * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+             * @enum {string}
+             */
+            statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
             failureReason?: string;
             output?: string;
             progress?: string;
@@ -32607,6 +32666,8 @@ export interface components {
             wasPaused: boolean;
             /** Format: date-time */
             deferredAt?: string;
+            /** Format: date-time */
+            deferredUntil?: string;
             compactionCount?: number;
             peakContextPercent?: number;
             peakContextTokens?: number;
@@ -33590,6 +33651,9 @@ export interface components {
             estTokens: number;
         };
         ScriptRun: {
+            objectScriptId?: string;
+            objectId?: string;
+            objectMethod?: string;
             /** Format: uuid */
             id: string;
             agentId: string;
@@ -33882,6 +33946,23 @@ export interface components {
              */
             status: "invited" | "active" | "suspended";
             mergedIntoUserId?: string | null;
+            avatar?: {
+                /** @enum {string} */
+                type: "lucide";
+                icon: string;
+                color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
+            };
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -36847,6 +36928,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         runs: {
+                            objectScriptId?: string;
+                            objectId?: string;
+                            objectMethod?: string;
                             /** Format: uuid */
                             id: string;
                             agentId: string;
@@ -37549,6 +37633,10 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     source?: string;
+                    object?: {
+                        id: string;
+                        method: string;
+                    };
                     args?: unknown;
                     /** @default  */
                     intent?: string;
@@ -37574,6 +37662,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: unknown;
+                        object?: {
+                            id: string;
+                            stateVersion: number;
+                            destroyed: boolean;
+                        };
                         autoSaved?: {
                             slug: string;
                             reason: string;
@@ -37626,6 +37719,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Object busy, re-entry, or lease lost */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description workspace-rw scripts are not supported in v1 */
             501: {
                 headers: {
@@ -37667,6 +37769,15 @@ export interface operations {
                         results: {
                             name: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;
@@ -37765,6 +37876,15 @@ export interface operations {
                 content: {
                     "application/json": {
                         signature: {
+                            /** @enum {string} */
+                            kind?: "durable";
+                            methods?: {
+                                [key: string]: {
+                                    argsType: string;
+                                    resultType: string;
+                                    description: string;
+                                };
+                            };
                             argsType: string;
                             resultType: string;
                             description: string;
@@ -37921,6 +38041,15 @@ export interface operations {
                             createdAt: string;
                             updatedAt: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;

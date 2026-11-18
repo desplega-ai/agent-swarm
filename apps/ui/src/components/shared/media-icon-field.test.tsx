@@ -30,6 +30,7 @@ mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => nu
 mock.module("@/api/hooks/use-agent-fs", () => ({
   useAgentFsMediaUrl: () => ({ data: undefined }),
 }));
+mock.module("@/components/shared/agent-fs-file-picker", () => ({ AgentFsFilePicker: () => null }));
 for (const [alias, path] of [
   ["@/lib/utils", "../../lib/utils"],
   ["@/lib/agent-color", "../../lib/agent-color"],

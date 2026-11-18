@@ -340,13 +340,27 @@ export const workflowSchedules: Scenario = {
 
       // ── update (PUT) and patch (PATCH) ──────────────────────────────────────
       const beforeNext = String(flow.nextRunAt);
+      // Pick a date two days ahead so offset changes cannot cross a just-passed occurrence.
+      const cronDay = new Date(Date.now() + 48 * HOUR_MS);
+      const cron = `0 4 ${cronDay.getUTCDate()} ${cronDay.getUTCMonth() + 1} *`;
+      const utcOccurrence = Date.UTC(
+        cronDay.getUTCFullYear(),
+        cronDay.getUTCMonth(),
+        cronDay.getUTCDate(),
+        4,
+      );
       const put = await ctx.api("PUT", `/api/schedules/${flowId}`, {
-        body: { cronExpression: "0 4 1 1 *", description: "moved to four", tags: ["e2e", "moved"] },
+        body: {
+          cronExpression: cron,
+          timezone: "UTC",
+          description: "moved to four",
+          tags: ["e2e", "moved"],
+        },
       });
       expectStatus(put, [200], "update a schedule");
       const putJson = asRecord(put.json);
       expect(
-        putJson.cronExpression === "0 4 1 1 *" &&
+        putJson.cronExpression === cron &&
           putJson.description === "moved to four" &&
           (putJson.tags as string[]).join(",") === "e2e,moved" &&
           putJson.workflowId === targetWorkflow &&
@@ -360,8 +374,38 @@ export const workflowSchedules: Scenario = {
       expect(
         asRecord(patch.json).description === "patched" &&
           asRecord(patch.json).priority === 70 &&
-          asRecord(patch.json).cronExpression === "0 4 1 1 *",
+          asRecord(patch.json).cronExpression === cron,
         "patch merges over the stored schedule",
+      );
+      for (const [method, timezone, utcOffset] of [
+        ["PATCH", "Asia/Shanghai", 8],
+        ["PUT", "Etc/GMT+5", -5],
+      ] as const) {
+        const updatedTimezone = await ctx.api(method, `/api/schedules/${flowId}`, {
+          body: { timezone },
+        });
+        expectStatus(updatedTimezone, [200], `${method} changes only the cron timezone`);
+        const schedule = asRecord(updatedTimezone.json);
+        const expectedRun = new Date(utcOccurrence - utcOffset * HOUR_MS).toISOString();
+        expect(
+          schedule.timezone === timezone && schedule.nextRunAt === expectedRun,
+          `${method} recalculates the next run in ${timezone}: expected ${expectedRun}, got ${schedule.nextRunAt}`,
+        );
+      }
+      expectStatus(
+        await ctx.api("PATCH", `/api/schedules/${flowId}`, {
+          body: { timezone: "Invalid/Timezone" },
+        }),
+        [400],
+        "reject an invalid cron timezone",
+      );
+      const intervalTimezone = await ctx.api("PATCH", `/api/schedules/${taskScheduleId}`, {
+        body: { timezone: "Asia/Shanghai" },
+      });
+      expectStatus(intervalTimezone, [200], "update the timezone of an interval schedule");
+      expect(
+        asRecord(intervalTimezone.json).nextRunAt === taskSchedule.nextRunAt,
+        "a timezone edit preserves the next interval run",
       );
       const renamed = await ctx.api("PATCH", `/api/schedules/${flowId}`, {
         body: { name: name("flow-renamed") },

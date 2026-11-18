@@ -24,6 +24,7 @@ import {
   type MetricWidget,
   MetricWidgetSchema,
 } from "../types";
+import { scrubObject } from "../utils/secret-scrubber";
 import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -87,7 +88,9 @@ function resolveVariableOptions(metric: Metric) {
     }
     const options = resolveVariableOptionValues(variable);
     optionsByKey[variable.key] = options;
-    return { ...variable, options };
+    // Options are query output, like widget rows: the response gets a scrubbed copy.
+    // `optionsByKey` keeps the raw values for validation and parameter binding.
+    return { ...variable, options: scrubObject(options) };
   });
   return { variables, optionsByKey };
 }
@@ -162,8 +165,11 @@ function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricP
     widget,
     result: {
       ...result,
-      rows: result.rows.map((row) =>
-        Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+      // Rows can hold secrets pasted into free text: scrub them, as /api/db-query does.
+      rows: scrubObject(
+        result.rows.map((row) =>
+          Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+        ),
       ),
       truncated: result.total > result.rows.length,
       maxRows,
@@ -180,7 +186,8 @@ function runMetric(metric: Metric, providedVariables: Record<string, unknown> = 
       ...metric,
       definition: { ...metric.definition, variables: resolved.variables },
     },
-    variables,
+    // A default can be the first option of an options query, so scrub the echo too.
+    variables: scrubObject(variables),
     widgets,
     // Kept as the first widget result for older callers during the PR cycle.
     result: widgets[0]?.result,

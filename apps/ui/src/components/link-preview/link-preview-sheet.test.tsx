@@ -99,6 +99,9 @@ function Probe() {
   return <output data-testid="preview">{JSON.stringify(panel.preview)}</output>;
 }
 
+const rerunButton = () =>
+  [...document.querySelectorAll("button")].find((b) => b.textContent === "Re-run");
+
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
 
@@ -123,9 +126,15 @@ beforeEach(async () => {
       </QueryClientProvider>,
     ),
   );
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 20));
-  });
+  // The task body loads lazily: wait for the card's button, not for a fixed
+  // time. A cold dynamic import on a busy CI runner outlasts any short sleep.
+  const deadline = Date.now() + 5000;
+  while (!rerunButton()) {
+    if (Date.now() > deadline) throw new Error("the card's Re-run button did not render");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+  }
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -142,7 +151,7 @@ function effectivePointerEvents(el: HTMLElement): string {
 
 describe("a card's Open toast in the mobile preview sheet", () => {
   test("stays clickable while the modal sheet disables the rest of the page", async () => {
-    const rerun = [...document.querySelectorAll("button")].find((b) => b.textContent === "Re-run");
+    const rerun = rerunButton();
     if (!rerun) throw new Error("the card's Re-run button did not render");
     await act(async () => {
       rerun.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));

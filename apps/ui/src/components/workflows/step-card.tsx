@@ -35,9 +35,10 @@ function formatBytes(bytes: number): string {
 }
 
 /** Safely get the JSON string length of a value for byte-size display. */
-function jsonByteSize(value: unknown): number {
+export function jsonByteSize(value: unknown): number {
   try {
-    return typeof value === "string" ? value.length : JSON.stringify(value).length;
+    const str = typeof value === "string" ? value : JSON.stringify(value);
+    return new TextEncoder().encode(str).length;
   } catch {
     return 0;
   }

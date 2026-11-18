@@ -13,6 +13,7 @@ import {
   useDataGridColumns,
 } from "@/components/shared/data-grid";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,25 +74,32 @@ function PeopleTable({
         cellRenderer: (params: { value: string; data: User | undefined }) => {
           if (!params.data) return null;
           return (
-            <div className="flex flex-col py-1 leading-tight">
-              <span className="text-sm font-medium">{params.value}</span>
-              {params.data.email && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-[11px] text-muted-foreground">{params.data.email}</span>
-                  </TooltipTrigger>
-                  {params.data.emailAliases && params.data.emailAliases.length > 0 && (
-                    <TooltipContent>
-                      <div className="text-xs font-medium mb-1">Aliases</div>
-                      <ul className="space-y-0.5 font-mono text-[11px]">
-                        {params.data.emailAliases.map((a) => (
-                          <li key={a}>{a}</li>
-                        ))}
-                      </ul>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              )}
+            <div className="flex items-center gap-2">
+              <UserAvatar
+                id={params.data.id}
+                name={params.data.name}
+                avatar={params.data.avatar ?? null}
+              />
+              <div className="flex flex-col py-1 leading-tight">
+                <span className="text-sm font-medium">{params.value}</span>
+                {params.data.email && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-[11px] text-muted-foreground">{params.data.email}</span>
+                    </TooltipTrigger>
+                    {params.data.emailAliases && params.data.emailAliases.length > 0 && (
+                      <TooltipContent>
+                        <div className="text-xs font-medium mb-1">Aliases</div>
+                        <ul className="space-y-0.5 font-mono text-[11px]">
+                          {params.data.emailAliases.map((a) => (
+                            <li key={a}>{a}</li>
+                          ))}
+                        </ul>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                )}
+              </div>
             </div>
           );
         },
@@ -181,6 +189,7 @@ function PeopleTable({
             to={`/people/${user.id}`}
             title={user.name}
             titleLines={1}
+            leading={<UserAvatar id={user.id} name={user.name} avatar={user.avatar ?? null} />}
             status={<UserStatusPill status={user.status} />}
             meta={[
               user.email,

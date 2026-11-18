@@ -21,6 +21,7 @@ import {
   parseFollowUpGateScheduleIds,
 } from "../utils/follow-up-gate-schedule-ids";
 import { kindForModelString } from "../utils/internal-ai/models";
+import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -84,7 +85,44 @@ const RESERVED_KEYS = new Set([
   "GITHUB_APP_INSTALLATION_ID",
   // Owners whose repos get a token for their own installation; same reason.
   "GITHUB_APP_REPO_OWNERS",
+  // The worker imports this module path into its own process. Deployment env only.
+  "OPENCODE_SDK_PATH",
 ]);
+
+/**
+ * Process-control variables that a global config row must never set in the API
+ * process env: they change how the runtime, the loader or a shell starts any
+ * child the API spawns. Operators may still store them for workers, so they are
+ * not reserved; `getInjectableGlobalConfigs` only leaves them out.
+ */
+const API_PROCESS_CONTROL_ENV_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "SHELL",
+  "ENV",
+  "NODE_ENV",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "BUN_OPTIONS",
+  "GCONV_PATH",
+  "GLIBC_TUNABLES",
+]);
+const API_PROCESS_CONTROL_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_", "BUN_INSPECT"];
+
+export function isApiProcessControlEnvKey(key: string): boolean {
+  const name = key.toUpperCase();
+  return (
+    API_PROCESS_CONTROL_ENV_KEYS.has(name) ||
+    API_PROCESS_CONTROL_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+  );
+}
+
+/** A key that cannot be an environment variable name: `=`, NUL, CR or LF. */
+export function invalidConfigKeyError(key: string): string | null {
+  return ["=", "\0", "\r", "\n"].some((char) => key.includes(char))
+    ? `Invalid config key '${JSON.stringify(key).slice(1, -1)}' (must not contain '=', NUL, CR or LF)`
+    : null;
+}
 
 // Config keys the API server owns for its own use and must NEVER hand out over
 // HTTP or to a script — workers/entrypoints read config to build their env, and
@@ -563,6 +601,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
+  ...enumValidator("CREDENTIAL_SELECTION_STRATEGY", [...CREDENTIAL_SELECTION_STRATEGIES]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
   // `enforce` is deliberately absent: the follow-up gate only records decisions.
   ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
@@ -824,6 +863,8 @@ export function validateConfigEntry(entry: {
   if ((entry.scope === "agent" || entry.scope === "repo") && !entry.scopeId) {
     return "Agent/repo scope requires scopeId";
   }
+  const keyError = invalidConfigKeyError(entry.key);
+  if (keyError) return keyError;
   if (isReservedConfigKey(entry.key)) return reservedKeyError(entry.key).message;
   if (isInternalConfigKey(entry.key)) return internalConfigKeyError(entry.key).message;
   return (

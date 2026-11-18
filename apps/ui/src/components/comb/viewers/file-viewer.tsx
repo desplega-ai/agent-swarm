@@ -18,6 +18,8 @@ export interface ViewerProps {
 const FallbackViewer = lazy(() => import("./fallback-viewer"));
 // HTML is a `text` file with a sandboxed preview next to its source.
 const HtmlViewer = lazy(() => import("./html-viewer"));
+// Boards and sheets: the live ObjectEmbed, with the raw JSON one toggle away.
+const ObjectViewer = lazy(() => import("./object-viewer"));
 
 // Add a viewer = one entry + one component, same as live/ FileViewer.
 export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerProps>>> = {
@@ -28,6 +30,8 @@ export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerP
   audio: lazy(() => import("./audio-viewer")),
   pdf: lazy(() => import("./pdf-viewer")),
   table: lazy(() => import("./table-viewer")),
+  board: ObjectViewer,
+  sheet: ObjectViewer,
   fallback: FallbackViewer,
 };
 

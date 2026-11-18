@@ -4,7 +4,7 @@ import { getApp } from "../apps/store";
 import { normalizeAssetKey } from "../assets/key";
 import { sourceMoveError, sourceOfKey } from "../assets/source-key";
 import { auditAssetKeys } from "../be/asset-key-audit";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AssetKeyMovesBlockedError,
@@ -26,6 +26,7 @@ import {
   AssetKeySchema,
   AssetSummarySchema,
 } from "../types";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { requestPrincipal, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import { canReadSession, hasSessionWrite, SESSION_READ_DENIED } from "./session-access";
@@ -283,7 +284,7 @@ export async function handleAssets(
     try {
       const actor = await resolveHttpRequesterUserId(req, myAgentId);
       const key = parsed.body.key
-        ? await authorizeAssetKeyWrite(parsed.body.key, actor)
+        ? await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key, actor)
         : undefined;
       const mapping = await upsertAssetKeyMapping({
         providerId: parsed.body.providerId,
@@ -382,7 +383,7 @@ export async function handleAssets(
 
     try {
       const actor = await resolveHttpRequesterUserId(req, myAgentId);
-      const key = await authorizeAssetKeyWrite(parsed.body.key, actor);
+      const key = await authorizeHttpAssetKeyWrite(req, myAgentId, parsed.body.key, actor);
       const moved = await moveAssetKey({
         entityType: parsed.params.entityType,
         id: parsed.params.id,

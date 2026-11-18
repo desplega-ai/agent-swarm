@@ -51,10 +51,17 @@ The records below are fictional: three lines on one purchase order, and a confir
 
 | Field | Purchase order, PO-1042 rev 2 | Supplier confirmation | Source | Flag |
 | --- | --- | --- | --- | --- |
-| Line 1 quantity | 400 units | 320 units | Order system; confirmation page 1 | Quantity short |
-| Line 2 promised date | 16 March | 27 March | Order system; confirmation page 2 | Later delivery date |
-| Line 3 unit price | EUR 12.40 | EUR 13.05 | Order system; confirmation page 2 | Unit price change |
-| Revision referenced | rev 2 | rev 1 | Confirmation header | Version conflict |
+| Line 1 quantity | 400 units | 320 units | [PO-1042 rev 2](#record-order-record); [confirmation page 1](#record-supplier-confirmation) | Quantity short |
+| Line 2 promised date | 16 March | 27 March | [PO-1042 rev 2](#record-order-record); [confirmation page 2](#record-supplier-confirmation) | Later delivery date |
+| Line 3 unit price | EUR 12.40 | EUR 13.05 | [PO-1042 rev 2](#record-order-record); [confirmation page 2](#record-supplier-confirmation) | Unit price change |
+| Revision referenced | rev 2 | rev 1 | [PO-1042 rev 2](#record-order-record); [confirmation header](#record-supplier-confirmation) | Version conflict |
+
+### Sources in this example
+
+Every source in the table opens the fictional record it names. The packet carries the same three parts on each line: the record, the place inside it, and the time the run read it.
+
+- <a id="record-order-record" />**Purchase order PO-1042, revision 2.** The approved order as the order system holds it: three lines with item identifiers, quantities, unit prices and promised dates, revision 2 in force. Read at 09:12 on 12 March 2026 through a configured [script connection](/docs/guides/script-connections).
+- <a id="record-supplier-confirmation" />**Supplier confirmation.** A two-page PDF that arrived in the monitored inbox: the line grid on page 1, promised dates and unit prices on page 2, and the order revision it answers stated in the header block. Read at 09:12 on 12 March 2026, in the same run as the order record.
 
 The packet states what the run knows and stops there. It does not say whether the short quantity is a supplier error or a deliberate allocation, or whether the later date breaks a production plan.
 

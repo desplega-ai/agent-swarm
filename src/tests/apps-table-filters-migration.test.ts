@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseAppDefinition } from "../apps/definition";
+import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
 
 /**
  * The "PRs" admin app's table is mostly NONE / NO pills. This patch adopts the
@@ -17,21 +17,6 @@ const selectionPatch = await Bun.file(
 const patch = await Bun.file(new URL("prs-filters-migration.patch.json.txt", fixtures)).json();
 
 type Json = Record<string, unknown>;
-const isObject = (value: unknown): value is Json =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** `pages.<p>.elements.<e>` replaces whole; everything else merges, `null` deletes. */
-function applyMergePatch(target: unknown, patchValue: unknown, path: string[] = []): unknown {
-  const atomicElement = path.length === 4 && path[0] === "pages" && path[2] === "elements";
-  if (!isObject(patchValue) || atomicElement) return patchValue;
-  const out: Json = isObject(target) ? { ...target } : {};
-  for (const [key, value] of Object.entries(patchValue)) {
-    if (value === null) delete out[key];
-    else out[key] = applyMergePatch(out[key], value, [...path, key]);
-  }
-  return out;
-}
-
 /** `parseAppDefinition` checks `scriptId`s against the scripts table; the page is what is under test. */
 function withoutScripts(definition: typeof before) {
   const copy = structuredClone(definition);
@@ -44,8 +29,16 @@ function withoutScripts(definition: typeof before) {
   return copy;
 }
 
-const selected = applyMergePatch(before, selectionPatch.definition) as typeof before;
-const after = applyMergePatch(selected, patch.definition) as typeof before;
+const selection = applyAppDefinitionPatch(before, selectionPatch.definition);
+if (!selection.success) throw new Error(JSON.stringify(selection.issues));
+const selected = selection.definition as typeof before;
+const filtered = applyAppDefinitionPatch(selected, patch.definition);
+if (!filtered.success) throw new Error(JSON.stringify(filtered.issues));
+const after = filtered.definition as typeof before;
+const elements = selected.pages.main.elements as Record<
+  string,
+  { props: Json; children: string[] }
+>;
 type Column = { key: string; kind?: string; filter?: string; muted?: string[]; width?: number };
 const tableOf = (definition: typeof before) =>
   (definition.pages.main.elements as unknown as Record<string, { props: Json }>).prTable!.props as {
@@ -54,22 +47,45 @@ const tableOf = (definition: typeof before) =>
     filterable: boolean;
     clearState: string[];
     columns: Column[];
-    bulkActions: unknown[];
+    bulkActions: { actions: { params: { name: string } }[] }[];
   };
 const table = tableOf(after);
 const column = (key: string) => table.columns.find((c) => c.key === key)!;
 
-describe("PRs app column filters and muted values", () => {
+describe("PRs app selection and filters migrations", () => {
   test("the selection migration and the filters migration, replayed in order, validate", async () => {
-    const parsed = await parseAppDefinition(withoutScripts(after));
-    if (!parsed.success) console.error(parsed.issues);
-    expect(parsed.success).toBe(true);
+    for (const definition of [before, selected, after]) {
+      const parsed = await parseAppDefinition(withoutScripts(definition));
+      if (!parsed.success) console.error(parsed.issues);
+      expect(parsed.success).toBe(true);
+    }
   });
 
   test("the table keeps its selection and gains filters", () => {
+    const selectedTable = tableOf(selected);
+    expect(selectedTable.columns.map((column) => column.key)).not.toContain("selected");
+    expect(elements.mqBtn).toBeUndefined();
+    expect(elements.reviewBtn).toBeUndefined();
+    expect(elements.toolbar!.children.toSorted()).toEqual([
+      "mqPreviewBtn",
+      "reviewPreviewBtn",
+      "search",
+    ]);
+    expect(selectedTable).toMatchObject({ id: "prTable", rowId: "prKey", selectable: true });
+    expect(selectedTable.bulkActions.map((action) => action.actions[0]!.params.name)).toEqual([
+      "enqueue",
+      "askReview",
+    ]);
+    expect(Object.keys(selected.models.pr.columns)).toContain("selected");
+    expect(selected.models).toEqual(before.models);
     expect(table).toMatchObject({ id: "prTable", selectable: true, filterable: true });
     expect(table.bulkActions).toHaveLength(2);
-    expect(tableOf(selected).filterable).toBeUndefined();
+    expect(selectedTable.filterable).toBeUndefined();
+    // Reapplying selection must remove filter properties by replacing the table whole.
+    expect(applyAppDefinitionPatch(after, selectionPatch.definition)).toEqual({
+      success: true,
+      definition: selected,
+    });
   });
 
   test("the all-NONE columns mute their empty values", () => {
@@ -89,7 +105,10 @@ describe("PRs app column filters and muted values", () => {
     expect(table.clearState).toEqual(["/ui/prSearch/value"]);
   });
 
-  test("the patch restates the table element only", () => {
+  test("selection touches page elements and filters restate only the table", () => {
+    expect(Object.keys(selectionPatch.definition)).toEqual(["pages"]);
+    expect(Object.keys(selectionPatch.definition.pages)).toEqual(["main"]);
+    expect(Object.keys(selectionPatch.definition.pages.main)).toEqual(["elements"]);
     expect(Object.keys(patch.definition)).toEqual(["pages"]);
     expect(Object.keys(patch.definition.pages.main.elements)).toEqual(["prTable"]);
   });

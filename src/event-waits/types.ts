@@ -12,6 +12,9 @@ export type EventMatch = Record<string, string | number>;
 /** A provider event reduced to the shared vocabulary (e.g. `vcs.pr.merged`). */
 export type ExternalEvent = { event: string; match: EventMatch };
 
+/** A `confirm` answer; `detail` goes into the wake-up cause (e.g. each required check's conclusion). */
+export type ConfirmResult = { happened: boolean; detail?: string };
+
 export interface ExternalEventAdapter {
   /** Provider id as agents write it in `wakeOn.source`, e.g. `github`. */
   readonly source: string;
@@ -19,8 +22,8 @@ export interface ExternalEventAdapter {
   readonly events: readonly string[];
   /** What `match` holds, for the tool description, e.g. `repo (owner/name), number`. */
   readonly matchHint: string;
-  /** `workflowEventBus` name prefix the provider's webhook handler emits under, e.g. `github.`. */
-  readonly busPrefix: string;
+  /** `workflowEventBus` name prefixes the provider's webhook handler emits under, e.g. `github.pull_request.`. */
+  readonly busPrefixes: readonly string[];
   /** True when `confirm` reads with server-held credentials, so task-scoped tokens may not trigger it. */
   readonly readsWithServerCredentials?: boolean;
   /** False when the provider integration is off, so no event could ever arrive. */
@@ -35,7 +38,7 @@ export interface ExternalEventAdapter {
    * the wait fires only on `true`, and boot re-checks pending waits (a delivery
    * missed while the API was down). Without it, the verified webhook is trusted.
    */
-  confirm?(event: string, match: EventMatch): Promise<boolean>;
+  confirm?(event: string, match: EventMatch): Promise<boolean | ConfirmResult>;
 }
 
 /** Canonical key for lookup: the same match always yields the same string. */
@@ -48,4 +51,8 @@ export function describeEventWait(source: string, event: string, match: EventMat
     .map(([key, value]) => `${key}=${value}`)
     .join(", ");
   return `${event} on ${source} (${target})`;
+}
+
+export function toConfirmResult(result: boolean | ConfirmResult): ConfirmResult {
+  return typeof result === "boolean" ? { happened: result } : result;
 }

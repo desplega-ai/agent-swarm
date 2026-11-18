@@ -262,7 +262,18 @@ export function registryCatalogSections(): Record<string, RegistryCatalogSection
  * providers' models.dev sections cut to agent chat models
  * (`withAgentChatRegistrySections`). A registry section replaces a same-id
  * section in `cache`; `cache` is not mutated.
+ *
+ * A registry provider's section also carries the registry's canonical key
+ * var, whatever name models.dev keys it on (`zai-coding-plan` is
+ * `ZHIPU_API_KEY` there, `ZAI_API_KEY` in the swarm): the registry is the
+ * declaration of record, so the merged catalog reads one name everywhere.
  */
 export function withRegistryCatalogSections<T extends object>(cache: T): T {
-  return { ...withAgentChatRegistrySections(cache), ...registryCatalogSections() };
+  const merged = { ...withAgentChatRegistrySections(cache), ...registryCatalogSections() };
+  const out = merged as Record<string, unknown>;
+  for (const provider of openAICompatibleProviders()) {
+    const section = out[provider.id];
+    if (section) out[provider.id] = { ...section, env: [provider.envVar] };
+  }
+  return merged as T;
 }

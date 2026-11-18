@@ -86,6 +86,7 @@ export function parseComposioArgs(
   if ((method === "GET" || method === "HEAD") && parsed.body !== undefined) {
     throw new Error(`${method} requests cannot include --body`);
   }
+  buildComposioUrl(parsed.baseUrl, parsed.endpoint, []);
 
   return parsed;
 }
@@ -131,6 +132,8 @@ export async function executeComposioRequest(
       body: args.body === undefined ? undefined : JSON.stringify(args.body),
       headers,
       method: args.method,
+      // A redirect would carry the key header to the new host.
+      redirect: "manual",
     });
   } catch (err) {
     return {
@@ -183,9 +186,11 @@ export function composioArgsFromParts(input: {
     throw new Error(`${method} requests cannot include a body`);
   }
   assertRelativeComposioPath(input.endpoint);
+  const baseUrl = input.baseUrl || process.env.COMPOSIO_BASE_URL || DEFAULT_COMPOSIO_BASE_URL;
+  buildComposioUrl(baseUrl, input.endpoint, []);
 
   return {
-    baseUrl: input.baseUrl || process.env.COMPOSIO_BASE_URL || DEFAULT_COMPOSIO_BASE_URL,
+    baseUrl,
     body: input.body,
     endpoint: input.endpoint,
     headers: input.headers ?? {},
@@ -228,6 +233,10 @@ function buildComposioUrl(
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const cleanEndpoint = endpoint.replace(/^\/+/, "");
   const url = new URL(cleanEndpoint, normalizedBase);
+  // The key header is bound to the base URL's host: a path must not change it.
+  if (url.origin !== new URL(normalizedBase).origin) {
+    throw new Error("endpoint must be a Composio API path on the configured base URL");
+  }
   for (const [key, value] of query) {
     url.searchParams.append(key, value);
   }

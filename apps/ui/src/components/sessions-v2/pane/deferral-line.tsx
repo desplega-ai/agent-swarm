@@ -2,7 +2,7 @@ import { ChevronDown, Clock } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import type { AgentTask } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
-import { deferralText, type TurnPart } from "@/lib/session-turns";
+import { deferralText, shownTry, type TurnPart } from "@/lib/session-turns";
 import { cn, formatDuration, parseUTCDate } from "@/lib/utils";
 import { SwarmReply } from "./swarm-reply";
 
@@ -62,15 +62,19 @@ function WaitRow({
 
 /**
  * A reply that only says the swarm waits (the lead deferred): one muted line,
- * "Waiting on Picateclas · by 17:50 · worked 2m 56s" or "Checking back at
+ * "Waiting on Picateclas · resumes by 17:50 · worked 2m 56s" or "Checking back at
  * 19:20 · worked 1m 29s". A click opens the reply as usual: its work and its
  * full text.
  */
 export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: () => void }) {
-  const { who, by } = deferralText(task.output);
+  const { who, by } = deferralText(task.output, task.deferredUntil);
   // A time alone reads "at 16:12"; a day reads as is ("tomorrow 09:00", "11-02 09:00").
   const back = by ? `Checking back ${/^\d{1,2}:\d{2}$/.test(by) ? "at " : ""}${by}` : "Waiting";
-  const label = [who ? `Waiting on ${who}` : back, who && by ? `by ${by}` : null, workedFor(task)]
+  const label = [
+    who ? `Waiting on ${who}` : back,
+    who && by ? `resumes by ${by}` : null,
+    workedFor(task),
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -87,7 +91,10 @@ export function DeferralLine({ task, onToggle }: { task: AgentTask; onToggle?: (
  * Picateclas) · latest by 17:50". It opens one `DeferralLine` per wait.
  */
 export function DeferralGroup({ parts, onToggle }: { parts: TurnPart[]; onToggle?: () => void }) {
-  const texts = parts.map((part) => deferralText(part.reply.output));
+  const texts = parts.map((part) => {
+    const answer = shownTry(part.answer);
+    return deferralText(answer.output, answer.deferredUntil);
+  });
   const names = [...new Set(texts.flatMap((text) => (text.who ? [text.who] : [])))];
   const latest = texts.at(-1)?.by;
   const label = `Waited ${parts.length} times${names.length ? ` (${names.join(", ")})` : ""}${
@@ -97,7 +104,7 @@ export function DeferralGroup({ parts, onToggle }: { parts: TurnPart[]; onToggle
     <WaitRow label={label} onToggle={onToggle}>
       <div className="flex min-w-0 flex-col gap-1 pt-1 pl-5">
         {parts.map((part) => (
-          <DeferralLine key={part.id} task={part.reply} onToggle={onToggle} />
+          <DeferralLine key={part.id} task={shownTry(part.answer)} onToggle={onToggle} />
         ))}
       </div>
     </WaitRow>

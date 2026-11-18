@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { checkHeartbeatChecklist, runHeartbeatSweep } from "../heartbeat/heartbeat";
+import { refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { json } from "./utils";
 
@@ -24,6 +25,7 @@ const triggerSweep = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "heartbeat.trigger" },
 });
 
 const triggerChecklist = route({
@@ -40,6 +42,7 @@ const triggerChecklist = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "heartbeat.trigger" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -52,6 +55,7 @@ export async function handleHeartbeat(
   if (triggerSweep.match(req.method, pathSegments)) {
     const parsed = await triggerSweep.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "heartbeat.trigger")) return true;
 
     try {
       await runHeartbeatSweep();
@@ -66,6 +70,7 @@ export async function handleHeartbeat(
   if (triggerChecklist.match(req.method, pathSegments)) {
     const parsed = await triggerChecklist.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "heartbeat.trigger")) return true;
 
     try {
       await checkHeartbeatChecklist();

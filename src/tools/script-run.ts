@@ -22,6 +22,7 @@ export function renderRunOutput(data: unknown): string | undefined {
     truncated?: { stdout?: boolean; stderr?: boolean };
     autoSaved?: { slug?: string };
     kvSaved?: { namespace?: string; key?: string };
+    object?: { stateVersion?: number };
   };
   const parts: string[] = [];
   if (body.result !== undefined) {
@@ -34,6 +35,9 @@ export function renderRunOutput(data: unknown): string | undefined {
   }
   const notes: string[] = [];
   if (typeof body.durationMs === "number") notes.push(`${body.durationMs}ms`);
+  if (typeof body.object?.stateVersion === "number") {
+    notes.push(`object.stateVersion: ${body.object.stateVersion}`);
+  }
   if (body.truncated?.stdout || body.truncated?.stderr) {
     notes.push("output truncated by the runtime");
   }
@@ -54,6 +58,10 @@ export const registerScriptRunTool = (server: McpServer) => {
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         name: scriptNameSchema.optional().describe("Name of a reusable script to run."),
+        object: z
+          .object({ id: z.string().min(1).max(256), method: z.string().min(1).max(128) })
+          .optional()
+          .describe("Call this object ID and method on the named global DurableObject script."),
         source: z
           .string()
           .min(1)

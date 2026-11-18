@@ -1,5 +1,5 @@
 import { type FileScope, FilesError, normalizeStoredKey } from "@/fs/provider";
-import { buildAgentFsLiveUrl } from "@/utils/constants";
+import { buildAgentFsFileLink } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { agentFsClientFor } from "../agent-fs-identity";
 import { getDbClient } from "../db";
@@ -107,7 +107,7 @@ const REINDEX_LIMITS: ReindexLimits = {
 // shortcut: in-process only; two API replicas can still reindex one drive at once (each pass is safe, just duplicated work).
 const reindexing = new Set<string>();
 
-const withLink = (row: ObjectRow): PrimitiveObject => ({ ...row, link: buildAgentFsLiveUrl(row) });
+const withLink = (row: ObjectRow): PrimitiveObject => ({ ...row, link: buildAgentFsFileLink(row) });
 
 export async function clientFor(agentId: string | undefined) {
   const client = agentId ? await agentFsClientFor(agentId) : undefined;

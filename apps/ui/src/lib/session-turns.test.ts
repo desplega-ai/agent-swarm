@@ -12,6 +12,7 @@ import {
   onlyWaits,
   partSteps,
   type SessionTurns,
+  shownTry,
   type TurnPart,
   workerSummary,
 } from "./session-turns";
@@ -295,17 +296,20 @@ const span = (part: TurnPart) => formatSpan(summary(part)?.durationMs ?? 0);
 const stepShape = (part: TurnPart) =>
   partSteps(part).map((s) => `${s.agentId}:${s.taskType}:${s.tries.length}`);
 /** The answers a part shows: the reply, then the result. */
-const answers = (part: TurnPart) => [part.reply.output, part.result?.output];
+const answers = (part: TurnPart) => [
+  shownTry(part.answer).output,
+  part.result ? shownTry(part.result).output : undefined,
+];
 
 /** Every task sits in exactly one place: a reply, a try, a handoff, a result, a live line, or rest. */
 function placedIds({ turns, rest }: SessionTurns): string[] {
   return [
     ...turns.flatMap((turn) =>
       turn.parts.flatMap((part) => [
-        part.reply.id,
+        ...part.answer.tries.map((t) => t.id),
         ...partSteps(part).flatMap((step) => step.tries.map((t) => t.id)),
         ...part.internal.map((t) => t.id),
-        ...(part.result ? [part.result.id] : []),
+        ...(part.result?.tries.map((t) => t.id) ?? []),
         ...(part.live ? [part.live.id] : []),
       ]),
     ),
@@ -426,7 +430,7 @@ describe("buildTurns on sB2 (Slack thread, a dashboard reply)", () => {
     expect(summary(parts[1])).toMatchObject({ agentIds: ["reviewer", "coder"], retries: 2 });
     expect(summary(parts[2])).toMatchObject({ agentIds: ["researcher", "writer", "reviewer"] });
     expect(summary(parts[3])?.retries).toBe(2);
-    expect(parts.map((p) => p.result?.output)).toEqual([
+    expect(parts.map((p) => (p.result ? shownTry(p.result).output : undefined))).toEqual([
       "The checklist is green.",
       "The chart is bumped to 2.5.0 and all checks pass.",
       "Release notes are ready.",
@@ -475,7 +479,7 @@ describe("live lead work never replaces a shown answer", () => {
       }),
     ];
     const part = buildTurns(chain).turns[0].parts[0];
-    expect(part.result?.id).toBe("f1");
+    expect(part.result && shownTry(part.result).id).toBe("f1");
     expect(part.live?.id).toBe("f2");
     expect(part.internal.map((t) => t.id)).toEqual([]);
   });
@@ -560,7 +564,7 @@ describe("real server shapes", () => {
     ];
     const { turns } = buildTurns(chain);
     expect(turns).toHaveLength(1);
-    expect(turns[0].parts[0].result?.id).toBe("retry");
+    expect(turns[0].parts[0].result && shownTry(turns[0].parts[0].result).id).toBe("retry");
   });
 
   test("a dashboard follow-up with no picked user still opens a turn", () => {
@@ -666,6 +670,84 @@ describe("real server shapes", () => {
     expect(stepShape(part)).toEqual(["forge:test:2"]);
     expect(summary(part)).toMatchObject({ retries: 1, state: "done" });
     expect(part.internal.map((t) => t.id)).toEqual(["lr"]);
+  });
+
+  test("the lead's cut reply and its resume are one answer, tried twice", () => {
+    // A deploy drained the lead mid-answer: the person's task is superseded
+    // with no output, and the server's resume of it carries the answer.
+    const chain = [
+      task({
+        id: "r",
+        createdAt: at(60),
+        finishedAt: at(59),
+        source: "ui",
+        requestedByUserId: "alex",
+        status: "superseded",
+        output: "",
+      }),
+      task({
+        id: "r2",
+        createdAt: at(58),
+        finishedAt: at(55),
+        parentTaskId: "r",
+        source: "system",
+        taskType: "resume",
+        tags: ["reason:graceful_shutdown"],
+        output: "Done: the playbook PR is up.",
+      }),
+    ];
+    const model = buildTurns(chain);
+    const part = model.turns[0].parts[0];
+    expect(part.reply.id).toBe("r");
+    expect(part.answer.tries.map((t) => t.id)).toEqual(["r", "r2"]);
+    expect(answers(part)).toEqual(["Done: the playbook PR is up.", undefined]);
+    expect(part.internal).toEqual([]);
+    expect(part.live).toBeUndefined();
+    expect(placedIds(model).sort()).toEqual(["r", "r2"]);
+  });
+
+  test("a resume still running after a cut reply is the answer, not a live line", () => {
+    const chain = [
+      task({ id: "r", createdAt: at(60), source: "ui", status: "superseded", output: "" }),
+      task({
+        id: "r2",
+        createdAt: at(58),
+        parentTaskId: "r",
+        source: "system",
+        taskType: "resume",
+        status: "in_progress",
+      }),
+    ];
+    const part = buildTurns(chain).turns[0].parts[0];
+    expect(shownTry(part.answer).id).toBe("r2");
+    expect(part.live).toBeUndefined();
+  });
+
+  test("a resume of the lead's cut follow-up joins the result's tries", () => {
+    const chain = [
+      task({ id: "r", createdAt: at(60), source: "ui", output: "On it." }),
+      task({
+        id: "f",
+        createdAt: at(50),
+        parentTaskId: "r",
+        source: "system",
+        status: "superseded",
+        output: "",
+      }),
+      task({
+        id: "f2",
+        createdAt: at(48),
+        finishedAt: at(45),
+        parentTaskId: "f",
+        source: "system",
+        taskType: "resume",
+        output: "All merged.",
+      }),
+    ];
+    const part = buildTurns(chain).turns[0].parts[0];
+    expect(part.answer.tries.map((t) => t.id)).toEqual(["r"]);
+    expect(part.result?.tries.map((t) => t.id)).toEqual(["f", "f2"]);
+    expect(part.internal).toEqual([]);
   });
 
   test("a step whose last try was cancelled is cancelled, not done", () => {
@@ -929,6 +1011,18 @@ describe("deferrals", () => {
       by: "11-02 09:00",
     });
     expect(deferralText('{"status":"pending"}')).toEqual({ who: null, by: null });
+    // `deferredUntil` wins over the text's time, rendered in the viewer's local timezone.
+    const now = new Date(2030, 0, 15, 12, 0);
+    const until = (h: number, day = 15) => new Date(2030, 0, day, h, 5).toISOString();
+    expect(deferralText(waiting("Picateclas", "17:50"), until(16), now)).toEqual({
+      who: "Picateclas",
+      by: "16:05",
+    });
+    expect(deferralText("Checking back today at 18:38", until(9, 16), now).by).toBe(
+      "tomorrow 09:05",
+    );
+    expect(deferralText("Checking back today at 18:38", until(9, 20), now).by).toBe("01-20 09:05");
+    expect(deferralText('{"status":"pending"}', until(16), now)).toEqual({ who: null, by: null });
   });
 
   test("a deferred task whose output is schema JSON is not a wait line", () => {

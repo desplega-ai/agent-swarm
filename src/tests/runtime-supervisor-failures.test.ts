@@ -78,6 +78,7 @@ test("eight failed concurrent provisions count one attempt and preserve retry de
   await reconcileOnce({ now: later(now, 120) });
   expect(state.fake.requests).toHaveLength(10);
   expect((await getTaskById(task.id))?.status).toBe("failed");
+  expect((await getTaskById(task.id))?.statusKind).toBe("error");
   expect((await getTaskById(task.id))?.failureReason).toStartWith(
     "provisioning failed after 3 attempts:",
   );

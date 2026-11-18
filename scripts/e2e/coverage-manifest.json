@@ -224,9 +224,17 @@
     }
   ],
   "flows": {
+    "caller-scoped-writes": {
+      "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
+      "scenarios": ["core-caller-scoped-writes"]
+    },
+    "durable-objects": {
+      "description": "Global DurableObject scripts: typecheck, method signatures, and refusal of agent scope and inline execution.",
+      "scenarios": ["script-durable-objects"]
+    },
     "agent-access-tokens": {
-      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
-      "scenarios": ["core-agent-access"]
+      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens; worker tokens need the route permission on swarm-wide admin routes",
+      "scenarios": ["core-agent-access", "platform-agent-token-permissions"]
     },
     "agent-lifecycle": {
       "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
@@ -261,8 +269,8 @@
       "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-primitives"]
     },
     "asset-namespaces": {
-      "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit",
-      "scenarios": ["knowledge-assets"]
+      "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit; an operator-key dashboard writes only its logged-in user's personal keys",
+      "scenarios": ["knowledge-assets", "knowledge-assets-dashboard-user"]
     },
     "audit-attribution": {
       "description": "create, cross-actor update and no-person update record the writing agent and person on scripts, skills, workflows and schedules over HTTP, MCP and a script run's ctx.swarm calls",
@@ -293,6 +301,10 @@
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
       "scenarios": ["platform-config", "platform-lead-tools"]
     },
+    "platform-config-key-guards": {
+      "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
+      "scenarios": ["platform-config-key-guards"]
+    },
     "connector-handoff": {
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]
@@ -314,9 +326,10 @@
       "scenarios": ["script-credential-bindings"]
     },
     "credential-pool": {
-      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side, pool-key config routes and Codex accounts.",
+      "description": "Worker key telemetry (usage, rate limit, auth bench, validation, windows) feeding the available/status read side and its pace ranking, pool-key config routes and Codex accounts.",
       "scenarios": [
         "platform-keys",
+        "platform-key-pace",
         "key-window-usage",
         "platform-pool-keys",
         "platform-codex-accounts"
@@ -459,12 +472,24 @@
       "scenarios": ["script-connections"]
     },
     "script-credential-egress": {
-      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
-      "scenarios": ["script-connections", "script-credential-bindings"]
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value. Bindings resolve from config rows; the API env backs only GITHUB_TOKEN.",
+      "scenarios": [
+        "script-connections",
+        "script-credential-bindings",
+        "script-credential-binding-sources"
+      ]
+    },
+    "platform-secret-egress": {
+      "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
+      "scenarios": ["platform-secret-egress"]
     },
     "script-inline-run": {
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]
+    },
+    "script-input-handling": {
+      "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
+      "scenarios": ["script-input-handling"]
     },
     "script-limits": {
       "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
@@ -477,6 +502,10 @@
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
       "scenarios": ["script-runs-durable", "script-run-storage"]
+    },
+    "script-sandbox-identity": {
+      "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
+      "scenarios": ["script-sandbox-identity"]
     },
     "script-saved-lifecycle": {
       "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",
@@ -509,6 +538,10 @@
     "slack-agent-tools": {
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
       "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+    },
+    "slack-file-download-bounds": {
+      "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
+      "scenarios": ["slack-file-download-bounds"]
     },
     "slack-chat-sdk-http": {
       "description": "Chat SDK Slack adapter in webhook mode with the built-in Slack off, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands as channel posts, signed block_actions accepted without a task, and forged, stale, unsigned and replayed requests",
@@ -547,12 +580,14 @@
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, and the flag-off repro",
+      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
+        "slack-lead-follow-up-card",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
-        "slack-delegation-late-child"
+        "slack-delegation-late-child",
+        "slack-delegation-band-entry"
       ]
     },
     "slack-http-native": {
@@ -566,6 +601,10 @@
         "slack-http-restart-redelivery"
       ]
     },
+    "slack-inbound-gates": {
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
+      "scenarios": ["slack-inbound-gates"]
+    },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
       "scenarios": ["slack-skipped-task-legacy", "slack-skipped-task-v2"]
@@ -578,6 +617,10 @@
       "description": "Cancel, supersede, pause and resume controls with agent status recomputed",
       "scenarios": ["core-task-controls"]
     },
+    "task-status-kind": {
+      "description": "Every terminal write records why the task ended in statusKind (agent, error, cascade, runner, user, graceful_shutdown), and status filters still match every kind",
+      "scenarios": ["core-task-status-kind"]
+    },
     "task-terminal-fence": {
       "description": "A session whose task was superseded is refused send-task and slack-reply, and keeps store-progress and read-only tools",
       "scenarios": ["core-terminal-task-fence"]
@@ -589,6 +632,10 @@
     "task-defer-wake-pr-merged": {
       "description": "defer-task wakeOn vcs.pr.merged (external-event wait, github adapter): refused with GitHub off or an unknown source, already-happened and unreadable targets rejected, an unconfirmed merged webhook wakes nobody, a confirmed one wakes once, the ceiling still fires, a task-scoped token is refused, the 20-wait cap refuses the 21st but not a timer-only defer",
       "scenarios": ["defer-wake-pr-merged"]
+    },
+    "task-defer-wake-pr-checks-done": {
+      "description": "defer-task wakeOn vcs.pr.checks_done (github adapter): rejected when the base branch has no required checks or they already finished, a check_run while a required check still runs wakes nobody, a forged check_run is refused, the same finished delivery twice wakes once with every conclusion",
+      "scenarios": ["defer-wake-pr-checks-done"]
     },
     "task-delegation": {
       "description": "send-task assign, offer, accept, poll-task start, cancel by creator and lead",
@@ -651,9 +698,10 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
+        "workflow-event-subscriber-isolation",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",
@@ -682,9 +730,17 @@
       "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
       "scenarios": ["schedule-target-owner"]
     },
+    "route-caller-identity": {
+      "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
+      "scenarios": ["route-caller-identity"]
+    },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
+    },
+    "outbound-url-guards": {
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, and discovered OAuth endpoints are validated",
+      "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",

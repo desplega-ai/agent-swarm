@@ -87,6 +87,17 @@ export async function loadScenarios(): Promise<Scenario[]> {
       }
       orderOwners.set(scenario.order, scenario.name);
 
+      // .github/workflows/slack-visuals.yml starts on slack-*.ts scenario files only.
+      if (
+        scenario.groups?.some((group) => group.startsWith("visuals-")) &&
+        !file.startsWith("slack-")
+      ) {
+        throw new Error(
+          `"${scenario.name}" (${file}) is in a visuals group. Move it to a slack-*.ts file, ` +
+            "or widen the paths in .github/workflows/slack-visuals.yml.",
+        );
+      }
+
       scenarios.push(scenario);
     }
   }

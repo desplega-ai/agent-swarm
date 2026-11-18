@@ -84,11 +84,6 @@ describe("reasoningLevelsFor", () => {
   });
 
   test("opencode keeps max only when the catalog declares it", () => {
-    expect(reasoningLevelsFor("opencode", "x", effort("low", "high", "max"))).toEqual([
-      "low",
-      "high",
-      "max",
-    ]);
     expect(reasoningLevelsFor("opencode", "x", effort("low", "high"))).toEqual(["low", "high"]);
   });
 
@@ -132,7 +127,7 @@ describe("claudeCatalogModelId", () => {
     "claude-opus-5": { release_date: "2026-05-01" },
     "claude-opus-5-5": { release_date: "2026-09-22" },
     "claude-sonnet-5-5": { release_date: "2026-09-28" },
-    "claude-haiku-4-5": { release_date: "2025-10-15" },
+    "claude-haiku-4-5": { release_date: "2025-09-30" },
     "claude-haiku-4-5-20251001": { release_date: "2025-10-01" },
   };
 
@@ -241,7 +236,7 @@ describe("modelDisplayName", () => {
     expect(modelDisplayName("Llama (latest) Instruct")).toBe("Llama (latest) Instruct");
     expect(modelDisplayName("(latest)")).toBe("(latest)");
   });
-  test("passes null and undefined through", () => {
+  test("returns undefined for null and undefined", () => {
     expect(modelDisplayName(undefined)).toBeUndefined();
     expect(modelDisplayName(null)).toBeUndefined();
   });

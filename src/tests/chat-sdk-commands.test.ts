@@ -140,6 +140,7 @@ describe("Chat SDK slash commands", () => {
     expect(sentTexts(3003).at(-1)).toContain(`Cancelled task ${task!.id.slice(0, 8)}`);
     const cancelled = await getTaskById(task!.id);
     expect(cancelled?.status).toBe("cancelled");
+    expect(cancelled?.statusKind).toBe("user");
     expect(cancelled?.failureReason).toContain("Cancelled from chat by tester");
 
     await postTelegramUpdate(commandUpdate(dm(3003), "/cancel"));

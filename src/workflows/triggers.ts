@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
-import { getWorkflow, getWorkflowsByScheduleId, listWorkflows } from "../be/db";
+import {
+  getWorkflow,
+  getWorkflowsByEventName,
+  getWorkflowsByScheduleId,
+  listWorkflows,
+} from "../be/db";
 import type { ScheduledTask, TriggerConfig } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";
@@ -300,25 +306,29 @@ export async function logOpenWebhookTriggers(): Promise<void> {
 
 /**
  * Start every enabled workflow subscribed to a named in-process event.
- * Returns the workflow run IDs in workflow-list order.
+ * Returns the workflow run IDs in workflow-list order. A failed subscriber
+ * start is logged without preventing delivery to the remaining subscribers.
  */
 export async function handleEventTrigger(
   eventName: string,
   payload: unknown,
   registry: ExecutorRegistry,
 ): Promise<string[]> {
-  const workflows = (await listWorkflows({ enabled: true })).filter((workflow) =>
-    workflow.triggers.some(
-      (trigger) => trigger.type === "event" && trigger.eventName === eventName,
-    ),
-  );
+  const workflows = await getWorkflowsByEventName(eventName);
 
   const runIds: string[] = [];
   for (const workflow of workflows) {
-    const runId = await startWorkflowExecution(workflow, payload, registry, {
-      triggerType: "event",
-    });
-    runIds.push(runId);
+    try {
+      const runId = await startWorkflowExecution(workflow, payload, registry, {
+        triggerType: "event",
+      });
+      runIds.push(runId);
+    } catch (err) {
+      console.error(
+        `[workflows] Failed to start workflow ${workflow.id} for ${eventName} event trigger:`,
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
   return runIds;
 }

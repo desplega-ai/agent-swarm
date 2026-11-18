@@ -5,12 +5,29 @@ import {
   looksLikeText,
   needsSniff,
   SNIFF_MAX_BYTES,
+  swarmObjectId,
 } from "./file-kinds";
 
 describe("getFileKind", () => {
   test("markdown", () => {
     expect(getFileKind("notes.md")).toBe("markdown");
     expect(getFileKind("page.MDX")).toBe("markdown");
+  });
+
+  test("swarm boards and sheets win over the json/text rule", () => {
+    expect(getFileKind("shared/roadmap.excalidraw", "application/json")).toBe("board");
+    expect(getFileKind("plan.EXCALIDRAW")).toBe("board");
+    expect(getFileKind("shared/budget.sheet.json", "application/json")).toBe("sheet");
+    expect(getFileKind("budget.json", "application/json")).toBe("text");
+    expect(getFileKind("sheet.json")).toBe("text");
+  });
+
+  test("swarmObjectId reads swarm.id", () => {
+    expect(swarmObjectId(JSON.stringify({ type: "excalidraw", swarm: { id: "abc" } }))).toBe("abc");
+    expect(swarmObjectId(JSON.stringify({ type: "excalidraw", elements: [] }))).toBeNull();
+    expect(swarmObjectId(JSON.stringify({ swarm: { id: "" } }))).toBeNull();
+    expect(swarmObjectId("null")).toBeNull();
+    expect(swarmObjectId("{not json")).toBeNull();
   });
 
   test("tables", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AgentFsError } from "../agent-fs/client";
 import {
+  hasFileExtension,
   isSearchable,
   isUnknownOpError,
   literalFtsPattern,
@@ -187,5 +188,18 @@ describe("search modes in the URL", () => {
     expect(nextSearchMode("semantic", 1)).toBe("text");
     expect(nextSearchMode("text", 1)).toBe("name");
     expect(nextSearchMode("name", -1)).toBe("text");
+  });
+});
+
+describe("hasFileExtension", () => {
+  test("matches the last extension, ignoring case", () => {
+    expect(hasFileExtension("/a/b/photo.PNG", ["png", "jpg"])).toBe(true);
+    expect(hasFileExtension("/a/b/photo.png.md", ["png"])).toBe(false);
+    expect(hasFileExtension("/a/b.png/readme", ["png"])).toBe(false);
+  });
+
+  test("a dotfile has no extension, and an empty list accepts all", () => {
+    expect(hasFileExtension("/a/.png", ["png"])).toBe(false);
+    expect(hasFileExtension("/a/readme", [])).toBe(true);
   });
 });

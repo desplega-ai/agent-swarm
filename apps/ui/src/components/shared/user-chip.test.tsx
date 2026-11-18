@@ -5,6 +5,10 @@ import type { User } from "../../api/types";
 mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy-to-clipboard"));
+mock.module("@/lib/user-initials", () => require("../../lib/user-initials"));
+mock.module("@/components/shared/user-avatar", () => ({
+  UserAvatar: ({ avatar }: { avatar: { type: string } }) => <i>avatar:{avatar.type}</i>,
+}));
 
 const { TooltipProvider } = await import("../ui/tooltip");
 const { UserChip, userInitials } = await import("./user-chip");
@@ -38,6 +42,15 @@ describe("UserChip", () => {
     expect(html).toContain(">TY<");
     expect(html).not.toContain(`>${taras.id}<`);
     expect(html).toContain(`Copy ID ${taras.id}`);
+  });
+
+  test("a user with a custom avatar shows it instead of initials", () => {
+    const html = render(taras.id, {
+      ...taras,
+      avatar: { type: "url", url: "https://x.test/a.png" },
+    });
+    expect(html).toContain("avatar:url");
+    expect(html).not.toContain(">TY<");
   });
 
   test("an unknown reference renders as stored, so nothing is hidden", () => {

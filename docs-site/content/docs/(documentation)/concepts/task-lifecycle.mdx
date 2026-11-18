@@ -38,6 +38,20 @@ stateDiagram-v2
 | `cancelled` | Task was cancelled by the lead or creator |
 | `skipped` | The agent decided the work was not its to handle, such as a Slack thread message addressed to someone else. Set with `store-progress` status `skipped` and a one-line `failureReason`. Posts nothing to Slack and creates no lead follow-up. |
 
+### Status kind
+
+A terminal task also carries `statusKind`, which says why it ended. It refines `status` and never replaces it: a `status = failed` filter still matches every failed task. Tasks that finished before the field existed have no kind.
+
+| Status | Kinds |
+|-------|-------|
+| `failed` | `agent` (the agent chose to fail with `store-progress`), `error` (crash, non-zero exit, provider error, stall, provisioning or reboot), `cascade` (a task it depends on ended without completing), `external` (a PR or issue event) |
+| `completed` | `agent` (`store-progress`), `runner` (the runner wrapper finished it after the session ended), `deferred` (`defer-task`) |
+| `cancelled` | `user` (dashboard, Slack, chat, tracker stop), `agent` (`cancel-task`), `workflow` (the run or step was cancelled), `external` (the tracker issue was deleted or cancelled), `system` (heartbeat housekeeping) |
+| `skipped` | `agent`, `runner` |
+| `superseded` | the resume reason (`graceful_shutdown`, `context_limits`, `manual_supersede`, `crash_recovery`, `provider_fallback`), or `workflow_retry` |
+
+Filter by kind with `get-tasks` `statusKind` or `GET /api/tasks?status=failed&statusKind=error`. The valid kinds live in `TASK_STATUS_KINDS` in `src/types.ts`. A new kind is one entry there and needs no migration.
+
 ## Task Creation
 
 Tasks can be created in several ways:

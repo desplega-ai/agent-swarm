@@ -63,6 +63,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import { getChannelExternality } from "./external-channel";
 import {
   completedStatusIcon,
   iconPrefix,
@@ -1179,6 +1180,121 @@ async function isSlackContinuation(task: AgentTask): Promise<boolean> {
   );
 }
 
+/** Lead review tasks the engine creates when a worker finishes or a session resumes. */
+const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
+/** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
+const SLACK_ANCESTOR_WALK_LIMIT = 50;
+
+/** True when `task`'s parent chain holds a task a person started in Slack. */
+async function hasSlackAskAncestor(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<boolean> {
+  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
+  const seen = new Set<string>([task.id]);
+  let parentId = task.parentTaskId;
+  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
+    seen.add(parentId);
+    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
+    if (!parent) return false;
+    if (parent.source === "slack") return true;
+    parentId = parent.parentTaskId;
+  }
+  return false;
+}
+
+/**
+ * A Lead follow-up (worker completion) or resume task in a tree a person
+ * started in Slack is "eligible": its output is the answer the thread waits
+ * for, so it gets an outcome card like the ask did. Before this, the thread
+ * stayed silent until someone asked "status?". A Lead follow-up with Slack
+ * context but no Slack ask in its parent chain is an "orphan": it posts
+ * nothing, and its card is settled so the thread does not wait on it.
+ */
+async function classifyLeadFollowUp(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<"none" | "eligible" | "orphan"> {
+  if (
+    task.source !== "system" ||
+    !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "") ||
+    !task.slackChannelId ||
+    !task.slackThreadTs ||
+    !task.agentId ||
+    !(await getAgentById(task.agentId))?.isLead
+  ) {
+    return "none";
+  }
+  return (await hasSlackAskAncestor(task, threadTasks)) ? "eligible" : "orphan";
+}
+
+/**
+ * Settles a Lead follow-up's card as abandoned without posting anything, so
+ * slackThreadHasOutcomeWork stops counting it and the thread can close.
+ */
+async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): Promise<void> {
+  if (!task.slackChannelId || !task.slackThreadTs) return;
+  // A bound card is a stream Slack already holds; it keeps its own bounded
+  // recovery. A pending one has no bound message, so it is settled here.
+  const card = await getSlackOutcomeMessage(task.id);
+  if (card && !isPendingSlackMessage(card)) return;
+  await reserveSlackMessage({
+    contextKey:
+      task.contextKey ??
+      slackContextKey({ channelId: task.slackChannelId, threadTs: task.slackThreadTs }),
+    channelId: task.slackChannelId,
+    threadTs: task.slackThreadTs,
+    kind: "outcome",
+    taskId: task.id,
+  });
+  await abandonSlackOutcomeDelivery(task.id, reason);
+}
+
+/**
+ * Gates a new outcome card for a Lead follow-up; every other task passes.
+ * No card when the Lead already answered with `slack-reply` (it would repeat
+ * that answer), when the delegation child pass owns the card, or when Slack
+ * does not confirm the channel is internal: a Slack Connect channel is a
+ * customer's, and posting there needs a person's explicit yes. An external
+ * verdict settles the card as abandoned so the thread can close.
+ */
+async function mayPostLeadFollowUpCard(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+  ownerAskId: ReadonlyMap<string, string>,
+  delegationActivatedAt: string | null,
+): Promise<boolean> {
+  if (task.source !== "system" || !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "")) {
+    return true;
+  }
+  if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) {
+    // A reservation left by a failed delivery would keep the thread open.
+    if (await getSlackOutcomeMessage(task.id)) {
+      await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
+    }
+    return false;
+  }
+  const askId = ownerAskId.get(task.id);
+  const ownerAsk = askId ? threadTasks.find((candidate) => candidate.id === askId) : undefined;
+  if (
+    delegationActivatedAt !== null &&
+    ownerAsk &&
+    ownerAsk.createdAt >= delegationActivatedAt &&
+    isChildCardCandidate(task, delegationActivatedAt)
+  ) {
+    return false;
+  }
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
+  const externality = await getChannelExternality(app.client, task.slackChannelId);
+  if (externality === "external") {
+    // "unknown" is not settled: it retries on the next tick.
+    await settleLeadFollowUpWithoutCard(task, "external_channel: Lead follow-up not posted");
+    return false;
+  }
+  return externality === "internal";
+}
+
 /**
  * True when `task` is a candidate for its own child result card (plan
  * section 3.4, rules 1-4, 3, and part of rule 6). Callers still need the
@@ -1216,12 +1332,15 @@ export async function slackDelegationOwnsChildCard(task: AgentTask): Promise<boo
   return !!ownerAsk && ownerAsk.createdAt >= delegationActivatedAt;
 }
 
-async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {
-  return (
-    ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
-      ((await isSlackContinuation(task)) && isOutcomeStatus(task.status))) &&
-    task.createdAt >= activatedAt
-  );
+async function taskNeedsDirectOutcome(
+  task: AgentTask,
+  activatedAt: string,
+  leadFollowUp: "none" | "eligible" | "orphan",
+): Promise<boolean> {
+  if (task.createdAt < activatedAt) return false;
+  if (task.source === "slack") return isAskOutcomeStatus(task.status);
+  if (!isOutcomeStatus(task.status)) return false;
+  return leadFollowUp === "eligible" || (await isSlackContinuation(task));
 }
 
 /**
@@ -2072,10 +2191,32 @@ async function processSlackThread(
 
   for (const task of tasks) {
     if (!isSlackRenderV2Enabled()) return "stop";
-    if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
+    const leadFollowUp = isOutcomeStatus(task.status)
+      ? await classifyLeadFollowUp(task, tasks)
+      : "none";
+    if (
+      leadFollowUp === "orphan" &&
+      isOutcomeStatus(task.status) &&
+      !task.slackReplySent &&
+      task.createdAt >= activatedAt &&
+      !endedBefore(task, outcomeWindow.finishedAfter)
+    ) {
+      // The reconcile SQL cannot walk the parent chain, so it counts this one.
+      await settleLeadFollowUpWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
+      continue;
+    }
+    if (!(await taskNeedsDirectOutcome(task, activatedAt, leadFollowUp))) continue;
     const card = await getSlackOutcomeMessage(task.id);
     if (card && isSettledSlackMessage(card)) continue;
     if (await isAnsweredByDeferralCard(task, tasks)) continue;
+    // A pending card has no bound Slack message, so its retry would create
+    // the first one: it passes the same gate as a new card.
+    if (
+      (!card || isPendingSlackMessage(card)) &&
+      !(await mayPostLeadFollowUpCard(task, tasks, ownerAskId, delegationActivatedAt))
+    ) {
+      continue;
+    }
     const deferByClosure =
       task.source === "slack" &&
       delegationEnabled &&

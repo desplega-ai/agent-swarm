@@ -108,15 +108,18 @@ describe("Schedule HTTP triage tooling", () => {
       lastErrorMessage: "boom",
     });
 
-    const res = await fetch(
-      `${baseUrl}/api/schedules?lastRunStatus=failed&consecutiveErrorsMin=2`,
-      { headers },
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { schedules: ScheduledTaskSummary[]; count: number };
-    expect(body.schedules.some((s) => s.id === failing.id)).toBe(true);
-    expect(body.schedules.some((s) => s.id === ok.id)).toBe(false);
+    for (const [query, includesFailing] of [
+      ["lastRunStatus=failed", true],
+      ["lastRunStatus=failed&consecutiveErrorsMin=2", true],
+      ["lastRunStatus=failed&consecutiveErrorsMin=3", false],
+    ] as const) {
+      const res = await fetch(`${baseUrl}/api/schedules?${query}`, { headers });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { schedules: ScheduledTaskSummary[] };
+      const ids = body.schedules.map((schedule) => schedule.id);
+      expect(ids.includes(failing.id)).toBe(includesFailing);
+      expect(ids).not.toContain(ok.id);
+    }
   });
   test("PUT and PATCH /api/schedules/:id let only the owner, a lead or the operator change a deferral", async () => {
     const owner = await createAgent({ name: "DeferralOwner", isLead: false, status: "idle" });

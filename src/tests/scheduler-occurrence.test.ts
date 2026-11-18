@@ -322,26 +322,77 @@ test("a rejected recovery still starts polling", async () => {
   }
 });
 
-test("stopping during recovery prevents a late poller from being installed", async () => {
-  await dueSchedule("recurring", true);
+test.each([
+  ["recovery after stop", "recovery", false],
+  ["polling after stop", "polling", false],
+  ["recovery after stop and restart", "recovery", true],
+  ["polling after stop and restart", "polling", true],
+] as const)("%s leaves the rest of the old batch due", async (_label, phase, restart) => {
+  const first = await dueSchedule("one_time", true);
+  const second = await dueSchedule("one_time", true);
+  const batchFinished = Promise.withResolvers<void>();
+  const snapshot = [first, second];
+  // Observe both exhaustion and early exit without waiting on a timer.
+  Object.assign(snapshot, {
+    *[Symbol.iterator]() {
+      try {
+        yield* snapshot.values();
+      } finally {
+        batchFinished.resolve();
+      }
+    },
+  });
+
   const release = Promise.withResolvers<void>();
-  const finished = Promise.withResolvers<void>();
-  scriptDispatch.mockImplementation(async () => {
+  scriptDispatch.mockImplementationOnce(async () => {
     await release.promise;
-    finished.resolve();
     return scriptSuccess;
   });
+  const getDue = db.getDueScheduledTasks;
+  const due = spyOn(db, "getDueScheduledTasks");
+  if (phase === "polling") due.mockResolvedValueOnce([]);
+  due.mockResolvedValueOnce(snapshot);
+
+  const restartReading = Promise.withResolvers<void>();
+  const releaseRestart = Promise.withResolvers<void>();
   const timers = spyOn(globalThis, "setInterval");
   try {
-    startScheduler(new ExecutorRegistry(), 5);
+    startScheduler(new ExecutorRegistry(), 60_000);
     await waitUntil(() => scriptDispatch.mock.calls.length === 1);
     stopScheduler();
+
+    if (restart) {
+      // Hold the new recovery read so that any second claim must come from the old batch.
+      due.mockImplementationOnce(async () => {
+        restartReading.resolve();
+        await releaseRestart.promise;
+        return getDue();
+      });
+      startScheduler(new ExecutorRegistry(), 60_001);
+      await restartReading.promise;
+    }
+
     release.resolve();
-    await finished.promise;
-    await Bun.sleep(25);
-    expect(timers.mock.calls.filter((call) => call[1] === 5)).toHaveLength(0);
+    await batchFinished.promise;
+    expect(scriptDispatch).toHaveBeenCalledTimes(1);
+    expect((await db.getScheduledTaskById(first.id))?.enabled).toBe(false);
+    expect(await db.getScheduledTaskById(second.id)).toEqual(second);
+    expect(timers.mock.calls.filter((call) => call[1] === 60_000)).toHaveLength(
+      phase === "polling" ? 1 : 0,
+    );
+
+    if (restart) {
+      releaseRestart.resolve();
+      // The new timer is installed only after recovery consumes the second occurrence.
+      await waitUntil(() => timers.mock.calls.some((call) => call[1] === 60_001));
+      expect(scriptDispatch).toHaveBeenCalledTimes(2);
+      expect((await db.getScheduledTaskById(second.id))?.enabled).toBe(false);
+    }
   } finally {
+    stopScheduler();
     release.resolve();
+    releaseRestart.resolve();
+    due.mockRestore();
     timers.mockRestore();
   }
 });

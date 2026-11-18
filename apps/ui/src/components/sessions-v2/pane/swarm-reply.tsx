@@ -55,9 +55,10 @@ export function MessageTime({ at, focusable = true }: { at: string; focusable?: 
  * "Worked for", as a worker step does, then the text (`TaskOutcome`, without
  * its hover Copy), the files the agent attached, then a footer with the time, an always-visible Copy of the
  * same text, and a link to the task. A failed or cancelled one keeps the
- * tinted frame.
+ * tinted frame. `earlier` holds the tries a deploy or a crash cut before
+ * `task` took the work over: they fold under the same "Worked for".
  */
-export function SwarmReply({ task }: { task: AgentTask }) {
+export function SwarmReply({ task, earlier }: { task: AgentTask; earlier?: AgentTask[] }) {
   const files = (
     <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="agent" />
   );
@@ -72,7 +73,7 @@ export function SwarmReply({ task }: { task: AgentTask }) {
   const copyText = outcomeCopyText(task);
   return (
     <div data-slot="swarm-reply" className="flex min-w-0 flex-col gap-1.5">
-      <ChainOfThought taskId={task.id} status={task.status} task={task} />
+      <ChainOfThought taskId={task.id} status={task.status} task={task} earlier={earlier} />
       <TaskOutcome task={task} hideCopy />
       {files}
       <div className="flex min-h-4 items-center gap-1.5 text-muted-foreground">

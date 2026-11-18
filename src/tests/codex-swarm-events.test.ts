@@ -15,6 +15,7 @@ interface FetchCall {
 }
 
 const originalFetch = globalThis.fetch;
+const originalLog = console.log;
 
 function buildOpts(override: Partial<CodexSwarmEventHandlerOpts> = {}): CodexSwarmEventHandlerOpts {
   return {
@@ -41,6 +42,7 @@ function installFetchStub(responder: (url: string, init: RequestInit | undefined
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  console.log = originalLog;
 });
 
 describe("createCodexSwarmEventHandler", () => {
@@ -73,55 +75,7 @@ describe("createCodexSwarmEventHandler", () => {
       expect(urls.some((u) => u.includes("/api/agents/agent-1/activity"))).toBe(true);
     });
 
-    test("aborts the running turn when the cancellation endpoint reports cancelled", async () => {
-      installFetchStub((url) => {
-        if (url.includes("/cancelled-tasks")) {
-          return new Response(
-            JSON.stringify({ cancelled: [{ id: "task-1", failureReason: "user request" }] }),
-            { status: 200 },
-          );
-        }
-        return new Response("{}", { status: 200 });
-      });
-      const controller = new AbortController();
-      const opts = buildOpts({ abortRef: { current: controller } });
-      const handler = createCodexSwarmEventHandler(opts);
-      handler({
-        type: "tool_start",
-        toolCallId: "call-1",
-        toolName: "bash",
-        args: { command: "sleep 9999" },
-      });
-      // Wait for the async cancellation poll to resolve and call abort().
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(controller.signal.aborted).toBe(true);
-    });
-
-    test("sets abort signal reason to 'cancelled' on cancel-poll abort", async () => {
-      installFetchStub((url) => {
-        if (url.includes("/cancelled-tasks")) {
-          return new Response(
-            JSON.stringify({ cancelled: [{ id: "task-1", failureReason: "user request" }] }),
-            { status: 200 },
-          );
-        }
-        return new Response("{}", { status: 200 });
-      });
-      const controller = new AbortController();
-      const opts = buildOpts({ abortRef: { current: controller } });
-      const handler = createCodexSwarmEventHandler(opts);
-      handler({
-        type: "tool_start",
-        toolCallId: "call-1",
-        toolName: "bash",
-        args: { command: "sleep 9999" },
-      });
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(controller.signal.aborted).toBe(true);
-      expect(controller.signal.reason).toBe("cancelled");
-    });
-
-    test("logs the abort reason when /cancelled-tasks reports the task", async () => {
+    test("aborts with cancelled reason and logs the task ID when the poll reports cancellation", async () => {
       installFetchStub((url) => {
         if (url.includes("/cancelled-tasks")) {
           return new Response(
@@ -136,6 +90,9 @@ describe("createCodexSwarmEventHandler", () => {
       console.log = (...args: unknown[]) => logs.push(args.map(String).join(" "));
       try {
         const controller = new AbortController();
+        const aborted = new Promise<void>((resolve) => {
+          controller.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
         const handler = createCodexSwarmEventHandler(
           buildOpts({ abortRef: { current: controller }, taskId: "task-1" }),
         );
@@ -145,15 +102,15 @@ describe("createCodexSwarmEventHandler", () => {
           toolName: "bash",
           args: { command: "sleep 9999" },
         });
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await aborted;
+        expect(controller.signal.aborted).toBe(true);
+        expect(controller.signal.reason).toBe("cancelled");
       } finally {
         console.log = origLog;
       }
-      // The log MUST include the literal taskId (not the `${taskId}` template).
-      const abortLog = logs.find((l) =>
-        l.includes("aborting task task-1: cancelled via /cancelled-tasks poll"),
+      expect(logs).toContain(
+        "[swarm-events] aborting task task-1: cancelled via /cancelled-tasks poll",
       );
-      expect(abortLog).toBeDefined();
     });
 
     test("throttles the cancellation check across rapid tool_start events", async () => {

@@ -300,6 +300,15 @@ describe("Channel Activity — fetchChannelActivity", () => {
     expect(texts).not.toContain("Own bot msg");
     expect(texts).not.toContain("Thread reply");
     expect(texts).not.toContain("No user");
+
+    // With a sender allowlist, only listed users reach the lead.
+    process.env.SLACK_ALLOWED_USER_IDS = "U333";
+    try {
+      const filtered = await fetchChannelActivity(cursors, ["C001"]);
+      expect(filtered.messages.map((m) => m.text)).toEqual(["Thread parent"]);
+    } finally {
+      delete process.env.SLACK_ALLOWED_USER_IDS;
+    }
   });
 
   test("allowedChannelIds restricts which channels are processed", async () => {

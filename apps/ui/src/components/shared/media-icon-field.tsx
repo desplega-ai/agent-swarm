@@ -1,6 +1,6 @@
 /**
  * Edits a `MediaIcon`: a lucide glyph, an https image link, or an image
- * uploaded to the swarm's agent-fs drive. Generic over the owner: the caller
+ * uploaded to (or picked from) the swarm's agent-fs drive. Generic over the owner: the caller
  * saves through `onSave` and picks where uploads land (`uploadPrefix`, e.g.
  * `/apps/<appId>/icon`). Each tab saves on its own button; nothing stores on
  * view.
@@ -12,6 +12,7 @@ import { type DragEvent, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { MediaIcon } from "@/api/types";
 import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
+import { AgentFsFilePicker } from "@/components/shared/agent-fs-file-picker";
 import { MediaIconGlyph } from "@/components/shared/media-icon-glyph";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import {
   MEDIA_ICON_ACCEPT,
+  MEDIA_ICON_EXTENSIONS,
   mediaIconFileError,
   parseMediaIconUrl,
   uploadMediaIcon,
@@ -285,6 +287,13 @@ export function MediaIconField({ value, onSave, uploadPrefix, fallback }: MediaI
           ) : (
             <p className="text-xs text-muted-foreground">PNG, JPEG, WebP, GIF, or SVG. 1 MB max.</p>
           )}
+          {/* The picker searches the swarm drive, so the icon names no drive IDs, like an upload. */}
+          <AgentFsFilePicker
+            extensions={MEDIA_ICON_EXTENSIONS}
+            placeholder="Or search an image already in agent-fs…"
+            disabled={saving}
+            onSelect={(picked) => void save({ type: "agent-fs", path: picked.path })}
+          />
         </div>
       )}
 

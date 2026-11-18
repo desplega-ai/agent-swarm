@@ -21,21 +21,12 @@ describe("chatgptSubscriptionModelId", () => {
     }
   });
 
-  test("effort levels come from the openai catalog row", () => {
-    const catalog = { openai: { models: { "gpt-5.6-sol": { reasoning: true } } } };
-    expect(reasoningLevelsForModel("pi", "openai-codex/gpt-5.6-sol", catalog)).toEqual(
-      reasoningLevelsForModel("pi", "openai/gpt-5.6-sol", catalog),
-    );
-    expect(
-      reasoningLevelsForModel("pi", "openai-codex/gpt-5.6-sol", catalog).length,
-    ).toBeGreaterThan(0);
-  });
-
-  test("a mixed-case prefix keeps the openai effort levels", () => {
-    const catalog = { openai: { models: { "gpt-5.6-sol": { reasoning: true } } } };
+  test("subscription prefixes preserve the openai row's declared effort levels", () => {
+    const facts = { reasoning: true, reasoning_options: [{ type: "effort", values: ["high"] }] };
+    const catalog = { openai: { models: { "gpt-5.6-sol": facts } } };
     expect(isChatgptSubscriptionModel("OpenAI-Codex/gpt-5.6-sol")).toBe(true);
-    expect(reasoningLevelsForModel("pi", "OpenAI-Codex/gpt-5.6-sol", catalog)).toEqual(
-      reasoningLevelsForModel("pi", "openai/gpt-5.6-sol", catalog),
-    );
+    for (const provider of ["openai", "openai-codex", "OpenAI-Codex"]) {
+      expect(reasoningLevelsForModel("pi", `${provider}/gpt-5.6-sol`, catalog)).toEqual(["high"]);
+    }
   });
 });

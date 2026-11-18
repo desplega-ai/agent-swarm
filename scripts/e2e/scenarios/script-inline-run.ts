@@ -113,17 +113,32 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
     expect(result.doubled === 42 && result.marker === marker, "inline result is wrong");
     expect(
       JSON.stringify(result.ctxKeys) ===
-        JSON.stringify(["api", "boards", "fs", "logger", "mcp", "objects", "sh", "sheets", "stdlib", "swarm"]),
+        JSON.stringify([
+          "api",
+          "boards",
+          "caller",
+          "fs",
+          "logger",
+          "mcp",
+          "objects",
+          "sh",
+          "sheets",
+          "stdlib",
+          "swarm",
+        ]),
       `ctx offers an unexpected surface: ${JSON.stringify(result.ctxKeys)}`,
     );
     expect(
       typeof run.stdout === "string" && run.stdout.includes(`log ${marker}`),
       "inline run did not capture stdout",
     );
-    expect(run.stderr === "", "clean run wrote to stderr");
+    expect(run.stderr === "", `clean run wrote to stderr: ${JSON.stringify(run.stderr)}`);
     expect(typeof run.durationMs === "number" && run.durationMs >= 0, "no durationMs");
+    const truncated = asRecord(run.truncated);
     expect(
-      JSON.stringify(run.truncated) === JSON.stringify({ stdout: false, stderr: false }),
+      truncated.stdout === false &&
+        truncated.stderr === false &&
+        Object.keys(truncated).length === 2,
       "small output must not be truncated",
     );
     const autoSaved = asRecord(run.autoSaved);
@@ -195,9 +210,11 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
       idempotencyKey: idemKey,
       intent: `e2e keyed ${ctx.nonce}`,
     });
+    const kvSaved = asRecord(keyed.kvSaved);
     expect(
-      JSON.stringify(keyed.kvSaved) ===
-        JSON.stringify({ namespace: "script:executions", key: idemKey }),
+      kvSaved.namespace === "script:executions" &&
+        kvSaved.key === idemKey &&
+        Object.keys(kvSaved).length === 2,
       `kvSaved is wrong: ${JSON.stringify(keyed.kvSaved)}`,
     );
     const kv = await ctx.api("GET", `/api/kv/_/script:executions/${idemKey}`);

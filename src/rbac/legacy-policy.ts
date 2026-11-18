@@ -299,8 +299,11 @@ export const LEGACY_POLICY = {
   "memory.write.consolidated": leadOnly,
   "memory.read.any": leadOrOperatorOrUser,
   "memory.delete.any": memoryDelete,
+  "memory.reembed": leadOrOperatorOrUser,
   "channel.delete": leadOnly,
   "repo.merge-policy.write": leadOrOperatorOrUser,
+  "repo.delete": leadOrOperatorOrUser,
+  "heartbeat.trigger": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
   "integration.chat.manage": leadOnly,
   "integration.chat.post": leadOnly,
@@ -344,6 +347,7 @@ export const LEGACY_POLICY = {
   "mcp-server.stdio.write": leadOrOperatorOrUser,
   "mcp-server.read.secrets": leadOnly,
   "mcp-oauth.authorize.any": anyAuthenticated,
+  "mcp-oauth.manage": leadOrOperatorOrUser,
   "kv.write.any": leadOrOwnNamespace,
   "comb.presence": operatorOrUser,
   "fs.join.own": anyAuthenticated,
@@ -369,6 +373,8 @@ export const LEGACY_POLICY = {
   "schedule.deferral.update.any": leadOrResourceOwner,
   // A schedule fires as its creator, so only the creator or a lead picks what it runs.
   "schedule.target.update.any": leadOrResourceOwner,
+  // A manual run fires as the creator too, so only the creator or a lead starts one.
+  "schedule.run.any": leadOrResourceOwner,
   // Pool writes pick the image that receives a runtime token, so only humans
   // may make them. The lead may only place agents into operator-made pools.
   "runtime_pool.write": operatorOrUser,

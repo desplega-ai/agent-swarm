@@ -448,6 +448,7 @@ value:getWorkflowRunStep
 value:getWorkflowRunStepsByRunId
 value:getWorkflowVersion
 value:getWorkflowVersions
+value:getWorkflowsByEventName
 value:getWorkflowsByScheduleId
 value:giveUpStaleChatRelays
 value:hasBudgetRefusalNotificationToday
