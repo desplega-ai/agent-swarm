@@ -59,6 +59,7 @@ import {
 } from "../types";
 import { getCurrentRunProvenance } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { refuseAgentTokenWithout } from "./request-principal";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -1182,6 +1183,7 @@ export async function handleScripts(
   if (revealScriptApiSecretRoute.match(req.method, pathSegments)) {
     const parsed = await revealScriptApiSecretRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.read.secrets")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1194,6 +1196,7 @@ export async function handleScripts(
   if (rotateScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await rotateScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.rotate")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1214,6 +1217,7 @@ export async function handleScripts(
   if (patchScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await patchScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.update")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
@@ -1231,6 +1235,7 @@ export async function handleScripts(
   if (deleteScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await deleteScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "script.api.delete")) return true;
     const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);

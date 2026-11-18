@@ -29,7 +29,7 @@ import {
 } from "../rbac";
 import { AgentMcpServerSchema, McpServerSchema, McpServerWithInstallInfoSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
-import { agentFirstPrincipal, authUserId } from "./request-principal";
+import { agentFirstPrincipal, authUserId, refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -441,6 +441,15 @@ export async function handleMcpServers(
       jsonError(res, "MCP server not found", 404);
       return true;
     }
+    if (
+      parsed.body.agentId !== singleHeader(req, "x-agent-id") &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.install.any", {
+        kind: "agent",
+        agentId: parsed.body.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     try {
       const agentMcpServer = await installMcpServer(parsed.body.agentId, parsed.params.id);
@@ -455,6 +464,15 @@ export async function handleMcpServers(
   if (uninstallMcpServerRoute.match(req.method, pathSegments)) {
     const parsed = await uninstallMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (
+      parsed.params.agentId !== singleHeader(req, "x-agent-id") &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.uninstall.any", {
+        kind: "agent",
+        agentId: parsed.params.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     const removed = await uninstallMcpServer(parsed.params.agentId, parsed.params.id);
     uninstallMcpServerRoute.respond(res, 200, { success: removed });
@@ -611,6 +629,16 @@ export async function handleMcpServers(
   if (deleteMcpServerRoute.match(req.method, pathSegments)) {
     const parsed = await deleteMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = await getMcpServerById(parsed.params.id);
+    if (
+      existing &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.delete.any", {
+        kind: "owned",
+        ownerAgentId: existing.ownerAgentId,
+      }))
+    ) {
+      return true;
+    }
 
     const result = await deleteMcpServer(parsed.params.id);
     if (!result.deleted) {

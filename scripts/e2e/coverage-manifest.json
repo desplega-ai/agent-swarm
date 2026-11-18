@@ -225,8 +225,8 @@
   ],
   "flows": {
     "agent-access-tokens": {
-      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
-      "scenarios": ["core-agent-access"]
+      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens; worker tokens need the route permission on swarm-wide admin routes",
+      "scenarios": ["core-agent-access", "platform-agent-token-permissions"]
     },
     "agent-lifecycle": {
       "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
