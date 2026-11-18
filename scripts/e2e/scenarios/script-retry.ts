@@ -429,7 +429,8 @@ export const scriptRetryBridge: Scenario = {
 const LOOPBACK_SCRIPT = `export default async function (args: { key: string }, ctx: any) {
   const set = await ctx.swarm.kv_set({ key: args.key, value: "loopback" });
   const get = await ctx.swarm.kv_get({ key: args.key });
-  return { set: set.success, value: get.data?.value ?? null };
+  const visible = ctx.stdlib.Redacted.value(ctx.swarm.config.mcpBaseUrl);
+  return { set: set.success, value: get.data?.value ?? null, visible };
 }`;
 
 /**
@@ -438,6 +439,8 @@ const LOOPBACK_SCRIPT = `export default async function (args: { key: string }, c
  * nested call through it can fail at the proxy. Here `MCP_BASE_URL` names a closed port, so
  * any call that still used it would fail. `SCRIPT_API_BASE_URL` is deployment env only.
  */
+const CLOSED_MCP_BASE_URL = "http://127.0.0.1:9";
+
 export const scriptApiLoopback: Scenario = {
   name: "script-api-loopback",
   order: 491,
@@ -456,7 +459,7 @@ export const scriptApiLoopback: Scenario = {
     }
 
     const agentId = await registerAgent(ctx, "api-loopback");
-    const configId = await setGlobal(ctx, "MCP_BASE_URL", "http://127.0.0.1:9");
+    const configId = await setGlobal(ctx, "MCP_BASE_URL", CLOSED_MCP_BASE_URL);
     try {
       await reloadConfig(ctx);
       for (const executor of EXECUTORS) {
@@ -473,6 +476,12 @@ export const scriptApiLoopback: Scenario = {
         expect(
           out.set === true && out.value === "loopback",
           `${label}: ctx.swarm must reach the API with MCP_BASE_URL closed: ${JSON.stringify(out)}`,
+        );
+        // Script code still sees MCP_BASE_URL: a quickjs script may fetch it, and the
+        // egress guard refuses a loopback address outside ctx.swarm.
+        expect(
+          out.visible === CLOSED_MCP_BASE_URL,
+          `${label}: config.mcpBaseUrl must stay MCP_BASE_URL, got ${String(out.visible)}`,
         );
       }
 

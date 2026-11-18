@@ -123,9 +123,11 @@ Bun's Node compatibility layer makes these available:
 Three layers retry transient failures: status 429, 502, 503 or 504, or a
 network error.
 
-`ctx.swarm` calls go to the API over loopback (`http://127.0.0.1:<PORT>`), not
-through `MCP_BASE_URL`, so a public proxy in front of the API is not in their
-path. The deployment env `SCRIPT_API_BASE_URL` overrides this address.
+`ctx.swarm` and `ctx.mcp` calls go to the API over loopback
+(`http://127.0.0.1:<PORT>`), not through `MCP_BASE_URL`, so a public proxy in
+front of the API is not in their path. The deployment env `SCRIPT_API_BASE_URL`
+overrides this address. `ctx.swarm.config.mcpBaseUrl` still holds
+`MCP_BASE_URL`, for scripts that fetch the API themselves.
 
 - **`ctx.swarm`** retries on its own. A 429 retries on every call, honouring
   `Retry-After`. A 502, 503, 504 or network error retries only on a read
