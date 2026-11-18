@@ -3,7 +3,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
 import type { ModelTierPreview } from "../../api/types";
 import { tierRows } from "../../lib/model-tier-fixtures";
-import { loadModelsSnapshot } from "../../lib/models-snapshot";
+import {
+  loadModelsSnapshot,
+  modelsSnapshot,
+  resetModelsSnapshotForTests,
+} from "../../lib/models-snapshot";
 
 // The UI loads the models.dev snapshot lazily; these assertions read it.
 await loadModelsSnapshot();
@@ -29,7 +33,7 @@ mock.module("@/api/hooks/use-model-tiers", () => ({
   useModelTiers: () => ({ data: tiers, isPending: tiersPending }),
 }));
 mock.module("@/api/hooks/use-models-catalog", () => ({
-  useModelsCatalog: () => ({ data: undefined }),
+  useModelsCatalog: () => ({ data: undefined, snapshotLoaded: modelsSnapshot() !== null }),
 }));
 // Mocks of shared modules keep every export of the real module: in one `bun test`
 // process the first file to register a specifier fixes its export names, and a
@@ -199,6 +203,19 @@ describe("TaskEffortField", () => {
     expect(seen.at(-1)).toBe("xhigh");
     configsPending = false;
     configs = [{ key: "MODEL_OVERRIDE", value: "claude-opus-5-5" }];
+    await view.rerender(<Harness agent={agent("claude")} tier="" initial="xhigh" />);
+    expect(seen.at(-1)).toBe("xhigh");
+    await view.unmount();
+  });
+
+  test("before the models.dev snapshot lands, a seeded effort is not cleared", async () => {
+    resetModelsSnapshotForTests();
+    configs = [{ key: "MODEL_OVERRIDE", value: "claude-opus-5-5" }];
+    const view = await mount(<Harness agent={agent("claude")} tier="" initial="xhigh" />);
+    expect(seen.at(-1)).toBe("xhigh");
+    await act(async () => {
+      await loadModelsSnapshot();
+    });
     await view.rerender(<Harness agent={agent("claude")} tier="" initial="xhigh" />);
     expect(seen.at(-1)).toBe("xhigh");
     await view.unmount();

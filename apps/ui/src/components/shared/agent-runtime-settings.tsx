@@ -318,10 +318,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   // live catalog — which also refetches on an interval) stay in the dependency
   // list because the default-model pick reads them, but their arrival must not
   // reinitialize the form and discard in-progress edits — hence the syncKey
-  // guard. The lazily loaded snapshot is the exception: a form synced before
-  // it landed had no models to pick a default from, so it syncs once more.
+  // guard. The lazily loaded snapshot is handled below: only a default model
+  // picked before it landed is picked again.
   const syncKey = [
-    snapshotLoaded,
     agent.id,
     agent.harnessProvider,
     initialHarness,
@@ -336,6 +335,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     configuredValue(configs, "ACP_MODEL_ENV_KEY"),
   ].join("|");
   const lastSyncKey = useRef<string | null>(null);
+  // The model the form picked by default (no stored model, or a harness switch
+  // that dropped it), or null once the stored or the user's own model shows.
+  const autoPickedModel = useRef<string | null>(null);
   useEffect(() => {
     if (lastSyncKey.current === syncKey) return;
     lastSyncKey.current = syncKey;
@@ -350,7 +352,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
     setHarness(initialHarness);
     setDevinSelected(agent.harnessProvider === "devin");
-    setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog));
+    const shown = nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog);
+    autoPickedModel.current = nextModel ? null : shown;
+    setModel(shown);
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
     setModelProfile(configuredModelProfile(configs));
     setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
@@ -370,6 +374,21 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     liveOpencodeGoModels,
   ]);
 
+  // A default picked before the lazily loaded snapshot landed came from the
+  // registry sections alone: pick it again once the snapshot is in, unless the
+  // user chose a model since. Other in-progress edits stay as they are.
+  const repickedWithSnapshot = useRef(false);
+  useEffect(() => {
+    if (!snapshotLoaded || repickedWithSnapshot.current) return;
+    repickedWithSnapshot.current = true;
+    if (autoPickedModel.current === null || autoPickedModel.current !== model) return;
+    const next = pickDefaultModelForHarness(harness, groups, liveCatalog);
+    autoPickedModel.current = next;
+    if (next === model) return;
+    setModel(next);
+    setEffort((current) => effortAfterChange(current, harness, next, liveCatalog));
+  }, [snapshotLoaded, harness, groups, liveCatalog, model]);
+
   useEffect(() => {
     if (persistedClaudeTransport === undefined) return;
     setClaudeTransport(persistedClaudeTransport ?? "inherit");
@@ -382,6 +401,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   function changeModel(nextModel: string) {
+    autoPickedModel.current = null;
     setModel(nextModel);
     resetUnsupportedEffort(harness, nextModel);
   }
@@ -408,7 +428,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     const nextModel = findModelOption(model, nextGroups)
       ? model
       : pickDefaultModelForHarness(nextHarness, nextGroups, liveCatalog);
-    if (nextModel !== model) setModel(nextModel);
+    if (nextModel !== model) {
+      autoPickedModel.current = nextModel;
+      setModel(nextModel);
+    }
     if (harnessSupportsModelSelection(nextHarness)) {
       resetUnsupportedEffort(nextHarness, nextModel);
     } else {

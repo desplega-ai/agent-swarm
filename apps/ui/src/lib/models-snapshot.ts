@@ -6,7 +6,8 @@
  *
  * Until `loadModelsSnapshot()` resolves, `modelsSnapshot()` returns null and
  * `agent-runtime-models` reads only the registry sections. `useModelsCatalog`
- * starts the load and re-renders its callers when it lands. A test that reads
+ * starts the load, re-renders its callers when it lands and hands them a new
+ * `providers` object, so memos keyed on it recompute. A test that reads
  * snapshot models awaits `loadModelsSnapshot()` first.
  *
  * No React import here: backend unit tests import `agent-runtime-models` by
@@ -39,6 +40,15 @@ export function loadModelsSnapshot(): Promise<ModelsSnapshot> {
     },
   );
   return pending;
+}
+
+/**
+ * Tests only: forget the loaded snapshot, so a test can replay a cold load in a
+ * `bun test` process where another file already loaded it.
+ */
+export function resetModelsSnapshotForTests(): void {
+  snapshot = null;
+  pending = null;
 }
 
 /** `useSyncExternalStore` subscription: fires once, when the snapshot lands. */
