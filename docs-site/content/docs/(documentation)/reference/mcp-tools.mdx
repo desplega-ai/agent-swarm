@@ -471,8 +471,8 @@ Download a file from Slack by file ID or URL.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `fileId` | string | No | Slack file ID |
-| `url` | string | No | Direct download URL |
-| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
+| `url` | string | No | Slack file URL. The tool reads the file ID from it and downloads from the URL Slack returns for that file. |
+| `savePath` | string | No | Only without a task: where to save. Must be inside `/workspace/shared/downloads/`. A relative path resolves from there. Default: `/workspace/shared/downloads/{agentId}/slack/` |
 
 ### slack-leave-thread
 
