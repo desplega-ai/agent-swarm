@@ -32,7 +32,7 @@ import {
   getSlackProcessingThreads,
   getSlackThreadsOfTasks,
   type SlackOutcomeWindow,
-  slackThreadHasAgentReplySince,
+  slackThreadHasAgentReplyOnTasksSince,
   slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
@@ -1186,6 +1186,24 @@ const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
 /** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
 const SLACK_ANCESTOR_WALK_LIMIT = 50;
 
+/** The ids of `task`'s parent chain, nearest first. */
+async function ancestorTaskIds(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<string[]> {
+  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
+  const ids: string[] = [];
+  const seen = new Set<string>([task.id]);
+  let parentId = task.parentTaskId;
+  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
+    seen.add(parentId);
+    ids.push(parentId);
+    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
+    parentId = parent?.parentTaskId;
+  }
+  return ids;
+}
+
 /** True when `task`'s parent chain holds a task a person started in Slack. */
 async function hasSlackAskAncestor(
   task: AgentTask,
@@ -1254,7 +1272,8 @@ async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): P
 /**
  * Gates a new outcome card for a Lead follow-up; every other task passes.
  * No card when the Lead already answered with `slack-reply` (it would repeat
- * that answer), also when the reply names another task, when the delegation child pass owns the card, or when Slack
+ * that answer), also when it attributed that reply to a task the follow-up
+ * descends from, when the delegation child pass owns the card, or when Slack
  * does not confirm the channel is internal: a Slack Connect channel is a
  * customer's, and posting there needs a person's explicit yes. An external
  * verdict settles the card as abandoned so the thread can close.
@@ -1279,17 +1298,20 @@ async function mayPostLeadFollowUpCard(
     task.agentId &&
     task.slackChannelId &&
     task.slackThreadTs &&
-    (await slackThreadHasAgentReplySince(
+    (await slackThreadHasAgentReplyOnTasksSince(
       task.slackChannelId,
       task.slackThreadTs,
       task.createdAt,
       task.agentId,
+      await ancestorTaskIds(task, threadTasks),
     ))
   ) {
-    // The Lead replied in the thread during the follow-up, but attributed the
-    // reply to another task, so slackReplySent stays 0. The card would repeat
-    // that reply. The reconcile SQL counts this task as outcome work until its
-    // card is settled, so always settle it.
+    // The Lead answered during the follow-up with a slack-reply attributed to
+    // a task the follow-up descends from (the reviewed task, or the ask), so
+    // slackReplySent stays 0. The card would repeat that reply. A reply under
+    // an unrelated Lead task in the same thread does not count. The reconcile
+    // SQL counts this task as outcome work until its card is settled, so
+    // always settle it.
     await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }

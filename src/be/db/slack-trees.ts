@@ -195,23 +195,26 @@ export async function slackThreadHasBotReplySince(
 
 /**
  * True when agent `agentId` sent a `slack-reply` in the thread at or after
- * `since`. The check ignores the reply's task id: an agent can attribute its
- * reply to a different task of the thread (for example, the worker task that
- * its follow-up reviews).
+ * `since`, attributed to one of `taskIds`. A Lead follow-up passes its parent
+ * chain: the Lead can attribute its review reply to the task it reviews (or
+ * to the ask) instead of to the follow-up itself.
  */
-export async function slackThreadHasAgentReplySince(
+export async function slackThreadHasAgentReplyOnTasksSince(
   channelId: string,
   threadTs: string,
   since: string,
   agentId: string,
+  taskIds: readonly string[],
 ): Promise<boolean> {
+  if (taskIds.length === 0) return false;
   const row = await getDbClient().get<{ found: number }>(
     `SELECT EXISTS (
        SELECT 1 FROM slack_messages reply
        WHERE reply.channel_id = ? AND reply.thread_ts = ? AND reply.created_at >= ?
          AND reply.kind = 'agent' AND reply.created_by = ?
+         AND reply.task_id IN (${taskIds.map(() => "?").join(", ")})
      ) AS found`,
-    [channelId, threadTs, since, agentId],
+    [channelId, threadTs, since, agentId, ...taskIds],
   );
   return !!row?.found;
 }

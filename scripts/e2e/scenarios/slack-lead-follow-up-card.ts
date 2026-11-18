@@ -326,6 +326,63 @@ export const slackLeadFollowUpCard: Scenario = {
       `The Lead's reply under the ask task landed ${misattributedReplies} times, expected 1`,
     );
 
+    // 4c. A reply under an unrelated Lead task of the same thread does not
+    // count: the follow-up still posts its card. A person mentions the bot in
+    // the thread while the follow-up runs, and the Lead (now allowed several
+    // tasks at once) answers that new task with slack-reply.
+    const concurrent = await delegatedAsk(ctx, GENERAL, workerId, "concurrent");
+    const leadName = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [
+      concurrent.leadId,
+    ])?.name;
+    expectStatus(
+      await ctx.api("POST", "/api/agents", {
+        agentId: concurrent.leadId,
+        body: { name: leadName, isLead: true, maxTasks: 3 },
+      }),
+      [200, 201],
+      "let the Lead hold several tasks",
+    );
+    const mention = await ctx.slack.postMessage({
+      channel: GENERAL,
+      user: "alice",
+      thread_ts: concurrent.threadTs,
+      text: `<@${ctx.slack.bot.userId}> concurrent: one more question`,
+    });
+    const otherTask = await findSlackTask(ctx, mention.ts);
+    const otherTaskId = String(otherTask.id);
+    expect(
+      otherTaskId !== concurrent.askTaskId && String(otherTask.agentId) === concurrent.leadId,
+      `The thread mention did not create a new Lead task: ${JSON.stringify(otherTask)}`,
+    );
+    await claim(ctx, concurrent.leadId, otherTaskId);
+    const otherReply = `reply to the other question ${ctx.nonce}`;
+    const otherConn = await ctx.connectMcp(concurrent.leadId);
+    try {
+      expectToolOk(
+        await callTool(otherConn, "slack-reply", { taskId: otherTaskId, message: otherReply }),
+        "slack-reply under the concurrent Lead task",
+      );
+    } finally {
+      await otherConn.close();
+    }
+    const concurrentOutput = `follow-up review concurrent ${ctx.nonce}`;
+    await finish(ctx, concurrent.leadId, concurrent.followUpId, {
+      status: "completed",
+      output: concurrentOutput,
+    });
+    const concurrentPosted = await pollUntil(
+      () => threadMessages(ctx, GENERAL, concurrent.threadTs, concurrentOutput).length > 0,
+      30_000,
+    );
+    expect(
+      concurrentPosted,
+      "The follow-up card was suppressed by a reply under an unrelated Lead task",
+    );
+    await finish(ctx, concurrent.leadId, otherTaskId, {
+      status: "completed",
+      output: `other question answered ${ctx.nonce}`,
+    });
+
     // 5. No card in a Slack Connect channel. The mock always reports channels
     // as internal, so one injected conversations.info answer marks this fresh
     // channel external; the API caches that verdict for 10 minutes.
