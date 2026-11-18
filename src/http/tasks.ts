@@ -1400,21 +1400,15 @@ export async function handleTasks(
     // An agent session token writes only its own task's session: a task token
     // its bound task, any other agent token a task its agent holds. The holder is
     // the offeree while a task is offered or in review (its review session), else
-    // the assignee: the same rule as ROUTING_HOLDER_SQL in src/be/db.ts.
+    // strictly the assignee, so a stale offer never grants a write.
     // Check and write in one transaction so a reassignment cannot slip between.
     const task = await getDbClient().transaction(async () => {
       if (auth?.kind === "agent") {
         if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
         const existing = await getTaskById(parsed.params.id);
         if (!existing) return null;
-        const offerOpen =
-          existing.status === "draft" ||
-          existing.status === "offered" ||
-          existing.status === "reviewing";
-        const holder =
-          offerOpen && existing.offeredTo
-            ? existing.offeredTo
-            : (existing.agentId ?? existing.offeredTo);
+        const offerOpen = existing.status === "offered" || existing.status === "reviewing";
+        const holder = offerOpen && existing.offeredTo ? existing.offeredTo : existing.agentId;
         if (holder !== auth.agentId) return "forbidden";
       }
       return await updateTaskClaudeSessionId(
