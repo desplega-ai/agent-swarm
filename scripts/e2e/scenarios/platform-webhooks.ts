@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -104,8 +104,8 @@ function svixHeaders(secret: string, body: string): Record<string, string> {
 }
 
 /**
- * Verified AgentMail deliveries reach task routing. With a sender filter set, only mail AgentMail
- * authenticated is routed, and the filter reads the mailbox, not the display name.
+ * Verified AgentMail deliveries reach task routing. The sender is linked to a user only when
+ * AgentMail authenticated it, and the sender filter reads the mailbox, not the display name.
  */
 async function checkAgentMailSenders(
   ctx: ScenarioContext,
@@ -119,12 +119,7 @@ async function checkAgentMailSenders(
   const bossId = String(asRecord(asRecord(boss.json).user).id);
   const leadId = await registerLead(ctx, `e2e-agentmail-lead-${ctx.nonce}`);
   try {
-    const deliver = async (
-      eventType: string,
-      from: string | string[],
-      subject: string,
-      labels: string[] = eventType.endsWith(".unauthenticated") ? ["unauthenticated"] : [],
-    ) => {
+    const deliver = async (eventType: string, from: string | string[], subject: string) => {
       const body = JSON.stringify({
         event_type: eventType,
         event_id: `evt_${subject}`,
@@ -134,7 +129,7 @@ async function checkAgentMailSenders(
           message_id: `msg_${subject}`,
           from_: Array.isArray(from) ? from : [from],
           to: [`inb_${ctx.nonce}@agentmail.to`],
-          labels,
+          labels: eventType.endsWith(".unauthenticated") ? ["unauthenticated"] : [],
           subject,
           text: "hello",
         },
@@ -174,30 +169,23 @@ async function checkAgentMailSenders(
       ["Other <other@elsewhere.test>", `Boss <boss@${domain}>`],
       second,
     );
-    // The sender filter cannot trust a From address AgentMail did not authenticate: the
-    // mail is archived, but it creates no task, by event type or by label.
-    const unsigned = `unsigned-${ctx.nonce}`;
-    await deliver("message.received.unauthenticated", `Boss <boss@${domain}>`, unsigned);
-    const labelled = `labelled-${ctx.nonce}`;
-    await deliver("message.received", `Boss <boss@${domain}>`, labelled, ["unauthenticated"]);
     const signed = `signed-${ctx.nonce}`;
     await deliver("message.received", `Boss <boss@${domain}>`, signed);
     expect((await waitForTask(signed))?.requestedByUserId === bossId, "signed mail is linked");
     expect(merges() === 1, `signed mail links the user once, got ${merges()}`);
     expect(taskFor(quoted) === null, "the sender filter reads the mailbox, not the display name");
     expect(taskFor(second) === null, "the sender filter reads the first From entry only");
-    for (const subject of [unsigned, labelled]) {
-      expect(taskFor(subject) === null, `unauthenticated mail ${subject} made a task`);
-      expect(
-        ctx.db.get("SELECT 1 AS one FROM kv_entries WHERE namespace = ? AND key = ?", [
-          "agentmail-inbound",
-          createHash("sha256")
-            .update(JSON.stringify([`inb_${ctx.nonce}`, `msg_${subject}`]))
-            .digest("hex"),
-        ]) !== null,
-        `unauthenticated mail ${subject} was not archived`,
-      );
-    }
+
+    // A sender AgentMail could not authenticate still reaches the lead, unlinked.
+    const unsigned = `unsigned-${ctx.nonce}`;
+    await deliver("message.received.unauthenticated", `Boss <boss@${domain}>`, unsigned);
+    const task = await waitForTask(unsigned);
+    expect(task?.requestedByUserId === null, "unauthenticated mail is not linked to a user");
+    expect(
+      task?.task.includes(`From: email:boss@${domain} (unknown user)`) === true,
+      `unauthenticated mail shows the address as unknown, got ${task?.task}`,
+    );
+    expect(merges() === 1, `unauthenticated mail adds no identity event, got ${merges()}`);
   } finally {
     await retireAgent(ctx, leadId);
   }
