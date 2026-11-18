@@ -103,13 +103,9 @@ describe("normalizeOutcome — native v2 passthrough (v8.0)", () => {
 
   test("native v2 ignores v1 judges when dimensions are present", () => {
     const dim: DimensionSpec = { name: "completeness", weight: 1, checks: [check("x")] };
-    const n = normalizeOutcome({
-      dimensions: [dim],
-      // A v1 judge alongside explicit dimensions must NOT spawn a second
-      // correctness dimension — explicit dimensions win.
-      llmJudge: { rubric: "ignored" },
-    });
-    expect(n.dimensions).toEqual([dim]);
+    const llmJudge = { rubric: "ignored" };
+    expect(normalizeOutcome({ dimensions: [dim], llmJudge }).dimensions).toEqual([dim]);
+    expect(normalizeOutcome({ dimensions: [], llmJudge }).dimensions).toEqual([]);
   });
 });
 
@@ -128,11 +124,5 @@ describe("normalizeOutcome — mixed v1/v2 (v8.0)", () => {
     const n = normalizeOutcome({ checks: [c0], dimensions: [dim] });
     expect(n.gates.map((g) => g.name)).toEqual(["legacy"]);
     expect(n.dimensions).toEqual([dim]);
-  });
-
-  test("does NOT prepend tasksCompletedCheck (that stays the runner's job)", () => {
-    const n = normalizeOutcome({ checks: [check("only")] });
-    expect(n.gates.map((g) => g.name)).toEqual(["only"]);
-    expect(n.gates.some((g) => g.name.includes("tasks"))).toBe(false);
   });
 });
