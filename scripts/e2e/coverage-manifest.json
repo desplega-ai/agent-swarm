@@ -687,6 +687,10 @@
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
     },
+    "slack-file-download-bounds": {
+      "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
+      "scenarios": ["slack-file-download-bounds"]
+    },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
       "scenarios": [
