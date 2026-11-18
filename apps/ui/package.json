@@ -79,6 +79,8 @@
     "@biomejs/biome": "2.4.5",
     "@happy-dom/global-registrator": "^21.0.4",
     "@resvg/resvg-js": "^2.6.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/user-event": "^14.6.12",
     "@types/dagre": "^0.7.54",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
