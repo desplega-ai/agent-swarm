@@ -19877,7 +19877,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
+                /** @description Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20030,7 +20030,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
+                /** @description Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -33583,7 +33583,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
