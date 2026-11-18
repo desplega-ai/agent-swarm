@@ -33,7 +33,10 @@ async function registerWithToken(
 
 export const routeCallerIdentity: Scenario = {
   name: "route-caller-identity",
-  order: 696,
+  // Before platform-file-import (690), the suite's last restart: the boot sweep fails
+  // in_progress tasks 5 s after a restart, and the strict gate needs that status in the final
+  // database, so nothing may run for long after that restart.
+  order: 667,
   async run(ctx) {
     const owner = await registerWithToken(ctx, "owner");
     const other = await registerWithToken(ctx, "other");
