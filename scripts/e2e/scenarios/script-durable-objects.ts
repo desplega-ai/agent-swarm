@@ -1,15 +1,400 @@
 import { asRecord, expect, expectStatus } from "../http";
-import type { Scenario } from "../run";
+import type { Scenario, ScenarioContext } from "../run";
 import {
   callToolErr,
   callToolOk,
+  expectRunOk,
   getLead,
   registerAgent,
+  runScript,
   structured,
   toolText,
   upsertScript,
   withMcp,
 } from "./script-helpers";
+
+const NESTED_ENV = { SCRIPT_QUICKJS_POOL_SIZE: "20" };
+
+async function checkExecutor(
+  ctx: ScenarioContext,
+  agentId: string,
+  leadId: string,
+  functionName: string,
+  executor: "native" | "quickjs",
+) {
+  const runtimeName = `e2e-counter-${ctx.nonce}-${executor}`;
+  const recursiveName = `${runtimeName}-recursive`;
+  const ttlName = `${runtimeName}-ttl`;
+  const runtimeSource = `import { DurableObject } from "swarm-sdk";
+export default class Counter extends DurableObject<{ n: number; secret?: string }> {
+  initialState() { return { n: 0 }; }
+  async add(args: { by: number }) {
+    const before = this.state.n;
+    await Promise.resolve();
+    this.state.n = before + args.by;
+    return this.state.n;
+  }
+  read() { return this.state; }
+  fail() { this.state.n += 100; throw new Error("rollback counter"); }
+  reset() { this.destroy(); return true; }
+  remember(args: { secret: string }) { this.state.secret = args.secret; return true; }
+  caller(_args: unknown, ctx: any) { return ctx.caller; }
+  config(args: { key: string }, ctx: any) {
+    return ctx.stdlib.Redacted.value(ctx.swarm.config.get(args.key));
+  }
+  async forward(args: { name: string; id: string; executor: string }, ctx: any) {
+    return await ctx.swarm.script_run({ name: args.name, executor: args.executor,
+      object: { id: args.id, method: "caller" } });
+  }
+  async reenter(args: { name: string; executor: string }, ctx: any) {
+    try {
+      return await ctx.swarm.script_run({ name: args.name, executor: args.executor,
+        object: { id: this.id, method: "read" } });
+    } catch (error) {
+      const message = String(error);
+      return { success: false, status: Number(message.match(/failed with (\\d+)/)?.[1]),
+        data: { error: message } };
+    }
+  }
+  _secret() { return "hidden"; }
+}`;
+  const runtime = await upsertScript(ctx, leadId, {
+    name: runtimeName,
+    source: runtimeSource,
+    scope: "global",
+    executor,
+  });
+  const durableNamespace = `durable:${runtime.id}`;
+  const call = async (id: string, method: string, args?: unknown) => {
+    const label = `${executor} object ${id}.${method}`;
+    const run = await runScript(ctx, agentId, {
+      name: runtimeName,
+      scope: "global",
+      executor,
+      object: { id, method },
+      args,
+    });
+    expectRunOk(run, label);
+    const object = asRecord(run.object);
+    expect(
+      object.id === id &&
+        Number.isInteger(object.stateVersion) &&
+        typeof object.destroyed === "boolean",
+      `${label}: missing object response`,
+    );
+    return run;
+  };
+
+  async function checkCounterLifecycle() {
+    const key = `E2E_DURABLE_${ctx.nonce.toUpperCase()}`;
+    const ordinary = await runScript(ctx, agentId, {
+      source: `export default function(args: any, ctx: any) {
+  return ctx.stdlib.Redacted.value(ctx.swarm.config.get(args.key));
+}`,
+      executor,
+      args: { key },
+    });
+    expectRunOk(ordinary, `${executor} ordinary script config`);
+    expect(
+      ordinary.result === ctx.nonce &&
+        (await call("config", "config", { key })).result === ctx.nonce,
+      `${executor}: object must receive the same agent config as an ordinary script`,
+    );
+    expect((await call("a", "add", { by: 2 })).result === 2, `${executor}: first add`);
+    await withMcp(ctx, agentId, async (mcp) => {
+      const added = await callToolOk(mcp, "script-run", {
+        name: runtimeName,
+        scope: "global",
+        executor,
+        object: { id: "a", method: "add" },
+        args: { by: 2 },
+      });
+      const run = asRecord(structured(added).data);
+      expectRunOk(run, `${executor} MCP object add`);
+      expect(
+        run.result === 4 &&
+          asRecord(run.object).id === "a" &&
+          toolText(added).includes(`object.stateVersion: ${asRecord(run.object).stateVersion}`),
+        `${executor}: MCP must preserve the object response and state`,
+      );
+    });
+    expect(asRecord((await call("b", "read")).result).n === 0, `${executor}: isolated id`);
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 5 }, () => call("concurrent", "add", { by: 1 })),
+    );
+    expect(
+      concurrent
+        .map((run) => run.result)
+        .sort()
+        .join(",") === "1,2,3,4,5" && asRecord((await call("concurrent", "read")).result).n === 5,
+      `${executor}: concurrent calls must serialize without losing additions`,
+    );
+    const beforeFailure = ctx.db.get<{ value: string }>(
+      "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
+      [durableNamespace, "state/a"],
+    );
+    const failed = await runScript(ctx, agentId, {
+      name: runtimeName,
+      executor,
+      object: { id: "a", method: "fail" },
+    });
+    expect(
+      failed.exitCode !== 0 && JSON.stringify(failed).includes("rollback counter"),
+      `${executor}: thrown method must fail`,
+    );
+    expect(
+      ctx.db.get<{ value: string }>(
+        "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
+        [durableNamespace, "state/a"],
+      )?.value === beforeFailure?.value && asRecord((await call("a", "read")).result).n === 4,
+      `${executor}: thrown method must preserve the stored snapshot`,
+    );
+    for (const method of ["initialState", "_secret"]) {
+      const refusedId = `refused-${method}`;
+      const refused = await ctx.api("POST", "/api/scripts/run", {
+        agentId,
+        body: { name: runtimeName, executor, object: { id: refusedId, method } },
+      });
+      expectStatus(refused, [400], `${executor} reserved method ${method}`);
+      expect(
+        String(asRecord(refused.json).error).includes("not callable") &&
+          ctx.db.get<{ n: number }>(
+            "SELECT count(*) AS n FROM kv_entries WHERE namespace = ? AND key IN (?, ?)",
+            [durableNamespace, `lease/${refusedId}`, `state/${refusedId}`],
+          )?.n === 0,
+        `${executor}: reserved method must create no lease or state`,
+      );
+    }
+    await call("destroyed", "add", { by: 9 });
+    expect(
+      asRecord((await call("destroyed", "reset")).object).destroyed === true &&
+        asRecord((await call("destroyed", "read")).result).n === 0,
+      `${executor}: destroy must restore the initial state on the next call`,
+    );
+  }
+
+  async function checkCallerAndDepth() {
+    const rootCaller = asRecord((await call("a", "caller")).result);
+    expect(
+      rootCaller.kind === "agent" && rootCaller.agentId === agentId,
+      `${executor}: root caller must identify the agent`,
+    );
+    const nestedCaller = asRecord(
+      (await call("parent", "forward", { name: runtimeName, id: "child", executor })).result,
+    );
+    const caller = asRecord(asRecord(nestedCaller.data).result);
+    expect(
+      nestedCaller.success === true &&
+        caller.kind === "script" &&
+        caller.agentId === agentId &&
+        (caller.scriptId === undefined || caller.scriptId === runtime.id) &&
+        (caller.objectId === undefined || caller.objectId === "parent"),
+      `${executor}: nested caller must identify its agent without inventing provenance`,
+    );
+    const reentry = asRecord((await call("a", "reenter", { name: runtimeName, executor })).result);
+    expect(
+      reentry.success === false &&
+        reentry.status === 409 &&
+        String(asRecord(reentry.data).error).includes("already in this call chain"),
+      `${executor}: self object call must fail with reentry`,
+    );
+
+    const recursive = await upsertScript(ctx, agentId, {
+      name: recursiveName,
+      executor,
+      source: `export default async function (args: any, ctx: any): Promise<any> {
+    if (args.objectName) return await ctx.swarm.script_run({ name: args.objectName,
+      executor: args.executor, object: { id: "plain-caller", method: "caller" } });
+    let nested;
+    try {
+      nested = await ctx.swarm.script_run({ name: args.name, executor: args.executor,
+        args: { ...args, level: args.level + 1 } });
+    } catch (error) {
+      const message = String(error);
+      nested = { success: false, status: Number(message.match(/failed with (\\d+)/)?.[1]),
+        data: { error: message } };
+    }
+    return { level: args.level, attemptedLevel: args.level + 1, nested };
+  }`,
+    });
+    const plain = await runScript(ctx, agentId, {
+      name: recursiveName,
+      executor,
+      args: { objectName: runtimeName, executor },
+    });
+    expectRunOk(plain, `${executor} plain caller`);
+    const plainNested = asRecord(plain.result);
+    const plainCaller = asRecord(asRecord(plainNested.data).result);
+    expect(
+      plainNested.success === true &&
+        plainCaller.kind === "script" &&
+        plainCaller.agentId === agentId &&
+        (plainCaller.scriptId === undefined || plainCaller.scriptId === recursive.id) &&
+        plainCaller.objectId === undefined,
+      `${executor}: plain script caller must identify its saved script`,
+    );
+    const recursion = await runScript(ctx, agentId, {
+      name: recursiveName,
+      executor,
+      args: { name: recursiveName, executor, level: 1 },
+    });
+    expectRunOk(recursion, `${executor} recursive root`);
+    let level = asRecord(recursion.result);
+    for (let depth = 1; depth <= 16; depth++) {
+      expect(level.level === depth, `${executor}: recursion lost level ${depth}`);
+      const nested = asRecord(level.nested);
+      if (depth === 16) {
+        expect(
+          level.attemptedLevel === 17 &&
+            nested.success === false &&
+            nested.status === 400 &&
+            String(asRecord(nested.data).error).includes("call depth exceeds 16"),
+          `${executor}: nested level 17 must hit the depth limit`,
+        );
+      } else {
+        expect(nested.success === true, `${executor}: recursion failed before level 17`);
+        const child = asRecord(nested.data);
+        expectRunOk(child, `${executor} recursive level ${depth + 1}`);
+        level = asRecord(child.result);
+      }
+    }
+  }
+
+  async function checkPersistenceAndMigration() {
+    await ctx.restartSut({ env: NESTED_ENV });
+    expect(
+      asRecord((await call("a", "read")).result).n === 4,
+      `${executor}: API restart must preserve state`,
+    );
+    await upsertScript(ctx, leadId, {
+      name: ttlName,
+      scope: "global",
+      executor,
+      source: runtimeSource.replace(
+        "  initialState()",
+        "  static idleTtlSec = 1;\n  initialState()",
+      ),
+    });
+    const ttlBody = { name: ttlName, executor, object: { id: "ttl", method: "add" } };
+    const ttlAdded = await runScript(ctx, agentId, { ...ttlBody, args: { by: 3 } });
+    expectRunOk(ttlAdded, `${executor} TTL initial call`);
+    expect(ttlAdded.result === 3, `${executor}: TTL object initial addition`);
+    // This wait tests expiry itself, rather than waiting for an asynchronous side effect.
+    await Bun.sleep(2_000);
+    const expired = await runScript(ctx, agentId, { ...ttlBody, args: { by: 0 } });
+    expectRunOk(expired, `${executor} TTL expired call`);
+    expect(expired.result === 0, `${executor}: idle TTL must restore the initial state`);
+
+    const fakeSecret = `sk-ant-api03-${"A".repeat(90)}`;
+    const secretIdRun = await runScript(ctx, agentId, {
+      name: runtimeName,
+      executor,
+      object: { id: fakeSecret, method: "read" },
+    });
+    expectRunOk(secretIdRun, `${executor} secret-shaped object id`);
+    const secretIdRow = ctx.db.get<{ id: string }>(
+      "SELECT id FROM script_runs WHERE objectScriptId = ? AND objectId = ?",
+      [runtime.id, fakeSecret],
+    );
+    expect(secretIdRow, `${executor}: run must retain the exact object identity`);
+    const history = await ctx.api("GET", `/api/script-runs/${secretIdRow.id}`, { agentId });
+    expectStatus(history, [200], `${executor} object run history`);
+    expect(
+      !JSON.stringify(secretIdRun).includes(fakeSecret) &&
+        !history.text.includes(fakeSecret) &&
+        String(asRecord(asRecord(history.json).run).objectId).includes("[REDACTED"),
+      `${executor}: run responses must scrub secret-shaped object ids`,
+    );
+    await call("a", "remember", { secret: fakeSecret });
+    await withMcp(ctx, agentId, async (mcp) => {
+      const snapshot = await callToolOk(mcp, "kv-get", {
+        namespace: durableNamespace,
+        key: "state/a",
+      });
+      const value = asRecord(asRecord(structured(snapshot).entry).value);
+      expect(
+        value.codeVersion === 1 &&
+          asRecord(value.state).n === 4 &&
+          String(asRecord(value.state).secret).includes("[REDACTED") &&
+          !JSON.stringify(snapshot).includes(fakeSecret),
+        `${executor}: KV inspection must show the snapshot with its secret scrubbed`,
+      );
+    });
+    const migrated = await upsertScript(ctx, leadId, {
+      name: runtimeName,
+      scope: "global",
+      executor,
+      source: runtimeSource
+        .replace("{ n: number; secret?: string }", "{ total: number; secret?: string }")
+        .replace(
+          "initialState() { return { n: 0 }; }",
+          `initialState() { return { total: 0 }; }
+    migrate(state: any) { return { total: state.n, secret: state.secret }; }`,
+        )
+        .replaceAll("this.state.n", "this.state.total"),
+    });
+    expect(migrated.version === 2, `${executor}: migration must create version 2`);
+    const migratedState = asRecord((await call("a", "read")).result);
+    expect(
+      migratedState.total === 4 && migratedState.n === undefined,
+      `${executor}: migration must change the persisted state shape`,
+    );
+    const storedMigration = asRecord(
+      JSON.parse(
+        ctx.db.get<{ value: string }>(
+          "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
+          [durableNamespace, "state/a"],
+        )?.value ?? "null",
+      ),
+    );
+    expect(
+      storedMigration.codeVersion === 2 &&
+        asRecord(storedMigration.state).total === 4 &&
+        asRecord(storedMigration.state).secret === fakeSecret,
+      `${executor}: migration must persist state while KV inspection scrubs its secret`,
+    );
+    expect(
+      ctx.db.get<{ n: number }>(
+        "SELECT count(*) AS n FROM script_runs WHERE objectScriptId = ? AND objectId = ? AND objectMethod = ? AND status = 'completed'",
+        [runtime.id, "a", "add"],
+      )?.n === 2,
+      `${executor}: run rows must record the object script, id, and method`,
+    );
+  }
+
+  await checkCounterLifecycle();
+  await checkCallerAndDepth();
+  await checkPersistenceAndMigration();
+  for (const body of [
+    { name: runtimeName, executor },
+    { name: functionName, executor, object: { id: "kind", method: "add" } },
+    {
+      source: "export default function () { return null; }",
+      executor,
+      object: { id: "inline", method: "read" },
+    },
+  ]) {
+    expectStatus(
+      await ctx.api("POST", "/api/scripts/run", { agentId, body }),
+      [400],
+      `${executor} object target body refusal`,
+    );
+  }
+  for (const [scriptName, scope, owner] of [
+    [runtimeName, "global", leadId],
+    [ttlName, "global", leadId],
+    [recursiveName, "agent", agentId],
+  ]) {
+    expectStatus(
+      await ctx.api("DELETE", `/api/scripts/${scriptName}?scope=${scope}`, {
+        agentId: owner,
+      }),
+      [200],
+      `delete ${executor} runtime script`,
+    );
+  }
+}
 
 export const scriptDurableObjects: Scenario = {
   name: "script-durable-objects",
@@ -197,6 +582,33 @@ export default class Counter extends Middle {
         JSON.stringify({ argsType: "{ n: number }", resultType: "number", description: "" }),
       "function signature must remain unchanged",
     );
+
+    const config = await ctx.api("PUT", "/api/config", {
+      body: {
+        scope: "agent",
+        scopeId: agentId,
+        key: `E2E_DURABLE_${ctx.nonce.toUpperCase()}`,
+        value: ctx.nonce,
+        isSecret: false,
+      },
+    });
+    expectStatus(config, [200], "store durable object agent config");
+    const configId = asRecord(config.json).id;
+    expect(typeof configId === "string", "durable object config id");
+    // Recursive SDK calls hold their executor slots until every child returns.
+    try {
+      await ctx.restartSut({ env: NESTED_ENV });
+      for (const executor of ["native", "quickjs"] as const) {
+        await checkExecutor(ctx, agentId, leadId, functionName, executor);
+      }
+    } finally {
+      await ctx.restartSut();
+      expectStatus(
+        await ctx.api("DELETE", `/api/config/${configId}`),
+        [200],
+        "delete durable object agent config",
+      );
+    }
 
     expectStatus(
       await ctx.api("DELETE", `/api/scripts/${name}?scope=global`, { agentId: leadId }),

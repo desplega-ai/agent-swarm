@@ -388,25 +388,25 @@ Deliverable: `script_run({ name, object: { id, method }, args })` works from age
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types, lint, seam: `bun run tsc:check:tsc && bun run lint && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] Generators clean: `bun run docs:openapi && bun run build:script-types && git status --porcelain openapi.json docs-site src/scripts-runtime/types`. Commit any diff.
-- [ ] Gates: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun scripts/check-sdk-tool-registration.ts`
-- [ ] Full script band: `bun run e2e --only script-durable-objects,script-inline-run,script-saved-lifecycle,script-sdk-calls,script-kv,script-limits,script-apis`
+- [x] Types, lint, seam: `bun run tsc:check:tsc && bun run lint && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Generators clean: `bun run docs:openapi && bun run build:script-types && git status --porcelain openapi.json docs-site src/scripts-runtime/types`. Commit any diff.
+- [x] Gates: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun scripts/check-sdk-tool-registration.ts`
+- [x] Full script band: `bun run e2e --only script-durable-objects,script-inline-run,script-saved-lifecycle,script-sdk-calls,script-kv,script-limits,script-apis`
 
 #### Automated QA:
-- [ ] Complete `script-durable-objects` and run it with `bun run e2e --only script-durable-objects`. Each case runs once with `executor: "native"` and once with `executor: "quickjs"`:
-  - [ ] Two `add` calls on id `a` return 2, then 4. Id `b` starts at 0.
-  - [ ] Five concurrent `add({ by: 1 })` calls on a fresh id finish with a final state of 5, and every call returns a distinct value.
-  - [ ] A method that throws leaves the state unchanged.
-  - [ ] `method: "initialState"` and `method: "_secret"` are refused, and no lease row exists afterwards (`ctx.db.get` on `kv_entries`).
-  - [ ] `destroy()` and then a call returns the initial state.
-  - [ ] A method that calls its own object through `ctx.swarm.script_run` gets the re-entry error.
-  - [ ] A plain script that calls itself recursively fails with the depth error at 17. Risk: 17 live nested runs may hit the script concurrency cap first (skill `### Concurrency limit`). If they do, check the cap value in code. Then either raise it for the e2e SUT via `ctx.restartSut({ env })`, or seed the depth through a chain of distinct scripts. Do not add a new env var for the depth limit.
-  - [ ] `ctx.restartSut()` keeps the state.
-  - [ ] `static idleTtlSec = 1`: after about 2 s the object is fresh.
-  - [ ] Upserting v2 with `migrate` changes the shape on the next call.
-  - [ ] `kv_get` on `state/a` returns the snapshot, and a secret-shaped string inside the state comes back scrubbed.
-  - [ ] Run rows carry `objectId` and `objectMethod` (`ctx.db.get` on `script_runs`).
+- [x] Complete `script-durable-objects` and run it with `bun run e2e --only script-durable-objects`. Each case runs once with `executor: "native"` and once with `executor: "quickjs"`:
+  - [x] Two `add` calls on id `a` return 2, then 4. Id `b` starts at 0.
+  - [x] Five concurrent `add({ by: 1 })` calls on a fresh id finish with a final state of 5, and every call returns a distinct value.
+  - [x] A method that throws leaves the state unchanged.
+  - [x] `method: "initialState"` and `method: "_secret"` are refused, and no lease row exists afterwards (`ctx.db.get` on `kv_entries`).
+  - [x] `destroy()` and then a call returns the initial state.
+  - [x] A method that calls its own object through `ctx.swarm.script_run` gets the re-entry error.
+  - [x] A plain script that calls itself recursively fails with the depth error at 17. Risk: 17 live nested runs may hit the script concurrency cap first (skill `### Concurrency limit`). If they do, check the cap value in code. Then either raise it for the e2e SUT via `ctx.restartSut({ env })`, or seed the depth through a chain of distinct scripts. Do not add a new env var for the depth limit.
+  - [x] `ctx.restartSut()` keeps the state.
+  - [x] `static idleTtlSec = 1`: after about 2 s the object is fresh.
+  - [x] Upserting v2 with `migrate` changes the shape on the next call.
+  - [x] `kv_get` on `state/a` returns the snapshot, and a secret-shaped string inside the state comes back scrubbed.
+  - [x] Run rows carry `objectId` and `objectMethod` (`ctx.db.get` on `script_runs`).
 
 #### Manual Verification:
 - [ ] None. The Manual E2E section below covers a real backend.

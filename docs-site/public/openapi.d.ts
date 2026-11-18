@@ -37623,6 +37623,10 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     source?: string;
+                    object?: {
+                        id: string;
+                        method: string;
+                    };
                     args?: unknown;
                     /** @default  */
                     intent?: string;
@@ -37648,6 +37652,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: unknown;
+                        object?: {
+                            id: string;
+                            stateVersion: number;
+                            destroyed: boolean;
+                        };
                         autoSaved?: {
                             slug: string;
                             reason: string;
@@ -37693,6 +37702,15 @@ export interface operations {
             };
             /** @description Script not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Object busy, re-entry, or lease lost */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

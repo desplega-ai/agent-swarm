@@ -16,7 +16,7 @@ export type ScriptAgentFsDescriptor = { apiUrl: string; orgId: string; driveId: 
 /** The invoking agent, or the saved script that made a nested call. */
 export type ScriptCaller =
   | { kind: "agent"; agentId: string }
-  | { kind: "script"; agentId: string; scriptId: string; objectId?: string }
+  | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
   | null;
 
 /** Host-owned snapshot and call target for one DurableObject method invocation. */

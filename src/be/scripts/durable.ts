@@ -5,7 +5,7 @@ import {
   type ScriptExecutorName,
   type ScriptFsMode,
 } from "../../scripts-runtime/executors/types";
-import type { RunScriptOutput } from "../../scripts-runtime/loader";
+import type { RunScriptInput, RunScriptOutput } from "../../scripts-runtime/loader";
 import type { ScriptRecord } from "../../types";
 import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import { scrubSecrets } from "../../utils/secret-scrubber";
@@ -14,7 +14,17 @@ import { runScriptWithRunCredential } from "./run-credential";
 
 type DurableState = { codeVersion: number; stateVersion: number; state: unknown };
 
-export type DurableCallInput = {
+export type DurableCallInput = Pick<
+  RunScriptInput,
+  | "runtimeInstanceId"
+  | "sourceTaskId"
+  | "egressSecrets"
+  | "failedBindings"
+  | "userConfig"
+  | "agentFs"
+  | "apiConnections"
+  | "mcpConnections"
+> & {
   script: ScriptRecord;
   objectId: string;
   method: string;
@@ -52,6 +62,7 @@ export async function callDurableObject({
   executor,
   fsMode,
   nested = false,
+  ...runContext
 }: DurableCallInput): Promise<DurableCallResult> {
   let signature: { kind?: string; methods?: Record<string, unknown> };
   try {
@@ -110,10 +121,11 @@ export async function callDurableObject({
     const stored = entry?.value as DurableState | undefined;
     output = await runScriptWithRunCredential(
       {
+        ...runContext,
         source: script.source,
         args,
         agentId,
-        executor: executor ?? script.executor,
+        executor: executor === undefined ? script.executor : executor,
         fsMode: fsMode ?? script.fsMode,
         signal: AbortSignal.timeout(DEFAULT_SCRIPT_RESOURCES.wallClockMs),
         durable: {
@@ -135,9 +147,15 @@ export async function callDurableObject({
       await release();
       return { ok: false, code: "run_failed", message: "object run failed", output };
     }
-    const { state, destroyed, idleTtlSec } = output.durable;
+    const { state, destroyed } = output.durable;
+    const ttl = output.durable.idleTtlSec;
+    const idleTtlSec = typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0 ? ttl : null;
     const encoded = JSON.stringify(state);
-    if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > MAX_KV_BODY_BYTES) {
+    if (encoded === undefined) {
+      await release();
+      return { ok: false, code: "run_failed", message: "state must be JSON-serializable" };
+    }
+    if (Buffer.byteLength(encoded, "utf8") > MAX_KV_BODY_BYTES) {
       await release();
       return { ok: false, code: "too_large", message: "state too large" };
     }

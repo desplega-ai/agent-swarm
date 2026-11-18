@@ -14332,7 +14332,7 @@ function parseJsonColumn(value: string | null): unknown | undefined {
 function rowToScriptRun(row: ScriptRunRow): ScriptRun {
   return {
     objectScriptId: row.objectScriptId ?? undefined,
-    objectId: row.objectId ?? undefined,
+    objectId: row.objectId == null ? undefined : scrubSecrets(row.objectId),
     objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
@@ -14433,6 +14433,9 @@ export async function recordInlineScriptRun(data: {
   source: string;
   args: unknown;
   scriptName?: string;
+  objectScriptId?: string;
+  objectId?: string;
+  objectMethod?: string;
   status: "completed" | "failed";
   output?: unknown;
   error?: ScrubbedText;
@@ -14455,8 +14458,8 @@ export async function recordInlineScriptRun(data: {
       `INSERT INTO script_runs
         (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
          startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
-         sourceStepId, parentScriptRunId)
-       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         sourceStepId, parentScriptRunId, objectScriptId, objectId, objectMethod)
+       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [
         data.id,
@@ -14477,6 +14480,9 @@ export async function recordInlineScriptRun(data: {
         // ctx.swarm.script_run) records that run and its workflow step.
         provenance?.sourceStepId ?? null,
         provenance?.sourceScriptRunId ?? null,
+        data.objectScriptId ?? null,
+        data.objectId ?? null,
+        data.objectMethod ?? null,
       ],
     );
     if (!row) throw new Error("Failed to record inline script run");
