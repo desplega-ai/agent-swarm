@@ -108,6 +108,8 @@ async function runHook(
   const env: Record<string, string | undefined> = {
     ...process.env,
     CLAUDE_PROJECT_DIR: projectDir,
+    // A worker container's /workspace/.mcp.json would otherwise win over the fake API.
+    HOOK_WORKSPACE_DIR: projectDir,
     TASK_FILE: taskFile,
     CONTEXT_BOUND_NOTE_TOKENS: undefined,
     ...extraEnv,
