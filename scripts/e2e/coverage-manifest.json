@@ -531,6 +531,10 @@
       "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
       "scenarios": ["slack-file-download-bounds"]
     },
+    "slack-upload-path-bounds": {
+      "description": "slack-upload-file by filePath reads only a regular file inside /workspace or the caller's own task directory, refuses climbs, outward symlinks, directories and other agents' task directories, and sends the allowed file byte for byte",
+      "scenarios": ["slack-upload-path-bounds"]
+    },
     "slack-chat-sdk-http": {
       "description": "Chat SDK Slack adapter in webhook mode with the built-in Slack off, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands as channel posts, signed block_actions accepted without a task, and forged, stale, unsigned and replayed requests",
       "scenarios": [
