@@ -145,7 +145,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       const baseURL = this.baseURL;
       // A base URL stored through config must reach a public address. The
       // deployment environment's own value may be private (bundled TEI).
-      const endpoint = embeddingEndpoint();
+      const endpoint = embeddingEndpoint(baseURL ?? null);
       this.client = new OpenAI({
         baseURL,
         apiKey: this.apiKey,
