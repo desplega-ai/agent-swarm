@@ -145,13 +145,20 @@ export function CommentHighlights({
 
     if (native) {
       for (const [group, name] of Object.entries(NAMES) as [keyof typeof NAMES, string][]) {
-        const highlight = new Highlight(...groups[group]);
+        const highlight = CSS.highlights.get(name) ?? new Highlight();
+        for (const range of groups[group]) highlight.add(range);
         if (group === "active") highlight.priority = 1;
         CSS.highlights.set(name, highlight);
       }
     }
     return () => {
-      if (native) for (const name of Object.values(NAMES)) CSS.highlights.delete(name);
+      if (native) {
+        for (const [group, name] of Object.entries(NAMES) as [keyof typeof NAMES, string][]) {
+          const highlight = CSS.highlights.get(name);
+          for (const range of groups[group]) highlight?.delete(range);
+          if (highlight?.size === 0) CSS.highlights.delete(name);
+        }
+      }
       for (const el of marked) {
         el.classList.remove(FALLBACK_CLASS, FALLBACK_FLAGGED_CLASS, FALLBACK_ACTIVE_CLASS);
       }

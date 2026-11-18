@@ -6,6 +6,7 @@ import { useScriptsSavings } from "@/api/hooks/use-savings";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScripts } from "@/api/hooks/use-scripts";
 import type { SavingsJobRow, ScriptListItem, ScriptScope } from "@/api/types";
+import { DurableBadge } from "@/components/scripts/durable-badge";
 import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
 import { DataGridColumnsMenu } from "@/components/shared/columns-menu";
 import { DataGrid, HIDE_WHEN_COMPACT, useDataGridColumns } from "@/components/shared/data-grid";
@@ -91,6 +92,7 @@ export default function ScriptsPage() {
         cellRenderer: (params: { value: string; data?: ScriptListItem }) => (
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate font-semibold">{params.value}</span>
+            {params.data?.kind === "durable" && <DurableBadge />}
             {params.data?.isScratch && (
               <Badge variant="outline" size="tag">
                 SCRATCH
@@ -299,9 +301,12 @@ export default function ScriptsPage() {
                   title={script.name}
                   titleLines={1}
                   status={
-                    <Badge variant="outline" size="tag">
-                      {script.isScratch ? "scratch" : script.scope}
-                    </Badge>
+                    <span className="flex items-center gap-1">
+                      {script.kind === "durable" ? <DurableBadge /> : null}
+                      <Badge variant="outline" size="tag">
+                        {script.isScratch ? "scratch" : script.scope}
+                      </Badge>
+                    </span>
                   }
                   meta={[
                     `v${script.version}`,

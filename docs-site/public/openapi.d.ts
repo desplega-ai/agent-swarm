@@ -6134,8 +6134,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * Send agent-fs comments to the swarm as one task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -6147,6 +6147,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        parentTaskId?: string;
                         orgId: string;
                         driveId: string;
                         commentIds: string[];
@@ -14831,6 +14833,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    review_follow_ups: boolean;
                                     service_user_id: string | null;
                                 };
                             };
@@ -19877,7 +19880,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
+                /** @description Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20030,7 +20033,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
+                /** @description Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -33583,7 +33586,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -36922,6 +36925,8 @@ export interface operations {
                 status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
                 agentId?: string;
                 scriptName?: string;
+                objectScriptId?: string;
+                objectId?: string;
                 limit?: number;
                 offset?: number | null;
             };
@@ -37965,6 +37970,8 @@ export interface operations {
                             updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
+                            /** @enum {string} */
+                            kind: "function" | "durable";
                         }[];
                     };
                 };

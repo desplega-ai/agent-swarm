@@ -2046,6 +2046,10 @@ export interface ScriptRun {
   lastHeartbeatAt?: string;
   idempotencyKey?: string;
   requestedByUserId?: string;
+  /** Set on a durable object call: the class script, the object id and the method. */
+  objectScriptId?: string;
+  objectId?: string;
+  objectMethod?: string;
 }
 
 export type ScriptRunListItem = Omit<ScriptRun, "source" | "args" | "output">;
@@ -2102,6 +2106,8 @@ export interface ScriptListItem {
   createdByAgentId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** `durable` for a DurableObject class script. */
+  kind?: "function" | "durable";
 }
 
 /** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
@@ -2111,6 +2117,20 @@ export interface ScriptDetail extends ScriptListItem {
   contentHash: string;
   signature: unknown;
   argsJsonSchema: unknown;
+}
+
+/** One durable object, read from the KV namespace `durable:<scriptId>` (key `state/<id>`). */
+export interface DurableObjectEntry {
+  id: string;
+  codeVersion: number | null;
+  stateVersion: number | null;
+  /** Secrets are scrubbed by the KV read. */
+  state: unknown;
+  updatedAt: number;
+  /** Idle TTL expiry (epoch ms), or null when the object never expires. */
+  expiresAt: number | null;
+  /** A call holds the object's lease right now. */
+  busy: boolean;
 }
 
 /** Row served by `GET /api/scripts/{id}/versions` — mirrors ScriptVersionRecord in src/types.ts. */
@@ -3805,6 +3825,8 @@ export interface StatusComb {
    * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
    */
   service_user_id?: string | null;
+  /** The API supports sending review batches as follow-ups. */
+  review_follow_ups?: boolean;
 }
 
 /**
@@ -3849,6 +3871,7 @@ export interface CombRepairedComment {
 }
 
 export interface CombReviewBatchInput {
+  parentTaskId?: string;
   orgId: string;
   driveId: string;
   /** agent-fs root comment ids, 1 to 50. */

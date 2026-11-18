@@ -214,6 +214,7 @@ describe("/status agent_fs.comb", () => {
       org_id: "org-1",
       drive_id: "drive-1",
       service_user_id: null,
+      review_follow_ups: true,
     });
   });
 

@@ -146,6 +146,12 @@ function turnWeight(turn: { person?: unknown; parts: TurnPart[] }): number {
   );
 }
 
+function fileReviewRequest(task: AgentTask): string | null {
+  return task.source === "comb" && task.taskType === "comb-review" && task.parentTaskId
+    ? `Sent file comments for review. [View follow-up](/tasks/${task.id})`
+    : null;
+}
+
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
  * message, then its parts (a deferred wake-up starts a new part). A part
@@ -163,7 +169,7 @@ export function TurnTimeline({
   showHandoffs,
   typing,
   onLayoutChange,
-  requestText,
+  requestText = fileReviewRequest,
 }: {
   rootTaskId: string;
   chain: AgentTask[];
@@ -178,7 +184,7 @@ export function TurnTimeline({
    * The person's words in a task whose prompt wraps them (a json-render app
    * page's action prompt), or null for any other task. A task it names opens
    * a turn, and its bubble shows only those words. Pass a stable function.
-   * Omitted: turns follow the task sources and show `task.task`.
+   * By default, file reviews link to the follow-up that holds the full request.
    */
   requestText?: (task: AgentTask) => string | null;
 }) {

@@ -2536,7 +2536,7 @@ export const SwarmRepoSchema = z
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
     hooks: RepoHooksSchema.describe(
-      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
     ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),
@@ -4377,7 +4377,7 @@ export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 export type ScriptListItem = Omit<
   ScriptRecord,
   "source" | "signatureJson" | "argsJsonSchema" | "contentHash"
->;
+> & { kind: "function" | "durable" };
 
 /** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
 export type ScriptDetail = Omit<ScriptRecord, "argsJsonSchema"> & {

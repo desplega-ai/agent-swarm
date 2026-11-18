@@ -365,6 +365,9 @@ export {
   getScriptRunFollowUpGuard,
   setScriptRunFollowUpGuard,
 } from "./db/script-runs";
+
+import { type ScriptRunFilter, scriptRunFilterSql } from "./db/script-runs";
+
 export {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -14272,6 +14275,9 @@ type ScriptRunListRow = Pick<
   | "last_heartbeat_at"
   | "idempotencyKey"
   | "requestedByUserId"
+  | "objectScriptId"
+  | "objectId"
+  | "objectMethod"
 >;
 
 function parseJsonColumn(value: string | null): unknown | undefined {
@@ -14307,6 +14313,9 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
 
 function rowToScriptRunListItem(row: ScriptRunListRow): ScriptRunListItem {
   return {
+    objectScriptId: row.objectScriptId ?? undefined,
+    objectId: row.objectId == null ? undefined : scrubSecrets(row.objectId),
+    objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
@@ -14455,27 +14464,11 @@ export async function getScriptRunByIdempotencyKey(
   return row ? rowToScriptRun(row) : null;
 }
 
-export async function listScriptRuns(opts?: {
-  status?: ScriptRunStatus;
-  agentId?: string;
-  scriptName?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<ScriptRunListItem[]> {
-  const conditions: string[] = [];
-  const params: Array<string | number> = [];
-  if (opts?.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts?.scriptName) {
-    conditions.push("scriptName = ?");
-    params.push(opts.scriptName);
-  }
+export async function listScriptRuns(
+  opts?: ScriptRunFilter & { limit?: number; offset?: number },
+): Promise<ScriptRunListItem[]> {
+  const { conditions, params: filterParams } = scriptRunFilterSql(opts);
+  const params: Array<string | number> = [...filterParams];
 
   const limit = opts?.limit ?? 50;
   const offset = opts?.offset ?? 0;
@@ -14494,7 +14487,10 @@ export async function listScriptRuns(opts?: {
         error,
         last_heartbeat_at,
         idempotencyKey,
-        requestedByUserId
+        requestedByUserId,
+        objectScriptId,
+        objectId,
+        objectMethod
        FROM script_runs ${where}
        ORDER BY startedAt DESC
        LIMIT ? OFFSET ?`,
@@ -14503,25 +14499,8 @@ export async function listScriptRuns(opts?: {
   return rows.map(rowToScriptRunListItem);
 }
 
-export async function countScriptRuns(opts?: {
-  status?: ScriptRunStatus;
-  agentId?: string;
-  scriptName?: string;
-}): Promise<number> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-  if (opts?.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts?.scriptName) {
-    conditions.push("scriptName = ?");
-    params.push(opts.scriptName);
-  }
+export async function countScriptRuns(opts?: ScriptRunFilter): Promise<number> {
+  const { conditions, params } = scriptRunFilterSql(opts);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const row = await getDbClient().get<{ count: number }>(
     `SELECT COUNT(*) AS count FROM script_runs ${where}`,

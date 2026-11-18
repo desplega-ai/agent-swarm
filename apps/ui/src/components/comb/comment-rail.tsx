@@ -29,6 +29,7 @@ import {
 } from "@/api/hooks/use-agent-fs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -134,6 +135,8 @@ export interface CommentRailProps {
    * narrow-layout sheet closes and a deep link does not open it.
    */
   viewerParams?: readonly string[];
+  /** Embedded file headers keep thread selection within this pane. */
+  preview?: { commentId: string | null };
 }
 
 /**
@@ -157,6 +160,7 @@ export function CommentRail({
   readOnly,
   onReadOnly,
   viewerParams,
+  preview,
 }: CommentRailProps) {
   const access = useAgentFsAccess();
   const { apiUrl } = useConfig().config;
@@ -236,7 +240,8 @@ export function CommentRail({
   const [hover, setHover] = useState<{ id: string; from: "doc" | "card" } | null>(null);
   const [pending, setPending] = useState<Range | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const wide = useMediaQuery(WIDE_QUERY);
+  const viewportWide = useMediaQuery(WIDE_QUERY);
+  const wide = viewportWide && !preview;
 
   // The `?comment=` link this rail has already selected (and scrolled to).
   const linkRef = useRef<{ id: string; scrolled: boolean } | null>(null);
@@ -247,16 +252,17 @@ export function CommentRail({
   const activate = useCallback(
     (id: string) => {
       setActiveId(id);
-      setSearchParams(
-        (params) => {
-          const next = new URLSearchParams(params);
-          next.set("comment", id);
-          // step-10: leave the review in the same navigation.
-          for (const name of viewerParams ?? []) next.delete(name);
-          return next;
-        },
-        { replace: true },
-      );
+      if (!preview)
+        setSearchParams(
+          (params) => {
+            const next = new URLSearchParams(params);
+            next.set("comment", id);
+            // step-10: leave the review in the same navigation.
+            for (const name of viewerParams ?? []) next.delete(name);
+            return next;
+          },
+          { replace: true },
+        );
       if (viewerState) {
         // step-10: the file renders next. The deep-link effect scrolls to the
         // passage once it resolves.
@@ -264,20 +270,20 @@ export function CommentRail({
         setSheetOpen(false);
         return;
       }
-      linkRef.current = { id, scrolled: true };
+      if (!preview) linkRef.current = { id, scrolled: true };
       const anchor = anchors.get(id);
       if (scrollToPassage(space, anchor, reduceMotion)) setSheetOpen(false);
       else if (anchor?.status === "lost") {
         toast.info("The text this comment pointed to is no longer in the file.");
       }
     },
-    [anchors, space, reduceMotion, setSearchParams, viewerParams, viewerState],
+    [preview, anchors, space, reduceMotion, setSearchParams, viewerParams, viewerState],
   );
 
   // Deep link `?comment=<id>`: once the thread loads, open its tab (and the
   // sheet on narrow layouts) and select it. Scroll to its passage as soon as
   // the passage resolves. A search or filter that hides it is cleared.
-  const linkedId = searchParams.get("comment");
+  const linkedId = preview ? preview.commentId : searchParams.get("comment");
   useEffect(() => {
     if (!linkedId) return;
     let link = linkRef.current;
@@ -323,11 +329,11 @@ export function CommentRail({
   const listRef = useRef<HTMLDivElement>(null);
   const focusId = hover?.from === "doc" ? hover.id : activeId;
   useEffect(() => {
-    if (!focusId) return;
+    if (!focusId || (!wide && !sheetOpen)) return;
     listRef.current
       ?.querySelector(`[data-comment-id="${CSS.escape(focusId)}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [focusId]);
+  }, [focusId, wide, sheetOpen]);
 
   // Back online: send what is waiting.
   const { retryAll } = outbox;
@@ -431,6 +437,10 @@ export function CommentRail({
     />
   );
   const notSaved = outbox.entries.length;
+  const openPassage = (id: string) => {
+    activate(id);
+    if (preview) setSheetOpen(true);
+  };
 
   return (
     <CommentContextProvider value={context}>
@@ -447,11 +457,38 @@ export function CommentRail({
             id ? { id, from: "doc" } : current?.from === "doc" ? null : current,
           )
         }
-        onActivate={activate}
+        onActivate={openPassage}
       />
-      <PassageMarkers rootRef={viewerRef} space={space} anchors={anchors} ids={processingIds} />
+      <PassageMarkers
+        rootRef={viewerRef}
+        space={space}
+        anchors={anchors}
+        ids={preview ? paintIds : processingIds}
+        onOpen={preview ? openPassage : undefined}
+      />
       <SelectionCommentButton rootRef={viewerRef} space={space} onPendingChange={setPending} />
-      {wide ? (
+      {preview ? (
+        <Popover open={sheetOpen} onOpenChange={setSheetOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Comments (${open.length} open)`}
+              title="Comments"
+            >
+              <MessageSquare />
+              {open.length + notSaved || null}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            aria-label="File comments"
+            className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden p-0"
+          >
+            {rail}
+          </PopoverContent>
+        </Popover>
+      ) : wide ? (
         // The collapsible outer container (title row, collapse, icon strip): side-panels.tsx.
         <CommentPanel openCount={open.length} notSaved={notSaved}>
           {rail}
