@@ -870,13 +870,17 @@ describe("OpencodeSession — persisted bytes stay bounded", () => {
       succeeded,
     ]);
 
+    let checked = 0;
     for (const event of emitted) {
       const row = event as { type: string; content?: string };
       if (row.type !== "raw_log" || !row.content) continue;
+      checked++;
       expect(new TextEncoder().encode(row.content).length).toBeLessThan(256 * 1024);
       // Whatever is stored must still parse: a cut row would not.
       expect(() => JSON.parse(row.content as string)).not.toThrow();
     }
+    // Otherwise the loop would pass by checking nothing at all.
+    expect(checked).toBeGreaterThan(0);
   });
 
   test("a multi-byte payload is bounded in bytes, not characters", async () => {

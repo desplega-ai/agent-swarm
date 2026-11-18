@@ -45,6 +45,37 @@ export const coreSessionLogBounds: Scenario = {
     );
     expect(content.includes("[truncated"), "A truncated line must say so");
 
+    // A JSONL event is every other harness's log format: cutting it would
+    // leave the row unparseable and the dashboard would render a parse error.
+    const jsonSession = `core-slb-json-${ctx.nonce}`;
+    expectStatus(
+      await ctx.api("POST", "/api/session-logs", {
+        body: {
+          sessionId: jsonSession,
+          iteration: 1,
+          cli: "claude",
+          lines: [JSON.stringify({ type: "tool_result", content: "z".repeat(2 * 1024 * 1024) })],
+        },
+      }),
+      [201],
+      "store an oversized JSON event",
+    );
+    const jsonRow =
+      ctx.db.get<{ content: string }>("SELECT content FROM session_logs WHERE sessionId = ?", [
+        jsonSession,
+      ])?.content ?? "";
+    expect(
+      (() => {
+        try {
+          JSON.parse(jsonRow);
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+      `A truncated JSON event must stay parseable, stored ${jsonRow.slice(0, 120)}`,
+    );
+
     const configId = await setBudgetMb(ctx, "1");
     try {
       const budgetSession = `core-slb-budget-${ctx.nonce}`;

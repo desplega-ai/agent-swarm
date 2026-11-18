@@ -44,6 +44,16 @@ export function sessionLogBudgetBytes(): number {
 export function boundSessionLogLine(line: string): string {
   const encoded = encoder.encode(line);
   if (encoded.length <= SESSION_LOG_LINE_MAX_BYTES) return line;
+  // Every harness writes JSONL here. Cutting the serialized form would leave
+  // the row unparseable, and the dashboard renders it as a parse error instead
+  // of the event — so an oversized structured row becomes a valid marker.
+  if (line.startsWith("{") || line.startsWith("[")) {
+    return JSON.stringify({
+      type: "session_log_truncated",
+      reason: "event exceeded the session-log row bound",
+      bytes: encoded.length,
+    });
+  }
   // The suffix spends part of the cap, so the count reports what was really
   // dropped from the cut point rather than `length - cap`.
   const suffixWidth = sessionLogByteLength(` [truncated ${encoded.length} bytes by agent-swarm]`);

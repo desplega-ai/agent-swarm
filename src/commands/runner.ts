@@ -5098,7 +5098,11 @@ export async function spawnProviderProcess(
     if (!shouldStream) return;
     const content = boundLogLine(raw);
     logBuffer.lines.push(content);
-    logBuffer.bytes += new TextEncoder().encode(content).length;
+    // Measured as it will be sent: the flush posts JSON, and escaping can
+    // multiply control-heavy text ~6x. Counting the raw bytes would let four
+    // 1 MB NUL-filled lines become a 24 MB body against the route's 16 MB cap,
+    // which 413s after flushLogBuffer has already cleared the batch.
+    logBuffer.bytes += new TextEncoder().encode(JSON.stringify(content)).length;
     const shouldFlush =
       logBuffer.lines.length >= LOG_BUFFER_SIZE ||
       logBuffer.bytes >= LOG_BUFFER_MAX_BYTES ||
