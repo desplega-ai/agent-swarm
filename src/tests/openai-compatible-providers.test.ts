@@ -108,7 +108,13 @@ describe("openai-compatible provider table", () => {
       // OpenCode's built-in AI Gateway SDK has no OpenAI-compatible `api` URL.
       if (entry.npm === "@ai-sdk/gateway") expect(section.api).toBeUndefined();
       else expect(section.api).toBe(entry.baseUrl);
-      expect(section.env).toEqual([entry.envVar]);
+      if (section.env?.length === 1 && entry.aliasEnvVars.includes(section.env[0] ?? "")) {
+        // Intentional rename (zai-coding-plan): models.dev keys the section on
+        // Z.ai's upstream var, the swarm reads ZAI_API_KEY and aliases it.
+        expect(section.env).toEqual([entry.aliasEnvVars[0]]);
+      } else {
+        expect(section.env).toEqual([entry.envVar]);
+      }
       expect(section.npm).toBe(entry.npm);
       for (const model of entry.models) {
         const snap = section.models[model.id];

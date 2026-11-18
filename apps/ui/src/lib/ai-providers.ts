@@ -550,7 +550,7 @@ export const AI_PROVIDERS: AiProvider[] = [
     harnesses: ["pi", "opencode"],
     noun: "key",
     vendor: "Z.ai",
-    poolVar: "ZHIPU_API_KEY",
+    poolVar: "ZAI_API_KEY",
     liveCheck: true,
     summary:
       "Z.ai's GLM models (GLM-5.3-Flash, GLM-5.3 and more) for the pi and opencode harnesses, billed to a flat-rate coding plan.",
@@ -564,7 +564,7 @@ export const AI_PROVIDERS: AiProvider[] = [
     docs: { label: "Model gateways guide", href: `${DOCS}/provider-auth/model-gateways` },
     fields: [
       {
-        key: "ZHIPU_API_KEY",
+        key: "ZAI_API_KEY",
         label: "API key",
         kind: "pool",
         placeholder: "Paste the coding plan key",

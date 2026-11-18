@@ -124,6 +124,7 @@ describe("scrubSecrets — env-based replacement", () => {
         "HELMCODE_API_KEY",
         "HELMCODE_API_NAN",
         "NAN_API_KEY",
+        "ZAI_API_KEY",
         "ZHIPU_API_KEY",
       ],
     });

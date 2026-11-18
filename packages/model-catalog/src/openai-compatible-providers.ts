@@ -250,8 +250,10 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
     baseUrl: "https://api.z.ai/api/coding/paas/v4",
     baseUrlLocked: true,
     docsUrl: "https://docs.z.ai/devpack/quick-start",
-    envVar: "ZHIPU_API_KEY",
-    aliasEnvVars: [],
+    envVar: "ZAI_API_KEY",
+    // models.dev keys the section on Z.ai's upstream var name; the runner
+    // copies it into ZAI_API_KEY when the canonical var is empty.
+    aliasEnvVars: ["ZHIPU_API_KEY"],
     keyNote:
       "Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.",
     catalog: "models.dev",
