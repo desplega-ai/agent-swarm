@@ -468,6 +468,9 @@
           "resolvedProfile": {
             "type": "string"
           },
+          "modelGroup": {
+            "type": "string"
+          },
           "fallbackHops": {
             "type": "array",
             "items": {
@@ -3734,6 +3737,7 @@
               "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
+              "task_model_group_resolved",
               "task_dependency_repointed",
               "task_released",
               "task_deferred_wait_woke",
@@ -39974,6 +39978,9 @@
                               "resolvedProfile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -40286,6 +40293,10 @@
                     ]
                   },
                   "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelGroup": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -41661,6 +41672,9 @@
                             "type": "string"
                           },
                           "resolvedProfile": {
+                            "type": "string"
+                          },
+                          "modelGroup": {
                             "type": "string"
                           },
                           "provider": {
@@ -47878,6 +47892,9 @@
                   "profile": {
                     "type": "string"
                   },
+                  "modelGroup": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -48060,6 +48077,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -48433,6 +48453,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -48629,6 +48652,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -48870,6 +48896,9 @@
                           ]
                         },
                         "profile": {
+                          "type": "string"
+                        },
+                        "modelGroup": {
                           "type": "string"
                         },
                         "scheduleType": {
@@ -49128,6 +49157,9 @@
                     "profile": {
                       "type": "string"
                     },
+                    "modelGroup": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -49327,6 +49359,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49511,6 +49549,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -49743,6 +49784,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49927,6 +49974,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -67492,6 +67542,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -67680,6 +67733,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
