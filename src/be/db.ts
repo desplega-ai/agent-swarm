@@ -284,6 +284,7 @@ import {
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
+import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -377,6 +378,7 @@ export {
   pinWorkflowDefinition,
   toPinnedDefinition,
 } from "./db/workflow-run-definitions";
+export { getWorkflowsByEventName } from "./db/workflows/read";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -7570,58 +7572,6 @@ export async function getRecentFailedCount(hours: number = 24): Promise<number> 
 // Workflow CRUD
 // ============================================================================
 
-type WorkflowRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  enabled: number;
-  definition: string;
-  triggers: string;
-  cooldown: string | null;
-  input: string | null;
-  triggerSchema: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  dir: string | null;
-  vcs_repo: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-function rowToWorkflow(row: WorkflowRow): Workflow {
-  return {
-    id: row.id,
-    key: row.key,
-    name: row.name,
-    description: row.description ?? undefined,
-    enabled: row.enabled === 1,
-    definition: JSON.parse(row.definition) as WorkflowDefinition,
-    triggers: JSON.parse(row.triggers) as TriggerConfig[],
-    cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
-    input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
-    triggerSchema: row.triggerSchema
-      ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
-      : undefined,
-    params: JSON.parse(row.params) as Record<string, unknown>,
-    requiredParams: JSON.parse(row.requiredParams) as string[],
-    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
-    dir: row.dir ?? undefined,
-    vcsRepo: row.vcs_repo ?? undefined,
-    createdByAgentId: row.createdByAgentId ?? undefined,
-    updatedByAgentId: row.updatedByAgentId ?? undefined,
-    createdAt: normalizeDateRequired(row.createdAt),
-    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
-    createdBy: row.created_by ?? undefined,
-    updatedBy: row.updated_by ?? undefined,
-  };
-}
-
 export async function createWorkflow(
   data: {
     key?: string;
@@ -14284,6 +14234,9 @@ export async function countKv(namespace: string, opts: { prefix?: string }): Pro
 // ─── Script Runs ────────────────────────────────────────────────────────────
 
 type ScriptRunRow = {
+  objectScriptId: string | null;
+  objectId: string | null;
+  objectMethod: string | null;
   id: string;
   agentId: string;
   scriptName: string | null;
@@ -14328,6 +14281,9 @@ function parseJsonColumn(value: string | null): unknown | undefined {
 
 function rowToScriptRun(row: ScriptRunRow): ScriptRun {
   return {
+    objectScriptId: row.objectScriptId ?? undefined,
+    objectId: row.objectId == null ? undefined : scrubSecrets(row.objectId),
+    objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
@@ -14427,6 +14383,9 @@ export async function recordInlineScriptRun(data: {
   source: string;
   args: unknown;
   scriptName?: string;
+  objectScriptId?: string;
+  objectId?: string;
+  objectMethod?: string;
   status: "completed" | "failed";
   output?: unknown;
   error?: ScrubbedText;
@@ -14449,8 +14408,8 @@ export async function recordInlineScriptRun(data: {
       `INSERT INTO script_runs
         (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
          startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
-         sourceStepId, parentScriptRunId)
-       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         sourceStepId, parentScriptRunId, objectScriptId, objectId, objectMethod)
+       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [
         data.id,
@@ -14471,6 +14430,9 @@ export async function recordInlineScriptRun(data: {
         // ctx.swarm.script_run) records that run and its workflow step.
         provenance?.sourceStepId ?? null,
         provenance?.sourceScriptRunId ?? null,
+        data.objectScriptId ?? null,
+        data.objectId ?? null,
+        data.objectMethod ?? null,
       ],
     );
     if (!row) throw new Error("Failed to record inline script run");

@@ -5,7 +5,7 @@ import type {
   ScriptMcpConnectionDescriptor,
   ScriptMcpRegistryClient,
 } from "./api-types";
-import type { ScriptAgentFsDescriptor } from "./executors/types";
+import type { ScriptAgentFsDescriptor, ScriptCaller } from "./executors/types";
 import { createMcpRegistryClient } from "./mcp-client";
 import {
   createScriptFs,
@@ -19,6 +19,7 @@ import type { SwarmConfig } from "./swarm-config";
 import { createNamespaceClients, createSwarmSdk } from "./swarm-sdk";
 
 export type RuntimeCtx = {
+  caller: ScriptCaller;
   swarm: Record<string, unknown> & { config: SwarmConfig };
   api: ScriptApiRegistryClient;
   mcp: ScriptMcpRegistryClient;
@@ -39,6 +40,7 @@ export function buildCtx({
   apiConnections,
   mcpConnections,
   agentFs,
+  caller = null,
   signal,
   namespaces,
 }: {
@@ -46,6 +48,7 @@ export function buildCtx({
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  caller?: ScriptCaller;
   /** Aborts in-flight `ctx.sh` commands when the run ends (quickjs passes its run signal). */
   signal?: AbortSignal;
   /** Tests inject a fixture; production uses `SDK_NAMESPACES`. */
@@ -56,6 +59,7 @@ export function buildCtx({
   return {
     // Spread first: assertNamespaces already rejects a namespace named like a ctx key.
     ...createNamespaceClients(swarmConfig, { signal, registry: namespaces }),
+    caller: caller === null ? null : Object.freeze(JSON.parse(JSON.stringify(caller))),
     swarm,
     api: createApiRegistryClient(apiConnections, { swarmConfig }),
     mcp: createMcpRegistryClient(mcpConnections, swarmConfig),

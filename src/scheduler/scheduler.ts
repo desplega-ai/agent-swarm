@@ -52,7 +52,7 @@ import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./s
 export { createStandaloneScheduleTask } from "./schedule-task";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
-let schedulerRun: object | null = null;
+let schedulerRun: AbortController | null = null;
 let isProcessing = false;
 let lastDeferredReapAt = 0;
 const DEFERRED_REAP_INTERVAL_MS = 60 * 60 * 1000;
@@ -349,13 +349,24 @@ async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): 
  * Claim the snapshot's occurrence under BEGIN IMMEDIATE. A competing poller,
  * recovery pass, or schedule edit invalidates it before any target is dispatched.
  */
-async function claimScheduleOccurrence(snapshot: ScheduledTask, extraTags: string[]) {
+async function claimScheduleOccurrence(
+  snapshot: ScheduledTask,
+  extraTags: string[],
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) return null;
   // Run extension pre-hooks before opening the claim transaction. The snapshot
   // guard below still prevents a moved ceiling from consuming this preparation.
   const preparedWait = await prepareDeferredTaskWait(snapshot.id, "ceiling", extraTags);
+  if (signal?.aborted) return null;
   return getDbClient().transaction(async () => {
     const current = await getScheduledTaskById(snapshot.id);
-    if (!current?.enabled || !current.nextRunAt || current.nextRunAt !== snapshot.nextRunAt) {
+    if (
+      signal?.aborted ||
+      !current?.enabled ||
+      !current.nextRunAt ||
+      current.nextRunAt !== snapshot.nextRunAt
+    ) {
       return null;
     }
     const schedule = renderScheduledTaskParams(current);
@@ -407,10 +418,11 @@ async function updateClaimedSchedule(claimed: ScheduledTask, updates: UpdateSche
 }
 
 /** Recover ONE catch-up occurrence per schedule, using the poller's same claim. */
-async function recoverMissedSchedules(): Promise<void> {
+async function recoverMissedSchedules(signal: AbortSignal): Promise<void> {
   const now = Date.now();
   const dueSchedules = await getDueScheduledTasks();
   for (const schedule of dueSchedules) {
+    if (signal.aborted) return;
     if (!schedule.nextRunAt) continue;
     const missedBy = now - new Date(schedule.nextRunAt).getTime();
     if (missedBy < 15000) continue; // Less than 15s — normal timing jitter
@@ -418,7 +430,7 @@ async function recoverMissedSchedules(): Promise<void> {
       `[Scheduler] Recovering missed schedule "${schedule.name}" ` +
         `(was due ${Math.round(missedBy / 1000)}s ago)`,
     );
-    await executeSchedule(schedule, ["recovered"]);
+    await executeSchedule(schedule, ["recovered"], signal);
   }
 }
 
@@ -472,12 +484,13 @@ function getBackoffMs(consecutiveErrors: number): number {
 export async function executeSchedule(
   schedule: ScheduledTask,
   extraTags: string[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
-  let claimed = schedule;
+  let claimed: ScheduledTask | undefined;
   let triggeredWorkflows = false;
   const wasRecovered = extraTags.includes("recovered");
   try {
-    const occurrence = await claimScheduleOccurrence(schedule, extraTags);
+    const occurrence = await claimScheduleOccurrence(schedule, extraTags, signal);
     if (!occurrence) return;
     ({ schedule, claimed } = occurrence);
     // The claim has committed before external workflow/script dispatch begins.
@@ -499,6 +512,7 @@ export async function executeSchedule(
       wasRecovered,
     });
   } catch (err) {
+    if (signal?.aborted && !claimed) return;
     if (err instanceof AutomationNeedsSetupError) {
       // Preflight records its own diagnostic. The claim already advanced the
       // cadence, so no retry/backoff or second schedule advancement is needed.
@@ -549,7 +563,7 @@ export async function executeSchedule(
       console.log(`[Scheduler] Backing off "${schedule.name}" for ${backoff / 1000}s`);
     }
 
-    await updateClaimedSchedule(claimed, updates);
+    await updateClaimedSchedule(claimed ?? schedule, updates);
     telemetry.schedule("error", {
       scheduleType: schedule.scheduleType,
       triggeredWorkflows,
@@ -596,24 +610,25 @@ export function startScheduler(
     return;
   }
 
-  const run = {};
+  const run = new AbortController();
   schedulerRun = run;
+  const { signal } = run;
   executorRegistry = registry;
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
 
   // Both success and failure resume polling, but only after recovery settles.
-  // The identity prevents stop/restart during startup from installing an old timer.
+  // A stopped run cannot install a timer even if another run starts in the meantime.
   void initDeferredTaskWaits()
-    .then(() => (schedulerRun === run ? recoverMissedSchedules() : undefined))
+    .then(() => (signal.aborted ? undefined : recoverMissedSchedules(signal)))
     .catch((err) => console.error("[Scheduler] Recovery failed:", err))
     .then(async () => {
-      if (schedulerRun !== run) return;
+      if (signal.aborted) return;
       schedulerInterval = setInterval(() => {
-        void withLoopPath("scheduler.poll", () => processSchedules()).catch((err) =>
+        void withLoopPath("scheduler.poll", () => processSchedules(signal)).catch((err) =>
           console.error("[Scheduler] Poll failed:", err),
         );
       }, intervalMs);
-      await processSchedules();
+      await processSchedules(signal);
     })
     .catch((err) => console.error("[Scheduler] Poll failed:", err));
 
@@ -640,24 +655,26 @@ export function startScheduler(
 /**
  * Process all due schedules (called by interval).
  */
-async function processSchedules(): Promise<void> {
-  if (isProcessing) return;
+async function processSchedules(signal: AbortSignal): Promise<void> {
+  if (signal.aborted || isProcessing) return;
   isProcessing = true;
 
   try {
     await reconcileDeferredTaskWaits();
+    if (signal.aborted) return;
     const dueSchedules = await getDueScheduledTasks();
 
     for (const schedule of dueSchedules) {
+      if (signal.aborted) return;
       try {
-        await executeSchedule(schedule);
+        await executeSchedule(schedule, [], signal);
       } catch (err) {
         console.error(`[Scheduler] Error executing "${schedule.name}":`, err);
       }
     }
 
     // After dispatch, so a slow or failing reap never delays a due schedule.
-    if (Date.now() - lastDeferredReapAt >= DEFERRED_REAP_INTERVAL_MS) {
+    if (!signal.aborted && Date.now() - lastDeferredReapAt >= DEFERRED_REAP_INTERVAL_MS) {
       lastDeferredReapAt = Date.now();
       try {
         const reaped = await reapSpentDeferredSchedules();
@@ -675,6 +692,7 @@ async function processSchedules(): Promise<void> {
  * Stop the scheduler polling loop.
  */
 export function stopScheduler(): void {
+  schedulerRun?.abort();
   schedulerRun = null;
   stopDeferredTaskWaits();
   if (schedulerInterval) {

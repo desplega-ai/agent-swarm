@@ -17,6 +17,12 @@
 #
 # Keep the explicit 10s timeout in parity with merge-gate.yml and ci.yml;
 # bunfig.toml intentionally sets no global test timeout.
+#
+# One run at a time per user on this machine: the script holds a lock on
+# /tmp/agent-swarm-pre-push-tests-<uid>.lock (flock, or lockf on macOS) for
+# its whole run, and every other worktree waits. Concurrent runs from parallel
+# agents oversubscribe the CPU, and 1 s tests then exceed the 10 s timeout. With
+# no lock tool, the script runs unlocked.
 set -euo pipefail
 
 # git exports GIT_DIR (and friends) to a hook when the push runs from a linked
@@ -25,6 +31,28 @@ set -euo pipefail
 # git below still finds this repo by discovery.
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
+
+lock_file="/tmp/agent-swarm-pre-push-tests-$(id -u).lock"
+if [[ "${PRE_PUSH_TESTS_LOCKED:-}" != 1 ]]; then
+  try_lock=()
+  hold_lock=()
+  if command -v flock >/dev/null 2>&1; then
+    try_lock=(flock -n "$lock_file" true)
+    hold_lock=(flock "$lock_file")
+  elif command -v lockf >/dev/null 2>&1; then
+    try_lock=(lockf -k -t 0 "$lock_file" true)
+    hold_lock=(lockf -k "$lock_file")
+  fi
+  if [[ "${#hold_lock[@]}" -gt 0 ]]; then
+    if ! "${try_lock[@]}" 2>/dev/null; then
+      echo "[pre-push-tests] waiting for the test run of another worktree ($(cat "$lock_file.owner" 2>/dev/null || echo "owner unknown"))"
+    fi
+    PRE_PUSH_TESTS_LOCKED=1 exec "${hold_lock[@]}" bash "${BASH_SOURCE[0]}" "$@"
+  fi
+fi
+if [[ "${PRE_PUSH_TESTS_LOCKED:-}" == 1 ]]; then
+  echo "pid $$ in $PWD since $(date +%H:%M:%S)" >"$lock_file.owner" 2>/dev/null || true
+fi
 
 FULL_RUN_PATHS='^(src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$)'
 

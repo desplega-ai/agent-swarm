@@ -831,6 +831,22 @@ export async function handleMemory(
       contextKey,
     } = parsed.body;
     const memoryAgentId = agentId ?? (scope === "agent" ? myAgentId : undefined);
+    // An agent-bound token writes its own memory. Another agent's needs a lead.
+    const auth = getRequestAuth(req);
+    if (
+      auth?.kind === "agent" &&
+      memoryAgentId !== undefined &&
+      memoryAgentId !== auth.agentId &&
+      !can({
+        principal: await ingestPrincipal(req, myAgentId),
+        verb: "memory.edit.any",
+        resource: { kind: "owned", ownerAgentId: memoryAgentId },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(res, "An agent token can index memory only for its own agent", 403);
+      return true;
+    }
 
     if (source === "session_summary" && sourceTaskId) {
       const sourceTask = await getTaskById(sourceTaskId);

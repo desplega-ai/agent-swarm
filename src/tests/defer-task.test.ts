@@ -28,6 +28,7 @@ import {
   getTaskById,
   initDb,
   startTask,
+  updateTaskTitle,
 } from "../be/db";
 import { registerDeferTaskTool } from "../tools/defer-task";
 
@@ -604,7 +605,7 @@ describe("defer-task handler", () => {
     expect(stored?.output).not.toContain(watched.id);
   });
 
-  test("a wakeOn defer on unassigned tasks falls back to a count, not a UUID", async () => {
+  test("a wakeOn defer on unassigned tasks falls back to a title, then a count, not a UUID", async () => {
     const watched = await createTaskExtended("unassigned watched work", { source: "mcp" });
     const task = await startedTask("waiting on an unassigned task");
 
@@ -622,6 +623,27 @@ describe("defer-task handler", () => {
     const stored = await getTaskById(task.id);
     expect(stored?.output).toStartWith("Waiting on 1 task — or ");
     expect(stored?.output).not.toContain(watched.id);
+    // The wake-up ceiling is kept as data, so renderers can show it in their own timezone.
+    expect(
+      Date.parse(stored?.deferredUntil ?? "") - Date.parse(stored?.deferredAt ?? ""),
+    ).toBeWithin(55_000, 65_000);
+
+    const titled = await createTaskExtended("titled watched work", { source: "mcp" });
+    await updateTaskTitle(titled.id, "Staging smoke test");
+    const titledWaiter = await startedTask("waiting on a titled task");
+    await buildTool().handler(
+      {
+        taskId: titledWaiter.id,
+        delayMs: 60_000,
+        summary: SUMMARY,
+        note: "pending",
+        wakeOn: { event: "settled", taskIds: [titled.id] },
+      },
+      meta(),
+    );
+    expect((await getTaskById(titledWaiter.id))?.output).toStartWith(
+      "Waiting on Staging smoke test — or ",
+    );
   });
 
   test("the schedule keeps the delay that was actually requested", async () => {

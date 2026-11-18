@@ -32,6 +32,7 @@ import {
   SkillSchema,
   SkillWithInstallInfoSchema,
 } from "../types";
+import { refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -628,6 +629,7 @@ export async function handleSkills(
   if (installRemoteRoute.match(req.method, pathSegments)) {
     const parsed = await installRemoteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await refuseAgentTokenWithout(req, res, "skill.install.global")) return true;
 
     try {
       const branch = "main";
@@ -770,6 +772,15 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
+    if (
+      parsed.body.agentId !== myAgentId &&
+      (await refuseAgentTokenWithout(req, res, "skill.install.any", {
+        kind: "agent",
+        agentId: parsed.body.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     try {
       const agentSkill = await installSkill(parsed.body.agentId, parsed.params.id);
@@ -784,6 +795,15 @@ export async function handleSkills(
   if (uninstallSkillRoute.match(req.method, pathSegments)) {
     const parsed = await uninstallSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (
+      parsed.params.agentId !== myAgentId &&
+      (await refuseAgentTokenWithout(req, res, "skill.uninstall.any", {
+        kind: "agent",
+        agentId: parsed.params.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     const removed = await uninstallSkill(parsed.params.agentId, parsed.params.id);
     uninstallSkillRoute.respond(res, 200, { success: removed });
@@ -868,6 +888,14 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
+    if (
+      await refuseAgentTokenWithout(req, res, "skill.update.any", {
+        kind: "owned",
+        ownerAgentId: skill.ownerAgentId,
+      })
+    ) {
+      return true;
+    }
     if (skill.systemDefault) {
       jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
       return true;
@@ -922,6 +950,14 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
+    if (
+      await refuseAgentTokenWithout(req, res, "skill.update.any", {
+        kind: "owned",
+        ownerAgentId: skill.ownerAgentId,
+      })
+    ) {
+      return true;
+    }
     if (skill.systemDefault) {
       jsonError(res, SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, 403);
       return true;
@@ -949,6 +985,14 @@ export async function handleSkills(
     const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (
+      await refuseAgentTokenWithout(req, res, "skill.update.any", {
+        kind: "owned",
+        ownerAgentId: skill.ownerAgentId,
+      })
+    ) {
       return true;
     }
     if (skill.systemDefault) {
@@ -989,6 +1033,12 @@ export async function handleSkills(
   if (createSkillRoute.match(req.method, pathSegments)) {
     const parsed = await createSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (
+      ((parsed.body.scope ?? "agent") !== "agent" || parsed.body.systemDefault === true) &&
+      (await refuseAgentTokenWithout(req, res, "skill.create.swarm"))
+    ) {
+      return true;
+    }
 
     try {
       const pm = parseSkillContent(parsed.body.content);
@@ -1025,6 +1075,18 @@ export async function handleSkills(
     const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    const owned = { kind: "owned", ownerAgentId: existing.ownerAgentId } as const;
+    if (await refuseAgentTokenWithout(req, res, "skill.update.any", owned)) return true;
+    // Widening a skill to every agent, or handing it to another owner, is a lead decision.
+    const { scope, systemDefault, ownerAgentId } = parsed.body;
+    if (
+      ((scope !== undefined && scope !== existing.scope && scope !== "agent") ||
+        systemDefault === true ||
+        (Object.hasOwn(parsed.body, "ownerAgentId") && ownerAgentId !== existing.ownerAgentId)) &&
+      (await refuseAgentTokenWithout(req, res, "skill.promote.swarm", owned))
+    ) {
       return true;
     }
 
@@ -1097,6 +1159,14 @@ export async function handleSkills(
     const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    if (
+      await refuseAgentTokenWithout(req, res, "skill.delete.any", {
+        kind: "owned",
+        ownerAgentId: existing.ownerAgentId,
+      })
+    ) {
       return true;
     }
     if (existing.systemDefault) {

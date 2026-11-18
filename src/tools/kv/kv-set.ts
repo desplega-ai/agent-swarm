@@ -1,13 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { upsertKv } from "@/be/db";
+import { MAX_KV_BODY_BYTES } from "@/kv-limits";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { kvWriteAuthError } from "./kv-write-auth";
 import { resolveNamespace } from "./resolve-namespace";
-
-// 2 MiB cap — mirrors the HTTP enforcement.
-const MAX_KV_BODY_BYTES = 2 * 1024 * 1024;
 
 // Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
 const kvEntryOutputSchema = z.looseObject({

@@ -228,9 +228,13 @@
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
     },
+    "durable-objects": {
+      "description": "Global DurableObject scripts: typecheck, method signatures, and refusal of agent scope and inline execution.",
+      "scenarios": ["script-durable-objects"]
+    },
     "agent-access-tokens": {
-      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
-      "scenarios": ["core-agent-access"]
+      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens; worker tokens need the route permission on swarm-wide admin routes",
+      "scenarios": ["core-agent-access", "platform-agent-token-permissions"]
     },
     "agent-lifecycle": {
       "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
@@ -464,8 +468,12 @@
       "scenarios": ["script-connections"]
     },
     "script-credential-egress": {
-      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
-      "scenarios": ["script-connections", "script-credential-bindings"]
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value. Bindings resolve from config rows; the API env backs only GITHUB_TOKEN.",
+      "scenarios": [
+        "script-connections",
+        "script-credential-bindings",
+        "script-credential-binding-sources"
+      ]
     },
     "platform-secret-egress": {
       "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
@@ -491,6 +499,10 @@
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
       "scenarios": ["script-runs-durable", "script-run-storage"]
     },
+    "script-sandbox-identity": {
+      "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
+      "scenarios": ["script-sandbox-identity"]
+    },
     "script-saved-lifecycle": {
       "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",
       "scenarios": ["script-saved-lifecycle"]
@@ -502,6 +514,10 @@
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
       "scenarios": ["core-sessions", "core-use-case-group"]
+    },
+    "session-followup-context": {
+      "description": "The task and session reads a Lead's Sessions follow-up preamble and the composer's parent pick depend on: parentTaskId, isLeadTask, task text and attachments along a Lead / worker / review chain",
+      "scenarios": ["core-session-followup-turns"]
     },
     "sheets": {
       "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
@@ -682,9 +698,10 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
+        "workflow-event-subscriber-isolation",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",
@@ -712,6 +729,10 @@
     "schedule-target-owner": {
       "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
       "scenarios": ["schedule-target-owner"]
+    },
+    "route-caller-identity": {
+      "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
+      "scenarios": ["route-caller-identity"]
     },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",

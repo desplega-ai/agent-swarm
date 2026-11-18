@@ -5,7 +5,7 @@ import {
   claim,
   createChildTask,
   enableSlackRenderV2Only,
-  expectNoWakeTime,
+  expectChannelWakeTime,
   findSlackTask,
   finish,
   registerLead,
@@ -89,7 +89,7 @@ export const slackRedefer: Scenario = {
         "SELECT nextRunAt FROM scheduled_tasks WHERE parentTaskId = ?",
         [wakeId],
       );
-      // Slack deliberately hides times; assert the changed ceiling in the stored schedules.
+      // The stored schedules carry the later ceiling; the Slack card shows it below.
       expect(
         firstSchedule &&
           nextSchedule &&
@@ -126,7 +126,7 @@ export const slackRedefer: Scenario = {
         10_000,
       );
       expect(!duplicate, "Re-defer or refused watcher added a card or a redundant resume line");
-      expectNoWakeTime(ctx, message.ts, "re-defer");
+      expectChannelWakeTime(ctx, message.ts, "re-defer", nextSchedule!.nextRunAt);
     } finally {
       try {
         // Remove deadlines/watchers before cancelling dependencies, so cleanup cannot wake them.

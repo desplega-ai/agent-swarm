@@ -98,10 +98,10 @@ async function render(node: React.ReactNode) {
   await act(async () => root.unmount());
 }
 
-test("by default only a live lead task is steered: a running worker gets a follow-up", async () => {
+test("by default only a live lead task is steered: a running worker gets a follow-up on the lead's turn", async () => {
   await render(<SessionConversation rootTaskId="root" timeline="turns" />);
   expect(composer).toMatchObject({ canSteer: false });
-  expect((composer?.targetTask as AgentTask).id).toBe("worker");
+  expect((composer?.targetTask as AgentTask).id).toBe("root");
   expect(composer?.steerSource).toBeUndefined();
   expect(composer?.onFollowUp).toBeUndefined();
   expect(composer?.value).toBeUndefined();

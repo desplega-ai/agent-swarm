@@ -116,6 +116,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
         JSON.stringify([
           "api",
           "boards",
+          "caller",
           "fs",
           "logger",
           "mcp",

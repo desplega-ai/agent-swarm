@@ -127,6 +127,7 @@ export type AgentTaskRow = {
   contextWindowSize: number | null;
   was_paused: number;
   deferredAt: string | null;
+  deferredUntil: string | null;
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
   requestedByUserId: string | null;
@@ -433,6 +434,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     progress: row.progress ?? undefined,
     wasPaused: !!row.was_paused,
     deferredAt: row.deferredAt ?? undefined,
+    deferredUntil: row.deferredUntil ?? undefined,
     credentialKeySuffix: row.credentialKeySuffix ?? undefined,
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,

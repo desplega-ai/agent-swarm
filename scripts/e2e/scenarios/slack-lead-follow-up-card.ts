@@ -40,16 +40,25 @@ function threadMessages(
 }
 
 /** The task's outcome card row is finalized in the thread it was asked in. */
-function expectFinalizedCard(
+async function expectFinalizedCard(
   ctx: ScenarioContext,
   taskId: string,
   threadTs: string,
   label: string,
-): void {
-  const card = ctx.db.get<{ thread_ts: string; finalized_at: string | null }>(
-    "SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-    [taskId],
-  );
+): Promise<void> {
+  type CardRow = { thread_ts: string; finalized_at: string | null };
+  const read = () =>
+    ctx.db.get<CardRow>(
+      "SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+      [taskId],
+    );
+  // The message lands in Slack at chat.startStream; finalized_at is written
+  // only after stopStream, the status clear and the permalink read. Wait for it.
+  await pollUntil(() => {
+    const row = read();
+    return row?.thread_ts === threadTs && row.finalized_at !== null;
+  }, 15_000);
+  const card = read();
   expect(
     card?.thread_ts === threadTs && card.finalized_at !== null,
     `The ${label} ${taskId} has no finalized outcome card in thread ${threadTs}: ${JSON.stringify(card)}`,
@@ -119,7 +128,7 @@ export const slackLeadFollowUpCard: Scenario = {
     await pollUntil(() => false, slackAbsenceWindowMs(ctx));
     const copies = threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length;
     expect(copies === 1, `The Lead follow-up's outcome posted ${copies} times, expected 1`);
-    expectFinalizedCard(ctx, posted.followUpId, posted.threadTs, "worker follow-up");
+    await expectFinalizedCard(ctx, posted.followUpId, posted.threadTs, "worker follow-up");
 
     // 1b. A Lead follow-up pinned to the thread by hand, with no Slack ask in
     // its parent chain, posts nothing and settles its card so the thread closes.
@@ -198,7 +207,7 @@ export const slackLeadFollowUpCard: Scenario = {
       30_000,
     );
     expect(resumed, "The Lead resume task's outcome card never posted in the ask's thread");
-    expectFinalizedCard(ctx, resumeId, resumeAsk.ts, "resume");
+    await expectFinalizedCard(ctx, resumeId, resumeAsk.ts, "resume");
 
     // 3. Negative control: a follow-up with no Slack context posts nothing.
     const plainRes = await ctx.api("POST", "/api/tasks", {
@@ -364,7 +373,7 @@ export const slackLeadFollowUpCard: Scenario = {
       recoveredCopies.length === 1,
       `The recovered follow-up posted ${recoveredCopies.length} times, expected 1`,
     );
-    expectFinalizedCard(ctx, recovered.followUpId, recovered.threadTs, "recovered follow-up");
+    await expectFinalizedCard(ctx, recovered.followUpId, recovered.threadTs, "recovered follow-up");
     type CardRow = { delivery_abandoned_at: string | null; finalized_at: string | null };
     const suppressedCard = () =>
       ctx.db.get<CardRow>(

@@ -9,9 +9,11 @@ import { buildEgressSecrets } from "./egress-secrets";
 import { isExecutorAllowedByDeployment, resolveScriptExecutor } from "./executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
+  type DurableInvocation,
   type EgressSecretEntry,
   type ExecutorOutput,
   type ScriptAgentFsDescriptor,
+  type ScriptCaller,
   type ScriptExecutorName,
   type ScriptFsMode,
   type ScriptResourcePolicy,
@@ -39,6 +41,8 @@ const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
 
 export type RunScriptInput = {
   source: string;
+  durable?: DurableInvocation;
+  caller?: ScriptCaller;
   args?: unknown;
   /**
    * Unforgeable host-only capability symbol set only when the host has already
@@ -119,6 +123,8 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
         : {}),
     },
     user: input.userConfig ?? {},
+    durable: input.durable,
+    caller: input.caller,
     egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),
     failedBindings: input.failedBindings ?? [],
     apiConnections: input.apiConnections ?? [],

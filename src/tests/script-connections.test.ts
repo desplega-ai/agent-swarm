@@ -730,8 +730,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "341_user_token_expiry.sql");
       // 342 alters script_runs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "342_script_run_sources.sql");
-      // 350 normalizes scheduled_tasks, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "350_schedule_next_run_at_utc.sql");
+      // 354 alters session_tokens and script_runs, which this fixture does not create.
+      markMigrationApplied(database, "354_durable_objects.sql");
+      // 356 normalizes scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "356_schedule_next_run_at_utc.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
