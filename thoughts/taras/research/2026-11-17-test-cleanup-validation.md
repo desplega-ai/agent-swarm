@@ -261,6 +261,19 @@ All temporary production changes were restored. The final patch changes only sch
 Earlier adjacent runs passed 72 cases, including real scripts. These preceded restoration of the target-only case and were not repeated afterward.
 The refined coverage pair has identical loaded src locations and hit sets. Selected scheduling scopes retain 360 covered locations out of 829.
 The HTTP handler is not loaded. Child scripts, branches, and full-repository coverage remain unmeasured.
-Parent check:local and pre-push checks passed. PR #3318 remains outside merged totals while CI and merge validation proceed.
+Parent check:local and pre-push checks passed. PR #3318 merged as `2a851add58`.
 Refined evidence: /tmp/test-cleanup-scheduling-refined/report.md. The earlier three-case report remains historical evidence only.
 No owned service remains. The refinement preserves evidence and claims no reclaimed disk space.
+
+## Eval dependencies and benchmark mapping
+
+At main `02cb3bae9a`, the scheduler filter change had merged as `6f7de0e7d1`, followed by the scenario registry change as `02cb3bae9a`.
+
+PR #3326 reduced the registry suite from 70 to 64 cases. Eight independent controls failed their intended retained assertions.
+The eval package passed 1,187 cases and skipped the opt-in Turso test. Package typechecking and the root local checks passed.
+The coverage pair retained every covered line across its 47 measured files. Execution counts differed.
+
+PR #3327 reduced the combined mapping and catalog suites from 27 to 24 cases. Both versions detected all 13 controls.
+Twelve controls failed assertions. The missing TSV source row failed during import.
+The eval package passed 1,187 cases and skipped the opt-in Turso test on its separate base. Package typechecking and the root local checks passed.
+The root affected-test selector selected zero files for both PRs. The direct package commands exercised the changed suites.
