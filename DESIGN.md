@@ -156,7 +156,7 @@ Keep dark overrides on `.dark`, so scoped app presets can inherit correctly. Pre
 
 ## Typography
 
-Use the shared sans family for dashboard text and the mono family for code. Balance headings and card titles; use pretty wrapping for shared descriptions. Fonts and wrapping rules come from `apps/ui/src/styles/globals.css`; `apps/ui/index.html` loads the font families.
+Use the shared sans family for dashboard text and the mono family for code. Balance headings and card titles; use pretty wrapping for shared descriptions. Fonts and wrapping rules come from `apps/ui/src/styles/globals.css`; `apps/ui/index.html` loads the font families. Write `var(--font-sans)` / `var(--font-mono)`, never a family name: Settings → Appearance lets each operator swap them through `data-font` on the root (`apps/ui/src/lib/ui-font.ts`).
 
 ## Layout
 
