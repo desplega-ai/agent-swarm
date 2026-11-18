@@ -19,7 +19,7 @@ export const scriptCredentialBindingSources: Scenario = {
     const configKey = `E2E_CONFIG_BACKED_${nonce}`;
     const configValue = `e2e-config-backed-${ctx.nonce}-7313`;
     const apiOnlyValue = `e2e-api-only-${ctx.nonce}-7314`;
-    const operatorKey = ctx.sutEnv.AGENT_SWARM_API_KEY;
+    const operatorKey = asString(ctx.sutEnv.AGENT_SWARM_API_KEY, "the SUT swarm API key");
     const stub = startStub(() => Response.json({ ok: true }));
     const bindingIds: string[] = [];
     const configIds: string[] = [];
