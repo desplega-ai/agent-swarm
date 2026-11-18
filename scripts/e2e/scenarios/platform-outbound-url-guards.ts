@@ -26,7 +26,10 @@ function openapiSpec(origin: string): string {
 
 export const platformOutboundUrlGuards: Scenario = {
   name: "platform-outbound-url-guards",
-  order: 659,
+  // Before github-installation-token-repos (656): this scenario restarts the API, and the boot
+  // sweep fails in_progress tasks 5 s after a restart. The strict gate needs that status in the
+  // final database, so no new restart may come later than the suite's own late restarts.
+  order: 636,
   async run(ctx) {
     const cleanup = cleanupStack(ctx);
     const spec = startMockServer((request: MockRequest) =>
