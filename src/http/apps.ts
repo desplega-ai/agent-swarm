@@ -1088,6 +1088,7 @@ export async function selectAppRows(
           ? [{ column: filter.column, value: filter.value }]
           : [],
       ),
+      model.columns,
     )
   ).filter((row) => rowMatchesFilters(row, filters));
 
