@@ -40,6 +40,7 @@ const TEST_DB_PATH = "./test-slack-identity-resolution.sqlite";
 interface MockUsersInfoResponse {
   user?: {
     real_name?: string;
+    tz?: string;
     profile?: {
       email?: string;
       real_name?: string;
@@ -143,6 +144,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
       U_HUMAN: {
         user: {
           real_name: "Real Human",
+          tz: "Asia/Kathmandu",
           profile: { email: "real@example.com", real_name: "Real Human" },
         },
       },
@@ -154,6 +156,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(userId).toBeDefined();
+    expect((await findUserByExternalId("slack", "U_HUMAN"))?.timezone).toBe("Asia/Kathmandu");
     expect(await countUsers()).toBe(1);
 
     const ext = await externalIdRows();
@@ -257,14 +260,17 @@ describe("resolveSlackUserId — three-step cascade", () => {
   test("auto-link merges into an existing user by email", async () => {
     const { client } = makeMockClient({
       U_HUMAN: {
-        user: { profile: { email: "shared@example.com", real_name: "Shared Email Human" } },
+        user: {
+          tz: "Asia/Kathmandu",
+          profile: { email: "shared@example.com", real_name: "Shared Email Human" },
+        },
       },
     });
 
     // Seed an existing user with the same email — no slack alias yet.
     await getDbClient().run(
-      `INSERT INTO users (id, name, email, emailAliases, status, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+      `INSERT INTO users (id, name, email, emailAliases, timezone, status, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, 'America/Chicago', 'active', ?, ?)`,
       [
         "existing-id",
         "Pre-existing",
@@ -282,6 +288,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
 
     // Auto-merge: cascade lands on the existing row, no new `users` insert.
     expect(userId).toBe("existing-id");
+    expect((await findUserByExternalId("slack", "U_HUMAN"))?.timezone).toBe("America/Chicago");
     expect(await countUsers()).toBe(1);
 
     // One slack alias linked to the pre-existing user.

@@ -148,7 +148,7 @@ async function deferOnChildAndWake(ctx: ScenarioContext): Promise<void> {
     `Stored output must keep the event card with its ceiling, got: ${JSON.stringify(storedOutput)}`,
   );
 
-  // Slack shows who the deferral waits on and the ceiling in Europe/Madrid.
+  // Slack shows who the deferral waits on and the labelled UTC ceiling for an unknown requester.
   const card = await waitForOutcome(ctx, message.ts, `Waiting on ${workerName} · resumes by `);
   expect(card.bot_id === ctx.slack.bot.botId, "Deferral card must come from the bot");
   const stopped = await ctx.slack.waitForApiCall("chat.stopStream", {
