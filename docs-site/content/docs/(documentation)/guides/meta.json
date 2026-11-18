@@ -10,6 +10,7 @@
     "supplier-order-confirmation-review",
     "marketplace-payout-exception-review",
     "marketplace-moderation-appeals",
+    "marketplace-fraud-alert-investigation",
     "customer-billing-dispute-review",
     "agent-assisted-bank-reconciliation-review",
     "customer-pricing-change-review",
