@@ -7,7 +7,6 @@ import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import {
   createValueScrubber,
   registerVolatileSecret,
-  scrubObject,
   scrubSecrets,
   type ValueScrubber,
 } from "@/utils/secret-scrubber";
@@ -136,12 +135,14 @@ async function createMcpServerClient(
 
 /**
  * The external server receives the resolved secret headers and may echo them.
- * Redact those exact values (any length) and every known secret from what it
- * returns or throws, before the result reaches the caller.
+ * Redact those exact values (any length) from what it returns or throws. A result
+ * is otherwise returned as the tool produced it: a pattern scrub would damage
+ * legitimate data such as signed URLs or file contents. Errors also get the
+ * pattern scrub, because they are logged.
  */
 async function withScrubbedResponse<T>(scrubber: ValueScrubber, run: () => Promise<T>): Promise<T> {
   try {
-    return scrubObject(scrubber.object(await run()));
+    return scrubber.object(await run());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(scrubSecrets(scrubber.text(message)));

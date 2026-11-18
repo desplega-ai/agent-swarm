@@ -88,7 +88,9 @@ function resolveVariableOptions(metric: Metric) {
     }
     const options = resolveVariableOptionValues(variable);
     optionsByKey[variable.key] = options;
-    return { ...variable, options };
+    // Options are query output, like widget rows: the response gets a scrubbed copy.
+    // `optionsByKey` keeps the raw values for validation and parameter binding.
+    return { ...variable, options: scrubObject(options) };
   });
   return { variables, optionsByKey };
 }
@@ -184,7 +186,8 @@ function runMetric(metric: Metric, providedVariables: Record<string, unknown> = 
       ...metric,
       definition: { ...metric.definition, variables: resolved.variables },
     },
-    variables,
+    // A default can be the first option of an options query, so scrub the echo too.
+    variables: scrubObject(variables),
     widgets,
     // Kept as the first widget result for older callers during the PR cycle.
     result: widgets[0]?.result,

@@ -212,12 +212,24 @@ async function mcpServerResolution(ctx: ScenarioContext, workerId: string): Prom
 /** A metric run redacts secret-shaped values in its rows and keeps the rest. */
 async function metricRun(ctx: ScenarioContext, agentId: string): Promise<void> {
   const token = `ghp_${randomBytes(18).toString("hex")}`;
+  const optionSuffix = randomBytes(18).toString("hex");
+  const optionToken = `ghp_${optionSuffix}`;
   const created = await ctx.api("POST", "/api/metrics/definitions", {
     agentId,
     body: {
       title: `Secret egress metric ${ctx.nonce}`,
       definition: {
         version: 1,
+        // The options query builds its value from parts, so the stored SQL does not hold it.
+        variables: [
+          {
+            key: "pick",
+            optionsQuery: {
+              sql: `SELECT 'gh' || 'p_' || '${optionSuffix}' AS value UNION ALL SELECT '${ctx.nonce}' AS value`,
+              valueKey: "value",
+            },
+          },
+        ],
         widgets: [
           {
             id: "rows",
@@ -243,6 +255,17 @@ async function metricRun(ctx: ScenarioContext, agentId: string): Promise<void> {
     expect(
       row?.token !== token && String(row?.token).includes("REDACTED"),
       `the metric run returned a secret-shaped row value unredacted: ${String(row?.token)}`,
+    );
+    // Variable options are query output too: the secret-shaped one is redacted, the plain one kept.
+    expect(
+      !run.text.includes(optionToken),
+      "the metric run returned a secret-shaped variable option unredacted",
+    );
+    const definition = asRecord(asRecord(asRecord(run.json).metric).definition);
+    const options = asRecords(asRecords(definition, "variables")[0], "options");
+    expect(
+      options.some((option) => option.value === ctx.nonce),
+      `the metric run lost a plain variable option: ${JSON.stringify(options)}`,
     );
   } finally {
     await ctx.api("DELETE", `/api/metrics/definitions/${metricId}`, { agentId });
