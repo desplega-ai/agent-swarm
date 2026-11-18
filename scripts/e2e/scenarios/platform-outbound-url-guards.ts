@@ -60,9 +60,7 @@ export const platformOutboundUrlGuards: Scenario = {
     });
     cleanup.add("stop the oauth server", async () => oauth.stop());
     // Answers 401, so a probe that reaches it ends as an auth failure and saves nothing.
-    const embeddings = startMockServer(() =>
-      jsonResponse({ error: { message: "bad key" } }, 401),
-    );
+    const embeddings = startMockServer(() => jsonResponse({ error: { message: "bad key" } }, 401));
     cleanup.add("stop the embeddings server", async () => embeddings.stop());
     const probe = (baseUrl: string) =>
       ctx.api("POST", "/api/onboarding/memory", {
