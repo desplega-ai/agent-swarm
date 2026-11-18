@@ -53,9 +53,14 @@ Retention is age-based, so it cannot bound a table that grows inside its own
 granularity: one session once wrote 7.3 GB of `session_logs` in 27 minutes and
 OOM-killed the API container, with nothing old enough to sweep. That class of
 growth is bounded at write time instead, by `SESSION_LOG_SESSION_MAX_MB`
-(default 256) and a 256 KB cap per line. Crossing the budget logs a
-`[session-logs]` warning and stops that one session's logging; retention still
-owns reclaiming the rows afterwards.
+(default 256) and a 256 KB cap per line, both counted in UTF-8 bytes. Crossing
+the budget logs a `[session-logs]` warning and stops that one session's
+logging; retention still owns reclaiming the rows afterwards.
+
+Each session's spend lives in `session_log_bytes`, updated inside the same
+transaction as the inserts: that is what makes a restart keep the budget and
+concurrent batches reserve bytes atomically. Rows are small (one per session)
+and sweeping them is a separate opt-in candidate.
 
 Workflow deletion and opt-in run retention both reclaim only snapshots referenced by
 the deleted runs, after checking that no other run still references them. Unrelated

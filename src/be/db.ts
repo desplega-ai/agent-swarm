@@ -231,8 +231,7 @@ import {
   boundSessionLogLine,
   sessionLogBudgetBytes,
   sessionLogBudgetMarker,
-  sessionLogBytesWritten,
-  trackSessionLogBytes,
+  sessionLogByteLength,
 } from "./db/session-log-bounds";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
@@ -4907,8 +4906,6 @@ export async function createSessionLogs(logs: {
   // the inserts hold the lock.
   const BATCH_SIZE = 200;
   const budget = sessionLogBudgetBytes();
-  let written = sessionLogBytesWritten(logs.sessionId);
-  if (written >= budget) return;
   let exhausted = false;
   for (let start = 0; start < logs.lines.length && !exhausted; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
@@ -4923,10 +4920,35 @@ export async function createSessionLogs(logs: {
       // again here so any future write path that bypasses the adapter still
       // lands clean text in the persistent session_logs table.
       const content = boundSessionLogLine(scrubSecrets(line));
-      written += content.length;
       // Parsed here, next to the scrub, so the write lock covers inserts only.
       batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
-      if (written >= budget) {
+    }
+    if (batch.length === 0) break;
+    await getDbClient().transaction(async (tx) => {
+      // Budget accounting shares this transaction with the inserts, so two
+      // concurrent batches cannot both spend the same remaining bytes: the
+      // second one blocks on the write lock and then reads the first's total.
+      const spent =
+        (
+          await tx.get<{ bytes: number; exhaustedAt: string | null }>(
+            "SELECT bytes, exhaustedAt FROM session_log_bytes WHERE sessionId = ?",
+            [logs.sessionId],
+          )
+        )?.bytes ?? 0;
+      if (spent >= budget) {
+        exhausted = true;
+        return;
+      }
+      let written = spent;
+      for (const [index, { content }] of batch.entries()) {
+        written += sessionLogByteLength(content);
+        if (written >= budget) {
+          batch.length = index + 1;
+          exhausted = true;
+          break;
+        }
+      }
+      if (exhausted) {
         console.warn(
           `[session-logs] session ${logs.sessionId} reached the ${Math.round(
             budget / (1024 * 1024),
@@ -4934,13 +4956,14 @@ export async function createSessionLogs(logs: {
         );
         const marker = sessionLogBudgetMarker(logs.sessionId, budget);
         batch.push({ content: marker, reasoning: extractReasoning(logs.cli, marker) });
-        exhausted = true;
-        break;
+        written += sessionLogByteLength(marker);
       }
-    }
-    trackSessionLogBytes(logs.sessionId, written);
-    if (batch.length === 0) break;
-    await getDbClient().transaction(async (tx) => {
+      await tx.run(
+        `INSERT INTO session_log_bytes (sessionId, bytes, exhaustedAt)
+         VALUES (?, ?, ?)
+         ON CONFLICT(sessionId) DO UPDATE SET bytes = excluded.bytes, exhaustedAt = excluded.exhaustedAt`,
+        [logs.sessionId, written, exhausted ? new Date().toISOString() : null],
+      );
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting
       // at the POST's index. Reading the newest row by rowid walks the

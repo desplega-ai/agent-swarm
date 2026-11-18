@@ -2986,6 +2986,22 @@ const LOG_FLUSH_INTERVAL_MS = 5000; // Flush every 5 seconds
  * whole; staying under the route's 16 MB cap keeps every flush accepted.
  */
 const LOG_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Hard cap on one buffered line, in UTF-8 bytes. A single event above the
+ * route's body cap would be rejected with 413 after `flushLogBuffer` already
+ * cleared the batch, losing every line it carried — so the line is cut here,
+ * before it can poison a flush. The API truncates again at 256 KB per row.
+ */
+const LOG_LINE_MAX_BYTES = 1024 * 1024;
+
+function boundLogLine(content: string): string {
+  const encoded = new TextEncoder().encode(content);
+  if (encoded.length <= LOG_LINE_MAX_BYTES) return content;
+  const suffix = ` [truncated ${encoded.length - LOG_LINE_MAX_BYTES} bytes by agent-swarm]`;
+  const room = LOG_LINE_MAX_BYTES - new TextEncoder().encode(suffix).length;
+  // `stream: true` drops a trailing partial sequence instead of emitting U+FFFD.
+  return `${new TextDecoder("utf-8").decode(encoded.subarray(0, room), { stream: true })}${suffix}`;
+}
 
 /** Push buffered logs to the API */
 async function flushLogBuffer(
@@ -5070,10 +5086,11 @@ export async function spawnProviderProcess(
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
   let cumulativeProgressOutputTokens = 0;
 
-  function bufferSessionLogLine(content: string) {
+  function bufferSessionLogLine(raw: string) {
     if (!shouldStream) return;
+    const content = boundLogLine(raw);
     logBuffer.lines.push(content);
-    logBuffer.bytes += content.length;
+    logBuffer.bytes += new TextEncoder().encode(content).length;
     const shouldFlush =
       logBuffer.lines.length >= LOG_BUFFER_SIZE ||
       logBuffer.bytes >= LOG_BUFFER_MAX_BYTES ||

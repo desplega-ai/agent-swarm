@@ -90,6 +90,54 @@ export const coreSessionLogBounds: Scenario = {
         after.length === written.length,
         `An exhausted session must store nothing more, went from ${written.length} to ${after.length} rows`,
       );
+
+      // The accounting lives in SQLite, so a restart must not hand the same
+      // session a second budget.
+      await ctx.restartSut({ env: { SESSION_LOG_SESSION_MAX_MB: "1" } });
+      expectStatus(
+        await ctx.api("POST", "/api/session-logs", {
+          body: {
+            sessionId: budgetSession,
+            iteration: 1,
+            cli: "opencode",
+            lines: Array.from({ length: 10 }, () => chunk),
+          },
+        }),
+        [201],
+        "post after an API restart",
+      );
+      const afterRestart = ctx.db.query<{ content: string }>(
+        "SELECT content FROM session_logs WHERE sessionId = ?",
+        [budgetSession],
+      );
+      expect(
+        afterRestart.length === written.length,
+        `A restart must not grant a second budget, went from ${written.length} to ${afterRestart.length} rows`,
+      );
+
+      // The budget counts UTF-8 bytes: 3-byte characters must spend it ~3x
+      // faster than `String.length` would suggest.
+      const cjkSession = `core-slb-utf8-${ctx.nonce}`;
+      expectStatus(
+        await ctx.api("POST", "/api/session-logs", {
+          body: {
+            sessionId: cjkSession,
+            iteration: 1,
+            cli: "opencode",
+            lines: Array.from({ length: 20 }, () => "漢".repeat(100 * 1024)),
+          },
+        }),
+        [201],
+        "store CJK lines",
+      );
+      const cjkBytes = ctx.db.get<{ bytes: number }>(
+        "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
+        [cjkSession],
+      );
+      expect(
+        (cjkBytes?.bytes ?? 0) <= 2 * 1024 * 1024,
+        `A 1 MB budget must bound stored UTF-8 bytes, stored ${cjkBytes?.bytes ?? 0}`,
+      );
     } finally {
       expectStatus(
         await ctx.api("DELETE", `/api/config/${configId}`),

@@ -2846,6 +2846,14 @@
       "pending": "unassigned: no batch yet scrubs this writer"
     }
   },
+  "session_log_bytes": {
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "exhaustedAt": {
+      "exempt": "timestamp"
+    }
+  },
   "session_logs": {
     "id": {
       "exempt": "identifier"
