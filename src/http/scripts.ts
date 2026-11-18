@@ -153,12 +153,26 @@ const rowAuditColumnsShape = {
   updated_by: z.string().nullable().optional(),
 };
 
+/** `durable` when the stored signature marks a DurableObject class script. */
+function scriptKind(signatureJson: string): "function" | "durable" {
+  try {
+    return (JSON.parse(signatureJson) as { kind?: unknown } | null)?.kind === "durable"
+      ? "durable"
+      : "function";
+  } catch {
+    return "function";
+  }
+}
+
 /** Lean projection served by `GET /api/scripts` — mirrors `ScriptListItem`. */
 const scriptListItemSchema = ScriptRecordSchema.omit({
   source: true,
   signatureJson: true,
   argsJsonSchema: true,
   contentHash: true,
+}).extend({
+  /** `durable` for a DurableObject class script, else `function`. */
+  kind: z.enum(["function", "durable"]),
 });
 
 /**
@@ -1108,6 +1122,7 @@ export async function handleScripts(
       updatedBy: script.updatedBy,
       createdAt: script.createdAt,
       updatedAt: script.updatedAt,
+      kind: scriptKind(script.signatureJson),
     }));
     listScriptsRoute.respond(res, 200, { scripts });
     return true;

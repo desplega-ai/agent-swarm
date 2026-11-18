@@ -49,7 +49,7 @@ import {
   ScriptRunStatusSchema,
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
-import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
+import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -82,6 +82,10 @@ const listScriptRunsQuerySchema = z.object({
   status: ScriptRunStatusSchema.optional(),
   agentId: z.string().optional(),
   scriptName: z.string().optional(),
+  /** Object calls on this durable script. */
+  objectScriptId: z.string().optional(),
+  /** One object of that script. */
+  objectId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
@@ -508,7 +512,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getMcpBaseUrl(), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
@@ -537,20 +541,20 @@ export async function handleScriptRuns(
   if (listScriptRunsRoute.match(req.method, pathSegments)) {
     const parsed = await listScriptRunsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const opts = {
+    const filter = {
       status: parsed.query.status,
       agentId: parsed.query.agentId,
       scriptName: parsed.query.scriptName,
-      limit: parsed.query.limit ?? 50,
-      offset: parsed.query.offset ?? 0,
+      objectScriptId: parsed.query.objectScriptId,
+      objectId: parsed.query.objectId,
     };
     listScriptRunsRoute.respond(res, 200, {
-      runs: await listScriptRuns(opts),
-      total: await countScriptRuns({
-        status: opts.status,
-        agentId: opts.agentId,
-        scriptName: opts.scriptName,
+      runs: await listScriptRuns({
+        ...filter,
+        limit: parsed.query.limit ?? 50,
+        offset: parsed.query.offset ?? 0,
       }),
+      total: await countScriptRuns(filter),
     });
     return true;
   }

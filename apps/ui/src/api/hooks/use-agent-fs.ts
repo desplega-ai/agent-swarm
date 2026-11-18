@@ -935,9 +935,16 @@ export function useSendCombReviewBatch(
   const access = useAgentFsAccess();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: Pick<CombReviewBatchInput, "commentIds" | "scopePath" | "note">) =>
-      api.sendCombReviewBatch({ orgId: drive.orgId, driveId: drive.driveId, ...input }),
-    onSuccess: callbacks.onSuccess,
+    mutationFn: (
+      input: Pick<CombReviewBatchInput, "commentIds" | "scopePath" | "note" | "parentTaskId">,
+    ) => api.sendCombReviewBatch({ orgId: drive.orgId, driveId: drive.driveId, ...input }),
+    onSuccess: (result, input) => {
+      if (result.taskId && input.parentTaskId) {
+        void queryClient.invalidateQueries({ queryKey: ["session", input.parentTaskId] });
+        void queryClient.invalidateQueries({ queryKey: ["task-lineage", input.parentTaskId] });
+      }
+      callbacks.onSuccess?.(result);
+    },
     onError: callbacks.onError,
     onSettled: () => queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, drive) }),
   });

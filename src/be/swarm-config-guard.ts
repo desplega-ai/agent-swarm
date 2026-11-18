@@ -88,6 +88,8 @@ const RESERVED_KEYS = new Set([
   "GITHUB_APP_REPO_OWNERS",
   // The worker imports this module path into its own process. Deployment env only.
   "OPENCODE_SDK_PATH",
+  // Every script run token goes to this base URL; a config writer must not redirect it.
+  "SCRIPT_API_BASE_URL",
 ]);
 
 /**

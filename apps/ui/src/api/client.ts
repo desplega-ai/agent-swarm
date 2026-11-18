@@ -55,6 +55,7 @@ import type {
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
   DashboardCostResponse,
+  DurableObjectEntry,
   EventDefinition,
   Extension,
   ExtensionBundle,
@@ -1855,6 +1856,8 @@ class ApiClient {
     status?: ScriptRunStatus | "all";
     agentId?: string;
     scriptName?: string;
+    objectScriptId?: string;
+    objectId?: string;
     limit?: number;
     offset?: number;
   }): Promise<ScriptRunsResponse> {
@@ -1862,6 +1865,8 @@ class ApiClient {
     if (filters?.status && filters.status !== "all") params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
     if (filters?.scriptName) params.set("scriptName", filters.scriptName);
+    if (filters?.objectScriptId) params.set("objectScriptId", filters.objectScriptId);
+    if (filters?.objectId) params.set("objectId", filters.objectId);
     if (filters?.limit) params.set("limit", String(filters.limit));
     if (filters?.offset) params.set("offset", String(filters.offset));
     const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -1901,6 +1906,50 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to fetch script: ${res.status}`);
     const data = (await res.json()) as { script: ScriptDetail };
     return data.script;
+  }
+
+  /**
+   * Objects of a durable script, read from its KV namespace. This is the one
+   * place that knows the storage layout: `state/<id>` holds
+   * `{ codeVersion, stateVersion, state }` and `lease/<id>` exists during a call.
+   */
+  async fetchDurableObjects(
+    scriptId: string,
+  ): Promise<{ objects: DurableObjectEntry[]; total: number }> {
+    const namespace = encodeURIComponent(`durable:${scriptId}`);
+    const list = async (prefix: string) => {
+      const params = new URLSearchParams({ prefix, limit: "1000" });
+      const res = await fetch(`${this.getBaseUrl()}/api/kv/_/${namespace}?${params}`, {
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) throw new Error(`Failed to fetch objects: ${res.status}`);
+      return (await res.json()) as {
+        entries: { key: string; value: unknown; expiresAt: number | null; updatedAt: number }[];
+        total: number;
+      };
+    };
+    // One page only: each state can be up to 2 MiB, so `total` tells the tab
+    // when the list is cut instead of paging through every object.
+    const [states, leases] = await Promise.all([list("state/"), list("lease/")]);
+    const busy = new Set(leases.entries.map((entry) => entry.key.slice("lease/".length)));
+    const objects = states.entries.map((entry) => {
+      const id = entry.key.slice("state/".length);
+      const value = (entry.value ?? {}) as {
+        codeVersion?: unknown;
+        stateVersion?: unknown;
+        state?: unknown;
+      };
+      return {
+        id,
+        codeVersion: typeof value.codeVersion === "number" ? value.codeVersion : null,
+        stateVersion: typeof value.stateVersion === "number" ? value.stateVersion : null,
+        state: value.state,
+        updatedAt: entry.updatedAt,
+        expiresAt: entry.expiresAt,
+        busy: busy.has(id),
+      };
+    });
+    return { objects, total: states.total };
   }
 
   async fetchScriptVersions(id: string): Promise<ScriptVersion[]> {
