@@ -732,6 +732,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "342_script_run_sources.sql");
       // 354 alters session_tokens and script_runs, which this fixture does not create.
       markMigrationApplied(database, "354_durable_objects.sql");
+      // 362 rebuilds user_favorites, which this fixture does not create (see 301).
+      markMigrationApplied(database, "362_favorites_app.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
