@@ -32,6 +32,7 @@ import {
   getSlackProcessingThreads,
   getSlackThreadsOfTasks,
   type SlackOutcomeWindow,
+  slackThreadHasAgentReplyOnTasksSince,
   slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
@@ -1253,7 +1254,8 @@ async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): P
 /**
  * Gates a new outcome card for a Lead follow-up; every other task passes.
  * No card when the Lead already answered with `slack-reply` (it would repeat
- * that answer), when the delegation child pass owns the card, or when Slack
+ * that answer), also when it attributed that reply to the task the follow-up
+ * reviews, when the delegation child pass owns the card, or when Slack
  * does not confirm the channel is internal: a Slack Connect channel is a
  * customer's, and posting there needs a person's explicit yes. An external
  * verdict settles the card as abandoned so the thread can close.
@@ -1272,6 +1274,28 @@ async function mayPostLeadFollowUpCard(
     if (await getSlackOutcomeMessage(task.id)) {
       await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
     }
+    return false;
+  }
+  if (
+    task.agentId &&
+    task.parentTaskId &&
+    task.slackChannelId &&
+    task.slackThreadTs &&
+    (await slackThreadHasAgentReplyOnTasksSince(
+      task.slackChannelId,
+      task.slackThreadTs,
+      task.createdAt,
+      task.agentId,
+      [task.parentTaskId],
+    ))
+  ) {
+    // The Lead answered during the follow-up with a slack-reply attributed to
+    // the task it reviews, and the reply came without the follow-up as its
+    // source task, so slackReplySent stays 0 here. The card would repeat that
+    // reply. A reply under the ask or a sibling's task does not count: in a
+    // fan-out, every sibling follow-up shares those. The reconcile SQL counts
+    // this task as outcome work until its card is settled, so always settle it.
+    await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }
   const askId = ownerAskId.get(task.id);
