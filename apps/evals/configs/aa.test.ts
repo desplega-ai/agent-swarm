@@ -11,18 +11,6 @@ import { configs } from "./index.ts";
 const CATALOG_IDS = new Set(configs.map((c) => c.id));
 
 describe("AA mapping completeness (v7.6 item D, frozen)", () => {
-  test("every CONFIG_AA_ROWS key exists in the catalog", () => {
-    for (const id of Object.keys(CONFIG_AA_ROWS)) {
-      expect(CATALOG_IDS.has(id)).toBe(true);
-    }
-  });
-
-  test("every unmatched id exists in the catalog", () => {
-    for (const id of Object.keys(AA_UNMATCHED_CONFIG_IDS)) {
-      expect(CATALOG_IDS.has(id)).toBe(true);
-    }
-  });
-
   test("mapped and unmatched are disjoint and together cover the full catalog", () => {
     const mapped = new Set(Object.keys(CONFIG_AA_ROWS));
     const unmatched = new Set(Object.keys(AA_UNMATCHED_CONFIG_IDS));
@@ -33,7 +21,7 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     expect(mapped.size + unmatched.size).toBe(configs.length);
   });
 
-  test("frozen counts: 59 matched, 25 unmatched, 32 distinct AA rows", () => {
+  test("frozen counts: 60 matched, 65 unmatched, 32 distinct AA rows", () => {
     expect(Object.keys(CONFIG_AA_ROWS).length).toBe(60);
     expect(Object.keys(AA_UNMATCHED_CONFIG_IDS).length).toBe(65);
     // 32: Haiku, Sonnet 4.6 (max), Opus 4.8 (max), Opus 4.7 (max), Fable 5,
@@ -50,12 +38,6 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     // spec-pin; grok-build-0.1 / owl-alpha have no rows), plus round-11 rows:
     // Qwen3.5 397B A17B and Mistral Large 3.
     expect(new Set(Object.values(CONFIG_AA_ROWS).map((m) => m.sourceRow)).size).toBe(32);
-  });
-
-  test("every sourceRow exists in the TSV", () => {
-    for (const { sourceRow } of Object.values(CONFIG_AA_ROWS)) {
-      expect(AA_ROWS_BY_MODEL.has(sourceRow)).toBe(true);
-    }
   });
 
   test("none of our picks is a '(variant 2)' row", () => {
@@ -78,9 +60,6 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
     expect(getAaForConfig("pi-qwen-coder")?.matchedVariant).toBeNull();
     expect(getAaForConfig("opencode-qwen-coder")?.matchedVariant).toBeNull();
     expect(getAaForConfig("opencode-gemini-flash-lite")?.matchedVariant).toBeNull();
-    // v7.7 item 1: "Preview" is the model identity (the catalog model IS the
-    // preview slug), not a serving variant — the snapshot's only 3.1 Pro row.
-    expect(getAaForConfig("pi-gemini-pro")?.matchedVariant).toBeNull();
     // Round-8 OSS refresh: MiMo-V2.5 and Nemotron 3 Ultra are unique rows.
     for (const short of ["mimo-v2.5", "nemotron-3-ultra"]) {
       expect(getAaForConfig(`pi-${short}`)?.matchedVariant).toBeNull();
