@@ -2,7 +2,7 @@
 date: 2026-11-17
 planner: Claude
 topic: "Durable-object scripts, PR 1 (core)"
-status: in-progress
+status: completed
 autonomy: critical
 commit_per_phase: true
 last_updated: 2026-11-17
@@ -441,12 +441,12 @@ Then run `bun run build:skill-md`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Skill drift: `bun run build:skill-md && bun run check:skill-md && bun run check:skill-sources`
-- [ ] Full local gate: `bun run check:local`
-- [ ] CI mirror: `bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run test:root -- --parallel=4 && bun run e2e`
+- [x] Skill drift: `bun run build:skill-md && bun run check:skill-md && bun run check:skill-sources`
+- [x] Full local gate: `bun run check:local`
+- [x] CI mirror: `bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run test:root -- --parallel=4 && bun run e2e`
 
 #### Automated QA:
-- [ ] Rendered skill check: `grep -n "Durable objects" templates/skills/swarm-scripts/SKILL.md`, and the example in the skill passes `script_upsert` typecheck. Paste it into a `script_upsert` call in the e2e scenario, or into a quick local run.
+- [x] Rendered skill check: `grep -n "Durable objects" templates/skills/swarm-scripts/SKILL.md`, and the example in the skill passes `script_upsert` typecheck. Paste it into a `script_upsert` call in the e2e scenario, or into a quick local run.
 
 #### Manual Verification:
 - [ ] Taras reads the skill section for tone and accuracy.
