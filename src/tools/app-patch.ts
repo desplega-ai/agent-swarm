@@ -12,6 +12,7 @@ import {
   unexpectedMigrationDetails,
   withAppDefinitionLock,
 } from "@/apps/schema-migrate";
+import { appWriteTypesWarnings } from "@/apps/script-types";
 import { appDefinitionNeedsRepair, getApp, updateApp } from "@/apps/store";
 import { snapshotApp } from "@/apps/version";
 import { getAgentById } from "@/be/db";
@@ -52,6 +53,7 @@ export const registerAppPatchTool = (server: McpServer) => {
         url: z.string().optional(),
         app: z.unknown().optional(),
         migration: AppMigrationReportOutputSchema.optional(),
+        warnings: z.array(z.string()).optional(),
         issues: z
           .array(z.looseObject({ path: z.string().optional(), message: z.string().optional() }))
           .optional(),
@@ -148,9 +150,11 @@ export const registerAppPatchTool = (server: McpServer) => {
         if (!app) return toolErr(`App ${input.appId} not found.`);
 
         const url = `/apps/${app.id}`;
+        const warnings = await appWriteTypesWarnings(app.id);
+        const extra = warnings.length > 0 ? { warnings } : {};
         return toolOk(`App "${app.name}" patched.`, {
-          details: JSON.stringify({ appId: app.id, url, app, migration }, null, 2),
-          data: { appId: app.id, url, app, migration },
+          details: JSON.stringify({ appId: app.id, url, app, migration, ...extra }, null, 2),
+          data: { appId: app.id, url, app, migration, ...extra },
         });
       });
     },

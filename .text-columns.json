@@ -3270,6 +3270,9 @@
     },
     "closed_at": {
       "exempt": "timestamp"
+    },
+    "merged_into_id": {
+      "exempt": "identifier"
     }
   },
   "slack_relay_obligations": {

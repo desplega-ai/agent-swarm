@@ -25,6 +25,7 @@ import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { FOREACH_ITEMS_WAIT_FOR, parkAndDriveForeach, runForeachDrive } from "./foreach-driver";
 import { resolveForeachParent } from "./foreach-join";
+import { runWithNodeDeadline } from "./node-timeout";
 import { rebuildNodeExecutionInput } from "./step-input";
 import { hasOwedSuccessors } from "./successor-routing";
 import { runStepValidation, validateOutputSchema } from "./validation";
@@ -124,7 +125,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           };
 
           try {
-            const result = await executor.run({
+            const result = await runWithNodeDeadline(node, executor, {
               config: interpolatedConfig,
               context: ctx,
               meta,

@@ -296,7 +296,7 @@ export function runMigrations(db: Database): void {
 
     try {
       db.transaction(() => {
-        if (migration.name === "356_schedule_next_run_at_utc") {
+        if (migration.name === "360_schedule_next_run_at_utc") {
           normalizeScheduleNextRunTimes(db);
         } else {
           db.exec(migration.sql);

@@ -1,6 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ModelProfile } from "@/api/types";
+import { loadModelsSnapshot } from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/api/hooks/use-models-catalog", () => ({

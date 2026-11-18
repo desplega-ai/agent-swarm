@@ -21,6 +21,7 @@ import { TaskSourceMark } from "@/components/shared/task-source-mark";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { groupCrumb, groupLabel, resourceOfGroupKey, sourceOfGroupKey } from "@/lib/session-groups";
+import { showsUnread } from "@/lib/session-status";
 import {
   GROUP_TAB,
   isSessionTab,
@@ -147,7 +148,7 @@ export function useTabInfo(tab: string, view: string | null, poll: SessionPoll =
     title,
     tip: `${title} · ${crumb}`,
     icon: null,
-    unread: item.readState === "unread",
+    unread: showsUnread(item),
     activity: activityOf(item),
   };
 }

@@ -179,8 +179,11 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
       expect(res.status).toBe(201);
       const body = (await res.json()) as CostResponse;
       expect(body.cost.costSource).toBe("pricing-table");
-      // 1M @ 2 + 0.5M @ 10 = $2 + $5 = $7
-      expect(body.cost.totalCostUsd).toBeCloseTo(7.0, 5);
+      // 1M @ 2 + 0.5M @ 10 = $2 + $5 = $7. Codex input already holds the 100
+      // cache-write tokens; they bill at the (zero) cache_write rate instead.
+      const billedInputTokens = provider === "codex" ? 1_000_000 - 100 : 1_000_000;
+      const expectedCostUsd = (billedInputTokens * 2 + 500_000 * 10) / 1_000_000;
+      expect(body.cost.totalCostUsd).toBeCloseTo(expectedCostUsd, 5);
       expect(body.cost.harnessCostUsd).toBe(999.99);
       expect(body.cost.cacheWrite5mTokens).toBe(25);
       expect(body.cost.cacheWrite1hTokens).toBe(75);
@@ -192,7 +195,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
           cacheReadTokens: 0,
           cacheWriteTokens: 100,
           harnessCostUsd: 999.99,
-          costUsd: 7,
+          costUsd: expectedCostUsd,
         },
       ]);
     });

@@ -1,4 +1,4 @@
-import type { AgentTask, AgentTaskStatus } from "../api/types";
+import type { AgentTask, AgentTaskStatus, SessionListItem } from "../api/types";
 import { TERMINAL_STATUSES } from "./task-activity";
 
 /**
@@ -64,4 +64,17 @@ export function deriveSessionStatus(root: AgentTask, chain: AgentTask[]): Sessio
  */
 export function sessionChipStatus(status: AgentTaskStatus): AgentTaskStatus | "running" {
   return TERMINAL_STATUSES.has(status) || status === "paused" ? status : "running";
+}
+
+/**
+ * Whether a session shows the unread dot and bold title. A running session
+ * hides them: every progress write marks it unread again, so the dot only
+ * repeats the spinner. The dot comes back when the run ends; Needs you and
+ * failed keep it (the activity rule of `activityOf` in the sidebar row).
+ */
+export function showsUnread(
+  session: Pick<SessionListItem, "readState" | "needsYou" | "latestStatus">,
+): boolean {
+  if (session.readState !== "unread") return false;
+  return session.needsYou || TERMINAL_STATUSES.has(session.latestStatus);
 }

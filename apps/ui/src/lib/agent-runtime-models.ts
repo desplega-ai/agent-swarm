@@ -18,7 +18,7 @@ import {
   withRegistryCatalogSections,
 } from "@desplega/model-catalog";
 import type { AcpTarget, ProviderName, SwarmConfig } from "@/api/types";
-import modelsCache from "./modelsdev-cache.json";
+import { modelsSnapshot } from "./models-snapshot";
 
 // Every `@/api/types` import here is `import type`: backend unit tests import
 // this module by relative path with no bundler (`src/tests/agents-list-model-display.test.ts`,
@@ -129,11 +129,25 @@ interface CachedProvider {
  */
 export type LiveModelsCatalog = Partial<Record<CatalogProviderId, CachedProvider>>;
 
-// The bundled snapshot plus the registry-synthesized sections models.dev does
-// not list (`helmcode`), as the server merges them.
-const CACHE = withRegistryCatalogSections(
-  modelsCache as unknown as Record<string, CachedProvider | undefined>,
-);
+type SnapshotCache = Record<string, CachedProvider | undefined>;
+
+let mergedCache: { from: object | null; cache: SnapshotCache } | null = null;
+
+/**
+ * The bundled snapshot plus the registry-synthesized sections models.dev does
+ * not list (`helmcode`), as the server merges them. The snapshot loads lazily
+ * (`models-snapshot.ts`); before it lands this holds the registry sections only.
+ */
+function snapshotCache(): SnapshotCache {
+  const loaded = modelsSnapshot();
+  if (mergedCache?.from !== loaded) {
+    mergedCache = {
+      from: loaded,
+      cache: withRegistryCatalogSections((loaded ?? {}) as SnapshotCache),
+    };
+  }
+  return mergedCache.cache;
+}
 
 /** A provider section of `source`, or undefined for a key it does not own (never a prototype member). */
 function sectionOf(
@@ -167,7 +181,7 @@ function runtimeSectionModels(
   providerId: string,
   liveCatalog: LiveModelsCatalog | null | undefined,
 ): Record<string, CachedModel> {
-  const snapshot = sectionOf(CACHE, providerId)?.models;
+  const snapshot = sectionOf(snapshotCache(), providerId)?.models;
   const live = sectionOf(liveCatalog, providerId)?.models;
   return live ? { ...snapshot, ...live } : (snapshot ?? {});
 }
@@ -222,7 +236,7 @@ export function effortLevelsFor(
   }
   const facts =
     sectionOf(liveCatalog, providerId)?.models?.[catalogId] ??
-    sectionOf(CACHE, providerId)?.models?.[catalogId];
+    sectionOf(snapshotCache(), providerId)?.models?.[catalogId];
   return reasoningLevelsFor(harness, catalogId, facts);
 }
 
@@ -372,7 +386,7 @@ function directModels(
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelOption[] {
   const section: SnapshotProviderId = harness === "claude" ? "anthropic" : "openai";
-  const models = (liveCatalog?.[section] ?? CACHE[section])?.models ?? {};
+  const models = (liveCatalog?.[section] ?? snapshotCache()[section])?.models ?? {};
   const meta = harness === "claude" ? ANTHROPIC_META : OPENAI_META;
   return harnessModelIds(harness, models).map((id) =>
     directModel(harness, { ...models[id], id }, meta),
@@ -503,7 +517,7 @@ function chatgptSubscriptionGroup(
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
   if (!hasCodexOAuthSlot(configs)) return [];
-  const rows = (liveCatalog?.openai ?? CACHE.openai)?.models ?? {};
+  const rows = (liveCatalog?.openai ?? snapshotCache().openai)?.models ?? {};
   const models = directModels("codex", liveCatalog).map((m) =>
     subscriptionModel(harness, m, rows[m.id] ?? { id: m.id }),
   );
@@ -566,7 +580,7 @@ function opencodeGoGroup(
 ): ModelGroup {
   const label =
     sectionOf(liveCatalog, "opencode-go")?.name ??
-    sectionOf(CACHE, "opencode-go")?.name ??
+    sectionOf(snapshotCache(), "opencode-go")?.name ??
     "OpenCode Go";
   const requiredKey = harness === "pi" ? "OPENCODE_API_KEY" : "";
   const resolvable = harness === "pi" && resolvableIds ? new Set(resolvableIds) : null;
@@ -610,7 +624,7 @@ export function modelGroupsForHarness(
   if (harness === "acp") return [];
 
   const providerCache = (providerId: SnapshotProviderId): CachedProvider | undefined =>
-    liveCatalog?.[providerId] ?? CACHE[providerId];
+    liveCatalog?.[providerId] ?? snapshotCache()[providerId];
 
   if (harness === "claude" || harness === "codex") {
     const models = directModels(harness, liveCatalog);
@@ -751,7 +765,7 @@ function ampModelGroups(
   const pins = (["anthropic", "openai"] as const).map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
     const models: ModelOption[] = Object.values(
-      (liveCatalog?.[providerId] ?? CACHE[providerId])?.models ?? {},
+      (liveCatalog?.[providerId] ?? snapshotCache()[providerId])?.models ?? {},
     )
       .map((m) => ({
         id: `${providerId}/${m.id}`,
@@ -798,7 +812,9 @@ function dshModelGroups(
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
   const openrouterMeta = SNAPSHOT_META.openrouter;
-  const openrouter = Object.values((liveCatalog?.openrouter ?? CACHE.openrouter)?.models ?? {})
+  const openrouter = Object.values(
+    (liveCatalog?.openrouter ?? snapshotCache().openrouter)?.models ?? {},
+  )
     .map((m) => ({
       id: `openrouter/${m.id}`,
       label: modelDisplayName(m.name) ?? m.id,
@@ -849,7 +865,9 @@ function grokModelGroups(
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
   const openrouterMeta = SNAPSHOT_META.openrouter;
-  const openrouter = Object.values((liveCatalog?.openrouter ?? CACHE.openrouter)?.models ?? {})
+  const openrouter = Object.values(
+    (liveCatalog?.openrouter ?? snapshotCache().openrouter)?.models ?? {},
+  )
     .map((m) => ({
       id: `openrouter/${m.id}`,
       label: modelDisplayName(m.name) ?? m.id,
@@ -981,7 +999,7 @@ export function modelGroupsForAcpTarget(
 ): ModelGroup[] {
   if (target !== "opencode") return [];
 
-  const opencodeCache = liveCatalog?.opencode ?? CACHE.opencode;
+  const opencodeCache = liveCatalog?.opencode ?? snapshotCache().opencode;
   const opencodeModels: ModelOption[] = Object.values(opencodeCache?.models ?? {})
     .map((model) => ({
       id: `opencode/${model.id}`,
@@ -1020,7 +1038,7 @@ export function modelGroupsForAcpTarget(
  * worker claims it.
  */
 export function modelGroupsForSchedule(liveCatalog?: LiveModelsCatalog | null): ModelGroup[] {
-  const anthropic = (liveCatalog?.anthropic ?? CACHE.anthropic)?.models ?? {};
+  const anthropic = (liveCatalog?.anthropic ?? snapshotCache().anthropic)?.models ?? {};
   const aliasOptions: ModelOption[] = Object.entries(buildClaudeShortnameMap(anthropic)).map(
     ([alias, target]) => {
       const model = anthropic[target];
@@ -1085,7 +1103,7 @@ export function findModelOption(
 // may report these verbatim — map them to the newest canonical id in the
 // catalog so the row reads "Claude Sonnet 5.5" instead of a bare "sonnet".
 function anthropicShortnameToId(liveCatalog?: LiveModelsCatalog | null): Record<string, string> {
-  return buildClaudeShortnameMap((liveCatalog?.anthropic ?? CACHE.anthropic)?.models);
+  return buildClaudeShortnameMap((liveCatalog?.anthropic ?? snapshotCache().anthropic)?.models);
 }
 
 /**
@@ -1119,7 +1137,7 @@ export function findKnownModel(
   }
   for (const providerId of SNAPSHOT_ORDER) {
     const meta = SNAPSHOT_META[providerId];
-    const cache = CACHE[providerId];
+    const cache = snapshotCache()[providerId];
     const prefix = `${providerId}/`;
     if (!model.startsWith(prefix)) continue;
     const tail = model.slice(prefix.length);
@@ -1208,7 +1226,7 @@ function findByLabel(raw: string, liveCatalog?: LiveModelsCatalog | null): Model
   const lowered = [...candidates].map((c) => c.toLowerCase().trim());
   // The live catalog first (it names models the snapshot does not know yet),
   // then the bundled snapshot for anything the live sections dropped.
-  for (const source of liveCatalog ? [liveCatalog, CACHE] : [CACHE]) {
+  for (const source of liveCatalog ? [liveCatalog, snapshotCache()] : [snapshotCache()]) {
     for (const providerId of SNAPSHOT_ORDER) {
       const meta = SNAPSHOT_META[providerId];
       for (const cached of Object.values(source[providerId]?.models ?? {})) {

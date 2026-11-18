@@ -221,6 +221,13 @@ A continuation normally resolves its parent's waiting card in place, without pos
 
 Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
+A Lead follow-up or resume result can merge into the previous outcome card instead of posting a new message. The previous card gets the new result under its own, separated by a blank line, and one footer links both tasks. An edit sends no notification, so the merge happens only when all of these are true:
+
+- The follow-up completed. A failed or deferred follow-up posts its own card.
+- The previous card is from the same agent, changed at most 2 minutes ago, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
+- No message, from a person or a bot, came after the previous card.
+- One card holds at most 5 results, and the merged text fits one card.
+
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.

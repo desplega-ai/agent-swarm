@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { modelGroupsForHarness } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
 import { buildModelsCatalog } from "../be/models-catalog";
 import cache from "../be/modelsdev-cache.json";
 import { buildModelsDevSeedRows } from "../be/seed-pricing";
@@ -11,6 +12,9 @@ import {
   resolveCodexModel,
 } from "../providers/codex-models";
 import { applyReasoningEffort, reasoningCapability } from "../providers/reasoning-effort";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 const releases = [
   { id: "gpt-6-sol", label: "GPT-6 Sol", input: 2, output: 10, read: 0.2, write: 2.5 },

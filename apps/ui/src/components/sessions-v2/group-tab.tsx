@@ -47,6 +47,7 @@ import { useStableHandler } from "@/hooks/use-stable-handler";
 import { useWithinAllUsersScope } from "@/lib/all-users-scope";
 import { peerColor } from "@/lib/comb/presence";
 import { chatSourceOf, groupCrumb } from "@/lib/session-groups";
+import { showsUnread } from "@/lib/session-status";
 import { useSessionsFilter } from "@/lib/sessions-show";
 import { sidebarListParams, userName } from "@/lib/sessions-v2";
 import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
@@ -237,7 +238,7 @@ function GroupList({
         valueGetter: (p) => (p.data ? sessionDisplayTitle(p.data.root) : ""),
         cellRenderer: (p: { data?: SessionListItem }) => {
           if (!p.data) return null;
-          const unread = p.data.readState === "unread";
+          const unread = showsUnread(p.data);
           const chat = chatSourceOf(p.data.root);
           return (
             <span className="flex h-full min-w-0 items-center gap-2">

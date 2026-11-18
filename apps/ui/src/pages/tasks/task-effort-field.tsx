@@ -37,7 +37,7 @@ export function TaskEffortField({
   enabled: boolean;
 }) {
   const tiersQuery = useModelTiers();
-  const { data: modelsCatalog } = useModelsCatalog();
+  const { data: modelsCatalog, snapshotLoaded } = useModelsCatalog();
   const agentId = agent?.id ?? "";
   const fetchesConfigs = enabled && agentId !== "";
   const configsQuery = useResolvedConfigs({ agentId }, { enabled: fetchesConfigs });
@@ -52,9 +52,12 @@ export function TaskEffortField({
 
   // A level the new agent or tier cannot take must not ride along to the API.
   // While the model behind the answer still loads, a level seeded from a
-  // template stays: the answer would only be a guess.
+  // template stays: the answer would only be a guess. So does a level the
+  // lazily loaded models.dev snapshot has not confirmed yet.
   const loading =
-    (fetchesConfigs && configsQuery.isPending) || (tier !== "" && tiersQuery.isPending);
+    !snapshotLoaded ||
+    (fetchesConfigs && configsQuery.isPending) ||
+    (tier !== "" && tiersQuery.isPending);
   const kept = loading ? value : effortAllowed(options, value);
   useEffect(() => {
     if (value && kept !== value) onChange(kept);

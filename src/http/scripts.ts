@@ -269,7 +269,9 @@ const upsertRoute = route({
         warnings: z
           .array(z.string())
           .optional()
-          .describe("Advisory quickjs-executor compatibility findings. Never blocks the save."),
+          .describe(
+            "Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save.",
+          ),
       }),
     },
     400: { description: "Validation or typecheck failure" },
@@ -767,9 +769,12 @@ export async function handleScripts(
       });
     }
 
-    const warnings = quickJSCompatWarnings(
-      checkQuickJSCompat(parsed.body.source, { fsMode: parsed.body.fsMode }),
-    );
+    const warnings = [
+      ...quickJSCompatWarnings(
+        checkQuickJSCompat(parsed.body.source, { fsMode: parsed.body.fsMode }),
+      ),
+      ...(typecheck.warnings ?? []),
+    ];
     upsertRoute.respond(res, 200, {
       name: result.script.name,
       version: result.script.version,

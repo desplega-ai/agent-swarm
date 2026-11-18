@@ -19,7 +19,11 @@ import {
 import { DIAL_LEVELS, type DialHarness, dialPrice, dialSetting } from "./model-dial";
 import { DEFAULT_TIER_VALUES, tierRows } from "./model-tier-fixtures";
 import { modelVendor } from "./model-vendor";
+import { loadModelsSnapshot } from "./models-snapshot";
 import modelsCache from "./modelsdev-cache.json";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 // The UI keeps a few concrete model ids (the pi/opencode default) and a table of
 // vendor id patterns, and the dial reads the shipped model tier defaults

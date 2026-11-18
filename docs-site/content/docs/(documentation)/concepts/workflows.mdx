@@ -353,7 +353,7 @@ Workflow runs preserve the human who actually triggered them in `createdBy`. Aut
 
 ### Webhook verification formats
 
-Webhook triggers verify signatures only when `hmacSecret` is set. The secret can be a literal, an environment reference such as `${WEBHOOK_SECRET}`, or a swarm secret reference such as `secret.SUPERAGENT_WEBHOOK_SECRET`.
+Webhook triggers verify signatures only when `hmacSecret` is set. The secret can be a literal, an environment reference such as `${WEBHOOK_SECRET}`, or a swarm secret reference such as `secret.SUPERAGENT_WEBHOOK_SECRET`. An operator can limit which environment variables a `${NAME}` reference may read with [`WORKFLOW_INPUT_ENV_ALLOWLIST`](/docs/ui/configuration#workflow-env-allowlist).
 
 Omitting `verification` keeps the legacy behavior: HMAC-SHA256 over the raw request body, accepting either `sha256=<hex>` or bare hex. The verifier checks `hmacHeader` first and then the legacy fallback headers.
 
