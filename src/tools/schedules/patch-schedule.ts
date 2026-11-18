@@ -93,11 +93,10 @@ export const patchScheduleInputSchema = z.object({
   modelTier: ModelTierSchema.nullable()
     .optional()
     .describe(
-      'Deprecated: pass modelGroup "<tier>" (the tier's group) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear.',
+      'Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear.',
     ),
   profile: z
-    .string
-()
+    .string()
     .trim()
     .min(1)
     .nullable()
@@ -105,8 +104,7 @@ export const patchScheduleInputSchema = z.object({
     .describe(
       "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear.",
     ),
-  modelGroup
-: z
+  modelGroup: z
     .string()
     .trim()
     .min(1)
@@ -121,7 +119,7 @@ export const patchScheduleInputSchema = z.object({
     .describe(
       "Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet.",
     ),
-})
+});
 
 const scheduleDataShape = {
   id: z.string().optional(),
