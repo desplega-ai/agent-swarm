@@ -148,7 +148,7 @@ The branch sits on current `main`, so migration numbering and spike line refs ar
 #### Automated Verification:
 - [x] Rebased: `git fetch origin main && git rebase origin/main && git rev-list --count HEAD..origin/main` prints `0`
 - [x] Types pass: `bun run tsc:check`
-- [x] Migration tail known (345_task_status_kind; open claims 346, 347; chosen 348): `git ls-tree --name-only origin/main src/be/migrations/ | grep '\.sql$' | sort | tail -1`
+- [x] Migration tail known (345_task_status_kind; open claims 346, 347; chosen 348, renumbered to 354 after main took 348 and open PRs claimed 349-353): `git ls-tree --name-only origin/main src/be/migrations/ | grep '\.sql$' | sort | tail -1`
 
 #### Automated QA:
 - [x] Open-PR migration claims listed: `gh pr list --repo desplega-ai/agent-swarm --state open --limit 100 --json number,files --jq '.[] | {n:.number, m:[.files[].path | select(startswith("src/be/migrations/"))]} | select(.m|length>0)'`. Pick the next ordinal above both `main`'s tail and every open claim (345 or higher at planning time).
