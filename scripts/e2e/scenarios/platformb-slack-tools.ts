@@ -486,19 +486,10 @@ export const platformbSlackTools: Scenario = {
           ),
         "files.getUploadURLExternal did not announce the file",
       );
-      // A file on the API server's disk uploads by path; the name defaults to the basename.
+      // Uploads by path (inside /workspace or the caller's task directory): scenario
+      // slack-upload-path-bounds.
       const diskPath = join(scratchDir, `disk-${ctx.nonce}.txt`);
       await Bun.write(diskPath, `disk body ${marker}`);
-      outcome = expectToolOk(
-        await callTool(leadConn, "slack-upload-file", { channelId, filePath: diskPath }),
-        "slack-upload-file with filePath",
-      );
-      expect(
-        ctx.slack
-          .apiCalls("files.getUploadURLExternal")
-          .some((call) => call.args.filename === `disk-${ctx.nonce}.txt`),
-        "The path upload did not use the file's basename",
-      );
       for (const [args, needle, label] of [
         [{ channelId }, "Must provide either filePath or content (base64).", "no file"],
         [

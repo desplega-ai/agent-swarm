@@ -48,21 +48,33 @@ import { UsageLayout } from "@/pages/usage/usage-layout";
 // Relative, not `@/`: `routes.test.ts` loads this file under `bun test`.
 import { nav, unlisted } from "../lib/command-palette/route-meta";
 import { connectPagePath, type IntegrationCategory } from "../lib/integrations-catalog";
+import { loadModelsSnapshot } from "../lib/models-snapshot";
 import { RouteRedirect } from "./route-redirect";
 import { SessionsRoute as SessionsPage } from "./sessions-route";
 
+/**
+ * A page whose model pickers pick defaults on their first render also waits
+ * for the lazily loaded models.dev snapshot (`lib/models-snapshot.ts`), as it
+ * did when the snapshot sat in the entry chunk. A failed load does not block it.
+ */
+function withModelsSnapshot<T>(load: () => Promise<T>): () => Promise<T> {
+  return () => Promise.all([load(), loadModelsSnapshot().catch(() => null)]).then(([mod]) => mod);
+}
+
 const UnifiedHome = lazyRoute(() => import("@/pages/home/unified-home"));
-const AgentsPage = lazyRoute(() => import("@/pages/agents/page"));
-const AgentDetailPage = lazyRoute(() => import("@/pages/agents/[id]/page"));
-const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
-const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
+const AgentsPage = lazyRoute(withModelsSnapshot(() => import("@/pages/agents/page")));
+const AgentDetailPage = lazyRoute(withModelsSnapshot(() => import("@/pages/agents/[id]/page")));
+const TasksPage = lazyRoute(withModelsSnapshot(() => import("@/pages/tasks/page")));
+const TaskDetailPage = lazyRoute(withModelsSnapshot(() => import("@/pages/tasks/[id]/page")));
 const TaskLineagePage = lazyRoute(() => import("@/pages/tasks/[id]/lineage/page"));
-const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
-const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
+const SchedulesPage = lazyRoute(withModelsSnapshot(() => import("@/pages/schedules/page")));
+const ScheduleDetailPage = lazyRoute(
+  withModelsSnapshot(() => import("@/pages/schedules/[id]/page")),
+);
 const UsageContent = lazyRoute(() =>
   import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
 );
-const BudgetsPage = lazyRoute(() => import("@/pages/budgets/page"));
+const BudgetsPage = lazyRoute(withModelsSnapshot(() => import("@/pages/budgets/page")));
 const SavingsPage = lazyRoute(() =>
   import("@/pages/usage/savings-page").then((m) => ({ default: m.SavingsPage })),
 );
@@ -117,7 +129,7 @@ const NotFoundPage = lazyRoute(() => import("@/pages/not-found/page"));
 /** An admin-only Settings route (`AdminRoute`). */
 const admin = (element: ReactNode) => <AdminRoute>{element}</AdminRoute>;
 
-const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
+const SetupPage = lazyRoute(withModelsSnapshot(() => import("@/pages/setup/page")));
 const ConnectPage = lazyRoute(() => import("@/pages/connect/page"));
 const FsContinuePage = lazyRoute(() => import("@/pages/fs-continue/page"));
 const JoinPage = lazyRoute(() => import("@/pages/join/page"));

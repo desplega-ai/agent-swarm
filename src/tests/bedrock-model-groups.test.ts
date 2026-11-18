@@ -16,6 +16,10 @@ import {
   type LiveBedrockStatus,
   modelGroupsForHarness,
 } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 describe("modelGroupsForHarness — Bedrock group for pi harness", () => {
   const configs = undefined;

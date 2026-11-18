@@ -2788,7 +2788,6 @@ describe("Slack renderer v2", () => {
     await completeTask(ask.id, "Checking back today at 18:38", {
       addTags: ["deferred"],
       deferredAt: new Date().toISOString(),
-      // 03:00 UTC is 04:00 in Europe/Madrid (CET).
       deferredUntil: "2030-01-15T03:00:00.000Z",
     });
     await backdateLastUpdated([ask.id], 20);
@@ -2796,7 +2795,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back 01-15 04:00");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back 01-15 03:00 UTC");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -3004,10 +3003,9 @@ describe("Slack renderer v2", () => {
     calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
-    // The event-based card names who it waits on and its ceiling in Europe/Madrid (CEST).
     const opening = calls.find((call) => call.method === "chat.startStream");
     expect(opening?.payload.markdown_text).toBe(
-      "⏳ Waiting on Researcher · resumes by 07-15 18:38",
+      "⏳ Waiting on Researcher · resumes by 07-15 16:38 UTC",
     );
     expect(JSON.stringify(calls)).not.toContain("at the latest");
 
@@ -3736,8 +3734,10 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     });
     await startTask(ask.id);
 
+    // A worker-owned follow-up isolates the child-card filter: a Lead
+    // follow-up gets its own outcome card (e2e slack-lead-follow-up-card).
     const followUp = await createTaskExtended("[Thread follow-up] wrap up", {
-      agentId: lead.id,
+      agentId: worker.id,
       source: "system",
       taskType: "follow-up",
       parentTaskId: ask.id,

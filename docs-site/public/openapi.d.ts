@@ -1123,7 +1123,7 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1357,7 +1357,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1552,7 +1552,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1718,7 +1718,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -16287,7 +16287,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -16339,7 +16342,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16348,8 +16351,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task created under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -37763,7 +37784,7 @@ export interface operations {
                         name: string;
                         version: number;
                         contentDeduped: boolean;
-                        /** @description Advisory quickjs-executor compatibility findings. Never blocks the save. */
+                        /** @description Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save. */
                         warnings?: string[];
                     };
                 };

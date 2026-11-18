@@ -82,6 +82,17 @@ Five decisions stay with people in every version of this workflow.
 
 Nothing here is a compliance control, a detection guarantee or a regulator-ready audit trail. It assembles evidence for the people who make those calls, and it contains no automatic enforcement.
 
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a suspected fraud alert is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then a Researcher agent that writes the brief from it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, its approve and reject branches, the timeout and the fallback.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a script reaches a detection system, an admin, a ledger and a log store while the secret stays in the broker.
+- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, one named owner per workflow, and the rules for who may read account and transaction data.
+- [Team collaboration](/docs/features/team-collaboration): one shared context for the operations, engineering and risk people on the same alert.
+- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): when a specialist risk platform or the payment provider's own tooling is the better answer.
+
 ## Operator checks
 
 A short list to settle before the first run.
@@ -93,14 +104,3 @@ A short list to settle before the first run.
 - The gate has a timeout, a fallback path and a named backup reviewer.
 - Retention and access for briefs are agreed before the first brief exists.
 - The specialist platform, not this workflow, remains the detector.
-
-## Building blocks
-
-Each piece below ships in agent-swarm and is documented. Pointing them at a suspected fraud alert is the illustrative part.
-
-- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then a Researcher agent that writes the brief from it.
-- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, its approve and reject branches, the timeout and the fallback.
-- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a script reaches a detection system, an admin, a ledger and a log store while the secret stays in the broker.
-- [AI operations governance](/docs/guides/ai-operations-governance): RBAC roles, one named owner per workflow, and the rules for who may read account and transaction data.
-- [Team collaboration](/docs/features/team-collaboration): one shared context for the operations, engineering and risk people on the same alert.
-- [Choosing an AI operating model](/docs/guides/choosing-an-ai-operating-model): when a specialist risk platform or the payment provider's own tooling is the better answer.

@@ -444,9 +444,13 @@ export const slackLeadFollowUpCard: Scenario = {
     const postedB = threadMessages(ctx, GENERAL, fanAsk.ts, outputB).length;
     expect(postedB === 0, "Follow-up B posted a card after its own slack-reply");
 
-    // 5. No card in a Slack Connect channel. The mock always reports channels
-    // as internal, so one injected conversations.info answer marks this fresh
-    // channel external; the API caches that verdict for 10 minutes.
+    // 5. A Slack Connect channel gets the follow-up card too, like the ask's
+    // own card, while SLACK_BLOCK_EXTERNAL_CHANNELS is off (the default).
+    // Regression: the follow-up gate refused every Slack Connect channel
+    // whatever the flag said and settled the card as abandoned, so a
+    // delegated answer never reached the customer thread. The mock always
+    // reports channels as internal, so one injected conversations.info answer
+    // marks this fresh channel external for any code that asks.
     const externalId = `C0EXT${ctx.nonce.slice(0, 5).toUpperCase()}`;
     const alice = ctx.slack.user("alice").id;
     ctx.slack.addChannel({
@@ -455,45 +459,76 @@ export const slackLeadFollowUpCard: Scenario = {
       members: [alice],
     });
     const external = await delegatedAsk(ctx, externalId, workerId, "external");
+    // A message after the ask's card stops a merge into it: as in production,
+    // where the follow-up ended past the merge window, it posts its own card.
+    await ctx.slack.postMessage({
+      channel: externalId,
+      user: "alice",
+      thread_ts: external.threadTs,
+      text: `<@${ctx.slack.user("bob").id}> side note ${ctx.nonce}`,
+    });
     const faultCode = "e2e_ext_shared";
     ctx.slack.injectFault({
       method: "conversations.info",
       error: faultCode,
       extra: { ok: true, channel: { id: externalId, is_ext_shared: true } },
     });
-    const externalOutput = `follow-up review external ${ctx.nonce}`;
-    await finish(ctx, external.leadId, external.followUpId, {
-      status: "completed",
-      output: externalOutput,
-    });
-    const leaked = await pollUntil(
-      () => threadMessages(ctx, externalId, external.threadTs, externalOutput).length > 0,
-      slackAbsenceWindowMs(ctx),
-    );
-    expect(!leaked, "The Lead follow-up posted its card into a Slack Connect channel");
-    // Control: the gate asked Slack about this channel and got the external answer.
-    const consulted = ctx.slack
-      .apiCalls("conversations.info")
-      .some((call) => call.args.channel === externalId && call.error === faultCode);
-    expect(consulted, `The external-channel gate never classified ${externalId} via Slack`);
-    // The skipped card is settled, so the thread stops owing outcome work.
-    const settled = ctx.db.get<{
-      delivery_abandoned_at: string | null;
-      finalized_at: string | null;
-    }>(
-      "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-      [external.followUpId],
-    );
-    expect(
-      settled?.delivery_abandoned_at != null && settled.finalized_at === null,
-      `The external follow-up's card is not settled as abandoned: ${JSON.stringify(settled)}`,
-    );
+    try {
+      const externalOutput = `follow-up review external ${ctx.nonce}`;
+      await finish(ctx, external.leadId, external.followUpId, {
+        status: "completed",
+        output: externalOutput,
+      });
+      const delivered = await pollUntil(
+        () => threadMessages(ctx, externalId, external.threadTs, externalOutput).length > 0,
+        30_000,
+      );
+      expect(delivered, "The Lead follow-up's card never reached the Slack Connect thread");
+      await expectFinalizedCard(ctx, external.followUpId, external.threadTs, "external follow-up");
+      const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
+        "SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
+        [external.followUpId],
+      );
+      expect(
+        card !== null &&
+          !card.ts.startsWith("pending:") &&
+          !card.ts.startsWith("merged:") &&
+          card.delivery_abandoned_at === null,
+        `The external follow-up's card is not its own delivered message: ${JSON.stringify(card)}`,
+      );
+    } finally {
+      // With the flag off nothing asks Slack about the channel, so the fault
+      // may still be armed. Spend it here: it answers for any channel.
+      const spent = () =>
+        ctx.slack.apiCalls("conversations.info").some((call) => call.error === faultCode);
+      if (!spent()) {
+        await fetch(`${ctx.slack.apiUrl}conversations.info`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${ctx.slack.bot.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ channel: externalId }),
+        });
+      }
+      expect(spent(), "The injected conversations.info answer is still armed");
+    }
 
     // 6. Recovery of a reservation whose delivery failed. A restart drops the
     // retry backoff, so both cards are retried from the persisted row. The one
     // without a reply posts once; the one the Lead answered with slack-reply
     // posts nothing and is settled so the thread closes.
     const failDelivery = async (ask: DelegatedAsk, output: string) => {
+      // A message after the ask's card stops the follow-up from merging into
+      // that card (slack-follow-up-card-merge), so it posts its own card and
+      // the injected faults below hit it. It addresses another person, so the
+      // swarm does not route it.
+      await ctx.slack.postMessage({
+        channel: GENERAL,
+        user: "alice",
+        thread_ts: ask.threadTs,
+        text: `<@${ctx.slack.user("bob").id}> side note ${ctx.nonce}`,
+      });
       ctx.slack.injectFault({ method: "chat.startStream", error: "internal_error" });
       ctx.slack.injectFault({ method: "chat.postMessage", error: "internal_error" });
       await finish(ctx, ask.leadId, ask.followUpId, { status: "completed", output });

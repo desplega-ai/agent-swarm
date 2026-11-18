@@ -359,3 +359,48 @@ describe("jsonByteSize", () => {
     expect(jsonByteSize("hello")).toBe(5);
   });
 });
+
+test("Tab reaches step selection and Enter, Space and click select it independently of Expand", async () => {
+  const { GlobalRegistrator } = await import("@happy-dom/global-registrator");
+  GlobalRegistrator.register();
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react");
+  const { default: userEvent } = await import("@testing-library/user-event");
+  const user = userEvent.setup({ document });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const select = mock();
+  const expand = mock();
+  try {
+    await act(() =>
+      root.render(
+        <StepCard
+          step={step("approved")}
+          isSelected={false}
+          isExpanded={false}
+          onClick={select}
+          onToggleExpand={expand}
+        />,
+      ),
+    );
+    const { getByRole } = await import("@testing-library/dom");
+    const title = getByRole(host, "button", { name: "review" });
+
+    await user.tab();
+    expect(document.activeElement).toBe(title);
+    await user.keyboard("{Enter}");
+    expect(select).toHaveBeenCalledTimes(1);
+    await user.keyboard(" ");
+    expect(select).toHaveBeenCalledTimes(2);
+    await user.click(title);
+    expect(select).toHaveBeenCalledTimes(3);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(expand).toHaveBeenCalledTimes(1);
+    expect(select).toHaveBeenCalledTimes(3);
+  } finally {
+    await act(() => root.unmount());
+    host.remove();
+    await GlobalRegistrator.unregister();
+  }
+});
