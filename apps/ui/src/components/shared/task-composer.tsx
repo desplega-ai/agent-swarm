@@ -425,7 +425,7 @@ export function TaskComposer({
     if (rootTaskId && attachments.length === 0) {
       optimisticFollowUp.mutate(
         {
-          task: trimmed,
+          task: message,
           parentTaskId: targetTask?.id ?? rootTaskId,
           ...(followUpAgentId
             ? { agentId: followUpAgentId, routingReason: "continuity" as const }
@@ -436,6 +436,7 @@ export function TaskComposer({
         { onSuccess: (created) => onCreated?.(created) },
       );
       setDraft("");
+      citations?.clear();
       return;
     }
     createTask.mutate({
