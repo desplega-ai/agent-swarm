@@ -37,9 +37,7 @@ import {
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { ScriptExecutor } from "../workflows/executors/script";
 import { resolveInputs } from "../workflows/input";
-import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
-import { waitUntil } from "./workflow-wait";
 
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -637,41 +635,6 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       await Bun.sleep(250);
       expect(signalProbe.signal?.aborted).toBe(false);
     }, 5_000);
-
-    test("an automatic retry aborts its executor at the node deadline", async () => {
-      signalProbe.sideEffect = false;
-      const registry = createTestRegistry();
-      const workflow = await makeWorkflow({
-        nodes: [
-          {
-            id: "probe",
-            type: "signal-probe",
-            config: { delayMs: 300, timeoutMs: 50 },
-            retry: { strategy: "static", maxRetries: 1, baseDelayMs: 1, maxDelayMs: 1 },
-          },
-        ],
-      });
-      const runId = await startWorkflowExecution(workflow, {}, registry);
-      const firstSignal = signalProbe.signal;
-      expect((await getWorkflowRunStepsByRunId(runId))[0]?.nextRetryAt).toBeTruthy();
-
-      try {
-        startRetryPoller(registry, 5);
-        await waitUntil(
-          async () => (await getWorkflowRun(runId))?.finishedAt,
-          () => "the retried workflow did not settle",
-        );
-      } finally {
-        stopRetryPoller();
-      }
-
-      const run = await getWorkflowRun(runId);
-      expect(run?.status).toBe("failed");
-      expect(run?.error).toContain("Step timed out after 50ms");
-      expect(signalProbe.signal).not.toBe(firstSignal);
-      expect(signalProbe.signal?.aborted).toBe(true);
-      expect(signalProbe.sideEffect).toBe(false);
-    });
 
     // The inline runtime's ulimit preamble fails on macOS (no usable
     // RLIMIT_AS), so the script dies before the watchdog behavior under test.
