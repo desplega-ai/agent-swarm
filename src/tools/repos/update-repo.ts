@@ -1,10 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
-import { updateSwarmRepoChecked } from "@/be/repo-checked-update";
+import { execConfigRefusal, updateSwarmRepoChecked } from "@/be/repo-checked-update";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { agentsMayMerge, RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
+import { getCurrentRequestAuth } from "@/utils/request-auth-context";
 
 const swarmRepoOutputShape = z.looseObject({
   id: z.string().optional(),
@@ -33,15 +34,27 @@ export const registerUpdateRepoTool = (server: McpServer) => {
     {
       title: "Update Repo",
       description:
-        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.",
+        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines. An agent session token also needs the lead role to change url, clonePath or hooks.",
       annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
         id: z.string().uuid().describe("The repo ID to update."),
-        url: z.string().optional().describe("New repo URL."),
+        url: z
+          .string()
+          .refine((value) => !value.startsWith("-"), 'url must not start with "-"')
+          .optional()
+          .describe("New repo URL."),
         name: z.string().optional().describe("New repo name."),
-        clonePath: z.string().optional().describe("New clone path."),
-        defaultBranch: z.string().optional().describe("New default branch."),
+        clonePath: z
+          .string()
+          .refine((value) => !value.startsWith("-"), 'clonePath must not start with "-"')
+          .optional()
+          .describe("New clone path."),
+        defaultBranch: z
+          .string()
+          .refine((value) => !value.startsWith("-"), 'defaultBranch must not start with "-"')
+          .optional()
+          .describe("New default branch."),
         autoClone: z.boolean().optional().describe("Whether to auto-clone."),
         hooks: RepoHooksSchema.nullable()
           .optional()
@@ -61,20 +74,25 @@ export const registerUpdateRepoTool = (server: McpServer) => {
     async ({ id, ...updates }, requestInfo) => {
       // The comparison with the stored merge policy, the decision and the write share one
       // transaction, so a stale edit cannot overwrite a merge-policy change committed after it.
-      const result = await updateSwarmRepoChecked(id, updates, async (existing) => {
-        const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
-        const decision = can({
-          principal: requestInfo.agentId
-            ? { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false }
-            : { kind: "operator" },
-          verb: "repo.merge-policy.write",
-          resource: { kind: "none" },
-          source: "mcp",
-        });
-        if (decision.allow) return null;
-        const current = agentsMayMerge(existing.guidelines);
-        return `Only lead agents can change allowMerge or mergePolicy (agents may merge: ${current}). Resend the current allowMerge and mergePolicy to keep them while you edit the other guidelines.`;
-      });
+      const result = await updateSwarmRepoChecked(
+        id,
+        updates,
+        async (existing) => {
+          const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
+          const decision = can({
+            principal: requestInfo.agentId
+              ? { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false }
+              : { kind: "operator" },
+            verb: "repo.merge-policy.write",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (decision.allow) return null;
+          const current = agentsMayMerge(existing.guidelines);
+          return `Only lead agents can change allowMerge or mergePolicy (agents may merge: ${current}). Resend the current allowMerge and mergePolicy to keep them while you edit the other guidelines.`;
+        },
+        () => execConfigRefusal(getCurrentRequestAuth(), "mcp"),
+      );
 
       if (result.kind === "refused") {
         return toolErr(result.refusal, { data: { repo: null } });

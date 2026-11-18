@@ -4292,7 +4292,7 @@
             "default": false
           }
         },
-        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -46408,7 +46408,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can change allowMerge or mergePolicy",
+            "description": "Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks",
             "content": {
               "application/json": {
                 "schema": {
@@ -46659,7 +46659,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy",
+            "description": "Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks",
             "content": {
               "application/json": {
                 "schema": {

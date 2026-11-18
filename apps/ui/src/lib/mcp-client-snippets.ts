@@ -1,3 +1,5 @@
+import { shellQuote } from "./shell-quote";
+
 export interface McpSnippetInput {
   serverUrl: string;
   token: string;
@@ -27,7 +29,7 @@ export function buildMcpClientSnippets({ serverUrl, token }: McpSnippetInput): M
       label: "Claude Code CLI",
       description: "Adds this user's hosted MCP endpoint as a user-scoped HTTP server.",
       language: "bash",
-      value: `claude mcp add --transport http agent-swarm-user ${serverUrl} --scope user --header "Authorization: ${authorization}"`,
+      value: `claude mcp add --transport http agent-swarm-user ${shellQuote(serverUrl)} --scope user --header ${shellQuote(`Authorization: ${authorization}`)}`,
     },
     {
       id: "cursor",
@@ -93,8 +95,8 @@ export function buildMcpClientSnippets({ serverUrl, token }: McpSnippetInput): M
       label: "curl debug",
       description: "Quick JSON-RPC initialize check against the hosted user MCP route.",
       language: "bash",
-      value: `curl -s ${serverUrl} \\
-  -H "Authorization: ${authorization}" \\
+      value: `curl -s ${shellQuote(serverUrl)} \\
+  -H ${shellQuote(`Authorization: ${authorization}`)} \\
   -H "Content-Type: application/json" \\
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"debug"}}}'`,
     },

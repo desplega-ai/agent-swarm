@@ -1,6 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "@/server";
 import { closeDb } from "./be/db";
+import { setDeploymentEnvReader } from "./be/memory";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -9,12 +10,16 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "./be/rbac-audit";
+import { getDeploymentEnvValue } from "./http/core";
 import { clearAuditSink, setAuditSink } from "./rbac";
 
 async function main() {
   // createServer() initializes the DB, so this standalone stdio transport OWNS
   // the database and serves the same gated tools as src/http — wire the RBAC
   // permission-audit sink here too (DES-445 Phase 6; plan "stdio blind spot").
+  // Before any embed: the embedding provider exempts only the deployment env's
+  // base URL from the SSRF check (same as src/http/index.ts).
+  setDeploymentEnvReader(getDeploymentEnvValue);
   const server = await createServer();
   setAuditSink(enqueueAuditRow);
   startAuditWriter();

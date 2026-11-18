@@ -113,7 +113,15 @@ test("Claude SDK enables Interrupt and sends steer through the real API @local",
       provider: "claude",
       providerMeta: { transport: "sdk" },
     });
+    // A reload restores the task from the localStorage query cache, which stays
+    // fresh for the 2s staleTime. A reload inside that window skips the mount
+    // refetch and shows the cli transport until the 10s poll, past the expect
+    // timeout. Wait for the task GET (mount refetch or poll) before asserting.
+    const refetched = page.waitForResponse(
+      (r) => r.url().endsWith(`/api/tasks/${taskId}`) && r.request().method() === "GET",
+    );
     await page.reload();
+    await refetched;
     await expect(interrupt).not.toHaveAttribute("aria-disabled", "true");
     await interrupt.click();
     const message = `SDK redirect ${crypto.randomUUID()}`;

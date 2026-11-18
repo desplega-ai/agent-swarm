@@ -302,6 +302,7 @@ export const LEGACY_POLICY = {
   "memory.reembed": leadOrOperatorOrUser,
   "channel.delete": leadOnly,
   "repo.merge-policy.write": leadOrOperatorOrUser,
+  "repo.exec-config.write": leadOrOperatorOrUser,
   "repo.delete": leadOrOperatorOrUser,
   "heartbeat.trigger": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
