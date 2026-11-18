@@ -460,6 +460,9 @@
     "deferredAt": {
       "exempt": "timestamp"
     },
+    "deferredUntil": {
+      "exempt": "timestamp"
+    },
     "resolvedModel": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },

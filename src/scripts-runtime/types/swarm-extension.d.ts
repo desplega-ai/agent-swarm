@@ -294,6 +294,7 @@ declare module "swarm-extension" {
         }
       | undefined;
     deferredAt?: string | undefined;
+    deferredUntil?: string | undefined;
     compactionCount?: number | undefined;
     peakContextPercent?: number | undefined;
     peakContextTokens?: number | undefined;

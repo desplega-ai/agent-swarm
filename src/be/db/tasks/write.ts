@@ -470,6 +470,8 @@ export async function completeTask(
   options?: {
     addTags?: string[];
     deferredAt?: string;
+    /** The deferral's wake-up ceiling (ISO). Written only with `deferredAt`. */
+    deferredUntil?: string;
     /** Why it completed; see TASK_STATUS_KINDS. Omitted stores NULL (unknown). */
     statusKind?: TaskStatusKindFor<"completed">;
   },
@@ -521,8 +523,8 @@ export async function completeTask(
     }
     if (completed && options?.deferredAt) {
       completed = await getDbClient().get<AgentTaskRow>(
-        "UPDATE agent_tasks SET deferredAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [options.deferredAt, id],
+        "UPDATE agent_tasks SET deferredAt = ?, deferredUntil = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+        [options.deferredAt, options.deferredUntil ?? null, id],
       );
     }
     if (completed) {
