@@ -1,4 +1,12 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../fixtures";
+
+// The loading textarea shares this name; wait for the rich editor before filling it.
+// A fill that lands as the editor replaces the textarea types into nothing.
+const taskDescription = (dialog: Locator) =>
+  dialog
+    .getByRole("textbox", { name: "Task description" })
+    .and(dialog.locator('[contenteditable="true"]'));
 
 for (const width of [1280, 390]) {
   for (const legacy of [false, true]) {
@@ -20,7 +28,7 @@ for (const width of [1280, 390]) {
           creates.push(request.postData() ?? "");
         }
       });
-      await dialog.getByRole("textbox", { name: "Task description" }).fill(prompt);
+      await taskDescription(dialog).fill(prompt);
       await expect(dialog.getByLabel("Task type", { exact: true })).not.toBeVisible();
       await dialog.getByRole("button", { name: "Advanced settings" }).click();
       await expect(dialog.getByLabel("Task type", { exact: true })).toBeVisible();
@@ -44,7 +52,7 @@ test("create task keeps advanced settings when collapsed and submits them", asyn
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks?new=true");
   const dialog = page.getByRole("dialog", { name: "Create task" });
-  await dialog.getByRole("textbox", { name: "Task description" }).fill("e2e custom task creation");
+  await taskDescription(dialog).fill("e2e custom task creation");
   await dialog.getByRole("combobox", { name: "Assign to agent" }).click();
   await page.getByRole("option", { name: "e2e-worker-a", exact: true }).click();
   await dialog.getByRole("button", { name: "Advanced settings" }).click();
@@ -85,7 +93,7 @@ test("failed task creation keeps the draft for retry", async ({ page, seed }) =>
   });
   await page.goto("/tasks?new=true");
   const dialog = page.getByRole("dialog", { name: "Create task" });
-  await dialog.getByRole("textbox", { name: "Task description" }).fill("Keep this task draft");
+  await taskDescription(dialog).fill("Keep this task draft");
   await dialog.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Task creation unavailable");
   await expect(dialog.getByRole("textbox", { name: "Task description" })).toHaveText(
