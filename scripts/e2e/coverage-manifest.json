@@ -687,6 +687,10 @@
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
     },
+    "outbound-url-guards": {
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, and discovered OAuth endpoints are validated",
+      "scenarios": ["platform-outbound-url-guards"]
+    },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
       "scenarios": [

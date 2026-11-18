@@ -815,7 +815,7 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     delete process.env.MANAGED_MCP_VAULT_ID;
   });
 
-  test("normalizeRepoUrl: passes through github.com URLs and expands owner/repo shorthand", () => {
+  test("normalizeRepoUrl: accepts github.com URLs and owner/repo shorthand, refuses other URLs", () => {
     expect(normalizeRepoUrl("https://github.com/desplega-ai/agent-swarm")).toBe(
       "https://github.com/desplega-ai/agent-swarm",
     );
@@ -825,9 +825,6 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     expect(normalizeRepoUrl("desplega-ai/agent-swarm")).toBe(
       "https://github.com/desplega-ai/agent-swarm",
     );
-  });
-
-  test("normalizeRepoUrl: refuses URLs that are not an https github.com repo", () => {
     for (const url of [
       "http://gitlab.example.com/foo/bar",
       "https://gitlab.example.com/foo/bar",
