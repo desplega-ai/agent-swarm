@@ -11,12 +11,14 @@ import {
   listKv,
   upsertKv,
 } from "../be/db";
+import { MAX_KV_BODY_BYTES } from "../kv-limits";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import {
   privateNamespaceError,
   requiresLeadToWrite,
   reservedNamespaceError,
   reservedRoomKeyError,
+  scrubReservedRead,
 } from "../kv-reserved-namespaces";
 import { hasKvViewArgs, resolveKvView } from "../kv-view";
 import { can } from "../rbac";
@@ -45,10 +47,6 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
  * cookie. The kv handler treats it as the highest-priority namespace source
  * and overrides anything in the URL/body so pages can't escape their namespace.
  */
-
-// 2 MiB cap on PUT bodies. Pre-flighted via Content-Length; the parsed JSON
-// body itself is enforced too (`value` size ≤ MAX_KV_BODY_BYTES after stringify).
-const MAX_KV_BODY_BYTES = 2 * 1024 * 1024;
 
 // `limit` upper bound on list endpoints. Anything higher gets clamped silently
 // — callers should paginate via offset.
@@ -693,6 +691,7 @@ async function sendGet(
     jsonError(res, "not found", 404);
     return true;
   }
+  entry.value = scrubReservedRead(namespace, entry.value);
   if (hasKvViewArgs(query)) {
     const view = resolveKvView(entry.value, query);
     if (!view.ok) {
@@ -791,7 +790,10 @@ async function sendList(
   const limit = Math.min(query.limit ?? 100, MAX_KV_LIST_LIMIT);
   const offset = query.offset ?? 0;
   const prefix = query.prefix && query.prefix.length > 0 ? query.prefix : undefined;
-  const entries = await listKv(namespace, { prefix, limit, offset });
+  const entries = (await listKv(namespace, { prefix, limit, offset })).map((entry) => ({
+    ...entry,
+    value: scrubReservedRead(namespace, entry.value),
+  }));
   const total = await countKv(namespace, { prefix });
   respond(res, 200, { entries, total, namespace });
   return true;

@@ -9,7 +9,7 @@ import {
   RESOURCE_GROUPS_READ_ONLY,
 } from "../assets/key";
 import { SOURCE_GROUPS_READ_ONLY, sourceMoveError, sourceOfKey } from "../assets/source-key";
-import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
+import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AgentDeletedError,
@@ -82,6 +82,7 @@ import {
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
+import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { canMutateTaskNamespace } from "./assets";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { createListTotalCache } from "./list-total-cache";
@@ -133,6 +134,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
+  statusKind: true,
   peakContextPercent: true,
   totalCostUsd: true,
 });
@@ -772,7 +774,10 @@ async function withSessionMove(
   try {
     const changedBy = await resolveHttpRequesterUserId(req, myAgentId);
     const actor = await resolveSessionActor(req, myAgentId);
-    const key = destination === null ? null : await authorizeAssetKeyWrite(destination, changedBy);
+    const key =
+      destination === null
+        ? null
+        : await authorizeHttpAssetKeyWrite(req, myAgentId, destination, changedBy);
     await assertAssetKeyMovesAllowed();
     await run({ actor, changedBy: changedBy ?? undefined, key });
   } catch (error) {

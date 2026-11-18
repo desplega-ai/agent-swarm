@@ -13,6 +13,7 @@ import { Check, ChevronsUpDown, Plus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useCreateUser, useUsers } from "@/api/hooks/use-users";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -62,12 +63,16 @@ export function UserSwitcher() {
       <SidebarMenu>
         <SidebarMenuItem>
           <div className="flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm">
-            <span
-              aria-hidden="true"
-              className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary font-mono text-[10px] font-semibold text-primary-foreground shadow-sm"
-            >
-              {userInitials(user.name)}
-            </span>
+            {user.avatar ? (
+              <UserAvatar id={user.id} name={user.name} avatar={user.avatar} />
+            ) : (
+              <span
+                aria-hidden="true"
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary font-mono text-[10px] font-semibold text-primary-foreground shadow-sm"
+              >
+                {userInitials(user.name)}
+              </span>
+            )}
             <span className="grid flex-1 text-left text-sm leading-tight text-foreground">
               <span className="sr-only">Signed in as </span>
               <span className="truncate font-medium">{user.name}</span>
@@ -103,15 +108,19 @@ export function UserSwitcher() {
                 tooltip={user ? `Acting as ${user.name}` : "Pick identity"}
                 aria-label={user ? `Acting as ${user.name}. Click to switch.` : "Pick identity"}
               >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold shadow-sm",
-                    user ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary",
-                  )}
-                >
-                  {user ? initials : <UserPlus className="size-3.5" />}
-                </span>
+                {user?.avatar ? (
+                  <UserAvatar id={user.id} name={user.name} avatar={user.avatar} />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold shadow-sm",
+                      user ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary",
+                    )}
+                  >
+                    {user ? initials : <UserPlus className="size-3.5" />}
+                  </span>
+                )}
                 <span
                   className={cn(
                     "grid flex-1 text-left text-sm leading-tight",
@@ -135,12 +144,16 @@ export function UserSwitcher() {
                     onClick={() => setUserId(u.id)}
                     className="flex items-center gap-2"
                   >
-                    <span
-                      aria-hidden="true"
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted font-mono text-[9px] font-semibold text-muted-foreground shrink-0"
-                    >
-                      {userInitials(u.name)}
-                    </span>
+                    {u.avatar ? (
+                      <UserAvatar id={u.id} name={u.name} avatar={u.avatar} className="size-5" />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted font-mono text-[9px] font-semibold text-muted-foreground shrink-0"
+                      >
+                        {userInitials(u.name)}
+                      </span>
+                    )}
                     <span className="flex-1 truncate">{u.name}</span>
                     {u.id === userId ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
                   </DropdownMenuItem>

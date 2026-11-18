@@ -467,7 +467,12 @@ export default async function memoryEval(args: any, ctx: any) {
   try {
     const kvResult = await ctx.swarm.kv_get({ key: KV_KEY, namespace: KV_NS });
     const payload = kvResult?.data ?? kvResult;
-    if (Array.isArray(payload?.value)) history = payload.value;
+    // Keep only points with a YYYY-MM-DD date: the date sorts and labels the chart.
+    if (Array.isArray(payload?.value)) {
+      history = payload.value.filter(
+        (p: any) => typeof p?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.date),
+      );
+    }
   } catch (_e) {
     // first run — no history yet
   }
@@ -625,7 +630,11 @@ function buildMarkdownReport(r: any): string {
 function buildDashboardHtml(report: any, history: DailyPoint[]): string {
   const fmtNum = (v: unknown) =>
     typeof v === "number" ? new Intl.NumberFormat("en-US").format(v) : String(v ?? "");
-  const dataJson = JSON.stringify(history);
+  // Escape "<" and the JS line separators so the JSON cannot end the inline <script>.
+  const dataJson = JSON.stringify(history)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 
   const metricCards = [
     ["Carry-forward", `${report.axis1.score}%`],

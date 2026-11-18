@@ -1,5 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { loadModelsSnapshot } from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 mock.module("@/components/shared/provider-icon", () => require("./provider-icon"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));

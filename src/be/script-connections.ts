@@ -14,6 +14,7 @@ import {
   type CredentialBinding,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
+import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import { refreshSecretScrubberCache } from "@/utils/secret-scrubber";
 import { listMcpServerTools } from "./mcp-proxy";
 import { assertPostgresDsn } from "./sql-connections";
@@ -1510,7 +1511,10 @@ export async function fetchOpenapiSpec(
       Accept: "application/json, application/yaml;q=0.9, text/yaml;q=0.8, */*;q=0.5",
     });
     if (opts.etag) headers.set("If-None-Match", opts.etag);
-    const fetchImpl = openapiSpecFetchForTesting ?? Bun.fetch;
+    // Guarded: each hop resolves the name and connects only to a checked address.
+    const fetchImpl =
+      openapiSpecFetchForTesting ??
+      createSsrfGuardedFetch(openapiSpecUrlOptions(), Bun.fetch as typeof fetch);
     let response: Response | null = null;
     for (let hop = 0; hop <= 5; hop += 1) {
       response = await fetchImpl(parsed, {

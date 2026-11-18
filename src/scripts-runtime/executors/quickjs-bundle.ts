@@ -1,3 +1,4 @@
+import { DURABLE_OBJECT_BASE_JS } from "../durable-object-base";
 import { SourceMapReader } from "./sourcemap";
 
 /**
@@ -27,7 +28,9 @@ export const retry = s.retry;
 export const Redacted = s.Redacted;
 `;
 
-const SWARM_SDK_MODULE = `export function createSwarmSdk() {
+const SWARM_SDK_MODULE = `${DURABLE_OBJECT_BASE_JS}
+export { DurableObject };
+export function createSwarmSdk() {
   return globalThis.__swarm_ctx.swarm;
 }
 `;
@@ -130,6 +133,22 @@ export async function bundleForQuickJS(source: string): Promise<QuickJSBundle> {
                 );
               }
               return { path: zodEntry };
+            });
+            // Registered last, so it sees only the imports the handlers above do not
+            // claim. The two in-memory files resolve to themselves. Every other import
+            // from them fails, so the bundle never reads a host file. Imports inside
+            // the resolved zod sources keep Bun's default resolution.
+            build.onResolve({ filter: /.*/ }, (args) => {
+              if (args.importer === "" && args.path === ENTRY_PATH) return { path: ENTRY_PATH };
+              if (args.importer === ENTRY_PATH && args.path === `./${USER_SCRIPT_FILE}`) {
+                return { path: USER_PATH };
+              }
+              if (args.importer === "" || args.importer.startsWith(`${VIRTUAL_DIR}/`)) {
+                throw new Error(
+                  `Import '${args.path}' is not available to the quickjs executor. Allowed imports are "stdlib", "swarm-sdk", "zod" and "zod/mini".`,
+                );
+              }
+              return undefined;
             });
           },
         },

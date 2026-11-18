@@ -292,26 +292,6 @@ describe("Memory System", () => {
   });
 
   describe("store.get (getMemoryById)", () => {
-    test("returns existing memory", async () => {
-      const created = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "Findable",
-        content: "Find me",
-        source: "manual",
-      });
-
-      const found = await store.get(created.id);
-      expect(found).not.toBeNull();
-      expect(found!.id).toBe(created.id);
-      expect(found!.name).toBe("Findable");
-    });
-
-    test("returns null for non-existent ID", async () => {
-      const found = await store.get("00000000-0000-0000-0000-000000000000");
-      expect(found).toBeNull();
-    });
-
     test("updates accessedAt on retrieval", async () => {
       const created = await store.store({
         agentId: agentA,
@@ -321,16 +301,18 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      // Force a tiny delay so timestamps differ
-      const start = performance.now();
-      while (performance.now() - start < 5) {
-        /* spin */
-      }
-
-      const found = await store.get(created.id);
-      expect(found).not.toBeNull();
-      // accessedAt should be updated (may or may not differ depending on timing)
-      expect(found!.accessedAt).toBeDefined();
+      const stale = "2000-01-01T00:00:00.000Z";
+      await getDbClient().run("UPDATE agent_memory SET accessedAt = ? WHERE id = ?", [
+        stale,
+        created.id,
+      ]);
+      const before = Date.now();
+      expect(await store.get(created.id)).not.toBeNull();
+      // get() returns the old row. Inspect the committed update without another access.
+      const persisted = await store.peek(created.id);
+      expect(persisted!.accessedAt).not.toBe(stale);
+      expect(Date.parse(persisted!.accessedAt)).toBeGreaterThanOrEqual(before);
+      expect(Date.parse(persisted!.accessedAt)).toBeLessThanOrEqual(Date.now());
     });
   });
 
@@ -344,20 +326,24 @@ describe("Memory System", () => {
         source: "manual",
       });
 
+      const unembedded = await getDbClient().get<{ embedding: Buffer | null }>(
+        "SELECT embedding FROM agent_memory WHERE id = ?",
+        [memory.id],
+      );
+      expect(unembedded!.embedding).toBeNull();
       const embedding = new Float32Array([0.1, 0.2, 0.3, -0.5]);
       await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Read back the raw row to check embedding
-      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
-        "SELECT embedding FROM agent_memory WHERE id = ?",
+      const row = (await getDbClient().get<{ embedding: Buffer | null; embeddingModel: string }>(
+        "SELECT embedding, embeddingModel FROM agent_memory WHERE id = ?",
         [memory.id],
       ))!;
       expect(row.embedding).not.toBeNull();
+      expect(row.embeddingModel).toBe("test-model");
 
       const restored = deserializeEmbedding(row.embedding!);
-      expect(restored.length).toBe(4);
-      expect(restored[0]).toBeCloseTo(0.1, 5);
-      expect(restored[3]).toBeCloseTo(-0.5, 5);
+      expect(restored).toEqual(embedding);
     });
   });
 
@@ -569,29 +555,6 @@ describe("Memory System", () => {
     });
   });
 
-  describe("store.delete (deleteMemory)", () => {
-    test("deletes existing memory", async () => {
-      const memory = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "To Delete",
-        content: "Delete me",
-        source: "manual",
-      });
-
-      const deleted = await store.delete(memory.id);
-      expect(deleted).toBe(true);
-
-      const found = await store.get(memory.id);
-      expect(found).toBeNull();
-    });
-
-    test("returns false for non-existent memory", async () => {
-      const deleted = await store.delete("00000000-0000-0000-0000-000000000000");
-      expect(deleted).toBe(false);
-    });
-  });
-
   describe("store.deleteBySourcePath (deleteMemoriesBySourcePath)", () => {
     test("deletes all chunks for a source path", async () => {
       const path = "/workspace/personal/memory/to-reindex.md";
@@ -645,12 +608,20 @@ describe("Memory System", () => {
         content: "Content",
         source: "manual",
       });
+      await store.store({
+        agentId: statsAgent,
+        scope: "agent",
+        name: "Stat 4",
+        content: "Content",
+        source: "task_completion",
+      });
 
       const stats = await store.getStats(statsAgent);
-      expect(stats.total).toBe(3);
+      expect(stats.total).toBe(4);
       expect(stats.bySource.manual).toBe(2);
       expect(stats.bySource.file_index).toBe(1);
-      expect(stats.byScope.agent).toBe(2);
+      expect(stats.bySource.task_completion).toBe(1);
+      expect(stats.byScope.agent).toBe(3);
       expect(stats.byScope.swarm).toBe(1);
       expect(stats.withEmbeddings).toBe(0);
       expect(stats.expired).toBe(0);
@@ -767,46 +738,6 @@ describe("Memory System", () => {
       for (const m of memories) {
         expect(m.totalChunks).toBe(chunks.length);
       }
-    });
-
-    test("memory created without embedding has null embedding in DB", async () => {
-      const memory = await store.store({
-        agentId: ingestAgent,
-        content: "No embedding needed",
-        name: "no-embed",
-        scope: "agent",
-        source: "manual",
-      });
-
-      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
-        "SELECT embedding FROM agent_memory WHERE id = ?",
-        [memory.id],
-      ))!;
-      expect(row.embedding).toBeNull();
-    });
-
-    test("store.updateEmbedding stores and retrieves correctly", async () => {
-      const memory = await store.store({
-        agentId: ingestAgent,
-        content: "Embed me",
-        name: "embed-update",
-        scope: "agent",
-        source: "manual",
-      });
-
-      const embedding = new Float32Array([0.5, -0.3, 0.8]);
-      await store.updateEmbedding(memory.id, embedding, "test-model");
-
-      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
-        "SELECT embedding FROM agent_memory WHERE id = ?",
-        [memory.id],
-      ))!;
-      expect(row.embedding).not.toBeNull();
-
-      const restored = deserializeEmbedding(row.embedding!);
-      expect(restored[0]).toBeCloseTo(0.5, 5);
-      expect(restored[1]).toBeCloseTo(-0.3, 5);
-      expect(restored[2]).toBeCloseTo(0.8, 5);
     });
   });
 });

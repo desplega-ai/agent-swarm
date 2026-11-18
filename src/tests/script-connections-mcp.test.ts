@@ -487,9 +487,12 @@ describe("script MCP connections", () => {
         result?: { content: Array<{ type: string; text?: string }> };
       };
       expect(body.ok).toBe(true);
-      expect(body.result?.content[0]?.text).toBe(
-        JSON.stringify({ echo: "hello", secret: SECRET_VALUE }),
-      );
+      // The header reaches the server; its echo comes back redacted.
+      expect(fake.requests.some((request) => request.secretHeader === SECRET_VALUE)).toBe(true);
+      const echoed = JSON.parse(body.result?.content[0]?.text ?? "{}") as Record<string, string>;
+      expect(echoed.echo).toBe("hello");
+      expect(echoed.secret).toContain("[REDACTED");
+      expect(JSON.stringify(body)).not.toContain(SECRET_VALUE);
       expect(fake.requests.some((request) => request.method === "tools/call")).toBe(true);
 
       const unauthenticated = await dispatchProxyApi(

@@ -37,9 +37,7 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("store → search → get → delete lifecycle", () => {
-    let memoryId: string;
-
-    test("store creates a memory with correct fields", async () => {
+    test("stores, embeds, searches, accesses and deletes one memory", async () => {
       const memory = await store.store({
         agentId: agentA,
         scope: "agent",
@@ -48,74 +46,35 @@ describe("Memory E2E Lifecycle", () => {
         source: "manual",
         tags: ["deployment", "ci"],
       });
-      memoryId = memory.id;
-      expect(memory.id).toBeDefined();
+      const memoryId = memory.id;
+      expect(memoryId).toBeDefined();
       expect(memory.agentId).toBe(agentA);
       expect(memory.content).toContain("GitHub Actions");
-    });
 
-    test("updateEmbedding stores vector and model name", async () => {
       const embedding = new Float32Array([0.8, 0.2, 0.1]);
       await store.updateEmbedding(memoryId, embedding, "test-model-v1");
+      expect((await store.peek(memoryId))!.embeddingModel).toBe("test-model-v1");
+      const results = await store.search(embedding, agentA, { limit: 5 });
+      const match = results.find((r) => r.id === memoryId);
+      expect(match).toBeDefined();
+      expect(match!.similarity).toBeCloseTo(1.0, 3);
 
-      // Verify via raw SQL
-      const row = (await getDbClient().get("SELECT embeddingModel FROM agent_memory WHERE id = ?", [
-        memoryId,
-      ])) as { embeddingModel: string | null };
-      expect(row.embeddingModel).toBe("test-model-v1");
-    });
-
-    test("search returns the memory with similarity score", async () => {
-      const query = new Float32Array([0.8, 0.2, 0.1]); // same as stored
-      const results = await store.search(query, agentA, { limit: 5 });
-      expect(results.length).toBeGreaterThan(0);
-
-      const found = results.find((r) => r.id === memoryId);
-      expect(found).toBeDefined();
-      expect(found!.similarity).toBeCloseTo(1.0, 3);
-    });
-
-    test("get retrieves memory and increments accessCount", async () => {
-      const mem1 = await store.get(memoryId);
-      expect(mem1).not.toBeNull();
-      expect(mem1!.name).toBe("deployment info");
-
-      // Access count should increment on each get
-      const row1 = (await getDbClient().get("SELECT accessCount FROM agent_memory WHERE id = ?", [
-        memoryId,
-      ])) as { accessCount: number };
-      const count1 = row1.accessCount;
-
+      const first = await store.get(memoryId);
+      expect(first).not.toBeNull();
+      expect(first!.id).toBe(memoryId);
+      expect(first!.name).toBe("deployment info");
       await store.get(memoryId);
-      const row2 = (await getDbClient().get("SELECT accessCount FROM agent_memory WHERE id = ?", [
-        memoryId,
-      ])) as { accessCount: number };
-      expect(row2.accessCount).toBe(count1 + 1);
-    });
-
-    test("peek reads without incrementing accessCount", async () => {
-      const rowBefore = (await getDbClient().get(
+      const peeked = await store.peek(memoryId);
+      expect(peeked!.name).toBe("deployment info");
+      expect(peeked!.accessCount).toBe(2);
+      const row = await getDbClient().get<{ accessCount: number }>(
         "SELECT accessCount FROM agent_memory WHERE id = ?",
         [memoryId],
-      )) as { accessCount: number };
+      );
+      expect(row!.accessCount).toBe(2);
 
-      const mem = await store.peek(memoryId);
-      expect(mem).not.toBeNull();
-      expect(mem!.name).toBe("deployment info");
-
-      const rowAfter = (await getDbClient().get(
-        "SELECT accessCount FROM agent_memory WHERE id = ?",
-        [memoryId],
-      )) as { accessCount: number };
-      expect(rowAfter.accessCount).toBe(rowBefore.accessCount);
-    });
-
-    test("delete removes the memory", async () => {
-      const deleted = await store.delete(memoryId);
-      expect(deleted).toBe(true);
-
-      const found = await store.get(memoryId);
-      expect(found).toBeNull();
+      expect(await store.delete(memoryId)).toBe(true);
+      expect(await store.get(memoryId)).toBeNull();
     });
   });
 
@@ -175,46 +134,6 @@ describe("Memory E2E Lifecycle", () => {
   // ==========================================================================
 
   describe("TTL expiry filtering", () => {
-    test("task_completion has ~7d TTL", async () => {
-      const memory = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "task result",
-        content: "Completed task output",
-        source: "task_completion",
-      });
-
-      const row = (await getDbClient().get("SELECT expiresAt FROM agent_memory WHERE id = ?", [
-        memory.id,
-      ])) as { expiresAt: string | null };
-      expect(row.expiresAt).not.toBeNull();
-
-      const expiresAt = new Date(row.expiresAt!).getTime();
-      const expectedMin = Date.now() + 6 * 24 * 60 * 60 * 1000; // ~6d
-      const expectedMax = Date.now() + 8 * 24 * 60 * 60 * 1000; // ~8d
-      expect(expiresAt).toBeGreaterThan(expectedMin);
-      expect(expiresAt).toBeLessThan(expectedMax);
-
-      await store.delete(memory.id);
-    });
-
-    test("manual source has no TTL (null expiresAt)", async () => {
-      const memory = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "permanent note",
-        content: "This should never expire",
-        source: "manual",
-      });
-
-      const row = (await getDbClient().get("SELECT expiresAt FROM agent_memory WHERE id = ?", [
-        memory.id,
-      ])) as { expiresAt: string | null };
-      expect(row.expiresAt).toBeNull();
-
-      await store.delete(memory.id);
-    });
-
     test("expired memories are excluded from search", async () => {
       const memory = await store.store({
         agentId: agentA,
@@ -281,6 +200,9 @@ describe("Memory E2E Lifecycle", () => {
       );
 
       expect(memories.length).toBe(3);
+      expect(memories.map((memory) => memory.content)).toEqual(
+        chunks.map((chunk) => chunk.content),
+      );
       for (let i = 0; i < 3; i++) {
         expect(memories[i].chunkIndex).toBe(i);
         expect(memories[i].totalChunks).toBe(3);
@@ -441,6 +363,13 @@ describe("Memory E2E Lifecycle", () => {
     });
 
     test("filters by agentId", async () => {
+      const other = await store.store({
+        agentId: agentA,
+        scope: "agent",
+        name: "other-owner",
+        content: "A's content",
+        source: "manual",
+      });
       const mem = await store.store({
         agentId: agentB,
         scope: "agent",
@@ -451,11 +380,13 @@ describe("Memory E2E Lifecycle", () => {
 
       const listAll = await store.listForReembedding();
       const listB = await store.listForReembedding({ agentId: agentB });
-      expect(listB.length).toBeLessThanOrEqual(listAll.length);
+      expect(listAll.map((item) => item.id)).toContain(other.id);
+      expect(listB.map((item) => item.id)).not.toContain(other.id);
 
       const found = listB.find((item) => item.id === mem.id);
       expect(found).toBeDefined();
 
+      await store.delete(other.id);
       await store.delete(mem.id);
     });
   });

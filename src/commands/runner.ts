@@ -132,6 +132,7 @@ import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
   buildContextPreamble,
   buildResumeContextPreamble,
+  buildSessionFollowUpPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
 import {
@@ -7465,14 +7466,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(resumePrompt).slice(0, 100)}...`);
 
         const metadata = {
           type: metadataType,
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: resumePrompt,
+          prompt: scrubSecrets(resumePrompt),
           trigger: "task_resumed",
           resumedTaskId: task.id,
         };
@@ -7909,8 +7910,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           "task" in trigger.task
             ? (trigger.task as { task: string; id?: string; contextKey?: string })
             : null;
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const taskObj = trigger.task as
+          | { parentTaskId?: string; taskType?: string; source?: string }
+          | undefined;
         const isResumeTask = taskObj?.taskType === "resume";
+        // A Sessions message to the Lead reads against the session's last Lead
+        // turns, not one parent: a fresh session per message keeps no transcript.
+        const isSessionFollowUp = isLead && !isResumeTask && taskObj?.source === "ui";
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
 
         // The prompt enrichment below needs several API reads that do not
@@ -7938,7 +7944,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           taskObj?.parentTaskId && apiUrl
             ? isResumeTask
               ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : isSessionFollowUp
+                ? buildSessionFollowUpPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+                : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
             : null,
           fetchProfileSyncRejectionBanner({
             ...apiConfig,
@@ -8163,7 +8171,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`\n[${role}] === Iteration ${iteration} ===`);
         console.log(`[${role}] Logging to: ${logFile}`);
-        console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+        console.log(`[${role}] Prompt: ${scrubSecrets(triggerPrompt).slice(0, 100)}...`);
         if (effectiveCwd) {
           console.log(`[${role}] Working directory: ${effectiveCwd}`);
         }
@@ -8173,7 +8181,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           sessionId,
           iteration,
           timestamp: new Date().toISOString(),
-          prompt: triggerPrompt,
+          prompt: scrubSecrets(triggerPrompt),
           trigger: trigger.type,
         };
         await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);

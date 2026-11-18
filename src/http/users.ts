@@ -94,6 +94,7 @@ import {
 } from "../be/users";
 import { isRbacEnabled } from "../rbac";
 import {
+  UserAvatarSchema,
   UserCommsPrefsSchema,
   UserMergeJobSchema,
   UserMergeJobStatusSchema,
@@ -285,6 +286,7 @@ const createUserRoute = route({
     metadata: z.record(z.string(), z.unknown()).optional(),
     dailyBudgetUsd: z.number().nullable().optional(),
     status: z.enum(["invited", "active", "suspended"]).optional(),
+    avatar: UserAvatarSchema.nullable().optional(),
     identities: z
       .array(z.object({ kind: z.string().min(1), externalId: z.string().min(1) }))
       .optional(),
@@ -445,6 +447,8 @@ const updateUserRoute = route({
         ),
       dailyBudgetUsd: z.number().nullable().optional(),
       status: z.enum(["invited", "active", "suspended"]).optional(),
+      // null resets to the initials avatar.
+      avatar: UserAvatarSchema.nullable().optional(),
       // Complete-list diff: passing this replaces the user's identity set,
       // emitting `identity_added` / `identity_removed` for each delta.
       identities: z
@@ -1865,6 +1869,7 @@ export async function handleUsers(
           "preferredChannel",
           "notes",
           "metadata",
+          "avatar",
         ] as const;
         for (const field of PROFILE_FIELDS) {
           if (parsed.body[field] === undefined) continue;

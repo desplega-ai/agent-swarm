@@ -24,15 +24,38 @@ export async function resolveInputs(
 }
 
 /**
+ * The `${ENV_VAR}` names a workflow may read, from `WORKFLOW_INPUT_ENV_ALLOWLIST`
+ * (comma-separated, blanks ignored). Null means the variable is unset and imposes no
+ * restriction. An explicitly empty list allows no names. Read on every call, so a config
+ * reload applies at once.
+ */
+export function workflowInputEnvAllowlist(): Set<string> | null {
+  const raw = process.env.WORKFLOW_INPUT_ENV_ALLOWLIST;
+  if (raw === undefined) return null;
+  const names = raw
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  return new Set(names);
+}
+
+/**
  * Resolve a single input value, supporting `${ENV_VAR}` and `secret.NAME`
  * references. A plain string is returned unchanged. Throws if a referenced
- * env var or swarm secret cannot be found.
+ * env var or swarm secret cannot be found, or if `WORKFLOW_INPUT_ENV_ALLOWLIST`
+ * is set and does not list the env var. This is the only place `${ENV_VAR}` is
+ * resolved: workflow input (`resolveInputs`) and webhook HMAC secrets both come here.
  */
 export async function resolveInputValue(value: string): Promise<string> {
   // Env var reference: ${MY_VAR}
   const envMatch = /^\$\{(.+)\}$/.exec(value);
   if (envMatch?.[1]) {
     const envName = envMatch[1];
+    const allowed = workflowInputEnvAllowlist();
+    // Checked before the read, so a name outside the list never touches process.env.
+    if (allowed && !allowed.has(envName)) {
+      throw new Error(`Environment variable "${envName}" is not in WORKFLOW_INPUT_ENV_ALLOWLIST`);
+    }
     const envValue = process.env[envName];
     if (envValue === undefined) {
       throw new Error(`Environment variable "${envName}" is not set`);

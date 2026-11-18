@@ -101,7 +101,8 @@ export function MobileDetailScreen({
           rootTaskId={rootTaskId}
           showInternalHandoffs={showHandoffs}
           timeline="turns"
-          scrollClassName="px-4 py-4"
+          // A scroll at the end of the conversation does not move the page under the screen.
+          scrollClassName="overscroll-contain px-4 py-4"
           composer={{
             bar: true,
             // Above the home indicator. With the keyboard up, the inset is gone.

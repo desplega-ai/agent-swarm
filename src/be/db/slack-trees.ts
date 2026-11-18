@@ -139,6 +139,16 @@ export type SlackOutcomeWindow = {
 };
 
 /**
+ * A Lead follow-up or resume task that may owe an outcome card. Needs alias
+ * `task`. Over-selects on purpose: the renderer's isSlackLeadFollowUp also
+ * checks the Slack ask ancestor and the channel, which SQL cannot cheaply do.
+ */
+const SLACK_LEAD_FOLLOW_UP_SQL = `(task.source = 'system'
+  AND task.taskType IN ('follow-up', 'resume') AND task.slackReplySent = 0
+  AND task.status IN ('completed', 'failed', 'cancelled')
+  AND EXISTS (SELECT 1 FROM agents lead WHERE lead.id = task.agentId AND lead.isLead = 1))`;
+
+/**
  * Needs aliases `task` and `state` in scope. Params: slackOutcomeWindowParams.
  * shortcut: thread activity stands in for closure activity, so an expired
  * closure in a busy thread is revisited until the thread goes quiet; walk the
@@ -183,6 +193,32 @@ export async function slackThreadHasBotReplySince(
   return !!row?.found;
 }
 
+/**
+ * True when agent `agentId` sent a `slack-reply` in the thread at or after
+ * `since`, attributed to one of `taskIds`. A Lead follow-up passes the task
+ * it reviews: the Lead can attribute its review reply to that task instead of
+ * to the follow-up itself.
+ */
+export async function slackThreadHasAgentReplyOnTasksSince(
+  channelId: string,
+  threadTs: string,
+  since: string,
+  agentId: string,
+  taskIds: readonly string[],
+): Promise<boolean> {
+  if (taskIds.length === 0) return false;
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM slack_messages reply
+       WHERE reply.channel_id = ? AND reply.thread_ts = ? AND reply.created_at >= ?
+         AND reply.kind = 'agent' AND reply.created_by = ?
+         AND reply.task_id IN (${taskIds.map(() => "?").join(", ")})
+     ) AS found`,
+    [channelId, threadTs, since, agentId, ...taskIds],
+  );
+  return !!row?.found;
+}
+
 function slackOutcomeWindowParams(window: SlackOutcomeWindow): (string | number)[] {
   return [window.finishedAfter, Number(window.delegationEnabled), window.closureActiveAfter];
 }
@@ -204,7 +240,7 @@ export async function slackThreadHasOutcomeWork(
          SELECT 1 FROM agent_tasks task, slack_render_v2_state state
          WHERE state.id = 1
          AND task.slackChannelId = ? AND task.slackThreadTs = ?
-         AND task.source = 'slack'
+         AND (task.source = 'slack' OR ${SLACK_LEAD_FOLLOW_UP_SQL})
          AND task.createdAt >= state.activated_at
          AND task.status IN ('completed', 'failed', 'cancelled')
          AND ${SLACK_OUTCOME_WINDOW_SQL}
@@ -310,6 +346,7 @@ export async function getSlackProcessingThreads(
       (task.createdAt >= state.activated_at
        AND (task.source = 'slack'
          OR (task.source = 'schedule' AND task.taskType = 'deferred')
+         OR ${SLACK_LEAD_FOLLOW_UP_SQL}
          OR (? = 1 AND task.parentTaskId IS NOT NULL AND task.createdAt >= state.delegation_activated_at
            AND task.status IN ('completed', 'failed') AND task.slackReplySent = 0
            AND COALESCE(task.taskType, '') NOT IN ('follow-up', 'reroute-decision')))

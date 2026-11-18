@@ -430,7 +430,7 @@ export async function handlePullRequestClosed(
   const reason = outcome === "merged" ? "PR was merged" : "PR was declined";
   for (const task of await findActiveTasksByVcs(repository.full_name, pr.id, "bitbucket")) {
     console.log(`[Bitbucket] Cancelling task ${task.id} — ${reason}`);
-    await failTask(task.id, reason);
+    await failTask(task.id, reason, { statusKind: "external" });
   }
   return { created: false };
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getKv } from "@/be/db";
+import { scrubReservedRead } from "@/kv-reserved-namespaces";
 import {
   hasKvViewArgs,
   joinKvPath,
@@ -192,6 +193,7 @@ export const registerKvGetTool = (server: McpServer) => {
       // entries go out whole and the harness applies its own truncation; with
       // path/offset/limit the tool bounds the page itself.
       const entry = await getKv(resolved.namespace, key);
+      if (entry) entry.value = scrubReservedRead(resolved.namespace, entry.value);
       if (entry && hasKvViewArgs({ path, offset, limit })) {
         return boundedView(entry, requestInfo.agentId, { path, offset, limit });
       }

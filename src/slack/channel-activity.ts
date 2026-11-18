@@ -1,4 +1,6 @@
 import { getSlackApp } from "./app";
+import { shouldBlockChannel } from "./external-channel";
+import { isUserAllowed, LOOKUP_USER_TEAM } from "./handlers";
 
 export interface ChannelMessage {
   channelId: string;
@@ -70,6 +72,9 @@ export async function fetchChannelActivity(
     const cursor = cursors.get(channelId);
 
     try {
+      // Same external-channel gate as the message handler (SLACK_BLOCK_EXTERNAL_CHANNELS).
+      if (await shouldBlockChannel(client, channelId)) continue;
+
       // Cold-start: no cursor for this channel — seed it without triggering
       if (!cursor) {
         const seedResult = await client.conversations.history({
@@ -100,6 +105,8 @@ export async function fetchChannelActivity(
         if (!msg.text?.trim() || !msg.user) continue;
         // Skip thread replies (only top-level channel messages)
         if (msg.thread_ts && msg.thread_ts !== msg.ts) continue;
+        // Same SLACK_ALLOWED_* sender gate as the message handler.
+        if (!(await isUserAllowed(client, msg.user, LOOKUP_USER_TEAM))) continue;
 
         messages.push({
           channelId,

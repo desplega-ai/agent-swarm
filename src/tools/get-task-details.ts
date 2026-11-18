@@ -77,6 +77,7 @@ export const looseAgentTaskOutputSchema = z.looseObject({
   lastUpdatedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   notifiedAt: z.string().optional(),
+  statusKind: z.string().optional(),
   failureReason: z.string().optional(),
   output: z.string().optional(),
   progress: z.string().optional(),
@@ -468,10 +469,13 @@ export async function getTaskDetailsHandler(
     ? ` Fitted to the size budget; include ${JSON.stringify(reducedParts)} for the rest.`
     : "";
 
-  return toolOk(`Task "${taskId}" (${task.status}) details retrieved.${fitNote}`, {
-    details: JSON.stringify(data),
-    data,
-  });
+  return toolOk(
+    `Task "${taskId}" (${task.status}${task.statusKind ? `, ${task.statusKind}` : ""}) details retrieved.${fitNote}`,
+    {
+      details: JSON.stringify(data),
+      data,
+    },
+  );
 }
 
 export const registerGetTaskDetailsTool = (server: McpServer) => {

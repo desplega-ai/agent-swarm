@@ -790,6 +790,7 @@ describe("Heartbeat Triage", () => {
       // Original task should be failed
       const updated = await getTaskById(task.id);
       expect(updated?.status).toBe("failed");
+      expect(updated?.statusKind).toBe("error");
       expect(updated?.failureReason).toContain("reboot sweep");
 
       // Retry task should exist

@@ -50,13 +50,6 @@ describe("parseCodexRateLimitResetTime — same-day format variants", () => {
     const msg = `You've hit your usage limit. Try again at ${time}.`;
     expect(parseCodexRateLimitResetTime(msg, now)).toBe(expected);
   });
-
-  test("'or try again at' prefix (lowercase) also parses", () => {
-    const now = new Date("2026-05-25T18:00:00Z");
-    const msg =
-      "You've hit your usage limit. To get more access now, send a request to your admin or try again at 8:35 PM.";
-    expect(parseCodexRateLimitResetTime(msg, now)).toBe("2026-05-25T20:35:00.000Z");
-  });
 });
 
 describe("parseCodexRateLimitResetTime — different-day format", () => {

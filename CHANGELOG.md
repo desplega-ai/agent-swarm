@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.13.5] - 2026-11-18
+
+### Added
+- GitHub: the API mints an installation token per repository for owners listed in `GITHUB_APP_REPO_OWNERS`; other calls keep `GITHUB_APP_INSTALLATION_ID` (#3182).
+- Defer: `defer-task` can wake on `vcs.pr.checks_done`, when every required check finished on the PR head (#3260).
+- Tasks: `statusKind` records why a task ended, shown in task details and lists (#3303).
+- Users: custom avatars (`manage-user` `avatar`) and an agent-fs file picker (#3288).
+- Credentials: fresh usage telemetry with lowest-usage key selection (#3240), and opt-in pace ranking for pooled keys (#3262).
+- UI: usage cards show a quota pace line with shortage or overage (#3243); an admin "Add me to ranking" button on Home (#3238).
+
+### Changed
+- agent-fs pins bumped 0.18.32 -> 0.18.33.
+- Dependencies: worker harness bumps for claude-code, anthropic sdk, amp, grok, kiro and qwen (#3239, #3280); `azure/setup-helm` 5.1.0 (#3315); templates-ui `next` 16.4.5 (#3234).
+- Apps: app-sync passes run up to 3 at a time (#3244).
+- Pre-push: the hook runs only the nearest affected tests and lints changed files; CI stays the authority (#3287, #3292).
+- CI: shorter Merge Gate verdict and less repeated CI work (#3252).
+- Prompts: trackers route to sheets and diagrams to boards (#3241).
+- Tests: a test cleanup campaign consolidated duplicate suites and replaced copied fixtures with production contracts, with its ledger and test-line budget in the testing docs (#3253-#3336).
+- Docs: Goals playbook (#3279); contractor credential, supplier confirmation and competitor brief guide updates (#3236, #3245, #3246); TLA+ specs synced (#3237); swarm-scripts skill seed patches (#3235); MCP.md and the MCP tools reference list the `manage-user` `avatar` field.
+
+### Fixed
+- Slack: Lead follow-up outcomes post to the Slack thread (#3316).
+- Workflows: step output size counts UTF-8 bytes (#3267).
+- Sandbox: shell startup files are blocked before limits apply (#3269).
+- Assets: the dashboard's logged-in user can write its own personal keys (#3261).
+- Scripts: `memory_rate` accepts the `memoryId` alias (#3232).
+- UI: boards and sheets open as live embeds in Files and session previews (#3289); a malformed saved connection configuration no longer breaks the page (#3283); the lead's cut reply and its resume fold into one answer (#3296); message bubble sizing (#3268, #3298); sessions phone screens and sidebar alignment (#3242, #3247, #3263).
+
 ## [2.13.4] - 2026-11-17
 
 ### Added

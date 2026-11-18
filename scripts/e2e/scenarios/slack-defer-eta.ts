@@ -5,7 +5,7 @@ import {
   ask,
   claim,
   enableSlackRenderV2Only,
-  expectNoWakeTime,
+  expectChannelWakeTime,
   findSlackTask,
   registerLead,
   slackPace,
@@ -52,7 +52,8 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
   // This defer is time-based (delayMs, no wakeOn), so the card is the
   // "checking back" shape. A wakeOn defer instead reads "Waiting on <agent> —
   // or <when> at the latest"; both are asserted as units in defer-task.test.ts.
-  // The stored card keeps the wake-up time for the API and the UI; only Slack drops it.
+  // The stored card renders its time in the requester's timezone (UTC here);
+  // Slack re-renders `deferredUntil` in Europe/Madrid.
   expect(
     typeof deferred.output === "string" && STORED_TIME_CARD.test(deferred.output),
     `Stored output must be the human-facing defer ETA, got: ${JSON.stringify(deferred.output)}`,
@@ -68,8 +69,8 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     "Stored output must not carry the agent's internal handoff note",
   );
 
-  // Slack reads the card without its wake-up time.
-  const outcome = await waitForOutcome(ctx, message.ts, "Checking back later");
+  expect(typeof deferred.deferredUntil === "string", "Deferred task must store deferredUntil");
+  const outcome = await waitForOutcome(ctx, message.ts, "Checking back ");
   expect(outcome.bot_id === ctx.slack.bot.botId, "Deferral outcome must come from the bot");
   if (renderer === "v2") {
     // Require the outcome stream to finish, so a tree update cannot satisfy this assertion.
@@ -129,7 +130,7 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     !thread.includes("/schedules/"),
     `${renderer} Slack thread leaked the defer schedule link`,
   );
-  expectNoWakeTime(ctx, message.ts, renderer);
+  expectChannelWakeTime(ctx, message.ts, renderer, String(deferred.deferredUntil));
 }
 
 // registry.ts discovers both exports. Legacy must precede the scenarios that enable v2;

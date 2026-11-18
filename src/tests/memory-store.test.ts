@@ -137,7 +137,22 @@ describe("SqliteMemoryStore", () => {
         totalChunks: 2,
       })),
     );
-    await expect(store.storeBatch([{ ...input, content: "new" }])).rejects.toThrow();
+    await store.whenFtsPopulated();
+    const counts = () =>
+      getDbClient().get(
+        `SELECT (SELECT COUNT(*) FROM agent_memory) AS memories,
+              (SELECT COUNT(*) FROM agent_memory_version) AS versions,
+              (SELECT COUNT(*) FROM memory_fts) AS fts`,
+      );
+    const before = await counts();
+    // The first insert succeeds before the existing document rejects the second.
+    await expect(
+      store.storeBatch([
+        { ...input, key: "/test/rewrite-transient", content: "transient" },
+        { ...input, content: "new" },
+      ]),
+    ).rejects.toThrow("UNIQUE constraint failed");
+    expect(await counts()).toEqual(before);
     for (const chunk of chunks) expect(await store.peek(chunk.id)).not.toBeNull();
     expect(await store.deleteBySourcePath(key, agentA)).toBe(2);
     const replacement = await store.storeBatch([{ ...input, content: "new" }]);
@@ -218,22 +233,6 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("store()", () => {
-    test("creates memory with correct fields", async () => {
-      const memory = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "test memory",
-        content: "test content",
-        source: "manual",
-      });
-      expect(memory.id).toBeDefined();
-      expect(memory.agentId).toBe(agentA);
-      expect(memory.scope).toBe("agent");
-      expect(memory.name).toBe("test memory");
-      expect(memory.content).toBe("test content");
-      expect(memory.source).toBe("manual");
-    });
-
     test("task_completion → expiresAt ≈ now + 7d", async () => {
       const before = Date.now();
       const memory = await store.store({
@@ -249,6 +248,9 @@ describe("SqliteMemoryStore", () => {
       const expectedMax = Date.now() + 7 * 86400000 + 5000;
       expect(expires).toBeGreaterThan(expectedMin);
       expect(expires).toBeLessThan(expectedMax);
+      expect(
+        await getDbClient().get("SELECT expiresAt FROM agent_memory WHERE id = ?", [memory.id]),
+      ).toEqual({ expiresAt: memory.expiresAt });
     });
 
     test("session_summary → expiresAt ≈ now + 3d", async () => {
@@ -274,18 +276,9 @@ describe("SqliteMemoryStore", () => {
         source: "manual",
       });
       expect(memory.expiresAt).toBeNull();
-    });
-  });
-
-  describe("storeBatch()", () => {
-    test("atomically stores multiple memories", async () => {
-      const memories = await store.storeBatch([
-        { agentId: agentA, scope: "agent", name: "batch1", content: "c1", source: "manual" },
-        { agentId: agentA, scope: "agent", name: "batch2", content: "c2", source: "manual" },
-      ]);
-      expect(memories).toHaveLength(2);
-      expect(memories[0]!.name).toBe("batch1");
-      expect(memories[1]!.name).toBe("batch2");
+      expect(
+        await getDbClient().get("SELECT expiresAt FROM agent_memory WHERE id = ?", [memory.id]),
+      ).toEqual({ expiresAt: null });
     });
   });
 
@@ -491,6 +484,7 @@ describe("SqliteMemoryStore", () => {
       await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [raw.id]);
 
       const freshStore = new SqliteMemoryStore();
+      await freshStore.whenFtsPopulated();
       const health = freshStore.getHealth();
 
       expect(health.counts.missingFromVec).toBe(0);
@@ -527,6 +521,7 @@ describe("SqliteMemoryStore", () => {
       `);
 
       const freshStore = new SqliteMemoryStore();
+      await freshStore.whenFtsPopulated();
       const health = freshStore.getHealth();
 
       expect(health.sqliteVec.schema).toContain("distance_metric=cosine");
@@ -551,102 +546,6 @@ describe("SqliteMemoryStore", () => {
 
     test("returns false for non-existent", async () => {
       expect(await store.delete("00000000-0000-0000-0000-000000000000")).toBe(false);
-    });
-  });
-
-  describe("deleteBySourcePath()", () => {
-    test("removes all matching memories", async () => {
-      const path = "/test/delete-path.ts";
-      await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "chunk1",
-        content: "c1",
-        source: "file_index",
-        sourcePath: path,
-      });
-      await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "chunk2",
-        content: "c2",
-        source: "file_index",
-        sourcePath: path,
-      });
-
-      const deleted = await store.deleteBySourcePath(path, agentA);
-      expect(deleted).toBe(2);
-    });
-  });
-
-  describe("updateEmbedding()", () => {
-    test("sets embedding and model", async () => {
-      const memory = await store.store({
-        agentId: agentA,
-        scope: "agent",
-        name: "embed test",
-        content: "embeddable",
-        source: "manual",
-      });
-      await store.updateEmbedding(
-        memory.id,
-        new Float32Array([1, 2, 3]),
-        "openai/text-embedding-3-small",
-      );
-
-      const updated = await store.peek(memory.id);
-      expect(updated!.embeddingModel).toBe("openai/text-embedding-3-small");
-    });
-  });
-
-  describe("getStats()", () => {
-    test("returns correct counts", async () => {
-      const statsAgent = "cccc0000-0000-4000-8000-000000000003";
-      await createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
-
-      await store.store({
-        agentId: statsAgent,
-        scope: "agent",
-        name: "s1",
-        content: "c1",
-        source: "manual",
-      });
-      await store.store({
-        agentId: statsAgent,
-        scope: "swarm",
-        name: "s2",
-        content: "c2",
-        source: "task_completion",
-      });
-      await store.store({
-        agentId: statsAgent,
-        scope: "agent",
-        name: "s3",
-        content: "c3",
-        source: "manual",
-      });
-
-      const stats = await store.getStats(statsAgent);
-      expect(stats.total).toBe(3);
-      expect(stats.bySource.manual).toBe(2);
-      expect(stats.bySource.task_completion).toBe(1);
-      expect(stats.byScope.agent).toBe(2);
-      expect(stats.byScope.swarm).toBe(1);
-    });
-  });
-
-  describe("listForReembedding()", () => {
-    test("returns id and content", async () => {
-      const all = await store.listForReembedding();
-      expect(all.length).toBeGreaterThan(0);
-      expect(all[0]).toHaveProperty("id");
-      expect(all[0]).toHaveProperty("content");
-    });
-
-    test("filters by agentId", async () => {
-      const filtered = await store.listForReembedding({ agentId: agentA });
-      expect(filtered.every((_m) => true)).toBe(true); // just verifying it doesn't throw
-      expect(filtered.length).toBeGreaterThan(0);
     });
   });
 

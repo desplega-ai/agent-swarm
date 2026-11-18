@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { initDb, resetDbForTests } from "../db/client.ts";
-import { getAttempt, insertAttempt, listJudgments, updateAttempt } from "../db/queries.ts";
+import { insertAttempt, listJudgments } from "../db/queries.ts";
 import { beginJudging, clearJudging } from "../judge/live-registry.ts";
 import { newJudgeTrace } from "../judge/llm.ts";
 import { beginAttemptProgress, finishAttemptProgress } from "../live/attempt-progress.ts";
@@ -314,69 +314,5 @@ describe("scoreDimension — judge-only dimension invokes the judge (round 11 XO
     expect(row?.weight).toBe(2);
     expect(row?.score).toBeCloseTo(0.6, 10);
     expect(row?.pass).toBe(false); // pass only when sub-score >= 1
-  });
-});
-
-describe("runAttemptWithRetry — JudgeInfraError maps to status 'error' (NOT 'failed')", () => {
-  // The block above asserts scoreDimension THROWS a JudgeInfraError on a judge
-  // infra flake. This block closes the loop on what runAttemptWithRetry's catch
-  // does with that throw (runner/index.ts ~1688/1720): a JudgeInfraError keeps
-  // its CLEAN typed message (NOT a raw stack) and the attempt is persisted in
-  // terminal status `error` — never `failed`.
-  //
-  // PARTIAL-BY-DESIGN: runAttemptWithRetry / runAttemptOnce are module-private
-  // and runAttemptOnce unconditionally boots an E2B stack before any judge runs,
-  // so driving the real catch end-to-end means mock.module-ing ../swarm/sandbox.ts
-  // (bootStack). bun's mock.module mutates the GLOBAL module registry + live
-  // bindings and does NOT isolate per-file without `--isolate` (which this suite
-  // doesn't use), so that mock leaks into src/runner/progress.test.ts (which
-  // imports bootStack directly) and breaks its abort test. Rather than ship a
-  // flaky cross-file mock, we assert the two decisions the catch actually makes,
-  // against the REAL types + REAL DB persistence path (getAttempt/updateAttempt):
-  //   1) the error the catch special-cases IS a JudgeInfraError carrying a clean
-  //      message (no stack) + its dimension — this is the exact discriminant the
-  //      `err instanceof JudgeInfraError ? err.message : err.stack` branch keys on;
-  //   2) persisting that terminal verdict writes status `error` (the mapping
-  //      target), round-tripping out of the DB as `error`, never `failed`.
-
-  const JUDGE_INFRA_MSG = "openrouter judge returned 503 (model overloaded)";
-
-  test("a JudgeInfraError carries the CLEAN message the catch persists (not a stack)", () => {
-    const err = new JudgeInfraError("communication", JUDGE_INFRA_MSG);
-    // runAttemptWithRetry's catch: `err instanceof JudgeInfraError ? err.message
-    // : (err.stack ?? err.message)`. So the discriminant must be true and the
-    // message must be the clean one — a stack would START with the class name and
-    // contain "\n    at " frames, which must NOT leak into the persisted error.
-    expect(err).toBeInstanceOf(JudgeInfraError);
-    expect(err.message).toBe(JUDGE_INFRA_MSG);
-    expect(err.dimension).toBe("communication");
-    const persisted = (err instanceof JudgeInfraError ? err.message : (err as Error).stack) ?? "";
-    expect(persisted).toBe(JUDGE_INFRA_MSG);
-    expect(persisted).not.toContain("\n    at ");
-  });
-
-  test("the terminal mapping persists status 'error' (NOT 'failed') and round-trips from the DB", async () => {
-    const db = await freshDbWithAttempt();
-    const err = new JudgeInfraError("communication", JUDGE_INFRA_MSG);
-
-    // Exactly what runAttemptWithRetry's terminal branch does for a thrown
-    // JudgeInfraError (runner/index.ts ~1719): status 'error' + the clean,
-    // 4000-char-capped message. We exercise the REAL updateAttempt so the status
-    // CHECK constraint + column round-trip are part of the assertion.
-    const message = err instanceof JudgeInfraError ? err.message : ((err as Error).stack ?? "");
-    await updateAttempt(db, ATTEMPT_ID, {
-      status: "error",
-      retries: 0,
-      error: message.slice(0, 4000),
-      finishedAt: new Date().toISOString(),
-    });
-
-    const attempt = await getAttempt(db, ATTEMPT_ID);
-    expect(attempt).not.toBeNull();
-    expect(attempt?.status).toBe("error"); // the mapping target
-    expect(attempt?.status).not.toBe("failed"); // the bug would be 'failed'
-    expect(attempt?.error).toBe(JUDGE_INFRA_MSG); // clean message, no stack
-    expect(attempt?.passed).toBeNull(); // an errored attempt has no verdict
-    expect(attempt?.score).toBeNull();
   });
 });

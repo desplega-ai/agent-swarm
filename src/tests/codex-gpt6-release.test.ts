@@ -1,17 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { modelGroupsForHarness } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
 import { buildModelsCatalog } from "../be/models-catalog";
 import cache from "../be/modelsdev-cache.json";
 import { buildModelsDevSeedRows } from "../be/seed-pricing";
 import {
   CODEX_DEFAULT_MODEL,
-  computeCodexCostUsd,
   getCodexContextWindow,
   getCodexModelPricing,
   listCodexModels,
   resolveCodexModel,
 } from "../providers/codex-models";
 import { applyReasoningEffort, reasoningCapability } from "../providers/reasoning-effort";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 const releases = [
   { id: "gpt-6-sol", label: "GPT-6 Sol", input: 2, output: 10, read: 0.2, write: 2.5 },
@@ -30,10 +33,6 @@ for (const release of releases) {
         cachedInputPerMillion: release.read,
         outputPerMillion: release.output,
       });
-      expect(computeCodexCostUsd(release.id, 1_000_000, 250_000, 100_000)).toBeCloseTo(
-        release.input * 0.75 + release.read * 0.25 + release.output * 0.1,
-        8,
-      );
     });
 
     test("exposes the full reasoning range and transports none/max correctly", () => {
@@ -109,10 +108,6 @@ describe("gpt-6.1-sol", () => {
       cachedInputPerMillion: 0.1,
       outputPerMillion: 10,
     });
-    expect(computeCodexCostUsd(id, 1_000_000, 250_000, 100_000)).toBeCloseTo(
-      2 * 0.75 + 0.1 * 0.25 + 10 * 0.1,
-      8,
-    );
   });
 
   test("exposes low through max without an off level", () => {

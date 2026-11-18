@@ -62,7 +62,9 @@ export const registerSetConfigTool = (server: McpServer) => {
         envPath: z
           .string()
           .optional()
-          .describe("Optional: file path to write the value as KEY=VALUE in a .env file."),
+          .describe(
+            "Optional: a path stored with the row as metadata. The server does not write files.",
+          ),
         description: z
           .string()
           .optional()

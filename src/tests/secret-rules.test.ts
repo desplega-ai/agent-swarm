@@ -349,8 +349,10 @@ describe("secret corpus", () => {
 
 describe("pass 5 throughput", () => {
   // Informational budget. Timing-sensitive on a shared CI runner: retry
-  // absorbs a spike; a real regression fails every attempt.
-  test(
+  // absorbs a spike; a real regression fails every attempt. Skipped in the
+  // nightly coverage run: instrumentation slows pass 5's JS more than the
+  // native regex passes, so the ratio sits near 2x there with no regression.
+  test.skipIf(process.env.ROOT_COVERAGE_RUN === "1")(
     "10k lines with pass 5 cost under 2x the run without it",
     () => {
       const lines: string[] = [];

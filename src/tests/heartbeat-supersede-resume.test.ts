@@ -92,6 +92,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     // Parent transitioned to `superseded` (NOT `failed`).
     const updatedParent = await getTaskById(parent.id);
     expect(updatedParent?.status).toBe("superseded");
+    expect(updatedParent?.statusKind).toBe("crash_recovery");
 
     // A resume follow-up child exists.
     const children = await getChildTasks(parent.id);
@@ -160,6 +161,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
 
     const updatedParent = await getTaskById(parent.id);
     expect(updatedParent?.status).toBe("failed");
+    expect(updatedParent?.statusKind).toBe("error");
     expect(updatedParent?.failureReason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
     expect((await getChildTasks(parent.id)).length).toBe(0);
   });

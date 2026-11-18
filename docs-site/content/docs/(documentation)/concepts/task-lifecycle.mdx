@@ -38,6 +38,20 @@ stateDiagram-v2
 | `cancelled` | Task was cancelled by the lead or creator |
 | `skipped` | The agent decided the work was not its to handle, such as a Slack thread message addressed to someone else. Set with `store-progress` status `skipped` and a one-line `failureReason`. Posts nothing to Slack and creates no lead follow-up. |
 
+### Status kind
+
+A terminal task also carries `statusKind`, which says why it ended. It refines `status` and never replaces it: a `status = failed` filter still matches every failed task. Tasks that finished before the field existed have no kind.
+
+| Status | Kinds |
+|-------|-------|
+| `failed` | `agent` (the agent chose to fail with `store-progress`), `error` (crash, non-zero exit, provider error, stall, provisioning or reboot), `cascade` (a task it depends on ended without completing), `external` (a PR or issue event) |
+| `completed` | `agent` (`store-progress`), `runner` (the runner wrapper finished it after the session ended), `deferred` (`defer-task`) |
+| `cancelled` | `user` (dashboard, Slack, chat, tracker stop), `agent` (`cancel-task`), `workflow` (the run or step was cancelled), `external` (the tracker issue was deleted or cancelled), `system` (heartbeat housekeeping) |
+| `skipped` | `agent`, `runner` |
+| `superseded` | the resume reason (`graceful_shutdown`, `context_limits`, `manual_supersede`, `crash_recovery`, `provider_fallback`), or `workflow_retry` |
+
+Filter by kind with `get-tasks` `statusKind` or `GET /api/tasks?status=failed&statusKind=error`. The valid kinds live in `TASK_STATUS_KINDS` in `src/types.ts`. A new kind is one entry there and needs no migration.
+
 ## Task Creation
 
 Tasks can be created in several ways:
@@ -136,7 +150,7 @@ Every task created through an ingress path gets a `contextKey` stamped on it so 
 
 Child tasks created via `parentTaskId` (including `send-task` delegations) automatically inherit their parent's `contextKey`. This enables sibling-task awareness: when a worker starts a task, its prompt surfaces recent siblings sharing the same `contextKey` so related work across ingress paths isn't missed.
 
-In addition, follow-up tasks now receive a bounded **context preamble** built from the parent chain before execution begins. The immediate parent contributes inline task/output/artifact detail, older ancestors are included as pointers only, and the whole block is capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default: 2000) so continuity works across every harness without unbounded context growth.
+In addition, follow-up tasks now receive a bounded **context preamble** built from the parent chain before execution begins. The immediate parent contributes inline task/output/artifact detail, older ancestors are included as pointers only, and the whole block is capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default: 2000) so continuity works across every harness without unbounded context growth. A Lead task sent from the Sessions composer (`source: "ui"`) gets a larger block instead, built as a sandwich: the session's original ask (the root of the task chain, however long), then a marker that counts and names the Lead turns skipped in between, then the last 6 Lead turns, oldest first, each with its ask, answer and artifacts. Delegated worker tasks on the path are not turns. To fit 6000 tokens, the oldest of the last turns drop first into the marker; the original ask and the newest turn always stay. The block names `get-task-details` and the `task-context-gathering` script for fetching more, and comes from the `task.followup.session_turns` prompt template. With no Lead turn on the path, the regular preamble is used.
 
 The column is indexed as `(contextKey, status)` for fast sibling lookup. Historical rows remain `null` — no backfill is performed.
 

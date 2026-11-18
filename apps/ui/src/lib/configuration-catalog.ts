@@ -969,6 +969,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "CREDENTIAL_SELECTION_STRATEGY",
+        label: "Credential selection strategy",
+        description:
+          "How a worker picks a key from a pooled credential. usage (default): the lowest-utilization key first. pace: the key furthest under even use of its windows first, so quota that resets soon gets used.",
+        kind: "enum",
+        options: ["usage", "pace"],
+        defaultValue: "usage",
+        restartRequired: false,
+        docsUrl: `${DOCS}guides/harness-configuration`,
+      },
+      {
         key: "MODEL_LATEST_SOAK_DAYS",
         label: "latest: alias soak",
         description:
@@ -1785,6 +1796,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "number",
         defaultValue: "500",
         placeholder: "500",
+      },
+      {
+        key: "WORKFLOW_INPUT_ENV_ALLOWLIST",
+        label: "Workflow env allowlist",
+        description:
+          "Comma-separated API server env vars that workflow inputs and webhook HMAC secrets can reference. This does not limit script nodes. Unset means no limit; an explicitly empty or blank list blocks all env references in those fields. Config changes require a user token or dashboard user session, with admin access when RBAC is on. Agents (including the lead) and the shared key cannot change it directly. A stored value overrides the deployment env.",
+        kind: "string",
+        placeholder: "MCP_BASE_URL,GITLAB_URL",
+        docsUrl: `${DOCS}ui/configuration#workflow-env-allowlist`,
       },
       {
         key: "SCHEDULER_INTERVAL_MS",

@@ -146,6 +146,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `keyPrefix` | string | No | Filter by namespace subtree |
 | `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
 | `status` | string | No | Filter by status |
+| `statusKind` | string | No | Why the task ended, e.g. `error` vs `agent` for `failed` tasks. See [status kind](/docs/concepts/task-lifecycle#status-kind) |
 | `limit` | number | No | Max tasks to return (default: 25) |
 
 ### send-task
@@ -457,7 +458,7 @@ Upload a file to a Slack channel or thread (max 1 GB).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
+| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. The file must be a regular file inside `/workspace` or the working directory of the caller's current task. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
 | `content` | string | No | Base64-encoded file content. Use when the file isn't reachable from the API server. |
 | `filename` | string | No | Name for the file in Slack (required when using `content`) |
 | `taskId` | uuid | No | Task context for thread |
@@ -471,8 +472,8 @@ Download a file from Slack by file ID or URL.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `fileId` | string | No | Slack file ID |
-| `url` | string | No | Direct download URL |
-| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
+| `url` | string | No | Slack file URL. The tool reads the file ID from it and downloads from the URL Slack returns for that file. |
+| `savePath` | string | No | Only without a task: where to save. Must be inside `/workspace/shared/downloads/`. A relative path resolves from there. Default: `/workspace/shared/downloads/{agentId}/slack/` |
 
 ### slack-leave-thread
 
@@ -681,7 +682,7 @@ Complete the current task now and wake up later to continue it. Use it when the 
 Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call and receives a `deferred` tag. A one-off schedule targets you, and its child task carries the deferred task as `parentTaskId` so the wake-up run receives the prior context. Use this tool instead of creating a continuation schedule by hand.
 
 - **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`, or use `taskIds: ["<first-id>", "<second-id>"]` instead of `taskId`. `mode` defaults to `all` (every member must match); use `mode: "any"` for the first match. Events are `task.completed`, `task.failed`, or `settled` (completed, failed, cancelled, or skipped). Cancellation does not match either named event. IDs must be unique, exist, be nonterminal, and differ from the task being deferred. Any invalid or already-terminal member rejects the entire call without completing the task or creating a schedule. One `delayMs` or `runAt` deadline is still required for the whole set; events and the deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its `followUpConfig` sets `onCompleted`/`onFailed`; an `all`-mode member that settles while others are pending still does.
-- **Wake on an external event:** pass `wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo: "owner/name", number: 123 } }` instead of task IDs. The webhook is only a candidate; where the provider adapter can read, the server confirms with the provider before waking you. Rejected when the event already happened, the provider is unreadable or its integration is off, or you hold 20 pending external waits. The `delayMs`/`runAt` ceiling still applies.
+- **Wake on an external event:** pass `wakeOn: { event: "vcs.pr.merged", source: "github", match: { repo: "owner/name", number: 123 } }` instead of task IDs. Use `event: "vcs.pr.checks_done"` with the same match to wake when every required check of the base branch ruleset finished on the PR head (any conclusion; the wake-up lists them). The webhook is only a candidate; where the provider adapter can read, the server confirms with the provider before waking you. Rejected when the event already happened, the provider is unreadable or its integration is off, or you hold 20 pending external waits. The `delayMs`/`runAt` ceiling still applies.
 - **Structured output:** if the task has an `outputSchema`, pass `output` as a JSON string matching it. The tool stores that string verbatim as terminal output and puts the summary and deferral details in the task log. Missing or invalid output is rejected before creating a schedule. Without a schema, terminal output says when the agent will check back, or names the agents it is waiting on and the latest wake-up time; `output` is ignored. The time uses the requester's stored timezone, falling back to a labeled UTC time when none is set. Full summary, checks, and schedule details remain in the task log.
 
 See [deferring until another task finishes](/docs/concepts/scheduling#deferring-until-another-task-finishes) for an example.
@@ -1543,6 +1544,7 @@ Create, update, delete, or list user profiles in the user registry. Lead-only. I
 | `dailyBudgetUsd` | number \| null | No | Daily budget cap in USD. `null` = unlimited. |
 | `status` | `invited \| active \| suspended` | No | User lifecycle status (defaults to `active`). |
 | `metadata` | object \| null | No | Free-form JSON metadata. `null` clears the field. |
+| `avatar` | object or null | No | Custom avatar, one of: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`; `{ type: "url", url: "https://…" }` (https only, no credentials); `{ type: "agent-fs", path: "/users/<id>/avatar.png", orgId?, driveId? }` (both IDs or neither for the swarm drive). Pass `null` to reset to initials. |
 
 > **Migration note (2026-05)**: the old top-level identity fields (`slackUserId`, `linearUserId`, `githubUsername`, `gitlabUsername`) were removed. Pass identities through the `identities` array instead.
 

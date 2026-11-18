@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createBunSqliteClient, type DbClient, DbTransactionDeadlineError } from "../be/db-client";
+import * as loopLag from "../be/event-loop-lag";
 
 // Cross-process SQLITE_BUSY retry: a second connection on the same file plays
 // the external lock holder (litestream checkpoint, CLI access). The client's
@@ -85,22 +86,54 @@ describe("db-client SQLITE_BUSY retry", () => {
     expect(rows.map((r) => r.name)).toEqual(["bridged", "locker"]);
   });
 
-  test("runTimed excludes the async backoff sleeps a bridged statement waited out", async () => {
-    // The retry path releases the FIFO lock and sleeps between attempts, so
-    // nothing is executing for most of the bridge. Only the driver attempts
-    // count: each is capped at attemptSpinMs (25ms) by the short busy_timeout,
-    // and the attempt count is capped at backoffMs.length + 1 (6), so
-    // executionMs cannot structurally exceed ~150ms however long the hold is.
-    const released = holdWriteLock(400);
-    const startedAt = performance.now();
-    const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["bridged-timed"]);
-    const wallMs = performance.now() - startedAt;
-    await released;
-
-    expect(timed.changes).toBe(1);
-    expect(wallMs).toBeGreaterThan(400);
-    expect(timed.executionMs).toBeLessThan(300);
-    expect(timed.executionMs).toBeLessThan(wallMs);
+  test("runTimed counts failed driver attempts and excludes async backoff", async () => {
+    const timedClient = createBunSqliteClient(() => main, {
+      maxWaitMs: 400,
+      backoffMs: [400],
+      attemptSpinMs: 25,
+    });
+    locker.run("BEGIN IMMEDIATE");
+    let attemptMs = 0;
+    let sawBusy = false;
+    const recorded = spyOn(loopLag, "recordStatement");
+    const query = main.query.bind(main);
+    const queries = spyOn(main, "query").mockImplementation(((sql: string) => {
+      const stmt = query(sql);
+      if (!sql.startsWith("INSERT INTO items")) return stmt;
+      return {
+        run: (...params: unknown[]) => {
+          const startedAt = performance.now();
+          try {
+            return stmt.run(...(params as never[]));
+          } catch (err) {
+            if ((err as { code?: string }).code === "SQLITE_BUSY") {
+              sawBusy = true;
+              locker.run("COMMIT");
+            }
+            throw err;
+          } finally {
+            attemptMs += performance.now() - startedAt;
+          }
+        },
+      };
+    }) as unknown as typeof main.query);
+    try {
+      const startedAt = performance.now();
+      const timed = await timedClient.runTimed("INSERT INTO items (name) VALUES (?)", [
+        "bridged-timed",
+      ]);
+      const wallMs = performance.now() - startedAt;
+      expect(timed.changes).toBe(1);
+      expect(sawBusy).toBe(true);
+      expect(timed.executionMs).toBeGreaterThanOrEqual(attemptMs);
+      // Successful-attempt overhead must not hide an omitted BUSY attempt.
+      expect(timed.executionMs).toBeGreaterThan(recorded.mock.calls.at(-1)![1]);
+      expect(wallMs - timed.executionMs).toBeGreaterThanOrEqual(200);
+    } finally {
+      queries.mockRestore();
+      recorded.mockRestore();
+      if (locker.inTransaction) locker.run("ROLLBACK");
+    }
   });
 
   test("transaction BEGIN IMMEDIATE bridges an external write lock", async () => {

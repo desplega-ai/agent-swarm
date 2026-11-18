@@ -12,6 +12,10 @@ import {
 } from "./agent-runtime-models";
 import { getAgentModelPresentation } from "./agents-list-model-display";
 import { modelVendor } from "./model-vendor";
+import { loadModelsSnapshot } from "./models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 /** A live catalog holding only the given sections. */
 function live(sections: Record<string, Record<string, object>>): LiveModelsCatalog {

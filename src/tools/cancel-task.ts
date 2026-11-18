@@ -93,7 +93,7 @@ export async function cancelTaskHandler(
           };
         }
 
-        const cancelled = await cancelTask(taskId, reason);
+        const cancelled = await cancelTask(taskId, reason, { statusKind: "agent" });
 
         if (!cancelled) {
           return {
@@ -126,7 +126,7 @@ export async function cancelTaskHandler(
       const ownershipError = assertOwnsTask(ctx, existingTask, "task.cancel.own");
       if (ownershipError) return ownershipError;
 
-      const cancelled = await cancelTask(taskId, reason);
+      const cancelled = await cancelTask(taskId, reason, { statusKind: "user" });
 
       if (!cancelled) {
         return {

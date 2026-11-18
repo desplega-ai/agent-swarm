@@ -72,22 +72,33 @@ interface PushCustom {
   instant: boolean;
 }
 
+/** A keyboard takes this much height or more. Browser bars take less. */
+const KEYBOARD_MIN_HEIGHT = 200;
+
 /**
- * The visual viewport box: the pushed screens fill it, so an open keyboard
- * shrinks them and the composer stays in view (iOS does not resize `dvh`).
+ * The visual viewport box while the on-screen keyboard is open, else null.
+ * A pushed screen fills that box, so the keyboard shrinks it and the
+ * composer stays in view (iOS does not resize `dvh` for the keyboard).
+ *
+ * With no keyboard the screen uses plain CSS (the top edge and `dvh`), as
+ * the app shell does. The offset of the visual viewport is not used then:
+ * browsers that hide their bars on scroll (Brave on iOS) report an offset
+ * while the page still starts at the top, which moved the screen down and
+ * showed the list above it.
  */
-function useVisualViewport() {
-  const [box, setBox] = useState<{ top: number; height: number; keyboard: boolean } | null>(null);
+function useKeyboardViewport() {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
-    const update = () =>
-      setBox({
-        top: viewport.offsetTop,
-        height: viewport.height,
-        // A keyboard takes far more than the browser bars do.
-        keyboard: window.innerHeight - viewport.height > 120,
+    const update = () => {
+      const keyboard = window.innerHeight - viewport.height > KEYBOARD_MIN_HEIGHT;
+      setBox((prev) => {
+        if (!keyboard) return null;
+        if (prev && prev.top === viewport.offsetTop && prev.height === viewport.height) return prev;
+        return { top: viewport.offsetTop, height: viewport.height };
       });
+    };
     update();
     viewport.addEventListener("resize", update);
     viewport.addEventListener("scroll", update);
@@ -123,7 +134,7 @@ function PushedScreen({
   custom: PushCustom;
   children: ReactNode;
 }) {
-  const viewport = useVisualViewport();
+  const keyboard = useKeyboardViewport();
   const ref = useRef<HTMLElement>(null);
   // A push moves the focus to the new screen (the list under it goes inert).
   useEffect(() => {
@@ -139,9 +150,13 @@ function PushedScreen({
       initial="initial"
       animate="animate"
       exit="exit"
-      data-keyboard={viewport?.keyboard ? "open" : undefined}
-      style={viewport ? { top: viewport.top, height: viewport.height } : { top: 0, bottom: 0 }}
-      className="group/screen fixed inset-x-0 z-40 flex flex-col bg-background shadow-xl outline-none"
+      data-keyboard={keyboard ? "open" : undefined}
+      style={keyboard ? { top: keyboard.top, height: keyboard.height } : undefined}
+      // `touch-manipulation`: a double tap does not zoom the page in.
+      // `overscroll-contain`: a scroll at the end of the screen does not move the page under it.
+      // `after:`: the screen's fill goes on below it, so the list does not show
+      // between the screen and the keyboard (under the bars iOS floats there).
+      className="group/screen fixed inset-x-0 top-0 z-40 flex h-dvh touch-manipulation flex-col overscroll-contain bg-background shadow-xl outline-none after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-screen after:bg-background"
     >
       {children}
     </motion.section>

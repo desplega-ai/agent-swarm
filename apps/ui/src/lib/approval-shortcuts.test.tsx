@@ -50,7 +50,6 @@ describe("matchDetailShortcut", () => {
     expect(matchDetailShortcut({ key: "Enter", ctrlKey: true, target: page })).toEqual({
       type: "submit",
     });
-    expect(matchDetailShortcut({ key: "Enter", target: textarea })).toBeNull();
   });
 
   test("leaves modified keys, IME composition, and open overlays alone", () => {

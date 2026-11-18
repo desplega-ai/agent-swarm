@@ -86,6 +86,7 @@ describe("native ctx namespaces", () => {
       [
         ...Object.keys(SDK_NAMESPACES),
         "api",
+        "caller",
         "fs",
         "logger",
         "mcp",
@@ -125,7 +126,7 @@ describe("quickjs ctx namespaces", () => {
 };`);
     expect(output.error).toBeUndefined();
     expect(output.result).toEqual({
-      keys: ["api", "app", "fs", "kv", "logger", "mcp", "sh", "stdlib", "swarm"],
+      keys: ["api", "app", "caller", "fs", "kv", "logger", "mcp", "sh", "stdlib", "swarm"],
       frozen: true,
       list: { entries: [{ key: "a" }], total: 1 },
       apps: { message: "1 app", apps: [{ id: "x" }] },
@@ -163,6 +164,7 @@ describe("quickjs ctx namespaces", () => {
       [
         ...Object.keys(SDK_NAMESPACES),
         "api",
+        "caller",
         "fs",
         "logger",
         "mcp",

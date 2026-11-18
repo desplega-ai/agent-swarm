@@ -123,20 +123,29 @@ describe("provider runtime dependencies", () => {
 
   test("OpenCode resolves the SDK override and names a missing SDK without checking a CLI", async () => {
     const deps = probes();
-    const session = config({ OPENCODE_SDK_PATH: "/missing/sdk.js" });
-    expect(resolveOpencodeSdkSpecifier(session.env)).toBe("/missing/sdk.js");
-    await validateProviderDependencies("opencode", session, deps);
-    expect(deps.resolveModule).toHaveBeenCalledWith("/missing/sdk.js");
-    deps.resolveModule.mockImplementation(() => {
-      throw new Error("missing module");
-    });
-    await expect(validateProviderDependencies("opencode", session, deps)).rejects.toThrow(
-      "@opencode/sdk",
-    );
-    await expect(validateProviderDependencies("opencode", session, deps)).rejects.toThrow(
-      "OPENCODE_SDK_PATH",
-    );
-    expect(deps.which).not.toHaveBeenCalled();
+    const previous = process.env.OPENCODE_SDK_PATH;
+    process.env.OPENCODE_SDK_PATH = "/missing/sdk.js";
+    try {
+      // A session env value (swarm config) never picks the module path.
+      const session = config({ OPENCODE_SDK_PATH: "/from/config/sdk.js" });
+      expect(resolveOpencodeSdkSpecifier()).toBe("/missing/sdk.js");
+      await validateProviderDependencies("opencode", session, deps);
+      expect(deps.resolveModule).toHaveBeenCalledWith("/missing/sdk.js");
+      expect(deps.resolveModule).not.toHaveBeenCalledWith("/from/config/sdk.js");
+      deps.resolveModule.mockImplementation(() => {
+        throw new Error("missing module");
+      });
+      await expect(validateProviderDependencies("opencode", session, deps)).rejects.toThrow(
+        "@opencode/sdk",
+      );
+      await expect(validateProviderDependencies("opencode", session, deps)).rejects.toThrow(
+        "OPENCODE_SDK_PATH",
+      );
+      expect(deps.which).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_SDK_PATH;
+      else process.env.OPENCODE_SDK_PATH = previous;
+    }
   });
 
   test("ACP presets use their runtime command and supply installation guidance", async () => {
@@ -189,15 +198,17 @@ describe("provider runtime dependencies", () => {
       await expect(validateProviderDependencies("amp", session)).rejects.toThrow("not executable");
       await chmod(join(directory, "local-cli"), 0o755);
       await validateProviderDependencies("amp", session);
-      session.env = { OPENCODE_SDK_PATH: join(directory, "sdk.js") };
+      process.env.OPENCODE_SDK_PATH = join(directory, "sdk.js");
       await expect(validateProviderDependencies("opencode", session)).rejects.toThrow(
         "@opencode/sdk",
       );
       await Bun.write(join(directory, "sdk.js"), "export const OpenCode = {};\n");
       await validateProviderDependencies("opencode", session);
+      delete process.env.OPENCODE_SDK_PATH;
       // Source installs resolve the local SDK without the global worker image layout.
       await validateProviderDependencies("opencode", config());
     } finally {
+      delete process.env.OPENCODE_SDK_PATH;
       await rm(directory, { recursive: true, force: true });
     }
   });

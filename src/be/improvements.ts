@@ -12,6 +12,8 @@
  *   valid email, and `install_id` is minted here when telemetry never did.
  * - `IMPROVEMENTS_ENABLED=false` refuses every create, send and discard.
  */
+import { publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
+import { createSsrfGuardedFetch } from "../utils/egress-guard";
 import { parseEnvFlag } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "./db";
@@ -288,14 +290,15 @@ export async function approveAndSend(
   let proxyId: string | null = null;
   let proxyError: string | null = null;
   try {
-    const response = await fetch(approval.endpoint, {
+    // Every hop, redirects included, must reach a public host outside dev and test.
+    const response = await createSsrfGuardedFetch(publicEndpointSsrfOptions())(approval.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     proxyStatus = response.status;
-    const body = await response.text().catch(() => "");
+    const body = await readBodyPrefix(response, PROXY_ERROR_MAX).catch(() => "");
     if (response.ok) {
       try {
         const parsed = JSON.parse(body) as { id?: unknown };
@@ -329,6 +332,25 @@ export async function approveAndSend(
   const finished = await getImprovement(id);
   if (!finished) throw new Error(`Improvement ${id} vanished after send`);
   return finished;
+}
+
+/** The first `maxBytes` of a response body; the rest is never buffered. */
+async function readBodyPrefix(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, maxBytes));
 }
 
 /** Discard a pending or failed draft. The caller checks who may discard. */

@@ -22,7 +22,7 @@ The `sheet-*` and `board-*` MCP tools are off in the agent tool list. Call them 
 - Identify a file by `id` (from `create` or `list`) or by `path`.
 - Writes check the file version and re-apply on a concurrent edit (other cells or elements merge; the same cell or element is last writer wins). After 4 conflicting attempts the call throws "retry".
 - `create` and `importXlsx` are create-only: they refuse when the path exists. Read or update the existing file instead.
-- Every returned `object` carries `link`, the live app link to the file. Hand that link to the person.
+- Every returned `object` carries `link`, the dashboard link to the file, where it opens as the editable board or sheet (the agent-fs live app when no dashboard is configured). Hand that link to the person.
 
 ## Where to put files
 

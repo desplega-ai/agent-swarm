@@ -614,10 +614,13 @@ describe("harness crashes end as error, excluded from scores", () => {
     expect(row.exclusion).toBe("harness-error");
   });
 
-  test("a judge flake or a plain runner error is an error but not a harness-error", async () => {
+  test("a judge failure persists its message and leaves the attempt unscored", async () => {
     const judge = await runWith(() => new JudgeInfraError("correctness", "judge died"), 0);
     expect(judge.row.status).toBe("error");
     expect(judge.row.exclusion).toBeNull();
+    expect(judge.row.error).toBe("judge died");
+    expect(judge.row.passed).toBeNull();
+    expect(judge.row.score).toBeNull();
   });
 
   test("an excluded attempt does not count in a run summary's pass rate", async () => {

@@ -26,7 +26,8 @@ export type CopyCheck = { copyable: true } | { copyable: false; reason: string }
 
 /**
  * Decided from `stat` before any bytes load. A file copies when it is text
- * (what the text, markdown, and table viewers render, plus SVG and YAML) and
+ * (what the text, markdown, and table viewers render, board and sheet JSON,
+ * plus SVG and YAML) and
  * at most `COPY_CONTENTS_MAX_BYTES`.
  */
 export function copyCheck(path: string, stat: Pick<StatResult, "size" | "contentType">): CopyCheck {
@@ -35,6 +36,8 @@ export function copyCheck(path: string, stat: Pick<StatResult, "size" | "content
     kind === "text" ||
     kind === "markdown" ||
     kind === "table" ||
+    kind === "board" ||
+    kind === "sheet" ||
     fileExtension(path) === "svg" ||
     EXTRA_TEXT_TYPES.has(mediaType(stat.contentType));
   if (!textLike) return { copyable: false, reason: CANT_COPY_TYPE };

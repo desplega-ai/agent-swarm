@@ -47,7 +47,7 @@ import {
   settleForeachChild,
 } from "./foreach-join";
 import { getSecretInputKeys } from "./input";
-import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
+import { runWithNodeDeadline } from "./node-timeout";
 import { rebuildNodeExecutionInput } from "./step-input";
 import { claimAndOweWalk, type SuccessorWalkDebt } from "./successor-routing";
 
@@ -521,21 +521,15 @@ async function startChild(input: {
   }
 
   const executor = registry.get(bodyType);
-  const deadline = startStepDeadline(resolveNodeTimeoutMs({ type: bodyType, config }));
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {
-    result = await Promise.race([
-      executor.run({
-        config,
-        context: { ...ctx, ...bodyCtx },
-        meta: { ...meta, stepId: child.id, nodeId: child.nodeId, signal: deadline.signal },
-      }),
-      deadline.expired,
-    ]);
+    result = await runWithNodeDeadline({ type: bodyType, config }, executor, {
+      config,
+      context: { ...ctx, ...bodyCtx },
+      meta: { ...meta, stepId: child.id, nodeId: child.nodeId },
+    });
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : String(err) };
-  } finally {
-    deadline.clear();
   }
 
   if (result.status === "failed") {

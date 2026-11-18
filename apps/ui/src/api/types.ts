@@ -476,6 +476,8 @@ export interface AgentTask {
   routingSource?: "declared" | "engine_default";
   /** Set by `defer-task`: the task ended waiting on something else. */
   deferredAt?: string;
+  /** The deferral's wake-up ceiling (ISO); the awaited event can resume it sooner. */
+  deferredUntil?: string;
   routingNote?: string;
   taskType?: string;
   tags: string[];
@@ -491,6 +493,8 @@ export interface AgentTask {
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt?: string;
+  /** Why a terminal task ended, e.g. `failed` + `agent` vs `failed` + `error`. Absent on older rows. */
+  statusKind?: string;
   failureReason?: string;
   output?: string;
   progress?: string;
@@ -684,6 +688,8 @@ export interface User {
   /** Set while a merge job still moves this user into another one; the row disappears when it is done. */
   mergedIntoUserId?: string | null;
   metadata?: Record<string, unknown>;
+  /** Custom avatar, same shapes as an agent's. Null/missing = initials. */
+  avatar?: MediaIcon | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -862,6 +868,8 @@ export interface UpdateUserInput {
   status?: "invited" | "active" | "suspended";
   metadata?: Record<string, unknown> | null;
   comms?: UserCommsPrefs | null;
+  /** `null` resets to initials. */
+  avatar?: MediaIcon | null;
 }
 
 /**

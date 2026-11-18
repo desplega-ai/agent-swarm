@@ -61,6 +61,17 @@ export function isSearchable(mode: SearchMode, query: string): boolean {
 }
 
 /**
+ * True when `path` ends in one of `extensions` (lowercase, no dot), ignoring
+ * case. An empty list accepts every path.
+ */
+export function hasFileExtension(path: string, extensions: readonly string[]): boolean {
+  if (extensions.length === 0) return true;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && extensions.includes(name.slice(dot + 1).toLowerCase());
+}
+
+/**
  * FTS5 reads `"`, `*`, `-`, `:`, `AND`, `OR`, and `NEAR` as syntax. Each word
  * becomes a quoted phrase (inner quotes doubled), and the words are joined with
  * `AND`, so "a-b c" searches the text as typed and never fails to parse.

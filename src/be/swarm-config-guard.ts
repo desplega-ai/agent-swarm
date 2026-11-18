@@ -21,6 +21,7 @@ import {
   parseFollowUpGateScheduleIds,
 } from "../utils/follow-up-gate-schedule-ids";
 import { kindForModelString } from "../utils/internal-ai/models";
+import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
@@ -84,7 +85,44 @@ const RESERVED_KEYS = new Set([
   "GITHUB_APP_INSTALLATION_ID",
   // Owners whose repos get a token for their own installation; same reason.
   "GITHUB_APP_REPO_OWNERS",
+  // The worker imports this module path into its own process. Deployment env only.
+  "OPENCODE_SDK_PATH",
 ]);
+
+/**
+ * Process-control variables that a global config row must never set in the API
+ * process env: they change how the runtime, the loader or a shell starts any
+ * child the API spawns. Operators may still store them for workers, so they are
+ * not reserved; `getInjectableGlobalConfigs` only leaves them out.
+ */
+const API_PROCESS_CONTROL_ENV_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "SHELL",
+  "ENV",
+  "NODE_ENV",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "BUN_OPTIONS",
+  "GCONV_PATH",
+  "GLIBC_TUNABLES",
+]);
+const API_PROCESS_CONTROL_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_", "BUN_INSPECT"];
+
+export function isApiProcessControlEnvKey(key: string): boolean {
+  const name = key.toUpperCase();
+  return (
+    API_PROCESS_CONTROL_ENV_KEYS.has(name) ||
+    API_PROCESS_CONTROL_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+  );
+}
+
+/** A key that cannot be an environment variable name: `=`, NUL, CR or LF. */
+export function invalidConfigKeyError(key: string): string | null {
+  return ["=", "\0", "\r", "\n"].some((char) => key.includes(char))
+    ? `Invalid config key '${JSON.stringify(key).slice(1, -1)}' (must not contain '=', NUL, CR or LF)`
+    : null;
+}
 
 // Config keys the API server owns for its own use and must NEVER hand out over
 // HTTP or to a script — workers/entrypoints read config to build their env, and
@@ -124,27 +162,38 @@ export function internalConfigKeyError(key: string): Error {
 }
 
 /**
- * Keys only an admin user (a user token or dashboard session) may write or
- * delete: never an agent, the Lead included, a guest, or the shared operator
- * key, which every worker holds. The deployment env can still seed them.
+ * Keys only a user (a user token or dashboard session) may write or delete.
+ * With RBAC enabled, that user must be an admin. Agents, including the lead,
+ * guests and the shared operator key cannot change them. The deployment env
+ * can still seed them.
  * `UI_SPEC_SCRIPT_ACTIONS` decides which scripts a card button may run.
  *
  * shortcut: this stops direct writes, not a determined holder of the
  * operator key. That key is root: it can create an admin user and mint a
  * token for it (`POST /api/users`, `/mcp-tokens`). Such a holder gains
- * nothing from a pin, because a script action runs as the card's own agent,
- * which the key can already act as. Upgrade to an anchor the key cannot mint
+ * nothing from a pin on `UI_SPEC_SCRIPT_ACTIONS`, because a script action
+ * runs as the card's own agent, which the key can already act as. That does
+ * not hold for `WORKFLOW_INPUT_ENV_ALLOWLIST`: a holder of the operator key can
+ * mint an admin token and widen the list, so the pin there only stops agents
+ * and the shared key from changing it through config. A stored value also
+ * overrides the deployment env, so an env-set list can be replaced by a stored
+ * row. Upgrade to an anchor the key cannot mint
  * (deployment-env only, or an out-of-band human approval) if workers stop
  * holding the operator key.
  */
-const HUMAN_ONLY_CONFIG_KEYS = new Set([UI_SPEC_SCRIPT_ACTIONS_KEY]);
+// WORKFLOW_INPUT_ENV_ALLOWLIST limits which server env vars a workflow can read, so an agent
+// (the lead included) must not widen it.
+const HUMAN_ONLY_CONFIG_KEYS = new Set([
+  UI_SPEC_SCRIPT_ACTIONS_KEY,
+  "WORKFLOW_INPUT_ENV_ALLOWLIST",
+]);
 
 export function isHumanOnlyConfigKey(key: string): boolean {
   return HUMAN_ONLY_CONFIG_KEYS.has(key.toUpperCase());
 }
 
 export function humanOnlyConfigKeyError(key: string): string {
-  return `Key '${key}' can only be changed by an admin user (a user token or dashboard session). Agents and the shared API key cannot change it.`;
+  return `Changing key '${key}' requires a user token or dashboard user session. With RBAC enabled, the user must be an admin. Agents and the shared API key cannot change it.`;
 }
 
 /** A page session acts for its viewer but runs the page author's code. */
@@ -433,7 +482,19 @@ export const validateControllerGraceSec = boundedIntegerValidators(
   86_400,
 ).RUNTIME_CONTROLLER_GRACE_SEC!;
 
+/** Comma-separated env var names; blank entries are ignored. No names means deny all. */
+function validateWorkflowInputEnvAllowlist(value: unknown): string | null {
+  if (typeof value !== "string") return "WORKFLOW_INPUT_ENV_ALLOWLIST must be a string";
+  for (const name of value.split(",").map((part) => part.trim())) {
+    if (name !== "" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      return `WORKFLOW_INPUT_ENV_ALLOWLIST: "${name}" is not an env var name (use comma-separated NAME values)`;
+    }
+  }
+  return null;
+}
+
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  WORKFLOW_INPUT_ENV_ALLOWLIST: validateWorkflowInputEnvAllowlist,
   [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
   DOCKER_RUNTIME: validateDockerRuntime,
@@ -563,6 +624,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
+  ...enumValidator("CREDENTIAL_SELECTION_STRATEGY", [...CREDENTIAL_SELECTION_STRATEGIES]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
   // `enforce` is deliberately absent: the follow-up gate only records decisions.
   ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
@@ -824,6 +886,8 @@ export function validateConfigEntry(entry: {
   if ((entry.scope === "agent" || entry.scope === "repo") && !entry.scopeId) {
     return "Agent/repo scope requires scopeId";
   }
+  const keyError = invalidConfigKeyError(entry.key);
+  if (keyError) return keyError;
   if (isReservedConfigKey(entry.key)) return reservedKeyError(entry.key).message;
   if (isInternalConfigKey(entry.key)) return internalConfigKeyError(entry.key).message;
   return (
