@@ -455,8 +455,12 @@
       "scenarios": ["script-connections"]
     },
     "script-credential-egress": {
-      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
-      "scenarios": ["script-connections", "script-credential-bindings"]
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value. Bindings resolve from config rows; the API env backs only GITHUB_TOKEN.",
+      "scenarios": [
+        "script-connections",
+        "script-credential-bindings",
+        "script-credential-binding-sources"
+      ]
     },
     "script-inline-run": {
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
