@@ -8,6 +8,7 @@ import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import { shouldBlockChannel } from "./external-channel";
 import type { SlackFile } from "./files";
+import { isUserAllowed } from "./handlers";
 import {
   ignoreSlackInbound,
   isAdmittedSlackDelivery,
@@ -156,6 +157,13 @@ export function createAssistant(
       ) {
         console.log(`[Slack] Ignoring message in external channel ${externalCheckChannel}`);
         return ignoreSlackInbound("external_channel");
+      }
+
+      // Same SLACK_ALLOWED_* sender gate as the channel message handler.
+      const sender = message as { user?: string; user_team?: string };
+      if (!(await isUserAllowed(client, sender.user ?? "", sender.user_team))) {
+        console.log(`[Slack] Ignoring assistant message from unauthorized user ${sender.user}`);
+        return ignoreSlackInbound("unauthorized_user");
       }
 
       // Wrap setStatus/setTitle to swallow all errors gracefully.

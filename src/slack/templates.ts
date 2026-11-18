@@ -76,3 +76,12 @@ registerTemplate({
   variables: [],
   category: "system",
 });
+
+registerTemplate({
+  eventType: "slack.message.thread_context_other_bot",
+  header: "",
+  // Author label in <thread_context> for a bot or app that is not this swarm.
+  defaultBody: "[Bot {{bot_id}}] (untrusted)",
+  variables: [{ name: "bot_id", description: "Slack bot ID of the bot or app that posted" }],
+  category: "system",
+});
