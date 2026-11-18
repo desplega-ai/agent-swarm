@@ -87,6 +87,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Coordinating a guest accessibility request between guest support and property operations with AI agents](https://docs.agent-swarm.dev/docs/guides/guest-accessibility-request-handoff). Reference.
 - [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-performance-review). Reference.
 - [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/guides/food-supplier-ingredient-change-review). Reference.
+- [Preparing a batch traceability packet for a mock recall with AI agents](https://docs.agent-swarm.dev/docs/guides/food-batch-traceability-exercise). Reference.
 - [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-rfp-bid-qualification). Reference.
 - [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-offboarding-access-review). Reference.
