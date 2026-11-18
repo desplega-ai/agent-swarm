@@ -14,9 +14,20 @@
  *
  * Follow-ups with files keep the composer's own send path (upload, then
  * promote); they never show here.
+ *
+ * Each viewer of the tab (`useCurrentUser`) has their own follow-ups: the
+ * mutation key holds the viewer, so a switch to another person hides the
+ * bubbles, Retry and Edit of the one before. A send keeps the session cache
+ * key of the viewer who made it, so its task lands in their chain even when
+ * the response comes back after the switch.
  */
 
-import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryKey,
+  useMutation,
+  useMutationState,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { api } from "@/api/client";
 import { sessionDetailKey } from "@/api/hooks/session-query-keys";
@@ -37,27 +48,36 @@ export interface FollowUpVariables {
   idempotencyKey: string;
 }
 
-function followUpMutationKey(rootTaskId: string) {
-  return ["session-follow-up", rootTaskId];
+function followUpMutationKey(rootTaskId: string, viewerId: string | null) {
+  return ["session-follow-up", rootTaskId, viewerId];
 }
 
-/** Sends a follow-up in `rootTaskId`'s session; its bubble shows through `usePendingFollowUps`. */
+/** Kept on the mutation at send time: the session cache of the viewer who sent it. */
+interface FollowUpContext {
+  detailKey: QueryKey;
+}
+
+/**
+ * Sends a follow-up in `rootTaskId`'s session as the current viewer; its
+ * bubble shows through that viewer's `usePendingFollowUps`.
+ */
 export function useSendFollowUp(rootTaskId: string) {
   const queryClient = useQueryClient();
-  const { userId } = useCurrentUser();
-  return useMutation({
-    mutationKey: followUpMutationKey(rootTaskId),
+  const viewerId = useCurrentUser().userId ?? null;
+  return useMutation<AgentTask, Error, FollowUpVariables, FollowUpContext>({
+    mutationKey: followUpMutationKey(rootTaskId, viewerId),
     // A failed send is the only copy of its text: keep it until Edit or the chain takes it.
     gcTime: Number.POSITIVE_INFINITY,
     mutationFn: ({ idempotencyKey, ...input }: FollowUpVariables) =>
       api.createTask({ ...input, source: "ui" }, { idempotencyKey }),
-    onSuccess: (created, input) => {
-      queryClient.setQueryData<SessionDetailResponse>(
-        sessionDetailKey(rootTaskId, userId ?? null),
-        (detail) =>
-          detail && !detail.chain.some((task) => task.id === created.id)
-            ? { ...detail, chain: [...detail.chain, created] }
-            : detail,
+    // Runs at send time: the observer's options (and this closure's viewer)
+    // can change before the response, the mutation's context cannot.
+    onMutate: () => ({ detailKey: sessionDetailKey(rootTaskId, viewerId) }),
+    onSuccess: (created, input, context) => {
+      queryClient.setQueryData<SessionDetailResponse>(context.detailKey, (detail) =>
+        detail && !detail.chain.some((task) => task.id === created.id)
+          ? { ...detail, chain: [...detail.chain, created] }
+          : detail,
       );
       queryClient.invalidateQueries({ queryKey: ["session", rootTaskId] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -84,11 +104,12 @@ function findMutation(queryClient: ReturnType<typeof useQueryClient>, mutationId
     .find({ predicate: (mutation) => mutation.mutationId === mutationId });
 }
 
-/** The follow-ups still sending or failed, in send order. */
+/** The current viewer's follow-ups still sending or failed, in send order. */
 export function usePendingFollowUps(rootTaskId: string, chain: AgentTask[] | undefined) {
   const queryClient = useQueryClient();
+  const viewerId = useCurrentUser().userId ?? null;
   const sent = useMutationState({
-    filters: { mutationKey: followUpMutationKey(rootTaskId) },
+    filters: { mutationKey: followUpMutationKey(rootTaskId, viewerId) },
     select: (mutation) => ({
       mutationId: mutation.mutationId,
       status: mutation.state.status,

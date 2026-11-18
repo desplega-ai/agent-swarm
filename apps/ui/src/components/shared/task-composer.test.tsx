@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
+import type { AgentTask } from "../../api/types";
 
 // A DOM for the composer; removed after this file so other files keep their
 // server-render environment.
@@ -52,6 +53,9 @@ const createdTasks: Array<Record<string, unknown>> = [];
 const createOpts: Array<{ idempotencyKey?: string } | undefined> = [];
 // Creates that fail before the server commits them.
 let rejectCreates = 0;
+// Held creates wait here until the test settles them (a slow response).
+let holdCreates = false;
+const heldCreates: Array<{ settle: (error?: Error) => void }> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
 // Promotions the server committed, and every promotion request sent.
 const promoted: string[] = [];
@@ -74,6 +78,11 @@ mock.module("@/api/client", () => ({
     createTask: async (input: Record<string, unknown>, opts?: { idempotencyKey?: string }) => {
       createdTasks.push(input);
       createOpts.push(opts);
+      if (holdCreates) {
+        await new Promise<void>((resolve, reject) =>
+          heldCreates.push({ settle: (error) => (error ? reject(error) : resolve()) }),
+        );
+      }
       if (rejectCreates > 0) {
         rejectCreates -= 1;
         throw new Error("network error");
@@ -123,8 +132,10 @@ mock.module("@/api/fs", () => ({
     return {};
   },
 }));
+// The person using the tab; a test switches it mid-send.
+let viewerId = "u1";
 mock.module("@/contexts/current-user-context", () => ({
-  useCurrentUser: () => ({ userId: "u1" }),
+  useCurrentUser: () => ({ userId: viewerId }),
 }));
 // Steering is its own surface; the stub shows which composer is up, the send
 // label, placeholder and route detail it was handed, and renders its extra actions.
@@ -155,10 +166,12 @@ mock.module("@/components/steering/steer-composer", () => ({
 }));
 
 const { createRoot } = await import("react-dom/client");
-const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { QueryClient, QueryClientProvider, useQueryClient } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../ui/tooltip");
 const { TaskComposer } = await import("./task-composer");
 const { GrantsContext } = await import("../../lib/use-can");
+const { sessionDetailKey } = await import("../../api/hooks/session-query-keys");
+const { PendingFollowUps, usePendingFollowUps } = await import("../sessions/pending-follow-ups");
 
 const runningLeadTask = {
   id: "lead-1",
@@ -192,6 +205,7 @@ async function mount(node: React.ReactNode) {
   );
   return {
     container,
+    queryClient,
     unmount: async () => {
       await act(async () => root.unmount());
       container.remove();
@@ -231,6 +245,9 @@ beforeEach(() => {
   createdTasks.length = 0;
   createOpts.length = 0;
   rejectCreates = 0;
+  holdCreates = false;
+  heldCreates.length = 0;
+  viewerId = "u1";
   uploads.length = 0;
   promoted.length = 0;
   promoteCalls.length = 0;
@@ -389,6 +406,99 @@ describe("TaskComposer on Sessions", () => {
     expect(bubbleText()).toBeNull();
     expect(textOf(container)).toBe("ship it");
     await unmount();
+  });
+
+  describe("a viewer switch while a follow-up sends", () => {
+    let rerender: () => void = () => {};
+    // A session view whose chain is the current viewer's cached session detail.
+    function ViewerSession() {
+      const [, setTick] = useState(0);
+      rerender = () => setTick((tick) => tick + 1);
+      const chain = useQueryClient().getQueryData<{ chain: AgentTask[] }>(
+        sessionDetailKey("root-1", viewerId),
+      )?.chain;
+      const items = usePendingFollowUps("root-1", chain);
+      return (
+        <>
+          <PendingFollowUps rootTaskId="root-1" items={items} draftKey="session:root-1" />
+          <TaskComposer
+            rootTaskId="root-1"
+            targetTask={null}
+            canSteer={false}
+            draftKey="session:root-1"
+          />
+        </>
+      );
+    }
+    async function sendAsAliceThenSwitchToBob() {
+      holdCreates = true;
+      const mounted = await mount(<ViewerSession />);
+      for (const viewer of ["alice", "bob"]) {
+        mounted.queryClient.setQueryData(sessionDetailKey("root-1", viewer), { chain: [] });
+      }
+      viewerId = "alice";
+      await act(async () => rerender());
+      await type(mounted.container, "alice only");
+      await send(mounted.container);
+      await waitFor(() => heldCreates.length === 1);
+      expect(bubbles(mounted.container)).toEqual(["alice only"]);
+      viewerId = "bob";
+      await act(async () => rerender());
+      return mounted;
+    }
+    const bubbles = (container: HTMLElement) =>
+      [...container.querySelectorAll('section[aria-label="Your message"]')].map(
+        (bubble) => bubble.querySelector("div")?.textContent ?? "",
+      );
+    const settle = async (error?: Error) => {
+      await act(async () => heldCreates.shift()?.settle(error));
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+    };
+    const chainIds = (queryClient: InstanceType<typeof QueryClient>, viewer: string) =>
+      queryClient
+        .getQueryData<{ chain: AgentTask[] }>(sessionDetailKey("root-1", viewer))
+        ?.chain.map((task) => task.id);
+
+    test("the created task lands in the sender's session cache, never the new viewer's", async () => {
+      const { container, queryClient, unmount } = await sendAsAliceThenSwitchToBob();
+      // Bob never sees Alice's sending bubble.
+      expect(bubbles(container)).toEqual([]);
+
+      await settle();
+      expect(chainIds(queryClient, "alice")).toEqual(["follow-up"]);
+      expect(chainIds(queryClient, "bob")).toEqual([]);
+      expect(bubbles(container)).toEqual([]);
+
+      // Back to Alice: the chain holds the task, so no bubble is left over.
+      viewerId = "alice";
+      await act(async () => rerender());
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+      expect(bubbles(container)).toEqual([]);
+      await unmount();
+    });
+
+    test("a send failing after the switch stays the sender's: Retry and Edit show only to them", async () => {
+      const { container, queryClient, unmount } = await sendAsAliceThenSwitchToBob();
+      await settle(new Error("network error"));
+      // Bob gets no "Not sent" bubble, so no Retry or Edit on Alice's text.
+      expect(bubbles(container)).toEqual([]);
+      expect(container.textContent).not.toContain("Not sent");
+
+      viewerId = "alice";
+      await act(async () => rerender());
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+      expect(bubbles(container)).toEqual(["alice only"]);
+      const retry = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Retry",
+      );
+      await act(async () => retry?.click());
+      await waitFor(() => heldCreates.length === 1);
+      expect(createOpts[1]?.idempotencyKey).toBe(createOpts[0]?.idempotencyKey as string);
+      await settle();
+      expect(chainIds(queryClient, "alice")).toEqual(["follow-up"]);
+      expect(chainIds(queryClient, "bob")).toEqual([]);
+      await unmount();
+    });
   });
 
   test("before the chain loads, the follow-up chains off the session root", async () => {
