@@ -2788,13 +2788,15 @@ describe("Slack renderer v2", () => {
     await completeTask(ask.id, "Checking back today at 18:38", {
       addTags: ["deferred"],
       deferredAt: new Date().toISOString(),
+      // 03:00 UTC is 04:00 in Europe/Madrid (CET).
+      deferredUntil: "2030-01-15T03:00:00.000Z",
     });
     await backdateLastUpdated([ask.id], 20);
     calls.length = 0;
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back later");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back 01-15 04:00");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -2996,14 +2998,17 @@ describe("Slack renderer v2", () => {
     await completeTask(ask.id, "Waiting on Researcher — or today at 18:38 at the latest", {
       addTags: ["deferred"],
       deferredAt: new Date().toISOString(),
+      deferredUntil: "2030-07-15T16:38:00.000Z",
     });
     await backdateLastUpdated([ask.id], 20);
     calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
-    // The event-based card names who it waits on; the ceiling time stays out of Slack.
+    // The event-based card names who it waits on and its ceiling in Europe/Madrid (CEST).
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Waiting on Researcher");
+    expect(opening?.payload.markdown_text).toBe(
+      "⏳ Waiting on Researcher · resumes by 07-15 18:38",
+    );
     expect(JSON.stringify(calls)).not.toContain("at the latest");
 
     const schedule = await createScheduledTask({

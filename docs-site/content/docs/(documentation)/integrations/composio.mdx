@@ -125,8 +125,11 @@ Agents can call `swarm_x` instead of shelling out:
 }
 ```
 
-`swarm_x` injects Composio auth server-side and rejects absolute Composio paths
-so the API key cannot be routed to arbitrary hosts.
+`swarm_x` injects Composio auth server-side and always sends it to
+`COMPOSIO_BASE_URL` (or the default v3.1 base). It takes no base URL argument,
+refuses a path that resolves to another host, and does not follow redirects, so
+the API key cannot be routed to arbitrary hosts. The CLI applies the same path
+and redirect rules.
 
 ## Skill
 

@@ -1033,6 +1033,8 @@ export const AgentTaskSchema = z
     // wake-up task" apart from "done" — see `isDeferredTask` in
     // src/slack/task-output.ts.
     deferredAt: z.iso.datetime().optional(),
+    // The wake-up ceiling `defer-task` booked; the wake event can come sooner.
+    deferredUntil: z.iso.datetime().optional(),
 
     // Context usage aggregates
     compactionCount: z.number().int().min(0).optional(),

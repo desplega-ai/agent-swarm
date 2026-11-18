@@ -1,8 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getScheduledTaskById, getScheduledTaskByName } from "@/be/db";
+import { getAgentById, getScheduledTaskById, getScheduledTaskByName } from "@/be/db";
+import { can } from "@/rbac";
 import { runScheduleNow } from "@/scheduler";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { getCurrentRequestAuth } from "@/utils/request-auth-context";
 
 export const registerRunScheduleNowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -45,6 +47,24 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
 
       if (!schedule) {
         return toolErr("Schedule not found.");
+      }
+
+      // A schedule runs as its creator. An agent-bound token may run it only
+      // as its creator or a lead.
+      const auth = getCurrentRequestAuth();
+      if (auth?.kind === "agent") {
+        const caller = await getAgentById(auth.agentId);
+        const decision = can({
+          principal: { kind: "agent", agentId: auth.agentId, isLead: caller?.isLead === true },
+          verb: "schedule.run.any",
+          resource: { kind: "owned", ownerAgentId: schedule.createdByAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          return toolErr(
+            `Schedule "${schedule.name}" runs as the agent that created it. Only that agent or a lead can run it.`,
+          );
+        }
       }
 
       if (!schedule.enabled) {

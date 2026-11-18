@@ -224,9 +224,13 @@
     }
   ],
   "flows": {
+    "caller-scoped-writes": {
+      "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
+      "scenarios": ["core-caller-scoped-writes"]
+    },
     "agent-access-tokens": {
-      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
-      "scenarios": ["core-agent-access"]
+      "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens; worker tokens need the route permission on swarm-wide admin routes",
+      "scenarios": ["core-agent-access", "platform-agent-token-permissions"]
     },
     "agent-lifecycle": {
       "description": "Operator-only agent delete into agent_history: blocker, delete, 410 on re-register, restore, history, and 403 for every agent caller",
@@ -292,6 +296,10 @@
     "config-store": {
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
       "scenarios": ["platform-config", "platform-lead-tools"]
+    },
+    "platform-config-key-guards": {
+      "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
+      "scenarios": ["platform-config-key-guards"]
     },
     "connector-handoff": {
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
@@ -456,12 +464,24 @@
       "scenarios": ["script-connections"]
     },
     "script-credential-egress": {
-      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
-      "scenarios": ["script-connections", "script-credential-bindings"]
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value. Bindings resolve from config rows; the API env backs only GITHUB_TOKEN.",
+      "scenarios": [
+        "script-connections",
+        "script-credential-bindings",
+        "script-credential-binding-sources"
+      ]
+    },
+    "platform-secret-egress": {
+      "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
+      "scenarios": ["platform-secret-egress"]
     },
     "script-inline-run": {
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]
+    },
+    "script-input-handling": {
+      "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
+      "scenarios": ["script-input-handling"]
     },
     "script-limits": {
       "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
@@ -506,6 +526,10 @@
     "slack-agent-tools": {
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
       "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+    },
+    "slack-file-download-bounds": {
+      "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
+      "scenarios": ["slack-file-download-bounds"]
     },
     "slack-chat-sdk-http": {
       "description": "Chat SDK Slack adapter in webhook mode with the built-in Slack off, driven by a slack-mock in HTTP delivery mode: signed mention to task to threaded relay, slash commands as channel posts, signed block_actions accepted without a task, and forged, stale, unsigned and replayed requests",
@@ -564,6 +588,10 @@
         "slack-http-cross-team-identity",
         "slack-http-restart-redelivery"
       ]
+    },
+    "slack-inbound-gates": {
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
+      "scenarios": ["slack-inbound-gates"]
     },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
@@ -689,9 +717,17 @@
       "description": "Only a schedule's creator, a lead or a human changes what it runs, over MCP and HTTP; other agents keep the other edits",
       "scenarios": ["schedule-target-owner"]
     },
+    "route-caller-identity": {
+      "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
+      "scenarios": ["route-caller-identity"]
+    },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
+    },
+    "outbound-url-guards": {
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, and discovered OAuth endpoints are validated",
+      "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",

@@ -663,8 +663,8 @@ describe("FxAdapter sessions", () => {
       expect(sent).not.toContain("END");
       expect(await Bun.file(artifact).text()).toBe(systemPrompt);
       await session.waitForCompletion();
-      await Bun.sleep(50);
-      expect(existsSync(artifact)).toBe(false);
+      // Cleanup runs off waitForCompletion().finally, so poll instead of a fixed sleep.
+      await waitFor(() => !existsSync(artifact));
     } finally {
       await closeStub(stub);
     }

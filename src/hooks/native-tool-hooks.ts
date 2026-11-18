@@ -127,7 +127,9 @@ export async function nativeHooksActive(
   const key = cacheKey(target);
   const file = join(tmpdir(), `agent-swarm-native-hooks-${key}.json`);
   const cached = memoryStatus.get(key) ?? readStatusFile(file);
-  if (cached && cached.until > now()) return cached.native;
+  // The shim never writes an expiry more than STATUS_TTL_MS ahead, so a later one is a miss.
+  const at = now();
+  if (cached && cached.until > at && cached.until <= at + STATUS_TTL_MS) return cached.native;
 
   let entry: StatusEntry;
   try {
@@ -143,7 +145,7 @@ export async function nativeHooksActive(
   }
   memoryStatus.set(key, entry);
   try {
-    writeFileSync(file, JSON.stringify(entry));
+    writeFileSync(file, JSON.stringify(entry), { mode: 0o600 });
   } catch {
     // An unwritable temp dir only costs the cache.
   }

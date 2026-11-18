@@ -35,6 +35,7 @@ import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import type { ClaudeFlagSettings } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { ClaudeUsageAccumulator, normalizeClaudeMessage } from "./claude-session-events";
+import { stderrFlushLength } from "./dsh-adapter";
 import type {
   CostData,
   ProviderEvent,
@@ -183,7 +184,19 @@ export function spawnClaudeSdkProcess(
   const stderr = proc.stderr as ReadableStream<Uint8Array> | null;
   const stderrDone = stderr
     ? (async () => {
-        for await (const chunk of stderr) onStderr(new TextDecoder().decode(chunk));
+        // Forward whole lines, not raw chunks: the callback scrubs each call on
+        // its own, and a chunk boundary can split a token or a UTF-8 character.
+        const decoder = new TextDecoder();
+        let pending = "";
+        for await (const chunk of stderr) {
+          pending += decoder.decode(chunk, { stream: true });
+          const cut = stderrFlushLength(pending);
+          if (cut === 0) continue;
+          onStderr(pending.slice(0, cut));
+          pending = pending.slice(cut);
+        }
+        pending += decoder.decode();
+        if (pending) onStderr(pending);
       })().catch((error) => onStderr(`Claude SDK stderr read failed: ${String(error)}\n`))
     : Promise.resolve();
 

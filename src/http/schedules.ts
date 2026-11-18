@@ -39,6 +39,7 @@ import {
   ScheduledTaskTargetTypeSchema,
   splitLegacyModelAlias,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { agentFirstPrincipal } from "./request-principal";
@@ -515,6 +516,25 @@ export async function handleSchedules(
 
     if (!schedule) {
       jsonError(res, "Schedule not found", 404);
+      return true;
+    }
+
+    // A schedule runs as its creator. An agent-bound token may run it only as
+    // its creator or a lead.
+    if (
+      getRequestAuth(req)?.kind === "agent" &&
+      !can({
+        principal: await agentFirstPrincipal(req, myAgentId),
+        verb: "schedule.run.any",
+        resource: { kind: "owned", ownerAgentId: schedule.createdByAgentId },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(
+        res,
+        `Schedule "${schedule.name}" runs as the agent that created it. Only that agent or a lead can run it.`,
+        403,
+      );
       return true;
     }
 

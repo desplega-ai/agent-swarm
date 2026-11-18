@@ -1402,16 +1402,36 @@ export async function handleTasks(
   if (updateSession.match(req.method, pathSegments)) {
     const parsed = await updateSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await updateTaskClaudeSessionId(
-      parsed.params.id,
-      parsed.body.claudeSessionId,
-      parsed.body.provider,
-      parsed.body.providerMeta,
-      parsed.body.model,
-      "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
-      "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
-      "effort" in parsed.body ? parsed.body.effort : undefined,
-    );
+    const auth = getRequestAuth(req);
+    // An agent session token writes only its own task's session: a task token
+    // its bound task, any other agent token a task its agent holds. The holder is
+    // the offeree while a task is offered or in review (its review session), else
+    // strictly the assignee, so a stale offer never grants a write.
+    // Check and write in one transaction so a reassignment cannot slip between.
+    const task = await getDbClient().transaction(async () => {
+      if (auth?.kind === "agent") {
+        if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
+        const existing = await getTaskById(parsed.params.id);
+        if (!existing) return null;
+        const offerOpen = existing.status === "offered" || existing.status === "reviewing";
+        const holder = offerOpen ? existing.offeredTo : existing.agentId;
+        if (holder !== auth.agentId) return "forbidden";
+      }
+      return await updateTaskClaudeSessionId(
+        parsed.params.id,
+        parsed.body.claudeSessionId,
+        parsed.body.provider,
+        parsed.body.providerMeta,
+        parsed.body.model,
+        "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
+        "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
+        "effort" in parsed.body ? parsed.body.effort : undefined,
+      );
+    });
+    if (task === "forbidden") {
+      jsonError(res, "Task belongs to another token agent", 403);
+      return true;
+    }
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;

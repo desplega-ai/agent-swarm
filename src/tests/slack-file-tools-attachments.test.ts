@@ -276,17 +276,21 @@ describe("slack-download-file", () => {
     expect(await storedBytes(taskId, "by-url.png")).toEqual(PNG);
   });
 
-  test("without a task it still saves on the API server, and says so", async () => {
+  test("without a task it refuses a save path outside the download directory", async () => {
     addSlackFile("F0SHOT0001", "screenshot.png", PNG);
     const dir = join(fsDir, "legacy");
+    process.env.SLACK_API_URL = host.url.toString();
+    try {
+      const result = await downloadTool({ fileId: "F0SHOT0001", savePath: `${dir}/` }, extra({}));
 
-    const result = await downloadTool({ fileId: "F0SHOT0001", savePath: `${dir}/` }, extra({}));
-
-    expect(result.isError).toBeFalsy();
-    expect(result.structuredContent.savedPath).toBe(`${dir}/screenshot.png`);
-    expect(String(result.structuredContent.message)).toContain("on the API server");
-    expect(String(result.structuredContent.nudge)).toContain("not in your container");
-    expect(new Uint8Array(await Bun.file(`${dir}/screenshot.png`).arrayBuffer())).toEqual(PNG);
+      expect(result.isError).toBe(true);
+      expect(String(result.structuredContent.message)).toContain(
+        "must be inside /workspace/shared/downloads",
+      );
+      expect(await Bun.file(`${dir}/screenshot.png`).exists()).toBe(false);
+    } finally {
+      delete process.env.SLACK_API_URL;
+    }
   });
 
   test("a source-task header for someone else's task falls back instead of attaching there", async () => {
@@ -297,7 +301,8 @@ describe("slack-download-file", () => {
       extra({ "x-source-task-id": othersTaskId }),
     );
 
-    expect(result.structuredContent.savedPath).toBeDefined();
+    // The no-task path runs, and its URL check refuses the local mock host.
+    expect(String(result.structuredContent.message)).toContain("not a Slack file URL");
     expect(await getTaskAttachments(othersTaskId)).toEqual([]);
   });
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -170,23 +170,20 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(raw?.value).not.toBe("now-secret");
   });
 
-  test("writeEnvFile writes plaintext to disk, not ciphertext", async () => {
+  test("envPath is stored as metadata and no file is written", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-encryption-"));
     const envPath = join(tmpDir, "test.env");
     try {
       const key = uniqueKey("ENV_FILE_SECRET");
-      await upsertSwarmConfig({
+      const config = await upsertSwarmConfig({
         scope: "global",
         key,
         value: "env-file-plaintext",
         isSecret: true,
         envPath,
       });
-      const content = readFileSync(envPath, "utf8");
-      expect(content).toContain(`${key}=env-file-plaintext`);
-      // Precisely verify the line holds plaintext, not base64 ciphertext.
-      const line = content.split("\n").find((l) => l.startsWith(`${key}=`));
-      expect(line).toBe(`${key}=env-file-plaintext`);
+      expect(config.envPath).toBe(envPath);
+      expect(existsSync(envPath)).toBe(false);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
