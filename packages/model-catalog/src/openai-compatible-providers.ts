@@ -80,6 +80,10 @@ export interface OpenAICompatibleProvider {
 }
 
 const DEVELOPER_ROLE = { supportsDeveloperRole: true } as const;
+// Z.ai's coding endpoint rejects the OpenAI `developer` role with
+// `400 {"code":"1214","message":"Incorrect role information"}`; the system
+// prompt must go as a `system` message.
+const SYSTEM_ROLE = { supportsDeveloperRole: false } as const;
 const TEXT_IMAGE = ["text", "image"] as const;
 const TEXT_ONLY = ["text"] as const;
 const EFFORTS = ["low", "medium", "high", "max"] as const;
@@ -251,9 +255,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
     baseUrlLocked: true,
     docsUrl: "https://docs.z.ai/devpack/quick-start",
     envVar: "ZAI_API_KEY",
-    // models.dev keys the section on Z.ai's upstream var name; the runner
-    // copies it into ZAI_API_KEY when the canonical var is empty.
-    aliasEnvVars: ["ZHIPU_API_KEY"],
+    aliasEnvVars: [],
     keyNote:
       "Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.",
     catalog: "models.dev",
@@ -275,7 +277,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         maxOutputTokens: 131072,
         input: TEXT_IMAGE,
         reasoning: true,
-        compat: DEVELOPER_ROLE,
+        compat: SYSTEM_ROLE,
       },
       {
         id: "glm-5.3",
@@ -284,7 +286,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         maxOutputTokens: 131072,
         input: TEXT_ONLY,
         reasoning: true,
-        compat: DEVELOPER_ROLE,
+        compat: SYSTEM_ROLE,
       },
       {
         id: "glm-5.2",
@@ -293,7 +295,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         maxOutputTokens: 131072,
         input: TEXT_ONLY,
         reasoning: true,
-        compat: DEVELOPER_ROLE,
+        compat: SYSTEM_ROLE,
       },
       {
         id: "glm-5.1",
@@ -302,7 +304,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         maxOutputTokens: 131072,
         input: TEXT_ONLY,
         reasoning: true,
-        compat: DEVELOPER_ROLE,
+        compat: SYSTEM_ROLE,
       },
       {
         id: "glm-5-turbo",
@@ -311,7 +313,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
         maxOutputTokens: 131072,
         input: TEXT_ONLY,
         reasoning: true,
-        compat: DEVELOPER_ROLE,
+        compat: SYSTEM_ROLE,
       },
     ],
   },
