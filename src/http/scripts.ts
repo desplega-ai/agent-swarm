@@ -57,7 +57,7 @@ import {
   ScriptScopeSchema,
   ScriptVersionRecordSchema,
 } from "../types";
-import { getCurrentRunProvenance } from "../utils/request-auth-context";
+import { getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -1148,6 +1148,25 @@ export async function handleScripts(
     if (!runAsAgentId) {
       jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
       return true;
+    }
+    // An agent-bound token must hold the route permission, as the script-apis
+    // tool requires, and must name a registered agent to run as.
+    const auth = getRequestAuth(req);
+    if (auth?.kind === "agent") {
+      const caller = await getAgentById(auth.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: auth.agentId, isLead: caller?.isLead === true },
+        verb: "script.api.create",
+        source: "http",
+      });
+      if (!decision.allow) {
+        jsonError(res, `Forbidden: ${decision.reason}`, 403);
+        return true;
+      }
+      if (!(await getAgentById(runAsAgentId))) {
+        jsonError(res, `agentId "${runAsAgentId}" is not a registered agent`, 400);
+        return true;
+      }
     }
     const endpoint = await createScriptApi({
       scriptId: script.id,
