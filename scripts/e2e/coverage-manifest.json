@@ -464,8 +464,12 @@
       "scenarios": ["script-connections"]
     },
     "script-credential-egress": {
-      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value.",
-      "scenarios": ["script-connections", "script-credential-bindings"]
+      "description": "Secrets reach upstream hosts only through the broker: inline connection auth and standalone bindings, redacted in every script-visible value. Bindings resolve from config rows; the API env backs only GITHUB_TOKEN.",
+      "scenarios": [
+        "script-connections",
+        "script-credential-bindings",
+        "script-credential-binding-sources"
+      ]
     },
     "platform-secret-egress": {
       "description": "Values that leave the API are redacted or withheld at the egress point: MCP proxy results and errors, resolved MCP server secrets, the Jira status URL, metric rows",
