@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getDbClient, upsertPromptTemplate } from "@/be/db";
+import { denyCatalog } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { PromptTemplateScopeSchema, PromptTemplateStateSchema } from "@/types";
 
@@ -56,6 +57,12 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
       }),
     },
     async ({ eventType, scope: rawScope, scopeId, state, body, changeReason }, requestInfo) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "prompt-template.write.any",
+        "Changing prompt templates requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }

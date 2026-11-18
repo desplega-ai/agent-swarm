@@ -13,6 +13,7 @@ import {
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflowEvents } from "../http/workflow-events";
 import type { Workflow, WorkflowDefinition } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
@@ -49,6 +50,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
 
   server = createHttpServer(async (req, res) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
     const handled = await handleWorkflowEvents(req, res, pathSegments, queryParams);

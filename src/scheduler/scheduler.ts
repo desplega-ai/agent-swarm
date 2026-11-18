@@ -310,7 +310,7 @@ export async function dispatchScheduleTarget(
  * neither is ever the principal). A creator-less (seeded) schedule that fires
  * a seeded workflow runs as the lead, resolved at fire time; with no lead the
  * fire fails instead of running agentless. Operator settings such as inputs
- * or on/off keep that. Any agent can edit a workflow, so one whose nodes or
+ * or on/off keep that. A workflow can be edited by anyone allowed to, so one whose nodes or
  * params changed never inherits the lead and its fire fails. Workflows the
  * seeder never wrote keep their previous principal.
  */

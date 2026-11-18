@@ -132,7 +132,8 @@ describe("asset namespace REST contract", () => {
           nodes: [{ id: "task", type: "agent-task", config: { template: "workflow work" } }],
         },
       },
-      { agentId },
+      // Workflow writes are lead-only for agents; the operator creates it as the agent.
+      { agentId, operator: true },
     );
     expect(workflow.status).toBe(201);
     expect(workflow.body.key).toBe("shared/team/");
@@ -146,7 +147,7 @@ describe("asset namespace REST contract", () => {
         intervalMs: 60_000,
         taskTemplate: "scheduled work",
       },
-      { agentId },
+      { agentId, operator: true },
     );
     expect(schedule.status).toBe(201);
     expect(schedule.body.key).toBe("shared/team/");

@@ -10,6 +10,7 @@ import {
   getScheduledTaskByName,
   initDb,
 } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreateScheduleTool } from "../tools/schedules/create-schedule";
 
 describe("create-schedule key inheritance", () => {
@@ -36,6 +37,8 @@ describe("create-schedule key inheritance", () => {
     },
   ])("$name", async (entry) => {
     const caller = await createAgent({ name: entry.name, status: "idle" });
+    // The schedule write gate is lead-only for agents; this test is not about authorization.
+    grantLeadEquivalence(caller.id);
     const requester = await createUser({ name: "Schedule requester" });
     const other = await createUser({ name: "Other schedule user" });
     const resolveKey = (key: string) =>

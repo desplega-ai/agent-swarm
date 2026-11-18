@@ -2,6 +2,18 @@
 
 Workflows are DAGs of nodes connected via `next`. Reference for authoring nodes with the `create-workflow` tool.
 
+## Who may change the catalog
+
+Creating, updating, patching, deleting, triggering, retrying and cancelling workflows needs `workflow.write.any` or `workflow.run.any`. Changing a schedule (create, update, patch, delete, run) needs `schedule.write.any`. Changing a prompt template needs `prompt-template.write.any`. Reloading config needs `config.reload`. The lead agent, the operator and a user holding the verb pass. A non-lead agent does not, because a workflow script node runs in the API process. This covers both HTTP and MCP. A worker asks the lead through `send-task`. Validate, reads, render, preview and the webhook trigger stay open.
+
+For catalog calls through the page proxy with a verified signed page session, the page owner must be a lead (checked live). With RBAC enabled, a user viewer must also hold the matching verb. Guest sessions retain their existing restrictions. Generic dashboard JSON pages send `swarm.call` with the viewer's bearer, not through the signed page proxy, so those calls keep the viewer's existing API permissions.
+
+Assumptions, not decisions by the operator:
+
+- The same call resolves differently by surface. Over MCP, the shared key with a registered non-lead agent id is that agent, and it is refused. Over HTTP, the shared key with an `X-Agent-ID` header is the operator, and it passes. Through `/api/mcp-bridge`, the shared key with an unregistered agent id is the operator. The HTTP protection holds for `aseph_` session tokens.
+- A non-lead agent may not delete, run or edit even the schedules it created, nor its own deferral schedules, over HTTP or MCP.
+- Both `POST /api/workflow-runs/{runId}/events` and `POST /api/workflow-events` need `workflow.run.any`.
+
 ## Cross-node data access
 
 Upstream outputs are **not** available by default. Declare an `inputs` mapping:
@@ -485,7 +497,9 @@ Use `env` for credentials instead of positional arguments or shell wrappers:
 
 `env` values are passed through the process environment, not embedded in the intermediate shell's command line. Scripts read them through `$NAME` in Bash, `os.environ["NAME"]` in Python, or `process.env.NAME` in TypeScript. Existing workflows without `env` keep their previous behavior.
 
-Storing a `secret.NAME` or `${ENV_VAR}` workflow input (create or update, MCP or HTTP) requires `config.read.secrets`: the lead agent, the operator key, or a user granted that verb. The check reads input after `params` render into it, so `{"b": "{{p}}"}` with `params: {"p": "secret.NAME"}` counts as a secret input. Changing the definition or `params` of a workflow that already stores such an input (full update, patch, node patch) needs the same verb. Other callers get an error; literal inputs and edits that leave the definition alone stay open. An operator can also limit which env vars a `${NAME}` input may read with `WORKFLOW_INPUT_ENV_ALLOWLIST` (see [ui/configuration](../docs-site/content/docs/(documentation)/ui/configuration.mdx#workflow-env-allowlist)); it does not limit script nodes.
+Storing a `secret.NAME` or `${ENV_VAR}` workflow input (create or update, MCP or HTTP) requires `config.read.secrets`: the lead agent, the operator key, or a user granted that verb. The check reads input after `params` render into it, so `{"b": "{{p}}"}` with `params: {"p": "secret.NAME"}` counts as a secret input. Changing the definition or `params` of a workflow that already stores such an input (full update, patch, node patch) needs the same verb. Other callers get an error. A non-lead agent never reaches this check: it may not create, change or run workflows at all (see Who may change the catalog).
+
+An operator can also limit which env vars a `${NAME}` input may read with `WORKFLOW_INPUT_ENV_ALLOWLIST` (see [ui/configuration](../docs-site/content/docs/(documentation)/ui/configuration.mdx#workflow-env-allowlist)); it does not limit script nodes.
 
 Secret workflow inputs (`secret.NAME` references and sensitive `${ENV_VAR}` references) remain masked as `***REDACTED***` in persisted `step.input`; the executing script receives the real values. This is not general secret detection for arbitrary literals or upstream outputs. Do not embed credentials directly in script source or echo them into output. Environment variables still have OS size limits and can be readable by other processes with sufficient permissions, including same-UID processes; `env` is not per-run process isolation.
 
@@ -1074,7 +1088,7 @@ A `wait` node pauses a workflow until either a duration elapses or a named event
 
 ### Signal endpoints
 
-External callers can fire arbitrary events into the bus via two HTTP routes (both auth via `Authorization: Bearer ${API_KEY}`):
+External callers can fire arbitrary events into the bus via two HTTP routes (both auth via `Authorization: Bearer ${API_KEY}`; an agent session token (`aseph_`) gets 403 unless the agent is the lead):
 
 ```bash
 # Run-scoped: payload is augmented with { ..., _runId: "<runId>" } before emit.

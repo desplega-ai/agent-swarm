@@ -34,7 +34,7 @@ import { authUserId, getRequestAuth, type HttpRequestAuth } from "../utils/reque
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { syncRankingAfterConfigChange } from "./ranking";
-import { requestPrincipal } from "./request-principal";
+import { pageExecutionPrincipal, requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { duplicateGuardedQueryKey, jsonError } from "./utils";
 
@@ -236,6 +236,15 @@ export async function runConfigWriteSideEffects(
   scheduleIntegrationsReload();
 }
 
+/** Verbs that change the shared catalog; a page session is judged as its owning agent for them. */
+const CATALOG_VERBS: ReadonlySet<PermissionVerb> = new Set<PermissionVerb>([
+  "workflow.write.any",
+  "workflow.run.any",
+  "prompt-template.write.any",
+  "schedule.write.any",
+  "config.reload",
+]);
+
 /**
  * The general form of `ensureConfigAdmin`: operators and users pass, guests
  * get a plain 403, and an agent principal (session identity first, then the
@@ -249,9 +258,14 @@ export async function ensureHttpPermission(
   forbiddenMessage: string,
   callerAgentId?: string,
 ): Promise<boolean> {
-  const principal = await requestPrincipal(req, callerAgentId ?? singleHeader(req, "x-agent-id"), {
-    unauthenticatedFallback: "anonymous-agent",
-  });
+  const pagePrincipal = CATALOG_VERBS.has(verb)
+    ? await pageExecutionPrincipal(getRequestAuth(req))
+    : null;
+  const principal =
+    pagePrincipal ??
+    (await requestPrincipal(req, callerAgentId ?? singleHeader(req, "x-agent-id"), {
+      unauthenticatedFallback: "anonymous-agent",
+    }));
   if (principal.kind === "operator" || principal.kind === "user") return true;
   if (principal.kind === "guest") {
     jsonError(res, "Forbidden", 403);
@@ -326,6 +340,7 @@ const reloadConfigRoute = route({
   summary:
     "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
   tags: ["Config"],
+  rbac: { permission: "config.reload" },
   body: z.object({}).optional(),
   responses: {
     200: {
@@ -338,6 +353,7 @@ const reloadConfigRoute = route({
       }),
     },
     500: { description: "Reload failed" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
 });
 
@@ -512,6 +528,15 @@ export async function handleConfig(
   }
 
   if (reloadConfigRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(
+        req,
+        res,
+        "config.reload",
+        "Reloading config requires the lead agent, operator, or user authentication",
+      ))
+    )
+      return true;
     try {
       const result = await reloadGlobalConfigsAndIntegrations();
       console.log(

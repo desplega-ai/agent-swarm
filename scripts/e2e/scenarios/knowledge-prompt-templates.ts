@@ -1,5 +1,6 @@
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { registerLead } from "./core-helpers";
 import {
   callTool,
   dbCount,
@@ -19,7 +20,9 @@ export const knowledgePromptTemplates: Scenario = {
     // change. Global scope is exercised on event types nothing renders.
     const agent = await registerAgent(ctx, "prompt-a");
     const otherAgent = await registerAgent(ctx, "prompt-b");
-    const session = await ctx.connectMcp(agent);
+    // Template writes are lead-only for agents, so the tool calls go through a lead.
+    const leadId = await registerLead(ctx, "prompt-lead");
+    const session = await ctx.connectMcp(leadId);
     const cleanup: string[] = [];
     try {
       // ── Registry ────────────────────────────────────────────────────────────────────────────
@@ -414,7 +417,7 @@ export const knowledgePromptTemplates: Scenario = {
         ctx.db.get<{ changedBy: string | null }>(
           "SELECT changedBy FROM prompt_template_history WHERE templateId = ? AND version = 1",
           [toolTemplateId],
-        )?.changedBy === agent,
+        )?.changedBy === leadId,
         "the tool records the calling agent as changedBy",
       );
       outcome = expectToolOk(

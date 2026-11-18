@@ -718,6 +718,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/reload-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload global swarm config and re-initialize integrations (internal) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Reload result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            configsLoaded: number;
+                            keysUpdated: string[];
+                            integrationsReinitialized: string[];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller lacks permission to reload config */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Reload failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            details: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/close": {
         parameters: {
             query?: never;
@@ -4001,6 +4073,15 @@ export interface paths {
                             keysUpdated: string[];
                             integrationsReinitialized: string[];
                         };
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Reload failed */
@@ -19079,6 +19160,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Template or version not found */
                 404: {
                     headers: {
@@ -19126,6 +19216,15 @@ export interface paths {
                         "application/json": {
                             template: components["schemas"]["PromptTemplateResponse"];
                         };
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Template not found or no code default available */
@@ -19222,6 +19321,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Template not found */
                 404: {
                     headers: {
@@ -19310,6 +19418,15 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -21019,6 +21136,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Duplicate name */
                 409: {
                     headers: {
@@ -21139,6 +21265,15 @@ export interface paths {
                 };
                 /** @description Schedule is disabled */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -21403,7 +21538,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral or target owned by another agent */
+                /** @description Caller may not change schedules, or the deferral or target is owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21455,6 +21590,15 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                         };
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Schedule not found */
@@ -21607,7 +21751,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Deferral or target owned by another agent */
+                /** @description Caller may not change schedules, or the deferral or target is owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30795,7 +30939,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks, or the caller is not a lead agent, operator, or user */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30874,7 +31018,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks, or the caller is not a lead agent, operator, or user */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31111,7 +31255,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Env var or secret input requires config.read.secrets */
+                /** @description Caller may not change workflows, or an env var or secret input requires config.read.secrets */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31341,7 +31485,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Env var or secret input requires config.read.secrets */
+                /** @description Caller may not change workflows, or an env var or secret input requires config.read.secrets */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31380,6 +31524,15 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Caller is not a lead agent, operator, or user with workflow write access */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Workflow not found */
                 404: {
@@ -31433,7 +31586,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Stored env var or secret input requires config.read.secrets */
+                /** @description Caller may not change workflows, or a stored env var or secret input requires config.read.secrets */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31532,7 +31685,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Stored env var or secret input requires config.read.secrets */
+                /** @description Caller may not change workflows, or a stored env var or secret input requires config.read.secrets */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31607,6 +31760,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user with workflow run access */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -31931,6 +32093,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller is not a lead agent, operator, or user with workflow run access */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Run not found */
                 404: {
                     headers: {
@@ -31989,6 +32160,15 @@ export interface paths {
                 };
                 /** @description Cannot cancel */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is not a lead agent, operator, or user with workflow run access */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

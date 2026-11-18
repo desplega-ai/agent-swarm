@@ -25,8 +25,10 @@ import { createModelProfile } from "../be/db/model-profiles";
 import { reloadModelsCatalog } from "../be/model-catalog-store";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { AgentCredStatus, WorkflowDefinition } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -225,6 +227,7 @@ describe("workflow repo change", () => {
 
   beforeAll(async () => {
     server = createServer(async (req, res) => {
+      setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
       res.setHeader("Content-Type", "application/json");
       const handled = await handleWorkflows(
         req,
@@ -246,6 +249,8 @@ describe("workflow repo change", () => {
       string,
       { handler: (args: unknown, extra: unknown) => Promise<unknown> }
     >;
+    // The workflow write gate is lead-only for agents; this test is not about authorization.
+    grantLeadEquivalence("agent-test");
     updateTool = (args) =>
       tools["update-workflow"]!.handler(args, {
         sessionId: "session-test",

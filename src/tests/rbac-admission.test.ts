@@ -842,7 +842,7 @@ describe("join the shared agent-fs drive", () => {
   });
 });
 
-describe("realtime ticket admission", () => {
+describe("HTTP admission with specific grants", () => {
   async function grantOnly(userId: string, verbs: PermissionVerb[]): Promise<void> {
     const roleId = `rbac-role-test-${crypto.randomUUID()}`;
     await detachRole(userId, "admin");
@@ -862,18 +862,24 @@ describe("realtime ticket admission", () => {
     );
   }
 
-  test("a role with either presence verb gets a ticket; a role with neither does not", async () => {
+  test("specific grants admit only the corresponding HTTP routes", async () => {
     process.env.RBAC_ENABLED = "true";
-    const cases: [PermissionVerb[], number][] = [
-      [["comb.presence"], 200],
-      [["session.presence"], 200],
-      [["task.read.own"], 403],
+    const cases: [PermissionVerb[], number, number][] = [
+      [["comb.presence"], 200, 403],
+      [["session.presence"], 200, 403],
+      [["task.read.own"], 403, 403],
+      [["config.reload"], 403, 200],
     ];
-    for (const [verbs, expected] of cases) {
-      const { userId, plaintext } = await createTokenForUser(`Presence ${verbs.join(",")}`);
+    for (const [verbs, ticketStatus, reloadStatus] of cases) {
+      const { userId, plaintext } = await createTokenForUser(`Grant ${verbs.join(",")}`);
       await grantOnly(userId, verbs);
-      const response = await api(port, "POST", "/api/realtime/ticket", { bearer: plaintext });
-      expect({ verbs, status: response.status }).toEqual({ verbs, status: expected });
+      const ticket = await api(port, "POST", "/api/realtime/ticket", { bearer: plaintext });
+      const reload = await api(port, "POST", "/internal/reload-config", { bearer: plaintext });
+      expect({ verbs, ticket: ticket.status, reload: reload.status }).toEqual({
+        verbs,
+        ticket: ticketStatus,
+        reload: reloadStatus,
+      });
     }
   });
 });
