@@ -124,9 +124,11 @@ export const platformConfigKeyGuards: Scenario = {
       expectStatus(response, [200], "approve the failed send");
       const sent = asRecord(asRecord(response.json).improvement);
       expect(sent.status === "sent", `retry status ${response.text}`);
+      // A fresh read: the earlier length assertion narrowed the array type.
+      const received: string[] = [...proxy.received];
       expect(
-        proxy.received.length === 1 && proxy.received[0] === "/v1/improvements",
-        `proxy got ${JSON.stringify(proxy.received)}`,
+        received.length === 1 && received[0] === "/v1/improvements",
+        `proxy got ${JSON.stringify(received)}`,
       );
     } finally {
       if (restarted) await ctx.restartSut();
