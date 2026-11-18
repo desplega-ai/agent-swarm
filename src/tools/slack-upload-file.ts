@@ -1,3 +1,6 @@
+import { constants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
+import { isAbsolute, relative, sep } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
@@ -37,8 +40,10 @@ function resolveTaskUploadThreadTs(
  * Handles several common patterns:
  * 1. Relative paths (e.g., "shared/file.png") -> resolved from /workspace
  * 2. Absolute paths under /workspace (e.g., "/workspace/shared/file.png") -> used as-is
- * 3. Absolute paths that look like they should be under /workspace (e.g., "/tmp/file.png")
- *    -> tries to find at /workspace/tmp/file.png if not found at original path
+ * 3. Other absolute paths (e.g., "/tmp/file.png") -> looked up under /workspace
+ *    (/workspace/tmp/file.png)
+ *
+ * `readWorkspaceFile` then checks that the real path stays inside /workspace.
  *
  * @param filePath - The path provided by the user
  * @returns Object with resolved path and exists flag, or error message
@@ -74,15 +79,15 @@ async function resolveAndValidateFilePath(
     };
   }
 
-  // Case 2: Absolute path - try it directly first
-  triedPaths.push(filePath);
-  if (await fileExists(filePath)) {
-    return { success: true, resolvedPath: filePath };
-  }
-
-  // Case 3: Absolute path didn't exist - try resolving under /workspace
-  // This helps with paths like /tmp/file.png -> /workspace/tmp/file.png
-  if (!filePath.startsWith(WORKSPACE_DIR)) {
+  // Case 2: Absolute path under /workspace - use it directly
+  if (filePath.startsWith(`${WORKSPACE_DIR}/`)) {
+    triedPaths.push(filePath);
+    if (await fileExists(filePath)) {
+      return { success: true, resolvedPath: filePath };
+    }
+  } else {
+    // Case 3: Absolute path outside /workspace - resolve it under /workspace
+    // This helps with paths like /tmp/file.png -> /workspace/tmp/file.png
     // Remove leading slash and resolve from workspace
     const relativePath = filePath.slice(1); // "/tmp/file.png" -> "tmp/file.png"
     const workspacePath = `${WORKSPACE_DIR}/${relativePath}`;
@@ -97,6 +102,48 @@ async function resolveAndValidateFilePath(
     error: `File not found at any of the attempted locations.`,
     triedPaths,
   };
+}
+
+/**
+ * Reads a file whose real path is inside /workspace. Symlinks resolve first, so
+ * a link that leads out of /workspace is refused. Only regular files are read.
+ */
+async function readWorkspaceFile(
+  path: string,
+): Promise<{ success: true; data: Buffer } | { success: false; error: string }> {
+  let realPath: string;
+  let realRoot: string;
+  try {
+    realRoot = await realpath(WORKSPACE_DIR);
+    realPath = await realpath(path);
+  } catch {
+    return { success: false, error: `File not found: ${path}` };
+  }
+  const rel = relative(realRoot, realPath);
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return { success: false, error: `filePath must be a file inside ${WORKSPACE_DIR}.` };
+  }
+
+  // O_NONBLOCK: opening a FIFO must not hang. O_NOFOLLOW: the last part is not a link.
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return { success: false, error: `Cannot read file: ${path}` };
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) {
+      return { success: false, error: `filePath must be a file inside ${WORKSPACE_DIR}.` };
+    }
+    if (info.size > MAX_FILE_SIZE) {
+      const sizeMB = Math.round(info.size / 1024 / 1024);
+      return { success: false, error: `File too large: ${sizeMB} MB. Maximum is 1 GB.` };
+    }
+    return { success: true, data: await handle.readFile() };
+  } finally {
+    await handle.close();
+  }
 }
 
 export const registerSlackUploadFileTool = (server: McpServer) => {
@@ -265,15 +312,12 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         }
 
         const resolvedPath = pathResult.resolvedPath;
-        const bunFile = Bun.file(resolvedPath);
-        const fileSize = bunFile.size;
-
-        if (fileSize > MAX_FILE_SIZE) {
-          const sizeMB = Math.round(fileSize / 1024 / 1024);
-          return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
+        const read = await readWorkspaceFile(resolvedPath);
+        if (!read.success) {
+          return toolErr(read.error);
         }
 
-        fileToUpload = resolvedPath;
+        fileToUpload = read.data;
         actualFilename = filename || resolvedPath.split("/").pop() || "file";
       } else {
         // Base64 content mode: decode and check size
