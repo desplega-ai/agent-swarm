@@ -61,8 +61,16 @@ export function defineOverflowSuite(name: (typeof VIEWPORTS)[number]["name"]) {
         test.skip(Boolean(route.skip), route.skip);
         const path = route.needs ? resolveRoute(route, seed!) : route.path;
         test.skip(path === null, "seed has no entity for this route");
-        await page.goto(path!);
-        await page.waitForLoadState("networkidle");
+        if (route.needs === "page") {
+          // The viewer is ready independently of polling and the iframe's background requests.
+          await page.goto(path!, { waitUntil: "domcontentloaded" });
+          await expect(
+            page.frameLocator("main iframe").getByRole("heading", { name: "e2e public page" }),
+          ).toBeVisible();
+        } else {
+          await page.goto(path!);
+          await page.waitForLoadState("networkidle");
+        }
         await expect(page.locator("main").first()).toBeVisible();
         const { scrollWidth, innerWidth } = await horizontalOverflow(page);
         expect(scrollWidth, `${path} scrolls sideways at ${innerWidth}px`).toBeLessThanOrEqual(
