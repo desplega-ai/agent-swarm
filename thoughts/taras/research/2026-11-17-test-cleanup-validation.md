@@ -277,3 +277,15 @@ PR #3327 reduced the combined mapping and catalog suites from 27 to 24 cases. Bo
 Twelve controls failed assertions. The missing TSV source row failed during import.
 The eval package passed 1,187 cases and skipped the opt-in Turso test on its separate base. Package typechecking and the root local checks passed.
 The root affected-test selector selected zero files for both PRs. The direct package commands exercised the changed suites.
+
+## Outcome normalization and baseline comparison
+
+The dependency and benchmark mapping PRs merged as `0a81244e84` and `3d9cba7de0`. PR #3329 merged as `9534b518f5`.
+The normalization and scoring suites passed 38 baseline cases and 37 candidate cases. Independent review confirmed the retained assertions catch an added gate, reversed checks and in-place renaming.
+An explicit empty dimension list now exercises precedence over the legacy judge. The corresponding regression passed on the baseline and failed on the candidate.
+The full eval package passed 1,183 cases with one opt-in skip on the candidate base.
+
+PR #3330 preserves 18 cases and 28 assertions. Rejecting failed attempts, accepting errored attempts, or counting missing shared scores each failed the revised comparison.
+Ignoring output, cache-read or cache-write tokens also failed it. All six regressions survived on the baseline.
+The package passed 1,181 cases with one opt-in skip on its separate base. Package typechecking and root local checks passed.
+An initial mutation driver failed to load a root import. Only the corrected driver supplied control evidence. Independent review was pending at this checkpoint.
