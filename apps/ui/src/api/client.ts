@@ -1913,7 +1913,9 @@ class ApiClient {
    * place that knows the storage layout: `state/<id>` holds
    * `{ codeVersion, stateVersion, state }` and `lease/<id>` exists during a call.
    */
-  async fetchDurableObjects(scriptId: string): Promise<DurableObjectEntry[]> {
+  async fetchDurableObjects(
+    scriptId: string,
+  ): Promise<{ objects: DurableObjectEntry[]; total: number }> {
     const namespace = encodeURIComponent(`durable:${scriptId}`);
     const list = async (prefix: string) => {
       const params = new URLSearchParams({ prefix, limit: "1000" });
@@ -1921,14 +1923,16 @@ class ApiClient {
         headers: this.getHeaders(),
       });
       if (!res.ok) throw new Error(`Failed to fetch objects: ${res.status}`);
-      const data = (await res.json()) as {
+      return (await res.json()) as {
         entries: { key: string; value: unknown; expiresAt: number | null; updatedAt: number }[];
+        total: number;
       };
-      return data.entries;
     };
+    // One page only: each state can be up to 2 MiB, so `total` tells the tab
+    // when the list is cut instead of paging through every object.
     const [states, leases] = await Promise.all([list("state/"), list("lease/")]);
-    const busy = new Set(leases.map((entry) => entry.key.slice("lease/".length)));
-    return states.map((entry) => {
+    const busy = new Set(leases.entries.map((entry) => entry.key.slice("lease/".length)));
+    const objects = states.entries.map((entry) => {
       const id = entry.key.slice("state/".length);
       const value = (entry.value ?? {}) as {
         codeVersion?: unknown;
@@ -1945,6 +1949,7 @@ class ApiClient {
         busy: busy.has(id),
       };
     });
+    return { objects, total: states.total };
   }
 
   async fetchScriptVersions(id: string): Promise<ScriptVersion[]> {

@@ -42,7 +42,9 @@ export function ScriptObjectsTab({ scriptId, methods }: { scriptId: string; meth
   const isPhone = useIsPhone();
   const { searchParams, setParam } = useUrlSearchState();
   const objectParam = readStringParam(searchParams, "object", "");
-  const { data: objects, isLoading } = useDurableObjects(scriptId);
+  const { data, isLoading } = useDurableObjects(scriptId);
+  const objects = data?.objects;
+  const total = data?.total ?? 0;
   const selected = useMemo(
     () => objects?.find((object) => object.id === objectParam) ?? objects?.[0] ?? null,
     [objects, objectParam],
@@ -116,6 +118,11 @@ export function ScriptObjectsTab({ scriptId, methods }: { scriptId: string; meth
                 {method}()
               </Badge>
             ))}
+          </p>
+        ) : null}
+        {objects && total > objects.length ? (
+          <p className="text-xs text-muted-foreground">
+            Showing {objects.length.toLocaleString()} of {total.toLocaleString()} objects.
           </p>
         ) : null}
         {isPhone ? (
