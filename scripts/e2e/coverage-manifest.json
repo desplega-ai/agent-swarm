@@ -463,6 +463,10 @@
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]
     },
+    "script-input-handling": {
+      "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
+      "scenarios": ["script-input-handling"]
+    },
     "script-limits": {
       "description": "Sandbox limits and failure surfaces: wall-clock timeout, output cap, executors, workspace-rw 501.",
       "scenarios": ["script-limits"]

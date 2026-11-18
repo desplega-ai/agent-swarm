@@ -131,6 +131,22 @@ export async function bundleForQuickJS(source: string): Promise<QuickJSBundle> {
               }
               return { path: zodEntry };
             });
+            // Registered last, so it sees only the imports the handlers above do not
+            // claim. The two in-memory files resolve to themselves. Every other import
+            // from them fails, so the bundle never reads a host file. Imports inside
+            // the resolved zod sources keep Bun's default resolution.
+            build.onResolve({ filter: /.*/ }, (args) => {
+              if (args.importer === "" && args.path === ENTRY_PATH) return { path: ENTRY_PATH };
+              if (args.importer === ENTRY_PATH && args.path === `./${USER_SCRIPT_FILE}`) {
+                return { path: USER_PATH };
+              }
+              if (args.importer === "" || args.importer.startsWith(`${VIRTUAL_DIR}/`)) {
+                throw new Error(
+                  `Import '${args.path}' is not available to the quickjs executor. Allowed imports are "stdlib", "swarm-sdk", "zod" and "zod/mini".`,
+                );
+              }
+              return undefined;
+            });
           },
         },
       ],
