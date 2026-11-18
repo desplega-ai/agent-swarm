@@ -12,7 +12,7 @@ import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useModelProfileCheck, useModelProfiles } from "@/api/hooks/use-model-profiles";
-import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
+import { useModelsCatalog, useModelsSnapshot } from "@/api/hooks/use-models-catalog";
 import {
   type AcpSessionConfigOption,
   type AcpTarget,
@@ -264,6 +264,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   );
   const liveOpencodeGoModels = agent.credStatus?.opencodeGo?.models ?? null;
   const catalogQuery = useModelsCatalog();
+  const snapshotLoaded = useModelsSnapshot();
   const liveCatalog = catalogQuery.data?.providers ?? null;
   const groups = useMemo(
     () =>
@@ -317,8 +318,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   // live catalog — which also refetches on an interval) stay in the dependency
   // list because the default-model pick reads them, but their arrival must not
   // reinitialize the form and discard in-progress edits — hence the syncKey
-  // guard.
+  // guard. The lazily loaded snapshot is the exception: a form synced before
+  // it landed had no models to pick a default from, so it syncs once more.
   const syncKey = [
+    snapshotLoaded,
     agent.id,
     agent.harnessProvider,
     initialHarness,

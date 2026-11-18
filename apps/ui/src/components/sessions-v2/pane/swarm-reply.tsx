@@ -60,12 +60,18 @@ export function MessageTime({ at, focusable = true }: { at: string; focusable?: 
  */
 export function SwarmReply({ task, earlier }: { task: AgentTask; earlier?: AgentTask[] }) {
   const files = (
-    <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="agent" />
+    <TaskPromptAttachments
+      taskId={task.id}
+      status={task.status}
+      attachments={task.attachments}
+      from="agent"
+    />
   );
   if (!TERMINAL_STATUSES.has(task.status)) {
     return (
       <div className="flex min-w-0 flex-col gap-1.5">
-        <ChainOfThought taskId={task.id} status={task.status} />
+        {/* The row lets the session poll, not a per-task poll, notice a queued task start. */}
+        <ChainOfThought taskId={task.id} status={task.status} task={task} />
         {files}
       </div>
     );

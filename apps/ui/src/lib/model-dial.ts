@@ -18,6 +18,7 @@ import {
   modelGroupsForHarness,
 } from "./agent-runtime-models";
 import { tierRowModel } from "./model-tiers";
+import { modelsSnapshot } from "./models-snapshot";
 
 /**
  * The per-agent model dial of `/setup` step 4 (Agents): three levels per harness,
@@ -172,7 +173,8 @@ function deepseekDirectModel(level: DialLevel, context: DialContext): string | n
 // so the clamp reads the live catalog when the context carries one. The answer
 // depends on the catalog AND the tier rows, so the settings cache is keyed by
 // both objects: a refetched catalog or tier list with new data is a new object,
-// and react-query keeps the same object while the data is unchanged.
+// and react-query keeps the same object while the data is unchanged. With no
+// catalog the key is the lazily loaded snapshot, so its arrival misses the cache.
 const NO_CATALOG = {};
 const NO_TIERS = {};
 
@@ -180,7 +182,7 @@ const groupCaches = new WeakMap<object, Map<LocalHarnessProvider, ModelGroup[]>>
 const settingCaches = new WeakMap<object, WeakMap<object, Map<string, DialSetting | null>>>();
 
 function groupCacheFor(catalog: LiveModelsCatalog | null | undefined) {
-  const key = catalog ?? NO_CATALOG;
+  const key = catalog ?? modelsSnapshot() ?? NO_CATALOG;
   let cache = groupCaches.get(key);
   if (!cache) {
     cache = new Map();
@@ -190,7 +192,7 @@ function groupCacheFor(catalog: LiveModelsCatalog | null | undefined) {
 }
 
 function settingCacheFor(context: DialContext) {
-  const catalogKey = context.catalog ?? NO_CATALOG;
+  const catalogKey = context.catalog ?? modelsSnapshot() ?? NO_CATALOG;
   let byTiers = settingCaches.get(catalogKey);
   if (!byTiers) {
     byTiers = new WeakMap();

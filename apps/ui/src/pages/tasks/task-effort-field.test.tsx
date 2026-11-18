@@ -3,6 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
 import type { ModelTierPreview } from "../../api/types";
 import { tierRows } from "../../lib/model-tier-fixtures";
+import { loadModelsSnapshot } from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 // A DOM for the interaction tests; removed after this file so other files keep
 // their server-render environment.

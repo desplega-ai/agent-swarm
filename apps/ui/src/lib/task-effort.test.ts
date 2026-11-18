@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { tierRows } from "./model-tier-fixtures";
+import { loadModelsSnapshot } from "./models-snapshot";
 import { effortAllowed, SHARED_EFFORT_LEVELS, taskEffortOptions } from "./task-effort";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 const base = {
   harness: "claude",

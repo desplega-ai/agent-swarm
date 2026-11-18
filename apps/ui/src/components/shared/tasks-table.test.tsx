@@ -3,6 +3,10 @@ import type { ColDef } from "ag-grid-community";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentTask } from "@/api/types";
+import { loadModelsSnapshot } from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 mock.module("@/components/shared/task-hover-card", () => ({ TaskHoverCard: () => null }));
 mock.module("@/components/shared/markdown-view", () => ({ MarkdownView: () => null }));

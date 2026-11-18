@@ -3,6 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, ModelProfile, ModelProfileCheckResult } from "../../api/types";
+import { loadModelsSnapshot } from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 // A DOM for the interaction tests at the end; removed after this file so other
 // files keep their server-render environment.
@@ -91,6 +95,7 @@ mock.module("@/api/hooks/use-integrations-meta", () => ({
 }));
 mock.module("@/api/hooks/use-models-catalog", () => ({
   useModelsCatalog: () => ({ data: undefined }),
+  useModelsSnapshot: () => true,
 }));
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));

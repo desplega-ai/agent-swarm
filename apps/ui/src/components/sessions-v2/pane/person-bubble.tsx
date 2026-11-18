@@ -75,7 +75,12 @@ export function PersonBubble({
       {/* The bubble spans the column at most and is at least 8rem wide; a narrow pane gets the full width. */}
       <div className={cn("flex w-full min-w-0 flex-col gap-1.5", mine && "items-end")}>
         {/* Only what the person sent: the agent's files show with its reply (`SwarmReply`). */}
-        <TaskPromptAttachments taskId={task.id} attachments={task.attachments} from="person" />
+        <TaskPromptAttachments
+          taskId={task.id}
+          status={task.status}
+          attachments={task.attachments}
+          from="person"
+        />
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.

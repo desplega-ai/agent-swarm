@@ -26,7 +26,7 @@ import {
   sourceOfGroupKey,
 } from "@/lib/session-groups";
 import { splitMatches } from "@/lib/session-search";
-import { sessionChipStatus } from "@/lib/session-status";
+import { sessionChipStatus, showsUnread } from "@/lib/session-status";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime, parseUTCDate, sessionDisplayTitle } from "@/lib/utils";
 import { GroupCrumbIcon } from "../group-crumb-icon";
@@ -147,7 +147,7 @@ export function rowLabel(
   const wake = session.readState === "later" && session.snoozeUntil;
   const chat = chatSourceOf(session.root);
   return [
-    session.readState === "unread" && "Unread",
+    showsUnread(session) && "Unread",
     activity === "needs" && "Needs you",
     !TERMINAL_STATUSES.has(session.latestStatus) && "Running",
     session.latestStatus === "failed" && "Failed",
@@ -282,7 +282,7 @@ function SessionRowView({
   // Drag onto a group to move it (plan Phase 5).
   const { dragRef, dragListeners, isDragging } = useRowDraggable(rowKey, session);
   const title = sessionDisplayTitle(session.root);
-  const unread = session.readState === "unread";
+  const unread = showsUnread(session);
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   const activity = activityOf(session);
   const group = flat ? groupLabel(session.groupKey, me, labels) : "";
