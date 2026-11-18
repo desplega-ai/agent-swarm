@@ -24,6 +24,7 @@ const mockTasks: Record<string, TaskContextForPreamble> = {};
 const mockSessionLogs: Record<string, { createdAt: string; content: string }[]> = {};
 
 let server: Server;
+let lineageReads = 0;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -32,6 +33,25 @@ beforeAll(async () => {
     if (logsMatch) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ logs: mockSessionLogs[logsMatch[1]] ?? [] }));
+      return;
+    }
+    // Mirrors GET /api/tasks/{id}/lineage: the path to the topmost of at most 50 ancestors.
+    const lineageMatch = url.match(/^\/api\/tasks\/([^/?]+)\/lineage/);
+    if (lineageMatch) {
+      lineageReads++;
+      let row = mockTasks[lineageMatch[1]];
+      if (!row) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const tasks = [row];
+      for (let hops = 0; hops < 50 && row.parentTaskId && mockTasks[row.parentTaskId]; hops++) {
+        row = mockTasks[row.parentTaskId];
+        tasks.push(row);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ rootTaskId: row.id, tasks, truncated: false }));
       return;
     }
     const match = url.match(/^\/api\/tasks\/([^/?]+)/);
@@ -254,12 +274,14 @@ describe("buildSessionTurnsPreamble", () => {
       output: "Roadmap: auth rewrite, billing v2, board embeds",
       status: "completed",
       isLeadTask: true,
+      agentId: "lead",
     });
     seedTask({
       id: `${prefix}-worker`,
       task: "Research defer-task wakeOn",
       status: "completed",
       isLeadTask: false,
+      agentId: "worker",
       parentTaskId: `${prefix}-root`,
     });
     seedTask({
@@ -268,6 +290,7 @@ describe("buildSessionTurnsPreamble", () => {
       output: "wakeOn works as documented",
       status: "completed",
       isLeadTask: true,
+      agentId: "lead",
       parentTaskId: `${prefix}-worker`,
     });
     seedTask({
@@ -276,40 +299,53 @@ describe("buildSessionTurnsPreamble", () => {
       output: "Board created",
       status: "completed",
       isLeadTask: true,
+      agentId: "lead",
       parentTaskId: `${prefix}-review`,
       attachments: [{ kind: "url", name: "Roadmap board", url: "https://example.com/board" }],
     });
   }
 
-  test("shows every Lead turn oldest first with its ask, answer and artifacts", async () => {
+  test("shows the original ask once on top, then the Lead turns oldest first", async () => {
     seedSession("st1");
     const preamble = await buildSessionTurnsPreamble(API_URL, API_KEY, "st1-turn");
     expect(preamble).not.toBeNull();
     const text = preamble ?? "";
     expect(text).toContain("## Prior Conversation Context");
-    expect(text).toContain("your last 3 turns");
+    expect(text).toContain("your last 2 turns");
+    expect(text).toContain("### Original ask (session root) (task `st1-root`, completed)");
     const root = text.indexOf("List the roadmap items for Q1");
     const review = text.indexOf("wakeOn works as documented");
     const turn = text.indexOf("make a board of the roadmap");
     expect(root).toBeGreaterThan(-1);
     expect(root).toBeLessThan(review);
     expect(review).toBeLessThan(turn);
+    // Shown once, and nothing was skipped.
+    expect(text.split("List the roadmap items for Q1").length).toBe(2);
+    expect(text).not.toContain("earlier turn");
     expect(text).toContain("Roadmap: auth rewrite, billing v2, board embeds");
     expect(text).toContain("https://example.com/board");
     // The delegated worker task is not a turn.
     expect(text).not.toContain("Research defer-task wakeOn");
-    expect(text).toContain("call `get-task-details` on the turns above");
+  });
+
+  test("points at get-task-details and the task-context-gathering script", async () => {
+    seedSession("st3");
+    const text = (await buildSessionTurnsPreamble(API_URL, API_KEY, "st3-turn")) ?? "";
+    expect(text).toContain("`get-task-details` with any task id above");
+    expect(text).toContain('`name: "task-context-gathering"`, `scope: "global"`');
+    expect(text).toContain('`args: { "taskId": "<id>", "queries": ["<topic>"] }`');
   });
 
   test("names the parent when the message was sent on another agent's task", async () => {
     seedSession("st2");
     const preamble = await buildSessionTurnsPreamble(API_URL, API_KEY, "st2-worker");
     expect(preamble).toContain("sent on task `st2-worker`, a task of another agent");
-    expect(preamble).toContain("List the roadmap items for Q1");
+    expect(preamble).toContain("### Turn 1, session root (task `st2-root`, completed)");
+    expect(preamble).not.toContain("Original ask (session root)");
     expect(preamble).toContain("your last 1 turns");
   });
 
-  test("keeps the newest turns and drops the oldest past the turn cap", async () => {
+  test("keeps the root and the last turns, and marks the turns between as skipped", async () => {
     let parent: string | undefined;
     const count = SESSION_TURNS_MAX_TURNS + 2;
     for (let i = 0; i < count; i++) {
@@ -319,21 +355,56 @@ describe("buildSessionTurnsPreamble", () => {
         output: `answer number ${i}`,
         status: "completed",
         isLeadTask: true,
+        agentId: "lead",
         parentTaskId: parent,
       });
       parent = `cap-${i}`;
     }
     const text = (await buildSessionTurnsPreamble(API_URL, API_KEY, `cap-${count - 1}`)) ?? "";
     expect(text).toContain(`your last ${SESSION_TURNS_MAX_TURNS} turns`);
+    expect(text).toContain("### Original ask (session root) (task `cap-0`");
+    expect(text).toContain("ask number 0");
     expect(text).toContain(`ask number ${count - 1}`);
     expect(text).toContain(`ask number ${count - SESSION_TURNS_MAX_TURNS}`);
-    expect(text).not.toContain(`ask number ${count - SESSION_TURNS_MAX_TURNS - 1}`);
-    expect(text).toContain(
-      `the newest of them is task \`cap-${count - SESSION_TURNS_MAX_TURNS - 1}\``,
-    );
+    expect(text).not.toContain("ask number 1\n");
+    expect(text).toContain("### … 1 earlier turn skipped");
+    expect(text).toContain("newest first: `cap-1`.");
+    const order = ["ask number 0", "earlier turn skipped", `ask number ${count - 1}`];
+    const at = order.map((s) => text.indexOf(s));
+    expect(at[0]).toBeLessThan(at[1]!);
+    expect(at[1]).toBeLessThan(at[2]!);
   });
 
-  test("drops the oldest turns to fit the token budget", async () => {
+  test("finds the original ask past the hop walk and the 50-ancestor lineage cap", async () => {
+    // long-0 is the root; odd tasks are delegated worker tasks, even ones Lead turns.
+    const total = 120;
+    for (let i = 0; i < total; i++) {
+      const lead = i % 2 === 0;
+      seedTask({
+        id: `long-${i}`,
+        task: i === 0 ? "Original ask: plan the Q1 launch" : `step ${i}`,
+        output: `result ${i}`,
+        status: "completed",
+        isLeadTask: lead,
+        agentId: lead ? "lead" : "worker",
+        parentTaskId: i === 0 ? undefined : `long-${i - 1}`,
+      });
+    }
+    lineageReads = 0;
+    const text = (await buildSessionTurnsPreamble(API_URL, API_KEY, `long-${total - 1}`)) ?? "";
+    expect(text).toContain("### Original ask (session root) (task `long-0`");
+    expect(text).toContain("Original ask: plan the Q1 launch");
+    // Shown turns: long-118 .. long-108. Skipped: the Lead turns long-106 .. long-2.
+    expect(text).toContain("step 108");
+    expect(text).not.toContain("step 106\n");
+    expect(text).toContain("### … 53 earlier turns skipped");
+    expect(text).toContain("newest first: `long-106`, `long-104`");
+    expect(text).toContain(", and 45 more.");
+    expect(text).toContain("task-context-gathering");
+    expect(lineageReads).toBeGreaterThan(1);
+  });
+
+  test("drops the oldest of the last turns to fit the budget, never the root", async () => {
     const big = "x".repeat(4000);
     seedTask({
       id: "bud-0",
@@ -341,6 +412,7 @@ describe("buildSessionTurnsPreamble", () => {
       output: big,
       status: "completed",
       isLeadTask: true,
+      agentId: "lead",
     });
     for (let i = 1; i < SESSION_TURNS_MAX_TURNS; i++) {
       seedTask({
@@ -349,15 +421,18 @@ describe("buildSessionTurnsPreamble", () => {
         output: big,
         status: "completed",
         isLeadTask: true,
+        agentId: "lead",
         parentTaskId: `bud-${i - 1}`,
       });
     }
-    const text =
-      (await buildSessionTurnsPreamble(API_URL, API_KEY, `bud-${SESSION_TURNS_MAX_TURNS - 1}`)) ??
-      "";
+    const last = SESSION_TURNS_MAX_TURNS - 1;
+    const text = (await buildSessionTurnsPreamble(API_URL, API_KEY, `bud-${last}`)) ?? "";
     expect(text.length).toBeLessThanOrEqual(SESSION_TURNS_MAX_CHARS);
-    expect(text).not.toContain("first ask");
-    expect(text).toContain("Earlier turns are left out");
+    expect(text).toContain("**Asked:** first ask");
+    expect(text).toContain(`task \`bud-${last}\``);
+    expect(text).toMatch(/### … \d+ earlier turns? skipped/);
+    expect(text).toContain("newest first: `bud-");
+    expect(text).not.toContain("[context preamble truncated");
   });
 
   test("returns null without a Lead turn, and the follow-up falls back", async () => {

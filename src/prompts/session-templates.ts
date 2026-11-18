@@ -791,11 +791,11 @@ registerTemplate({
 });
 
 /**
- * The Lead's follow-up preamble for a Sessions message (`source: "ui"`): the
- * last Lead turns of the session, so the new message is read against the
- * conversation, not one parent task. Built worker-side by
- * `buildSessionTurnsPreamble` in `src/commands/context-preamble.ts`, which
- * also bounds `turns` to its token budget.
+ * The Lead's follow-up preamble for a Sessions message (`source: "ui"`): a
+ * sandwich of the session's original ask, an elision marker, and the last
+ * Lead turns, so the new message is read against the conversation, not one
+ * parent task. Built worker-side by `buildSessionTurnsPreamble` in
+ * `src/commands/context-preamble.ts`, which also bounds it to its token budget.
  */
 registerTemplate({
   eventType: "task.followup.session_turns",
@@ -804,29 +804,36 @@ registerTemplate({
 ---
 ## Prior Conversation Context
 
-This message continues a Sessions conversation with you. Below are your last {{turn_count}} turns in it, oldest first: what you were asked and what you answered. The new message may refer to any of them.
-{{reply_target}}
-{{turns}}
-{{omitted_note}}If this block does not tell you what the new message refers to, call \`get-task-details\` on the turns above before you act. Never guess the referent.
+This message continues a Sessions conversation with you. Below are the session's original ask and your last {{turn_count}} turns in it, oldest first: what you were asked and what you answered. The new message may refer to any of them.
+
+{{reply_target}}{{root}}{{elided}}{{turns}}
+If this block does not tell you what the new message refers to, get more context before you act. Never guess the referent.
+- \`get-task-details\` with any task id above: the original ask, a skipped turn, or a turn whose text was cut.
+- The \`task-context-gathering\` script returns a task plus the memories related to it: \`script-run\` with \`name: "task-context-gathering"\`, \`scope: "global"\` and \`args: { "taskId": "<id>", "queries": ["<topic>"] }\`.
 
 ---
 `,
   variables: [
-    { name: "turn_count", description: "Lead turns shown below" },
+    { name: "turn_count", description: "Lead turns shown in `turns`" },
+    {
+      name: "reply_target",
+      description:
+        "A paragraph naming the task the message was sent on when that is not a Lead turn (a delegated task), else empty",
+    },
+    {
+      name: "root",
+      description:
+        "The session's original ask: '### Original ask (session root) (task `<id>`, <status>)', its ask, answer and artifacts. Empty when the root is the only turn or unknown",
+    },
+    {
+      name: "elided",
+      description:
+        "'### … N earlier turns skipped' with the skipped turn task ids, newest first, else empty",
+    },
     {
       name: "turns",
       description:
         "One block per Lead turn, oldest first: '### Turn N (task `<id>`, <status>)', the ask, the answer and its artifacts",
-    },
-    {
-      name: "reply_target",
-      description:
-        "A line naming the task the message was sent on when that is not a Lead turn (a delegated task), else empty",
-    },
-    {
-      name: "omitted_note",
-      description:
-        "A line naming the newest Lead turn left out by the turn cap or the token budget, else empty",
     },
   ],
   category: "task_lifecycle",

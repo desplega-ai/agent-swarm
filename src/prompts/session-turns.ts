@@ -9,7 +9,8 @@ export interface SessionTurnsVariables {
   turn_count: number;
   turns: string;
   reply_target: string;
-  omitted_note: string;
+  root: string;
+  elided: string;
 }
 
 /**
