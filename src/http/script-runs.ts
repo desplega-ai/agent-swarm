@@ -31,6 +31,8 @@ import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
   abortScriptRunLimit,
+  DURABLE_RUNS_NATIVE_REFUSED,
+  durableScriptRunsAllowed,
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
@@ -446,6 +448,11 @@ export async function handleScriptRuns(
     if (!parsed) return true;
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
+
+    if (!durableScriptRunsAllowed()) {
+      jsonError(res, DURABLE_RUNS_NATIVE_REFUSED, 400);
+      return true;
+    }
 
     const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
     if (secretRefusal) {

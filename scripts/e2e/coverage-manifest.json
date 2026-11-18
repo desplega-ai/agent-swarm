@@ -504,8 +504,8 @@
       "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge"]
     },
     "script-runs-durable": {
-      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
-      "scenarios": ["script-runs-durable", "script-run-storage"]
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
+      "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
