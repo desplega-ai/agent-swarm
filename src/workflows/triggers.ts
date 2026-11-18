@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
-import { getWorkflow, getWorkflowsByScheduleId, listWorkflows } from "../be/db";
+import {
+  getWorkflow,
+  getWorkflowsByEventName,
+  getWorkflowsByScheduleId,
+  listWorkflows,
+} from "../be/db";
 import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -307,11 +312,7 @@ export async function handleEventTrigger(
   payload: unknown,
   registry: ExecutorRegistry,
 ): Promise<string[]> {
-  const workflows = (await listWorkflows({ enabled: true })).filter((workflow) =>
-    workflow.triggers.some(
-      (trigger) => trigger.type === "event" && trigger.eventName === eventName,
-    ),
-  );
+  const workflows = await getWorkflowsByEventName(eventName);
 
   const runIds: string[] = [];
   for (const workflow of workflows) {

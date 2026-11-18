@@ -7967,6 +7967,23 @@ export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Work
   return rows.map(rowToWorkflow);
 }
 
+/** Find enabled event subscribers in workflow-list order, returning each workflow once. */
+export async function getWorkflowsByEventName(eventName: string): Promise<Workflow[]> {
+  const rows = await getDbClient().query<WorkflowRow>(
+    `SELECT w.* FROM workflows w
+       WHERE w.enabled = 1
+         AND EXISTS (
+           SELECT 1 FROM json_each(w.triggers) AS t
+           WHERE t.type = 'object'
+             AND json_extract(t.value, '$.type') = 'event'
+             AND json_extract(t.value, '$.eventName') = ?
+         )
+       ORDER BY w.lastUpdatedAt DESC`,
+    [eventName],
+  );
+  return rows.map(rowToWorkflow);
+}
+
 // ============================================================================
 // Workflow Run CRUD
 // ============================================================================
