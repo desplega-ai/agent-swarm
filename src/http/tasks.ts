@@ -1408,7 +1408,7 @@ export async function handleTasks(
         const existing = await getTaskById(parsed.params.id);
         if (!existing) return null;
         const offerOpen = existing.status === "offered" || existing.status === "reviewing";
-        const holder = offerOpen && existing.offeredTo ? existing.offeredTo : existing.agentId;
+        const holder = offerOpen ? existing.offeredTo : existing.agentId;
         if (holder !== auth.agentId) return "forbidden";
       }
       return await updateTaskClaudeSessionId(
