@@ -49,7 +49,7 @@ import {
   ScriptRunStatusSchema,
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
-import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
+import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -508,7 +508,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getMcpBaseUrl(), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,

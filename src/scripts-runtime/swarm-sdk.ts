@@ -642,7 +642,7 @@ async function callBridgeApi(
   config: SwarmConfig,
   options: { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal } = {},
 ): Promise<unknown> {
-  const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
+  const baseUrl = Redacted.value(config.sdkBaseUrl).replace(/\/$/, "");
   const request = bridgeRequestFor(name, args);
 
   // Tools without a specific REST route go through the generic MCP bridge
