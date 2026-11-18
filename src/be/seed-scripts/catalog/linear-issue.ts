@@ -19,7 +19,7 @@ async function resolveSecret(ctx: any, key: string, override: unknown): Promise<
     );
     const configs: any = res && Array.isArray(res.configs) ? res.configs : [];
     for (const c of configs) {
-      if (c && c.key === key && typeof c.value === "string" && c.value.length > 0) {
+      if (c && c.key === key && typeof c.value === "string" && c.value.length > 0 && c.value !== "********") {
         return c.value;
       }
     }

@@ -26,13 +26,14 @@ import {
   syncSkillsToFilesystem,
 } from "../be/skill-sync";
 import { getSkillUsageDetail, getSkillUsageSummary, SKILL_USAGE_WINDOWS } from "../be/skill-usage";
+import { can, type PermissionVerb, type RbacPrincipal } from "../rbac";
 import {
   AgentSkillSchema,
   SkillFileSchema,
   SkillSchema,
   SkillWithInstallInfoSchema,
 } from "../types";
-import { refuseAgentTokenWithout } from "./request-principal";
+import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -249,6 +250,64 @@ function decodeSkillFilePath(pathSegments: string[]): string {
 }
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+const SKILL_DENIED = "Forbidden: this skill change needs the lead agent, or the skill's owner";
+
+/**
+ * The agent principal of a skill write, or null when the caller is the operator or a user (their
+ * access is the admission gate's). A guest and a missing identity are refused by `can()`.
+ */
+async function skillAgentPrincipal(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+): Promise<RbacPrincipal | null> {
+  const principal = await agentFirstPrincipal(req, myAgentId, {
+    unauthenticatedFallback: "anonymous-agent",
+  });
+  return principal.kind === "operator" || principal.kind === "user" ? null : principal;
+}
+
+/**
+ * Handler-side gate for a skill write: `can(verb)` for an agent principal, mirroring the MCP skill
+ * tools. Writes a 403 and returns true when denied. A lead-equivalent extension agent passes.
+ */
+async function denySkillWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  verb: PermissionVerb,
+  resource: Parameters<typeof can>[0]["resource"],
+  message = SKILL_DENIED,
+): Promise<boolean> {
+  const principal = await skillAgentPrincipal(req, myAgentId);
+  if (!principal) return false;
+  if (can({ principal, verb, resource, source: "http" }).allow) return false;
+  jsonError(res, message, 403);
+  return true;
+}
+
+/** Install or uninstall for the caller itself is open; for another agent it is lead-only. */
+async function denyOtherAgentSkill(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  verb: "skill.install.any" | "skill.uninstall.any",
+  targetAgentId: string,
+): Promise<boolean> {
+  const principal = await skillAgentPrincipal(req, myAgentId);
+  if (!principal) return false;
+  if (principal.kind === "agent" && principal.agentId === targetAgentId && targetAgentId !== "") {
+    return false;
+  }
+  return denySkillWrite(
+    req,
+    res,
+    myAgentId,
+    verb,
+    { kind: "agent", agentId: targetAgentId },
+    "Forbidden: only a lead can change another agent's skills",
+  );
+}
 
 const listSkillsRoute = route({
   method: "get",
@@ -629,7 +688,18 @@ export async function handleSkills(
   if (installRemoteRoute.match(req.method, pathSegments)) {
     const parsed = await installRemoteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (await refuseAgentTokenWithout(req, res, "skill.install.global")) return true;
+    if (
+      await denySkillWrite(
+        req,
+        res,
+        myAgentId,
+        "skill.install.global",
+        { kind: "none" },
+        "Forbidden: only a lead installs a remote skill",
+      )
+    ) {
+      return true;
+    }
 
     try {
       const branch = "main";
@@ -683,6 +753,18 @@ export async function handleSkills(
   if (syncRemoteRoute.match(req.method, pathSegments)) {
     const parsed = await syncRemoteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = parsed.body.skillId ? await getSkillById(parsed.body.skillId) : null;
+      if (
+        await denySkillWrite(req, res, myAgentId, "skill.update.any", {
+          kind: "owned",
+          ownerAgentId: target?.ownerAgentId ?? null,
+          scope: target?.scope,
+        })
+      ) {
+        return true;
+      }
+    }
 
     const remoteSkills = parsed.body.skillId
       ? await (async () => {
@@ -766,19 +848,13 @@ export async function handleSkills(
   if (installSkillRoute.match(req.method, pathSegments)) {
     const parsed = await installSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (await denyOtherAgentSkill(req, res, myAgentId, "skill.install.any", parsed.body.agentId)) {
+      return true;
+    }
 
     const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    if (
-      parsed.body.agentId !== myAgentId &&
-      (await refuseAgentTokenWithout(req, res, "skill.install.any", {
-        kind: "agent",
-        agentId: parsed.body.agentId,
-      }))
-    ) {
       return true;
     }
 
@@ -796,11 +872,7 @@ export async function handleSkills(
     const parsed = await uninstallSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (
-      parsed.params.agentId !== myAgentId &&
-      (await refuseAgentTokenWithout(req, res, "skill.uninstall.any", {
-        kind: "agent",
-        agentId: parsed.params.agentId,
-      }))
+      await denyOtherAgentSkill(req, res, myAgentId, "skill.uninstall.any", parsed.params.agentId)
     ) {
       return true;
     }
@@ -882,18 +954,23 @@ export async function handleSkills(
   if (bulkUpsertSkillFilesRoute.match(req.method, pathSegments)) {
     const parsed = await bulkUpsertSkillFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = await getSkillById(parsed.params.id);
+      if (
+        target &&
+        (await denySkillWrite(req, res, myAgentId, "skill.update.any", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
 
     const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    if (
-      await refuseAgentTokenWithout(req, res, "skill.update.any", {
-        kind: "owned",
-        ownerAgentId: skill.ownerAgentId,
-      })
-    ) {
       return true;
     }
     if (skill.systemDefault) {
@@ -944,18 +1021,23 @@ export async function handleSkills(
   if (upsertSkillFileRoute.match(req.method, pathSegments)) {
     const parsed = await upsertSkillFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = await getSkillById(parsed.params.id);
+      if (
+        target &&
+        (await denySkillWrite(req, res, myAgentId, "skill.update.any", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
 
     const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    if (
-      await refuseAgentTokenWithout(req, res, "skill.update.any", {
-        kind: "owned",
-        ownerAgentId: skill.ownerAgentId,
-      })
-    ) {
       return true;
     }
     if (skill.systemDefault) {
@@ -981,18 +1063,23 @@ export async function handleSkills(
   if (deleteSkillFileRoute.match(req.method, pathSegments)) {
     const parsed = await deleteSkillFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = await getSkillById(parsed.params.id);
+      if (
+        target &&
+        (await denySkillWrite(req, res, myAgentId, "skill.update.any", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
 
     const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    if (
-      await refuseAgentTokenWithout(req, res, "skill.update.any", {
-        kind: "owned",
-        ownerAgentId: skill.ownerAgentId,
-      })
-    ) {
       return true;
     }
     if (skill.systemDefault) {
@@ -1033,11 +1120,27 @@ export async function handleSkills(
   if (createSkillRoute.match(req.method, pathSegments)) {
     const parsed = await createSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (
-      ((parsed.body.scope ?? "agent") !== "agent" || parsed.body.systemDefault === true) &&
-      (await refuseAgentTokenWithout(req, res, "skill.create.swarm"))
-    ) {
-      return true;
+    {
+      const principal = await skillAgentPrincipal(req, myAgentId);
+      const ownsIt =
+        principal?.kind === "agent" &&
+        principal.agentId !== "" &&
+        parsed.body.ownerAgentId === principal.agentId;
+      const sharedScope = parsed.body.scope === "swarm" || parsed.body.scope === "global";
+      if (
+        principal &&
+        (sharedScope || parsed.body.systemDefault || !ownsIt) &&
+        (await denySkillWrite(
+          req,
+          res,
+          myAgentId,
+          "skill.create.swarm",
+          { kind: "none" },
+          "Forbidden: only a lead creates swarm-scope skills, or skills for another agent",
+        ))
+      ) {
+        return true;
+      }
     }
 
     try {
@@ -1071,22 +1174,48 @@ export async function handleSkills(
   if (updateSkillRoute.match(req.method, pathSegments)) {
     const parsed = await updateSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = await getSkillById(parsed.params.id);
+      if (
+        target &&
+        (await denySkillWrite(req, res, myAgentId, "skill.update.any", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
+    {
+      const target = await getSkillById(parsed.params.id);
+      // Promotion is any change that shares the skill or moves it to another owner: a scope
+      // other than `agent` (MCP allows only agent|swarm), a change of systemDefault (it hands the
+      // skill to every agent through getAgentSkills), or a change of owner.
+      const promotes =
+        target &&
+        ((parsed.body.scope !== undefined &&
+          parsed.body.scope !== "agent" &&
+          parsed.body.scope !== target.scope) ||
+          (parsed.body.systemDefault !== undefined &&
+            parsed.body.systemDefault !== target.systemDefault) ||
+          (parsed.body.ownerAgentId !== undefined &&
+            parsed.body.ownerAgentId !== target.ownerAgentId));
+      if (
+        promotes &&
+        (await denySkillWrite(req, res, myAgentId, "skill.promote.swarm", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
 
     const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    const owned = { kind: "owned", ownerAgentId: existing.ownerAgentId } as const;
-    if (await refuseAgentTokenWithout(req, res, "skill.update.any", owned)) return true;
-    // Widening a skill to every agent, or handing it to another owner, is a lead decision.
-    const { scope, systemDefault, ownerAgentId } = parsed.body;
-    if (
-      ((scope !== undefined && scope !== existing.scope && scope !== "agent") ||
-        systemDefault === true ||
-        (Object.hasOwn(parsed.body, "ownerAgentId") && ownerAgentId !== existing.ownerAgentId)) &&
-      (await refuseAgentTokenWithout(req, res, "skill.promote.swarm", owned))
-    ) {
       return true;
     }
 
@@ -1155,18 +1284,23 @@ export async function handleSkills(
   if (deleteSkillRoute.match(req.method, pathSegments)) {
     const parsed = await deleteSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    {
+      const target = await getSkillById(parsed.params.id);
+      if (
+        target &&
+        (await denySkillWrite(req, res, myAgentId, "skill.delete.any", {
+          kind: "owned",
+          ownerAgentId: target.ownerAgentId,
+          scope: target.scope,
+        }))
+      ) {
+        return true;
+      }
+    }
 
     const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
-      return true;
-    }
-    if (
-      await refuseAgentTokenWithout(req, res, "skill.delete.any", {
-        kind: "owned",
-        ownerAgentId: existing.ownerAgentId,
-      })
-    ) {
       return true;
     }
     if (existing.systemDefault) {

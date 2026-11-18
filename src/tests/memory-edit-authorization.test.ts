@@ -218,7 +218,7 @@ for (const entrypoint of ["MCP", "HTTP"] as const) {
   });
 }
 
-test("internal cross-agent re-index still edits, embeds and refreshes links", async () => {
+test("a re-index by the owner edits, embeds and refreshes links; a stranger is refused", async () => {
   const targetName = randomUUID();
   const target = await store.store({
     agentId: owner,
@@ -241,8 +241,20 @@ test("internal cross-agent re-index still edits, embeds and refreshes links", as
     await getDbClient().query("SELECT * FROM memory_link WHERE from_memory_id = ?", [memory.id]),
   ).toHaveLength(1);
 
-  // The file-index route writes for the supplied owner, independently of the caller.
-  const result = await httpCall(stranger, "index", {
+  // A plain agent cannot name another agent as the owner of a re-index (plants no memory there).
+  const refused = await httpCall(stranger, "index", {
+    agentId: owner,
+    scope: "agent",
+    sourcePath,
+    name: "indexed",
+    content: "planted by a stranger",
+    source: "file_index",
+  });
+  expect(refused.status).toBe(403);
+  expect((await store.peek(memory.id))?.content).toBe(`See [[${targetName}]]`);
+
+  // The owner re-indexes its own file: edits, embeds and refreshes links.
+  const result = await httpCall(owner, "index", {
     agentId: owner,
     scope: "agent",
     sourcePath,

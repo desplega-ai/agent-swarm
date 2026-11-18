@@ -11011,6 +11011,7 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** @description Defaults to the calling agent for agent requests */
                         agentId?: string;
                         content: string;
                         name: string;
@@ -11051,7 +11052,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead */
+                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead, or a plain agent named another agent in `agentId` */
                 403: {
                     headers: {
                         [name: string]: unknown;
