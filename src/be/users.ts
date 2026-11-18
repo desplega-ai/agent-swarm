@@ -22,6 +22,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
+import type { ScriptRunProvenance } from "../utils/request-auth-context";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { randomChars } from "../utils/short-id";
@@ -746,7 +747,7 @@ export async function mintRuntimeToken(
 export async function mintScriptRunToken(
   agentId: string,
   ttlMs: number,
-  provenance: { sourceStepId?: string; sourceScriptRunId?: string } = {},
+  provenance: ScriptRunProvenance = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
   const token = await insertSessionToken(
     agentId,
@@ -761,10 +762,21 @@ export async function mintScriptRunToken(
   );
   // Recorded before the plaintext leaves this function, so no request can
   // present the token without its provenance.
-  if (provenance.sourceStepId || provenance.sourceScriptRunId) {
+  if (
+    provenance.sourceStepId ||
+    provenance.sourceScriptRunId ||
+    provenance.objectChain !== undefined ||
+    provenance.depth !== undefined
+  ) {
     await getDbClient().run(
-      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ? WHERE id = ?",
-      [provenance.sourceStepId ?? null, provenance.sourceScriptRunId ?? null, token.tokenId],
+      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ?, objectChain = ?, depth = ? WHERE id = ?",
+      [
+        provenance.sourceStepId ?? null,
+        provenance.sourceScriptRunId ?? null,
+        provenance.objectChain === undefined ? null : JSON.stringify(provenance.objectChain),
+        provenance.depth ?? 0,
+        token.tokenId,
+      ],
     );
   }
   return token;
@@ -1046,7 +1058,7 @@ export async function resolveSessionToken(
   options: { touch?: boolean } = {},
 ): Promise<
   | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
-  | {
+  | ({
       kind: "agent";
       tokenId: string;
       tokenKind: SessionTokenKind;
@@ -1054,9 +1066,7 @@ export async function resolveSessionToken(
       taskId: string | null;
       runtimeId: string | null;
       expiresAt: string;
-      sourceStepId?: string | null;
-      sourceScriptRunId?: string | null;
-    }
+    } & ScriptRunProvenance)
   | null
 > {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
@@ -1074,9 +1084,11 @@ export async function resolveSessionToken(
     revokedAt: string | null;
     sourceStepId: string | null;
     sourceScriptRunId: string | null;
+    objectChain: string | null;
+    depth: number;
   }>(
     `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     s.sourceStepId, s.sourceScriptRunId, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     s.sourceStepId, s.sourceScriptRunId, s.objectChain, s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
      WHERE s.tokenHash = ?`,
     [hash],
   );
@@ -1113,9 +1125,10 @@ export async function resolveSessionToken(
     taskId: row.taskId,
     runtimeId: row.runtimeId,
     expiresAt: row.expiresAt,
-    ...(row.sourceStepId || row.sourceScriptRunId
-      ? { sourceStepId: row.sourceStepId, sourceScriptRunId: row.sourceScriptRunId }
-      : {}),
+    ...(row.sourceStepId ? { sourceStepId: row.sourceStepId } : {}),
+    ...(row.sourceScriptRunId ? { sourceScriptRunId: row.sourceScriptRunId } : {}),
+    ...(row.objectChain !== null ? { objectChain: JSON.parse(row.objectChain) as string[] } : {}),
+    depth: row.depth,
   };
 }
 

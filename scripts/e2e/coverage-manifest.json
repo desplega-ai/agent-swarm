@@ -228,6 +228,10 @@
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
     },
+    "durable-objects": {
+      "description": "Global DurableObject scripts: typecheck, method signatures, and refusal of agent scope and inline execution.",
+      "scenarios": ["script-durable-objects"]
+    },
     "agent-access-tokens": {
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens; worker tokens need the route permission on swarm-wide admin routes",
       "scenarios": ["core-agent-access", "platform-agent-token-permissions"]
