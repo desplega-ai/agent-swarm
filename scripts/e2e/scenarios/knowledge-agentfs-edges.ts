@@ -137,6 +137,7 @@ export const knowledgeAgentFsEdges: Scenario = {
       response = await ctx.api("POST", "/api/comb/review-batches", { body: {} });
       expectStatus(response, [400], "Comb review batch with an empty body");
       for (const [label, body] of [
+        ["a malformed parent task id", { ...reviewBody, parentTaskId: "invalid" }],
         ["no comment ids", { ...reviewBody, commentIds: [] }],
         ["a non-UUID comment id", { ...reviewBody, commentIds: ["not-a-uuid"] }],
         ["more than 50 comment ids", { ...reviewBody, commentIds: Array(51).fill(COMMENT_ID) }],
@@ -159,6 +160,11 @@ export const knowledgeAgentFsEdges: Scenario = {
         apiKey: null,
       });
       expectStatus(response, [401], "Comb review batch without credentials");
+
+      response = await ctx.api("POST", "/api/comb/review-batches", {
+        body: { ...reviewBody, parentTaskId: crypto.randomUUID() },
+      });
+      expectStatus(response, [404], "A missing review parent cannot create a standalone task");
 
       configIds.push(await setConfig(ctx, "AGENT_FS_DEFAULT_ORG_ID", `org-${ctx.nonce}`));
       configIds.push(await setConfig(ctx, "AGENT_FS_DEFAULT_DRIVE_ID", `drive-${ctx.nonce}`));

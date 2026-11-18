@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useParams } from "react-router-dom";
 import { useOptionalContextPanel } from "@/components/context-panel/context-panel-state";
 import { isPlainClick, type LinkPreviewTarget, linkPreviewTarget } from "@/lib/link-preview";
 import type { SwarmLinkOrigins } from "@/lib/swarm-links";
@@ -82,7 +83,18 @@ export function LinkPreviewOpener({
 export function useOpenLinkPreview(): ((target: LinkPreviewTarget) => void) | undefined {
   const scope = useContext(LinkPreviewScopeContext);
   const openPreview = useOptionalContextPanel()?.openPreview;
-  return scope ? (scope.open ?? openPreview) : undefined;
+  const { id, rootTaskId } = useParams();
+  return useMemo(() => {
+    if (!scope || !openPreview) return scope?.open;
+    if (scope.open) return scope.open;
+    const origin = id
+      ? { kind: "task" as const, id }
+      : rootTaskId
+        ? { kind: "session" as const, id: rootTaskId }
+        : undefined;
+    return (target: LinkPreviewTarget) =>
+      openPreview(target.kind === "file" && origin ? { ...target, origin } : target);
+  }, [scope, openPreview, id, rootTaskId]);
 }
 
 /**

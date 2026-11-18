@@ -6134,8 +6134,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * Send agent-fs comments to the swarm as one task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -6147,6 +6147,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        parentTaskId?: string;
                         orgId: string;
                         driveId: string;
                         commentIds: string[];
@@ -14831,6 +14833,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    review_follow_ups: boolean;
                                     service_user_id: string | null;
                                 };
                             };

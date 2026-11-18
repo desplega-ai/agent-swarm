@@ -3805,6 +3805,8 @@ export interface StatusComb {
    * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
    */
   service_user_id?: string | null;
+  /** The API supports sending review batches as follow-ups. */
+  review_follow_ups?: boolean;
 }
 
 /**
@@ -3849,6 +3851,7 @@ export interface CombRepairedComment {
 }
 
 export interface CombReviewBatchInput {
+  parentTaskId?: string;
   orgId: string;
   driveId: string;
   /** agent-fs root comment ids, 1 to 50. */
