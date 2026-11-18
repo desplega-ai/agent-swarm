@@ -47,6 +47,8 @@ interface ScriptRunsGridProps {
   /** Skip the built-in status-filter row — the page renders
    * <ScriptRunsStatusFilter> in its own toolbar instead. */
   hideToolbar?: boolean;
+  /** Runs of one durable object: a Method column replaces Run ID, Type and Agent. */
+  objectRuns?: boolean;
 }
 
 /**
@@ -111,6 +113,7 @@ export function ScriptRunsGrid({
   statusParamKey = "status",
   paginationQueryKey,
   hideToolbar = false,
+  objectRuns = false,
 }: ScriptRunsGridProps) {
   const navigate = useNavigate();
   const isPhone = useIsPhone();
@@ -156,8 +159,10 @@ export function ScriptRunsGrid({
         field: "kind",
         headerName: "Type",
         width: 120,
-        cellRenderer: (params: { value?: ScriptRunKind }) =>
-          params.value ? <ScriptRunKindBadge kind={params.value} /> : null,
+        cellRenderer: (params: { value?: ScriptRunKind; data?: ScriptRunListItem }) =>
+          params.value ? (
+            <ScriptRunKindBadge kind={params.value} object={!!params.data?.objectId} />
+          ) : null,
       },
       {
         field: "status",
@@ -207,8 +212,35 @@ export function ScriptRunsGrid({
           ) : null,
       },
     ];
+    if (objectRuns) {
+      const methodColumn: ColDef<ScriptRunListItem> = {
+        field: "objectMethod",
+        headerName: "Method",
+        minWidth: 120,
+        flex: 1,
+        cellRenderer: (params: { value?: string }) => (
+          <span className="truncate font-mono text-sm">
+            {params.value ? `${params.value}()` : ""}
+          </span>
+        ),
+      };
+      // Narrower widths: this grid shares the row with the object's state.
+      const widths: Record<string, Partial<ColDef<ScriptRunListItem>>> = {
+        status: { width: 140 },
+        startedAt: { width: 110 },
+        Duration: { width: 100 },
+        error: { minWidth: 120 },
+      };
+      return [
+        methodColumn,
+        ...baseColumns
+          .map((column) => ({ column, key: column.field ?? column.headerName ?? "" }))
+          .filter(({ key }) => key in widths)
+          .map(({ column, key }) => ({ ...column, ...widths[key] })),
+      ];
+    }
     return hideNameColumn ? baseColumns : [nameColumn, ...baseColumns];
-  }, [hideNameColumn]);
+  }, [hideNameColumn, objectRuns]);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<ScriptRunListItem>) => {
@@ -246,7 +278,9 @@ export function ScriptRunsGrid({
               key={run.id}
               to={`/script-runs/${run.id}`}
               title={
-                hideNameColumn ? (
+                objectRuns ? (
+                  <span className="font-mono text-sm">{run.objectMethod ?? "?"}()</span>
+                ) : hideNameColumn ? (
                   <span className="font-mono text-xs">{run.id.slice(0, 8)}</span>
                 ) : (
                   run.scriptName || "One-off script"

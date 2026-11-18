@@ -36922,6 +36922,8 @@ export interface operations {
                 status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
                 agentId?: string;
                 scriptName?: string;
+                objectScriptId?: string;
+                objectId?: string;
                 limit?: number;
                 offset?: number | null;
             };
@@ -37965,6 +37967,8 @@ export interface operations {
                             updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
+                            /** @enum {string} */
+                            kind: "function" | "durable";
                         }[];
                     };
                 };

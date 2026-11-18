@@ -1,4 +1,4 @@
-import { asRecord, expect, expectStatus } from "../http";
+import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   callToolErr,
@@ -85,6 +85,47 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
     return run;
   };
 
+  /** The reads the dashboard uses: list kind, per-object runs, and objects from raw KV. */
+  async function checkDashboardReads() {
+    const listed = await ctx.api("GET", "/api/scripts");
+    expectStatus(listed, [200], `${executor}: list scripts`);
+    const scripts = asRecords(listed.json, "scripts");
+    const kindOf = (name: string) => scripts.find((script) => script.name === name)?.kind;
+    expect(
+      kindOf(runtimeName) === "durable" && kindOf(functionName) === "function",
+      `${executor}: the script list must mark durable scripts: ${kindOf(runtimeName)}, ${kindOf(functionName)}`,
+    );
+
+    const query = `objectScriptId=${runtime.id}&objectId=b`;
+    const objectRuns = await ctx.api("GET", `/api/script-runs?${query}`);
+    expectStatus(objectRuns, [200], `${executor}: runs of one object`);
+    const runs = asRecords(objectRuns.json, "runs");
+    expect(
+      runs.length >= 1 &&
+        asRecord(objectRuns.json).total === runs.length &&
+        runs.every(
+          (run) =>
+            run.objectScriptId === runtime.id &&
+            run.objectId === "b" &&
+            run.objectMethod === "read",
+        ),
+      `${executor}: the object filter must return only object b's runs: ${JSON.stringify(runs).slice(0, 400)}`,
+    );
+
+    const objects = await ctx.api(
+      "GET",
+      `/api/kv/_/${encodeURIComponent(durableNamespace)}?prefix=state/`,
+      { agentId },
+    );
+    expectStatus(objects, [200], `${executor}: list objects from KV`);
+    const entries = asRecords(objects.json, "entries");
+    const stateOf = (id: string) => asRecord(entries.find((e) => e.key === `state/${id}`)?.value);
+    expect(
+      Number.isInteger(stateOf("a").stateVersion) && asRecord(stateOf("b").state).n === 0,
+      `${executor}: KV must list each object's state: ${JSON.stringify(entries).slice(0, 400)}`,
+    );
+  }
+
   async function checkCounterLifecycle() {
     const key = `E2E_DURABLE_${ctx.nonce.toUpperCase()}`;
     const ordinary = await runScript(ctx, agentId, {
@@ -119,6 +160,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
       );
     });
     expect(asRecord((await call("b", "read")).result).n === 0, `${executor}: isolated id`);
+    await checkDashboardReads();
 
     const concurrent = await Promise.all(
       Array.from({ length: 5 }, () => call("concurrent", "add", { by: 1 })),

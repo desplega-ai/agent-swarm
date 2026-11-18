@@ -4377,7 +4377,7 @@ export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 export type ScriptListItem = Omit<
   ScriptRecord,
   "source" | "signatureJson" | "argsJsonSchema" | "contentHash"
->;
+> & { kind: "function" | "durable" };
 
 /** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
 export type ScriptDetail = Omit<ScriptRecord, "argsJsonSchema"> & {
