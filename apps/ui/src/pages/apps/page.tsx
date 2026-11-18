@@ -258,44 +258,47 @@ export default function AppsListingPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Apps"
-        action={
-          showToggle ? (
+      <PageHeader title="Apps" />
+      {/* No filter chrome over a first-run empty state: nothing to filter. */}
+      {isEmpty || error ? null : (
+        // One toolbar row: search and filter on the left, the view toggle on the right.
+        // Every control is 36px tall (h-9); items-start keeps the toggle on the first line when the filters wrap.
+        <div className="flex shrink-0 flex-wrap items-start gap-3">
+          <ListFilterBar
+            className="min-w-0 flex-1"
+            // A floor on the search width, so a narrow window wraps the controls instead of crushing the field.
+            searchClassName="w-full sm:min-w-48 sm:max-w-sm sm:flex-1"
+            searchValue={search}
+            onSearchChange={(value) => setParam("search", value, { replace: false })}
+            searchPlaceholder="Search name or description…"
+            hasActiveFilters={hasActiveFilters}
+            onClear={clearFilters}
+          >
+            <Select
+              value={favoritesOnly ? "favorites" : "all"}
+              onValueChange={(value) =>
+                setParam("favorites", value === "favorites" ? "true" : "", { replace: false })
+              }
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Favorites" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All apps</SelectItem>
+                <SelectItem value="favorites">Favorites only</SelectItem>
+              </SelectContent>
+            </Select>
+          </ListFilterBar>
+          {showToggle ? (
             <SegmentedControl
               aria-label="Apps view"
-              size="sm"
+              className="ml-auto"
               value={view}
               onValueChange={changeView}
               options={VIEW_OPTIONS}
             />
-          ) : undefined
-        }
-      />
-      {/* No filter chrome over a first-run empty state: nothing to filter. */}
-      {isEmpty || error ? null : (
-        <ListFilterBar
-          searchValue={search}
-          onSearchChange={(value) => setParam("search", value, { replace: false })}
-          searchPlaceholder="Search name or description…"
-          hasActiveFilters={hasActiveFilters}
-          onClear={clearFilters}
-        >
-          <Select
-            value={favoritesOnly ? "favorites" : "all"}
-            onValueChange={(value) =>
-              setParam("favorites", value === "favorites" ? "true" : "", { replace: false })
-            }
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Favorites" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All apps</SelectItem>
-              <SelectItem value="favorites">Favorites only</SelectItem>
-            </SelectContent>
-          </Select>
-        </ListFilterBar>
+          ) : null}
+        </div>
       )}
       {error ? (
         <AlertCallout tone="error" icon={LayoutGrid} title="Failed to load apps">
