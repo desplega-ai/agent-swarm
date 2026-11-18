@@ -281,6 +281,10 @@
         "audit-attribution-skills"
       ]
     },
+    "repo-exec-config-write": {
+      "description": "a non-lead agent token may not change a repo's url, clonePath or hooks or create one with hooks enabled (HTTP and MCP), the lead, operator and shared-key worker still may, and a url or clonePath that starts with - is refused",
+      "scenarios": ["repo-exec-config-write"]
+    },
     "requester-hint": {
       "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
       "scenarios": ["requester-hint"]

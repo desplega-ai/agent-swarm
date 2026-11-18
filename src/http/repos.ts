@@ -1,16 +1,21 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { createSwarmRepo, deleteSwarmRepo, getSwarmRepoById, getSwarmRepos } from "../be/db";
-import { updateSwarmRepoChecked } from "../be/repo-checked-update";
+import { execConfigRefusal, updateSwarmRepoChecked } from "../be/repo-checked-update";
 import { changesMergePolicy } from "../be/repo-merge-policy";
 import { can } from "../rbac";
 import { emitIntegrationConnected } from "../telemetry";
 import { RepoGuidelinesInputSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { agentFirstPrincipal, refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+/** Workers pass `url` and `clonePath` to git as arguments, so neither may read as an option. */
+const notOptionLike = (schema: z.ZodString, field: string) =>
+  schema.refine((value) => !value.startsWith("-"), `${field} must not start with "-"`);
 
 const getRepo = route({
   method: "get",
@@ -50,9 +55,9 @@ const createRepo = route({
   summary: "Create a new repo",
   tags: ["Repos"],
   body: z.object({
-    url: z.string().min(1),
+    url: notOptionLike(z.string().min(1), "url"),
     name: z.string().min(1),
-    clonePath: z.string().optional(),
+    clonePath: notOptionLike(z.string(), "clonePath").optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.optional(),
@@ -63,7 +68,7 @@ const createRepo = route({
     400: { description: "Validation error", schema: z.object({ error: z.string() }) },
     403: {
       description:
-        "Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy",
+        "Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks",
       schema: z.object({ error: z.string() }),
     },
     409: { description: "Duplicate repo", schema: z.object({ error: z.string() }) },
@@ -79,9 +84,9 @@ const updateRepo = route({
   tags: ["Repos"],
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
-    url: z.string().optional(),
+    url: notOptionLike(z.string(), "url").optional(),
     name: z.string().optional(),
-    clonePath: z.string().optional(),
+    clonePath: notOptionLike(z.string(), "clonePath").optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.nullable().optional(),
@@ -90,7 +95,8 @@ const updateRepo = route({
   responses: {
     200: { description: "Repo updated", schema: SwarmRepoSchema },
     403: {
-      description: "Only the lead, the operator or a user can change allowMerge or mergePolicy",
+      description:
+        "Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks",
       schema: z.object({ error: z.string() }),
     },
     404: { description: "Repo not found", schema: z.object({ error: z.string() }) },
@@ -169,6 +175,13 @@ export async function handleRepos(
         return true;
       }
     }
+    // A non-lead agent token may create a repo, but not one with hooks enabled: an explicit
+    // `hooks: { enabled: true }` is refused and an omitted `hooks` stores it disabled.
+    const execRefusal = await execConfigRefusal(getRequestAuth(req), "http");
+    if (execRefusal && parsed.body.hooks?.enabled === true) {
+      jsonError(res, execRefusal, 403);
+      return true;
+    }
     try {
       const repo = await createSwarmRepo({
         url: parsed.body.url,
@@ -176,7 +189,7 @@ export async function handleRepos(
         clonePath: parsed.body.clonePath,
         defaultBranch: parsed.body.defaultBranch,
         autoClone: parsed.body.autoClone,
-        hooks: parsed.body.hooks,
+        hooks: parsed.body.hooks ?? (execRefusal ? { enabled: false } : undefined),
         guidelines: parsed.body.guidelines,
       });
       try {
@@ -214,6 +227,7 @@ export async function handleRepos(
           guidelines: parsed.body.guidelines,
         },
         () => allowMergeRefusal(req, myAgentId),
+        () => execConfigRefusal(getRequestAuth(req), "http"),
       );
       if (result.kind === "refused") {
         jsonError(res, result.refusal, 403);
