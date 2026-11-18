@@ -687,6 +687,10 @@
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
     },
+    "platform-config-key-guards": {
+      "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
+      "scenarios": ["platform-config-key-guards"]
+    },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
       "scenarios": [
