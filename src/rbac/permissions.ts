@@ -156,6 +156,11 @@ export const PERMISSIONS = {
       "List every agent's memories, beyond the caller's own and swarm-scoped entries (lead, operator, or user).",
     namespace: "memory",
   },
+  "memory.reembed": {
+    description:
+      "Start a background re-embed of stored memories (lead, operator, or user), all agents' or one agent's.",
+    namespace: "memory",
+  },
   "memory.delete.any": {
     description:
       "Delete a memory entry: own agent-scoped entries; swarm-scoped entries as lead, operator, or user; any entry as operator or user.",

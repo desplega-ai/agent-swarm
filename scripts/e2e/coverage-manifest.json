@@ -224,6 +224,10 @@
     }
   ],
   "flows": {
+    "caller-scoped-writes": {
+      "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
+      "scenarios": ["core-caller-scoped-writes"]
+    },
     "agent-access-tokens": {
       "description": "Mint, use, rotate and revoke worker tokens; mint and revoke task tokens",
       "scenarios": ["core-agent-access"]

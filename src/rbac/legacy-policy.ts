@@ -299,6 +299,7 @@ export const LEGACY_POLICY = {
   "memory.write.consolidated": leadOnly,
   "memory.read.any": leadOrOperatorOrUser,
   "memory.delete.any": memoryDelete,
+  "memory.reembed": leadOrOperatorOrUser,
   "channel.delete": leadOnly,
   "repo.merge-policy.write": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
