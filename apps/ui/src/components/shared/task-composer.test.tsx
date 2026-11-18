@@ -342,7 +342,9 @@ describe("TaskComposer on Sessions", () => {
 
   test("a Sessions follow-up clears the box at once; a failed one keeps its text, Retry resends its key, Edit takes it back", async () => {
     rejectCreates = 2;
-    const { PendingFollowUps, usePendingFollowUps } = await import("../sessions/pending-follow-ups");
+    const { PendingFollowUps, usePendingFollowUps } = await import(
+      "../sessions/pending-follow-ups"
+    );
     function Session() {
       const items = usePendingFollowUps("root-1", []);
       return (
