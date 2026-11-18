@@ -320,6 +320,16 @@ export const slackLeadFollowUpCard: Scenario = {
     // without a reply posts once; the one the Lead answered with slack-reply
     // posts nothing and is settled so the thread closes.
     const failDelivery = async (ask: DelegatedAsk, output: string) => {
+      // A message after the ask's card stops the follow-up from merging into
+      // that card (slack-follow-up-card-merge), so it posts its own card and
+      // the injected faults below hit it. It addresses another person, so the
+      // swarm does not route it.
+      await ctx.slack.postMessage({
+        channel: GENERAL,
+        user: "alice",
+        thread_ts: ask.threadTs,
+        text: `<@${ctx.slack.user("bob").id}> side note ${ctx.nonce}`,
+      });
       ctx.slack.injectFault({ method: "chat.startStream", error: "internal_error" });
       ctx.slack.injectFault({ method: "chat.postMessage", error: "internal_error" });
       await finish(ctx, ask.leadId, ask.followUpId, { status: "completed", output });

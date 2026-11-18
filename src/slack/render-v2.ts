@@ -28,6 +28,13 @@ import {
   updateSlackMessageRecord,
 } from "../be/db";
 import {
+  getLatestSlackOutcomeGroupHost,
+  getSlackOutcomeGroupOf,
+  isMergedSlackMessageTs,
+  recordMergedSlackOutcome,
+  type SlackOutcomeGroupHost,
+} from "../be/db/slack-card-groups";
+import {
   closeSlackTreeIfSettled,
   getSlackProcessingThreads,
   getSlackThreadsOfTasks,
@@ -1625,12 +1632,27 @@ async function slackTeamId(client: WebClient): Promise<string | undefined> {
   return cachedTeamId;
 }
 
+/**
+ * The caption line under an outcome card: `duration · who · task link`. A
+ * merged card passes all its tasks: `who` counts the workers under any of
+ * them, and the line lists every task link.
+ */
 async function outcomeFooter(
-  task: AgentTask,
+  members: readonly AgentTask[],
   tasks: AgentTask[],
   duration: string,
 ): Promise<unknown[]> {
-  const descendants = buildAskClosure(task, tasks);
+  const task = members[0];
+  if (!task) return [];
+  const memberIds = new Set(members.map((member) => member.id));
+  const descendants = [
+    ...new Map(
+      members
+        .flatMap((member) => buildAskClosure(member, tasks))
+        .filter((candidate) => !memberIds.has(candidate.id))
+        .map((candidate) => [candidate.id, candidate]),
+    ).values(),
+  ];
   const candidateAgentIds = [
     ...new Set(
       descendants.map((candidate) => candidate.agentId).filter((id): id is string => !!id),
@@ -1651,7 +1673,8 @@ async function outcomeFooter(
       : task.agentId
         ? (await getAgentById(task.agentId))?.name
         : undefined;
-  const parts = [duration, who, getTaskLink(task.id)].filter(Boolean);
+  const links = members.map((member) => getTaskLink(member.id)).join(", ");
+  const parts = [duration, who, links].filter(Boolean);
   if (parts.length === 0) return [];
   return [{ type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] }];
 }
@@ -1691,7 +1714,7 @@ export async function streamOutcomeCard(
   // part of the streamed text, so notifications carry the answer alone.
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter(task, tasks, duration)),
+    ...(await outcomeFooter([task], tasks, duration)),
   ];
   // The task's own card goes first in the blocks, under the answer. The
   // streamed text stays the answer alone.
@@ -1865,13 +1888,26 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   if (!card?.ts || !card.finalizedAt || !isSettledSlackMessage(card)) return false;
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  // A merged card shows several tasks: re-render all of them, never one alone.
+  const group = await getSlackOutcomeGroupOf(card.id);
+  if (group) {
+    return await updateOutcomeGroupCard(
+      app.client,
+      task.slackChannelId,
+      group,
+      await outcomeGroupMembers(group, tasks),
+      tasks,
+    );
+  }
+  // A merged row whose host card is gone has no Slack message to edit.
+  if (isMergedSlackMessageTs(card.ts)) return false;
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const content = await outcomeContent(task, task.slackReplySent);
   const presentation = await outcomePresentation(task, content);
   if (!presentation) return false;
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter(task, tasks, duration)),
+    ...(await outcomeFooter([task], tasks, duration)),
   ];
   const uiSpec = await outcomeUiSpec(task);
   await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
@@ -1884,6 +1920,185 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
       blocks: [{ type: "markdown", text }, ...cardBlocks, ...captions],
     });
   });
+  return true;
+}
+
+/** How long after a card's last change a Lead follow-up may still merge into it. */
+const SLACK_CARD_MERGE_WINDOW_MS = 2 * 60_000;
+/** Most task answers one merged card shows. */
+const SLACK_CARD_GROUP_MAX_SECTIONS = 5;
+
+/** True when Slack timestamp `a` is later than `b`. Avoids float rounding of the microseconds. */
+function isSlackTsAfter(a: string, b: string): boolean {
+  const key = (ts: string) => {
+    const [seconds = "", micros = ""] = ts.split(".");
+    return `${seconds.padStart(12, "0")}.${micros.padEnd(6, "0")}`;
+  };
+  return key(a) > key(b);
+}
+
+/** True when the thread holds any message (a person's, or any bot's) posted after `ts`. */
+async function slackThreadHasMessageAfter(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+  ts: string,
+): Promise<boolean> {
+  const response = await callSlackWithRetry(client, "conversations.replies", {
+    channel: channelId,
+    ts: threadTs,
+    oldest: ts,
+    inclusive: false,
+    limit: 20,
+  });
+  const messages = Array.isArray(response.messages)
+    ? (response.messages as SlackThreadMessage[])
+    : [];
+  return messages.some((message) => !!message.ts && isSlackTsAfter(message.ts, ts));
+}
+
+/** The tasks a merged card shows, oldest first: the host's task, then each merged task. */
+async function outcomeGroupMembers(
+  group: SlackOutcomeGroupHost,
+  tasks: readonly AgentTask[],
+): Promise<AgentTask[]> {
+  const ids = [group.taskId, ...group.mergedTaskIds];
+  const members = await Promise.all(
+    ids.map(async (id) => tasks.find((task) => task.id === id) ?? (await getTaskById(id))),
+  );
+  return members.filter((member): member is AgentTask => !!member);
+}
+
+/**
+ * The text and blocks of a merged card: each task's answer, in order and
+ * separated by a blank line, then each task's captions, then one footer for
+ * all of them. A card from a script action (ui spec) shows its fallback text.
+ * Null when the text does not fit one markdown block.
+ */
+async function renderOutcomeGroup(
+  members: readonly AgentTask[],
+  tasks: AgentTask[],
+): Promise<{ text: string; blocks: unknown[] } | null> {
+  const sections: string[] = [];
+  const captions: unknown[] = [];
+  for (const member of members) {
+    const slackReplySent = (await getTaskById(member.id))?.slackReplySent ?? member.slackReplySent;
+    const content = await outcomeContent(member, slackReplySent);
+    const presentation = await outcomePresentation(member, content);
+    if (!presentation) continue;
+    sections.push(withUiSpecFallbackText(presentation, await outcomeUiSpec(member), false));
+    captions.push(...(await outcomeCaptionBlocks(member, content)));
+  }
+  const text = sections.join("\n\n");
+  if (!text || text.length > MAX_OUTCOME_MARKDOWN_LENGTH) return null;
+  const now = new Date();
+  const start = Math.min(...members.map((member) => Date.parse(member.createdAt)));
+  const end = Math.max(...members.map((member) => terminalEnd(member, now).getTime()));
+  const footer = await outcomeFooter(
+    members,
+    tasks,
+    formatV2Duration(new Date(start), new Date(end)),
+  );
+  return { text, blocks: [{ type: "markdown", text }, ...captions, ...footer] };
+}
+
+/** Edits the host card of `group` to show every task in `members`. Returns whether Slack was called. */
+async function updateOutcomeGroupCard(
+  client: WebClient,
+  channelId: string,
+  group: SlackOutcomeGroupHost,
+  members: readonly AgentTask[],
+  tasks: AgentTask[],
+): Promise<boolean> {
+  const rendered = await renderOutcomeGroup(members, tasks);
+  if (!rendered) return false;
+  await callSlackWithRetry(client, "chat.update", {
+    channel: channelId,
+    ts: group.ts,
+    text: rendered.text,
+    blocks: rendered.blocks,
+  });
+  return true;
+}
+
+/**
+ * Merges a Lead follow-up's answer into the previous card in the thread, so
+ * back-to-back results read as one message and send one notification. The
+ * edit sends no notification, so the merge is only allowed when all of these
+ * are true:
+ * - the task is a completed Lead follow-up or resume that did not defer,
+ * - the newest card in the thread is from the same agent, completed, not a
+ *   deferral, conclusion or delegation child card,
+ * - that card changed at most SLACK_CARD_MERGE_WINDOW_MS ago,
+ * - no message (a person's or a bot's) came after that card,
+ * - neither task has a ui-spec card, and the merged text fits one card.
+ *
+ * Returns false, with nothing changed, when the merge does not apply or the
+ * edit fails: the caller then posts a card as usual. An error after the edit
+ * propagates, and the next tick merges again: the edit is idempotent.
+ */
+async function mergeLeadFollowUpCard(
+  task: AgentTask,
+  tasks: AgentTask[],
+  statusBudget: StatusBudget,
+): Promise<boolean> {
+  if (task.source !== "system" || !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "")) {
+    return false;
+  }
+  if (task.status !== "completed" || isDeferredTask(task)) return false;
+  const app = getSlackApp();
+  const { agentId, slackChannelId: channelId, slackThreadTs: threadTs } = task;
+  if (!app || !agentId || !channelId || !threadTs) return false;
+
+  let group: SlackOutcomeGroupHost;
+  let members: AgentTask[];
+  try {
+    const host = await getLatestSlackOutcomeGroupHost(channelId, threadTs);
+    if (!host || host.conclusionKind) return false;
+    if (host.mergedTaskIds.length + 2 > SLACK_CARD_GROUP_MAX_SECTIONS) return false;
+    if (Date.now() - Date.parse(host.lastSectionAt) > SLACK_CARD_MERGE_WINDOW_MS) return false;
+    const existing = await outcomeGroupMembers(host, tasks);
+    const hostTask = existing[0];
+    if (
+      !hostTask ||
+      hostTask.id !== host.taskId ||
+      existing.length !== host.mergedTaskIds.length + 1 ||
+      hostTask.agentId !== agentId ||
+      hostTask.status !== "completed" ||
+      isDeferredTask(hostTask) ||
+      (await slackDelegationOwnsChildCard(hostTask)) ||
+      (await outcomeUiSpec(hostTask)) ||
+      (await outcomeUiSpec(task))
+    ) {
+      return false;
+    }
+    if (await slackThreadHasMessageAfter(app.client, channelId, threadTs, host.ts)) return false;
+    group = host;
+    members = [...existing, task];
+  } catch (error) {
+    console.error(
+      `[Slack] Could not check a card merge for task ${task.id}; posting a new card:`,
+      scrubSecrets(String(error)),
+    );
+    return false;
+  }
+
+  try {
+    if (!(await updateOutcomeGroupCard(app.client, channelId, group, members, tasks))) {
+      return false;
+    }
+  } catch (error) {
+    console.error(
+      `[Slack] Could not merge the card of task ${task.id}; posting a new card:`,
+      scrubSecrets(String(error)),
+    );
+    return false;
+  }
+  await recordMergedSlackOutcome({ host: group, channelId, threadTs, taskId: task.id });
+  await clearAssistantStatus(app.client, channelId, threadTs, statusBudget);
+  console.log(
+    `[Slack] Merged the card of task ${task.id.slice(0, 8)} into the card of task ${group.taskId.slice(0, 8)}`,
+  );
   return true;
 }
 
@@ -2235,6 +2450,12 @@ async function processSlackThread(
       if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
+        if (!card && (await mergeLeadFollowUpCard(task, tasks, statusTick.budget))) {
+          noteOutcomeDeliverySuccess(task.id);
+          await finalizeTerminalSlackReactions([task]);
+          outcomeCreated = true;
+          continue;
+        }
         const outcome = await streamOutcomeCard(task, { statusBudget: statusTick.budget });
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
