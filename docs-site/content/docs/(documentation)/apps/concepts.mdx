@@ -19,7 +19,7 @@ Prefer hiding a column when a field is being retired. Hiding preserves existing 
 
 Queries give an App a declared read surface. A query selects one model and can add equality filters, sorting, and a row limit. Parameter placeholders such as `{ "$param": "competitor" }` let a detail page or agent request one specific record without exposing an unfiltered fallback.
 
-Agents call named queries with `app-query`; saved scripts use `ctx.swarm.app_query`. Scripts also receive generated per-App TypeScript types for models and queries starting in 1.129.0. Types are budgeted at 1 MiB per app and 4 MiB for all apps. An app past either budget stays callable untyped, and its writes and `script-upsert` calls that name it return a warning.
+Agents call named queries with `app-query`; saved scripts use `ctx.swarm.app_query`. Scripts also receive generated per-App TypeScript types for models and queries starting in 1.129.0. A script is typechecked against only the apps it names. Types are budgeted at 1 MiB per app and 4 MiB for all the apps one script names. An app past a budget stays callable untyped: an app write over the per-app budget returns a warning, and so does a `script-upsert` that names an untyped app.
 
 ## Actions
 

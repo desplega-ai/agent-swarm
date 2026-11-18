@@ -1,6 +1,6 @@
 import type { ScriptTypeContext } from "../be/scripts/type-contributors";
 import { type ColumnDef, type ColumnKind, SYSTEM_COLUMN_KINDS } from "./definition";
-import { type AppRecord, listAppRecords } from "./store";
+import { type AppRecord, getApp, listAppRecords } from "./store";
 
 /**
  * One app's rendered types may use up to 1 MiB. A max-size app at the default
@@ -396,8 +396,17 @@ export function scriptAppTypesWarnings(source: string, omitted: OmittedAppTypes[
     .map(omittedAppTypesWarning);
 }
 
-/** The warning for an app write when the saved app lost its script types. */
+/**
+ * The warning for an app write whose saved app is over the per-app types
+ * budget. Renders only that app, so a write costs the same whatever the swarm
+ * holds; the swarm-wide budget is reported where it bites, on script-upsert.
+ */
 export async function appWriteTypesWarnings(appId: string): Promise<string[]> {
-  const omitted = (await getScriptAppTypesReport()).omitted.find((app) => app.id === appId);
-  return omitted ? [omittedAppTypesWarning(omitted)] : [];
+  try {
+    const app = await getApp(appId);
+    const omitted = app ? renderAppTypesReport([app]).omitted : [];
+    return omitted.map(omittedAppTypesWarning);
+  } catch {
+    return [];
+  }
 }
