@@ -186,6 +186,15 @@ async function discoverForMcp(resourceUrl: string): Promise<DiscoveryResult | nu
   if (!issuer) return null;
 
   const as = await discoverAuthorizationServerMetadata(issuer);
+  // The browser is sent to authorization_endpoint and the API posts to the others.
+  for (const endpoint of [
+    as.authorization_endpoint,
+    as.token_endpoint,
+    as.registration_endpoint,
+    as.revocation_endpoint,
+  ]) {
+    if (endpoint) assertUrlSafe(endpoint, mcpOAuthSsrfOptions());
+  }
 
   return {
     resourceUrl: prmd.resource ?? resourceUrl,

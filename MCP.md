@@ -2845,7 +2845,6 @@ Execute an Agent Swarm external command route. v1 supports target='composio' and
 | `body` | `unknown` | No | - | Optional JSON request body. |
 | `query` | `object` | No | - | Optional query parameters appended to the Composio path. |
 | `headers` | `object` | No | - | Optional extra headers. Auth headers are injected by the server. |
-| `baseUrl` | `string` | No | - | Optional Composio API base URL override. |
 | `useOrgKey` | `boolean` | No | false | Use COMPOSIO_ORG_API_KEY/x-org-api-key instead of COMPOSIO_API_KEY/x-api-key. |
 | `raw` | `boolean` | No | false | Return raw text instead of JSON-pretty output text. |
 
