@@ -42,6 +42,8 @@ describe("openai-compatible provider table", () => {
     expect(providerForKeyVar("NAN_API_KEY")?.id).toBe("nan");
     expect(providerForKeyVar("HELMCODE_API_NAN")?.id).toBe("nan");
     expect(providerForKeyVar("HELMCODE_API_KEY")?.id).toBe("helmcode");
+    // Z.ai is ZAI_API_KEY only: models.dev's ZHIPU_API_KEY is not honored.
+    expect(providerForKeyVar("ZHIPU_API_KEY")).toBeUndefined();
     expect(providerForKeyVar("OPENROUTER_API_KEY")).toBeUndefined();
   });
 
@@ -108,13 +110,10 @@ describe("openai-compatible provider table", () => {
       // OpenCode's built-in AI Gateway SDK has no OpenAI-compatible `api` URL.
       if (entry.npm === "@ai-sdk/gateway") expect(section.api).toBeUndefined();
       else expect(section.api).toBe(entry.baseUrl);
-      if (section.env?.length === 1 && entry.aliasEnvVars.includes(section.env[0] ?? "")) {
-        // Intentional rename (zai-coding-plan): models.dev keys the section on
-        // Z.ai's upstream var, the swarm reads ZAI_API_KEY and aliases it.
-        expect(section.env).toEqual([entry.aliasEnvVars[0]]);
-      } else {
-        expect(section.env).toEqual([entry.envVar]);
-      }
+      // The merge canonicalizes a section's env to the registry's var names
+      // (models.dev keys zai-coding-plan on ZHIPU_API_KEY; the swarm reads
+      // ZAI_API_KEY and no alias).
+      expect(section.env).toEqual([entry.envVar]);
       expect(section.npm).toBe(entry.npm);
       for (const model of entry.models) {
         const snap = section.models[model.id];

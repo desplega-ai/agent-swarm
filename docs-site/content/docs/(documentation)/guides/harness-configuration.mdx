@@ -231,7 +231,7 @@ opencode checks credentials in this priority order:
 | **OpenAI API key** | `OPENAI_API_KEY` | Direct OpenAI API billing |
 | **NaN API key** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Helmcode API key** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
-| **Z.ai API key** | `ZAI_API_KEY` (alias `ZHIPU_API_KEY`) | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
+| **Z.ai API key** | `ZAI_API_KEY` | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
 | **Auth file** | `~/.local/share/opencode/auth.json` | Native opencode CLI auth file |
 
 At least one credential source is required. The Docker entrypoint validates this on startup.
@@ -292,7 +292,7 @@ pi-mono supports several authentication methods depending on which model provide
 | **Google** | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
 | **NaN** | `NAN_API_KEY` (alias `HELMCODE_API_NAN`) | Flat-rate NaN models. See [NaN and Helmcode](#nan-and-helmcode) |
 | **Helmcode** | `HELMCODE_API_KEY` | Flat-rate Helmcode models. See [NaN and Helmcode](#nan-and-helmcode) |
-| **Z.ai** | `ZAI_API_KEY` (alias `ZHIPU_API_KEY`) | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
+| **Z.ai** | `ZAI_API_KEY` | Flat-rate GLM Coding Plan models. See [Z.ai Coding Plan](#zai-coding-plan) |
 | **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
 
 At least one of these must be available. The Docker entrypoint validates this on startup. When `MODEL_OVERRIDE` starts with a provider prefix, only the matching key is required; when it's unset, any one of `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` suffices.
@@ -428,7 +428,7 @@ Nothing else changes. These surfaces derive from the entry: credential routing a
 
 | | |
 |----------|---------|
-| Env var | `ZAI_API_KEY` (alias `ZHIPU_API_KEY`, the name models.dev uses for the section) |
+| Env var | `ZAI_API_KEY` |
 | Base URL | `https://api.z.ai/api/coding/paas/v4` (fixed; no override) |
 | Models | `zai-coding-plan/glm-5.3-flash` (the everyday default), `zai-coding-plan/glm-5.3`, `zai-coding-plan/glm-5.2`, `zai-coding-plan/glm-5.1`, `zai-coding-plan/glm-5-turbo` |
 
