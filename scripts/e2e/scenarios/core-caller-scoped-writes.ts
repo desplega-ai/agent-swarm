@@ -42,6 +42,8 @@ async function taskSessionWrites(ctx: ScenarioContext): Promise<void> {
   const taskA2 = await createAssignedTask(ctx, workerA, `session owner A2 ${ctx.nonce}`);
   const taskB = await createAssignedTask(ctx, workerB, `session owner B ${ctx.nonce}`);
   const tokenA = await mintAgentToken(ctx, workerA);
+  const tokenB = await mintAgentToken(ctx, workerB);
+  let offeredId: string | null = null;
   try {
     const put = (taskId: string, sessionId: string, options: Record<string, unknown> = {}) =>
       ctx.api("PUT", `/api/tasks/${taskId}/session`, {
@@ -61,6 +63,26 @@ async function taskSessionWrites(ctx: ScenarioContext): Promise<void> {
       asRecord(response.json).claudeSessionId === `own-${ctx.nonce}` &&
         storedSessionId(ctx, taskA) === `own-${ctx.nonce}`,
       "The own-task session write was not stored",
+    );
+
+    // An offered task has no assignee yet: only the agent it is offered to writes its session.
+    const offered = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: `session offer ${ctx.nonce}`,
+        offeredTo: workerA,
+        routingReason: "human_pinned",
+        source: "api",
+      },
+    });
+    expectStatus(offered, [201], "offer a task");
+    offeredId = String(asRecord(offered.json).id);
+    response = await put(offeredId, `offer-foreign-${ctx.nonce}`, { apiKey: tokenB });
+    expectStatus(response, [403], "agent token writes the session of a task offered to another");
+    response = await put(offeredId, `offer-${ctx.nonce}`, { apiKey: tokenA });
+    expectStatus(response, [200], "agent token writes the session of a task offered to it");
+    expect(
+      storedSessionId(ctx, offeredId) === `offer-${ctx.nonce}`,
+      "The offered-task session write was not stored",
     );
 
     // A task token is bound to its task, even for another task of the same agent.
@@ -92,7 +114,9 @@ async function taskSessionWrites(ctx: ScenarioContext): Promise<void> {
     );
   } finally {
     await ctx.api("DELETE", `/api/agents/${workerA}/token`);
+    await ctx.api("DELETE", `/api/agents/${workerB}/token`);
     for (const taskId of [taskA, taskA2, taskB]) await cancelQuietly(ctx, taskId);
+    if (offeredId) await cancelQuietly(ctx, offeredId);
   }
 }
 

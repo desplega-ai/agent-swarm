@@ -1398,14 +1398,18 @@ export async function handleTasks(
     if (!parsed) return true;
     const auth = getRequestAuth(req);
     // An agent session token writes only its own task's session: a task token
-    // its bound task, any other agent token a task assigned to its agent.
+    // its bound task, any other agent token a task assigned to its agent or, while
+    // the task has no assignee, offered to its agent (the review session of an offer).
     // Check and write in one transaction so a reassignment cannot slip between.
     const task = await getDbClient().transaction(async () => {
       if (auth?.kind === "agent") {
         if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
         const existing = await getTaskById(parsed.params.id);
         if (!existing) return null;
-        if (existing.agentId !== auth.agentId) return "forbidden";
+        const ownsTask =
+          existing.agentId === auth.agentId ||
+          (!existing.agentId && existing.offeredTo === auth.agentId);
+        if (!ownsTask) return "forbidden";
       }
       return await updateTaskClaudeSessionId(
         parsed.params.id,
