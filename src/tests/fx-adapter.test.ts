@@ -612,10 +612,9 @@ describe("FxAdapter sessions", () => {
       });
       expect(JSON.stringify(capture.settings)).not.toContain("or-test-key");
 
-      // The forwarder and the per-task run dir are gone once the session settles.
-      await Bun.sleep(50);
+      // Cleanup runs asynchronously after the session settles.
+      await waitFor(() => !existsSync(fxRunDir(config)));
       await expect(fetch(swarm!.url, { method: "POST", body: "{}" })).rejects.toThrow();
-      expect(existsSync(fxRunDir(config))).toBe(false);
     } finally {
       await closeStub(stub);
     }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { countKv, listKv } from "@/be/db";
+import { scrubReservedRead } from "@/kv-reserved-namespaces";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { kvReadAuthError } from "./kv-read-auth";
@@ -72,11 +73,16 @@ export const registerKvListTool = (server: McpServer) => {
       }
       const effectiveLimit = Math.min(limit ?? 100, MAX_KV_LIST_LIMIT);
       const effectivePrefix = prefix && prefix.length > 0 ? prefix : undefined;
-      const entries = await listKv(resolved.namespace, {
-        prefix: effectivePrefix,
-        limit: effectiveLimit,
-        offset: offset ?? 0,
-      });
+      const entries = (
+        await listKv(resolved.namespace, {
+          prefix: effectivePrefix,
+          limit: effectiveLimit,
+          offset: offset ?? 0,
+        })
+      ).map((entry) => ({
+        ...entry,
+        value: scrubReservedRead(resolved.namespace, entry.value),
+      }));
       const total = await countKv(resolved.namespace, { prefix: effectivePrefix });
       return toolOk(
         entries.length === 0

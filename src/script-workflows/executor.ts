@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chown, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { type RunDirFileCheck, readRunDirFile } from "../scripts-runtime/executors/native";
 import { SCRIPT_SDK_RESPONSE_LIMIT_BYTES } from "../scripts-runtime/response-limit";
 import type { ScriptRun } from "../types";
 import {
@@ -15,7 +16,9 @@ import {
 } from "../utils/process-group";
 import {
   buildSandboxedCommand,
+  DEFAULT_SANDBOX_LIMITS,
   readStreamCapped,
+  resolveSandboxIdentity,
   sandboxSpawnEnv,
 } from "../utils/sandboxed-process";
 import { handleCapabilityRequest, MAX_PENDING_CAPABILITY_CALLS } from "./capability-bridge";
@@ -170,6 +173,8 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     const { run, apiKey } = input;
     const baseUrl = input.baseUrl.replace(/\/$/, "");
     const harnessPath = getScriptWorkflowHarnessPath();
+    // Same identity as the native script executor: nobody:nogroup on a root API.
+    const runAs = resolveSandboxIdentity();
     const tmpdir = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", `script-workflow-${run.id}-`));
     const sourceFile = `${tmpdir}/source.ts`;
     const argsFile = `${tmpdir}/args.json`;
@@ -358,7 +363,8 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     // or API base URL; status, heartbeat, and ctx.swarm HTTP stay above it.
     const harnessEnv = {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: process.env.HOME ?? "/tmp",
+      // The dropped identity cannot use the API's HOME.
+      HOME: runAs ? tmpdir : (process.env.HOME ?? "/tmp"),
       LANG: process.env.LANG ?? "C.UTF-8",
       LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
       TMPDIR: tmpdir,
@@ -374,8 +380,24 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     };
 
     try {
+      if (runAs) {
+        // The guest writes its user module and result files into the run dir
+        // and connects to the capability socket.
+        await Promise.all(
+          [tmpdir, sourceFile, argsFile, socketPath].map((path) =>
+            chown(path, runAs.uid, runAs.gid),
+          ),
+        );
+      }
+      const command = buildSandboxedCommand(
+        ["bun", "run", harnessPath],
+        harnessEnv,
+        DEFAULT_SANDBOX_LIMITS,
+        "inline",
+        runAs,
+      );
       proc = registerProcessGroup(
-        Bun.spawn(buildSandboxedCommand(["bun", "run", harnessPath], harnessEnv), {
+        Bun.spawn(command, {
           cwd: tmpdir,
           detached: detachedProcessGroup,
           // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
@@ -410,6 +432,12 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       () => "",
     );
     const spawned = proc;
+    // The guest owns the run dir: read its files only through the checked reader.
+    const runDirCheck: RunDirFileCheck = {
+      // ulimit -f already bounds what the guest can write.
+      maxBytes: DEFAULT_SANDBOX_LIMITS.maxFileKb * 1024,
+      ...(runAs ? { ownerUid: runAs.uid } : {}),
+    };
     const exited = spawned.exited.then(async (processExitCode) => {
       clearInterval(heartbeat);
       await terminateProcessGroup(spawned.pid);
@@ -420,17 +448,18 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       try {
         if (protocolFailure) throw protocolFailure;
         if (processExitCode !== 0) {
-          const file = Bun.file(errorFile);
-          const failure = (await file.exists())
-            ? (JSON.parse(await file.text()) as { message?: unknown })
-            : undefined;
+          const errorText = await readRunDirFile(errorFile, runDirCheck);
+          const failure =
+            errorText === undefined ? undefined : (JSON.parse(errorText) as { message?: unknown });
           const message =
             typeof failure?.message === "string"
               ? failure.message
               : `guest exited with ${processExitCode}`;
           throw new Error(message);
         }
-        const output = JSON.parse(await Bun.file(resultFile).text());
+        const resultText = await readRunDirFile(resultFile, runDirCheck);
+        if (resultText === undefined) throw new Error("guest wrote no readable result file");
+        const output = JSON.parse(resultText);
         await postStatus(run, baseUrl, apiKey, { status: "completed", output });
         return { exitCode: 0, stderr };
       } catch (error) {

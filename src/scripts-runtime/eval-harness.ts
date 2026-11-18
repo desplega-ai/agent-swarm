@@ -1,4 +1,5 @@
 import { buildCtx } from "./ctx";
+import { DURABLE_OBJECT_RESERVED_METHODS } from "./durable-object-base";
 import { patchFetchWithEgressSubstitution } from "./egress-secrets";
 import { type SwarmConfigPayload, UNAWAITED_WORK_DRAIN_MS } from "./executors/types";
 import { isHostValidationEquivalent } from "./host-validated-args";
@@ -114,6 +115,12 @@ try {
     apiConnections: payload.apiConnections,
     mcpConnections: payload.mcpConnections,
     agentFs: payload.agentFs,
+    caller:
+      payload.durable?.caller ??
+      payload.caller ??
+      (payload.system.agentId.value
+        ? { kind: "agent", agentId: payload.system.agentId.value }
+        : null),
   });
 
   const sourceFile = requiredEnv("SWARM_SCRIPT_SOURCE_FILE");
@@ -129,6 +136,13 @@ try {
   // dynamic absolute-path import through that symlink ("Cannot find module ...
   // from ''"). The URL form resolves identically on all supported versions.
   const mod = await import(Bun.pathToFileURL(userModulePath).href);
+  const durable = payload.durable;
+  if (durable && !mod.default?.__swarmDurable) {
+    throw new Error("this script is not a DurableObject");
+  }
+  if (!durable && mod.default?.__swarmDurable) {
+    throw new Error("this script is a DurableObject. Call it with object: { id, method }");
+  }
   if (typeof mod.default !== "function") {
     throw new Error(
       "Swarm script must export a default function. Script must export default async function (args, ctx) — args FIRST, ctx second.",
@@ -165,7 +179,38 @@ try {
     }
   }
 
-  const result = await mod.default(validatedArgs, ctx);
+  let result: unknown;
+  if (durable) {
+    const obj = new mod.default(durable.id);
+    obj.state = durable.state === undefined ? await obj.initialState() : durable.state;
+    if (durable.storedCodeVersion < durable.codeVersion && typeof obj.migrate === "function") {
+      obj.state = await obj.migrate(obj.state, durable.storedCodeVersion);
+    }
+    const method = durable.method;
+    let prototype = mod.default.prototype;
+    let descriptor: PropertyDescriptor | undefined;
+    while (Object.getPrototypeOf(prototype)?.constructor?.__swarmDurable) {
+      descriptor = Object.getOwnPropertyDescriptor(prototype, method);
+      if (descriptor) break;
+      prototype = Object.getPrototypeOf(prototype);
+    }
+    if (
+      method.startsWith("_") ||
+      DURABLE_OBJECT_RESERVED_METHODS.has(method) ||
+      typeof descriptor?.value !== "function"
+    ) {
+      throw new Error(`DurableObject method "${method}" is not callable`);
+    }
+    result = {
+      __swarmDurable: 1,
+      result: (await obj[method](validatedArgs, ctx)) ?? null,
+      state: obj.state,
+      destroyed: Boolean(obj._destroyed),
+      idleTtlSec: mod.default.idleTtlSec ?? null,
+    };
+  } else {
+    result = await mod.default(validatedArgs, ctx);
+  }
   await Bun.write(requiredEnv("SWARM_SCRIPT_RESULT_FILE"), JSON.stringify(result ?? null));
   // The run settles once the entry function resolves. Bun would otherwise keep
   // the process alive while any call the script did not await is pending (a

@@ -3868,6 +3868,9 @@ export type ScriptRunKind = z.infer<typeof ScriptRunKindSchema>;
 
 export const ScriptRunSchema = z
   .object({
+    objectScriptId: z.string().optional(),
+    objectId: z.string().optional(),
+    objectMethod: z.string().optional(),
     id: z.string().uuid(),
     agentId: z.string(),
     scriptName: z.string().optional(),

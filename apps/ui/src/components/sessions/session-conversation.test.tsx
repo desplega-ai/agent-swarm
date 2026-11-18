@@ -44,6 +44,7 @@ mock.module("@/components/sessions-v2/pane/turn-timeline", () => ({
   },
 }));
 mock.module("./session-timeline", () => ({ SessionTimeline: () => null }));
+mock.module("./cite-outcome-selection", () => ({ CiteOutcomeSelection: () => null }));
 mock.module("./session-presence", () => ({
   useSessionPresenceContext: () => ({ viewers: [], setTyping: () => {} }),
 }));
@@ -57,6 +58,7 @@ mock.module("@/components/ui/button", () => ({ Button: () => null }));
 mock.module("@/components/ui/skeleton", () => ({ Skeleton: () => null }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
+mock.module("@/lib/composer-citations", () => require("../../lib/composer-citations"));
 mock.module("@/lib/session-presence", () => require("../../lib/session-presence"));
 mock.module("@/lib/session-sharing", () => require("../../lib/session-sharing"));
 mock.module("@/lib/task-steer", () => require("../../lib/task-steer"));
@@ -102,10 +104,10 @@ async function render(node: React.ReactNode) {
   await act(async () => root.unmount());
 }
 
-test("by default only a live lead task is steered: a running worker gets a follow-up", async () => {
+test("by default only a live lead task is steered: a running worker gets a follow-up on the lead's turn", async () => {
   await render(<SessionConversation rootTaskId="root" timeline="turns" />);
   expect(composer).toMatchObject({ canSteer: false });
-  expect((composer?.targetTask as AgentTask).id).toBe("worker");
+  expect((composer?.targetTask as AgentTask).id).toBe("root");
   expect(composer?.steerSource).toBeUndefined();
   expect(composer?.onFollowUp).toBeUndefined();
   expect(composer?.value).toBeUndefined();

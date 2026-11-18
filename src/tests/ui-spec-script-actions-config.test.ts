@@ -110,7 +110,7 @@ describe("PUT and DELETE /api/config", () => {
     for (const headers of [{}, { "X-Agent-ID": LEAD_ID }]) {
       const response = await put(headers);
       expect(response.status).toBe(403);
-      expect(await response.text()).toContain("can only be changed by an admin user");
+      expect(await response.text()).toContain("With RBAC enabled, the user must be an admin");
     }
   });
 
@@ -157,14 +157,18 @@ describe("set-config and delete-config tools", () => {
   test("the lead cannot set it", async () => {
     const result = await tools.get("set-config")!({ scope: "global", key: KEY, value: PIN }, meta);
     expect(result.structuredContent?.success).toBe(false);
-    expect(result.structuredContent?.message).toContain("can only be changed by an admin user");
+    expect(result.structuredContent?.message).toContain(
+      "requires a user token or dashboard user session",
+    );
   });
 
   test("the lead cannot delete it", async () => {
     const row = await upsertSwarmConfig({ scope: "global", key: KEY, value: PIN });
     const result = await tools.get("delete-config")!({ id: row.id }, meta);
     expect(result.structuredContent?.success).toBe(false);
-    expect(result.structuredContent?.message).toContain("can only be changed by an admin user");
+    expect(result.structuredContent?.message).toContain(
+      "requires a user token or dashboard user session",
+    );
   });
 });
 

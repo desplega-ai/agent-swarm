@@ -1,4 +1,5 @@
 import { type RunScriptInput, type RunScriptOutput, runScript } from "../../scripts-runtime/loader";
+import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import { getAgentById } from "../db";
 import {
   mintScriptRunToken,
@@ -34,14 +35,6 @@ export type ScriptApiCredential = {
   /** Revoke the per-run token, if one was minted. Safe to call more than once. */
   release: () => Promise<void>;
 };
-
-/**
- * Where a script run came from, bound to its token so the rows it creates can
- * be traced back (`sourceStepId`, `parentScriptRunId`). `sourceStepId` is the
- * swarm-script workflow step that started the run, inherited by nested runs;
- * `sourceScriptRunId` is the run's own `script_runs` id.
- */
-export type ScriptRunProvenance = { sourceStepId?: string; sourceScriptRunId?: string };
 
 /**
  * Resolve the api credential a script run acts as. When the run has a real

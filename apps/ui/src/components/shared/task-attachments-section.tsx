@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
-import type { TaskAttachment } from "@/api/types";
+import type { AgentTaskStatus, TaskAttachment } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { useLinkPreviewClick } from "@/components/link-preview/link-preview-state";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
@@ -814,11 +814,14 @@ export function isPersonUpload(attachment: TaskAttachment): boolean {
 
 export function TaskPromptAttachments({
   taskId,
+  status,
   attachments,
   from,
   className,
 }: {
   taskId: string;
+  /** The task's status: a terminal task's list stops polling. */
+  status?: AgentTaskStatus;
   attachments: TaskAttachment[] | undefined;
   /**
    * Whose files to show: the person's uploads (right-aligned, above their
@@ -827,7 +830,7 @@ export function TaskPromptAttachments({
   from?: "person" | "agent";
   className?: string;
 }) {
-  const listQuery = useTaskAttachments(taskId, attachments);
+  const listQuery = useTaskAttachments(taskId, attachments, { status });
   const rows = useMemo(() => {
     const all = listQuery.data?.attachments ?? attachments ?? [];
     return from ? all.filter((a) => isPersonUpload(a) === (from === "person")) : all;

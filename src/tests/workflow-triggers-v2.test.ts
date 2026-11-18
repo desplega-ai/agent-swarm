@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import {
   countWorkflowRuns,
   createWorkflow,
   getDb,
+  getDbClient,
   getWorkflowRun,
   initDb,
   updateWorkflow,
@@ -1524,22 +1525,45 @@ describe("TriggerConfigSchema", () => {
 });
 
 describe("handleEventTrigger", () => {
-  test("starts only enabled workflows subscribed to the Slack event", async () => {
-    const matching = await makeWorkflow({
-      triggers: [{ type: "event", eventName: "slack.message" }],
-    });
+  test("starts each matching enabled workflow once, newest first", async () => {
+    const trigger = { type: "event", eventName: "slack.message" } as const;
+    const older = await makeWorkflow({ triggers: [trigger] });
+    const newer = await makeWorkflow({ triggers: [trigger, trigger] });
     const disabled = await makeWorkflow({
-      triggers: [{ type: "event", eventName: "slack.message" }],
+      enabled: false,
+      triggers: [trigger],
     });
-    await updateWorkflow(disabled.id, { enabled: false });
+    const otherEvent = await makeWorkflow({
+      triggers: [{ type: "event", eventName: "azure-devops.work_item.assigned" }],
+    });
+    const setUpdated = getDb().prepare("UPDATE workflows SET lastUpdatedAt = ? WHERE id = ?");
+    setUpdated.run("2026-01-01T00:00:00.000Z", older.id);
+    setUpdated.run("2026-01-02T00:00:00.000Z", newer.id);
 
     const payload = { channel: "C123", text: "service is down", ts: "123.456" };
+    const client = getDbClient();
+    const query = spyOn(client, "query");
+    const get = spyOn(client, "get");
+    try {
+      expect(await handleEventTrigger("unsubscribed", payload, registry)).toEqual([]);
+      const reads = [...query.mock.results, ...get.mock.results];
+      const rows = (await Promise.all(reads.map((read) => read.value))).flat();
+      const definitions = rows.filter(
+        (row) => row && typeof row === "object" && "definition" in row,
+      );
+      expect(definitions).toHaveLength(0);
+    } finally {
+      query.mockRestore();
+      get.mockRestore();
+    }
+
     const runIds = await handleEventTrigger("slack.message", payload, registry);
 
-    expect(runIds).toHaveLength(1);
-    const run = await getWorkflowRun(runIds[0]!);
-    expect(run?.workflowId).toBe(matching.id);
-    expect(run?.triggerData).toEqual(payload);
+    const runs = await Promise.all(runIds.map((runId) => getWorkflowRun(runId)));
+    expect(runs.map((run) => run?.workflowId)).toEqual([newer.id, older.id]);
+    expect(runs.map((run) => run?.triggerData)).toEqual([payload, payload]);
+    expect(await countWorkflowRuns(disabled.id)).toBe(0);
+    expect(await countWorkflowRuns(otherEvent.id)).toBe(0);
   });
 });
 

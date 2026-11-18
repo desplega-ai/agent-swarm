@@ -25,6 +25,7 @@ mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
 mock.module("@/lib/composer-paste", () => require("../../lib/composer-paste"));
 mock.module("@/lib/composer-drafts", () => require("../../lib/composer-drafts"));
+mock.module("@/lib/composer-citations", () => require("../../lib/composer-citations"));
 mock.module("@/components/shared/error-boundary", () => ({
   ErrorBoundary: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -308,6 +309,21 @@ async function attachAndSend(container: HTMLElement) {
 }
 
 describe("TaskComposer on Sessions", () => {
+  test("a citation can be sent without a comment and clears on success", async () => {
+    const clear = mock(() => {});
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        citations={{ quotes: ["First line\n\nSecond line"], remove: () => {}, clear }}
+      />,
+    );
+    await send(container);
+    expect(createdTasks[0]?.task).toBe("> First line\n>\n> Second line");
+    expect(clear).toHaveBeenCalledTimes(1);
+    await unmount();
+  });
+
   test("a file added while steering is up switches to a follow-up task that carries it", async () => {
     const { container, unmount } = await mount(
       <TaskComposer

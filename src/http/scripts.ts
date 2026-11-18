@@ -30,6 +30,7 @@ import {
   updateScriptApi,
   upsertScriptByName,
 } from "../be/scripts/db";
+import { callDurableObject } from "../be/scripts/durable";
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { runScriptWithRunCredential } from "../be/scripts/run-credential";
@@ -40,9 +41,12 @@ import {
   typecheckScript,
 } from "../be/scripts/typecheck";
 import { toScriptSearchResults } from "../be/scripts/user-code-mode";
+import { isScriptRunToken } from "../be/users";
 import { can } from "../rbac";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
+import type { ScriptCaller } from "../scripts-runtime/executors/types";
 import { extractScriptSignature, type ScriptSignature } from "../scripts-runtime/extract-signature";
+import type { RunScriptOutput } from "../scripts-runtime/loader";
 import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import {
   ScriptApiAuthModeSchema,
@@ -79,6 +83,9 @@ const runBodySchema = z
   .object({
     name: scriptNameSchema.optional(),
     source: z.string().min(1).optional(),
+    object: z
+      .object({ id: z.string().min(1).max(256), method: z.string().min(1).max(128) })
+      .optional(),
     args: z.unknown().optional(),
     intent: z.string().default(""),
     scope: ScriptScopeSchema.optional(),
@@ -88,6 +95,9 @@ const runBodySchema = z
   })
   .refine((body) => Boolean(body.name) !== Boolean(body.source), {
     message: "Provide exactly one of name or source",
+  })
+  .refine((body) => !body.object || Boolean(body.name), {
+    message: "object requires name",
   });
 
 const searchBodySchema = z.object({
@@ -110,6 +120,13 @@ const listScriptsQuerySchema = z.object({
 // `extractScriptSignature`, so `JSON.parse(script.signatureJson)` is always
 // exactly this shape.
 const scriptSignatureSchema = z.object({
+  kind: z.literal("durable").optional(),
+  methods: z
+    .record(
+      z.string(),
+      z.object({ argsType: z.string(), resultType: z.string(), description: z.string() }),
+    )
+    .optional(),
   argsType: z.string(),
   resultType: z.string(),
   description: z.string(),
@@ -167,6 +184,7 @@ const scriptApiWithSecretSchema = ScriptApiRecordSchema.extend({
 // route adds.
 const scriptRunResponseSchema = z.object({
   result: z.unknown().optional(),
+  object: z.object({ id: z.string(), stateVersion: z.number(), destroyed: z.boolean() }).optional(),
   autoSaved: z.object({ slug: z.string(), reason: z.string() }).optional(),
   kvSaved: z.object({ namespace: z.string(), key: z.string() }).optional(),
   truncated: z.object({ stdout: z.boolean(), stderr: z.boolean() }),
@@ -279,6 +297,7 @@ const runRoute = route({
     200: { description: "Script run completed", schema: scriptRunResponseSchema },
     400: { description: "Validation error" },
     404: { description: "Script not found" },
+    409: { description: "Object busy, re-entry, or lease lost" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
 });
@@ -693,6 +712,14 @@ export async function handleScripts(
       return true;
     }
 
+    if (
+      parsed.body.scope !== "global" &&
+      extractScriptSignature(parsed.body.source).kind === "durable"
+    ) {
+      jsonError(res, "DurableObject scripts must be global scope", 400);
+      return true;
+    }
+
     const typecheck = await typecheckScript(parsed.body.source, { agentId: agent.id });
     if (!typecheck.ok) {
       json(
@@ -758,6 +785,13 @@ export async function handleScripts(
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
+    const callerProvenance = getCurrentRunProvenance();
+    const depth = callerProvenance?.depth ?? 0;
+    if (depth >= 16) {
+      jsonError(res, "call depth exceeds 16", 400);
+      return true;
+    }
+
     // Per-boot identity of the invoking worker process. Carried into the
     // script runtime as system context so SDK work-acquisition calls present
     // the same runtime the worker itself would — never script input.
@@ -777,6 +811,11 @@ export async function handleScripts(
       return true;
     }
 
+    if (parsed.body.source && extractScriptSignature(parsed.body.source).kind === "durable") {
+      jsonError(res, "DurableObject scripts must be saved globally and called by name", 400);
+      return true;
+    }
+
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;
     let executor = parsed.body.executor ?? null;
@@ -791,6 +830,21 @@ export async function handleScripts(
       source = script.source;
       fsMode = script.fsMode;
       executor = parsed.body.executor !== undefined ? parsed.body.executor : script.executor;
+    }
+
+    const isDurable = namedScript && JSON.parse(namedScript.signatureJson).kind === "durable";
+    if (isDurable && namedScript) {
+      if (namedScript.scope !== "global") {
+        jsonError(res, "DurableObject scripts must be global scope", 400);
+        return true;
+      }
+      if (!parsed.body.object) {
+        jsonError(res, "DurableObject scripts require object: { id, method }", 400);
+        return true;
+      }
+    } else if (parsed.body.object) {
+      jsonError(res, "not a DurableObject", 400);
+      return true;
     }
 
     if (fsMode === "workspace-rw") {
@@ -813,32 +867,81 @@ export async function handleScripts(
     const runStartTouch = namedScript?.isScratch
       ? await touchScratchScriptLastUsed(namedScript.id)
       : null;
-    const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
     // The run's script_runs id is fixed up front so the rows the script creates
     // through its token can point at it; a nested call keeps its caller's step.
     const runId = crypto.randomUUID();
-    const callerProvenance = getCurrentRunProvenance();
-    const output = await runScriptWithRunCredential(
-      {
-        source: source as string,
+    const provenance = {
+      ...callerProvenance,
+      sourceScriptRunId: runId,
+    };
+    const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
+    const runContext = {
+      agentId: agent.id,
+      runtimeInstanceId,
+      sourceTaskId,
+      egressSecrets: credentials.egressSecrets,
+      failedBindings: credentials.failedBindings,
+      userConfig: credentials.userConfig,
+      agentFs: credentials.agentFs,
+      apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
+      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+    };
+    let output: RunScriptOutput;
+    let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
+    if (isDurable && namedScript && parsed.body.object) {
+      const auth = getRequestAuth(req);
+      // The caller's own script_runs row is written only after it finishes, so
+      // a nested call knows the calling agent but not yet the calling script.
+      const caller: ScriptCaller =
+        auth?.kind === "agent" && (await isScriptRunToken(auth.tokenId))
+          ? { kind: "script", agentId: agent.id }
+          : { kind: "agent", agentId: agent.id };
+      const result = await callDurableObject({
+        ...runContext,
+        script: namedScript,
+        objectId: parsed.body.object.id,
+        method: parsed.body.object.method,
         args: parsed.body.args,
-        fsMode,
+        caller,
+        provenance,
         executor,
-        agentId: agent.id,
-        runtimeInstanceId,
-        sourceTaskId,
-        egressSecrets: credentials.egressSecrets,
-        failedBindings: credentials.failedBindings,
-        userConfig: credentials.userConfig,
-        agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
-      },
-      {
-        sourceScriptRunId: runId,
-        sourceStepId: callerProvenance?.sourceStepId ?? undefined,
-      },
-    );
+        fsMode,
+        nested: callerProvenance !== null,
+      });
+      if (!result.ok && result.code !== "run_failed") {
+        const status = ["busy", "reentry", "lease_lost"].includes(result.code) ? 409 : 400;
+        jsonError(res, result.message, status);
+        return true;
+      }
+      if (result.ok) {
+        output = result.output;
+        object = result.object;
+      } else {
+        output = result.output ?? {
+          result: undefined,
+          stdout: "",
+          stderr: result.message,
+          truncated: { stdout: false, stderr: false },
+          durationMs: 0,
+          exitCode: 1,
+          error: "executor_error",
+        };
+        if (output.exitCode === 0 && !output.error && !output.runtimeError) {
+          output = { ...output, exitCode: 1, error: "executor_error", stderr: result.message };
+        }
+      }
+    } else {
+      output = await runScriptWithRunCredential(
+        {
+          ...runContext,
+          source: source as string,
+          args: parsed.body.args,
+          fsMode,
+          executor,
+        },
+        { ...provenance, depth: depth + 1 },
+      );
+    }
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
 
     if (namedScript?.isScratch && ok) {
@@ -922,6 +1025,9 @@ export async function handleScripts(
         // redaction guarantees as the scrubbed run response below.
         args: scrubObject(parsed.body.args ?? null),
         scriptName: parsed.body.name ?? "(inline source)",
+        objectScriptId: isDurable ? namedScript?.id : undefined,
+        objectId: parsed.body.object?.id,
+        objectMethod: parsed.body.object?.method,
         status: ok ? "completed" : "failed",
         output: scrubObject(output.result),
         error: runError,
@@ -937,6 +1043,7 @@ export async function handleScripts(
       200,
       scrubObject({
         result: output.result,
+        object,
         autoSaved,
         kvSaved,
         truncated: output.truncated,

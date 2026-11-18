@@ -243,6 +243,22 @@ export const registerSlackReplyTool = (server: McpServer) => {
           await markTaskSlackReplySent(taskId);
           console.log(`[Slack] Marked slackReplySent=1 for task ${taskId}`);
         }
+        // The caller's own task also replied when the reply names another
+        // task of the same thread (a Lead follow-up that answers under the task
+        // it reviews). Without this mark, the caller's outcome card repeats
+        // the reply. A task of another thread or another agent keeps its card.
+        const sourceTaskId = requestInfo.sourceTaskId;
+        if (sourceTaskId && sourceTaskId !== taskId) {
+          const sourceTask = await getTaskById(sourceTaskId);
+          if (
+            sourceTask?.agentId === agent.id &&
+            sourceTask.slackChannelId === slackChannelId &&
+            sourceTask.slackThreadTs === slackThreadTs
+          ) {
+            await markTaskSlackReplySent(sourceTaskId);
+            console.log(`[Slack] Marked slackReplySent=1 for source task ${sourceTaskId}`);
+          }
+        }
 
         return toolOk("Reply sent successfully.", {
           details: messageTs ? `Message timestamp: ${messageTs}` : undefined,

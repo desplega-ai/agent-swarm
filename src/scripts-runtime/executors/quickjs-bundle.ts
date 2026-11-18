@@ -1,3 +1,4 @@
+import { DURABLE_OBJECT_BASE_JS } from "../durable-object-base";
 import { SourceMapReader } from "./sourcemap";
 
 /**
@@ -27,7 +28,9 @@ export const retry = s.retry;
 export const Redacted = s.Redacted;
 `;
 
-const SWARM_SDK_MODULE = `export function createSwarmSdk() {
+const SWARM_SDK_MODULE = `${DURABLE_OBJECT_BASE_JS}
+export { DurableObject };
+export function createSwarmSdk() {
   return globalThis.__swarm_ctx.swarm;
 }
 `;

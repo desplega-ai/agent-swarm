@@ -1,3 +1,5 @@
+import { scrubObject } from "./utils/secret-scrubber";
+
 /**
  * Namespace families owned by internal subsystems which write through the raw
  * DB helpers. Generic HTTP/MCP KV callers may read these namespaces for
@@ -6,6 +8,7 @@
  * (`integrations:kapso`), so its siblings under `integrations:` stay writable.
  */
 const RESERVED_FAMILIES = new Map([
+  ["durable", "namespace holds durable object state; it is written only by object calls"],
   ["apps", "namespace is reserved for swarm apps; use the app row endpoints"],
   // step-9: Comb's "Send to swarm" claims (`comb:sent`).
   ["comb", "namespace is reserved for Comb; use POST /api/comb/review-batches"],
@@ -76,4 +79,9 @@ export function reservedRoomKeyError(key: string): string | null {
   return key.startsWith("_room/")
     ? "room snapshot keys are reserved; use the room endpoints"
     : null;
+}
+
+/** Scrub durable state before generic KV reads return it. */
+export function scrubReservedRead(namespace: string, value: unknown): unknown {
+  return namespace.split(":", 1)[0] === "durable" ? scrubObject(value) : value;
 }

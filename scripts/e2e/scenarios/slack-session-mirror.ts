@@ -258,6 +258,22 @@ export const slackSessionMirror: Scenario = {
       const bothOutput = `mirror both reply ${ctx.nonce}`;
       await finish(ctx, leadId, bothId, { status: "completed", output: bothOutput });
       await expectPostedOnce(ctx, threadTs, bothOutput);
+      // The reply reads like a slack-reply: the output first, a context footer, no card header.
+      const reply = threadMessages(ctx, threadTs, bothOutput)[0];
+      const blocks = (reply?.blocks ?? []) as Array<{ type?: string; text?: { text?: string } }>;
+      expect(
+        blocks[0]?.type === "section" && String(blocks[0].text?.text).includes(bothOutput),
+        `Mirrored reply does not open with the output: ${JSON.stringify(blocks)}`,
+      );
+      expect(
+        blocks.at(-1)?.type === "context" &&
+          JSON.stringify(blocks.at(-1)).includes(bothId.slice(0, 8)),
+        `Mirrored reply has no agent · task footer: ${JSON.stringify(blocks)}`,
+      );
+      expect(
+        asRecord((await ctx.api("GET", `/api/tasks/${bothId}`)).json).slackReplySent === true,
+        "Mirrored reply did not mark slackReplySent",
+      );
 
       // A draft withdrawn before promotion (the composer cancels it when its
       // attachment upload fails) was never sent: no prompt, no cancellation card.

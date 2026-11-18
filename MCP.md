@@ -739,6 +739,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | No | - | Name of a reusable script to run. |
+| `object` | `object` | No | - | Call this object ID and method on the named global DurableObject script. |
 | `source` | `string` | No | - | Inline TypeScript source to run without a compile-time typecheck. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" for promotion-safe typing. |
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
@@ -754,7 +755,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). |
+| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). A global script can instead `export default class X extends DurableObject<State>` (import `DurableObject` from "swarm-sdk"). |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -2551,7 +2552,7 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
 | `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
-| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
+| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. The file must be a regular file inside /workspace or the working directory of your current task. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
 | `content` | `string` | No | - | Base64-encoded file content. Use this when the file lives on the caller's filesystem and isn't reachable by the API server (e.g. anything under /tmp on a worker/lead container). Either filePath OR content must be provided. |
 | `filename` | `string` | No | - | Name to give the file in Slack. Required when using content, defaults to original filename when using filePath. |
 | `initialComment` | `string` | No | - | Optional message to post with the file. |

@@ -2654,6 +2654,15 @@
     },
     "parentScriptRunId": {
       "exempt": "identifier"
+    },
+    "objectScriptId": {
+      "exempt": "identifier"
+    },
+    "objectId": {
+      "exempt": "object identity; must round-trip byte-exact for the (objectScriptId, objectId) index; rowToScriptRun scrubs it on read"
+    },
+    "objectMethod": {
+      "exempt": "method name that matched the script's signature allowlist"
     }
   },
   "script_versions": {
@@ -2993,6 +3002,9 @@
     },
     "sourceScriptRunId": {
       "exempt": "identifier"
+    },
+    "objectChain": {
+      "exempt": "JSON array of scriptId:objectId pairs written by the API; re-entry checks compare it byte-exact"
     }
   },
   "skill_files": {
@@ -3258,6 +3270,9 @@
     },
     "closed_at": {
       "exempt": "timestamp"
+    },
+    "merged_into_id": {
+      "exempt": "identifier"
     }
   },
   "slack_relay_obligations": {

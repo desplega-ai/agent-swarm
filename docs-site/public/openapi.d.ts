@@ -3933,7 +3933,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Map of key -> boolean (true iff set in process.env) */
+                /** @description Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -33662,6 +33662,9 @@ export interface components {
             estTokens: number;
         };
         ScriptRun: {
+            objectScriptId?: string;
+            objectId?: string;
+            objectMethod?: string;
             /** Format: uuid */
             id: string;
             agentId: string;
@@ -36936,6 +36939,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         runs: {
+                            objectScriptId?: string;
+                            objectId?: string;
+                            objectMethod?: string;
                             /** Format: uuid */
                             id: string;
                             agentId: string;
@@ -37638,6 +37644,10 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     source?: string;
+                    object?: {
+                        id: string;
+                        method: string;
+                    };
                     args?: unknown;
                     /** @default  */
                     intent?: string;
@@ -37663,6 +37673,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: unknown;
+                        object?: {
+                            id: string;
+                            stateVersion: number;
+                            destroyed: boolean;
+                        };
                         autoSaved?: {
                             slug: string;
                             reason: string;
@@ -37715,6 +37730,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Object busy, re-entry, or lease lost */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description workspace-rw scripts are not supported in v1 */
             501: {
                 headers: {
@@ -37756,6 +37780,15 @@ export interface operations {
                         results: {
                             name: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;
@@ -37854,6 +37887,15 @@ export interface operations {
                 content: {
                     "application/json": {
                         signature: {
+                            /** @enum {string} */
+                            kind?: "durable";
+                            methods?: {
+                                [key: string]: {
+                                    argsType: string;
+                                    resultType: string;
+                                    description: string;
+                                };
+                            };
                             argsType: string;
                             resultType: string;
                             description: string;
@@ -38010,6 +38052,15 @@ export interface operations {
                             createdAt: string;
                             updatedAt: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;

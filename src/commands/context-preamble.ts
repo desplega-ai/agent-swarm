@@ -11,6 +11,7 @@
  * resumes (see swarm memory sigterm-143-resumed-session-context-saturation-2026-05-13).
  */
 
+import { renderSessionTurnsPreamble } from "../prompts/session-turns";
 import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled } from "../utils/steering-enabled";
@@ -68,6 +69,9 @@ export interface TaskContextForPreamble {
   status?: string;
   taskType?: string;
   parentTaskId?: string;
+  agentId?: string;
+  /** Set by `GET /api/tasks/{id}`: the assignee is a lead agent. */
+  isLeadTask?: boolean;
   attachments?: Array<{
     kind: string;
     name: string;
@@ -102,6 +106,8 @@ export async function fetchTaskContextForPreamble(
       status: data.status,
       taskType: data.taskType,
       parentTaskId: data.parentTaskId,
+      agentId: data.agentId,
+      isLeadTask: data.isLeadTask,
       attachments: data.attachments,
     };
   } catch {
@@ -213,6 +219,237 @@ export async function buildContextPreamble(
   }
 
   return preamble;
+}
+
+// ─── Sessions Follow-up Preamble ──────────────────────────────────────────────
+
+/** Most recent Lead turns the Sessions follow-up preamble shows (the "last N"). */
+export const SESSION_TURNS_MAX_TURNS = 6;
+/**
+ * Token budget for the Sessions follow-up preamble: 3× the regular preamble,
+ * since it carries the session's original ask plus up to six turns.
+ * shortcut: a constant, not an env var; add one (with the configuration
+ * catalog entry) if operators need to tune it.
+ */
+export const SESSION_TURNS_MAX_TOKENS = 6000;
+export const SESSION_TURNS_MAX_CHARS = SESSION_TURNS_MAX_TOKENS * 4;
+/** Ancestors walked one by one to find the last Lead turns (delegated and review tasks sit between them). */
+export const SESSION_TURNS_MAX_HOPS = 30;
+/** Lineage reads made to reach the session root past that walk; each read climbs 50 ancestors. */
+const SESSION_ROOT_MAX_READS = 10;
+/** Skipped turn ids the elision marker names before it only counts the rest. */
+const SESSION_ELIDED_MAX_IDS = 8;
+/** Chars kept of each turn's ask (~400 tokens). */
+const SESSION_TURN_ASK_CHARS = 1600;
+/** Chars kept of each turn's answer (~1000 tokens); the newest turn keeps twice this. */
+const SESSION_TURN_ANSWER_CHARS = 4000;
+const SESSION_TURN_MAX_ARTIFACTS = 5;
+/** Room the template's own text takes, kept out of the turns' share of the budget. */
+const SESSION_TURNS_FRAME_CHARS = 1600;
+
+function clip(text: string, max: number, taskId: string): string {
+  return text.length > max
+    ? `${text.slice(0, max)} [cut; full text via \`get-task-details\` taskId \`${taskId}\`]`
+    : text;
+}
+
+function formatSessionTurn(turn: TaskContextForPreamble, heading: string, newest: boolean): string {
+  const lines = [
+    `### ${heading} (task \`${turn.id}\`, ${turn.status ?? "unknown"})`,
+    `**Asked:** ${clip(scrubSecrets(turn.task.trim()), SESSION_TURN_ASK_CHARS, turn.id)}`,
+  ];
+  const answer = (turn.output || turn.progress)?.trim();
+  const answerCap = newest ? SESSION_TURN_ANSWER_CHARS * 2 : SESSION_TURN_ANSWER_CHARS;
+  const answerLabel = turn.isLeadTask === false ? "Answer" : "You answered";
+  lines.push(
+    answer
+      ? `**${answerLabel}:** ${clip(scrubSecrets(answer), answerCap, turn.id)}`
+      : `**${answerLabel}:** (nothing recorded)`,
+  );
+  const atts = turn.attachments?.filter((a) => a.name && (a.url || a.path || a.pageId)) ?? [];
+  for (const att of atts.slice(0, SESSION_TURN_MAX_ARTIFACTS)) {
+    lines.push(`  - Artifact **${att.name}**: \`${formatAttachmentPointer(att)}\``);
+  }
+  return lines.join("\n");
+}
+
+interface LineageRow {
+  id: string;
+  agentId?: string | null;
+  parentTaskId?: string | null;
+}
+
+/**
+ * The ancestors of `fromId`, newest first, up to the session root, read with
+ * `GET /api/tasks/{id}/lineage` (the API climbs 50 ancestors per read, so a
+ * long chain costs a few reads, not one per task). Null when a read fails.
+ */
+async function fetchAncestorsToRoot(
+  apiUrl: string,
+  apiKey: string,
+  fromId: string,
+): Promise<LineageRow[] | null> {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const ancestors: LineageRow[] = [];
+  let id = fromId;
+  for (let read = 0; read < SESSION_ROOT_MAX_READS; read++) {
+    let data: { rootTaskId?: string; tasks?: LineageRow[] };
+    try {
+      const response = await fetch(`${apiUrl}/api/tasks/${id}/lineage?maxNodes=1&maxDepth=1`, {
+        headers,
+      });
+      if (!response.ok) return null;
+      data = (await response.json()) as typeof data;
+    } catch {
+      return null;
+    }
+    const byId = new Map((data.tasks ?? []).map((row) => [row.id, row]));
+    let row = byId.get(id);
+    while (row?.parentTaskId && byId.has(row.parentTaskId)) {
+      row = byId.get(row.parentTaskId);
+      if (row) ancestors.push(row);
+    }
+    // No parent left (the root), a deleted parent, or no progress: stop.
+    if (!row?.parentTaskId || row.id === id || data.rootTaskId === id) return ancestors;
+    id = row.id;
+  }
+  return ancestors;
+}
+
+function formatElisionMarker(elidedNewestFirst: string[], rootId: string | undefined): string {
+  if (elidedNewestFirst.length === 0) return "";
+  const named = elidedNewestFirst.slice(0, SESSION_ELIDED_MAX_IDS).map((id) => `\`${id}\``);
+  const more = elidedNewestFirst.length - named.length;
+  const turns = elidedNewestFirst.length === 1 ? "turn" : "turns";
+  return `### … ${elidedNewestFirst.length} earlier ${turns} skipped\n${rootId ? `Between the original ask (task \`${rootId}\`) and the turns below.` : "Before the turns below."} Skipped turn tasks, newest first: ${named.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`;
+}
+
+/**
+ * Build the Lead's preamble for a Sessions follow-up as a sandwich:
+ *
+ * 1. The session's original ask: the lineage root, whatever its type, found
+ *    past the turn walk through the lineage endpoint. Never dropped.
+ * 2. An elision marker counting and naming the Lead turns skipped between
+ *    the root and the turns shown.
+ * 3. The last SESSION_TURNS_MAX_TURNS Lead turns, oldest first, each with
+ *    its ask and answer. Delegated worker tasks are not turns: the Lead's
+ *    review of them is a turn of its own.
+ *
+ * The root is shown once: when it is also one of the last turns, it moves to
+ * the top block. To fit SESSION_TURNS_MAX_TOKENS, the oldest of the last
+ * turns drop first (into the elision marker); the root and the newest turn
+ * always stay, clipped per field.
+ *
+ * Returns null when the path holds no Lead turn or the template is switched
+ * off; the caller then falls back to `buildContextPreamble`.
+ */
+export async function buildSessionTurnsPreamble(
+  apiUrl: string,
+  apiKey: string,
+  parentTaskId: string,
+): Promise<string | null> {
+  const path: TaskContextForPreamble[] = [];
+  const turnsNewestFirst: TaskContextForPreamble[] = [];
+  const seen = new Set<string>();
+  let currentId: string | undefined = parentTaskId;
+  while (
+    currentId &&
+    !seen.has(currentId) &&
+    path.length < SESSION_TURNS_MAX_HOPS &&
+    turnsNewestFirst.length < SESSION_TURNS_MAX_TURNS
+  ) {
+    seen.add(currentId);
+    const ctx = await fetchTaskContextForPreamble(apiUrl, apiKey, currentId);
+    if (!ctx) break;
+    path.push(ctx);
+    if (ctx.isLeadTask) turnsNewestFirst.push(ctx);
+    currentId = ctx.parentTaskId;
+  }
+  if (turnsNewestFirst.length === 0) return null;
+
+  // The rest of the chain, from the oldest walked task up to the session root.
+  const top = path[path.length - 1]!;
+  const rest = top.parentTaskId ? ((await fetchAncestorsToRoot(apiUrl, apiKey, top.id)) ?? []) : [];
+  const rootRow = rest[rest.length - 1];
+  let root: TaskContextForPreamble | null = top.parentTaskId ? null : top;
+  if (rootRow) {
+    root = seen.has(rootRow.id)
+      ? (path.find((t) => t.id === rootRow.id) ?? null)
+      : await fetchTaskContextForPreamble(apiUrl, apiKey, rootRow.id);
+  }
+
+  // Lead turns past the walk. Lineage rows carry no isLeadTask, so a task
+  // assigned to an agent that owns a walked Lead turn counts as one.
+  const leadAgents = new Set(turnsNewestFirst.map((t) => t.agentId).filter(Boolean));
+  const elided = rest
+    .filter((row) => row.id !== root?.id && row.agentId && leadAgents.has(row.agentId))
+    .map((row) => row.id);
+
+  // The root is shown once, on top, unless it is the newest (only) turn.
+  const newest = turnsNewestFirst[0]!;
+  const rootOnTop = root && root.id !== newest.id ? root : null;
+  const candidates = turnsNewestFirst.filter((t) => t.id !== rootOnTop?.id);
+  const rootBlock = rootOnTop
+    ? `${formatSessionTurn(rootOnTop, "Original ask (session root)", false)}\n\n`
+    : "";
+
+  // Newest first, so the budget keeps the turns the message most likely means.
+  const budget = SESSION_TURNS_MAX_CHARS - SESSION_TURNS_FRAME_CHARS - rootBlock.length;
+  const kept: TaskContextForPreamble[] = [];
+  let used = 0;
+  for (const turn of candidates) {
+    const block = formatSessionTurn(turn, "Turn", kept.length === 0);
+    if (kept.length > 0 && used + block.length > budget) break;
+    kept.push(turn);
+    used += block.length;
+  }
+  // Turns the budget dropped are newer than the ones past the walk.
+  const elidedNewestFirst = [...candidates.slice(kept.length).map((t) => t.id), ...elided];
+  const elision = formatElisionMarker(elidedNewestFirst, rootOnTop?.id);
+
+  // Number oldest first now that the kept set is known.
+  const turns = kept
+    .map((turn, i) => {
+      const label = turn.id === root?.id ? "session root" : null;
+      const heading = `Turn ${kept.length - i}${label ? `, ${label}` : ""}`;
+      return formatSessionTurn(turn, heading, i === 0);
+    })
+    .reverse()
+    .join("\n\n");
+
+  const parent = path[0];
+  const replyTarget =
+    parent && !parent.isLeadTask
+      ? `The new message was sent on task \`${parent.id}\`, a task of another agent: ${parent.task
+          .slice(0, 300)
+          .replace(/\n/g, " ")}\n\n`
+      : "";
+
+  const rendered = await renderSessionTurnsPreamble({
+    turn_count: kept.length,
+    turns: `${turns}\n`,
+    reply_target: replyTarget,
+    root: rootBlock,
+    elided: elision ? `${elision}\n\n` : "",
+  });
+  if (!rendered) return null;
+  const preamble = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
+  return preamble.length > SESSION_TURNS_MAX_CHARS
+    ? `${preamble.slice(0, SESSION_TURNS_MAX_CHARS)}\n\n[context preamble truncated to ${SESSION_TURNS_MAX_TOKENS}-token budget]\n\n---\n`
+    : preamble;
+}
+
+/** The Lead's Sessions follow-up preamble, else the regular one-parent preamble. */
+export async function buildSessionFollowUpPreamble(
+  apiUrl: string,
+  apiKey: string,
+  parentTaskId: string,
+): Promise<string | null> {
+  return (
+    (await buildSessionTurnsPreamble(apiUrl, apiKey, parentTaskId)) ??
+    buildContextPreamble(apiUrl, apiKey, parentTaskId)
+  );
 }
 
 // ─── Resume Preamble ───────────────────────────────────────────────────────────

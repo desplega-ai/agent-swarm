@@ -69,7 +69,8 @@ language = "system"
 # changed file). The full suite runs with PRE_PUSH_FULL=1, when the preload,
 # bunfig.toml or tsconfig.json changed, or when origin/main is missing. A file-backed
 # Bun probe detects host-load RLIMIT_NPROC failures and skips only sandbox-spawn
-# tests when it exits 134; CI leaves the env gate unset. Blocking; CI stays authoritative.
+# tests when it exits 134; CI leaves the env gate unset. A per-user machine lock
+# lets one worktree run its tests at a time. Blocking; CI stays authoritative.
 entry = "bash scripts/pre-push-tests.sh"
 # CI "test" domain: src/ + scripts tests import + lockfile/tsconfig/bunfig + templates.
 files = '^(src/|scripts/|templates/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'

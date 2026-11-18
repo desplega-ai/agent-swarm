@@ -1,8 +1,17 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, useLayoutEffect } from "react";
+import { act, useLayoutEffect, useSyncExternalStore } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, ModelProfile, ModelProfileCheckResult } from "../../api/types";
+import {
+  loadModelsSnapshot,
+  modelsSnapshot,
+  resetModelsSnapshotForTests,
+  subscribeModelsSnapshot,
+} from "../../lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 // A DOM for the interaction tests at the end; removed after this file so other
 // files keep their server-render environment.
@@ -89,8 +98,18 @@ mock.module("@/api/hooks/use-integrations-meta", () => ({
     return { data: envPresence };
   },
 }));
+// The real hook's contract with no live catalog: once the snapshot lands, a new
+// snapshot-only catalog object (the cold-load tests replay that arrival).
+const SNAPSHOT_ONLY = { source: "snapshot", updatedAt: null, providers: {} };
+const snapshotLoadedNow = () => modelsSnapshot() !== null;
+const useSnapshotLoaded = () =>
+  useSyncExternalStore(subscribeModelsSnapshot, snapshotLoadedNow, snapshotLoadedNow);
 mock.module("@/api/hooks/use-models-catalog", () => ({
-  useModelsCatalog: () => ({ data: undefined }),
+  useModelsCatalog: () => {
+    const snapshotLoaded = useSnapshotLoaded();
+    return { data: snapshotLoaded ? SNAPSHOT_ONLY : undefined, snapshotLoaded };
+  },
+  useModelsSnapshot: useSnapshotLoaded,
 }));
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));
@@ -122,7 +141,9 @@ const { AgentRuntimeSettings, configuredAcpCommand, configuredAcpInvocation } = 
 );
 const { HarnessCell } = await import("./harness-cell");
 const { HarnessIcon } = await import("./harness-icon");
-const { modelGroupsForAcpTarget } = await import("../../lib/agent-runtime-models");
+const { modelGroupsForAcpTarget, modelGroupsForHarness, pickDefaultModelForHarness } = await import(
+  "../../lib/agent-runtime-models"
+);
 
 describe("AgentRuntimeSettings", () => {
   const acpAgent = {
@@ -563,6 +584,48 @@ describe("AgentRuntimeSettings Devin harness", () => {
     expect(harnessSwitches).toEqual([]);
     expect(saves).toHaveLength(1);
     expect(saves[0]?.harnessProvider).toBe("codex");
+    await view.unmount();
+  });
+});
+
+describe("AgentRuntimeSettings on a cold load of the models.dev snapshot", () => {
+  beforeEach(() => {
+    resolvedConfigs = [];
+    runtimeMetadata = cliRuntime;
+    runtimeError = false;
+    envPresence = ALL_KEYS;
+    saves.length = 0;
+    document.body.innerHTML = "";
+    resetModelsSnapshotForTests();
+  });
+  afterEach(async () => {
+    await loadModelsSnapshot();
+  });
+
+  const snapshotLands = () =>
+    act(async () => {
+      await loadModelsSnapshot();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  test("an edit made before the snapshot landed stays, and the default model is picked again", async () => {
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "Claude", "Codex");
+    await snapshotLands();
+    await save(view.container);
+    expect(saves.at(-1)?.harnessProvider).toBe("codex");
+    const groups = modelGroupsForHarness("codex", [], ALL_KEYS, null, {});
+    expect(saves.at(-1)?.model).toBe(pickDefaultModelForHarness("codex", groups, {}));
+    expect(saves.at(-1)?.allowCustomModel).toBe(false);
+    await view.unmount();
+  });
+
+  test("a stored model stays when the snapshot lands", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" }];
+    const view = await mountSettings("claude");
+    await snapshotLands();
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "claude", model: "claude-haiku-4-5" });
     await view.unmount();
   });
 });

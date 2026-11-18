@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { CHAT_COLUMN } from "@/lib/chat-width";
+import { useComposerCitations } from "@/lib/composer-citations";
 import { typingLabel } from "@/lib/session-presence";
 import { isReadOnlyAccess } from "@/lib/session-sharing";
 import {
@@ -28,6 +29,7 @@ import {
   sessionComposerTarget,
 } from "@/lib/task-steer";
 import { cn } from "@/lib/utils";
+import { CiteOutcomeSelection } from "./cite-outcome-selection";
 import { ComposerReadOnlyNotice } from "./composer-dock";
 import { PendingFollowUps, usePendingFollowUps } from "./pending-follow-ups";
 import { useSessionPresenceContext } from "./session-presence";
@@ -150,6 +152,9 @@ export function SessionConversation({
   const pendingSignature = pendingFollowUps
     .map((item) => `${item.mutationId}:${item.status}`)
     .join(",");
+  const canCite = canType && !onFollowUp;
+  const composerRef = useRef<HTMLDivElement>(null);
+  const citations = useComposerCitations(canCite ? rootTaskId : undefined);
 
   // The turn timeline also grows with a typing bubble and an approval line.
   const flowSignature = turns
@@ -252,6 +257,14 @@ export function SessionConversation({
             />
           )}
         </div>
+        {canCite && scrollEl ? (
+          <CiteOutcomeSelection
+            key={rootTaskId}
+            timeline={scrollEl}
+            composerRef={composerRef}
+            onCite={citations.add}
+          />
+        ) : null}
 
         {/* "Back to bottom", only when the user has scrolled up. Legacy: on
             the composer's top edge (half over the log's bottom padding).
@@ -299,6 +312,7 @@ export function SessionConversation({
         />
       ) : (
         <div
+          ref={composerRef}
           className="contents"
           onFocus={() => {
             composer.current.focused = true;
@@ -323,6 +337,7 @@ export function SessionConversation({
             placeholder={placeholder}
             routeLabel={routeLabel}
             value={value}
+            citations={canCite ? citations : undefined}
             // Uncontrolled: the draft persists per session (`lib/composer-drafts.ts`).
             // `PendingFollowUps` writes Edit's text back under the same key.
             draftKey={`session:${rootTaskId}`}
