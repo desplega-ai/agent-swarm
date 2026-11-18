@@ -445,6 +445,10 @@ export const PERMISSIONS = {
       "Change what a schedule the caller did not create runs (its target, task template, workflow, script, script args or params).",
     namespace: "schedule",
   },
+  "schedule.run.any": {
+    description: "Run a schedule the caller did not create now, as its creator.",
+    namespace: "schedule",
+  },
   "runtime_pool.write": {
     description: "Create, update, or delete runtime pools (image, provider kind, placement).",
     namespace: "runtime_pool",

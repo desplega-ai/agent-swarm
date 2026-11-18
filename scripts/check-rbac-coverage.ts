@@ -131,7 +131,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/schedules/create-schedule.ts": PIN_REASON,
   "src/tools/schedules/delete-schedule.ts": PIN_REASON,
   "src/tools/schedules/list-schedules.ts": PIN_REASON,
-  "src/tools/schedules/run-schedule-now.ts": PIN_REASON,
   "src/tools/script-delete.ts": PIN_REASON,
   "src/tools/script-query-types.ts": PIN_REASON,
   "src/tools/script-run.ts": PIN_REASON,
