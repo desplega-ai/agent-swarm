@@ -563,6 +563,10 @@
         "slack-http-restart-redelivery"
       ]
     },
+    "slack-inbound-gates": {
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
+      "scenarios": ["slack-inbound-gates"]
+    },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
       "scenarios": ["slack-skipped-task-legacy", "slack-skipped-task-v2"]
