@@ -4,7 +4,12 @@ import { ensureMcpToken } from "@/oauth/ensure-mcp-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type { McpServer } from "@/types";
 import { createSsrfGuardedFetch } from "@/utils/egress-guard";
-import { registerVolatileSecret } from "@/utils/secret-scrubber";
+import {
+  createValueScrubber,
+  registerVolatileSecret,
+  scrubSecrets,
+  type ValueScrubber,
+} from "@/utils/secret-scrubber";
 
 const MCP_PROXY_TIMEOUT_MS = 30_000;
 
@@ -23,9 +28,12 @@ function parseHeadersJson(value: string | null): Record<string, string> {
   }
 }
 
+type SecretEntry = { value: string; name: string };
+
 async function resolveHeaderConfigKeys(
   headerConfigKeys: string | null,
   context: { agentId?: string; repoId?: string },
+  secrets: SecretEntry[],
 ): Promise<Record<string, string>> {
   if (!headerConfigKeys) return {};
 
@@ -38,6 +46,7 @@ async function resolveHeaderConfigKeys(
 
   const configs = await getResolvedConfig(context.agentId, context.repoId);
   const configMap = new Map(configs.map((config) => [config.key, config.value]));
+  const secretKeys = new Set(configs.filter((config) => config.isSecret).map((c) => c.key));
   const resolved: Record<string, string> = {};
 
   if (Array.isArray(parsed)) {
@@ -46,6 +55,7 @@ async function resolveHeaderConfigKeys(
       const value = configMap.get(item);
       if (value === undefined) continue;
       registerVolatileSecret(value, `mcp-header:${item}`);
+      if (secretKeys.has(item)) secrets.push({ value, name: `mcp-header:${item}` });
       resolved[item] = value;
     }
     return resolved;
@@ -57,6 +67,7 @@ async function resolveHeaderConfigKeys(
     const value = configMap.get(configKey);
     if (value === undefined) continue;
     registerVolatileSecret(value, `mcp-header:${configKey}`);
+    if (secretKeys.has(configKey)) secrets.push({ value, name: `mcp-header:${configKey}` });
     resolved[headerName] = value;
   }
   return resolved;
@@ -65,10 +76,11 @@ async function resolveHeaderConfigKeys(
 async function resolveMcpHeaders(
   server: McpServer,
   context: { agentId?: string; repoId?: string },
+  secrets: SecretEntry[],
 ): Promise<Record<string, string>> {
   const headers = {
     ...parseHeadersJson(server.headers),
-    ...(await resolveHeaderConfigKeys(server.headerConfigKeys, context)),
+    ...(await resolveHeaderConfigKeys(server.headerConfigKeys, context, secrets)),
   };
 
   if (server.authMethod !== "oauth") return headers;
@@ -82,6 +94,7 @@ async function resolveMcpHeaders(
   }
 
   registerVolatileSecret(token.accessToken, `mcp-oauth:${server.id}`);
+  secrets.push({ value: token.accessToken, name: `mcp-oauth:${server.id}` });
   const rawType = token.tokenType || "Bearer";
   const prefix = rawType.toLowerCase() === "bearer" ? "Bearer" : rawType;
   headers.Authorization = `${prefix} ${token.accessToken}`;
@@ -91,7 +104,7 @@ async function resolveMcpHeaders(
 async function createMcpServerClient(
   serverId: string,
   context: { agentId?: string; repoId?: string; timeoutMs?: number } = {},
-): Promise<McpHttpClient> {
+): Promise<{ client: McpHttpClient; scrubber: ValueScrubber }> {
   const server = await getMcpServerById(serverId);
   if (!server) throw new Error("MCP server not found");
   if (!server.isEnabled) throw new Error("MCP server is disabled");
@@ -115,17 +128,36 @@ async function createMcpServerClient(
     fetch: createSsrfGuardedFetch(publicEndpointSsrfOptions()),
   });
   client.useRawUrl = true;
-  client.customHeaders = await resolveMcpHeaders(server, context);
-  return client;
+  const secrets: SecretEntry[] = [];
+  client.customHeaders = await resolveMcpHeaders(server, context, secrets);
+  return { client, scrubber: createValueScrubber(secrets) };
+}
+
+/**
+ * The external server receives the resolved secret headers and may echo them.
+ * Redact those exact values (any length) from what it returns or throws. A result
+ * is otherwise returned as the tool produced it: a pattern scrub would damage
+ * legitimate data such as signed URLs or file contents. Errors also get the
+ * pattern scrub, because they are logged.
+ */
+async function withScrubbedResponse<T>(scrubber: ValueScrubber, run: () => Promise<T>): Promise<T> {
+  try {
+    return scrubber.object(await run());
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(scrubSecrets(scrubber.text(message)));
+  }
 }
 
 export async function listMcpServerTools(
   serverId: string,
   context: { agentId?: string; repoId?: string; timeoutMs?: number } = {},
 ): Promise<McpTool[]> {
-  const client = await createMcpServerClient(serverId, context);
-  await client.initialize();
-  return client.listTools();
+  const { client, scrubber } = await createMcpServerClient(serverId, context);
+  return withScrubbedResponse(scrubber, async () => {
+    await client.initialize();
+    return client.listTools();
+  });
 }
 
 export async function callMcpServerTool(
@@ -134,7 +166,9 @@ export async function callMcpServerTool(
   args: Record<string, unknown>,
   context: { agentId?: string; repoId?: string; timeoutMs?: number } = {},
 ): Promise<McpToolCallEnvelope> {
-  const client = await createMcpServerClient(serverId, context);
-  await client.initialize();
-  return client.callToolRaw(tool, args);
+  const { client, scrubber } = await createMcpServerClient(serverId, context);
+  return withScrubbedResponse(scrubber, async () => {
+    await client.initialize();
+    return client.callToolRaw(tool, args);
+  });
 }

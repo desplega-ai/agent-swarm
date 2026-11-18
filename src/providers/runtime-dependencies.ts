@@ -30,11 +30,14 @@ export function resolveCodexCommand(
   }
 }
 
-/** OpenCode is external in compiled workers; source runs may use node_modules. */
-export function resolveOpencodeSdkSpecifier(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  if (env.OPENCODE_SDK_PATH) return env.OPENCODE_SDK_PATH;
+/**
+ * OpenCode is external in compiled workers; source runs may use node_modules.
+ * The worker imports this path into its own process, so only the worker's
+ * deployment env may set it, never the session env that carries swarm config.
+ */
+export function resolveOpencodeSdkSpecifier(): string {
+  const override = process.env.OPENCODE_SDK_PATH;
+  if (override) return override;
   for (const root of ["/usr/lib/node_modules", "/usr/local/lib/node_modules"]) {
     const candidate = `${root}/@opencode/sdk/dist/index.js`;
     if (existsSync(candidate)) return candidate;
@@ -125,7 +128,7 @@ export async function validateProviderDependencies(
       return;
     }
     case "opencode": {
-      const specifier = resolveOpencodeSdkSpecifier(env);
+      const specifier = resolveOpencodeSdkSpecifier();
       try {
         dependencies.resolveModule(specifier);
       } catch {

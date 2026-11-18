@@ -469,6 +469,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 | `dailyBudgetUsd` | `number` | No | - | Daily budget in USD (null clears the cap) |
 | `status` | `invited \| active \| suspended` | No | - | User status — invited / active / suspended |
 | `metadata` | `object` | No | - | Free-form JSON metadata (null clears the field) |
+| `avatar` | `unknown` | No | - | Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/users/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). Pass null to reset to initials. |
 | `comms` | `object` | No | - | Merge per key into metadata.comms, preserving omitted preferences and sibling metadata keys. A preference set to null removes only that preference; comms: null removes the whole comms object. When metadata is also provided, it is applied first and replaces the whole blob. |
 
 ### db-query
@@ -570,7 +571,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 | `key` | `string` | Yes | - | Configuration key (e.g., 'AGENTMAIL_WEBHOOK_SECRET'). |
 | `value` | `string` | Yes | - | Configuration value. |
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
-| `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
+| `envPath` | `string` | No | - | Optional: a path stored with the row as metadata. The server does not write files. |
 | `description` | `string` | No | - | Optional human-readable description of this config entry. |
 | `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
 
@@ -2844,7 +2845,6 @@ Execute an Agent Swarm external command route. v1 supports target='composio' and
 | `body` | `unknown` | No | - | Optional JSON request body. |
 | `query` | `object` | No | - | Optional query parameters appended to the Composio path. |
 | `headers` | `object` | No | - | Optional extra headers. Auth headers are injected by the server. |
-| `baseUrl` | `string` | No | - | Optional Composio API base URL override. |
 | `useOrgKey` | `boolean` | No | false | Use COMPOSIO_ORG_API_KEY/x-org-api-key instead of COMPOSIO_API_KEY/x-api-key. |
 | `raw` | `boolean` | No | false | Return raw text instead of JSON-pretty output text. |
 

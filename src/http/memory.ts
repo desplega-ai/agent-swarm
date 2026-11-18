@@ -47,7 +47,7 @@ import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { agentFirstPrincipal, rejectGuest } from "./request-principal";
+import { agentFirstPrincipal, rejectGuest, requestPrincipal } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -1370,6 +1370,17 @@ export async function handleMemory(
   if (reEmbedMemory.match(req.method, pathSegments)) {
     const parsed = await reEmbedMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
+    // Operator-first: the shared key stays the operator even with X-Agent-ID.
+    // An agent session token must belong to a lead.
+    const reembedDecision = can({
+      principal: await requestPrincipal(req, myAgentId, { unauthenticatedFallback: "operator" }),
+      verb: "memory.reembed",
+      source: "http",
+    });
+    if (!reembedDecision.allow) {
+      jsonError(res, `Forbidden: ${reembedDecision.reason}`, 403);
+      return true;
+    }
 
     const { agentId, batchSize } = parsed.body;
     const store = getMemoryStore();

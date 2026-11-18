@@ -62,19 +62,22 @@ export const platformExternalTools: Scenario = {
         "swarm_x rejects an unknown method",
       );
       expect(
-        (await callTool(worker, "swarm_x", { method: "GET", path: "/x", baseUrl: "not a url" }))
-          .isError,
-        "swarm_x rejects an invalid base url",
-      );
-      expect(
         (await callTool(worker, "swarm_x", { target: "slack", method: "GET", path: "/x" })).isError,
         "swarm_x rejects an unsupported target",
       );
 
       const composioKey = `ck_${ctx.nonce}_secret`;
       const orgKey = `ok_${ctx.nonce}_secret`;
+      // A second host: no swarm_x call may carry the Composio key here.
+      const elsewhere = startMockServer(() => jsonResponse({ ok: true }));
+      cleanup.add("stop the other host", async () => elsewhere.stop());
       const composio = startMockServer((request) => {
         if (request.path === "/missing") return jsonResponse({ error: "not here" }, 404);
+        if (request.path === "/redirect")
+          return new Response(null, {
+            status: 302,
+            headers: { location: `${elsewhere.origin}/landed` },
+          });
         if (request.path === "/plain")
           return new Response("plain text body", { headers: { "Content-Type": "text/plain" } });
         return jsonResponse({ ok: true, path: request.path, echoed: request.json });
@@ -82,6 +85,8 @@ export const platformExternalTools: Scenario = {
       cleanup.add("stop composio mock", async () => composio.stop());
       await track("COMPOSIO_API_KEY", composioKey, true);
       await track("COMPOSIO_ORG_API_KEY", orgKey, true);
+      // The base URL is deployment config only; swarm_x takes no base URL input.
+      await track("COMPOSIO_BASE_URL", composio.origin);
       await reloadConfig(ctx);
 
       const get = expectToolOk(
@@ -90,7 +95,6 @@ export const platformExternalTools: Scenario = {
           path: "/tool_router/session",
           query: { limit: 5, active: true, q: "a b" },
           headers: { "X-Trace": ctx.nonce },
-          baseUrl: composio.origin,
         }),
         "swarm_x GET",
       );
@@ -131,7 +135,6 @@ export const platformExternalTools: Scenario = {
           method: "POST",
           path: "/tool_router/session",
           body: { user: ctx.nonce },
-          baseUrl: composio.origin,
         }),
         "swarm_x POST",
       );
@@ -149,7 +152,6 @@ export const platformExternalTools: Scenario = {
           method: "GET",
           path: "/org",
           useOrgKey: true,
-          baseUrl: composio.origin,
         }),
         "swarm_x with the org key",
       );
@@ -166,7 +168,6 @@ export const platformExternalTools: Scenario = {
           method: "GET",
           path: "/plain",
           raw: true,
-          baseUrl: composio.origin,
         }),
         "swarm_x raw",
       );
@@ -181,11 +182,38 @@ export const platformExternalTools: Scenario = {
         notFound.isError && notFound.data.status === 404 && notFound.data.ok === false,
         "an upstream error is a tool error carrying the status",
       );
-      const unreachable = await callTool(worker, "swarm_x", {
-        method: "GET",
-        path: "/x",
-        baseUrl: "http://127.0.0.1:9",
-      });
+
+      // The key stays bound to the configured base URL's host.
+      const ignoredBase = expectToolOk(
+        await callTool(worker, "swarm_x", {
+          method: "GET",
+          path: "/ignored-base",
+          baseUrl: elsewhere.origin,
+        }),
+        "swarm_x with a base url argument",
+      );
+      expect(
+        asRecord(ignoredBase.data.response).path === "/ignored-base",
+        "a base url argument is ignored: the call goes to COMPOSIO_BASE_URL",
+      );
+      expectToolError(
+        await callTool(worker, "swarm_x", {
+          method: "GET",
+          path: `\\\\${new URL(elsewhere.origin).host}/x`,
+        }),
+        "swarm_x with a path that names another host",
+        "configured base URL",
+      );
+      const redirected = await callTool(worker, "swarm_x", { method: "GET", path: "/redirect" });
+      expect(
+        redirected.isError && redirected.data.status === 302,
+        "swarm_x returns an upstream redirect instead of following it",
+      );
+      expect(elsewhere.requests.length === 0, "the other host never received a request");
+
+      await track("COMPOSIO_BASE_URL", "http://127.0.0.1:9");
+      await reloadConfig(ctx);
+      const unreachable = await callTool(worker, "swarm_x", { method: "GET", path: "/x" });
       expect(
         unreachable.isError && unreachable.data.status === 0,
         "an unreachable upstream is a status-0 tool error",

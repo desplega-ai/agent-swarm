@@ -92,6 +92,11 @@ export async function buildSlackThreadSnapshot(
   }
   const isBot = (m: ThreadMessage) =>
     m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
+  // Only this swarm's own posts render as `[Agent]`; any other bot or app is untrusted.
+  const ownBotId = messages.some((m) => m.bot_id !== undefined) ? await getOwnBotId(client) : null;
+  const isOwnBot = (m: ThreadMessage) =>
+    (botUserId !== undefined && m.user === botUserId) ||
+    (ownBotId !== null && m.bot_id === ownBotId);
 
   // Latest message per human, newest first: the order of non-batch participants.
   const latest = new Map<string, { text: string; userTeam?: string }>();
@@ -116,15 +121,16 @@ export async function buildSlackThreadSnapshot(
     ]),
   ].filter((id) => id !== botUserId);
   const listed = ordered.slice(0, SLACK_PARTICIPANT_CAP);
+  const resolve = (slackUserId: string) =>
+    resolveSlackParticipant(client, slackUserId, {
+      sampleEventType: opts.sampleEventType,
+      sampleContext: latest.get(slackUserId)?.text ?? "",
+      userTeam: latest.get(slackUserId)?.userTeam,
+    });
 
-  // shortcut: people past the cap are not resolved, so their trust is unknown to the "untrusted present" rule; resolve them too if the cap ever hides one.
   const people: TaskSlackParticipant[] = await Promise.all(
     listed.map(async (slackUserId) => {
-      const resolution = await resolveSlackParticipant(client, slackUserId, {
-        sampleEventType: opts.sampleEventType,
-        sampleContext: latest.get(slackUserId)?.text ?? "",
-        userTeam: latest.get(slackUserId)?.userTeam,
-      });
+      const resolution = await resolve(slackUserId);
       return {
         slackUserId,
         ...(resolution.userId && { userId: resolution.userId }),
@@ -136,46 +142,80 @@ export async function buildSlackThreadSnapshot(
     }),
   );
   const trust = new Map(people.map((person) => [person.slackUserId, person.trust]));
+  // The cap limits the listed people only. Every sender and every author in the
+  // rendered context still gets a trust level, so a label is never dropped.
+  const window = contextWindow(messages, opts.excludeTs);
+  const unlisted = [
+    ...new Set([
+      ...senders.map((sender) => sender.userId),
+      ...window.filter((m) => !isBot(m) && m.user).map((m) => m.user as string),
+    ]),
+  ].filter((id) => id !== botUserId && !trust.has(id));
+  for (const [slackUserId, resolution] of await Promise.all(
+    unlisted.map(async (id) => [id, await resolve(id)] as const),
+  )) {
+    trust.set(slackUserId, resolution.trust);
+  }
   const newestPerson = people[0];
 
   return {
-    threadContext: await renderThreadContext(messages, opts.excludeTs, isBot, botUserId, trust),
+    threadContext: await renderThreadContext(window, isBot, isOwnBot, botUserId, trust),
     participants: { people, more: ordered.length - listed.length },
     trust,
     newest: { userId: newestPerson?.userId, trust: newestPerson?.trust ?? "unknown" },
   };
 }
 
-async function renderThreadContext(
-  messages: ThreadMessage[],
-  excludeTs: ReadonlySet<string>,
-  isBot: (m: ThreadMessage) => boolean,
-  botUserId: string | undefined,
-  trust: ReadonlyMap<string, SlackParticipantTrust>,
-): Promise<string> {
+/** Bot id of this swarm's own app (`auth.test`), cached per process once known. */
+let cachedOwnBotId: string | undefined;
+async function getOwnBotId(client: WebClient): Promise<string | null> {
+  if (cachedOwnBotId) return cachedOwnBotId;
+  try {
+    cachedOwnBotId = ((await client.auth.test()).bot_id as string | undefined) || undefined;
+  } catch (error) {
+    console.error("[Slack] auth.test failed while reading the bot id:", error);
+  }
+  return cachedOwnBotId ?? null;
+}
+
+/** The messages `<thread_context>` shows: the root plus the newest replies. */
+function contextWindow(messages: ThreadMessage[], excludeTs: ReadonlySet<string>): ThreadMessage[] {
   const previous = messages.filter(
     (m) => !(m.ts && excludeTs.has(m.ts)) && extractSlackMessageText(m) !== "",
   );
-  if (previous.length === 0) return "";
   // conversations.replies is oldest first: keep the root and the newest replies.
-  const window =
-    previous.length > THREAD_CONTEXT_MESSAGES
-      ? [previous[0]!, ...previous.slice(-(THREAD_CONTEXT_MESSAGES - 1))]
-      : previous;
+  return previous.length > THREAD_CONTEXT_MESSAGES
+    ? [previous[0]!, ...previous.slice(-(THREAD_CONTEXT_MESSAGES - 1))]
+    : previous;
+}
+
+async function renderThreadContext(
+  window: ThreadMessage[],
+  isBot: (m: ThreadMessage) => boolean,
+  isOwnBot: (m: ThreadMessage) => boolean,
+  botUserId: string | undefined,
+  trust: ReadonlyMap<string, SlackParticipantTrust>,
+): Promise<string> {
+  if (window.length === 0) return "";
 
   // Author identity comes from the identity primitive (resolved name or the
   // UNKNOWN sentinel), never a raw Slack display name.
+  let otherBot = false;
   const lines = window.map((m) => {
     const text = extractSlackMessageText(m);
-    if (isBot(m))
-      return formatAuthoredMessage(
-        "[Agent]",
-        text.length > 500 ? `${text.slice(0, 500)}...` : text,
-      );
+    if (isBot(m)) {
+      const short = text.length > 500 ? `${text.slice(0, 500)}...` : text;
+      if (isOwnBot(m)) return formatAuthoredMessage("[Agent]", short);
+      otherBot = true;
+      const label = resolveTemplate("slack.message.thread_context_other_bot", {
+        bot_id: m.bot_id ?? m.user ?? "unknown",
+      }).text;
+      return formatAuthoredMessage(label, short);
+    }
     return formatAuthoredMessage(m.user ? `<@${m.user}>` : "Unknown", text);
   });
   let body = await rewriteSlackMentions(lines.join("\n"), botUserId, trust);
-  if ([...trust.values()].some(isUntrusted)) {
+  if (otherBot || [...trust.values()].some(isUntrusted)) {
     body = `${resolveTemplate("slack.message.thread_context_untrusted", {}).text}\n${body}`;
   }
   return resolveTemplate("slack.message.thread_context", { thread_messages: body }).text;
