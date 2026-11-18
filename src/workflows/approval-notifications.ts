@@ -94,11 +94,10 @@ export interface ApprovalNotificationsDb {
 }
 
 /**
- * Post the "Approval Required" card for each notification channel and store
- * the Slack `messageTs` on the request. Used by the workflow HITL executor and
- * by `POST /api/approval-requests`, which checks the caller may post to Slack.
- * Callers fire and forget: a Slack failure is logged and never fails the
- * request. Email is not supported yet and is skipped.
+ * Post approval cards to Slack, Telegram, Discord and Teams and store their
+ * message addresses for later updates. The REST route and workflow HITL
+ * executor call this in the background. Delivery failures are logged, and
+ * email targets are skipped.
  */
 export async function dispatchApprovalNotifications(
   input: ApprovalNotificationsInput,

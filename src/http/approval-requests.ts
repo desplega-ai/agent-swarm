@@ -413,7 +413,7 @@ const createRoute = route({
       )
       .optional()
       .describe(
-        "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped.",
+        "Where to post approval cards with a dashboard link. Slack accepts a channel or user ID and requires `integration.slack.post`. Telegram accepts a bare chat ID or `telegram:<chatId>[:<topicId>]`. Discord requires `discord:<guildId>:<channelId>[:<threadId>]`. Teams requires `teams:<base64url conversationId>:<base64url serviceUrl>[:<type>]` with a Bot Framework service URL on the allowlist. Telegram, Discord and Teams require `integration.chat.post`. Both permissions are lead-only for agents by default. The API skips email targets.",
       ),
   }),
   responses: {
@@ -422,7 +422,7 @@ const createRoute = route({
       schema: z.object({ approvalRequest: ApprovalRequestSchema }),
     },
     400: { description: "Validation error" },
-    403: { description: "Slack notifications require a lead agent" },
+    403: { description: "Caller lacks the posting permission for a requested chat channel" },
   },
   auth: { apiKey: true },
 });
@@ -941,7 +941,7 @@ export async function handleApprovalRequests(
       createdBy,
     });
 
-    // Fire-and-forget: Slack must not delay or fail the 201. Workflow HITL
+    // Chat notification delivery runs in the background. Workflow HITL
     // requests are created by the executor directly, so they never post here.
     const notifications = parsed.body.notifications;
     if (notifications?.length && request.status === "pending") {
