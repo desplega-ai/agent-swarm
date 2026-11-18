@@ -547,11 +547,15 @@ export async function ensureRepoForTask(
 
     let warning: string | null = null;
 
+    // git, gh and glab would read a leading "-" as an option (clone, and the fetch of an
+    // existing clone), not as the repo, the target or the branch.
+    if (url.startsWith("-") || clonePath.startsWith("-") || defaultBranch.startsWith("-")) {
+      throw new Error(
+        `Refusing to use repo ${name}: its url, clonePath and defaultBranch must not start with "-"`,
+      );
+    }
+
     if (!gitHeadExists) {
-      // git, gh and glab would read a leading "-" as an option, not as the repo or the target.
-      if (url.startsWith("-") || clonePath.startsWith("-")) {
-        throw new Error(`Refusing to clone: the repo url and clonePath must not start with "-"`);
-      }
       console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
       const provider = detectVcsProvider(url);
       if (provider === "github") {

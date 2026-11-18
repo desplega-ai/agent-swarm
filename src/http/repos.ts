@@ -13,7 +13,7 @@ import { json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
-/** Workers pass `url` and `clonePath` to git as arguments, so neither may read as an option. */
+/** Workers pass `url`, `clonePath` and `defaultBranch` to git as arguments, so none may read as an option. */
 const notOptionLike = (schema: z.ZodString, field: string) =>
   schema.refine((value) => !value.startsWith("-"), `${field} must not start with "-"`);
 
@@ -58,7 +58,7 @@ const createRepo = route({
     url: notOptionLike(z.string().min(1), "url"),
     name: z.string().min(1),
     clonePath: notOptionLike(z.string(), "clonePath").optional(),
-    defaultBranch: z.string().optional(),
+    defaultBranch: notOptionLike(z.string(), "defaultBranch").optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.optional(),
     guidelines: RepoGuidelinesInputSchema.nullable().optional(),
@@ -87,7 +87,7 @@ const updateRepo = route({
     url: notOptionLike(z.string(), "url").optional(),
     name: z.string().optional(),
     clonePath: notOptionLike(z.string(), "clonePath").optional(),
-    defaultBranch: z.string().optional(),
+    defaultBranch: notOptionLike(z.string(), "defaultBranch").optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.nullable().optional(),
     guidelines: RepoGuidelinesInputSchema.nullable().optional(),

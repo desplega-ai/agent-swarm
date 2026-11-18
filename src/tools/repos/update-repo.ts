@@ -50,7 +50,11 @@ export const registerUpdateRepoTool = (server: McpServer) => {
           .refine((value) => !value.startsWith("-"), 'clonePath must not start with "-"')
           .optional()
           .describe("New clone path."),
-        defaultBranch: z.string().optional().describe("New default branch."),
+        defaultBranch: z
+          .string()
+          .refine((value) => !value.startsWith("-"), 'defaultBranch must not start with "-"')
+          .optional()
+          .describe("New default branch."),
         autoClone: z.boolean().optional().describe("Whether to auto-clone."),
         hooks: RepoHooksSchema.nullable()
           .optional()

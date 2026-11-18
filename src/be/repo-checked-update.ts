@@ -35,6 +35,11 @@ export async function execConfigRefusal(
   auth: HttpRequestAuth | null,
   source: "http" | "mcp",
 ): Promise<string | null> {
+  // A page session carries its viewer's identity, but the page's code is agent-authored and
+  // the page proxy forwards any /api/* route (same rule as human-only config keys).
+  if (auth?.page) {
+    return "Forbidden: a page session cannot change a repo's url, clonePath or hooks.";
+  }
   if (auth?.kind !== "agent") return null;
   const agent = await getAgentById(auth.agentId);
   const decision = can({

@@ -5,6 +5,11 @@ import { Cleanup, callTool, expectToolError, expectToolOk, retireAgent } from ".
 
 type Agent = { id: string; token: string };
 
+function cookiePair(headers: Headers): string {
+  const raw = headers.getSetCookie?.()[0] ?? headers.get("set-cookie") ?? "";
+  return raw.split(";")[0] ?? "";
+}
+
 async function registerWithToken(
   ctx: ScenarioContext,
   label: string,
@@ -28,7 +33,8 @@ type RepoRow = { url: string; clonePath: string; hooks: string | null; name: str
  * A repo's `url`, `clonePath` and `hooks` decide what a worker clones and runs before any model
  * step. A non-lead agent session token may not change them (HTTP and MCP) and may not create a
  * repo with hooks enabled. The lead token, the operator key and a worker on the shared key may.
- * A `url` or `clonePath` that starts with "-" is refused for every caller.
+ * A page session may not change them either. A `url`, `clonePath` or `defaultBranch` that starts
+ * with "-" is refused for every caller.
  */
 export const repoExecConfigWrite: Scenario = {
   name: "repo-exec-config-write",
@@ -111,7 +117,11 @@ export const repoExecConfigWrite: Scenario = {
           defaultBranch: "develop",
         },
       });
-      expectStatus(otherFields, [200], "worker token resends url/clonePath/hooks and edits a field");
+      expectStatus(
+        otherFields,
+        [200],
+        "worker token resends url/clonePath/hooks and edits a field",
+      );
       expect(
         asRecord(otherFields.json).defaultBranch === "develop",
         "worker token defaultBranch edit did not land",
@@ -154,7 +164,46 @@ export const repoExecConfigWrite: Scenario = {
         [400],
         "operator creates a repo with a url that starts with -",
       );
+      expectStatus(
+        await ctx.api("PUT", `/api/repos/${repoId}`, {
+          body: { defaultBranch: "--upload-pack=x" },
+        }),
+        [400],
+        "operator sets a defaultBranch that starts with -",
+      );
       expect(row(repoId)?.url === `${base}/lead.git`, "a refused dash url changed the row");
+
+      // ── a page session is refused, even for an operator viewer ─────────────
+      const page = await ctx.api("POST", "/api/pages", {
+        agentId: worker.id,
+        body: {
+          slug: `repo-exec-page-${ctx.nonce}`,
+          title: "Repo exec page",
+          body: "<p>hi</p>",
+          contentType: "text/html",
+          authMode: "authed",
+        },
+      });
+      expectStatus(page, [201], "worker creates a page");
+      const pageId = asString(asRecord(page.json).id, "page id");
+      cleanup.add("delete the page", async () => {
+        await ctx.api("DELETE", `/api/pages/${pageId}`, { agentId: worker?.id });
+      });
+      const launch = await ctx.api("POST", `/api/pages/${pageId}/launch`, { agentId: worker.id });
+      expectStatus(launch, [204], "launch a page session");
+      const pageSession = {
+        apiKey: null,
+        headers: { Cookie: cookiePair(launch.headers), "X-Swarm-Page-Id": pageId },
+      } as const;
+      expectStatus(
+        await ctx.api("PUT", `/@swarm/api/repos/${repoId}`, {
+          ...pageSession,
+          body: { url: `${base}/page.git` },
+        }),
+        [403],
+        "page session changes url",
+      );
+      expect(row(repoId)?.url === `${base}/lead.git`, "a refused page change changed the row");
 
       // ── non-lead agent token create ────────────────────────────────────────
       const workerCreate = await ctx.api("POST", "/api/repos", {
