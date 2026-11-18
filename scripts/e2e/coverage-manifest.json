@@ -293,6 +293,10 @@
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
       "scenarios": ["platform-config", "platform-lead-tools"]
     },
+    "platform-config-key-guards": {
+      "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
+      "scenarios": ["platform-config-key-guards"]
+    },
     "connector-handoff": {
       "description": "Discovery, connector code mint and exchange, whoami and /mcp-user with the exchanged token, the exchange rate limit",
       "scenarios": ["connector-handoff"]

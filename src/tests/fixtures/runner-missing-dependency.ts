@@ -12,6 +12,8 @@ const adapters: string[] = [];
 const registrations: string[] = [];
 const lifecycle: string[] = [];
 let failure: Record<string, string> | undefined;
+// The SDK path comes from the worker's own env, never from swarm config.
+process.env.OPENCODE_SDK_PATH = join(directory, "missing-sdk.js");
 
 const resolver = await import("../../prompts/resolver");
 mock.module("../../prompts/resolver", () => ({ ...resolver, configureHttpResolver() {} }));
@@ -80,7 +82,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       configs: [
         { key: "HARNESS_PROVIDER", value: selected },
         { key: "GROK_BINARY", value: join(directory, "missing-grok") },
-        { key: "OPENCODE_SDK_PATH", value: join(directory, "missing-sdk.js") },
       ],
     });
   }
