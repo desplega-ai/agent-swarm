@@ -2994,7 +2994,7 @@ const LOG_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
  */
 const LOG_LINE_MAX_BYTES = 1024 * 1024;
 
-function boundLogLine(content: string): string {
+export function boundLogLine(content: string): string {
   const encoded = new TextEncoder().encode(content);
   if (encoded.length <= LOG_LINE_MAX_BYTES) return content;
   const suffix = ` [truncated ${encoded.length - LOG_LINE_MAX_BYTES} bytes by agent-swarm]`;

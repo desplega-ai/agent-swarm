@@ -99,6 +99,41 @@ export const coreSessionLogBounds: Scenario = {
         `An exhausted session must store nothing more, went from ${written.length} to ${after.length} rows`,
       );
 
+      // Overlapping uploads must reserve their bytes against each other, not
+      // each spend the same remaining budget.
+      const raceSession = `core-slb-race-${ctx.nonce}`;
+      // Each upload is a third of the budget on its own, so only accounting
+      // that every batch can see bounds their sum.
+      await Promise.all(
+        Array.from({ length: 8 }, () =>
+          ctx.api("POST", "/api/session-logs", {
+            body: {
+              sessionId: raceSession,
+              iteration: 1,
+              cli: "opencode",
+              lines: Array.from({ length: 3 }, () => chunk),
+            },
+          }),
+        ),
+      );
+      const raceBytes =
+        ctx.db.get<{ bytes: number }>(
+          "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
+          [raceSession],
+        )?.bytes ?? 0;
+      expect(
+        raceBytes <= 1024 * 1024 + 1024,
+        `Concurrent batches must share one budget, stored ${raceBytes}`,
+      );
+      const markers = ctx.db.query<{ content: string }>(
+        "SELECT content FROM session_logs WHERE sessionId = ? AND content LIKE '%session_log_budget_exhausted%'",
+        [raceSession],
+      );
+      expect(
+        markers.length === 1,
+        `Overlapping batches must agree on one exhaustion, got ${markers.length} markers`,
+      );
+
       // The accounting lives in SQLite, so a restart must not hand the same
       // session a second budget.
       await ctx.restartSut({ env: { SESSION_LOG_SESSION_MAX_MB: "1" } });

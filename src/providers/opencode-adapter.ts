@@ -615,11 +615,13 @@ function boundedToolText(value: string): string {
 }
 
 /**
- * A whole `args` object may hold several bounded strings, so its aggregate
- * ceiling is looser than any single field's. Past it the shape is dropped for a
- * preview: the alternative is a worker-memory spike on one pathological call.
+ * Aggregate ceiling for a whole `args` object, in UTF-8 bytes, kept under the
+ * API's 256 KB per-row cap with room for the rest of the event. A mirror cut by
+ * that cap instead would be truncated mid-JSON, and the dashboard's parser
+ * reports a parse error rather than pairing the call with its `tool_end`.
+ * Past the ceiling the shape is dropped for a preview.
  */
-const TOOL_ARGS_MAX_CHARS = 4 * TOOL_PAYLOAD_MAX_CHARS;
+const TOOL_ARGS_MAX_BYTES = 150 * 1024;
 const TOOL_ARGS_MAX_DEPTH = 8;
 
 /** Truncate every string in `input`, at any depth. */
@@ -649,7 +651,10 @@ function boundedToolArgs(input: unknown): unknown {
   // A wide or deeply nested structure survives per-string truncation and can
   // still be far over the cap — many fields, or many array items.
   const reserialized = JSON.stringify(bounded);
-  if (reserialized === undefined || reserialized.length > TOOL_ARGS_MAX_CHARS) {
+  if (
+    reserialized === undefined ||
+    new TextEncoder().encode(reserialized).length > TOOL_ARGS_MAX_BYTES
+  ) {
     return { truncated: true, preview: boundedToolText(serialized) };
   }
   return bounded;
