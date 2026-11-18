@@ -3,8 +3,12 @@ import {
   findKnownModel,
   pickDefaultModelForHarness,
 } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
 import { loadModelsDevCache } from "../be/modelsdev-cache";
 import { buildModelsDevSeedRows } from "../be/seed-pricing";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 describe("Opus 5.5 registry", () => {
   test("defaults to Opus 5.5 and keeps Opus 5 selectable", () => {

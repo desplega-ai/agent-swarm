@@ -12,12 +12,15 @@
  *
  * Visible states:
  *   - active (`pending` / `offered` / `in_progress`): always rendered, the
- *     newest step shimmers. While the task is active the queries poll (4 s
- *     activity, 5 s transcript and steering) so new steps flow in live.
+ *     newest step shimmers. Only an `in_progress` task polls (4 s activity,
+ *     5 s transcript and steering) so new steps flow in live. A queued task
+ *     reads once and waits for the caller's session poll to flip it live; a
+ *     caller that passes no task row gets its row polled instead.
  *   - terminal (`completed` / `failed` / `cancelled` / `superseded`): one
  *     "Worked for 3m 12s" line, collapsed by default, that expands on click.
  *
- * Transcript fetches run only for active tasks or expanded history.
+ * Transcript fetches run only once an agent started the task, or for
+ * expanded history.
  * Steering history loads even when folded, so messages remain visible.
  * A caller that passes its task row skips the task fetch until expansion.
  * Finished tasks do not poll their steering history.
@@ -94,13 +97,24 @@ export function ChainOfThought({
 }: ChainOfThoughtProps) {
   const isActive = ACTIVE_STATUSES.has(status);
   const [expanded, setExpanded] = useState(embedded);
-  // Poll while the task is active so new activity rows flow in. Stop polling
-  // once the task reaches a terminal state. A closed fold over a known row
-  // needs no task fetch (an empty id disables the query).
-  const { data: fetched } = useTask(known && !isActive && !expanded ? "" : taskId, {
-    refetchInterval: isActive ? 4000 : false,
-  });
+  // The enabled id depends on the caller's status only: a closed fold over a
+  // known row needs no task fetch (an empty id disables the query).
+  const { data: fetched, refetch: refetchTask } = useTask(
+    known && !isActive && !expanded ? "" : taskId,
+    {
+      // Only a working task polls. A queued one with no caller row polls its
+      // own row to notice the start; with a row, the session poll does that.
+      refetchInterval: (query) =>
+        status === "in_progress" ||
+        query.state.data?.status === "in_progress" ||
+        (isActive && !known)
+          ? 4000
+          : false,
+    },
+  );
   const task = fetched ?? known;
+  // Either source may be the fresher one: the caller's session poll or this row.
+  const isLive = status === "in_progress" || fetched?.status === "in_progress";
 
   // Same gate as everywhere else. Both hooks are react-query-cached globals
   // (`/health` version + `/stats`), so calling them per timeline row costs one
@@ -109,22 +123,26 @@ export function ChainOfThought({
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages, refetch: refetchSteering } = useTaskSteeringMessages(taskId, {
     enabled: steerGate.supported && steeringEnabled,
-    refetchInterval: isActive ? 5000 : false,
+    refetchInterval: isLive ? 5000 : false,
   });
-  const wasActive = useRef(isActive);
+  const wasLive = useRef(isLive);
   useEffect(() => {
-    // Read the final acknowledgement before the finished task stops polling.
-    if (wasActive.current && !isActive && steerGate.supported && steeringEnabled) {
+    // A queued row read once is stale when the session poll says it started.
+    if (!wasLive.current && isLive) void refetchTask();
+    // Read the final acknowledgement once the task stops working and polling.
+    if (wasLive.current && !isLive && steerGate.supported && steeringEnabled) {
       void refetchSteering();
     }
-    wasActive.current = isActive;
-  }, [isActive, steerGate.supported, steeringEnabled, refetchSteering]);
+    wasLive.current = isLive;
+  }, [isLive, steerGate.supported, steeringEnabled, refetchSteering, refetchTask]);
   // Shares the detail sheet's query key, so opening the sheet reuses it. A
   // disabled query still returns the cached transcript, so a turn watched
-  // live keeps its steps once it ends.
+  // live keeps its steps once it ends. A queued task has no transcript yet:
+  // it loads once an agent accepted the task (a paused one keeps its steps).
+  const started = isLive || !!task?.acceptedAt;
   const { data: sessionLogs } = useTaskSessionLogs(taskId, {
-    enabled: isActive || expanded,
-    refetchInterval: isActive ? 5000 : false,
+    enabled: (isActive && started) || expanded,
+    refetchInterval: isLive ? 5000 : false,
   });
   const rows = useMemo(
     () =>

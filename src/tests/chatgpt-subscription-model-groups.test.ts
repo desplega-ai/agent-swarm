@@ -12,6 +12,10 @@ import {
   findKnownModel,
   modelGroupsForHarness,
 } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 function configRow(key: string, value: string): SwarmConfig {
   return { key, value } as SwarmConfig;
