@@ -469,6 +469,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 | `dailyBudgetUsd` | `number` | No | - | Daily budget in USD (null clears the cap) |
 | `status` | `invited \| active \| suspended` | No | - | User status — invited / active / suspended |
 | `metadata` | `object` | No | - | Free-form JSON metadata (null clears the field) |
+| `avatar` | `unknown` | No | - | Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/users/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). Pass null to reset to initials. |
 | `comms` | `object` | No | - | Merge per key into metadata.comms, preserving omitted preferences and sibling metadata keys. A preference set to null removes only that preference; comms: null removes the whole comms object. When metadata is also provided, it is applied first and replaces the whole blob. |
 
 ### db-query
