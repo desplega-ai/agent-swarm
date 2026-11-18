@@ -855,6 +855,28 @@ describe("OpencodeSession — persisted bytes stay bounded", () => {
     expect(storedBytes(emitted)).toBeLessThan(JSON.stringify(nested).length);
   });
 
+  test("a multi-byte payload is bounded in bytes, not characters", async () => {
+    // 80k UTF-16 units is under a character-based 100k cap, but 160 KB of
+    // UTF-8 — which the API's row cap would then cut mid-value.
+    const emoji = "😀".repeat(40_000);
+    const utf8 = (value: string) => new TextEncoder().encode(value).length;
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { body: emoji } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: emoji }],
+      }),
+      succeeded,
+    ]);
+
+    const toolEnd = emitted.find((e) => e.type === "tool_end") as { result: string };
+    expect(utf8(toolEnd.result)).toBeLessThanOrEqual(100_000);
+    const toolStart = emitted.find((e) => e.type === "tool_start") as { args: { body: string } };
+    expect(utf8(toolStart.args.body)).toBeLessThanOrEqual(100_000);
+  });
+
   test("assistant text grows linearly with its parts, not quadratically", async () => {
     const part = "z".repeat(10_000);
     const parts = Array.from({ length: 40 }, (_, ordinal) =>

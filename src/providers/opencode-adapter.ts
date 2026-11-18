@@ -458,11 +458,13 @@ const SWARM_AGENT_NAME = "swarm";
 const TRANSCRIPT_TAIL_CHARS = 20_000;
 const TOOL_RESULT_PREVIEW_CHARS = 500;
 /**
- * Cap on a persisted tool argument or result. Tool payloads are the only
- * unbounded field in an OpenCode session: one run wrote 7.3 GB of session_logs
- * in 27 minutes and OOM-killed the API container.
+ * Cap on a persisted tool argument or result, in UTF-8 bytes. Tool payloads are
+ * the only unbounded field in an OpenCode session: one run wrote 7.3 GB of
+ * session_logs in 27 minutes and OOM-killed the API container.
  */
-const TOOL_PAYLOAD_MAX_CHARS = 100_000;
+const TOOL_PAYLOAD_MAX_BYTES = 100_000;
+
+const textEncoder = new TextEncoder();
 /**
  * Raw events the dashboard never renders: tool events are covered by the
  * `tool_start` / `tool_end` mirrors, and text or reasoning deltas by their
@@ -608,10 +610,18 @@ export function measureOpencodeContext(
   });
 }
 
+/**
+ * Truncate to {@link TOOL_PAYLOAD_MAX_BYTES} UTF-8 bytes — the unit the row cap
+ * downstream counts. Bounding characters instead would let 100k 4-byte
+ * characters through as 400 KB, which the API then cuts mid-value. The cut
+ * lands on a code-point boundary, so no U+FFFD is stored.
+ */
 function boundedToolText(value: string): string {
-  return value.length > TOOL_PAYLOAD_MAX_CHARS
-    ? `${value.slice(0, TOOL_PAYLOAD_MAX_CHARS)}… [truncated ${value.length - TOOL_PAYLOAD_MAX_CHARS} chars]`
-    : value;
+  const encoded = textEncoder.encode(value);
+  if (encoded.length <= TOOL_PAYLOAD_MAX_BYTES) return value;
+  const suffix = `… [truncated ${encoded.length - TOOL_PAYLOAD_MAX_BYTES} bytes]`;
+  const room = TOOL_PAYLOAD_MAX_BYTES - textEncoder.encode(suffix).length;
+  return `${new TextDecoder("utf-8").decode(encoded.subarray(0, room), { stream: true })}${suffix}`;
 }
 
 /**
@@ -646,15 +656,13 @@ function boundedToolArgs(input: unknown): unknown {
   if (typeof input === "string") return boundedToolText(input);
   if (!input || typeof input !== "object") return input;
   const serialized = JSON.stringify(input);
-  if (serialized === undefined || serialized.length <= TOOL_PAYLOAD_MAX_CHARS) return input;
+  if (serialized === undefined || textEncoder.encode(serialized).length <= TOOL_PAYLOAD_MAX_BYTES)
+    return input;
   const bounded = boundStringsDeep(input, 0);
   // A wide or deeply nested structure survives per-string truncation and can
   // still be far over the cap — many fields, or many array items.
   const reserialized = JSON.stringify(bounded);
-  if (
-    reserialized === undefined ||
-    new TextEncoder().encode(reserialized).length > TOOL_ARGS_MAX_BYTES
-  ) {
+  if (reserialized === undefined || textEncoder.encode(reserialized).length > TOOL_ARGS_MAX_BYTES) {
     return { truncated: true, preview: boundedToolText(serialized) };
   }
   return bounded;
