@@ -590,6 +590,10 @@ scripts run. The setting applies to every script run on that server.
 | `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
 | `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
 
+Durable script runs (`launch-script-run`, `POST /api/script-runs`) have only a
+`native` runner. Under `quickjs` the server refuses new durable runs with a 400
+and marks any durable run it would restart as `failed`.
+
 `SCRIPT_QUICKJS_POOL_SIZE` (default `4`, 1 to 32) caps the `quickjs` worker
 threads. The pool reads it once, when it is first created, so restart the API
 after a change. More workers trade memory for concurrent throughput.
