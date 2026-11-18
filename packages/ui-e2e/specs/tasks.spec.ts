@@ -113,16 +113,23 @@ test("Claude SDK enables Interrupt and sends steer through the real API @local",
       provider: "claude",
       providerMeta: { transport: "sdk" },
     });
-    // A reload restores the task from the localStorage query cache, which stays
-    // fresh for the 2s staleTime. A reload inside that window skips the mount
-    // refetch and shows the cli transport until the 10s poll, past the expect
-    // timeout. Wait for the task GET (mount refetch or poll) before asserting.
+    // The dashboard persists its React Query cache in localStorage
+    // (`apps/ui/src/app/providers.tsx`), and a restored record younger than the
+    // 2 s `staleTime` counts as fresh: a reload landing inside that window skips
+    // the mount refetch and holds the pre-write transport until the
+    // `["task", id]` query's default 10 s `refetchInterval`. Whether the reload
+    // lands there is a few hundred ms of boot timing, which is why the same
+    // shard is green in one merge group and red in the next (run 44341267991).
+    // Wait for a task GET (mount refetch or poll), and keep a full interval of
+    // slack on the assertion: a poll issued before the transport PUT can still
+    // answer with the pre-write record, and the next read is 10 s away. 25 s
+    // stays well inside the 60 s test timeout.
     const refetched = page.waitForResponse(
       (r) => r.url().endsWith(`/api/tasks/${taskId}`) && r.request().method() === "GET",
     );
     await page.reload();
     await refetched;
-    await expect(interrupt).not.toHaveAttribute("aria-disabled", "true");
+    await expect(interrupt).not.toHaveAttribute("aria-disabled", "true", { timeout: 25_000 });
     await interrupt.click();
     const message = `SDK redirect ${crypto.randomUUID()}`;
     await page
