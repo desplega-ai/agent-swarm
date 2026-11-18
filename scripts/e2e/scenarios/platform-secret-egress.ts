@@ -353,7 +353,10 @@ async function connectGitignore(ctx: ScenarioContext): Promise<void> {
  */
 export const platformSecretEgress: Scenario = {
   name: "platform-secret-egress",
-  order: 663,
+  // Before github-installation-token-repos (656): this scenario restarts the API, and the boot
+  // sweep fails in_progress tasks 5 s after a restart. The strict gate needs that status in the
+  // final database, so no new restart may come later than the suite's own late restarts.
+  order: 637,
   async run(ctx) {
     const workerId = await registerWorker(ctx, "secret-egress");
     await mcpProxyResponses(ctx, workerId);
