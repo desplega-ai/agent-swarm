@@ -15,7 +15,7 @@ Pending inventory rows do not imply an audit. Reconcile this inventory against m
 
 Taras requested coverage and CI timing tracking alongside deletion totals.
 See [campaign measurements](./2026-11-17-test-cleanup-metrics.md) for verified totals, forecasts, coverage references, and comparison rules.
-The current checkpoint contains 1996 net test lines and 96 cases removed across 36 merged changes at `02cb3bae9a`.
+The current checkpoint contains 2067 net test lines and 106 cases removed across 39 merged changes at `9534b518f5`.
 The recorded C22 through C27 coverage pairs lost no covered production lines within their named final scopes.
 C25 cards, HTTP, fallback, executor, index, and follow-up slices landed in PRs #3299, #3301, #3304, #3305, #3306, and #3307.
 Complete post-cleanup coverage and controlled CI savings remain unmeasured.
@@ -692,14 +692,25 @@ The audit compared all five suites below with their direct production modules. S
 
 | Suite | Retained contract | Remaining work |
 | --- | --- | --- |
-| Registry | Dependency bounds, transitive and forward references, duplicate references, self references and cycles. | PR #3326 consolidates six cases. Some dimension-weight fixtures can fail on the aggregate weight alone. |
-| Outcome normalization | Legacy judge fallback, explicit dimension precedence, and the default threshold. | Check whether an explicitly empty dimension list falls back to the legacy judge. |
-| Baseline comparison | Shared quality dimensions, weighted results, empty sides, and scenario pairing. | An errored fixture also lacks a shared score. Give it a score to isolate status filtering. |
+| Registry | Dependency bounds, transitive and forward references, duplicate references, self references and cycles. | PR #3326 landed and consolidated six cases. Some dimension-weight fixtures can fail on the aggregate weight alone. |
+| Outcome normalization | Legacy judge fallback, explicit dimension precedence, and the default threshold. | PR #3329 established that an explicit empty list suppresses the legacy judge. |
+| Baseline comparison | Shared quality dimensions, weighted results, empty sides, and scenario pairing. | PR #3330 separates error status from missing score and exercises four token components. |
 | Scoring | Rubric scoring, efficiency decay, and normalization followed by score finalization. | Hand-calculated examples leave the runner's choice between two budgets untested. |
 | Benchmark publication | Refusal rules, held-out cells and exclusion of private fields. | The environment fixture lacks a secret sentinel. Preserve database and publication checks separately. |
 
 PR #3327 removes three benchmark mapping cases. The catalog partition, ID uniqueness, production TSV join and exact Gemini benchmark object retain their checks.
 Both versions detected 13 regressions, including a missing source row that failed during module loading.
+
+### Eval runner audit
+
+The inventory records all 17 runner test files. The audit compared their assertions with seven runner implementation files.
+Some direct dependencies outside that directory received inspection after the tests. These included polling, sandbox boot, server startup, validation and database helpers.
+The inventory records partial audit status for this pass. It supplied no runtime or mutation evidence.
+
+Two judge-error examples reproduce message selection and manually persist the expected outcome. Before deleting them, verify the stored result through the real retry executor.
+The spawned-task merge and worker-failure selection fixtures also copy runner logic. Their tests can stay green when production diverges.
+Preserve the direct origin classifier, actual scenario validation, database state transitions, startup wiring and rubric execution.
+Runtime candidates include checking cancellation with an in-flight request and distinguishing configuration IDs when two scheduled attempts otherwise tie.
 
 ### Newly added main tests
 
@@ -718,8 +729,8 @@ The new core-task-status-kind scenario remains outside the unit-file denominator
 
 ## Resume order
 
-1. Track the dependency and benchmark mapping changes in PRs #3326 and #3327.
-2. Use the eval engine audit to verify normalization and scoring candidates against their retained behavior checks.
+1. Complete review and merge validation for the baseline comparison fixture in #3330.
+2. Verify the scoring cleanup and compare the manual judge-error fixtures with persisted results from the retry executor.
 3. Continue remaining approval and memory repairs. Reconcile inventory after merges.
 4. Diagnose remaining load-sensitive baseline failures without removing useful guards.
 5. Continue pending inventory rows. Audit fixtures with their callers. No releases.
@@ -761,6 +772,9 @@ Eval timestamps: #3320 merged, +47/-32. Four shell cases retain their original b
 Codex duplicates: #3321 merged, +0/-13. The retained cases detect both regressions.
 Scheduling: #3318 merged (+2/-44, two cases removed). #3323 merged (+24/-16, same case count).
 Scenario registry: #3324 merged (+3/-64, three cases removed).
+Eval dependencies: #3326 merged (+7/-47, six cases removed).
+Benchmark mapping: #3327 merged (+1/-22, three cases removed).
+Outcome normalization: #3329 merged (+3/-13, one case removed). The retained test now detects a fallback from explicit empty dimensions to a legacy judge.
 Budget policy: PR #3254 merged. Zero net growth by default, with contract-specific exceptions and no unrelated safety offsets.
 
 ## Risks and blockers
@@ -785,7 +799,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 
 | Test file | Status | Slice or evidence |
 |---|---|---|
-| apps/evals/configs/aa.test.ts | validated, reviewed | #3327: benchmark row mappings, nulls, independent numeric pins and parser errors. |
+| apps/evals/configs/aa.test.ts | landed | #3327: benchmark row mappings, nulls, independent numeric pins and parser errors. |
 | apps/evals/configs/index.test.ts | static audit complete | Provider prefixes, model catalog membership, default selection, and alias boundaries. |
 | apps/evals/scenarios/capability-routing.test.ts | pending | |
 | apps/evals/scenarios/delegation-probe.test.ts | pending | |
@@ -814,7 +828,7 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/api/suite-analytics-http.test.ts | pending | |
 | apps/evals/src/api/suite-analytics-routes.test.ts | pending | |
 | apps/evals/src/api/suite-analytics.test.ts | pending | |
-| apps/evals/src/baseline.test.ts | static audit complete | Shared scoring, empty results, and scenario pairing. An additional exclusion masks status filtering. |
+| apps/evals/src/baseline.test.ts | candidate validated | #3330 separates status and shared-score exclusions and tests token composition. |
 | apps/evals/src/benchmark.test.ts | static audit complete | Publication refusal, held-out cells, private fields and serialization. |
 | apps/evals/src/check-display.test.ts | pending | |
 | apps/evals/src/cli-show.test.ts | pending | |
@@ -832,28 +846,28 @@ Landed marks the named slice only. Other findings in the same subsystem remain o
 | apps/evals/src/judge/trace.test.ts | pending | |
 | apps/evals/src/live/attempt-progress.test.ts | pending | |
 | apps/evals/src/logs-parser-ui.test.ts | pending | |
-| apps/evals/src/normalize-outcome.test.ts | static audit complete | Legacy fallback, explicit dimension precedence and default threshold. |
-| apps/evals/src/registry.test.ts | static audit complete | Validated #3326 dependency consolidation. Weight validation and serialization risks remain. |
+| apps/evals/src/normalize-outcome.test.ts | landed | #3329. Legacy fallback, explicit dimension precedence and default threshold. |
+| apps/evals/src/registry.test.ts | landed | #3326 dependency consolidation. Weight validation and serialization risks remain. |
 | apps/evals/src/regression-summary.test.ts | pending | |
 | apps/evals/src/regression.test.ts | pending | |
 | apps/evals/src/results.test.ts | pending | |
-| apps/evals/src/runner/harness-crash.test.ts | pending | |
-| apps/evals/src/runner/human-input.test.ts | pending | |
-| apps/evals/src/runner/hygiene.test.ts | pending | |
-| apps/evals/src/runner/member-seeding.test.ts | pending | |
-| apps/evals/src/runner/orphaned-runs.test.ts | pending | |
-| apps/evals/src/runner/progress.test.ts | pending | |
-| apps/evals/src/runner/resolve-attempt-cost.test.ts | pending | |
-| apps/evals/src/runner/roster.test.ts | pending | |
-| apps/evals/src/runner/run-configs.test.ts | pending | |
-| apps/evals/src/runner/run-efforts.test.ts | pending | |
-| apps/evals/src/runner/schedule.test.ts | pending | |
-| apps/evals/src/runner/scoring.test.ts | pending | |
-| apps/evals/src/runner/seeding.test.ts | pending | |
-| apps/evals/src/runner/spawned-tasks.test.ts | pending | |
-| apps/evals/src/runner/task-net.test.ts | pending | |
-| apps/evals/src/runner/topo.test.ts | pending | |
-| apps/evals/src/runner/worker-failures.test.ts | pending | |
+| apps/evals/src/runner/harness-crash.test.ts | partial audit | Crash signatures, retryability and clipped messages. No actual retry execution. |
+| apps/evals/src/runner/human-input.test.ts | partial audit | Answer serialization and polling settlement. Approval HTTP validation is separate. |
+| apps/evals/src/runner/hygiene.test.ts | partial audit | Database transitions, retry classification and cancellation. Executors and sweepers are injected. |
+| apps/evals/src/runner/member-seeding.test.ts | partial audit | Strict profile failures, worker routing and command order. Shell execution is outside scope. |
+| apps/evals/src/runner/orphaned-runs.test.ts | partial audit | Reaping, startup snapshot handoff and scheduled resume. No process restart. |
+| apps/evals/src/runner/progress.test.ts | partial audit | Abort behavior for polling and sandbox boot. In-flight request cancellation needs verification. |
+| apps/evals/src/runner/resolve-attempt-cost.test.ts | partial audit | Harness prices, recomputation and zero-token handling. Pricing inputs are injected. |
+| apps/evals/src/runner/roster.test.ts | partial audit | Per-member configuration, matching and costs. Two fixtures construct similar sandbox handles. |
+| apps/evals/src/runner/run-configs.test.ts | partial audit | Stored model pins and reuse. Concurrent insertion remains unverified. |
+| apps/evals/src/runner/run-efforts.test.ts | partial audit | Override precedence, snapshot application, storage and legacy NULL. |
+| apps/evals/src/runner/schedule.test.ts | partial audit | Public-first and attempt ordering. Config-ID tie breaking lacks a discriminating fixture. |
+| apps/evals/src/runner/scoring.test.ts | partial audit | Dimension execution and persistence. Manual judge-error cases bypass the retry executor. |
+| apps/evals/src/runner/seeding.test.ts | partial audit | SQL restrictions, serialized sandbox fields and expiry. Real import remains separate. |
+| apps/evals/src/runner/spawned-tasks.test.ts | partial audit | Origin classification uses production. Local merge fixtures duplicate behavior. |
+| apps/evals/src/runner/task-net.test.ts | partial audit | Cascade skip recognition and failure classification. Server cascades remain separate. |
+| apps/evals/src/runner/topo.test.ts | partial audit | Deterministic ordering, invalid edges and cycle discovery. Persisted task order remains separate. |
+| apps/evals/src/runner/worker-failures.test.ts | partial audit | Real validator acceptance. Local target-selection logic bypasses runner injection. |
 | apps/evals/src/scoring.test.ts | static audit complete | Scoring and efficiency decay. Manual arithmetic does not exercise runner budget selection. |
 | apps/evals/src/stats.test.ts | pending | |
 | apps/evals/src/swarm/api-extension.test.ts | pending | |
