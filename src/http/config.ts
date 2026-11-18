@@ -190,8 +190,8 @@ export async function ensureConfigAdmin(
 }
 
 /**
- * A human-only key (see `isHumanOnlyConfigKey`) needs an admin user: a user
- * token or a dashboard session. The operator key resolves to the operator,
+ * A human-only key (see `isHumanOnlyConfigKey`) needs a user token or dashboard
+ * user session, with admin access when RBAC is enabled. The operator key resolves to the operator,
  * and every worker holds it, so it is refused like an agent or a guest. A
  * page session is refused whoever its viewer is. The operator key can still
  * mint an admin user token; see the limit on `HUMAN_ONLY_CONFIG_KEYS`.
@@ -311,7 +311,8 @@ const envPresence = route({
   }),
   responses: {
     200: {
-      description: "Map of key -> boolean (true iff set in process.env)",
+      description:
+        "Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present.",
       schema: z.object({ presence: z.record(z.string(), z.boolean()) }),
     },
     400: { description: "Validation error" },
@@ -501,7 +502,10 @@ export async function handleConfig(
       // Organization identity is trimmed by both /status and telemetry.
       // Match that definition without changing presence semantics for secrets.
       const value = key === "SWARM_ORG_NAME" ? process.env[key]?.trim() : process.env[key];
-      presence[key] = value !== undefined && (isSlackIconConfigKey(key) || value !== "");
+      // An empty workflow allowlist is an active deny-all setting.
+      presence[key] =
+        value !== undefined &&
+        (key === "WORKFLOW_INPUT_ENV_ALLOWLIST" || isSlackIconConfigKey(key) || value !== "");
     }
     envPresence.respond(res, 200, { presence });
     return true;

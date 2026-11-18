@@ -9,7 +9,7 @@ import { workflowEventBus } from "../workflows/event-bus";
 import { getSlackApp } from "./app";
 import { getChannelExternality } from "./external-channel";
 import { slackDelegationOwnsChildCard } from "./render-v2";
-import { sendTaskResponse } from "./responses";
+import { sendTaskOutputAsReply, sendTaskResponse } from "./responses";
 
 /**
  * Mirrors a Sessions follow-up into the Slack thread its session is bound to,
@@ -160,8 +160,9 @@ export async function mirrorSessionPrompt(task: AgentTask): Promise<void> {
 }
 
 /**
- * Posts the outcome card of a person's Sessions follow-up, the card a
- * Slack-sourced task gets. Skipped when the agent already replied in the
+ * Posts the outcome of a person's Sessions follow-up. A completed task posts
+ * its output as a plain agent message, as if the agent had used `slack-reply`.
+ * A failed or cancelled task posts the status card. Skipped when the agent already replied in the
  * thread (`slackReplySent`) or the delegation renderer posts the task's
  * child card, so the thread gets the answer once.
  */
@@ -175,9 +176,13 @@ export async function mirrorSessionReply(taskId: string): Promise<void> {
     if (await slackDelegationOwnsChildCard(task)) return;
     if (!(await isInternalChannel(app.client, task.slackChannelId as string))) return;
     if (!(await claimOnce(`reply:${task.id}`))) return;
-    if (!(await sendTaskResponse(task))) {
+    const sent =
+      task.status === "completed"
+        ? await sendTaskOutputAsReply(task)
+        : await sendTaskResponse(task);
+    if (!sent) {
       await deleteKv(MIRROR_KV_NAMESPACE, `reply:${task.id}`);
-      logFailure("reply", task.id, "Slack did not accept the outcome card");
+      logFailure("reply", task.id, "Slack did not accept the outcome message");
     }
   } catch (error) {
     logFailure("reply", taskId, error);

@@ -4575,6 +4575,15 @@
       "ScriptRun": {
         "type": "object",
         "properties": {
+          "objectScriptId": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "objectMethod": {
+            "type": "string"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -15112,7 +15121,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Map of key -> boolean (true iff set in process.env)",
+            "description": "Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present.",
             "content": {
               "application/json": {
                 "schema": {
@@ -55585,6 +55594,15 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "objectScriptId": {
+                            "type": "string"
+                          },
+                          "objectId": {
+                            "type": "string"
+                          },
+                          "objectMethod": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string",
                             "format": "uuid"
@@ -64405,6 +64423,25 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "object": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "method"
+                    ]
+                  },
                   "args": {},
                   "intent": {
                     "type": "string",
@@ -64454,6 +64491,25 @@
                   "type": "object",
                   "properties": {
                     "result": {},
+                    "object": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "stateVersion": {
+                          "type": "number"
+                        },
+                        "destroyed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "stateVersion",
+                        "destroyed"
+                      ]
+                    },
                     "autoSaved": {
                       "type": "object",
                       "properties": {
@@ -64607,6 +64663,16 @@
               }
             }
           },
+          "409": {
+            "description": "Object busy, re-entry, or lease lost",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "501": {
             "description": "workspace-rw scripts are not supported in v1",
             "content": {
@@ -64680,6 +64746,34 @@
                           "signature": {
                             "type": "object",
                             "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "durable"
+                                ]
+                              },
+                              "methods": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "argsType": {
+                                      "type": "string"
+                                    },
+                                    "resultType": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "argsType",
+                                    "resultType",
+                                    "description"
+                                  ]
+                                }
+                              },
                               "argsType": {
                                 "type": "string"
                               },
@@ -64876,6 +64970,34 @@
                     "signature": {
                       "type": "object",
                       "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "durable"
+                          ]
+                        },
+                        "methods": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "argsType": {
+                                "type": "string"
+                              },
+                              "resultType": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "argsType",
+                              "resultType",
+                              "description"
+                            ]
+                          }
+                        },
                         "argsType": {
                           "type": "string"
                         },
@@ -65278,6 +65400,34 @@
                         "signature": {
                           "type": "object",
                           "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "durable"
+                              ]
+                            },
+                            "methods": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "argsType": {
+                                    "type": "string"
+                                  },
+                                  "resultType": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "argsType",
+                                  "resultType",
+                                  "description"
+                                ]
+                              }
+                            },
                             "argsType": {
                               "type": "string"
                             },

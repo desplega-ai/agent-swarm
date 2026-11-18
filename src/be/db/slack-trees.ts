@@ -193,6 +193,32 @@ export async function slackThreadHasBotReplySince(
   return !!row?.found;
 }
 
+/**
+ * True when agent `agentId` sent a `slack-reply` in the thread at or after
+ * `since`, attributed to one of `taskIds`. A Lead follow-up passes the task
+ * it reviews: the Lead can attribute its review reply to that task instead of
+ * to the follow-up itself.
+ */
+export async function slackThreadHasAgentReplyOnTasksSince(
+  channelId: string,
+  threadTs: string,
+  since: string,
+  agentId: string,
+  taskIds: readonly string[],
+): Promise<boolean> {
+  if (taskIds.length === 0) return false;
+  const row = await getDbClient().get<{ found: number }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM slack_messages reply
+       WHERE reply.channel_id = ? AND reply.thread_ts = ? AND reply.created_at >= ?
+         AND reply.kind = 'agent' AND reply.created_by = ?
+         AND reply.task_id IN (${taskIds.map(() => "?").join(", ")})
+     ) AS found`,
+    [channelId, threadTs, since, agentId, ...taskIds],
+  );
+  return !!row?.found;
+}
+
 function slackOutcomeWindowParams(window: SlackOutcomeWindow): (string | number)[] {
   return [window.finishedAfter, Number(window.delegationEnabled), window.closureActiveAfter];
 }

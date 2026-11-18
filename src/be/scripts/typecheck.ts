@@ -477,7 +477,7 @@ export interface SwarmSdk {
   schedule_list(args?: { enabled?: boolean; name?: string; scheduleType?: "recurring" | "one_time"; targetType?: "agent-task" | "workflow" | "script"; workflowId?: string; scriptName?: string; hideCompleted?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "failed" | "succeeded"; includeFull?: boolean }): Promise<unknown>;
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
-  script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
+  script_run(args: { name?: string; source?: string; object?: { id: string; method: string }; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; executor?: ScriptExecutorName | null; idempotencyKey?: string }): Promise<unknown>;
   // --- savings calibration (REST only) ---
   /** The savings curve in use (shipped or derived from this deployment) and the stored row's metadata. */
   savings_calibrationGet(): Promise<unknown>;
@@ -896,7 +896,25 @@ export interface ScriptShResult {
   exitCode: number;
 }
 
+/** The invoking agent, or the saved script that made a nested call. */
+export type ScriptCaller =
+  | { kind: "agent"; agentId: string }
+  | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
+  | null;
+
+export abstract class DurableObject<S> {
+  constructor(id: string);
+  readonly id: string;
+  state: S;
+  abstract initialState(): S | Promise<S>;
+  migrate?(state: unknown, fromVersion: number): S | Promise<S>;
+  destroy(): void;
+  static idleTtlSec?: number;
+}
+
 export interface ScriptContext {
+  /** Frozen caller identity supplied by the host. */
+  caller: ScriptCaller;
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
   swarm: SwarmSdk & { config: SwarmConfig };
@@ -1603,8 +1621,8 @@ export async function typecheckScript(
     modules: { "swarm-sdk": sdkTypes, stdlib: stdlibTypes },
     checkFile: `/// <reference path="./runtime-globals.d.ts" />
 import run from "./user-script";
-import type { ScriptMain } from "swarm-sdk";
-const _scriptMain: ScriptMain = run;
+import type { ScriptMain, DurableObject } from "swarm-sdk";
+const _scriptMain: ScriptMain | (abstract new (id: string) => DurableObject<any>) = run;
 void _scriptMain;
 `,
   });

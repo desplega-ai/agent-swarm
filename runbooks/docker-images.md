@@ -48,6 +48,13 @@ PATH entries. It needs no npm packages or compiled CLI initialization. Keep
 this code-dependent COPY in both leaf blocks. Custom worker images ship the
 helper and shell entrypoint together.
 
+MCP configuration is a second standalone Bun module:
+`src/commands/entrypoint-mcp-config.ts`. Both leaf stages copy it the same way.
+The shell entrypoint pipes `API_KEY` on stdin; the helper writes
+`/workspace/.mcp.json` and merges installed MCP server permission patterns into
+`/home/worker/.claude/settings.json`. It also needs no npm packages or compiled
+CLI initialization, so keep its COPY in both leaf blocks too.
+
 Provider dependency validation runs per task inside the compiled worker. It
 needs no standalone helper or leaf-stage COPY; missing provider dependencies
 fail the affected task with installation guidance after the worker joins.

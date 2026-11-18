@@ -52,7 +52,7 @@ describe("AI provider registry", () => {
   test("ids are unique, and every provider can be set up", () => {
     const ids = AI_PROVIDERS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(17);
+    expect(ids.length).toBe(18);
     for (const p of AI_PROVIDERS) {
       expect(p.steps.length).toBeGreaterThan(0);
       // Codex signs in through the device flow; every other provider has a field.
