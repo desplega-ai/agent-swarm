@@ -790,6 +790,48 @@ registerTemplate({
   category: "task_lifecycle",
 });
 
+/**
+ * The Lead's follow-up preamble for a Sessions message (`source: "ui"`): the
+ * last Lead turns of the session, so the new message is read against the
+ * conversation, not one parent task. Built worker-side by
+ * `buildSessionTurnsPreamble` in `src/commands/context-preamble.ts`, which
+ * also bounds `turns` to its token budget.
+ */
+registerTemplate({
+  eventType: "task.followup.session_turns",
+  header: "",
+  defaultBody: `
+---
+## Prior Conversation Context
+
+This message continues a Sessions conversation with you. Below are your last {{turn_count}} turns in it, oldest first: what you were asked and what you answered. The new message may refer to any of them.
+{{reply_target}}
+{{turns}}
+{{omitted_note}}If this block does not tell you what the new message refers to, call \`get-task-details\` on the turns above before you act. Never guess the referent.
+
+---
+`,
+  variables: [
+    { name: "turn_count", description: "Lead turns shown below" },
+    {
+      name: "turns",
+      description:
+        "One block per Lead turn, oldest first: '### Turn N (task `<id>`, <status>)', the ask, the answer and its artifacts",
+    },
+    {
+      name: "reply_target",
+      description:
+        "A line naming the task the message was sent on when that is not a Lead turn (a delegated task), else empty",
+    },
+    {
+      name: "omitted_note",
+      description:
+        "A line naming the newest Lead turn left out by the turn cap or the token budget, else empty",
+    },
+  ],
+  category: "task_lifecycle",
+});
+
 registerTemplate({
   eventType: "task.thread.participants",
   header: "",

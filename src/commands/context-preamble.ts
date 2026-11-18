@@ -11,6 +11,7 @@
  * resumes (see swarm memory sigterm-143-resumed-session-context-saturation-2026-05-13).
  */
 
+import { renderSessionTurnsPreamble } from "../prompts/session-turns";
 import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled } from "../utils/steering-enabled";
@@ -68,6 +69,8 @@ export interface TaskContextForPreamble {
   status?: string;
   taskType?: string;
   parentTaskId?: string;
+  /** Set by `GET /api/tasks/{id}`: the assignee is a lead agent. */
+  isLeadTask?: boolean;
   attachments?: Array<{
     kind: string;
     name: string;
@@ -102,6 +105,7 @@ export async function fetchTaskContextForPreamble(
       status: data.status,
       taskType: data.taskType,
       parentTaskId: data.parentTaskId,
+      isLeadTask: data.isLeadTask,
       attachments: data.attachments,
     };
   } catch {
@@ -213,6 +217,143 @@ export async function buildContextPreamble(
   }
 
   return preamble;
+}
+
+// ─── Sessions Follow-up Preamble ──────────────────────────────────────────────
+
+/** Most Lead turns the Sessions follow-up preamble shows. */
+export const SESSION_TURNS_MAX_TURNS = 6;
+/**
+ * Token budget for the Sessions follow-up preamble: 3× the regular preamble,
+ * since it carries up to six asks and answers, not one.
+ * shortcut: a constant, not an env var; add one (with the configuration
+ * catalog entry) if operators need to tune it.
+ */
+export const SESSION_TURNS_MAX_TOKENS = 6000;
+export const SESSION_TURNS_MAX_CHARS = SESSION_TURNS_MAX_TOKENS * 4;
+/** Ancestors walked to find the Lead turns (delegated and review tasks sit between them). */
+export const SESSION_TURNS_MAX_HOPS = 30;
+/** Chars kept of each turn's ask (~400 tokens). */
+const SESSION_TURN_ASK_CHARS = 1600;
+/** Chars kept of each turn's answer (~1000 tokens); the newest turn keeps twice this. */
+const SESSION_TURN_ANSWER_CHARS = 4000;
+const SESSION_TURN_MAX_ARTIFACTS = 5;
+/** Room the template's own text takes, kept out of the turns' share of the budget. */
+const SESSION_TURNS_FRAME_CHARS = 1200;
+
+function clip(text: string, max: number, taskId: string): string {
+  return text.length > max
+    ? `${text.slice(0, max)} [cut; full text via \`get-task-details\` taskId \`${taskId}\`]`
+    : text;
+}
+
+function formatSessionTurn(turn: TaskContextForPreamble, index: number, newest: boolean): string {
+  const lines = [
+    `### Turn ${index} (task \`${turn.id}\`, ${turn.status ?? "unknown"})`,
+    `**Asked:** ${clip(scrubSecrets(turn.task.trim()), SESSION_TURN_ASK_CHARS, turn.id)}`,
+  ];
+  const answer = (turn.output || turn.progress)?.trim();
+  const answerCap = newest ? SESSION_TURN_ANSWER_CHARS * 2 : SESSION_TURN_ANSWER_CHARS;
+  lines.push(
+    answer
+      ? `**You answered:** ${clip(scrubSecrets(answer), answerCap, turn.id)}`
+      : "**You answered:** (nothing recorded)",
+  );
+  const atts = turn.attachments?.filter((a) => a.name && (a.url || a.path || a.pageId)) ?? [];
+  for (const att of atts.slice(0, SESSION_TURN_MAX_ARTIFACTS)) {
+    lines.push(`  - Artifact **${att.name}**: \`${formatAttachmentPointer(att)}\``);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Build the Lead's preamble for a Sessions follow-up: the last
+ * SESSION_TURNS_MAX_TURNS Lead turns on the message's ancestor path, oldest
+ * first, each with its ask and answer. Delegated worker tasks on the path are
+ * skipped: the Lead's review of them is a turn of its own. Oldest turns drop
+ * first to fit SESSION_TURNS_MAX_TOKENS.
+ *
+ * Returns null when the path holds no Lead turn or the template is switched
+ * off; the caller then falls back to `buildContextPreamble`.
+ */
+export async function buildSessionTurnsPreamble(
+  apiUrl: string,
+  apiKey: string,
+  parentTaskId: string,
+): Promise<string | null> {
+  const path: TaskContextForPreamble[] = [];
+  const turnsNewestFirst: TaskContextForPreamble[] = [];
+  const seen = new Set<string>();
+  let currentId: string | undefined = parentTaskId;
+  while (
+    currentId &&
+    !seen.has(currentId) &&
+    path.length < SESSION_TURNS_MAX_HOPS &&
+    turnsNewestFirst.length <= SESSION_TURNS_MAX_TURNS
+  ) {
+    seen.add(currentId);
+    const ctx = await fetchTaskContextForPreamble(apiUrl, apiKey, currentId);
+    if (!ctx) break;
+    path.push(ctx);
+    if (ctx.isLeadTask) turnsNewestFirst.push(ctx);
+    currentId = ctx.parentTaskId;
+  }
+  if (turnsNewestFirst.length === 0) return null;
+
+  // Newest first, so the budget keeps the turns the message most likely means.
+  const budget = SESSION_TURNS_MAX_CHARS - SESSION_TURNS_FRAME_CHARS;
+  const kept: TaskContextForPreamble[] = [];
+  const blocks: string[] = [];
+  let used = 0;
+  for (const turn of turnsNewestFirst.slice(0, SESSION_TURNS_MAX_TURNS)) {
+    const block = formatSessionTurn(turn, 0, kept.length === 0);
+    if (kept.length > 0 && used + block.length > budget) break;
+    kept.push(turn);
+    blocks.push(block);
+    used += block.length;
+  }
+  const omitted = turnsNewestFirst[kept.length];
+
+  // Renumber oldest first now that the kept set is known.
+  const turns = kept
+    .map((turn, i) => formatSessionTurn(turn, kept.length - i, i === 0))
+    .reverse()
+    .join("\n\n");
+
+  const parent = path[0];
+  const replyTarget =
+    parent && !parent.isLeadTask
+      ? `The new message was sent on task \`${parent.id}\`, a task of another agent: ${parent.task
+          .slice(0, 300)
+          .replace(/\n/g, " ")}`
+      : "";
+  const omittedNote = omitted
+    ? `Earlier turns are left out; the newest of them is task \`${omitted.id}\`.\n`
+    : "";
+
+  const rendered = await renderSessionTurnsPreamble({
+    turn_count: kept.length,
+    turns,
+    reply_target: replyTarget,
+    omitted_note: omittedNote,
+  });
+  if (!rendered) return null;
+  const preamble = rendered.endsWith("\n") ? rendered : `${rendered}\n`;
+  return preamble.length > SESSION_TURNS_MAX_CHARS
+    ? `${preamble.slice(0, SESSION_TURNS_MAX_CHARS)}\n\n[context preamble truncated to ${SESSION_TURNS_MAX_TOKENS}-token budget]\n\n---\n`
+    : preamble;
+}
+
+/** The Lead's Sessions follow-up preamble, else the regular one-parent preamble. */
+export async function buildSessionFollowUpPreamble(
+  apiUrl: string,
+  apiKey: string,
+  parentTaskId: string,
+): Promise<string | null> {
+  return (
+    (await buildSessionTurnsPreamble(apiUrl, apiKey, parentTaskId)) ??
+    buildContextPreamble(apiUrl, apiKey, parentTaskId)
+  );
 }
 
 // ─── Resume Preamble ───────────────────────────────────────────────────────────

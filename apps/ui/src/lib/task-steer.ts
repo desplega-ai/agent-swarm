@@ -26,14 +26,21 @@ export function canSteerSessionTask(
 /**
  * The task the Sessions composer talks to. The newest live lead task, so a
  * message steers the turn that is running even while a delegated worker
- * task is the newest in the chain. With none live, the newest task: the
- * message follows up on it, and the new task joins the same session.
+ * task is the newest in the chain. With none live, the newest lead task: the
+ * message follows up on the Lead's last turn, not on a delegated worker task
+ * or another agent's task, whose context the Lead never wrote. With no lead
+ * task at all, the newest task. The new task joins the same session.
  */
 export function sessionComposerTarget<
   T extends Pick<AgentTask, "status" | "isLeadTask" | "createdAt">,
 >(chain: readonly T[]): T | null {
   const newestFirst = [...chain].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return newestFirst.find((task) => canSteerSessionTask(task)) ?? newestFirst[0] ?? null;
+  return (
+    newestFirst.find((task) => canSteerSessionTask(task)) ??
+    newestFirst.find((task) => task.isLeadTask) ??
+    newestFirst[0] ??
+    null
+  );
 }
 
 /**

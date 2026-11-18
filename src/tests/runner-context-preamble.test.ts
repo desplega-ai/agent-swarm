@@ -3,10 +3,14 @@ import { createServer, type Server } from "node:http";
 import {
   buildContextPreamble,
   buildResumeContextPreamble,
+  buildSessionFollowUpPreamble,
+  buildSessionTurnsPreamble,
   CONTEXT_PREAMBLE_MAX_CHARS,
   CONTEXT_PREAMBLE_MAX_TOKENS,
   fetchTaskContextForPreamble,
   prependContextPreamble,
+  SESSION_TURNS_MAX_CHARS,
+  SESSION_TURNS_MAX_TURNS,
   type TaskContextForPreamble,
 } from "../commands/context-preamble";
 import { listenOnFreePort } from "./test-net";
@@ -238,6 +242,129 @@ describe("buildContextPreamble", () => {
   test("CONTEXT_PREAMBLE_MAX_TOKENS is 2000 by default", () => {
     expect(CONTEXT_PREAMBLE_MAX_TOKENS).toBe(2000);
     expect(CONTEXT_PREAMBLE_MAX_CHARS).toBe(8000);
+  });
+});
+
+describe("buildSessionTurnsPreamble", () => {
+  // root (lead) -> worker child -> lead review -> ui follow-up (lead) -> message parent
+  function seedSession(prefix: string): void {
+    seedTask({
+      id: `${prefix}-root`,
+      task: "List the roadmap items for Q1",
+      output: "Roadmap: auth rewrite, billing v2, board embeds",
+      status: "completed",
+      isLeadTask: true,
+    });
+    seedTask({
+      id: `${prefix}-worker`,
+      task: "Research defer-task wakeOn",
+      status: "completed",
+      isLeadTask: false,
+      parentTaskId: `${prefix}-root`,
+    });
+    seedTask({
+      id: `${prefix}-review`,
+      task: "Worker task completed — review needed",
+      output: "wakeOn works as documented",
+      status: "completed",
+      isLeadTask: true,
+      parentTaskId: `${prefix}-worker`,
+    });
+    seedTask({
+      id: `${prefix}-turn`,
+      task: "make a board of the roadmap",
+      output: "Board created",
+      status: "completed",
+      isLeadTask: true,
+      parentTaskId: `${prefix}-review`,
+      attachments: [{ kind: "url", name: "Roadmap board", url: "https://example.com/board" }],
+    });
+  }
+
+  test("shows every Lead turn oldest first with its ask, answer and artifacts", async () => {
+    seedSession("st1");
+    const preamble = await buildSessionTurnsPreamble(API_URL, API_KEY, "st1-turn");
+    expect(preamble).not.toBeNull();
+    const text = preamble ?? "";
+    expect(text).toContain("## Prior Conversation Context");
+    expect(text).toContain("your last 3 turns");
+    const root = text.indexOf("List the roadmap items for Q1");
+    const review = text.indexOf("wakeOn works as documented");
+    const turn = text.indexOf("make a board of the roadmap");
+    expect(root).toBeGreaterThan(-1);
+    expect(root).toBeLessThan(review);
+    expect(review).toBeLessThan(turn);
+    expect(text).toContain("Roadmap: auth rewrite, billing v2, board embeds");
+    expect(text).toContain("https://example.com/board");
+    // The delegated worker task is not a turn.
+    expect(text).not.toContain("Research defer-task wakeOn");
+    expect(text).toContain("call `get-task-details` on the turns above");
+  });
+
+  test("names the parent when the message was sent on another agent's task", async () => {
+    seedSession("st2");
+    const preamble = await buildSessionTurnsPreamble(API_URL, API_KEY, "st2-worker");
+    expect(preamble).toContain("sent on task `st2-worker`, a task of another agent");
+    expect(preamble).toContain("List the roadmap items for Q1");
+    expect(preamble).toContain("your last 1 turns");
+  });
+
+  test("keeps the newest turns and drops the oldest past the turn cap", async () => {
+    let parent: string | undefined;
+    const count = SESSION_TURNS_MAX_TURNS + 2;
+    for (let i = 0; i < count; i++) {
+      seedTask({
+        id: `cap-${i}`,
+        task: `ask number ${i}`,
+        output: `answer number ${i}`,
+        status: "completed",
+        isLeadTask: true,
+        parentTaskId: parent,
+      });
+      parent = `cap-${i}`;
+    }
+    const text = (await buildSessionTurnsPreamble(API_URL, API_KEY, `cap-${count - 1}`)) ?? "";
+    expect(text).toContain(`your last ${SESSION_TURNS_MAX_TURNS} turns`);
+    expect(text).toContain(`ask number ${count - 1}`);
+    expect(text).toContain(`ask number ${count - SESSION_TURNS_MAX_TURNS}`);
+    expect(text).not.toContain(`ask number ${count - SESSION_TURNS_MAX_TURNS - 1}`);
+    expect(text).toContain(
+      `the newest of them is task \`cap-${count - SESSION_TURNS_MAX_TURNS - 1}\``,
+    );
+  });
+
+  test("drops the oldest turns to fit the token budget", async () => {
+    const big = "x".repeat(4000);
+    seedTask({
+      id: "bud-0",
+      task: "first ask",
+      output: big,
+      status: "completed",
+      isLeadTask: true,
+    });
+    for (let i = 1; i < SESSION_TURNS_MAX_TURNS; i++) {
+      seedTask({
+        id: `bud-${i}`,
+        task: `ask ${i} ${big}`,
+        output: big,
+        status: "completed",
+        isLeadTask: true,
+        parentTaskId: `bud-${i - 1}`,
+      });
+    }
+    const text =
+      (await buildSessionTurnsPreamble(API_URL, API_KEY, `bud-${SESSION_TURNS_MAX_TURNS - 1}`)) ??
+      "";
+    expect(text.length).toBeLessThanOrEqual(SESSION_TURNS_MAX_CHARS);
+    expect(text).not.toContain("first ask");
+    expect(text).toContain("Earlier turns are left out");
+  });
+
+  test("returns null without a Lead turn, and the follow-up falls back", async () => {
+    seedTask({ id: "w-only", task: "Worker-only parent task", status: "completed" });
+    expect(await buildSessionTurnsPreamble(API_URL, API_KEY, "w-only")).toBeNull();
+    const fallback = await buildSessionFollowUpPreamble(API_URL, API_KEY, "w-only");
+    expect(fallback).toContain("### Immediate Prior Task (ID: `w-only`)");
   });
 });
 
