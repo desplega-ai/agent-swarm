@@ -16,6 +16,7 @@ import {
 } from "../be/db";
 import { getModelProfileByName, hasUnreadableCredentialAllowlist } from "../be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { firstFailingCheck, resolveGroupForAgent } from "../be/model-group-resolution";
 import { checkProfileForAgent, configPools } from "../be/model-profile-check";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { carryUnhandledSteering } from "../be/steering";
@@ -196,15 +197,17 @@ export function inheritedModelSelection(
     | "resolvedModel"
     | "claudeSessionId"
     | "profile"
+    | "modelGroup"
   >,
-): Pick<CreateTaskOptions, "model" | "modelTier" | "profile"> {
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "modelGroup"> {
   const model = taskModelPin(parent);
-  // The task's own profile travels like its tier; an agent-default profile
-  // (`resolvedProfile` only) is re-resolved by the child's claim.
+  // The task's own profile and group travel like its tier; an agent-default
+  // profile (`resolvedProfile` only) is re-resolved by the child's claim.
   return {
     ...(model ? { model } : {}),
     ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),
     ...(parent.profile ? { profile: parent.profile } : {}),
+    ...(parent.modelGroup ? { modelGroup: parent.modelGroup } : {}),
   };
 }
 
@@ -228,6 +231,7 @@ type FallbackParent = Pick<
   | "agentId"
   | "resolvedProfile"
   | "resolvedModel"
+  | "modelGroup"
   | "fallbackHops"
   | "vcsRepo"
   | "routingAffinity"
@@ -303,6 +307,11 @@ async function keyPoolOf(
  * profile to the visited set and the saved fallback graph is acyclic, so the
  * walk ends once every reachable profile has run.
  *
+ * On a model group task the group order is the chain instead: the members
+ * after the current one that run on this agent's harness, minus the profiles
+ * the work already ran on. Member fallbacks are ignored, so the one order the
+ * group shows decides every hop.
+ *
  * The pick is judged against this agent only, so the resume is always pinned
  * to it (`createResumeFollowUp`). Lead-only work on an agent that cannot hold
  * a lead-only pin would be rerouted to another agent, so it never hops.
@@ -330,7 +339,9 @@ export async function nextFallback(
   if (parent.routingAffinity?.leadOnly) {
     const agent = await getAgentById(parent.agentId);
     if (!agent?.isLead || !isAgentEligibleForTask(agent, parent)) {
-      const listsFallbacks = (await getModelProfileByName(current))?.fallbacks.length ?? 0;
+      const listsFallbacks = parent.modelGroup
+        ? 1
+        : ((await getModelProfileByName(current))?.fallbacks.length ?? 0);
       if (!configured && listsFallbacks === 0) return { kind: "none", message: null };
       return {
         kind: "none",
@@ -359,7 +370,33 @@ export async function nextFallback(
     }
   }
 
-  for (let i = path.length - 1; i >= 0; i--) {
+  if (parent.modelGroup) {
+    const resolution = await resolveGroupForAgent(parent.modelGroup, parent.agentId, {
+      vcsRepo: parent.vcsRepo,
+      includeRepoSecrets: options.includeRepoSecrets,
+      skip: visited,
+      startAfter: current,
+      sameHarnessOnly: true,
+    });
+    if (resolution.kind === "resolved") {
+      return {
+        kind: "picked",
+        profile: resolution.member,
+        hop: {
+          from: current,
+          profile: resolution.member,
+          errorClass,
+          at: new Date().toISOString(),
+          ...(resolution.skipped.length > 0 ? { skipped: resolution.skipped } : {}),
+        },
+      };
+    }
+    if (resolution.kind === "none" && resolution.skipped.length > 0) {
+      configured = true;
+      skipped.push(...resolution.skipped);
+    }
+  }
+  for (let i = path.length - 1; !parent.modelGroup && i >= 0; i--) {
     const profile = await getModelProfileByName(path[i]!);
     for (const name of profile?.fallbacks ?? []) {
       configured = true;
@@ -383,7 +420,7 @@ export async function nextFallback(
           },
         };
       }
-      skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
+      skipped.push({ profile: name, reason: result ? firstFailingCheck(result) : "not found" });
     }
   }
   if (!configured) {
@@ -402,13 +439,6 @@ export async function nextFallback(
     kind: "none",
     message: `${errorClass} on ${current}; ${keysExhausted}no fallback left (tried: ${path.join(" → ")})${skippedText}`,
   };
-}
-
-/** "check: detail" of the primary's first failing row. */
-function firstFailingRow(result: NonNullable<Awaited<ReturnType<typeof checkProfileForAgent>>>) {
-  const row = result.profiles[0]?.checks.find((check) => check.state === "fail");
-  if (!row) return "failed the profile check";
-  return row.detail ? `${row.check}: ${row.detail}` : row.check;
 }
 
 function attachmentPointer(a: TaskAttachment): string {
@@ -1028,9 +1058,15 @@ export async function createResumeFollowUp(args: {
 function resumeModelSelection(
   parent: AgentTask,
   fallback: { profile: string; hop: FallbackHop } | undefined,
-): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "fallbackHops"> {
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "modelGroup" | "fallbackHops"> {
   const hops = [...(parent.fallbackHops ?? []), ...(fallback ? [fallback.hop] : [])];
-  const selection = fallback ? { profile: fallback.profile } : inheritedModelSelection(parent);
+  // A group task keeps its group, so its next hop walks the same order.
+  const selection = fallback
+    ? {
+        profile: fallback.profile,
+        ...(parent.modelGroup ? { modelGroup: parent.modelGroup } : {}),
+      }
+    : inheritedModelSelection(parent);
   return { ...selection, ...(hops.length > 0 ? { fallbackHops: hops } : {}) };
 }
 
