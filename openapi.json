@@ -55601,6 +55601,22 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "objectScriptId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "objectId",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 500
@@ -65229,6 +65245,13 @@
                           },
                           "updatedAt": {
                             "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "function",
+                              "durable"
+                            ]
                           }
                         },
                         "required": [
@@ -65244,7 +65267,8 @@
                           "fsMode",
                           "createdByAgentId",
                           "createdAt",
-                          "updatedAt"
+                          "updatedAt",
+                          "kind"
                         ]
                       }
                     }

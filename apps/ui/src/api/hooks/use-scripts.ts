@@ -23,6 +23,15 @@ export function useScript(id: string) {
   });
 }
 
+/** Objects of a durable script. Pass an empty id to skip the fetch. */
+export function useDurableObjects(scriptId: string) {
+  return useQuery({
+    queryKey: ["durable-objects", scriptId],
+    queryFn: () => api.fetchDurableObjects(scriptId),
+    enabled: !!scriptId,
+  });
+}
+
 export function useScriptVersions(id: string) {
   return useQuery({
     queryKey: ["script-versions", id],
