@@ -10,7 +10,10 @@ const NOT_ALLOWED = "The endpoint URL is not allowed.";
  */
 export const onboardingEmbeddingEndpointGuard: Scenario = {
   name: "onboarding-embedding-endpoint-guard",
-  order: 662,
+  // Before github-installation-token-repos (656): this scenario restarts the API, and the boot
+  // sweep fails in_progress tasks 5 s after a restart. The strict gate needs that status in the
+  // final database, so no new restart may come later than the suite's own late restarts.
+  order: 638,
   async run(ctx) {
     const memory = (body: Record<string, unknown>) =>
       ctx.api("POST", "/api/onboarding/memory", { body });
