@@ -71,6 +71,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
 - [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
 - [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
+- [Preparing a suspected marketplace fraud alert for human investigation with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-fraud-alert-investigation). Reference.
 - [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
 - [Preparing unmatched bank transactions for finance review with AI agents](https://docs.agent-swarm.dev/docs/guides/agent-assisted-bank-reconciliation-review). Reference.
 - [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
@@ -101,6 +102,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.
 - [agent-fs Co-deployment](https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment). When: Someone wants shared persistent files for agents on a self-hosted swarm.
 - [Self-Hosted SSO](https://docs.agent-swarm.dev/docs/guides/self-hosted-sso). When: Someone wants their self-hosted swarm dashboard behind single sign-on.
+- [Reviewing why actual demand differed from a forecast with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-demand-forecast-accuracy-review). Reference.
 - [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/guides/ai-operations-governance). Reference.
 - [Repo merge policy](https://docs.agent-swarm.dev/docs/guides/repo-merge-policy). Reference.
 - [E2B Provider Smoke Tests](https://docs.agent-swarm.dev/docs/guides/e2b-provider-smoke-tests). Reference.
