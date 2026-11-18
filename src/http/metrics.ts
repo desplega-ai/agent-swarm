@@ -24,6 +24,7 @@ import {
   type MetricWidget,
   MetricWidgetSchema,
 } from "../types";
+import { scrubObject } from "../utils/secret-scrubber";
 import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -162,8 +163,11 @@ function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricP
     widget,
     result: {
       ...result,
-      rows: result.rows.map((row) =>
-        Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+      // Rows can hold secrets pasted into free text: scrub them, as /api/db-query does.
+      rows: scrubObject(
+        result.rows.map((row) =>
+          Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+        ),
       ),
       truncated: result.total > result.rows.length,
       maxRows,

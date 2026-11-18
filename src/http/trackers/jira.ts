@@ -12,6 +12,7 @@ import { getJiraAuthorizationUrl } from "../../jira/oauth";
 import { handleJiraWebhook } from "../../jira/webhook";
 import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifecycle";
 import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
+import { requestSecretReadScope } from "../config";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
@@ -228,8 +229,15 @@ const jiraDisconnect = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getWebhookUrl(req: IncomingMessage): string {
-  const token = process.env.JIRA_WEBHOOK_TOKEN ?? "<unset>";
+// The path token is the only credential of the inbound Jira webhook. Only a
+// caller that may read every config secret gets it; everyone else sees a mask.
+async function getWebhookUrl(req: IncomingMessage): Promise<string> {
+  const configured = process.env.JIRA_WEBHOOK_TOKEN;
+  const token = !configured
+    ? "<unset>"
+    : (await requestSecretReadScope(req)) === "all"
+      ? configured
+      : "<redacted>";
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/webhook/${token}`;
 }
 
@@ -259,7 +267,7 @@ async function buildJiraStatusPayload(req: IncomingMessage): Promise<JiraStatusP
     scope,
     hasManageWebhookScope,
     webhookTokenConfigured: Boolean(process.env.JIRA_WEBHOOK_TOKEN),
-    webhookUrl: getWebhookUrl(req),
+    webhookUrl: await getWebhookUrl(req),
     redirectUri: getRedirectUri(req),
     webhookIds: meta.webhookIds ?? [],
   };
