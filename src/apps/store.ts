@@ -215,5 +215,8 @@ export async function updateApp(
 }
 
 export async function deleteApp(id: string): Promise<boolean> {
-  return (await getDbClient().run("DELETE FROM apps WHERE id = ?", [id])).changes > 0;
+  return getDbClient().transaction(async (tx) => {
+    await tx.run("DELETE FROM user_favorites WHERE itemType = 'app' AND itemId = ?", [id]);
+    return (await tx.run("DELETE FROM apps WHERE id = ?", [id])).changes > 0;
+  });
 }

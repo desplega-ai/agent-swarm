@@ -1145,7 +1145,8 @@ export type FavoriteItemType =
   | "agent-fs-path"
   | "key"
   | "session"
-  | "hidden-key";
+  | "hidden-key"
+  | "app";
 
 export interface UserFavorite {
   id: string;
@@ -4391,6 +4392,8 @@ export interface AppListItem {
   icon?: AppIcon | null;
   createdAt: string;
   updatedAt: string;
+  /** Whether the viewer starred the app. Set on the list, not on the detail. */
+  favorite?: boolean;
 }
 
 export interface AppDetail extends AppListItem {

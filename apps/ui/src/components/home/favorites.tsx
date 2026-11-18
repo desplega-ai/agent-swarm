@@ -1,6 +1,6 @@
 /**
  * Favorites on Home: every starred use case (a Sessions group key), page,
- * workflow, schedule and agent-fs path of the picked user, newest star first.
+ * workflow, schedule, app and agent-fs path of the picked user, newest star first.
  * The first 3 show; "Show all" opens the rest, with a search past 6. The
  * header's "New use case" starts a session that asks the Lead to plan one.
  * A star can outlive its item: a deleted group, page or schedule still lists,
@@ -8,9 +8,20 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-import { Clock, File, FolderOpen, Globe, Plus, Search, Star, Workflow } from "lucide-react";
+import {
+  Clock,
+  File,
+  FolderOpen,
+  Globe,
+  LayoutGrid,
+  Plus,
+  Search,
+  Star,
+  Workflow,
+} from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useApp } from "@/api/hooks/use-apps";
 import { useFavorites } from "@/api/hooks/use-favorites";
 import { usePage } from "@/api/hooks/use-pages";
 import { useScheduledTask } from "@/api/hooks/use-schedules";
@@ -38,6 +49,7 @@ export function Favorites({
     useFavorites("page"),
     useFavorites("workflow"),
     useFavorites("schedule"),
+    useFavorites("app"),
     useFavorites("agent-fs-path"),
   ];
   const favorites = mergeFavorites(queries.map((query) => query.data?.favorites));
@@ -142,8 +154,8 @@ export function FavoritesView({
         {favorites.length === 0 ? (
           state.isLoading ? null : (
             <HomeWidgetEmpty>
-              Nothing starred yet. Star a use case in Sessions, or a page, workflow, schedule or
-              file, and it shows here.
+              Nothing starred yet. Star a use case in Sessions, or a page, workflow, schedule, app
+              or file, and it shows here.
             </HomeWidgetEmpty>
           )
         ) : (
@@ -190,6 +202,8 @@ function FavoriteRow({ favorite }: { favorite: UserFavorite }) {
       return <WorkflowRow id={favorite.itemId} />;
     case "schedule":
       return <ScheduleRow id={favorite.itemId} />;
+    case "app":
+      return <AppRow id={favorite.itemId} />;
     case "agent-fs-path":
       return <PathRow id={favorite.itemId} />;
     // Home does not list these: the Sessions sidebar reads them.
@@ -273,6 +287,20 @@ function ScheduleRow({ id }: { id: string }) {
       }
       kind={favoriteKind("schedule", id)}
       to={favoriteHref("schedule", id)}
+    />
+  );
+}
+
+function AppRow({ id }: { id: string }) {
+  const { data, isError } = useApp(id);
+  return (
+    <Row
+      icon={LayoutGrid}
+      title={data?.app.name || (isError ? "App not found" : "App")}
+      muted={isError}
+      meta={data ? `Updated ${formatRelativeTime(data.app.updatedAt)}` : null}
+      kind={favoriteKind("app", id)}
+      to={favoriteHref("app", id)}
     />
   );
 }

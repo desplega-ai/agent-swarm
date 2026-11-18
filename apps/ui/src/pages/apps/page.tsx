@@ -2,25 +2,40 @@
  * `/apps` — catalog of swarm apps. A Table | Tiles toggle (remembered per
  * browser) switches between the grid of rows and a Finder-style grid of icon
  * tiles; both link into the runtime at `/apps/:id`. Phones always get the
- * compact list.
+ * compact list. Every view lists starred apps first and shares the URL-backed
+ * search and favorites filter, like `/pages`.
  */
 
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { LayoutGrid } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useApps } from "@/api/hooks/use-apps";
+import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import type { AppListItem } from "@/api/types";
 import { AppGlyph } from "@/components/apps/app-glyph";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FavoriteButton } from "@/components/shared/favorite-button";
+import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
+import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { PageHeader } from "@/components/ui/page-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { formatSmartTime } from "@/lib/utils";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
+import { matchesSearchTerms, searchText } from "@/lib/list-search";
+import { cn, formatSmartTime } from "@/lib/utils";
 
 type AppsView = "table" | "tiles";
 
@@ -52,8 +67,42 @@ export default function AppsListingPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { data, isLoading, error } = useApps();
-  const rows = useMemo(() => data?.apps ?? [], [data]);
+  const { searchParams, setParam, setParams } = useUrlSearchState();
+  const search = readStringParam(searchParams, "search");
+  const favoritesOnly = readBooleanParam(searchParams, "favorites");
+  const favoriteToggle = useFavoriteToggle("app");
+  // Starred first; the sort is stable, so the server order holds within each group.
+  const rows = useMemo(
+    () => [...(data?.apps ?? [])].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite)),
+    [data],
+  );
+  // One filter for every view (grid, tiles, phone), so a query finds the same apps at any width.
+  const filteredRows = useMemo(
+    () =>
+      rows.filter(
+        (app) =>
+          (!favoritesOnly || app.favorite) &&
+          matchesSearchTerms(searchText([app.name, app.description]), search),
+      ),
+    [favoritesOnly, rows, search],
+  );
+  const hasActiveFilters = search !== "" || favoritesOnly;
+  const clearFilters = useCallback(() => {
+    setParams({ search: "", favorites: "" }, { replace: false });
+  }, [setParams]);
   const [view, setView] = useState<AppsView>(readStoredView);
+
+  const favoriteControl = useCallback(
+    (app: AppListItem, className?: string) => (
+      <FavoriteButton
+        favorite={app.favorite}
+        disabled={favoriteToggle.isPending && favoriteToggle.variables?.itemId === app.id}
+        onToggle={() => favoriteToggle.mutate({ itemId: app.id, favorite: !app.favorite })}
+        className={className}
+      />
+    ),
+    [favoriteToggle],
+  );
 
   const changeView = useCallback((next: AppsView) => {
     setView(next);
@@ -62,6 +111,11 @@ export default function AppsListingPage() {
 
   const columnDefs = useMemo<ColDef<AppListItem>[]>(
     () => [
+      {
+        ...FAVORITE_COLUMN,
+        cellRenderer: (params: { data: AppListItem | undefined }) =>
+          params.data ? favoriteControl(params.data) : null,
+      },
       {
         field: "name",
         headerName: "App",
@@ -97,11 +151,13 @@ export default function AppsListingPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : "—"),
       },
     ],
-    [],
+    [favoriteControl],
   );
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AppListItem>) => {
+      // The star sits in the row: a click on it must not open the app.
+      if (isRowNavigationSuppressed(event.event?.target)) return;
       if (event.data) void navigate(`/apps/${event.data.id}`);
     },
     [navigate],
@@ -119,19 +175,25 @@ export default function AppsListingPage() {
     />
   );
 
+  const isEmpty = !isLoading && !error && rows.length === 0;
+  const noMatch = "No apps match the current filters";
+
   let content: ReactNode;
-  if (!isLoading && !error && rows.length === 0) {
+  if (isEmpty) {
     content = empty;
   } else if (isMobile) {
     content = (
-      <MobileList label="Apps" loading={isLoading} emptyMessage="No apps yet">
-        {rows.map((app) => (
+      <MobileList label="Apps" loading={isLoading} emptyMessage={noMatch}>
+        {filteredRows.map((app) => (
           <MobileListRow
             key={app.id}
             to={`/apps/${app.id}`}
             title={app.name}
             leading={<AppGlyph icon={app.icon} className="size-5 text-muted-foreground" />}
             meta={[app.description, formatSmartTime(app.updatedAt)]}
+            controls={[
+              <Fragment key="favorite">{favoriteControl(app, "size-11 [&_svg]:size-5")}</Fragment>,
+            ]}
           />
         ))}
       </MobileList>
@@ -147,25 +209,37 @@ export default function AppsListingPage() {
           </div>
         ))}
       </div>
+    ) : filteredRows.length === 0 ? (
+      <p className="py-8 text-center text-sm text-muted-foreground">{noMatch}</p>
     ) : (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-3">
-          {rows.map((app) => (
-            <Link
-              key={app.id}
-              to={`/apps/${app.id}`}
-              title={app.name}
-              className="group flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground group-hover:text-foreground">
-                <AppGlyph
-                  icon={app.icon}
-                  className="h-7 w-7"
-                  imageClassName="h-14 w-14 rounded-2xl"
-                />
-              </div>
-              <span className="line-clamp-2 text-sm font-medium text-foreground">{app.name}</span>
-            </Link>
+          {filteredRows.map((app) => (
+            // The star is a sibling of the link, not inside it: a button in an anchor is invalid.
+            <div key={app.id} className="group relative">
+              <Link
+                to={`/apps/${app.id}`}
+                title={app.name}
+                className="flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50 text-muted-foreground group-hover:text-foreground">
+                  <AppGlyph
+                    icon={app.icon}
+                    className="h-7 w-7"
+                    imageClassName="h-14 w-14 rounded-2xl"
+                  />
+                </div>
+                <span className="line-clamp-2 text-sm font-medium text-foreground">{app.name}</span>
+              </Link>
+              {favoriteControl(
+                app,
+                cn(
+                  "absolute right-1 top-1",
+                  !app.favorite &&
+                    "opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
+                ),
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -173,11 +247,11 @@ export default function AppsListingPage() {
   } else {
     content = (
       <DataGrid
-        rowData={rows}
+        rowData={filteredRows}
         columnDefs={columnDefs}
         loading={isLoading}
         onRowClicked={onRowClicked}
-        emptyMessage="No apps yet"
+        emptyMessage={noMatch}
       />
     );
   }
@@ -198,6 +272,31 @@ export default function AppsListingPage() {
           ) : undefined
         }
       />
+      {/* No filter chrome over a first-run empty state: nothing to filter. */}
+      {isEmpty || error ? null : (
+        <ListFilterBar
+          searchValue={search}
+          onSearchChange={(value) => setParam("search", value, { replace: false })}
+          searchPlaceholder="Search name or description…"
+          hasActiveFilters={hasActiveFilters}
+          onClear={clearFilters}
+        >
+          <Select
+            value={favoritesOnly ? "favorites" : "all"}
+            onValueChange={(value) =>
+              setParam("favorites", value === "favorites" ? "true" : "", { replace: false })
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Favorites" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All apps</SelectItem>
+              <SelectItem value="favorites">Favorites only</SelectItem>
+            </SelectContent>
+          </Select>
+        </ListFilterBar>
+      )}
       {error ? (
         <AlertCallout tone="error" icon={LayoutGrid} title="Failed to load apps">
           {error instanceof Error ? error.message : String(error)}
