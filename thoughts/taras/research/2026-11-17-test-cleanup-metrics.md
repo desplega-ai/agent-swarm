@@ -5,17 +5,17 @@ Keep forecasts separate from measurements. Do not use a deletion target to justi
 
 ## Deletions
 
-The current checkpoint includes 39 merged cleanup changes, verified through GitHub.
-Merge status checkpoint: main `9534b518f5`, 2026-11-18 at 01:18 BCN.
+The current checkpoint includes 40 merged cleanup changes, verified through GitHub.
+Merge status checkpoint: main `2c17d2c01c`, 2026-11-18 at 01:37 BCN.
 It excludes ledger documents, the budget policy, and the production line added in PR #3269.
 Counts include test helpers and E2E scenarios. Cases count executed examples, including parameterized examples, rather than assertion calls.
 
 | Checkpoint | Added test lines | Deleted test lines | Net lines removed | Cases removed or consolidated | Files removed |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 39 merged changes | 802 | 2869 | 2067 | 106 | 3 |
-| Including open PR #3330 | 818 | 2877 | 2059 | 106 | 3 |
+| 40 merged changes | 804 | 2921 | 2117 | 110 | 3 |
+| Including open PRs #3330, #3333 and #3334 | 847 | 3032 | 2185 | 114 | 3 |
 
-Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310, #3308, #3311, #3313, #3320, #3321, #3318, #3323, #3324, #3326, #3327, #3329.
+Merged PRs: #3248, #3253, #3258, #3255, #3257, #3259, #3266, #3271, #3275, #3276, #3272, #3273, #3278, #3281, #3285, #3286, #3269, #3291, #3293, #3274, #3294, #3299, #3301, #3304, #3305, #3306, #3307, #3310, #3308, #3311, #3313, #3320, #3321, #3318, #3323, #3324, #3326, #3327, #3329, #3332.
 PRs #3320 and #3321 added 47 lines, deleted 45, and removed two cases since the 31-change checkpoint.
 Scheduling and scenario registry PRs #3318, #3323 and #3324 added 29 lines, deleted 124, and removed five cases since the 33-change checkpoint.
 The unpublished preview alternative and the external repair #3312 also remain outside campaign totals.
@@ -23,7 +23,7 @@ The net reduction decreased by 22 lines when C22 landed. Its justified accountin
 
 ## Forecast, not an acceptance target
 
-The reconciled inventory has 1616 current test files. Of these, 224 received at least partial audit work (13.9%) and 1392 remain pending.
+The reconciled inventory has 1616 current test files. Of these, 227 received at least partial audit work (14.0%) and 1389 remain pending.
 Three files appeared on main after the initial inventory. All three have recorded audits. The object viewer received a static audit, and the existing eval timestamp suite received runtime verification.
 Three deleted rows remain as historical records.
 The initial 17-PR checkpoint extrapolated to about 10900 net lines and 575 cases removed across the whole campaign.
@@ -126,7 +126,7 @@ The earlier adjacent runs passed 72 cases before the target-only case was restor
 The superseded C28 preview pair retained 901 covered locations out of 2839 across 36 production files.
 That unpublished alternative contributes no merged lines or cases. The external repair #3312 superseded it.
 
-## Recent measurements at main `9534b518f5`
+## Recent measurements at main `2c17d2c01c`
 
 | Change | Added / deleted test lines | Cases before / after in the affected suites | Paired production coverage |
 | --- | ---: | ---: | --- |
@@ -138,8 +138,11 @@ That unpublished alternative contributes no merged lines or cases. The external 
 | Benchmark mapping and catalog, #3327 | +1 / -22 | 27 / 24 | All 12 files retained their covered lines. The mapping module covered 361 of 364 lines and all six functions. |
 | Outcome normalization, #3329 | +3 / -13 | 38 / 37 | Both runs covered all 45 instrumented lines across the two production modules. |
 | Baseline comparison, #3330 | +16 / -8 | 18 / 18 | Both runs covered the same 3,773 of 7,263 lines across 45 files. |
+| Scoring examples, #3332 | +2 / -52 | 44 / 40 | Same 3,633 of 10,262 lines across 56 files. |
+| Judge-error persistence, #3333 | +5 / -66 | 35 / 33 | Same 4,146 of 10,512 lines across 58 files. |
+| Run summary intervals, #3334 | +22 / -37 | 54 / 52 | Same 614 of 707 lines across four files. |
 
-Only #3330 remained open at this checkpoint. Each coverage pair has its own denominator.
+PRs #3330, #3333 and #3334 remained open at this checkpoint. Each coverage pair has its own denominator.
 
 ## CI timing reference
 
