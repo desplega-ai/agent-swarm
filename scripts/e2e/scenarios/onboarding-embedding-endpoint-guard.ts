@@ -10,7 +10,7 @@ const NOT_ALLOWED = "The endpoint URL is not allowed.";
  */
 export const onboardingEmbeddingEndpointGuard: Scenario = {
   name: "onboarding-embedding-endpoint-guard",
-  order: 660,
+  order: 662,
   async run(ctx) {
     const memory = (body: Record<string, unknown>) =>
       ctx.api("POST", "/api/onboarding/memory", { body });
