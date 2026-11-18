@@ -4,7 +4,7 @@ import { getDbClient } from "../db";
  * Outcome card groups: one Slack message (the host card) that shows the
  * answers of several tasks. Each merged task keeps its own outcome row, with
  * `merged_into_id` set to the host row and the placeholder ts `merged:<id>`.
- * See migration 353.
+ * See migration 356.
  */
 
 const MERGED_SLACK_MESSAGE_TS_PREFIX = "merged:";
