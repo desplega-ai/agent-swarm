@@ -1,5 +1,5 @@
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getScriptApiBaseUrl } from "../utils/constants";
 import { type EgressPolicy, parseEgressAllowlist } from "../utils/egress-guard";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -112,7 +112,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
       apiKey: { value: apiKey, isSecret: true },
       agentId: { value: input.agentId, isSecret: false },
       mcpBaseUrl: {
-        value: input.mcpBaseUrl ?? getMcpBaseUrl(),
+        value: input.mcpBaseUrl ?? getScriptApiBaseUrl(),
         isSecret: false,
       },
       ...(input.runtimeInstanceId

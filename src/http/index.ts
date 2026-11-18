@@ -72,7 +72,11 @@ import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { ensure, initialize } from "../utils/business-use";
-import { getConfiguredAppUrls, getMcpBaseUrl } from "../utils/constants";
+import {
+  getConfiguredAppUrls,
+  getScriptApiBaseUrl,
+  setApiLoopbackBaseUrl,
+} from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -808,6 +812,7 @@ httpServer
     const boundAddress = httpServer.address();
     if (boundAddress && typeof boundAddress === "object") {
       setExtensionLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
+      setApiLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
     }
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
@@ -921,7 +926,7 @@ httpServer
     await initWorkflows();
 
     // Reconcile durable script workflow subprocesses
-    await startScriptRunSupervisor(getMcpBaseUrl());
+    await startScriptRunSupervisor(getScriptApiBaseUrl());
 
     // Start scheduler (if enabled). The interval is read post-hydration, like
     // heartbeat below, and parsed so an unusable value keeps the 10s default (#3169).
