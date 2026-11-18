@@ -33,3 +33,10 @@ export function parseScheduleInstant(value: string): Date | undefined {
   const year = instant.getUTCFullYear();
   return year >= 0 && year <= 9999 ? instant : undefined;
 }
+
+export function serializeNextRunAt(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const instant = parseScheduleInstant(value);
+  if (!instant) throw new RangeError("nextRunAt must be a valid timestamp.");
+  return instant.toISOString();
+}

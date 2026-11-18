@@ -196,7 +196,7 @@ import {
 } from "../utils/subscription-plans";
 import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
-import { normalizeDate, normalizeDateRequired, parseScheduleInstant } from "./date-utils";
+import { normalizeDate, normalizeDateRequired, serializeNextRunAt } from "./date-utils";
 import {
   type AgentRow,
   configureAgentDependencies,
@@ -6232,13 +6232,6 @@ export interface CreateScheduledTaskData {
   requiredParams?: string[];
   requires?: AutomationIntegrationId[];
   createdBy?: string;
-}
-
-function serializeNextRunAt(value: string | null | undefined): string | null {
-  if (value == null) return null;
-  const instant = parseScheduleInstant(value);
-  if (!instant) throw new RangeError("nextRunAt must be a valid timestamp.");
-  return instant.toISOString();
 }
 
 export async function createScheduledTask(data: CreateScheduledTaskData): Promise<ScheduledTask> {
