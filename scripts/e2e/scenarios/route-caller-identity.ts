@@ -1,8 +1,7 @@
+// Worker-bound tokens cannot create script endpoints or run schedules, even their own.
+// Workers can index only their own memory. Lead tokens and the shared HTTP key retain
+// cross-agent access; a manual schedule run still attributes the task to its creator.
 import { sql } from "../db";
-// An agent-bound token (aseph_) acts only as its own agent on three routes that take an
-// agent identity from the request: a script endpoint's run-as agent, a manual schedule run,
-// and the owner of indexed memory. The lead's token keeps cross-agent access. The shared
-// key, with or without an X-Agent-ID, behaves as before.
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { retireAgent } from "./core-helpers";
@@ -13,7 +12,7 @@ type Agent = { id: string; token: string };
 
 // 03:00 on 1 January: never due while the suite runs.
 const YEARLY = "0 3 1 1 *";
-const RUN_DENIED = "Only that agent or a lead can run it";
+const RUN_DENIED = "Changing schedules requires the lead agent, operator, or user authentication";
 
 async function registerWithToken(
   ctx: ScenarioContext,
@@ -98,31 +97,67 @@ export default async function (_args: z.infer<typeof argsSchema>, _ctx: any) {
           targetAgentId: owner.id,
         },
       });
-      expectStatus(created, [201], "the owner creates a schedule");
-      scheduleId = asString(asRecord(created.json).id, "schedule id");
+      expectStatus(created, [201], "the shared key creates a schedule on behalf of the owner");
+      const schedule = asRecord(created.json);
+      scheduleId = asString(schedule.id, "schedule id");
+      expect(schedule.createdByAgentId === owner.id, "the schedule belongs to the worker owner");
       const runPath = `/api/schedules/${scheduleId}/run`;
 
-      const refused = await ctx.api("POST", runPath, { apiKey: other.token });
-      expectStatus(refused, [403], "another agent's token runs the schedule");
-      expect(String(asRecord(refused.json).error).includes(RUN_DENIED), "the 403 says why");
-      await callToolErr(otherMcp, "run-schedule-now", { scheduleId }, RUN_DENIED);
+      for (const [label, agent, mcp] of [
+        ["owner", owner, ownerMcp],
+        ["other worker", other, otherMcp],
+      ] as const) {
+        const refused = await ctx.api("POST", runPath, { apiKey: agent.token });
+        expectStatus(refused, [403], `the ${label}'s token cannot run the schedule over HTTP`);
+        expect(
+          asString(asRecord(refused.json).error, "HTTP error").includes(RUN_DENIED),
+          `HTTP denies the ${label} at the gate`,
+        );
+        const denied = await callToolErr(mcp, "run-schedule-now", { scheduleId });
+        expect(
+          asString(denied.structured.message, "MCP error message").includes(RUN_DENIED),
+          `MCP denies the ${label} at the gate`,
+        );
+      }
 
-      expectStatus(
-        await ctx.api("POST", runPath, { apiKey: owner.token }),
-        [200],
-        "the owner's token runs the schedule",
-      );
-      await callToolOk(ownerMcp, "run-schedule-now", { scheduleId });
-      expectStatus(
-        await ctx.api("POST", runPath, { apiKey: lead.token }),
-        [200],
-        "the lead's token runs the schedule",
-      );
-      expectStatus(
-        await ctx.api("POST", runPath, { agentId: other.id }),
-        [200],
-        "the shared key with another agent's X-Agent-ID runs the schedule",
-      );
+      const scheduledTasks = () =>
+        ctx.db.query<{ creatorAgentId: string; agentId: string }>(
+          sql`SELECT "creatorAgentId", "agentId" FROM agent_tasks WHERE "scheduleId" = ${scheduleId}`,
+        );
+      expect(scheduledTasks().length === 0, "the denied runs created no tasks");
+
+      const leadMcp = await ctx.connectMcp(lead.id, { apiKey: lead.token });
+      try {
+        const run = await callToolOk(leadMcp, "run-schedule-now", { scheduleId });
+        expect(
+          asRecord(run.structured.schedule).id === scheduleId,
+          "MCP ran the requested schedule",
+        );
+        const tasks = scheduledTasks();
+        expect(
+          tasks.length === 1 &&
+            tasks[0]?.creatorAgentId === owner.id &&
+            tasks[0]?.agentId === owner.id,
+          "the lead's MCP run created one task as and for the owner",
+        );
+      } finally {
+        await leadMcp.close();
+      }
+
+      for (const [label, auth] of [
+        ["the lead's token", { apiKey: lead.token }],
+        ["the shared key with another agent's X-Agent-ID", { agentId: other.id }],
+      ] as const) {
+        const run = await ctx.api("POST", runPath, auth);
+        expectStatus(run, [200], `${label} runs the schedule`);
+        const task = asRecord(asRecord(run.json).task);
+        expect(
+          task.scheduleId === scheduleId &&
+            task.creatorAgentId === owner.id &&
+            task.agentId === owner.id,
+          `${label} creates a task linked to the schedule as and for the owner`,
+        );
+      }
 
       // ── memory index owner ───────────────────────────────────────────────────
       const indexBody = (agentId: string, label: string) => ({
