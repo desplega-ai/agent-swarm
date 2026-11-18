@@ -21,6 +21,17 @@ describe("worker log line bounds", () => {
     expect(bounded).toContain("[truncated");
   });
 
+  test("the truncation marker counts what was actually dropped", () => {
+    // Not `length - cap`: the marker itself spends part of the budget, so a
+    // 1-byte overflow drops more than one byte.
+    const line = "x".repeat(LINE_MAX_BYTES + 1);
+    const bounded = boundLogLine(line);
+    const dropped = Number(bounded.match(/truncated (\d+) bytes/)?.[1]);
+    const head = bounded.slice(0, bounded.indexOf(" [truncated "));
+
+    expect(byteLength(head) + dropped).toBe(line.length);
+  });
+
   test("the cap counts UTF-8 bytes, not UTF-16 units", () => {
     // 1.5M chars of a 3-byte character is 4.5 MB: `String.length` would call
     // this safely under a 1 MB cap.

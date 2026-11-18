@@ -44,10 +44,14 @@ export function sessionLogBudgetBytes(): number {
 export function boundSessionLogLine(line: string): string {
   const encoded = encoder.encode(line);
   if (encoded.length <= SESSION_LOG_LINE_MAX_BYTES) return line;
-  const suffix = ` [truncated ${encoded.length - SESSION_LOG_LINE_MAX_BYTES} bytes by agent-swarm]`;
-  const room = SESSION_LOG_LINE_MAX_BYTES - sessionLogByteLength(suffix);
-  const head = new TextDecoder("utf-8").decode(encoded.subarray(0, room), { stream: true });
-  return `${head}${suffix}`;
+  // The suffix spends part of the cap, so the count reports what was really
+  // dropped from the cut point rather than `length - cap`.
+  const suffixWidth = sessionLogByteLength(` [truncated ${encoded.length} bytes by agent-swarm]`);
+  const head = new TextDecoder("utf-8").decode(
+    encoded.subarray(0, SESSION_LOG_LINE_MAX_BYTES - suffixWidth),
+    { stream: true },
+  );
+  return `${head} [truncated ${encoded.length - sessionLogByteLength(head)} bytes by agent-swarm]`;
 }
 
 export function sessionLogBudgetMarker(sessionId: string, maxBytes: number): string {

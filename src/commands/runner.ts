@@ -2997,10 +2997,18 @@ const LOG_LINE_MAX_BYTES = 1024 * 1024;
 export function boundLogLine(content: string): string {
   const encoded = new TextEncoder().encode(content);
   if (encoded.length <= LOG_LINE_MAX_BYTES) return content;
-  const suffix = ` [truncated ${encoded.length - LOG_LINE_MAX_BYTES} bytes by agent-swarm]`;
-  const room = LOG_LINE_MAX_BYTES - new TextEncoder().encode(suffix).length;
+  // The suffix spends part of the cap, so the count reports what was really
+  // dropped from the cut point rather than `length - cap`.
+  const suffixWidth = new TextEncoder().encode(
+    ` [truncated ${encoded.length} bytes by agent-swarm]`,
+  ).length;
   // `stream: true` drops a trailing partial sequence instead of emitting U+FFFD.
-  return `${new TextDecoder("utf-8").decode(encoded.subarray(0, room), { stream: true })}${suffix}`;
+  const head = new TextDecoder("utf-8").decode(
+    encoded.subarray(0, LOG_LINE_MAX_BYTES - suffixWidth),
+    { stream: true },
+  );
+  const dropped = encoded.length - new TextEncoder().encode(head).length;
+  return `${head} [truncated ${dropped} bytes by agent-swarm]`;
 }
 
 /** Push buffered logs to the API */

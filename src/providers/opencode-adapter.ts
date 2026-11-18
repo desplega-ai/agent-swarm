@@ -619,9 +619,15 @@ export function measureOpencodeContext(
 function boundedToolText(value: string): string {
   const encoded = textEncoder.encode(value);
   if (encoded.length <= TOOL_PAYLOAD_MAX_BYTES) return value;
-  const suffix = `… [truncated ${encoded.length - TOOL_PAYLOAD_MAX_BYTES} bytes]`;
-  const room = TOOL_PAYLOAD_MAX_BYTES - textEncoder.encode(suffix).length;
-  return `${new TextDecoder("utf-8").decode(encoded.subarray(0, room), { stream: true })}${suffix}`;
+  // The suffix spends part of the budget, so the count reports what was really
+  // dropped from the cut point — not `length - cap`, which ignores both the
+  // suffix and the code-point boundary.
+  const suffixWidth = textEncoder.encode(`… [truncated ${encoded.length} bytes]`).length;
+  const head = new TextDecoder("utf-8").decode(
+    encoded.subarray(0, TOOL_PAYLOAD_MAX_BYTES - suffixWidth),
+    { stream: true },
+  );
+  return `${head}… [truncated ${encoded.length - textEncoder.encode(head).length} bytes]`;
 }
 
 /**
