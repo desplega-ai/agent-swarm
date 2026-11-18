@@ -175,6 +175,14 @@ export const PERMISSIONS = {
       "Change a repo's merge policy (the allowMerge guideline or the mergePolicy record), which tells agents whether they may merge a PR themselves and which PRs the swarm may auto-merge.",
     namespace: "repo",
   },
+  "repo.delete": {
+    description: "Delete a repo record and the guidelines and merge policy it holds.",
+    namespace: "repo",
+  },
+  "heartbeat.trigger": {
+    description: "Run the heartbeat sweep or the heartbeat checklist check on demand.",
+    namespace: "heartbeat",
+  },
   "integration.kapso.manage": {
     description: "Register or unregister a Kapso inbound number.",
     namespace: "integration",
@@ -342,6 +350,11 @@ export const PERMISSIONS = {
   },
   "mcp-oauth.authorize.any": {
     description: "Start an MCP-server OAuth authorize flow for a caller-supplied user scope.",
+    namespace: "mcp-oauth",
+  },
+  "mcp-oauth.manage": {
+    description:
+      "Refresh or revoke an MCP server's OAuth token, or register its OAuth client by hand.",
     namespace: "mcp-oauth",
   },
   "kv.write.any": {

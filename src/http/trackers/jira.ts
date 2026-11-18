@@ -14,6 +14,7 @@ import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifec
 import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { requestSecretReadScope } from "../config";
 import { completeGenericOAuthCallback } from "../oauth-callback";
+import { refuseAgentTokenWithout } from "../request-principal";
 import { route } from "../route-def";
 import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
 import {
@@ -186,6 +187,7 @@ const jiraWebhookRegister = route({
   body: z.object({
     jqlFilter: z.string().min(1),
   }),
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
     200: { description: "Webhook registered", schema: JiraWebhookRegisteredSchema },
     400: { description: "Invalid jqlFilter" },
@@ -204,6 +206,7 @@ const jiraWebhookDelete = route({
   params: z.object({
     id: z.coerce.number().int().positive(),
   }),
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
     200: { description: "Webhook deleted", schema: JiraWebhookDeletedSchema },
     400: { description: "Invalid webhook id" },
@@ -221,6 +224,7 @@ const jiraDisconnect = route({
   pattern: ["api", "trackers", "jira", "disconnect"],
   summary: "Fully disconnect Jira: delete all webhooks, drop tokens, clear metadata",
   tags: ["Trackers"],
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
     200: { description: "Disconnected", schema: JiraDisconnectResultSchema },
     503: { description: "Jira not configured" },
@@ -438,6 +442,7 @@ export async function handleJiraTracker(
 
   // POST /api/trackers/jira/webhook-register — admin: register a dynamic webhook.
   if (jiraWebhookRegister.match(req.method, pathSegments)) {
+    if (await refuseAgentTokenWithout(req, res, "oauth-authorization.manage")) return true;
     if (!isJiraEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Jira integration not configured" }));
@@ -469,6 +474,7 @@ export async function handleJiraTracker(
   // Note: this pattern overlaps the POST /webhook/:token path; the matcher
   // disambiguates by HTTP method.
   if (jiraWebhookDelete.match(req.method, pathSegments)) {
+    if (await refuseAgentTokenWithout(req, res, "oauth-authorization.manage")) return true;
     if (!isJiraEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Jira integration not configured" }));
@@ -493,6 +499,7 @@ export async function handleJiraTracker(
 
   // DELETE /api/trackers/jira/disconnect — full cleanup.
   if (jiraDisconnect.match(req.method, pathSegments)) {
+    if (await refuseAgentTokenWithout(req, res, "oauth-authorization.manage")) return true;
     if (!isJiraEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Jira integration not configured" }));

@@ -11,6 +11,7 @@ import { getLinearAuthorizationUrl, revokeLinearToken } from "../../linear/oauth
 import { handleLinearWebhook } from "../../linear/webhook";
 import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
+import { refuseAgentTokenWithout } from "../request-principal";
 import { route } from "../route-def";
 import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
 import {
@@ -141,6 +142,7 @@ const linearDisconnect = route({
   pattern: ["api", "trackers", "linear", "disconnect"],
   summary: "Fully disconnect Linear: revoke OAuth grant + drop tokens",
   tags: ["Trackers"],
+  rbac: { permission: "oauth-authorization.manage" },
   responses: {
     200: { description: "Disconnected", schema: LinearDisconnectSchema },
     503: { description: "Linear not configured" },
@@ -309,6 +311,7 @@ export async function handleLinearTracker(
 
   // DELETE /api/trackers/linear/disconnect — full cleanup.
   if (linearDisconnect.match(req.method, pathSegments)) {
+    if (await refuseAgentTokenWithout(req, res, "oauth-authorization.manage")) return true;
     if (!isLinearEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Linear integration not configured" }));
