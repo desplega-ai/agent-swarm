@@ -7,11 +7,15 @@ import { cleanupStack, jsonResponse, type MockRequest, startMockServer } from ".
 //     guard allows loopback (the dev posture), so a loopback spec imports. Outside dev/test a
 //     public-looking name is resolved and refused when it does not resolve to a public address;
 //     ALLOW_PRIVATE_NETWORK_URLS=true keeps the self-hosted opt-in.
+//   - The onboarding embeddings probe uses the same guard for a caller-supplied endpoint, with
+//     the same three postures. The deployment's own EMBEDDING_API_BASE_URL stays exempt.
 //   - MCP OAuth discovery refuses an authorization-server document whose endpoints are not
 //     http(s) URLs, so /authorize-url can never hand the browser a script URL.
 
 /** A public DNS name that answers with 127.0.0.1. Without DNS the guard still refuses it. */
 const LOOPBACK_DNS_NAME = "localtest.me";
+
+const ENDPOINT_NOT_ALLOWED = "The endpoint URL is not allowed.";
 
 function openapiSpec(origin: string): string {
   return JSON.stringify({
@@ -55,6 +59,24 @@ export const platformOutboundUrlGuards: Scenario = {
       return new Response("not found", { status: 404 });
     });
     cleanup.add("stop the oauth server", async () => oauth.stop());
+    // Answers 401, so a probe that reaches it ends as an auth failure and saves nothing.
+    const embeddings = startMockServer(() =>
+      jsonResponse({ error: { message: "bad key" } }, 401),
+    );
+    cleanup.add("stop the embeddings server", async () => embeddings.stop());
+    const probe = (baseUrl: string) =>
+      ctx.api("POST", "/api/onboarding/memory", {
+        body: { preset: "custom", baseUrl, apiKey: `k-${ctx.nonce}` },
+      });
+    const expectProbeReached = async (baseUrl: string, label: string) => {
+      const before = embeddings.requests.length;
+      const response = await probe(baseUrl);
+      expectStatus(response, [200], label);
+      expect(
+        asRecord(response.json).errorClass === "auth" && embeddings.requests.length === before + 1,
+        `${label}: the endpoint was not reached: ${response.text.slice(0, 300)}`,
+      );
+    };
     const createFromUrl = (label: string, url: string) =>
       ctx.api("POST", "/api/script-connections", {
         body: { kind: "openapi", slug: `e2e-guard-${label}-${ctx.nonce}`, openapiSpecUrl: url },
@@ -106,6 +128,10 @@ export const platformOutboundUrlGuards: Scenario = {
       const devImport = await createFromUrl("dev", `${spec.origin}/spec.json`);
       expectStatus(devImport, [200], "import a loopback spec under NODE_ENV=test");
       deleteConnection(devImport);
+      await expectProbeReached(
+        `${embeddings.origin}/v1`,
+        "probe a loopback embeddings endpoint under NODE_ENV=test",
+      );
 
       // ── OpenAPI spec URL, production posture: the name is resolved and checked ──
       restarted = true;
@@ -121,13 +147,39 @@ export const platformOutboundUrlGuards: Scenario = {
       );
       expect(spec.requests.length === probesBefore, "the refused import never reached the server");
 
-      // The self-hosted opt-in still reaches a private spec server.
+      // The embeddings probe resolves the name too and refuses it before connecting.
+      const embeddingsBefore = embeddings.requests.length;
+      const refusedProbe = await probe(
+        `https://${LOOPBACK_DNS_NAME}:${new URL(embeddings.origin).port}/v1`,
+      );
+      expectStatus(refusedProbe, [200], "probe an embeddings endpoint name that is not public");
+      expect(
+        asRecord(refusedProbe.json).ok === false &&
+          asRecord(refusedProbe.json).error === ENDPOINT_NOT_ALLOWED &&
+          embeddings.requests.length === embeddingsBefore,
+        `the embeddings probe must refuse a name that does not resolve to a public address: ${refusedProbe.text.slice(0, 300)}`,
+      );
+      // The deployment's own endpoint (the loopback inference mock) is operator config: exempt.
+      const existing = await ctx.api("POST", "/api/onboarding/memory", {
+        body: { preset: "existing" },
+      });
+      expectStatus(existing, [200], "probe the deployment embeddings endpoint in production");
+      expect(
+        asRecord(existing.json).ok === true && asRecord(existing.json).dimensions === 512,
+        `the deployment embeddings endpoint must still be probed: ${existing.text.slice(0, 300)}`,
+      );
+
+      // The self-hosted opt-in still reaches a private spec server and embeddings endpoint.
       await ctx.restartSut({
         env: { NODE_ENV: "production", ALLOW_PRIVATE_NETWORK_URLS: "true" },
       });
       const optIn = await createFromUrl("optin", `${spec.origin}/spec.json`);
       expectStatus(optIn, [200], "import a loopback spec with ALLOW_PRIVATE_NETWORK_URLS=true");
       deleteConnection(optIn);
+      await expectProbeReached(
+        `${embeddings.origin}/v1`,
+        "probe a loopback embeddings endpoint with ALLOW_PRIVATE_NETWORK_URLS=true",
+      );
     } finally {
       // Later scenarios run on the base environment.
       if (restarted) await ctx.restartSut();

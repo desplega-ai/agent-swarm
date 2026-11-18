@@ -731,7 +731,7 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, and discovered OAuth endpoints are validated",
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, and discovered OAuth endpoints are validated",
       "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {
