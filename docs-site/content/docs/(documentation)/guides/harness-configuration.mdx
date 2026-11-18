@@ -430,11 +430,11 @@ Nothing else changes. These surfaces derive from the entry: credential routing a
 |----------|---------|
 | Env var | `ZAI_API_KEY` (alias `ZHIPU_API_KEY`, the name models.dev uses for the section) |
 | Base URL | `https://api.z.ai/api/coding/paas/v4` (fixed; no override) |
-| Models | `zai-coding-plan/glm-5.3-flash` (the everyday default), `zai-coding-plan/glm-5.3`, `zai-coding-plan/glm-5.3-highspeed`, `zai-coding-plan/glm-5.2`, `zai-coding-plan/glm-5.2-highspeed` |
+| Models | `zai-coding-plan/glm-5.3-flash` (the everyday default), `zai-coding-plan/glm-5.3`, `zai-coding-plan/glm-5.2`, `zai-coding-plan/glm-5.1`, `zai-coding-plan/glm-5-turbo` |
 
 - **Entering keys**: use the Z.ai Coding Plan card on the dashboard Connect → AI providers page, or set `ZAI_API_KEY` on the worker. A key saved on the dashboard needs no restart.
 - **Key kind**: Z.ai keys are product-specific. Use a key created under the GLM Coding Plan; a pay-as-you-go Z.ai key is rejected on this endpoint.
-- **Catalog**: models.dev lists the plan (`zai-coding-plan` section); the picker shows its tool-calling chat models.
+- **Catalog**: models.dev lists the plan (`zai-coding-plan` section); the picker shows its tool-calling chat models. The endpoint itself serves a few more ids — the newer `glm-5.3-flashx` pair and the 4.x generation — which stay out of the picker until models.dev lists them, and the section's `*-highspeed` ids are not served and are excluded.
 - **Pricing**: plan billing is flat. models.dev lists every plan model at cost 0, so sessions record $0 with `costSource: "pricing-table"`. See [Cost and context computation](/docs/guides/cost-and-context-computation).
 - **Default harness**: when `HARNESS_PROVIDER` is unset and a Z.ai key is the worker's only LLM credential, the worker defaults to `pi`. Set `MODEL_OVERRIDE=zai-coding-plan/glm-5.3-flash` on those agents, or retarget the tier config keys (`MODEL_TIER_PI_*`, `MODEL_TIER_OPENCODE_*`) as in the NaN and Helmcode section above.
 
