@@ -35,6 +35,7 @@ import { useSteerTask } from "@/api/hooks/use-tasks";
 import type { AgentTaskStatus, SteeringSource, SteerMode, SteerResult } from "@/api/types";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { type ComposerCitations, messageWithCitations } from "@/lib/composer-citations";
 import { useCan } from "@/lib/use-can";
 import { SteerModeToggle } from "./steer-mode-toggle";
 
@@ -56,6 +57,7 @@ export interface SteerComposerProps {
   /** Controlled draft. Omit both to keep the draft internal. */
   value?: string;
   onValueChange?: (next: string) => void;
+  citations?: ComposerCitations;
   placeholder?: string;
   autoFocus?: boolean;
   /** Span the full available width (task-detail dock). Sessions chat omits it
@@ -110,6 +112,7 @@ export function SteerComposer({
   taskStatus,
   value,
   onValueChange,
+  citations,
   placeholder,
   autoFocus,
   fullWidth,
@@ -153,12 +156,12 @@ export function SteerComposer({
   const effectiveMode: SteerMode = canInterrupt ? mode : "queue";
 
   const submit = () => {
-    const trimmed = draft.trim();
-    if (trimmed.length === 0 || steerTask.isPending) return;
+    const message = messageWithCitations(draft, citations);
+    if (message.length === 0 || steerTask.isPending) return;
     steerTask.mutate(
       {
         id: taskId,
-        message: trimmed,
+        message,
         mode: effectiveMode,
         requestedByUserId: userId ?? undefined,
         source,
@@ -178,6 +181,7 @@ export function SteerComposer({
               : undefined,
           );
           setDraft("");
+          citations?.clear();
         },
       },
     );
@@ -200,6 +204,7 @@ export function SteerComposer({
       className={className}
       value={draft}
       onChange={setDraft}
+      citations={citations}
       onSubmit={submit}
       isPending={steerTask.isPending}
       isError={steerTask.isError}

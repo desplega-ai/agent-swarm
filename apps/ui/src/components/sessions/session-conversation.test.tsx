@@ -44,6 +44,7 @@ mock.module("@/components/sessions-v2/pane/turn-timeline", () => ({
   },
 }));
 mock.module("./session-timeline", () => ({ SessionTimeline: () => null }));
+mock.module("./cite-outcome-selection", () => ({ CiteOutcomeSelection: () => null }));
 mock.module("./session-presence", () => ({
   useSessionPresenceContext: () => ({ viewers: [], setTyping: () => {} }),
 }));
@@ -53,6 +54,7 @@ mock.module("@/components/ui/button", () => ({ Button: () => null }));
 mock.module("@/components/ui/skeleton", () => ({ Skeleton: () => null }));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
+mock.module("@/lib/composer-citations", () => require("../../lib/composer-citations"));
 mock.module("@/lib/session-presence", () => require("../../lib/session-presence"));
 mock.module("@/lib/session-sharing", () => require("../../lib/session-sharing"));
 mock.module("@/lib/task-steer", () => require("../../lib/task-steer"));
