@@ -7,6 +7,7 @@ import { getUserGrant } from "../../be/rbac-roles";
 import { can, isRbacEnabled } from "../../rbac";
 import type { ExecutorMeta } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
+import { isChatApprovalChannel } from "../approval-inline";
 import { dispatchApprovalNotifications } from "../approval-notifications";
 import type { ExecutorDependencies, ExecutorInput, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
@@ -80,8 +81,8 @@ export const ApproverConfigSchema = z.object({
 });
 
 export const NotificationConfigSchema = z.object({
-  channel: z.enum(["slack", "email", "telegram"]),
-  // Telegram: a chat id, or a Chat SDK thread id (`telegram:<chat>[:<topic>]`).
+  channel: z.enum(["slack", "email", "telegram", "discord", "teams"]),
+  // Chat SDK thread id. Telegram also accepts a bare chat id.
   target: z.string(),
 });
 
@@ -209,10 +210,10 @@ export function resolveHitlQuestions(
   return { ok: true, questions };
 }
 
-// ─── Telegram authorization ─────────────────────────────────
+// ─── Chat SDK authorization ─────────────────────────────────
 
-export const TELEGRAM_HITL_NOTIFICATION_REFUSED =
-  "Telegram notifications require lead privileges (integration.chat.post): a writer of this workflow lacks them. Remove the telegram notification, or have the lead save the workflow.";
+export const CHAT_HITL_NOTIFICATION_REFUSED =
+  "Chat notifications require lead privileges (integration.chat.post): a writer of this workflow lacks them. Remove the chat notification, or have the lead save the workflow.";
 
 type ExecutorDb = ExecutorDependencies["db"];
 
@@ -246,14 +247,11 @@ async function writerMayPostChat(
 }
 
 /**
- * A workflow node chooses its Telegram target and card text, so both its creator
+ * A workflow node chooses its Chat SDK target and card text, so both its creator
  * and its last writer must hold the chat post verb. Otherwise a non-lead agent
  * could author a workflow that makes the bot post anywhere.
  */
-export async function workflowMaySendTelegram(
-  db: ExecutorDb,
-  workflowId: string,
-): Promise<boolean> {
+export async function workflowMaySendChat(db: ExecutorDb, workflowId: string): Promise<boolean> {
   const workflow = await db.getWorkflow(workflowId);
   if (!workflow) return false;
   return (
@@ -339,10 +337,10 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       return { status: "failed", error: "human-in-the-loop questions did not resolve to an array" };
     }
     if (
-      config.notifications?.some((notification) => notification.channel === "telegram") &&
-      !(await workflowMaySendTelegram(db, meta.workflowId))
+      config.notifications?.some((notification) => isChatApprovalChannel(notification.channel)) &&
+      !(await workflowMaySendChat(db, meta.workflowId))
     ) {
-      return { status: "failed", error: TELEGRAM_HITL_NOTIFICATION_REFUSED };
+      return { status: "failed", error: CHAT_HITL_NOTIFICATION_REFUSED };
     }
     const requestId = crypto.randomUUID();
     const created = await db.createApprovalRequest({

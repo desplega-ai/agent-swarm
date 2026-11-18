@@ -1439,12 +1439,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -1567,10 +1567,10 @@ export interface paths {
                         sourceTaskId?: string;
                         /** @description Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). */
                         timeoutSeconds?: number;
-                        /** @description Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped. */
+                        /** @description Where to post approval cards with a dashboard link. Slack accepts a channel or user ID and requires `integration.slack.post`. Telegram accepts a bare chat ID or `telegram:<chatId>[:<topicId>]`. Discord requires `discord:<guildId>:<channelId>[:<threadId>]`. Teams requires `teams:<base64url conversationId>:<base64url serviceUrl>[:<type>]` with a Bot Framework service URL on the allowlist. Telegram, Discord and Teams require `integration.chat.post`. Both permissions are lead-only for agents by default. The API skips email targets. */
                         notifications?: {
                             /** @enum {string} */
-                            channel: "slack" | "email" | "telegram";
+                            channel: "slack" | "email" | "telegram" | "discord" | "teams";
                             target: string;
                         }[];
                     };
@@ -1679,12 +1679,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -1713,7 +1713,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Slack notifications require a lead agent */
+                /** @description Caller lacks the posting permission for a requested chat channel */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1854,12 +1854,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -2034,12 +2034,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;
@@ -2232,12 +2232,12 @@ export interface paths {
                                 expiresAt: string | null;
                                 notificationChannels: {
                                     /** @enum {string} */
-                                    channel: "slack" | "email" | "telegram";
+                                    channel: "slack" | "email" | "telegram" | "discord" | "teams";
                                     target: string;
                                     messageTs?: string;
-                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    /** @description Chat SDK: the thread the card was posted in. */
                                     threadId?: string;
-                                    /** @description Telegram: the card's message id. */
+                                    /** @description Chat SDK: the card's message id. */
                                     messageId?: string;
                                 }[] | null;
                                 createdBy?: string;

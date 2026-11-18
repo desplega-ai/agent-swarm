@@ -37,6 +37,7 @@ import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { cancelApprovalRequest } from "../workflows/approval-cancel";
+import { isChatApprovalChannel } from "../workflows/approval-inline";
 import {
   createApprovalFollowUpTask,
   dispatchApprovalNotifications,
@@ -103,13 +104,13 @@ const ApproversSchema = z.object({
 type ApproversShape = z.infer<typeof ApproversSchema>;
 
 const NotificationChannelSchema = z.object({
-  channel: z.enum(["slack", "email", "telegram"]),
+  channel: z.enum(["slack", "email", "telegram", "discord", "teams"]),
   target: z.string(),
   // Added post-creation by workflows/executors/human-in-the-loop.ts once the
   // notification message is sent (see `updateApprovalRequestNotifications`).
   messageTs: z.string().optional(),
-  threadId: z.string().optional().describe("Telegram: the Chat SDK thread the card was posted in."),
-  messageId: z.string().optional().describe("Telegram: the card's message id."),
+  threadId: z.string().optional().describe("Chat SDK: the thread the card was posted in."),
+  messageId: z.string().optional().describe("Chat SDK: the card's message id."),
 });
 type NotificationChannelShape = z.infer<typeof NotificationChannelSchema>;
 
@@ -406,13 +407,13 @@ const createRoute = route({
     notifications: z
       .array(
         z.object({
-          channel: z.enum(["slack", "email", "telegram"]),
+          channel: z.enum(["slack", "email", "telegram", "discord", "teams"]),
           target: z.string(),
         }),
       )
       .optional()
       .describe(
-        "Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped.",
+        "Where to post approval cards with a dashboard link. Slack accepts a channel or user ID and requires `integration.slack.post`. Telegram accepts a bare chat ID or `telegram:<chatId>[:<topicId>]`. Discord requires `discord:<guildId>:<channelId>[:<threadId>]`. Teams requires `teams:<base64url conversationId>:<base64url serviceUrl>[:<type>]` with a Bot Framework service URL on the allowlist. Telegram, Discord and Teams require `integration.chat.post`. Both permissions are lead-only for agents by default. The API skips email targets.",
       ),
   }),
   responses: {
@@ -421,7 +422,7 @@ const createRoute = route({
       schema: z.object({ approvalRequest: ApprovalRequestSchema }),
     },
     400: { description: "Validation error" },
-    403: { description: "Slack notifications require a lead agent" },
+    403: { description: "Caller lacks the posting permission for a requested chat channel" },
   },
   auth: { apiKey: true },
 });
@@ -899,10 +900,12 @@ export async function handleApprovalRequests(
         return true;
       }
     }
-    if (parsed.body.notifications?.some((notification) => notification.channel === "telegram")) {
+    if (
+      parsed.body.notifications?.some((notification) => isChatApprovalChannel(notification.channel))
+    ) {
       const { principal } = await approvalCallerPrincipal(req);
       if (!can({ principal, verb: "integration.chat.post", source: "http" }).allow) {
-        jsonError(res, TELEGRAM_NOTIFICATION_REFUSED, 403);
+        jsonError(res, CHAT_NOTIFICATION_REFUSED, 403);
         return true;
       }
     }
@@ -938,7 +941,7 @@ export async function handleApprovalRequests(
       createdBy,
     });
 
-    // Fire-and-forget: Slack must not delay or fail the 201. Workflow HITL
+    // Chat notification delivery runs in the background. Workflow HITL
     // requests are created by the executor directly, so they never post here.
     const notifications = parsed.body.notifications;
     if (notifications?.length && request.status === "pending") {
@@ -996,8 +999,8 @@ export async function handleApprovalRequests(
   return false;
 }
 
-const TELEGRAM_NOTIFICATION_REFUSED =
-  "Telegram notifications require lead privileges (integration.chat.post). Create the request without them, or ask the lead to post the link.";
+const CHAT_NOTIFICATION_REFUSED =
+  "Chat notifications require lead privileges (integration.chat.post). Create the request without them, or ask the lead to post the link.";
 
 const SLACK_NOTIFICATION_REFUSED =
   "Slack notifications require lead privileges (integration.slack.post). Create the request without them, or ask the lead to post the link.";

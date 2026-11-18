@@ -107,7 +107,8 @@ function drain(stream: ReadableStream<Uint8Array>, writer: Bun.FileSink) {
 
 /** One lcov directory and bunfig per API process, so a restart never overwrites a boot's lcov. */
 async function coverageCommand(sut: Sut) {
-  if (!sut.coverageDir) return ["run", "src/http.ts"];
+  if (!sut.coverageDir)
+    return ["run", "--preload", "./src/tests/fixtures/chat-sdk/e2e-preload.ts", "src/http.ts"];
   const name = `${basename(sut.logPaths[0]!, ".log")}-${sut.logPaths.length}`;
   const configPath = `/tmp/${name}.toml`;
   sut.tempPaths.push(configPath);
@@ -123,7 +124,13 @@ async function coverageCommand(sut: Sut) {
       "",
     ].join("\n"),
   );
-  return [`--config=${configPath}`, "test", "./scripts/e2e/coverage-sut.ts"];
+  return [
+    `--config=${configPath}`,
+    "test",
+    "--preload",
+    "./src/tests/fixtures/chat-sdk/e2e-preload.ts",
+    "./scripts/e2e/coverage-sut.ts",
+  ];
 }
 
 function spawnSutProcess(logPath: string, env: Record<string, string>, command: string[]) {
@@ -246,6 +253,8 @@ export async function startSut(
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
   const codexDevicePort = await reservedPort();
   const chatSdkPort = await reservedPort();
+  const chatSdkDiscordPort = await reservedPort();
+  const chatSdkTeamsPort = await reservedPort();
   // Chat SDK Slack posts to a mock bound here by the scenario (slack-http.ts).
   const chatSdkSlackPort = await reservedPort();
   // Chat SDK Rocket.Chat posts to a mock bound here by platform-chat-sdk-rocketchat.
@@ -288,8 +297,11 @@ export async function startSut(
     // Short buffer: a chat mention becomes a task in half a second, not ten.
     CHAT_SDK_BUFFER_MS: "500",
     CHAT_SDK_ADAPTERS: "{}",
+    CHAT_SDK_E2E_WEBHOOK_TOKEN: randomBytes(24).toString("hex"),
     CHAT_SDK_API_URL_OVERRIDES: JSON.stringify({
       telegram: `http://127.0.0.1:${chatSdkPort}`,
+      discord: `http://127.0.0.1:${chatSdkDiscordPort}/api/v10`,
+      teams: `http://127.0.0.1:${chatSdkTeamsPort}/`,
       slack: `http://127.0.0.1:${chatSdkSlackPort}/api/`,
       rocketchat: `http://127.0.0.1:${chatSdkRocketchatPort}`,
     }),

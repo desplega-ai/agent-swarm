@@ -171,6 +171,16 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
 
+### Chat approval transport fixtures
+
+The SUT preloads `src/tests/fixtures/chat-sdk/e2e-preload.ts` only in the test child.
+It disables the Discord Gateway and supplies the Teams token/verifier hooks. Teams callbacks
+require a per-run bearer from `CHAT_SDK_E2E_WEBHOOK_TOKEN`; Discord callbacks still pass the
+real Ed25519 signature verifier. Scenarios bind fake platform APIs to the reserved Discord and
+Teams origins in `CHAT_SDK_API_URL_OVERRIDES`. Production startup does not load the fixture.
+`discord-approval-buttons` and `teams-approval-buttons` exercise the real HTTP routes, adapters,
+identity resolution, workflow resume and card updates through those mocked network edges.
+
 ### Mocked edges
 
 | Edge | How the SUT reaches the mock | What the mock does |
