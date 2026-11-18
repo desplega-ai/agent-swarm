@@ -284,6 +284,7 @@ import {
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
+import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -377,6 +378,7 @@ export {
   pinWorkflowDefinition,
   toPinnedDefinition,
 } from "./db/workflow-run-definitions";
+export { getWorkflowsByEventName } from "./db/workflows/read";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -7570,58 +7572,6 @@ export async function getRecentFailedCount(hours: number = 24): Promise<number> 
 // Workflow CRUD
 // ============================================================================
 
-type WorkflowRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  enabled: number;
-  definition: string;
-  triggers: string;
-  cooldown: string | null;
-  input: string | null;
-  triggerSchema: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  dir: string | null;
-  vcs_repo: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-function rowToWorkflow(row: WorkflowRow): Workflow {
-  return {
-    id: row.id,
-    key: row.key,
-    name: row.name,
-    description: row.description ?? undefined,
-    enabled: row.enabled === 1,
-    definition: JSON.parse(row.definition) as WorkflowDefinition,
-    triggers: JSON.parse(row.triggers) as TriggerConfig[],
-    cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
-    input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
-    triggerSchema: row.triggerSchema
-      ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
-      : undefined,
-    params: JSON.parse(row.params) as Record<string, unknown>,
-    requiredParams: JSON.parse(row.requiredParams) as string[],
-    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
-    dir: row.dir ?? undefined,
-    vcsRepo: row.vcs_repo ?? undefined,
-    createdByAgentId: row.createdByAgentId ?? undefined,
-    updatedByAgentId: row.updatedByAgentId ?? undefined,
-    createdAt: normalizeDateRequired(row.createdAt),
-    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
-    createdBy: row.created_by ?? undefined,
-    updatedBy: row.updated_by ?? undefined,
-  };
-}
-
 export async function createWorkflow(
   data: {
     key?: string;
@@ -7963,23 +7913,6 @@ export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Work
          AND json_extract(t.value, '$.type') = 'schedule'
          AND json_extract(t.value, '$.scheduleId') = ?`,
     [scheduleId],
-  );
-  return rows.map(rowToWorkflow);
-}
-
-/** Find enabled event subscribers in workflow-list order, returning each workflow once. */
-export async function getWorkflowsByEventName(eventName: string): Promise<Workflow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    `SELECT w.* FROM workflows w
-       WHERE w.enabled = 1
-         AND EXISTS (
-           SELECT 1 FROM json_each(w.triggers) AS t
-           WHERE t.type = 'object'
-             AND json_extract(t.value, '$.type') = 'event'
-             AND json_extract(t.value, '$.eventName') = ?
-         )
-       ORDER BY w.lastUpdatedAt DESC`,
-    [eventName],
   );
   return rows.map(rowToWorkflow);
 }

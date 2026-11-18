@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import {
   countWorkflowRuns,
   createWorkflow,
   getDb,
+  getDbClient,
   getWorkflowRun,
   initDb,
   updateWorkflow,
@@ -1540,7 +1541,22 @@ describe("handleEventTrigger", () => {
     setUpdated.run("2026-01-02T00:00:00.000Z", newer.id);
 
     const payload = { channel: "C123", text: "service is down", ts: "123.456" };
-    await expect(handleEventTrigger("unsubscribed", payload, registry)).resolves.toEqual([]);
+    const client = getDbClient();
+    const query = spyOn(client, "query");
+    const get = spyOn(client, "get");
+    try {
+      expect(await handleEventTrigger("unsubscribed", payload, registry)).toEqual([]);
+      const reads = [...query.mock.results, ...get.mock.results];
+      const rows = (await Promise.all(reads.map((read) => read.value))).flat();
+      const definitions = rows.filter(
+        (row) => row && typeof row === "object" && "definition" in row,
+      );
+      expect(definitions).toHaveLength(0);
+    } finally {
+      query.mockRestore();
+      get.mockRestore();
+    }
+
     const runIds = await handleEventTrigger("slack.message", payload, registry);
 
     const runs = await Promise.all(runIds.map((runId) => getWorkflowRun(runId)));
