@@ -32,3 +32,30 @@ export function getMemoryStore(): MemoryStore {
   }
   return memoryStore;
 }
+
+/**
+ * Reads a key's deployment environment value, without stored config. Set by
+ * the HTTP server at boot (http/core owns the env injection). Unset, no URL
+ * counts as operator config, so every one gets the SSRF check.
+ */
+let readDeploymentEnv: (key: string) => string | undefined = () => undefined;
+
+export function setDeploymentEnvReader(read: (key: string) => string | undefined): void {
+  readDeploymentEnv = read;
+}
+
+/**
+ * The base URL the embedding client sends to, in the SDK's precedence order,
+ * and whether it is the deployment environment's own value. Null when neither
+ * key is set (the SDK default, OpenAI).
+ */
+export function embeddingEndpoint(): { baseUrl: string; fromDeployment: boolean } | null {
+  const key = process.env.EMBEDDING_API_BASE_URL
+    ? "EMBEDDING_API_BASE_URL"
+    : process.env.OPENAI_BASE_URL
+      ? "OPENAI_BASE_URL"
+      : null;
+  if (!key) return null;
+  const baseUrl = process.env[key] ?? "";
+  return { baseUrl, fromDeployment: baseUrl === readDeploymentEnv(key) };
+}
