@@ -114,7 +114,16 @@ test("Claude SDK enables Interrupt and sends steer through the real API @local",
       providerMeta: { transport: "sdk" },
     });
     await page.reload();
-    await expect(interrupt).not.toHaveAttribute("aria-disabled", "true");
+    // The dashboard persists its React Query cache in localStorage
+    // (`apps/ui/src/app/providers.tsx`), and a restored record younger than
+    // `staleTime` (2 s) counts as fresh. A reload that lands inside that window
+    // renders the pre-write transport and takes no read at all; the task record
+    // then converges on the `["task", id]` query's default 10 s
+    // `refetchInterval`. So wait out one full interval, not the 5 s default:
+    // whether the reload falls inside the 2 s window is a few hundred ms of boot
+    // timing, which is why the same shard is green in one merge group and red in
+    // the next (run 44341267991). 25 s stays well inside the 60 s test timeout.
+    await expect(interrupt).not.toHaveAttribute("aria-disabled", "true", { timeout: 25_000 });
     await interrupt.click();
     const message = `SDK redirect ${crypto.randomUUID()}`;
     await page
