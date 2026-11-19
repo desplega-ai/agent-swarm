@@ -43,7 +43,12 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { modelFamilyOf, windowForModelFamily } from "../utils/model-rate-limit-windows";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { chatThreadOfContextKey } from "./context-key";
-import { scheduleFollowUpGateShadow } from "./follow-up-gate";
+import {
+  isFollowUpGateEnforced,
+  readFollowUpGateConfig,
+  scheduleFollowUpGateEnforce,
+  scheduleFollowUpGateShadow,
+} from "./follow-up-gate";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -527,6 +532,9 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  *
  * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
  * verifier's would-skip decision after commit; the follow-up is never skipped.
+ * With `enforce`, a completed run of a schedule in
+ * `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS` returns null here: its follow-up is
+ * created after commit unless the verifier says `would_skip`.
  */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
@@ -706,27 +714,49 @@ export async function createWorkerTaskFollowUp(args: {
     );
     return null;
   }
-  const followUp = await createTaskWithSiblingAwareness(
-    changes.description ?? followUpDescription,
-    {
-      agentId: followUpAgentId,
-      routingReason: followUpAgentId ? "skill" : undefined,
-      routingSource: followUpAgentId ? "engine_default" : undefined,
-      source: "system",
-      taskType: "follow-up",
-      priority: changes.priority,
-      parentTaskId: task.id,
-      contextKey: await deferredWorkChatContextKey(task),
-      slackChannelId: task.slackChannelId,
-      slackThreadTs: task.slackThreadTs,
-      slackUserId: task.slackUserId,
-      followUpConfig: changes.followUpConfig,
-      // The Lead reviews the worker's result here; it is not producing the
-      // worker's structured output, so it must not inherit that contract.
-      inheritParentOutputSchema: false,
-    },
-    { origin: "followUp" },
-  );
+  const createFollowUp = async () =>
+    createTaskWithSiblingAwareness(
+      changes.description ?? followUpDescription,
+      {
+        agentId: followUpAgentId,
+        routingReason: followUpAgentId ? "skill" : undefined,
+        routingSource: followUpAgentId ? "engine_default" : undefined,
+        source: "system",
+        taskType: "follow-up",
+        priority: changes.priority,
+        parentTaskId: task.id,
+        contextKey: await deferredWorkChatContextKey(task),
+        slackChannelId: task.slackChannelId,
+        slackThreadTs: task.slackThreadTs,
+        slackUserId: task.slackUserId,
+        followUpConfig: changes.followUpConfig,
+        // The Lead reviews the worker's result here; it is not producing the
+        // worker's structured output, so it must not inherit that contract.
+        inheritParentOutputSchema: false,
+      },
+      { origin: "followUp" },
+    );
+  const gateConfig = readFollowUpGateConfig();
+  if (isFollowUpGateEnforced({ task, status, config: gateConfig })) {
+    try {
+      // The verifier reads the committed run, so the follow-up waits for it after commit.
+      scheduleFollowUpGateEnforce({
+        task,
+        status,
+        leadAgentId: leadAgent.id,
+        config: gateConfig,
+        createFollowUp,
+      });
+      return null;
+    } catch (err) {
+      // Fail open: create the follow-up now.
+      console.warn(
+        `[worker-follow-up] Follow-up gate enforce failed for task ${task.id.slice(0, 8)}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  const followUp = await createFollowUp();
   if (followUp) {
     try {
       scheduleFollowUpGateShadow({
