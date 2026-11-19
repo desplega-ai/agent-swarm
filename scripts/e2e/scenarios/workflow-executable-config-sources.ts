@@ -141,6 +141,34 @@ export const workflowExecutableConfigSources: Scenario = {
     expect(stepOf(controlDetail, "cm").nextPort === "false", "control code-match routed on data");
     expect(!hasStep(controlDetail, "hit"), "control took the true branch");
 
+    // Control: an allowed source still interpolates into code-match code.
+    const allowedId = await createWorkflow(
+      ctx,
+      "wf-exec-src-allowed",
+      {
+        nodes: [
+          {
+            id: "cm",
+            type: "code-match",
+            config: {
+              code: "(input) => input.run.id === '{{run.id}}'",
+              outputPorts: ["true", "false"],
+            },
+            next: { true: "hit" },
+          },
+          onTrue("hit"),
+        ],
+      },
+      {},
+      workerId,
+    );
+    const allowed = await triggerWorkflow(ctx, allowedId, trigger, { agentId: workerId });
+    const allowedDetail = await waitForRun(ctx, allowed.runId, "completed", 30_000, "allowed run");
+    expect(
+      stepOf(allowedDetail, "cm").nextPort === "true",
+      "allowed {{run.id}} token was not interpolated into code-match code",
+    );
+
     for (const [name, spec] of Object.entries(CASES)) {
       const workflowId = await createWorkflow(
         ctx,
