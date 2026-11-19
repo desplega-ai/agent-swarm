@@ -12,6 +12,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test("tasks list opens the seeded task and its session logs", async ({ page, seed, clean }) => {
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks");
+  await page.getByPlaceholder("Search by description or ID...").fill(TASK_PROMPT);
 
   const row = page.getByRole("row", { name: new RegExp(TASK_PROMPT) });
   await expect(row).toBeVisible();
