@@ -133,20 +133,23 @@ export const coreSessionLogBounds: Scenario = {
       // Overlapping uploads must reserve their bytes against each other, not
       // each spend the same remaining budget.
       const raceSession = `core-slb-race-${ctx.nonce}`;
-      // Each upload is a third of the budget on its own, so only accounting
-      // that every batch can see bounds their sum.
-      await Promise.all(
-        Array.from({ length: 8 }, () =>
+      // Each upload crosses the 200-row write-batch boundary. Both writers
+      // must reload the committed spend after yielding between their batches.
+      const raceResponses = await Promise.all(
+        Array.from({ length: 2 }, () =>
           ctx.api("POST", "/api/session-logs", {
             body: {
               sessionId: raceSession,
               iteration: 1,
               cli: "opencode",
-              lines: Array.from({ length: 3 }, () => chunk),
+              lines: Array.from({ length: 400 }, () => "r".repeat(3_000)),
             },
           }),
         ),
       );
+      for (const response of raceResponses) {
+        expectStatus(response, [201], "overlapping multi-batch upload");
+      }
       const raceBytes =
         ctx.db.get<{ bytes: number }>(
           "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
