@@ -141,7 +141,11 @@ export async function handleDbQuery(
     // The MCP tool gets this from the registrar; the HTTP route does it here.
     // The scrub is synchronous, so one sweep scrubber per request stays valid; it
     // skips the rules a clean row cannot trigger (rows run to MBs on this route).
-    dbQueryRoute.respond(res, 200, scrubObject(result, undefined, undefined, createSweepScrubber()));
+    dbQueryRoute.respond(
+      res,
+      200,
+      scrubObject(result, undefined, undefined, createSweepScrubber()),
+    );
   } catch (err: unknown) {
     if (err instanceof DbQueryConcurrencyCapError) {
       // Machine-readable code + Retry-After so a caller can back off instead
