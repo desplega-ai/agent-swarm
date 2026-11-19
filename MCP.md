@@ -661,7 +661,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, vercel. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, zai-coding-plan, vercel. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -1106,7 +1106,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines. An agent session token also needs the lead role to change url, clonePath or hooks.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2561,14 +2561,14 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved on the API server's disk, which your container usually can't read.
+Download a file from Slack by file ID or Slack file URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved under /workspace/shared/downloads/ on the API server's disk, which your container usually can't read.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
-| `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
+| `url` | `string` | No | - | Slack file URL (url_private_download or url_private from a file object). The file ID in it is looked up in Slack. |
 | `taskId` | `uuid` | No | - | Task to attach the file to. Defaults to the task you are working on; must be a task you own or created. |
-| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Defaults to /workspace/shared/downloads/{agentId}/slack/. |
+| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Must be inside /workspace/shared/downloads/; a relative path resolves from there. Defaults to /workspace/shared/downloads/{agentId}/slack/. |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
 
 ### slack-delete
