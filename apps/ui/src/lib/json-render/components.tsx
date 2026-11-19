@@ -3624,9 +3624,6 @@ function KanbanComponent({ props }: { props: KanbanComponentProps }) {
                       <button
                         type="button"
                         className="cursor-pointer text-left font-medium text-sm"
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") event.stopPropagation();
-                        }}
                       >
                         {item.name || "Untitled"}
                       </button>
