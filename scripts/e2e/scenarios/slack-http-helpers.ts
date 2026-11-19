@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { ScenarioContext } from "../run";
@@ -30,23 +29,6 @@ export type ChatSdkSlack = {
   undo: () => Promise<void>;
 };
 
-let chatSdkJournals = 0;
-
-/**
- * With `--visuals`, the HTTP-mode mock keeps its own journal in the visuals directory, so
- * the renderer can draw its threads. Returns the journal file name, or undefined.
- */
-async function chatSdkJournal(ctx: ScenarioContext): Promise<string | undefined> {
-  if (!ctx.visualsDir) return undefined;
-  chatSdkJournals += 1;
-  const name = `slack-chat-sdk-journal-${chatSdkJournals}.jsonl`;
-  // The mock replays a journal that is already there, so a reused directory starts clean.
-  await Bun.file(join(ctx.visualsDir, name))
-    .delete()
-    .catch(() => {});
-  return name;
-}
-
 function slackOverridePort(ctx: ScenarioContext): number {
   const overrides = asRecord(JSON.parse(ctx.sutEnv.CHAT_SDK_API_URL_OVERRIDES ?? "{}"));
   return Number(new URL(asString(overrides.slack, "Chat SDK Slack API override")).port);
@@ -61,12 +43,13 @@ function slackOverridePort(ctx: ScenarioContext): number {
 export async function enableChatSdkSlack(ctx: ScenarioContext): Promise<ChatSdkSlack> {
   const signingSecret = randomBytes(16).toString("hex");
   const webhookUrl = `${ctx.baseUrl}${CHAT_SDK_SLACK_WEBHOOK}`;
-  const journal = await chatSdkJournal(ctx);
+  // With `--visuals`, this mock keeps its own journal, so the renderer can draw its threads.
+  const journal = ctx.slackJournal();
   const mock = await startHttpSlackMock({
     eventsUrl: webhookUrl,
     signingSecret,
     port: slackOverridePort(ctx),
-    ...(journal && ctx.visualsDir ? { dataFile: join(ctx.visualsDir, journal) } : {}),
+    ...(journal ? { dataFile: journal.path } : {}),
   });
   const cleanup = cleanupStack(ctx);
   cleanup.add("stop the HTTP Slack mock", () => mock.stop());
@@ -121,7 +104,7 @@ export async function enableChatSdkSlack(ctx: ScenarioContext): Promise<ChatSdkS
         ...ctx,
         slack: mock,
         // A thread on this mock is in this mock's journal, not in the Socket mock's.
-        markThread: (label, channel, ts) => ctx.markThread(label, channel, ts, journal),
+        markThread: (label, channel, ts) => ctx.markThread(label, channel, ts, journal?.file),
       },
       undo,
     };
