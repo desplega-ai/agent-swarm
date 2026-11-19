@@ -93,6 +93,47 @@ test("a part places approvals after its answer and steps, before its live line",
   }
 });
 
+test("a lead follow-up answer renders by default, and later work renders after it", () => {
+  const root = task("root", { source: "ui", output: "First answer" });
+  const chain = [
+    root,
+    task("w1", {
+      parentTaskId: root.id,
+      agentId: "worker",
+      source: "mcp",
+      createdAt: "2026-11-07T12:00:30.000Z",
+    }),
+    task("f1", {
+      parentTaskId: "w1",
+      taskType: "follow-up",
+      createdAt: "2026-11-07T12:01:00.000Z",
+      output: "Approved",
+    }),
+    // A GitHub review starts more work under the worker's task an hour later.
+    task("w2", {
+      parentTaskId: "w1",
+      agentId: "worker",
+      source: "mcp",
+      status: "in_progress",
+      createdAt: "2026-11-07T13:00:00.000Z",
+    }),
+  ];
+  const html = renderToStaticMarkup(
+    <TurnTimeline
+      rootTaskId={root.id}
+      chain={chain}
+      approvals={[]}
+      showHandoffs={false}
+      typing={[]}
+    />,
+  );
+  const first = html.indexOf("Worker step");
+  const last = html.lastIndexOf("Worker step");
+  expect(html.indexOf("First answer")).toBeLessThan(first);
+  expect(first).toBeLessThan(html.indexOf("Approved"));
+  expect(html.indexOf("Approved")).toBeLessThan(last);
+});
+
 test("windowStart keeps the newest turns within the task budget, at least MIN_TURNS", () => {
   const { windowStart, MIN_TURNS } = require("./turn-timeline") as typeof import("./turn-timeline");
   const one = (n: number) => n;
