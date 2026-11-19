@@ -440,6 +440,7 @@ test.describe("phone", () => {
       "aria-activedescendant",
       await container.evaluate((item) => item.id),
     );
+    await expect(container).toHaveAttribute("data-cursor", "true");
 
     await expect(container).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.press("ArrowLeft");
@@ -452,6 +453,8 @@ test.describe("phone", () => {
     const rowIndex = rowIds.indexOf(rowId);
     for (let i = 0; i < rowIndex; i++) await page.keyboard.press("ArrowDown");
     await expect(tree).toHaveAttribute("aria-activedescendant", rowId);
+    await expect(row.locator('[data-cursor="true"]')).toBeVisible();
+    await expect(container).not.toHaveAttribute("data-cursor", "true");
 
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}(\\?|$)`));
