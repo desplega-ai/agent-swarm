@@ -163,7 +163,9 @@ test.describe("desktop", () => {
     });
     // The test API turns steering off; the dashboard reads the flag from stats.
     await page.route("**/api/stats", async (route) => {
-      const response = await route.fetch();
+      // The steer box polls stats, so a reused keep-alive socket the API already closed
+      // fails as ECONNRESET ("socket hang up"). maxRetries retries exactly that error.
+      const response = await route.fetch({ maxRetries: 2 });
       return route.fulfill({
         response,
         json: { ...(await response.json()), steeringEnabled: true },
