@@ -35,6 +35,8 @@ test("exposes exactly one pressed execution type as mouse and keyboard selection
   const root = createRoot(container);
   const user = userEvent.setup({ document });
   const buttons = within(container);
+  const labelsWithPressedState = (pressed: boolean) =>
+    buttons.queryAllByRole("button", { pressed }).map((button) => button.textContent);
 
   try {
     await act(async () => {
@@ -44,21 +46,17 @@ test("exposes exactly one pressed execution type as mouse and keyboard selection
         </QueryClientProvider>,
       );
     });
-    const agentTask = buttons.getByRole("button", { name: "Agent Task" });
-    const workflow = buttons.getByRole("button", { name: "Workflow" });
-    const script = buttons.getByRole("button", { name: "Script" });
+    expect(labelsWithPressedState(true)).toEqual(["Agent Task"]);
 
-    expect(buttons.queryAllByRole("button", { pressed: true })).toEqual([agentTask]);
-
-    await act(async () => user.click(script));
-    expect(buttons.getAllByRole("button", { pressed: true })).toEqual([script]);
-    expect(buttons.getAllByRole("button", { pressed: false })).toEqual([agentTask, workflow]);
+    await act(async () => user.click(buttons.getByRole("button", { name: "Script" })));
+    expect(labelsWithPressedState(true)).toEqual(["Script"]);
+    expect(labelsWithPressedState(false)).toEqual(["Agent Task", "Workflow"]);
 
     await act(async () => {
       await user.tab({ shift: true });
       await user.keyboard("{Enter}");
     });
-    expect(buttons.getAllByRole("button", { pressed: true })).toEqual([workflow]);
+    expect(labelsWithPressedState(true)).toEqual(["Workflow"]);
   } finally {
     await act(async () => root.unmount());
     container.remove();
