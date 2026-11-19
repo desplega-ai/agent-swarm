@@ -320,7 +320,7 @@ A handful of detail pages are exempt because their identity is an editor or spli
 
 ## agent-browser & PR screenshot and recording requirement
 
-Use the `agent-browser` skill for browser automation commands. Never `qa-use` unless explicitly asked. Any PR touching `ui/` MUST include screenshots of the changes running locally (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded to agent-fs with signed URLs in the PR body. This is a reviewer convention; no CI job enforces it. Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
+Use the `agent-browser` skill for browser automation commands. Never `qa-use` unless explicitly asked. A PR that changes what the dashboard shows MUST include screenshots of the change running locally (static/layout changes included), as GitHub user attachments in the PR body's `## Before / after` section. Add a recording only for a new or changed interaction or flow (navigation, form, modal, drag, animation, or multi-step flow). When nothing visible changes (a configuration-catalog entry that reuses an existing control `kind`, a type-only refactor), write `No visual change: <reason>` in that section and capture no media. The PR Body check requires the section; the media is a reviewer convention. Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
 
 ## UI E2E
 

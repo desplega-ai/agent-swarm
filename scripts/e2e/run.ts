@@ -72,7 +72,14 @@ export type ScenarioContext = {
   /** The SUT's stdout/stderr so far (current process only). Compare lengths to read what a step added. */
   sutLog: () => Promise<string>;
   log: (message: string) => void;
-  markThread: (label: string, channel: string, ts: string) => void;
+  /**
+   * Mark a Slack thread for the visuals renderer (`--visuals`). `journal` names another
+   * journal file in the visuals directory, for a thread on a mock the scenario started
+   * itself. Default: the journal of the run's Socket Mode mock.
+   */
+  markThread: (label: string, channel: string, ts: string, journal?: string) => void;
+  /** The `--visuals` directory (absolute path), when the run keeps Slack journals. */
+  visualsDir?: string;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
   restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
   nonce: string;
@@ -106,7 +113,13 @@ export type Scenario = {
 
 type BaseContext = Omit<ScenarioContext, "markThread">;
 
-type ThreadMark = { scenario: string; label: string; channel: string; ts: string };
+type ThreadMark = {
+  scenario: string;
+  label: string;
+  channel: string;
+  ts: string;
+  journal?: string;
+};
 
 const MANIFEST_PATH = `${import.meta.dir}/coverage-manifest.json`;
 
@@ -227,6 +240,7 @@ async function bootStack(
       apiKey: sut.apiKey,
       db,
       slack: slack.mock,
+      visualsDir: options.visualsDir ? resolve(options.visualsDir) : undefined,
       llm,
       async startAgent(agentOptions) {
         const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
@@ -415,11 +429,11 @@ async function main(): Promise<number> {
     if (options.skip.has(scenario.name)) continue;
     if (options.group && !scenario.groups?.includes(options.group)) continue;
     if (options.shard && bandOf(scenario.order) !== options.shard.index) continue;
-    const result = await runInStack(scenario, ctx, (label, channel, ts) => {
+    const result = await runInStack(scenario, ctx, (label, channel, ts, journal) => {
       if (!/^[a-z0-9-]+$/.test(label)) {
         throw new Error(`Invalid visual thread label: ${label}`);
       }
-      threadMarks.push({ scenario: scenario.name, label, channel, ts });
+      threadMarks.push({ scenario: scenario.name, label, channel, ts, journal });
     });
     scenarioResults.push(result);
     printScenario(result);
@@ -540,7 +554,8 @@ async function main(): Promise<number> {
             error: scenario.error ?? null,
             threads: threadMarks
               .filter((thread) => thread.scenario === scenario.name)
-              .map(({ label, channel, ts }) => ({ label, channel, ts })),
+              // `journal` is left out of the JSON when the thread is on the run's Socket mock.
+              .map(({ label, channel, ts, journal }) => ({ label, channel, ts, journal })),
           })),
         },
         null,

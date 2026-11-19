@@ -183,6 +183,10 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
+The renderer writes `frames/<scenario>/<label>/final-thread.png` for each thread a scenario marked with `ctx.markThread`.
+A PR that changes what users see in Slack attaches those frames in `## Before / after`: one run on `main` (or with the flag off) and one on the branch.
+A Chat SDK Slack scenario runs on its own HTTP-mode mock. With `--visuals`, that mock writes `slack-chat-sdk-journal-<n>.jsonl` next to `slack-journal.jsonl`, and `flip.ctx.markThread` records which journal holds the thread.
+
 Use `--harness claude,codex,pi,opencode,dsh,cursor,amp,grok,fx,acp` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
@@ -520,7 +524,7 @@ agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/
 | Doc (plan, research, report) | The live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`, under `## Swarm provenance`. `agent-fs share-create <path> --expires-in 604800` only when the requester asks for one or a reader has no agent-fs login |
 | `live.agent-fs.dev` links, swarm task links | Only under `## Swarm provenance` |
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after` with `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. Interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also need a recording, as an attachment mp4 on its own line. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after`. For a visible change, use `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. A new or changed interaction or flow (navigation, form, modal, drag, animation, or multi-step flow) also needs a recording, as an attachment mp4 on its own line. One more instance of an existing control is not a changed interaction. When nothing visible changes (a configuration-catalog entry that reuses an existing control `kind`), write `No visual change: <reason>` and capture no media. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
 
 ### Port-conflict resolution
 

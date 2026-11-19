@@ -31,6 +31,7 @@ async function askAndClaim(ctx: ScenarioContext, text: string) {
 export const slackReplyFooterToggle: Scenario = {
   name: "slack-reply-footer-toggle",
   order: 134.5,
+  groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
     await ctx.restartSut({ env: { SLACK_REPLY_FOOTER_ENABLED: "false" } });
@@ -75,6 +76,8 @@ export const slackReplyFooterToggle: Scenario = {
       await waitForReaction(ctx, threadTs, "white_check_mark");
 
       const automatic = await askAndClaim(ctx, "summarize the release");
+      // The footer-on frame of the same card is the slack-task-output-citations scenario.
+      ctx.markThread("footer-off", CHANNEL, automatic.threadTs);
       const completing = await ctx.connectMcp(automatic.leadId);
       const summary = "Release checks passed.";
       try {

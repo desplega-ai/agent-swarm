@@ -49,7 +49,7 @@ jobs:
           bun-version-file: package.json
 
       - name: List changed files
-        # A UI change requires the Before / after section.
+        # A change under a path in the template's `ui` marker requires the Before / after section.
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

@@ -310,7 +310,11 @@ Hard rules:
 - **No new unit tests for API or CLI code.** Prove a change with an e2e scenario in `scripts/e2e/scenarios/` (`bun run e2e --only <name>` before push; authoring: [scripts/e2e/README.md](./scripts/e2e/README.md)). A new test file (any name `bun test` runs: `*.test.ts`, `*.spec.ts`, `*_test.ts`, any JS/TS extension), or a new `test(` call in an old one, may import only the worker runtime, tooling, rule corpora, migrations and the dashboard listed in `scripts/unit-test-allowlist.txt`. `bun run check:unit-test-allowlist` (Lint job) enforces it on the diff; the escape hatch is a line with a reason in that file. Editing or deleting an existing unit test is fine.
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; Merge Gate needs it (8 shards, no retries, `ui-e2e-shards.yml`).
-- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+- PR evidence shows the surface the reviewer must verify, in the `## Before / after` section. The PR Body check requires that section when the diff touches `apps/ui/`, `apps/templates-ui/`, `src/slack/` or `src/integrations/chat-sdk/` (the template's marker lists the paths). The media is a reviewer convention.
+  - A visible dashboard change, static/layout changes included: screenshots of the change running locally, captured with `agent-browser`. Add a recording only for a new or changed interaction or flow (navigation, form, modal, drag, animation, or multi-step flow). One more instance of an existing control is not a changed interaction.
+  - A visible Slack change: before and after frames from the Slack mock (see the Slack block below).
+  - No visible change (a configuration-catalog entry that reuses an existing control `kind`, a handler, a refactor, another chat platform): write `No visual change: <reason>` and capture no media.
+  - Upload media as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`). Never `qa-use` unless explicitly asked. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
 
@@ -322,6 +326,18 @@ Hard rules:
 
 - **LOCAL / dev agent-swarm (Slack):** Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
 - **PRODUCTION / deployed swarm (MCP):** use `mcp__agent-swarm-user__send-task`. It queues work directly for the online Lead. The call fails without creating a task when no Lead is online. Read results with `mcp__agent-swarm-user__get-tasks`. Do **NOT** use the dev Slack channel for production swarm work. The MCP may not be enabled in every session. Check for `mcp__agent-swarm-user__*` first.
+
+</important>
+
+<important if="you are changing what users see in Slack: message text, blocks, cards, reactions, footers or buttons (src/slack/*, the Slack path of src/integrations/chat-sdk/*, or a prompt template that shapes Slack replies)">
+
+Ship the proof with the change:
+
+- Add or extend a `scripts/e2e/scenarios/slack-*.ts` scenario that asserts the rendered text and blocks. It runs in the contract suite (merge gate) against `@desplega.ai/slack-mock`.
+- Give that scenario a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`, or both) and call `ctx.markThread(label, channel, ts)` for each thread a reviewer must see. The **Slack Visuals** PR comment renders only the marked threads of grouped scenarios. For a flag, mark one thread per state.
+- Chat SDK Slack runs on a second, HTTP-mode mock: mark its threads through the context that `enableChatSdkSlack` returns (`flip.ctx.markThread`).
+- Put before and after frames in `## Before / after`: run the scenario on `main` and on the branch (or with the flag off and on), render, and attach each `frames/<scenario>/<label>/final-thread.png`. Commands: [LOCAL_TESTING.md § Black-box E2E](./LOCAL_TESTING.md#black-box-e2e-bun-run-e2e) (`--visuals <dir>`, then `bun run e2e:visuals <dir>`).
+- No visible change (a handler, a security check, another chat platform): write `No visual change: <reason>` in the section.
 
 </important>
 
@@ -372,7 +388,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .` — CI builds all three images
 - Touched `Dockerfile.ui` / `apps/ui/nginx.conf`? → `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
 
-Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. The PR Body check requires that section when the diff touches those paths. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+A diff that touches `apps/ui/`, `apps/templates-ui/`, `src/slack/` or `src/integrations/chat-sdk/` must fill `## Before / after` (PR Body check): dashboard screenshots, Slack mock frames, or `No visual change: <reason>`. The template comment gives the rule for each case.
 
 </important>
 
@@ -380,7 +396,7 @@ Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots
 
 Most PRs here are written by agents, so the description must carry the intent a reviewer checks the diff against. Write for a human, in the style of the [`comms` skill](https://github.com/desplega-ai/ai-toolbox/blob/main/cc-plugin/base/skills/comms/SKILL.md) (Precise mode): short direct sentences, no filler. Each template section gives a length target. Synthesize to meet it, and go past it only when the reviewer needs the detail.
 
-PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md): the `**Why:**` and `**Risk:**` lines, Review map, Change outline, Heads-up, Verified and Urgency. A `fix:` title adds Repro. A diff touching `apps/ui/` or `apps/templates-ui/` adds Before / after. A desplega-bot body adds Swarm provenance. Show the change, do not narrate it: about 250 prose words, with code blocks, mermaid, tables and `<details>` not counted (the check warns above 300).
+PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md): the `**Why:**` and `**Risk:**` lines, Review map, Change outline, Heads-up, Verified and Urgency. A `fix:` title adds Repro. A diff touching a path in the Before / after marker (the dashboard apps, `src/slack/`, `src/integrations/chat-sdk/`) adds Before / after. A desplega-bot body adds Swarm provenance. Show the change, do not narrate it: about 250 prose words, with code blocks, mermaid, tables and `<details>` not counted (the check warns above 300).
 
 - **Why**: one sentence, paraphrased. Link only public sources here (Fixes #N, a public PR or issue). Never paste customer names or verbatim quotes from private chat. Do not rewrite the ask to match what you built.
 - **Risk**: how deep to read, set by the author. `high` (migration, auth/RBAC, secrets, billing, data deletion, prompt or routing changes that hit every agent, a public API break) adds the `risk:high` label. Review pings stay driven by Urgency.
