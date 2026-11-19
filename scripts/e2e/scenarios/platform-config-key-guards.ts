@@ -84,11 +84,13 @@ export const platformConfigKeyGuards: Scenario = {
       await track({ key: plainKey, value: "plain" });
       await track({ key: "NODE_PATH", value: `/nonexistent-${ctx.nonce}` });
       await track({ key: loaderKey, value: "unused" });
+      await track({ key: "CLAUDE_BINARY", value: `/nonexistent-${ctx.nonce}/claude` });
       const reloaded = await reloadConfig(ctx);
       const updated = Array.isArray(reloaded.keysUpdated) ? reloaded.keysUpdated : [];
       expect(updated.includes(plainKey), `plain key not injected: ${JSON.stringify(updated)}`);
       expect(!updated.includes("NODE_PATH"), "NODE_PATH reached the API process env");
       expect(!updated.includes(loaderKey), `${loaderKey} reached the API process env`);
+      expect(!updated.includes("CLAUDE_BINARY"), "CLAUDE_BINARY reached the API process env");
 
       // ── improvement sends use the outbound URL guard ───────────────────────
       // Outside development and test, a loopback http endpoint is refused.
