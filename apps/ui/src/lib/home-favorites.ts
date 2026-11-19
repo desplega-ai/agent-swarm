@@ -17,6 +17,8 @@ export function favoriteHref(itemType: FavoriteItemType, itemId: string): string
       return `/workflows/${encodeURIComponent(itemId)}`;
     case "schedule":
       return `/schedules/${encodeURIComponent(itemId)}`;
+    case "app":
+      return `/apps/${encodeURIComponent(itemId)}`;
     case "agent-fs-path": {
       const pin = parsePinId(itemId);
       return pin ? combPath(pin) : null;
@@ -40,6 +42,8 @@ export function favoriteKind(itemType: FavoriteItemType, itemId: string): string
       return "Workflow";
     case "schedule":
       return "Schedule";
+    case "app":
+      return "App";
     case "agent-fs-path":
       return isFolderPath(itemId) ? "Folder" : "File";
     case "session":

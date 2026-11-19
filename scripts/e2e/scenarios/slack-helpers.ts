@@ -375,28 +375,13 @@ export async function waitForOutcome(
   }
 }
 
-/** A wake-up time as Slack shows it: HH:MM in Europe/Madrid. */
-export function madridClock(iso: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Madrid",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(iso));
-}
-
-/**
- * Slack shows a deferral's wake-up as `resumes by 04:00` / `Checking back at
- * 04:00` in Europe/Madrid, never the stored card's wording: no `at the latest`
- * ceiling, no `today at` / `tomorrow at` / `on 09-24 at` day, no UTC. Checks
- * the visible text and blocks of every message in the thread (not the raw
- * payload, whose ids and links are not read by a human).
- */
 export function expectChannelWakeTime(
   ctx: ScenarioContext,
   threadTs: string,
   label: string,
   deferredUntil: string,
+  timeZone = "UTC",
+  fallback = true,
 ): void {
   const visible = JSON.stringify(
     ctx.slack
@@ -407,12 +392,25 @@ export function expectChannelWakeTime(
   for (const [what, pattern] of [
     ["an `at the latest` ceiling", /at the latest/],
     ["a stored-card wake-up day", /\b(?:today|tomorrow|on \d{2}-\d{2}) at\b/],
-    ["a UTC time", /\bUTC\b/],
   ] as const) {
     const match = visible.match(pattern);
     expect(!match, `${label} Slack thread showed ${what}: ${JSON.stringify(match?.[0])}`);
   }
-  const clock = madridClock(deferredUntil);
+  const target = new Date(deferredUntil);
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(target);
+  const abbreviation = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+    .formatToParts(target)
+    .find((part) => part.type === "timeZoneName")!.value;
+  const labelled = `${clock} ${abbreviation}`;
+  expect(
+    visible.includes(labelled) === fallback,
+    `${label} expected fallback label: ${fallback}, got ${visible}`,
+  );
   expect(visible.includes(clock), `${label} Slack thread did not show the wake-up time ${clock}`);
 }
 

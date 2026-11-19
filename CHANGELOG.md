@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-11-19
+
+### Added
+- Scripts: durable object scripts. A global script can `export default class X extends DurableObject<State>`, and `script-run` takes `object: { id, method }` to call one object (#3368); the UI lists durable object scripts, their objects and object runs (#3415).
+- Apps: star apps and search the Apps list like Pages (#3432); higher definition caps and a per-app script type budget (#3389).
+- Sessions: optimistic follow-up send with retry and idempotent task create (#3381); outcome excerpts carry citations (#3388).
+- Slack: Sessions replies mirror into Slack as plain agent messages (#3338); a Lead follow-up card merges into the same agent's previous card (#3383); a deferral's wake-up time shows in Slack and the Sessions UI (#3342), in the requester's timezone with `SLACK_DEFAULT_TIMEZONE` as the fallback (#3401).
+- Workflows: `WORKFLOW_INPUT_ENV_ALLOWLIST` limits which env vars a `${NAME}` reference may read (#3387).
+- Providers: Z.ai Coding Plan (GLM) for pi and opencode (#3317).
+- UI: a UI font setting under Settings → Appearance (#3398); agent-fs file review in session and task previews (#3393).
+
+### Changed
+- agent-fs pins bumped 0.18.33 -> 0.18.34.
+- Dependencies: worker harness bumps (#3362), amp, copilot, dsh and acp sdk (#3420); `@desplega.ai/slack-mock` ^0.6.1 (#3429).
+- Entrypoint: MCP config setup moved to Bun (#3167).
+- Performance: idle Sessions polling cut and the models.dev snapshot lazy-loaded (#3382); app row lists read the column index (#3391) and parse each date once when sorting (#3421); workflow event subscribers are filtered before definitions load (#3377).
+- Pre-push: one pre-push test run at a time per machine (#3373).
+- Docs: new review guides (payroll discrepancy, demand forecast accuracy, marketplace fraud alerts, food batch mock recall, business continuity tabletop, AI win-loss, training completion evidence) (#3357-#3361, #3397, #3399, #3400); TLA+ specs synced (#3363); skill seed patches (#3356, #3395); the MCP tools and environment variables references cover durable objects, `SLACK_DEFAULT_TIMEZONE` and `WORKFLOW_INPUT_ENV_ALLOWLIST`.
+
+### Fixed
+- Security: secrets are scrubbed and withheld at more egress points (#3341); caller-supplied outbound URLs are resolved and pinned and credentials bound to their host (#3339); Slack sender and trust checks apply on every inbound path (#3347); the Slack bot token goes only to Slack file URLs and downloads stay in their directory (#3345); `slack-upload-file` paths are confined to `/workspace` and the task directory (#3385); config keys are checked before they reach files, the API env or module paths (#3344); unapproved quickjs imports are refused (#3337); the Kapso routing namespace is reserved (#3343).
+- API: agent-token identity is bound on script, schedule-run, memory index, task session and re-embed routes (#3346, #3350); admin routes check the route permission for agent-bound tokens (#3340); changing a repo's url, clonePath or hooks needs lead, operator or user (#3413).
+- Scripts: scripts and script tools call the API over loopback (#3409); durable runs and schema extraction run as the native sandbox identity (#3351); durable runs are refused under the quickjs executor (#3419); credential bindings resolve from config rows only (#3354); tool-usage arguments are bound as SQL parameters (#3414).
+- Workflows: node deadlines apply on automatic retries (#3349); event subscriber startup failures are isolated (#3365).
+- Schedules: cron runs recalculate when the timezone changes (#3371); the scheduler stops claiming due occurrences after shutdown (#3375).
+- Slack: Lead follow-up cards post in Slack Connect channels unless the flag blocks them (#3405) and are skipped when the Lead replied under another task (#3380).
+- Sessions: Lead follow-ups get the session's original ask and last turns (#3379); follow-ups with files show at once and composer focus survives a task end (#3402).
+- Costs: codex cache writes are no longer billed twice (#3386).
+- Memory: a stored embedding base URL is checked before memory embeds (#3412).
+- Onboard: generated images are pinned to the CLI release (#3408); hooks read the worker MCP config first and the embeddings probe is guarded (#3384).
+- UI: keyboard selection of workflow steps (#3406); URL and header values are quoted in generated shell commands (#3411).
+- Tests: UI e2e and unit test flakes fixed (#3355, #3372, #3378, #3390, #3410, #3416, #3418, #3422-#3424, #3431); the tracker ingest skips pull_request runs (#3433); the Slack profile enrichment cache stays API-written (#3430).
+
 ## [2.13.5] - 2026-11-18
 
 ### Added

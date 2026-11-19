@@ -111,19 +111,25 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
       >
         {/* Header row - always visible */}
         <div className="w-full flex items-center gap-2 px-3 py-2">
-          {inGroup && itemKey ? (
-            <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
-          ) : (
-            <>
-              <span className="text-sm font-medium truncate">{label}</span>
+          <button
+            type="button"
+            aria-pressed={isSelected}
+            className="flex min-w-0 items-center gap-2 rounded text-left focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {inGroup && itemKey ? (
+              <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
+            ) : (
+              <>
+                <span className="text-sm font-medium truncate">{label}</span>
 
-              {itemKey && (
-                <span className="text-xs text-muted-foreground font-mono truncate">
-                  &middot; {itemKey}
-                </span>
-              )}
-            </>
-          )}
+                {itemKey && (
+                  <span className="text-xs text-muted-foreground font-mono truncate">
+                    &middot; {itemKey}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
 
           <Badge
             variant="outline"

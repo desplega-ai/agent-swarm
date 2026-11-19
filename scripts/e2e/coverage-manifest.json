@@ -281,6 +281,10 @@
         "audit-attribution-skills"
       ]
     },
+    "repo-exec-config-write": {
+      "description": "a non-lead agent token may not change a repo's url, clonePath or hooks or create one with hooks enabled (HTTP and MCP), the lead, operator and shared-key worker still may, and a url or clonePath that starts with - is refused",
+      "scenarios": ["repo-exec-config-write"]
+    },
     "requester-hint": {
       "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
       "scenarios": ["requester-hint"]
@@ -483,6 +487,10 @@
       "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
       "scenarios": ["script-inline-run"]
     },
+    "script-tool-usage": {
+      "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
+      "scenarios": ["script-tool-usage"]
+    },
     "script-input-handling": {
       "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
       "scenarios": ["script-input-handling"]
@@ -492,12 +500,12 @@
       "scenarios": ["script-limits"]
     },
     "script-retry": {
-      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), and a ctx.swarm call that retries a real 429 from the API.",
-      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge"]
+      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), a ctx.swarm call that retries a real 429 from the API, and ctx.swarm plus the script-run tool reaching the API over loopback while MCP_BASE_URL is closed.",
+      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge", "script-api-loopback"]
     },
     "script-runs-durable": {
-      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
-      "scenarios": ["script-runs-durable", "script-run-storage"]
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
+      "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
@@ -658,6 +666,10 @@
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
       "scenarios": ["poll-concurrent-claim"]
     },
+    "task-create-idempotency": {
+      "description": "POST /api/tasks with an Idempotency-Key: a retry and a three-way race on one key return one task, a different body under the key is a 409, unkeyed creates stay separate, a malformed key is a 400",
+      "scenarios": ["task-create-idempotency"]
+    },
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
       "scenarios": ["task-lifecycle"]
@@ -745,7 +757,7 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, and discovered OAuth endpoints are validated",
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
       "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {

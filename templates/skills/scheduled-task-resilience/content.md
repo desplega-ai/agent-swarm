@@ -2,6 +2,8 @@
 
 Use these rules whenever a scheduled or regular task polls or waits on a long-running operation. They prevent heartbeat collisions, lost work, duplicate delivery, and sessions that fail after holding an external job open too long.
 
+Before you poll a pull request's CI at all, check whether you need to. When the Repository Guidelines or a repo skill say workflows handle red CI, review rounds and merge-queue ejections, end the task at push instead (`code-quality`, "After you open a PR"). The rules below cover the waits that remain.
+
 ## Rule 1 — Never use `ScheduleWakeup` with `delaySeconds >= 300`
 
 The runtime heartbeat staleness threshold may sit near the same window as the model prompt-cache TTL. Sleeping for five minutes or longer can therefore look like a dead worker and cause the heartbeat sweep to fail the task mid-poll.

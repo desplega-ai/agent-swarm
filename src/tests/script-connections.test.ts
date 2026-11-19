@@ -734,8 +734,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "354_durable_objects.sql");
       // 356 alters slack_messages, which this fixture does not create.
       markMigrationApplied(database, "356_slack_outcome_card_groups.sql");
-      // 360 normalizes scheduled_tasks, which this fixture does not create.
-      markMigrationApplied(database, "360_schedule_next_run_at_utc.sql");
+      // 362 rebuilds user_favorites, which this fixture does not create (see 301).
+      markMigrationApplied(database, "362_favorites_app.sql");
+      // 366 normalizes scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "366_schedule_next_run_at_utc.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

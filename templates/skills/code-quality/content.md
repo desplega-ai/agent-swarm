@@ -17,7 +17,7 @@ The task's `vcsProvider` field or the remote URL tells you the provider.
 
 ## Before you push
 
-1. Run every command in the Repository Guidelines section "PR Checks" of your system prompt, one after the other. When no guidelines exist, run the checklist in the repo's CLAUDE.md. When neither exists, ask the lead before you push.
+1. Run every command in the Repository Guidelines section "PR Checks" of your system prompt, one after the other. Follow each check's own scope: a check the guidelines run once before the PR opens does not rerun on later fix pushes. When no guidelines exist, run the checklist in the repo's CLAUDE.md. When neither exists, ask the lead before you push.
 2. A failing check: fix the cause and run the check again. Push only when every check passes.
 3. Git hooks stay on. `--no-verify` and any other bypass flag are out.
 4. `main` and `master` are never force-pushed.
@@ -38,9 +38,9 @@ A workflow or task brief that opens a PR names this section instead of restating
 
 ## After you open a PR
 
-1. Wait about 30 seconds, then read CI: `gh pr checks <number>` or `glab mr view --json pipelines`.
-2. Red CI: read the failing job, fix, push, read CI again. Repeat until green.
-3. Put the PR URL and the CI status in your task output.
+1. Put the PR URL and the head SHA in your task output.
+2. When the Repository Guidelines or a repo skill say the deployment handles red CI, review rounds and merge-queue ejections with workflows, your task ends here. Do not wait for CI: no `gh pr checks --watch`, `gh run watch` or sleep loops. A red check or a review round comes back to you as a new task.
+3. Otherwise, wait about 30 seconds, then read CI: `gh pr checks <number>` or `glab mr view --json pipelines`. Red CI: read the failing job, fix, push, read CI again. Repeat until green, and put the CI status in your task output.
 
 ## Merge policy
 

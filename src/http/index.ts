@@ -22,6 +22,7 @@ import { startEventLoopLagProbe, stopEventLoopLagProbe, withLoopPath } from "../
 import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { initMcpEventsDispatcher } from "../be/mcp-events/dispatcher";
 import { startMcpOverflowSweep, stopMcpOverflowSweep } from "../be/mcp-overflow-sweep";
+import { setDeploymentEnvReader } from "../be/memory";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -72,7 +73,11 @@ import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { ensure, initialize } from "../utils/business-use";
-import { getConfiguredAppUrls, getMcpBaseUrl } from "../utils/constants";
+import {
+  getConfiguredAppUrls,
+  getScriptApiBaseUrl,
+  setApiLoopbackBaseUrl,
+} from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -687,6 +692,9 @@ try {
   throw err;
 }
 warnIfCorsAllowsAnyOrigin();
+// Before any embed: the provider exempts only the deployment env's base URL
+// from the SSRF check, and it fixes that choice when it builds its client.
+setDeploymentEnvReader(getDeploymentEnvValue);
 
 // Register every stored secret (config secrets of all scopes, OAuth and MCP
 // OAuth credentials, script API tokens) with the scrubber before listen, so
@@ -808,6 +816,7 @@ httpServer
     const boundAddress = httpServer.address();
     if (boundAddress && typeof boundAddress === "object") {
       setExtensionLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
+      setApiLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
     }
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
@@ -921,7 +930,7 @@ httpServer
     await initWorkflows();
 
     // Reconcile durable script workflow subprocesses
-    await startScriptRunSupervisor(getMcpBaseUrl());
+    await startScriptRunSupervisor(getScriptApiBaseUrl());
 
     // Start scheduler (if enabled). The interval is read post-hydration, like
     // heartbeat below, and parsed so an unusable value keeps the 10s default (#3169).
@@ -992,10 +1001,7 @@ httpServer
     // prefix) changed, then embed rows with a missing or wrong-length vector.
     // Non-blocking, idempotent, resumable. See src/be/memory/embedding-space.ts.
     import("../be/memory/embedding-space")
-      .then(({ runEmbeddingMaintenance, setDeploymentEnvReader }) => {
-        setDeploymentEnvReader(getDeploymentEnvValue);
-        return runEmbeddingMaintenance({ backfill: true });
-      })
+      .then(({ runEmbeddingMaintenance }) => runEmbeddingMaintenance({ backfill: true }))
       .catch((err) => {
         console.error("[embedding-space] startup maintenance failed (non-fatal):", err);
       });

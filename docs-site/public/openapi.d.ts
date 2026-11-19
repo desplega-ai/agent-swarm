@@ -1004,6 +1004,7 @@ export interface paths {
                                 };
                                 createdAt: string;
                                 updatedAt: string;
+                                favorite: boolean;
                             }[];
                         };
                     };
@@ -6134,8 +6135,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * Send agent-fs comments to the swarm as one task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -6147,6 +6148,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        parentTaskId?: string;
                         orgId: string;
                         driveId: string;
                         commentIds: string[];
@@ -8505,7 +8508,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8549,7 +8552,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8565,7 +8568,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -14831,6 +14834,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    review_follow_ups: boolean;
                                     service_user_id: string | null;
                                 };
                             };
@@ -16206,7 +16210,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -16258,7 +16265,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16267,8 +16274,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task created under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -19856,7 +19881,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
+                /** @description Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20009,7 +20034,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
+                /** @description Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -33186,7 +33211,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
@@ -33562,7 +33587,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -36901,6 +36926,8 @@ export interface operations {
                 status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
                 agentId?: string;
                 scriptName?: string;
+                objectScriptId?: string;
+                objectId?: string;
                 limit?: number;
                 offset?: number | null;
             };
@@ -37944,6 +37971,8 @@ export interface operations {
                             updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
+                            /** @enum {string} */
+                            kind: "function" | "durable";
                         }[];
                     };
                 };

@@ -1258,6 +1258,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_DEFAULT_TIMEZONE",
+        label: "Default Slack deferral timezone",
+        description:
+          "IANA timezone for wake-up times on Slack deferral cards when the requester has no timezone.",
+        kind: "string",
+        defaultValue: "UTC",
+        docsUrl: `${DOCS}ui/configuration#slack-deferral-timezone`,
+      },
+      {
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:

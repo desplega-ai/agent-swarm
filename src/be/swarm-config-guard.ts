@@ -14,6 +14,7 @@ import {
   COMPANY_USE_CASES,
 } from "../utils/company-profile";
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
+import { isValidTimezone } from "../utils/deferral-time";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
 import {
@@ -87,6 +88,8 @@ const RESERVED_KEYS = new Set([
   "GITHUB_APP_REPO_OWNERS",
   // The worker imports this module path into its own process. Deployment env only.
   "OPENCODE_SDK_PATH",
+  // Every script run token goes to this base URL; a config writer must not redirect it.
+  "SCRIPT_API_BASE_URL",
 ]);
 
 /**
@@ -502,6 +505,8 @@ function validateWorkflowInputEnvAllowlist(value: unknown): string | null {
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  SLACK_DEFAULT_TIMEZONE: (value) =>
+    isValidTimezone(value) ? null : "SLACK_DEFAULT_TIMEZONE must be a valid IANA timezone",
   WORKFLOW_INPUT_ENV_ALLOWLIST: validateWorkflowInputEnvAllowlist,
   [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),

@@ -335,6 +335,8 @@ If the bot is not yet a member of a **public, internal** channel, `slack-read`, 
 
 Set `SLACK_BLOCK_EXTERNAL_CHANNELS=true` (global swarm config, default `false`) to keep the bot out of channels shared with another organization. A channel is external when Slack reports `is_ext_shared` or `is_pending_ext_shared` for it, or when the event carries `is_ext_shared_channel`. Enterprise Grid org-shared channels stay internal. The key is read on every event, so a change on **Settings → Configuration** applies without a restart.
 
+When the flag is off, an external channel works like any other: an ask and the Lead's follow-ups on it post their outcome cards in the thread.
+
 When the flag is on:
 
 - **Inbound guard.** Messages, assistant threads, Work Object previews, follow-up buttons, and `/agent-swarm-status` in an external channel create no task and return no task data. This guard works even when the bot cannot leave.

@@ -61,6 +61,7 @@ export interface RepairedComment {
 }
 
 export interface ReviewBatchInput {
+  parent?: { id: string; agentId?: string | null; agentCaller: boolean };
   orgId: string;
   driveId: string;
   commentIds: string[];
@@ -200,14 +201,18 @@ export async function sendReviewBatch(
           ...repairs.map((repair) => alreadySent(repair.id, repair.taskId)),
         ]);
       }
-      const lead = await getLeadAgent();
+      const parent = input.parent;
+      const lead = parent?.agentId ? null : await getLeadAgent();
       leadState = !lead ? "none" : lead.status === "offline" ? "offline" : "online";
       const task = await createTask(
         text,
         {
-          agentId: lead?.id ?? "",
-          routingReason: lead ? "skill" : undefined,
-          routingSource: lead ? "engine_default" : undefined,
+          agentId: parent?.agentId || lead?.id || "",
+          parentTaskId: parent?.id,
+          inheritParentOutputSchema: parent?.agentCaller,
+          routingAffinity: parent && !parent.agentCaller ? { capabilities: [] } : undefined,
+          routingReason: parent?.agentId ? "continuity" : lead ? "skill" : undefined,
+          routingSource: parent?.agentId || lead ? "engine_default" : undefined,
           source: "comb",
           taskType: "comb-review",
           tags: ["comb"],
@@ -254,7 +259,13 @@ export async function sendReviewBatch(
   }
   return taskId === null
     ? { taskId, sent: wonIds, skipped, repaired }
-    : { taskId, sent: wonIds, skipped, repaired, lead: leadState };
+    : {
+        taskId,
+        sent: wonIds,
+        skipped,
+        repaired,
+        lead: input.parent?.agentId ? undefined : leadState,
+      };
 }
 
 /** `items.map(fn)` with at most `limit` calls in flight. Results keep the input order. */

@@ -147,6 +147,98 @@ test.describe("desktop", () => {
     await clean.assertClean();
   });
 
+  test("a lead turn that ends while the person types keeps the composer focused", async ({
+    page,
+    api,
+    seed,
+    clean,
+  }) => {
+    // A lead task that has not ended: the composer is the steer box.
+    const session = await api.post<{ id: string }>("/api/tasks", {
+      task: "Draft the release notes",
+      source: "ui",
+      requestedByUserId: seed!.user.id,
+      agentId: seed!.agents.lead,
+      routingReason: "human_pinned",
+    });
+    // The test API turns steering off; the dashboard reads the flag from stats.
+    await page.route("**/api/stats", async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({
+        response,
+        json: { ...(await response.json()), steeringEnabled: true },
+      });
+    });
+    await page.goto(`/sessions/${session.id}`);
+
+    const box = page.locator("form").getByRole("textbox");
+    await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeVisible();
+    await box.click();
+    await page.keyboard.type("half a thought");
+    const steerEditor = await box.elementHandle();
+
+    // The turn ends: the next poll swaps the steer box for the follow-up dock, a new editor.
+    await api.post(`/api/tasks/${session.id}/cancel`, {});
+    await expect
+      .poll(() => steerEditor!.evaluate((element) => element.isConnected), { timeout: 15_000 })
+      .toBe(false);
+    await expect(box).toBeFocused();
+    await page.keyboard.type(", and more");
+    await expect(box).toContainText("half a thought, and more");
+    await clean.assertClean();
+  });
+
+  test("a follow-up with a file shows in the session while the file uploads", async ({
+    page,
+    api,
+    seed,
+    clean,
+  }) => {
+    const session = await startSession(api, seed!.user.id, "upload");
+    await api.post(`/api/tasks/${session.id}/cancel`, {});
+
+    // Hold the upload: the turn must show before it finishes.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/fs/tasks/*/files?*", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await held;
+      return route.fulfill({
+        status: 201,
+        json: { id: randomUUID(), name: "notes.txt", intent: "user-upload" },
+      });
+    });
+    // The test API has no file store: the draft's file list comes back empty.
+    await page.route("**/api/fs/tasks/*/files", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { attachments: [] } })
+        : route.fallback(),
+    );
+    await page.goto(`/sessions/${session.id}`);
+
+    const box = page.locator("form").getByRole("textbox");
+    await box.click();
+    await page.keyboard.type("see the attached notes");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("notes"),
+    });
+    await page.getByRole("button", { name: "Follow up", exact: true }).click();
+
+    const turn = page.getByRole("region", { name: "Your message" }).filter({
+      hasText: "see the attached notes",
+    });
+    await expect(turn).toContainText("Uploading files…");
+    await expect(box).not.toContainText("see the attached notes");
+
+    release();
+    await expect(turn).not.toContainText("Uploading files…", { timeout: 15_000 });
+    await clean.assertClean();
+  });
+
   test("the tree shows the seeded group and its shared session", async ({ page, seed, clean }) => {
     const { title, groupName, teammate } = seed!.sessionChain;
     await page.goto("/sessions");

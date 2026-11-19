@@ -18,7 +18,6 @@ import {
   MIN_SCRIPT_WALL_CLOCK_MS,
 } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
-import { getMcpBaseUrl } from "../../utils/constants";
 import { findInterpolationTokens } from "../../utils/template";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
@@ -136,7 +135,6 @@ export class SwarmScriptExecutor extends BaseExecutor<
         fsMode: "none",
         executor: resolved.script.executor,
         agentId: agentId ?? "workflow",
-        mcpBaseUrl: getMcpBaseUrl(),
         egressSecrets: credentials.egressSecrets,
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,

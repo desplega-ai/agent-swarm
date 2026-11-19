@@ -324,6 +324,24 @@
   }
 }
 
+/* UI font picked on Settings → Appearance (src/lib/ui-font.ts). The Hive
+   default sets no attribute. Mono follows only where the family ships a mono
+   cut; OpenDyslexic and Lexend keep Space Mono for code. */
+:root[data-font="system"] {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+:root[data-font="atkinson"] {
+  --font-sans: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+}
+:root[data-font="opendyslexic"] {
+  --font-sans: "OpenDyslexic", system-ui, sans-serif;
+}
+:root[data-font="lexend"] {
+  --font-sans: "Lexend Variable", system-ui, sans-serif;
+}
+
 body {
   margin: 0;
   background: var(--color-background);
@@ -750,7 +768,7 @@ button[data-slot="sidebar-rail"] {
   padding: 0.15em 0.35em;
   border-radius: 4px;
   background: var(--color-muted);
-  font-family: "Space Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .prose-chat pre {
@@ -855,7 +873,7 @@ button[data-slot="sidebar-rail"] {
   background: transparent;
   max-height: 26rem;
   overflow: auto;
-  font-family: "Space Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -910,7 +928,7 @@ button[data-slot="sidebar-rail"] {
   border-bottom: 1px solid color-mix(in oklch, var(--color-border) 50%, transparent);
   background: color-mix(in oklch, var(--color-muted) 50%, transparent);
   color: var(--color-muted-foreground);
-  font-family: "Space Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.05em;
@@ -993,7 +1011,7 @@ button[data-slot="sidebar-rail"] {
   border-radius: 0;
   background: transparent;
   color: var(--color-foreground);
-  font-family: "Space Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
 }
