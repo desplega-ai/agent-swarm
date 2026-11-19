@@ -41,7 +41,7 @@ export default async function toolUsage(args: any, ctx: any) {
       SELECT substr(content, instr(content, '"type":"tool_use"')) AS tail
       FROM session_logs
       WHERE content LIKE '%"type":"tool_use"%'
-        AND createdAt > datetime('now', ?)
+        AND createdAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
         ${agentFilter}
     ),
     nm AS (
