@@ -727,13 +727,14 @@
       ]
     },
     "workflow-engine-nodes": {
-      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
+      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction, code-match code and wait filters read only config interpolation sources",
       "scenarios": [
         "workflow-engine-instant-nodes",
         "workflow-engine-async-nodes",
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
-        "workflow-script-node"
+        "workflow-script-node",
+        "workflow-executable-config-sources"
       ]
     },
     "workflow-savings": {
