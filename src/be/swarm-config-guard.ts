@@ -109,6 +109,9 @@ const API_PROCESS_CONTROL_ENV_KEYS = new Set([
   "BUN_OPTIONS",
   "GCONV_PATH",
   "GLIBC_TUNABLES",
+  // Names the executable the API runs for its own `claude -p` calls
+  // (`defaultSpawnClaudeCli`). Workers read it from their config overlay.
+  "CLAUDE_BINARY",
 ]);
 const API_PROCESS_CONTROL_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_", "BUN_INSPECT"];
 
