@@ -121,6 +121,7 @@
     "tsc:check": "bun check",
     "tsc:check:tsc": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
+    "check:agents-md-size": "bash scripts/check-agents-md-size.sh",
     "check:codex-default-model": "bash scripts/check-codex-default-model.sh",
     "check:test-spawn-sync": "bash scripts/check-test-spawn-sync.sh",
     "check:dep-graph": "depcruise src packages/model-routing --config .dependency-cruiser.cjs",

@@ -220,7 +220,7 @@ function MentionPicker({
         align="start"
         sideOffset={4}
         hideWhenDetached
-        // Opened by typing: no open or close motion (apps/ui/CLAUDE.md, Motion).
+        // Opened by typing: no open or close motion (apps/ui/docs/motion.md).
         className="w-72 p-1 animate-none!"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}

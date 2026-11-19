@@ -550,6 +550,10 @@ jobs:
       - name: Check Bun version pins
         run: bun run check:bun-version
 
+      # Codex cuts agent files after 32,768 bytes with no error (scripts/check-agents-md-size.sh).
+      - name: Check agent file sizes
+        run: bun run check:agents-md-size
+
       # Dockerfile.worker's global playwright must equal packages/ui-e2e's
       # @playwright/test, so /opt/playwright holds the browser e2e:ui launches.
       - name: Check Playwright version pins
