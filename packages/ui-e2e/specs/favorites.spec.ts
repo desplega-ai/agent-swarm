@@ -141,6 +141,18 @@ test("starring an app in the list sorts it first, filters and searches like Page
     await expect(row("e2e plain app")).toBeVisible();
     await expect(row("e2e zz starred app")).toHaveCount(0);
 
+    // The view toggle is a query param too: it survives a reload and back restores the table.
+    await page.goto("/apps?search=plain&view=table");
+    await page.getByRole("radio", { name: "Tiles" }).click();
+    await expect(page).toHaveURL(/[?&]view=tiles/);
+    await expect(page).toHaveURL(/[?&]search=plain/);
+    await page.reload();
+    await expect(page.getByRole("link", { name: "e2e plain app" })).toBeVisible();
+    await expect(row("e2e plain app")).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/[?&]view=table/);
+    await expect(row("e2e plain app")).toBeVisible();
+
     await clean.assertClean();
   } finally {
     // Deleting the app also drops its star, which leaves the worker's state as found.

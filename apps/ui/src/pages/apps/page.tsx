@@ -1,9 +1,10 @@
 /**
- * `/apps` — catalog of swarm apps. A Table | Tiles toggle (remembered per
- * browser) switches between the grid of rows and a Finder-style grid of icon
- * tiles; both link into the runtime at `/apps/:id`. Phones always get the
- * compact list. Every view lists starred apps first and shares the URL-backed
- * search and favorites filter, like `/pages`.
+ * `/apps` — catalog of swarm apps. A Table | Tiles toggle switches between
+ * the grid of rows and a Finder-style grid of icon tiles; both link into the
+ * runtime at `/apps/:id`. Phones always get the compact list. Every view lists
+ * starred apps first. Search, the favorites filter and the view all live in
+ * URL query params (`search`, `favorites`, `view`), like `/pages`, so reload
+ * and back/forward restore them.
  */
 
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
@@ -46,7 +47,11 @@ const VIEW_OPTIONS = [
   { value: "tiles", label: "Tiles" },
 ] as const;
 
-/** Per-viewer convenience: storage can be missing or throw (private mode), so default to the table. */
+function parseView(value: string | null): AppsView | null {
+  return value === "table" || value === "tiles" ? value : null;
+}
+
+/** The view a URL without `view` shows: this browser's last choice. Storage can be missing or throw (private mode), so default to the table. */
 function readStoredView(): AppsView {
   try {
     return localStorage.getItem(VIEW_STORAGE_KEY) === "tiles" ? "tiles" : "table";
@@ -90,7 +95,9 @@ export default function AppsListingPage() {
   const clearFilters = useCallback(() => {
     setParams({ search: "", favorites: "" }, { replace: false });
   }, [setParams]);
-  const [view, setView] = useState<AppsView>(readStoredView);
+  // Read once per mount: a history entry with no `view` keeps the view it had when it was created.
+  const [fallbackView] = useState<AppsView>(readStoredView);
+  const view = parseView(searchParams.get("view")) ?? fallbackView;
 
   const favoriteControl = useCallback(
     (app: AppListItem, className?: string) => (
@@ -104,10 +111,14 @@ export default function AppsListingPage() {
     [favoriteToggle],
   );
 
-  const changeView = useCallback((next: AppsView) => {
-    setView(next);
-    storeView(next);
-  }, []);
+  // Always written explicitly (never dropped as a default), so every history entry names its view.
+  const changeView = useCallback(
+    (next: AppsView) => {
+      setParam("view", next, { replace: false });
+      storeView(next);
+    },
+    [setParam],
+  );
 
   const columnDefs = useMemo<ColDef<AppListItem>[]>(
     () => [
