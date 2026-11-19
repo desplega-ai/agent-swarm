@@ -71,5 +71,57 @@ export const workflowPredicateSandbox: Scenario = {
       "the wait completed on the matching payload",
     );
     expect(stepOf(done, "probe").nextPort === "guest", "code-match ran in the API realm");
+
+    // Before QuickJS, a predicate that never returns hung the API thread.
+    // Now the deadline stops it: code-match fails, a filter does not match.
+    const loopId = await createWorkflow(ctx, "predicate-sandbox-loop", {
+      nodes: [
+        {
+          id: "spin",
+          type: "code-match",
+          config: { code: "() => { for (;;) {} }", outputPorts: ["true"] },
+        },
+      ],
+    });
+    const loop = await triggerWorkflow(ctx, loopId);
+    const failed = await waitForRun(ctx, loop.runId, "failed", 10_000, "code-match busy loop");
+    const spinError = String(stepOf(failed, "spin").error ?? "");
+    expect(
+      spinError.startsWith("code-match execution error: "),
+      `busy loop error: ${spinError}`,
+    );
+
+    const loopEvent = `e2e.predicate.loop.${ctx.nonce}`;
+    const spinWaitId = await createWorkflow(ctx, "predicate-sandbox-filter-loop", {
+      nodes: [
+        {
+          id: "wait",
+          type: "wait",
+          config: {
+            mode: "event",
+            eventName: loopEvent,
+            scope: "global",
+            filter: "() => { for (;;) {} }",
+          },
+        },
+      ],
+    });
+    const spinWait = await triggerWorkflow(ctx, spinWaitId);
+    expect(
+      await pollUntil(
+        async () => (await getRunDetail(ctx, spinWait.runId)).run.status === "waiting",
+        10_000,
+        100,
+      ),
+      "the busy-loop filter run never parked",
+    );
+    const spun = await ctx.api("POST", "/api/workflow-events", {
+      body: { name: loopEvent, payload: { go: true } },
+    });
+    expectStatus(spun, [200], "send event to the busy-loop filter");
+    expect(
+      (await getRunDetail(ctx, spinWait.runId)).run.status === "waiting",
+      "a busy-loop filter matched",
+    );
   },
 };

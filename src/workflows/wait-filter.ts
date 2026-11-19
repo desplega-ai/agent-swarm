@@ -117,8 +117,10 @@ export async function matchesFilter(payload: unknown, filter: unknown): Promise<
   if (typeof filter === "string") {
     if (filter.length > 2048) return false;
     try {
-      const result = await evaluatePredicate(filter, payload, { timeoutMs: FILTER_TIMEOUT_MS });
-      return result.ok && !!result.value;
+      const result = await evaluatePredicate(filter, payload, "filter", {
+        timeoutMs: FILTER_TIMEOUT_MS,
+      });
+      return result.ok && result.value;
     } catch {
       return false;
     }

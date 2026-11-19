@@ -35,24 +35,15 @@ export class CodeMatchExecutor extends BaseExecutor<
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof CodeMatchOutputSchema>>> {
     try {
-      const result = await evaluatePredicate(config.code, context, {
+      const result = await evaluatePredicate(config.code, context, "port", {
         timeoutMs: CODE_MATCH_TIMEOUT_MS,
         strict: true,
       });
       if (!result.ok) {
         return { status: "failed", error: `code-match execution error: ${result.error}` };
       }
-      const rawResult = result.value;
-
-      // Map result to port name
-      let port: string;
-      if (typeof rawResult === "boolean") {
-        port = rawResult ? "true" : "false";
-      } else if (typeof rawResult === "string") {
-        port = rawResult;
-      } else {
-        port = String(rawResult);
-      }
+      // The guest maps the return value to a port string (see predicate-sandbox).
+      const { port, raw: rawResult } = result.value;
 
       // Validate port is in the declared outputPorts
       if (!config.outputPorts.includes(port)) {

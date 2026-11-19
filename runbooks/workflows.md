@@ -1175,6 +1175,8 @@ filter: "(payload) => payload.labels.some(l => l.name === 'release') && payload.
 
 Evaluated in a fresh QuickJS runtime (`src/workflows/predicate-sandbox.ts`), the same sandbox `code-match` nodes use. The filter has no access to API-process globals (`process`, `Bun`, `fetch`, `require`) and receives a JSON copy of the payload. Result is coerced to boolean. Throws or returns a Promise → no-match.
 
+Compatibility with the earlier `new Function` evaluator is pinned by the `workflow-predicate-compat` e2e scenario: same `!!` coercion and code-match port mapping (custom `toString`, `"[object Promise]"` for async), strict `this === undefined` in code-match, and `console.*` calls kept as no-ops. Differences by design: the input is a JSON copy (no `Date` instances, keys with `undefined` values are dropped, mutations stay local), the guest has its own `globalThis`, `eval` and `Function` instead of `undefined`, plain objects keep `Object.prototype`, Bun-only globals (`structuredClone`, `URL`, `TextEncoder`) are absent, and error text after the `code-match execution error:` prefix uses QuickJS wording. QuickJS interprets roughly 20x slower than JSC, so a predicate that took over ~2ms (filter) or ~40ms (code-match) under Bun now hits its deadline.
+
 Hardening (all enforced):
 
 - 50ms execution timeout, enforced inside the interpreter — infinite loops and catastrophic-backtracking regex resolve to no-match. `code-match` nodes get 1s.

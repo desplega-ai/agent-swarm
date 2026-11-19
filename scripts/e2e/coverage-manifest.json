@@ -734,7 +734,8 @@
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
         "workflow-script-node",
-        "workflow-predicate-sandbox"
+        "workflow-predicate-sandbox",
+        "workflow-predicate-compat"
       ]
     },
     "workflow-savings": {
