@@ -56788,10 +56788,14 @@
                     "minItems": 1
                   },
                   "taskId": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   },
                   "cli": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
                   }
                 },
                 "required": [

@@ -59,8 +59,14 @@ logging; retention still owns reclaiming the rows afterwards.
 
 Each session's spend lives in `session_log_bytes`, updated inside the same
 transaction as the inserts: that is what makes a restart keep the budget and
-concurrent batches reserve bytes atomically. Rows are small (one per session)
+concurrent batches reserve bytes atomically. Rows are small (one per authorized session scope)
 and sweeping them is a separate opt-in candidate.
+
+Accounting keys include the authorized task id, or the authenticated agent id
+for pre-claim uploads. A user upload without a task is rejected. Reusing a
+session id in another task cannot spend the first task's budget. Row costs
+include repeated session/task metadata and indexes as well as content; the
+HTTP route also bounds session/task ids at 200 characters and `cli` at 64.
 
 Workflow deletion and opt-in run retention both reclaim only snapshots referenced by
 the deleted runs, after checking that no other run still references them. Unrelated

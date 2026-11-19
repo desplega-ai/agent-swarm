@@ -230,6 +230,7 @@ import { getDb, getDbClient } from "./db/runtime";
 import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
 import {
   boundSessionLogLine,
+  sessionLogAccountKey,
   sessionLogBudgetBytes,
   sessionLogBudgetMarker,
   sessionLogRowCost,
@@ -4908,6 +4909,8 @@ export async function createSessionLogs(logs: {
   iteration: number;
   cli: string;
   lines: string[];
+  /** Server-derived scope for uploads with no task (pool workers/operator). */
+  budgetOwner?: string;
 }): Promise<number> {
   // Bounded batches, one short transaction each (reference shape:
   // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
@@ -4917,6 +4920,10 @@ export async function createSessionLogs(logs: {
   // the inserts hold the lock.
   const BATCH_SIZE = 200;
   const budget = sessionLogBudgetBytes();
+  const accountKey = sessionLogAccountKey(
+    logs.sessionId,
+    logs.taskId ? `task:${logs.taskId}` : (logs.budgetOwner ?? "operator"),
+  );
   let exhausted = false;
   let stored = 0;
   for (let start = 0; start < logs.lines.length && !exhausted; start += BATCH_SIZE) {
@@ -4942,7 +4949,7 @@ export async function createSessionLogs(logs: {
       // second one blocks on the write lock and then reads the first's total.
       const account = await tx.get<{ bytes: number; exhaustedAt: string | null }>(
         "SELECT bytes, exhaustedAt FROM session_log_bytes WHERE sessionId = ?",
-        [logs.sessionId],
+        [accountKey],
       );
       // `exhaustedAt`, not a byte comparison: the batch stops *before* the row
       // that would cross, so a spent session's total stays under the bound.
@@ -4952,7 +4959,7 @@ export async function createSessionLogs(logs: {
       }
       let written = account?.bytes ?? 0;
       for (const [index, { content }] of batch.entries()) {
-        const next = written + sessionLogRowCost(content);
+        const next = written + sessionLogRowCost(content, logs);
         if (next > budget) {
           // Stop before the row that crosses, so the stored total never passes
           // the configured bound.
@@ -4972,14 +4979,14 @@ export async function createSessionLogs(logs: {
         // reader the transcript is cut rather than finished.
         const marker = sessionLogBudgetMarker(logs.sessionId, budget);
         batch.push({ content: marker, reasoning: extractReasoning(logs.cli, marker) });
-        written += sessionLogRowCost(marker);
+        written += sessionLogRowCost(marker, logs);
       }
       stored += batch.length;
       await tx.run(
         `INSERT INTO session_log_bytes (sessionId, bytes, exhaustedAt)
          VALUES (?, ?, ?)
          ON CONFLICT(sessionId) DO UPDATE SET bytes = excluded.bytes, exhaustedAt = excluded.exhaustedAt`,
-        [logs.sessionId, written, exhausted ? new Date().toISOString() : null],
+        [accountKey, written, exhausted ? new Date().toISOString() : null],
       );
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting

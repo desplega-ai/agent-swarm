@@ -1,5 +1,6 @@
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { asUser, createAssignedTask, createUser, registerWorker } from "./core-helpers";
 
 const LINE_MAX_CHARS = 256 * 1024;
 
@@ -27,6 +28,21 @@ export const coreSessionLogBounds: Scenario = {
   name: "core-session-log-bounds",
   order: 247,
   async run(ctx) {
+    // Bounds apply to every repeated metadata field, not only content/sessionId.
+    for (const field of ["sessionId", "taskId", "cli"]) {
+      expectStatus(
+        await ctx.api("POST", "/api/session-logs", {
+          body: {
+            sessionId: `metadata-${ctx.nonce}`,
+            iteration: 1,
+            lines: ["x"],
+            [field]: "m".repeat(1024),
+          },
+        }),
+        [400],
+        `reject oversized ${field}`,
+      );
+    }
     const oversizedSession = `core-slb-line-${ctx.nonce}`;
     const line = "x".repeat(2 * 1024 * 1024);
     const stored = await ctx.api("POST", "/api/session-logs", {
@@ -78,6 +94,103 @@ export const coreSessionLogBounds: Scenario = {
 
     const configId = await setBudgetMb(ctx, "1");
     try {
+      const workerId = await registerWorker(ctx, "log-budget-owner");
+      const owner = await createUser(ctx, "log-budget-owner");
+      const stranger = await createUser(ctx, "log-budget-stranger");
+      const ownerTask = await createAssignedTask(ctx, workerId, `log owner ${ctx.nonce}`, {
+        requestedByUserId: owner,
+      });
+      const otherTask = await createAssignedTask(ctx, workerId, `log other ${ctx.nonce}`, {
+        requestedByUserId: stranger,
+      });
+      const protectedSession = `protected-${ctx.nonce}`;
+      const flood = Array.from({ length: 40 }, () => "f".repeat(100 * 1024));
+      for (const taskId of [undefined, ownerTask]) {
+        expectStatus(
+          await ctx.api("POST", "/api/session-logs", {
+            headers: asUser(stranger),
+            body: { sessionId: protectedSession, taskId, iteration: 1, lines: flood },
+          }),
+          [403],
+          "stranger cannot spend the victim's log budget",
+        );
+      }
+      // Even with write access to another task, spoofing sessionId spends only
+      // that task's account, never the victim's.
+      expectStatus(
+        await ctx.api("POST", "/api/session-logs", {
+          headers: asUser(stranger),
+          body: { sessionId: protectedSession, taskId: otherTask, iteration: 1, lines: flood },
+        }),
+        [201],
+        "another writable task has an isolated budget",
+      );
+      const tokenResponse = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: workerId, runtimeId: `log-worker-${ctx.nonce}` },
+      });
+      expectStatus(tokenResponse, [200], "mint pool-worker runtime credential");
+      const workerCredential = asRecord(tokenResponse.json);
+      try {
+        expectStatus(
+          await ctx.api("POST", "/api/session-logs", {
+            apiKey: String(workerCredential.plaintext),
+            body: { sessionId: protectedSession, iteration: 1, lines: flood },
+          }),
+          [201],
+          "pre-claim worker uploads retain a separate budget",
+        );
+      } finally {
+        expectStatus(
+          await ctx.api("DELETE", `/api/sessions/tokens/${workerCredential.tokenId}`),
+          [204],
+          "revoke pool-worker runtime credential",
+        );
+      }
+      const ownerUpload = await ctx.api("POST", "/api/session-logs", {
+        headers: asUser(owner),
+        body: {
+          sessionId: protectedSession,
+          taskId: ownerTask,
+          iteration: 1,
+          lines: ["owner-survives"],
+        },
+      });
+      expectStatus(ownerUpload, [201], "owner logs after spoofed-session flood");
+      expect(
+        asRecord(ownerUpload.json).count === 1,
+        "A foreign task must not exhaust the owner's budget",
+      );
+      const ownerRows = ctx.db.query<{ content: string }>(
+        "SELECT content FROM session_logs WHERE taskId = ? AND sessionId = ?",
+        [ownerTask, protectedSession],
+      );
+      expect(
+        ownerRows.some((row) => row.content === "owner-survives"),
+        "Owner transcript remains writable",
+      );
+      const outsiderWorker = await registerWorker(ctx, "log-budget-outsider");
+      const outsiderToken = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: outsiderWorker, runtimeId: `log-outsider-${ctx.nonce}` },
+      });
+      expectStatus(outsiderToken, [200], "mint another worker's runtime credential");
+      const outsiderCredential = asRecord(outsiderToken.json);
+      try {
+        expectStatus(
+          await ctx.api("POST", "/api/session-logs", {
+            apiKey: String(outsiderCredential.plaintext),
+            body: { sessionId: protectedSession, taskId: ownerTask, iteration: 1, lines: flood },
+          }),
+          [403],
+          "another worker cannot spend the assigned task's budget",
+        );
+      } finally {
+        expectStatus(
+          await ctx.api("DELETE", `/api/sessions/tokens/${outsiderCredential.tokenId}`),
+          [204],
+          "revoke another worker's runtime credential",
+        );
+      }
+
       const budgetSession = `core-slb-budget-${ctx.nonce}`;
       const chunk = "y".repeat(100 * 1024);
       const crossing = await ctx.api("POST", "/api/session-logs", {

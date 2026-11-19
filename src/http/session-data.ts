@@ -30,7 +30,12 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { bodyTask, route } from "./route-def";
-import { canReadSession, SESSION_READ_DENIED } from "./session-access";
+import {
+  canReadSession,
+  resolveSessionActor,
+  SESSION_READ_DENIED,
+  SESSION_WRITE_DENIED,
+} from "./session-access";
 import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
@@ -155,8 +160,8 @@ const createSessionLogsRoute = route({
     sessionId: z.string().min(1).max(200),
     iteration: z.number().int().min(1),
     lines: z.array(z.string()).min(1),
-    taskId: z.string().optional(),
-    cli: z.string().optional(),
+    taskId: z.string().min(1).max(200).optional(),
+    cli: z.string().min(1).max(64).optional(),
   }),
   responses: {
     201: {
@@ -353,12 +358,37 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
+      const auth = getRequestAuth(req);
+      const actor = await resolveSessionActor(req, myAgentId);
+      // A user cannot skip the task's session gate by omitting taskId. Pool
+      // workers still upload before claiming a task, under their own identity.
+      if (!parsed.body.taskId && actor.kind !== "bypass") {
+        jsonError(res, SESSION_WRITE_DENIED, 403);
+        return true;
+      }
+      if (parsed.body.taskId && auth?.kind === "agent") {
+        const task = await getTaskById(parsed.body.taskId);
+        if (
+          !task ||
+          task.agentId !== auth.agentId ||
+          (auth.taskId !== null && auth.taskId !== task.id)
+        ) {
+          jsonError(res, SESSION_WRITE_DENIED, 403);
+          return true;
+        }
+      }
       const stored = await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
         cli: parsed.body.cli || "claude",
         lines: parsed.body.lines,
+        budgetOwner:
+          auth?.kind === "agent"
+            ? `agent:${auth.agentId}`
+            : myAgentId
+              ? `agent:${myAgentId}`
+              : "operator",
       });
       // Every harness streams its output through this endpoint, so a task that
       // is producing output keeps its session alive here instead of per

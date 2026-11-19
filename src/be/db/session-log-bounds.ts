@@ -26,8 +26,24 @@ export function sessionLogByteLength(value: string): number {
  */
 const SESSION_LOG_ROW_OVERHEAD_BYTES = 128;
 
-export function sessionLogRowCost(content: string): number {
-  return sessionLogByteLength(content) + SESSION_LOG_ROW_OVERHEAD_BYTES;
+export function sessionLogRowCost(
+  content: string,
+  metadata: { sessionId: string; taskId?: string; cli: string },
+): number {
+  // Session/task ids also occur in their indexes; charging content alone lets
+  // repeated metadata amplify short lines without spending the budget.
+  return (
+    sessionLogByteLength(content) +
+    2 * sessionLogByteLength(metadata.sessionId) +
+    2 * sessionLogByteLength(metadata.taskId ?? "") +
+    sessionLogByteLength(metadata.cli) +
+    SESSION_LOG_ROW_OVERHEAD_BYTES
+  );
+}
+
+/** A client-supplied session id cannot spend another authorized owner's budget. */
+export function sessionLogAccountKey(sessionId: string, owner: string): string {
+  return JSON.stringify([owner, sessionId]);
 }
 
 export function sessionLogBudgetBytes(): number {

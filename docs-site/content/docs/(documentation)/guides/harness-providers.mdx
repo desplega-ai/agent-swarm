@@ -799,7 +799,7 @@ once wrote 7.3 GB of `session_logs` in 27 minutes and OOM-killed the API.
 
 | Layer | Bound |
 |---|---|
-| Adapter | 100k chars per tool payload; an `args` object over 4x that is replaced by a preview |
+| OpenCode adapter | 100,000 UTF-8 bytes per tool text payload; serialized `args` over 150 KiB become a preview; serialized mirrors over 200 KiB become a valid marker |
 | Worker buffer | 1 MB per line, flushed at 4 MB |
 | `POST /api/session-logs` | 16 MB body, else 413 |
 | `createSessionLogs` | 256 KB per row; `SESSION_LOG_SESSION_MAX_MB` (default 256) per session |
@@ -807,6 +807,13 @@ once wrote 7.3 GB of `session_logs` in 27 minutes and OOM-killed the API.
 All of these count UTF-8 bytes. A session that spends its budget stores one
 `session_log_budget_exhausted` marker and nothing more, and the route's `201`
 reports the rows actually stored, not the lines posted.
+
+Budget ownership is derived by the server: task uploads use the authorized
+task id, and uploads before a pool worker claims a task use that worker's
+authenticated agent identity. A user upload must name a writable task;
+choosing the same `sessionId` in another scope cannot exhaust its budget.
+Row charges include repeated session/task ids, their indexes, and the harness
+name. Session/task ids are capped at 200 characters and `cli` at 64.
 
 **Emit one row per event, never two.** The opencode adapter used to write an
 unconditional `raw_log` of the whole event *and* a translated copy, doubling
