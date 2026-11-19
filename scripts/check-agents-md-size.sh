@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Agent instruction files (CLAUDE.md, AGENTS.md) must fit the harnesses that load them.
-# A harness cuts an oversized file with no error, so the agent works without the rules
-# at the end of it.
+# Agent instruction files (CLAUDE.md, AGENTS.md) must fit what Codex loads.
 #
-# - Codex loads at most 32,768 bytes (`project_doc_max_bytes`) from the AGENTS.md files
-#   between the repo root and its start directory. It truncates the file that crosses the
-#   cap and skips every file after it.
-# - Other harnesses cap one file lower (Antigravity: 24,000 bytes).
+# Codex spends one budget of 32,768 bytes (`project_doc_max_bytes`) on the AGENTS.md files
+# between the repo root and its start directory. It truncates the file that crosses the
+# budget and skips every file after it, with only a startup warning. In each directory it
+# reads `AGENTS.override.md`, else `AGENTS.md`, and it follows symlinks.
 #
-# Rule 1: one agent file is at most FILE_MAX bytes.
+# Rule 1: one agent file is at most FILE_MAX bytes. This is the repo's editorial budget:
+#         it leaves CHAIN_MAX - FILE_MAX bytes of the Codex budget for one nested file.
 # Rule 2: an agent file plus the agent files of its parent directories is at most CHAIN_MAX.
+# Rule 3: one layout only, so that this check and every harness read the same bytes:
+#         a real `CLAUDE.md` with `AGENTS.md` as a symlink to it. No `AGENTS.override.md`.
 #
-# Fix a failure by moving detail to a runbook and leaving the rule and a pointer.
+# Fix a size failure by moving detail to a runbook and leaving the rule and a pointer.
 # `templates/` holds agent files for other workspaces, so it is out of scope.
 set -euo pipefail
 
@@ -20,43 +21,53 @@ CHAIN_MAX=32768
 
 cd "$(git rev-parse --show-toplevel)"
 
-# The real file of a directory: CLAUDE.md, or AGENTS.md when it is not a symlink to it.
-agent_file() {
-  local dir=$1 name
-  for name in CLAUDE.md AGENTS.md; do
-    if [ -f "$dir/$name" ] && [ ! -L "$dir/$name" ]; then
-      echo "$dir/$name"
-      return
-    fi
-  done
-}
-
 size_of() { wc -c <"$1" | tr -d ' '; }
 
 fail=0
+problem() {
+  echo "FAIL $1" >&2
+  fail=1
+}
+
 while IFS= read -r file; do
-  [ -L "$file" ] && continue
+  problem "$file: AGENTS.override.md is not supported. Codex reads it in place of AGENTS.md, and this check does not."
+done < <(git ls-files -- 'AGENTS.override.md' '*/AGENTS.override.md' ':!templates/')
+
+while IFS= read -r file; do
+  dir=$(dirname "$file")
+  if [ -L "$file" ]; then
+    problem "$file: CLAUDE.md is the real file. Make AGENTS.md the symlink."
+    continue
+  fi
+  before=$fail
+  if [ ! -L "$dir/AGENTS.md" ] || [ "$(readlink "$dir/AGENTS.md")" != "CLAUDE.md" ]; then
+    problem "$file: $dir/AGENTS.md must be a symlink to CLAUDE.md (ln -s CLAUDE.md AGENTS.md), so that Codex reads the same file."
+  fi
   size=$(size_of "$file")
-  bad=0
   if [ "$size" -gt "$FILE_MAX" ]; then
-    echo "FAIL $file: $size bytes. One agent file may hold at most $FILE_MAX bytes." >&2
-    bad=1
+    problem "$file: $size bytes. One agent file may hold at most $FILE_MAX bytes."
   fi
   chain=$size
-  dir=$(dirname "$file")
   while [ "$dir" != "." ]; do
     dir=$(dirname "$dir")
-    parent=$(agent_file "$dir")
-    if [ -n "$parent" ]; then chain=$((chain + $(size_of "$parent"))); fi
+    if [ -f "$dir/CLAUDE.md" ]; then chain=$((chain + $(size_of "$dir/CLAUDE.md"))); fi
   done
   if [ "$chain" -gt "$CHAIN_MAX" ]; then
-    echo "FAIL $file: $chain bytes together with the agent files of its parent directories. Codex loads at most $CHAIN_MAX bytes of that chain." >&2
-    bad=1
+    problem "$file: $chain bytes together with the agent files of its parent directories. Codex loads at most $CHAIN_MAX bytes of that chain."
   fi
-  if [ "$bad" -eq 0 ]; then echo "ok   $file: $size bytes (chain $chain)"; else fail=1; fi
-done < <(git ls-files -- 'CLAUDE.md' 'AGENTS.md' '*/CLAUDE.md' '*/AGENTS.md' ':!templates/')
+  if [ "$fail" -eq "$before" ]; then
+    echo "ok   $file: $size bytes (chain $chain, $((CHAIN_MAX - chain)) bytes left for Codex)"
+  fi
+done < <(git ls-files -- 'CLAUDE.md' '*/CLAUDE.md' ':!templates/')
+
+# A directory with AGENTS.md and no CLAUDE.md is outside the one supported layout.
+while IFS= read -r file; do
+  if [ ! -e "$(dirname "$file")/CLAUDE.md" ]; then
+    problem "$file: no CLAUDE.md beside it. Keep the text in CLAUDE.md and make AGENTS.md a symlink to it."
+  fi
+done < <(git ls-files -- 'AGENTS.md' '*/AGENTS.md' ':!templates/')
 
 if [ "$fail" -ne 0 ]; then
-  echo "Move detail to a runbook and leave the rule and a pointer in the agent file." >&2
+  echo "See the rules at the top of scripts/check-agents-md-size.sh." >&2
   exit 1
 fi

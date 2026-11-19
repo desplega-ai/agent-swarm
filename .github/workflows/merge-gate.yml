@@ -49,6 +49,11 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      # Here and not in the lint job: this job runs on every PR, and the lint job does not
+      # start for a CLAUDE.md-only change. Plain bash, no install.
+      - name: Check agent file sizes
+        run: bash scripts/check-agents-md-size.sh
+
       - name: Determine base for diff
         id: base
         run: |
@@ -549,10 +554,6 @@ jobs:
       # (the version setup-bun installs in every job above).
       - name: Check Bun version pins
         run: bun run check:bun-version
-
-      # Codex cuts agent files after 32,768 bytes with no error (scripts/check-agents-md-size.sh).
-      - name: Check agent file sizes
-        run: bun run check:agents-md-size
 
       # Dockerfile.worker's global playwright must equal packages/ui-e2e's
       # @playwright/test, so /opt/playwright holds the browser e2e:ui launches.
