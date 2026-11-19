@@ -1179,3 +1179,22 @@ Every config keeps its verdict and distinct-state count from the #3215 table abo
 `src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
 `workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
 `workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.
+
+## Sync with #3349 (`main` @ `50c105563`)
+
+#3349 moves the step watchdog into `runWithNodeDeadline` (`node-timeout.ts:55-69`) and calls it
+from `runClaimedStep`, the foreach item driver and the retry poller. The poller's `P5` now gets
+the same deadline as `XRun`: on expiry the race rejects into the poller's catch and takes the
+fenced `P7`. The model's `P5` already picks `fail` nondeterministically, and an attempt that hangs
+is a `P5` that never fires, so no guard, ordering or write path changes and the `.tla` and `.cfg`
+files are unchanged. Before #3349 a hung retry held the run (`P4`'s hold) until its executor
+returned; the model never forced `P5` to fire, so that liveness gap was not checked either way.
+ACTIONS.md re-pins the `XRun` and `P5` rows and every `engine.ts` line after the old race (-5) and
+`retry-poller.ts` line after its imports (+1).
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3349's e2e scenario
+`workflow-retry-deadline` passes.
