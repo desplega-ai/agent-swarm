@@ -63,7 +63,13 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
-import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
+import {
+  getAgentById,
+  getAppVersion,
+  getAppVersions,
+  getTaskById,
+  withFavoriteFlags,
+} from "../be/db";
 import type { RbacResource } from "../rbac";
 import { can } from "../rbac";
 import { APP_SESSION_KEY_PATTERN, appSessionContextKey } from "../tasks/context-key";
@@ -146,6 +152,8 @@ const AppSummarySchema = z.object({
   icon: AppIconSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Whether the caller starred the app (an `app` favorite). */
+  favorite: z.boolean(),
 });
 
 /**
@@ -1186,8 +1194,12 @@ export async function handleApps(
   if (listAppsRoute.match(req.method, pathSegments)) {
     const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     listAppsRoute.respond(res, 200, {
-      apps: await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+      apps: await withFavoriteFlags(
+        await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+        { favoriteScope, itemType: "app" },
+      ),
     });
     return true;
   }

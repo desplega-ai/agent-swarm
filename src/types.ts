@@ -1520,6 +1520,7 @@ export const FavoriteItemTypeSchema = z.enum([
   "key",
   "session",
   "hidden-key",
+  "app",
 ]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 

@@ -1004,6 +1004,7 @@ export interface paths {
                                 };
                                 createdAt: string;
                                 updatedAt: string;
+                                favorite: boolean;
                             }[];
                         };
                     };
@@ -8507,7 +8508,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8551,7 +8552,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8567,7 +8568,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -33210,7 +33211,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;

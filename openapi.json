@@ -2705,7 +2705,8 @@
               "agent-fs-path",
               "key",
               "session",
-              "hidden-key"
+              "hidden-key",
+              "app"
             ]
           },
           "itemId": {
@@ -9175,13 +9176,17 @@
                           },
                           "updatedAt": {
                             "type": "string"
+                          },
+                          "favorite": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "id",
                           "name",
                           "createdAt",
-                          "updatedAt"
+                          "updatedAt",
+                          "favorite"
                         ]
                       }
                     }
@@ -25695,7 +25700,8 @@
                 "agent-fs-path",
                 "key",
                 "session",
-                "hidden-key"
+                "hidden-key",
+                "app"
               ]
             },
             "required": false,
@@ -25777,7 +25783,8 @@
                       "agent-fs-path",
                       "key",
                       "session",
-                      "hidden-key"
+                      "hidden-key",
+                      "app"
                     ]
                   },
                   "itemId": {
@@ -25817,7 +25824,8 @@
                         "agent-fs-path",
                         "key",
                         "session",
-                        "hidden-key"
+                        "hidden-key",
+                        "app"
                       ]
                     },
                     "itemId": {

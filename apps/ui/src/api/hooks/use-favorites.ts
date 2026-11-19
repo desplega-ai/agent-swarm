@@ -15,6 +15,8 @@ const ENTITY_QUERY_KEYS: Record<FavoriteItemType, string[]> = {
   page: ["pages", "page"],
   workflow: ["workflows", "workflow"],
   schedule: ["scheduled-tasks", "scheduled-task"],
+  // The app detail nests the app under `app`, so only the list carries the flag.
+  app: ["apps"],
   // Comb pins: no entity list carries a favorite flag.
   "agent-fs-path": [],
   // Starred Sessions groups: read from the favorites list only.
