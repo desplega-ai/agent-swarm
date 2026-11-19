@@ -91,7 +91,12 @@ async function worktreeOfEndedTask(
   return path;
 }
 
-beforeEach(async () => {
+// Real-git fixture (bare origin + clone + push, ~9 git processes). Only the describes that
+// run git opt in, so the pure config tests never wait on it; the generous hook timeout is for
+// a loaded CI shard, where the default 5s killed the push mid-flight.
+const GIT_FIXTURE_TIMEOUT_MS = 60_000;
+
+async function setupRepo(): Promise<void> {
   root = await realpath(await mkdtemp(join(tmpdir(), "worktree-reaper-")));
   repo = join(root, "repo");
   const origin = join(root, "origin.git");
@@ -110,11 +115,11 @@ beforeEach(async () => {
   cwds = [];
   clock = Date.now();
   logs = [];
-});
+}
 
-afterEach(async () => {
+async function teardownRepo(): Promise<void> {
   await rm(root, { recursive: true, force: true });
-});
+}
 
 describe("resolveWorktreeReaperConfig", () => {
   test("defaults to dry-run, 72h TTL, hourly sweeps", () => {
@@ -148,6 +153,9 @@ describe("resolveWorktreeReaperConfig", () => {
 });
 
 describe("WorktreeReaper decisions", () => {
+  beforeEach(setupRepo, GIT_FIXTURE_TIMEOUT_MS);
+  afterEach(teardownRepo);
+
   test("removes a detached worktree when its only owner ended (rule 9)", async () => {
     const r = reaper();
     const path = await worktreeOfEndedTask(r, "review", "A");
@@ -262,6 +270,9 @@ describe("WorktreeReaper decisions", () => {
 });
 
 describe("WorktreeReaper slim, dry-run, ledger", () => {
+  beforeEach(setupRepo, GIT_FIXTURE_TIMEOUT_MS);
+  afterEach(teardownRepo);
+
   test("slims only ignored node_modules of a held worktree past the TTL", async () => {
     const r = reaper();
     const path = await worktreeOfEndedTask(r, "held", "A");
