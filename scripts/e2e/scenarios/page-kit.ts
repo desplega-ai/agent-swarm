@@ -47,9 +47,18 @@ async function createKitPage(
 }
 
 async function served(ctx: ScenarioContext, id: string, query = ""): Promise<string> {
+  return (await view(ctx, id, query)).html;
+}
+
+/** One anonymous view, with whether the kit render came from the cache. */
+async function view(
+  ctx: ScenarioContext,
+  id: string,
+  query = "",
+): Promise<{ html: string; kitRender: string | null }> {
   const response = await ctx.api("GET", `/p/${id}${query}`, { apiKey: null });
   expectStatus(response, [200], `serve page ${id}${query}`);
-  return response.text;
+  return { html: response.text, kitRender: response.headers.get("x-swarm-kit-render") };
 }
 
 function storedKit(ctx: ScenarioContext, id: string): string | null {
@@ -116,6 +125,25 @@ export const pageKit: Scenario = {
       expect(
         (await served(ctx, themed.id)).includes(PAPER_BACKGROUND),
         "theme paper reaches a kit page",
+      );
+
+      // ── A repeat view serves the cached render; an edit renders again ─────────────────
+      const cachedId = pages["kit-report-incident-review"] as string;
+      const first = await view(ctx, cachedId);
+      const repeat = await view(ctx, cachedId);
+      expect(repeat.kitRender === "hit", `a repeat view is a cache hit: ${repeat.kitRender}`);
+      expect(repeat.html === first.html, "a repeat view serves the same HTML");
+      const edited = await example("kit-report-incident-review");
+      const editedTitle = `Cache check ${ctx.nonce}`;
+      (edited.slots.header as { props: { title: string } }).props.title = editedTitle;
+      await createKitPage(session, `kit-report-incident-review-${ctx.nonce}`, edited);
+      const afterEdit = await view(ctx, cachedId);
+      expect(afterEdit.kitRender === "miss", `an edit renders again: ${afterEdit.kitRender}`);
+      expect(afterEdit.html.includes(editedTitle), "the next view shows the edit");
+      const afterEditRepeat = await view(ctx, cachedId);
+      expect(
+        afterEditRepeat.kitRender === "hit" && afterEditRepeat.html === afterEdit.html,
+        "the edited render is cached",
       );
 
       // ── Invalid slots are rejected with their paths ───────────────────────────────────
@@ -209,8 +237,15 @@ export const pageKit: Scenario = {
         }),
         "kv-set the dashboard data",
       );
-      const refreshed = await served(ctx, live.id);
+      const refreshedView = await view(ctx, live.id);
+      const refreshed = refreshedView.html;
+      expect(refreshedView.kitRender === "miss", "a data write renders again");
       expect(refreshed.includes("Live adoption"), "the KV value replaces the metrics slot");
+      const refreshedRepeat = await view(ctx, live.id);
+      expect(
+        refreshedRepeat.kitRender === "hit" && refreshedRepeat.html === refreshed,
+        "a repeat dashboard view serves the cached render",
+      );
       expect(!refreshed.includes("Android rollout is paused"), "null clears the notice slot");
       expectToolOk(
         await callTool(session, "kv-set", {
