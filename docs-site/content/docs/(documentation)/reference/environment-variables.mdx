@@ -70,6 +70,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SCRIPT_WORKFLOW_DEBUG` | `false` | When `true`, logs verbose debug output (auth override flag, resolved API key length) each time the script-run supervisor spawns a durable script-workflow subprocess. |
 | `WORKFLOW_MAX_ITERATIONS` | `100` | Max times a single workflow node may execute within one run before the engine aborts with an infinite-loop circuit-breaker error. |
 | `WORKFLOW_MAX_STEPS_PER_RUN` | `500` | Max total steps (across all nodes) allowed in a single workflow run before the engine's circuit breaker aborts it. |
+| `WORKFLOW_INPUT_ENV_ALLOWLIST` | unset (no restriction) | Comma-separated env var names that a workflow `${NAME}` reference may read. Unset allows any name; an explicitly empty value allows none. Read on every call, so a config reload applies at once. Agents cannot change it through the configuration APIs. See [Workflow env allowlist](/docs/ui/configuration#workflow-env-allowlist). |
 | `SEED_AUTOMATIONS_ENABLED` | `true` | Whether a freshly seeded zero-config workflow or schedule arrives enabled instead of disabled-but-inventoried. Read at boot. See [UI configuration](/docs/ui/configuration). |
 | `SEED_SCRIPTS_ENABLED` / `SEED_SKILLS_ENABLED` / `SEED_WORKFLOWS_ENABLED` / `SEED_SCHEDULES_ENABLED` | `true` | Set one to `false` to skip creating that kind's bundled catalog at all, at boot and by the seed CLI. Storage provisioning always runs. See [Per-kind seed suppression](/docs/ui/configuration#seed-suppression). |
 | `SWARM_IMPORT_SOURCES` | — | JSON array of file-import sources (workflows, skills, scripts, agent instructions) read at boot. Unset means no import. See [File import](/docs/guides/file-import). |
@@ -347,6 +348,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
 | `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
+| `SLACK_DEFAULT_TIMEZONE` | IANA timezone (for example `Europe/Madrid`) for deferral wake-up times in Slack cards when the requester has no valid timezone of their own. Unset or invalid falls back to `UTC`. The configuration APIs reject a value that is not a valid IANA timezone. |
 | `SLACK_ENTERPRISE_INSTALL` | Set to `true` when `SLACK_BOT_TOKEN` comes from an org-wide Enterprise Grid install (`is_enterprise_install` from `oauth.v2.access`). The swarm then accepts deliveries for its enterprise's org-wide install instead of its workspace (default: `false`). See [Slack: Workspace guard](/docs/integrations/slack#workspace-guard) |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |

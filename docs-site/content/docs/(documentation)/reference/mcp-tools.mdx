@@ -1252,6 +1252,7 @@ with `script-upsert`.
 | `scope` | string | No | Optional scope for named script resolution |
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
 | `executor` | `native` \| `quickjs` | No | Executor override for this run. When omitted, named scripts use their saved executor, else `SCRIPT_EXECUTOR` |
+| `object` | object | No | `{ id, method }`: call this object ID and method on the named global `DurableObject` script. See [Durable objects](/docs/guides/scripts-runtime#durable-objects) |
 
 ### script-upsert
 
@@ -1262,7 +1263,7 @@ the generated `.d.ts` and rejects on diagnostics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `source` | string | Yes | TypeScript source with a default export function |
+| `source` | string | Yes | TypeScript source with a default export function. A global script can instead `export default class X extends DurableObject<State>` (import `DurableObject` from `"swarm-sdk"`) |
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 | `executor` | `native` \| `quickjs` | No | Per-script executor override. Null or omitted inherits `SCRIPT_EXECUTOR` |
