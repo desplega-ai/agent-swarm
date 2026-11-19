@@ -6,6 +6,7 @@ import {
   checkPrBody,
   isFixTitle,
   leadChoices,
+  pendingPrBodyProblems,
   pickedChoices,
   prBodyWarnings,
   proseWordCount,
@@ -113,7 +114,8 @@ describe("check-pr-body", () => {
     expect(leads).toEqual(["Why", "Risk", "Urgency"]);
     const sections = templateSections(template).filter((s) => s.when !== "optional");
     expect(sections.length).toBeGreaterThan(0);
-    const all = { title: "fix: x", author: "desplega-bot" };
+    // A date after the template's warn-only window, so that every rule applies.
+    const all = { title: "fix: x", author: "desplega-bot", today: "2099-01-01" };
     // Unknown risk keeps the outline required, so every section and lead line is reported.
     expect(checkPrBody(template, template, all)).toHaveLength(sections.length + leads.length);
 
@@ -427,7 +429,7 @@ describe("check-pr-body: marker warnings", () => {
     ]);
     expect(prBodyWarnings("https://example.com/a", "")).toEqual([]);
     expect(prBodyWarnings(body)).toEqual([]);
-    expect(prBodyWarnings(`${body} ${"word ".repeat(301)}`)).toHaveLength(1);
+    expect(prBodyWarnings(`${body} ${"word ".repeat(201)}`)).toHaveLength(1);
   });
 });
 
@@ -449,9 +451,62 @@ describe("check-pr-body: prose budget", () => {
     expect(proseWordCount(body)).toBe(6);
   });
 
-  test("a long body warns but never fails", () => {
-    expect(prBodyWarnings("word ".repeat(300))).toEqual([]);
-    expect(prBodyWarnings("word ".repeat(301))).toHaveLength(1);
+  test("a long body warns above the target and fails above the limit", () => {
+    expect(prBodyWarnings("word ".repeat(200))).toEqual([]);
+    expect(prBodyWarnings("word ".repeat(201))).toHaveLength(1);
+    expect(checkPrBody("", "word ".repeat(300))).toEqual([]);
+    // Above the limit the failure replaces the warning.
+    expect(prBodyWarnings("word ".repeat(301))).toEqual([]);
+    expect(checkPrBody("", "word ".repeat(301))).toEqual([
+      "about 301 prose words. Limit: 300. Move detail into a code block, a table or <details>",
+    ]);
+  });
+  test("a lead line warns above its target and fails above its hard limit", () => {
+    const template = "**Why:** <!-- max words: 3 --> <!-- hard max words: 5 -->";
+    const why = (n: number) => `**Why:** ${"word ".repeat(n)}`;
+    expect(checkPrBody(template, why(5))).toEqual([]);
+    expect(prBodyWarnings(why(5), template)).toEqual(["**Why:** has 5 words. Target: 3 or fewer"]);
+    expect(checkPrBody(template, why(6))).toEqual(["**Why:** has 6 words. Limit: 5 (target 3)"]);
+    expect(prBodyWarnings(why(6), template)).toEqual([]);
+  });
+});
+
+describe("check-pr-body: warn-only window", () => {
+  const template = [
+    "<!-- new rules fail from: 2026-11-26 -->",
+    "**Why:** <!-- hard max words: 2 -->",
+    "## Proof <!-- evidence -->",
+    "## Links <!-- bot --> <!-- link: Task -->",
+    "## Checked <!-- fix mentions: main -->",
+  ].join("\n");
+  const body = "**Why:** one two three\n## Links\n- https://example.com/a\n## Checked\n- done";
+  const fresh = [
+    "**Why:** has 3 words. Limit: 2",
+    "missing section: ## Proof",
+    "## Links: write each link as [label](url), not as a bare URL",
+    '## Checked: for a fix, show the control on "main" (the failure before the fix)',
+  ];
+  const ctx = (today: string) => ({ title: "fix: x", author: "desplega-bot", today });
+  test("before the date the newer rules only warn", () => {
+    expect(checkPrBody(template, body, ctx("2026-11-25"))).toEqual([]);
+    expect(pendingPrBodyProblems(template, body, ctx("2026-11-25"))).toEqual({
+      from: "2026-11-26",
+      problems: fresh,
+    });
+  });
+  test("from the date they fail, and nothing is pending", () => {
+    expect(checkPrBody(template, body, ctx("2026-11-26"))).toEqual(fresh);
+    expect(pendingPrBodyProblems(template, body, ctx("2026-11-26"))).toBeUndefined();
+  });
+  test("the older rules fail inside the window too", () => {
+    expect(
+      checkPrBody(template, "## Proof\n```\nx\n```\n## Checked\n- main", ctx("2026-11-25")),
+    ).toEqual(["missing line: **Why:**", "missing section: ## Links"]);
+  });
+  test("a template without the line has no window", () => {
+    const always = template.split("\n").slice(1).join("\n");
+    expect(checkPrBody(always, body, ctx("2020-01-01"))).toEqual(fresh);
+    expect(pendingPrBodyProblems(always, body, ctx("2020-01-01"))).toBeUndefined();
   });
 });
 

@@ -29,8 +29,14 @@
  * removed, is not blank. Keep template guidance inside HTML comments so an
  * unedited template fails.
  *
- * Prose budget: above `PROSE_WORD_WARN` prose words (code fences, tables,
- * `<details>`, comments and headings excluded) the check warns. It never fails on length.
+ * Length: above `PROSE_WORD_WARN` prose words (code fences, tables, `<details>`, comments
+ * and headings excluded) the check warns, and above `PROSE_WORD_FAIL` it fails. A lead line
+ * warns above `max words: N` and fails above `hard max words: N`. Row, bullet and code-line
+ * budgets only warn.
+ *
+ * Window: a template line `<!-- new rules fail from: YYYY-MM-DD -->` makes the newer rules
+ * (evidence, provenance format, the fix control, the hard length limits) warn only until
+ * that date. Delete the line after the date.
  *
  * Bot-authored bodies also get the leak check (`src/utils/pr-body-leaks.ts`):
  * no Slack ids, private-chat quotes, and no task, dashboard, agent-fs or Slack
@@ -64,7 +70,8 @@ const TEMPLATE_PATH = process.env.PR_TEMPLATE_PATH || ".github/pull_request_temp
 export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export type Risk = (typeof RISK_LEVELS)[number];
 export const SMALL_DIFF_LINES = 50;
-export const PROSE_WORD_WARN = 300;
+export const PROSE_WORD_WARN = 200;
+export const PROSE_WORD_FAIL = 300;
 
 /** `flags`: each HTML comment on the heading line, whitespace collapsed, case kept. */
 type Section = { heading: string; flags: string[]; content: string };
@@ -81,6 +88,8 @@ export type PrContext = {
   title?: string;
   /** GitHub login. Unknown counts as the swarm bot, as for the leak check. */
   author?: string;
+  /** Today as YYYY-MM-DD, for the warn-only window. Default: the current UTC date. */
+  today?: string;
   /** Additions + deletions. Unknown: a low-risk PR may still skip `<!-- outline -->`. */
   changedLines?: number;
 };
@@ -151,12 +160,15 @@ function leadRules(template: string) {
             .map(normalize)
         : [],
       maxWords: markerLimit(flags, "words"),
+      hardMaxWords: markerLimit(flags, "words", "hard max"),
     };
   });
 }
 
-function markerLimit(flags: string[], unit: string): number | undefined {
-  const match = flags.map((f) => new RegExp(`^max ${unit}:\\s*(\\d+)$`, "i").exec(f)).find(Boolean);
+function markerLimit(flags: string[], unit: string, kind = "max"): number | undefined {
+  const match = flags
+    .map((f) => new RegExp(`^${kind} ${unit}:\\s*(\\d+)$`, "i").exec(f))
+    .find(Boolean);
   return match ? Number(match[1]) : undefined;
 }
 
@@ -220,16 +232,17 @@ export function proseWordCount(body: string): number {
 export function prBodyWarnings(body: string, template?: string): string[] {
   const words = proseWordCount(body);
   const warnings =
-    words > PROSE_WORD_WARN
+    words > PROSE_WORD_WARN && words <= PROSE_WORD_FAIL
       ? [
-          `about ${words} prose words (budget ~150, warn above ${PROSE_WORD_WARN}). Show the change: outline, tables, <details>.`,
+          `about ${words} prose words (target ~150, the check fails above ${PROSE_WORD_FAIL}). Show the change: outline, tables, <details>.`,
         ]
       : [];
   if (template === undefined) return warnings;
   const leads = bodyLeadLines(body);
   for (const rule of leadRules(template)) {
     const count = (leads.get(rule.label.toLowerCase()) ?? "").split(/\s+/).filter(Boolean).length;
-    if (rule.maxWords !== undefined && count > rule.maxWords) {
+    const underLimit = rule.hardMaxWords === undefined || count <= rule.hardMaxWords;
+    if (rule.maxWords !== undefined && count > rule.maxWords && underLimit) {
       warnings.push(`**${rule.label}:** has ${count} words. Target: ${rule.maxWords} or fewer`);
     }
   }
@@ -341,8 +354,38 @@ function sectionRequired(section: TemplateSection, body: string, ctx: PrContext)
  */
 export function checkPrBody(template: string, body: string, context: string | PrContext = {}) {
   const ctx: PrContext = typeof context === "string" ? { title: context } : context;
+  const { hard, fresh } = collectProblems(template, body, ctx);
+  return warnOnlyUntil(template, ctx) ? hard : [...hard, ...fresh];
+}
+
+/**
+ * The problems that do not fail yet. A template line `<!-- new rules fail from: YYYY-MM-DD -->`
+ * opens a window: until that date the rules marked "fresh" below only warn, so that PRs
+ * opened under the old template are not broken by an unrelated push. Empty after the date,
+ * and when the template has no such line.
+ */
+export function pendingPrBodyProblems(
+  template: string,
+  body: string,
+  context: string | PrContext = {},
+): { from: string; problems: string[] } | undefined {
+  const ctx: PrContext = typeof context === "string" ? { title: context } : context;
+  const from = warnOnlyUntil(template, ctx);
+  return from ? { from, problems: collectProblems(template, body, ctx).fresh } : undefined;
+}
+
+/** The window's end date while the window is open, else undefined. */
+function warnOnlyUntil(template: string, ctx: PrContext): string | undefined {
+  const from = /<!--\s*new rules fail from:\s*(\d{4}-\d{2}-\d{2})\s*-->/i.exec(template)?.[1];
+  const today = ctx.today ?? new Date().toISOString().slice(0, 10);
+  return from !== undefined && today < from ? from : undefined;
+}
+
+/** `hard`: rules that always fail. `fresh`: rules that only warn while the window is open. */
+function collectProblems(template: string, body: string, ctx: PrContext) {
   const { sections: bodySections } = parseSections(body);
   const problems: string[] = [];
+  const fresh: string[] = [];
 
   const leads = bodyLeadLines(body);
   for (const rule of leadRules(template)) {
@@ -360,6 +403,17 @@ export function checkPrBody(template: string, body: string, context: string | Pr
     } else if (label.toLowerCase() === "risk" && !riskLevel(body)) {
       problems.push(`${name} must start with one of: ${RISK_LEVELS.join(", ")}`);
     }
+    const count = (value ?? "").split(/\s+/).filter(Boolean).length;
+    if (rule.hardMaxWords !== undefined && count > rule.hardMaxWords) {
+      const target = rule.maxWords === undefined ? "" : ` (target ${rule.maxWords})`;
+      fresh.push(`${name} has ${count} words. Limit: ${rule.hardMaxWords}${target}`);
+    }
+  }
+  const proseWords = proseWordCount(body);
+  if (proseWords > PROSE_WORD_FAIL) {
+    fresh.push(
+      `about ${proseWords} prose words. Limit: ${PROSE_WORD_FAIL}. Move detail into a code block, a table or <details>`,
+    );
   }
 
   // `key: value` markers on each template heading, by normalized heading.
@@ -387,7 +441,7 @@ export function checkPrBody(template: string, body: string, context: string | Pr
       const noLinks = text.replace(new RegExp(link.source, "gi"), "");
       const bareUrl = /https?:\/\//i.test(noLinks);
       if (bareUrl) {
-        problems.push(`${name}: write each link as [label](url), not as a bare URL`);
+        fresh.push(`${name}: write each link as [label](url), not as a bare URL`);
       }
       // What is left of a line after its links and its list marker: separators only.
       // A bare URL and its `Label:` already have their own problem line.
@@ -399,9 +453,7 @@ export function checkPrBody(template: string, body: string, context: string | Pr
             .replace(/(?:[\p{L}][\p{L} /]{0,24}:\s*)?https?:\/\/\S+/giu, ""),
         );
       if (prose.some((l) => /[\p{L}\p{N}]/u.test(l))) {
-        problems.push(
-          `${name}: links only, each as [label](url). Move other text to another section`,
-        );
+        fresh.push(`${name}: links only, each as [label](url). Move other text to another section`);
       }
       // `<!-- link: Task -->` on the heading: the bot must link that label.
       const label = markers.get(normalize(section.heading))?.link;
@@ -410,7 +462,7 @@ export function checkPrBody(template: string, body: string, context: string | Pr
       );
       // With a bare URL, the fix for that problem line adds the label too.
       if (label && !bareUrl && shouldCheckLeaks(ctx.author) && !labels.includes(normalize(label))) {
-        problems.push(`${name}: link the ${label.toLowerCase()} as [${label}](url)`);
+        fresh.push(`${name}: link the ${label.toLowerCase()} as [${label}](url)`);
       }
     }
     // `<!-- fix mentions: main -->`: a fix shows its control (the failure before the fix).
@@ -418,28 +470,28 @@ export function checkPrBody(template: string, body: string, context: string | Pr
     if (mention && found && isFixTitle(ctx.title ?? "")) {
       const text = stripComments(found.content).trim();
       if (text && !new RegExp(`\\b${mention}\\b`, "i").test(text)) {
-        problems.push(
+        fresh.push(
           `${name}: for a fix, show the control on "${mention}" (the failure before the fix)`,
         );
       }
     }
     if (!required) continue;
     if (!found) {
-      problems.push(`missing section: ${name}`);
+      (section.when === "evidence" ? fresh : problems).push(`missing section: ${name}`);
     } else if (section.choices.length > 0) {
       const picked = checkboxes(found.content, true);
       if (picked.length !== 1 || !section.choices.includes(picked[0] ?? "")) {
         problems.push(`${name}: check exactly one of: ${section.choices.join(", ")}`);
       }
     } else if (section.when === "evidence" && !hasEvidence(stripComments(found.content))) {
-      problems.push(
+      fresh.push(
         `${name}: show a snippet, a table with a data row, an image or a video, write "Before: ... After: ...", or write "No visible change: <reason>"`,
       );
     } else if (!stripComments(found.content).trim()) {
       problems.push(`empty section: ${name}`);
     }
   }
-  return problems;
+  return { hard: problems, fresh };
 }
 
 /**
@@ -499,6 +551,11 @@ if (import.meta.main) {
   const ctx: PrContext = { title, author, changedLines };
   for (const warning of prBodyWarnings(body, template)) {
     console.warn(process.env.GITHUB_ACTIONS ? `::warning title=PR body::${warning}` : warning);
+  }
+  const pending = pendingPrBodyProblems(template, body, ctx);
+  for (const problem of pending?.problems ?? []) {
+    const text = `from ${pending?.from} this fails: ${problem}`;
+    console.warn(process.env.GITHUB_ACTIONS ? `::warning title=PR body::${text}` : text);
   }
   const leaks = shouldCheckLeaks(author) ? checkPrBodyLeaks(body) : [];
   const problems = [...checkPrBody(template, body, ctx), ...leaks];

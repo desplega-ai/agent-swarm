@@ -1,6 +1,6 @@
 <!--
 Write for a human who reads this in 60 seconds. Show the change, do not narrate it.
-Prose budget: about 150 words. Code blocks, mermaid, tables and <details> do not count. The check warns above 300.
+Prose budget: about 150 words. Code blocks, mermaid, tables and <details> do not count. The check warns above 200 and fails above 300.
 Plain words, active voice, one idea per sentence. No file-by-file changelog: that belongs in the task output.
 
 The "PR Body" check enforces this template. Local check:
@@ -8,7 +8,8 @@ The "PR Body" check enforces this template. Local check:
 - The **Why:**, **Risk:** and **Urgency:** lines are required.
 - Every ## section is required, except sections marked:
   "optional", "bot" (required only when desplega-bot is the author), "outline" (skip only when Risk is low and the diff is 50 lines or fewer).
-- The check fails on a missing part. It only warns on length.
+- The check fails on a missing part. Length: it warns above a target and fails far above it (Why: 40 words, prose: 300 words).
+- Until 2026-11-26 the newer rules only warn: Before / after, the link format of Swarm provenance, the control of a fix, the length limits.
 
 Risk is how deep to read. Urgency is when. Set Risk yourself. Copy Urgency from the request, and write "nice to have" when the request gives none.
 - high: migration, auth/RBAC, secrets or scrubbing, billing/cost, data deletion, prompt or claim/routing changes that hit every agent, a public API or SDK break. The reviewer reads every 🔍 row. Adds the risk:high label.
@@ -22,7 +23,9 @@ Links:
 - Swarm task, session and workflow-run links, durable agent-fs paths and Slack permalinks: only under ## Swarm provenance.
 -->
 
-**Why:** <!-- max words: 25 --> <!-- One sentence: who sees what after the merge. Not how it works. Link public sources only (Fixes #N). -->
+<!-- new rules fail from: 2026-11-26 -->
+
+**Why:** <!-- max words: 25 --> <!-- hard max words: 40 --> <!-- One sentence: who sees what after the merge. Not how it works. Link public sources only (Fixes #N). -->
 
 **Risk:** <!-- low | medium | high, then an optional reason in parentheses: "high (secrets)". -->
 

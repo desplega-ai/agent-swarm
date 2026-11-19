@@ -95,7 +95,7 @@ bun run check:dep-graph
 
 <important if="you are writing a pull request description or filing a GitHub issue on this repo">
 
-The description carries the intent a reviewer checks the diff against. Write for a human who reads it in 60 seconds, in about 150 prose words. Show the change, do not narrate it. The check fails on a missing part and only warns on length. The template comment gives the rule of each section. What it cannot tell you:
+The description carries the intent a reviewer checks the diff against. Write for a human who reads it in 60 seconds, in about 150 prose words. Show the change, do not narrate it. The check fails on a missing part, warns above a length target, and fails far above it (Why: 40 words, prose: 300). The template comment gives the rule of each section. What it cannot tell you:
 
 - **Why**: say who sees what after the merge. Paraphrase the ask as it was given, not rewritten to match what you built. Link public sources only (Fixes #N). Customer names and private-chat quotes stay out.
 - **Urgency**: copy it from the request. With none given, write "nice to have".
