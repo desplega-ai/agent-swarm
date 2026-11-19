@@ -688,7 +688,7 @@ By default, upstream step outputs are **not** available for interpolation. Built
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
 - Without `inputs`, ordinary templates referencing upstream nodes resolve to empty strings and report the token in run diagnostics
 
-Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` or `config.env` so they arrive as data instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
+Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` or `config.env` so they arrive as data instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. The same allowlist covers `code-match` `config.code` and a string `wait` `config.filter`: read trigger, alias and `item` values from the function's `input` argument, or match them with the object form of `filter`. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
 
 ### Structured Output (`outputSchema`)
 
