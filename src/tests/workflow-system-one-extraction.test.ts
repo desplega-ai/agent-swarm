@@ -459,6 +459,19 @@ describe("system-one-extraction on Cloudflare Clairic", () => {
       ],
       [{ order_id: { type: "text", value: "A-88412", confidence: 1.5 } }, '"order_id".confidence'],
       [{ order_id: { type: "text" } }, 'answer "order_id" is missing its value'],
+      // A null span is accepted only for a null value.
+      [
+        { order_id: { type: "text", value: "A-88412", span: null } },
+        '"order_id".span must be [start, end] offsets',
+      ],
+      [
+        { order_id: { type: "text", value: "A-88412", span: [17, 10] } },
+        '"order_id".span must be [start, end] offsets',
+      ],
+      [
+        { tracking_number: { type: "text", value: null, span: [10] } },
+        '"tracking_number".span must be [start, end] offsets',
+      ],
       [{ extra: { type: "text", value: "x" } }, "answer(s) for undeclared fields"],
     ];
     for (const [answers, message] of cases) {

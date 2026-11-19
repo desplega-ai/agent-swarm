@@ -491,6 +491,58 @@ export const workflowEngineSystemOne: Scenario = {
         );
       }
 
+      // ── extraction: clairic-27b reports a null value with `span: null` ──────
+      // Verbatim shape of a clairic-27b answer for a field the input does not hold.
+      const nullAnswer = {
+        type: "text",
+        value: null,
+        valid: true,
+        raw: "null",
+        span: null,
+        p_null: 0.97,
+      };
+      for (const [label, orderId, ok] of [
+        ["null value, null span", nullAnswer, true],
+        ["null value, no span", { type: "text", value: null, p_null: 0.99 }, true],
+        ["value with a null span", { ...nullAnswer, value: "A-1", raw: '"A-1"' }, false],
+        ["value with a reversed span", { type: "text", value: "A-1", span: [9, 3] }, false],
+      ] as const) {
+        ctx.llm.setSystemOneResponder(() => ({
+          model: "clairic-27b",
+          answers: { order_id: orderId },
+          usage: { input_tokens: 10, output_tokens: 0 },
+        }));
+        const spanFlow = await createWorkflow(
+          ctx,
+          `wf-s1-extract-span-${label.replaceAll(" ", "-").replaceAll(",", "")}`,
+          { nodes: [extractionNode(`Order ${marker}`, { provider: "cloudflare" })] },
+          {},
+          workerId,
+        );
+        const spanRun = await triggerWorkflow(ctx, spanFlow, {}, { agentId: workerId });
+        const spanDetail = await waitForRun(
+          ctx,
+          spanRun.runId,
+          ok ? "completed" : "failed",
+          20_000,
+          `extraction run (${label})`,
+        );
+        if (ok) {
+          const answer = asRecord(asRecord(outputOf(spanDetail, "extract").answers).order_id);
+          expect(
+            answer.value === null && !("span" in answer) && !("raw" in answer),
+            `${label}: the answer is a null value without a span: ${JSON.stringify(answer)}`,
+          );
+        } else {
+          const error = String(stepOf(spanDetail, "extract").error);
+          expect(
+            error.includes('answer "order_id".span must be [start, end] offsets'),
+            `${label}: the step fails on the span: ${error}`,
+          );
+        }
+      }
+      ctx.llm.setSystemOneResponder(undefined);
+
       // ── extraction: configured, strict token check, no outbound call ────────
       // Not tracked for cleanup: deleting a workflow deletes its runs, and the coverage
       // report reads node types from the step rows that survive the run.

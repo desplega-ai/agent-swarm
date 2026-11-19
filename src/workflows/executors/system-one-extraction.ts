@@ -630,7 +630,8 @@ function validateAnswer(
     }
     default:
       checkScalar(at, field, raw.value);
-      if (raw.span !== undefined) {
+      // A null value has nothing to point at; clairic-27b reports that as `span: null`.
+      if (raw.span !== undefined && !(raw.span === null && raw.value === null)) {
         if (!isSpan(raw.span)) fail(`${at}.span must be [start, end] offsets`);
         answer.span = raw.span;
       }
