@@ -117,6 +117,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
+- [Connect Your AI Client with the User MCP](https://docs.agent-swarm.dev/docs/guides/user-mcp). When: Someone wants to send or check swarm tasks from ChatGPT, Claude, Codex, Cursor or another AI assistant they already use.
 - [MCP Events on the User MCP](https://docs.agent-swarm.dev/docs/guides/mcp-events). Reference.
 - [Claude Code Mod](https://docs.agent-swarm.dev/docs/guides/claude-code-mod). Reference.
 - [Observability with OpenTelemetry](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry). When: Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend.
