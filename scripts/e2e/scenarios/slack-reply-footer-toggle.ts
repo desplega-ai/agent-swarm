@@ -28,6 +28,39 @@ async function askAndClaim(ctx: ScenarioContext, text: string) {
   return { threadTs: ask.ts, taskId, leadId };
 }
 
+/** Ask, complete the task with one citation, and return the outcome card's blocks as JSON. */
+async function summarize(ctx: ScenarioContext, label: string) {
+  const automatic = await askAndClaim(ctx, "summarize the release");
+  ctx.markThread(label, CHANNEL, automatic.threadTs);
+  const completing = await ctx.connectMcp(automatic.leadId);
+  const summary = "Release checks passed.";
+  try {
+    expectToolOk(
+      await callTool(completing, "store-progress", {
+        taskId: automatic.taskId,
+        status: "completed",
+        output: `${summary} [citation:1]`,
+        citations: [{ index: 1, kind: "url", ref: "https://example.com/checks", label: "Checks" }],
+      }),
+      "Complete the Slack task with a citation",
+    );
+  } finally {
+    await completing.close();
+  }
+  const outcome = await waitForOutcome(ctx, automatic.threadTs, summary);
+  const stopped = await ctx.slack.waitForApiCall("chat.stopStream", {
+    timeoutMs: 30_000,
+    where: (call) => call.args.ts === outcome.ts && call.args.channel === CHANNEL,
+  });
+  expect(stopped.ok, "The outcome did not finish streaming");
+  const blocks = JSON.stringify(
+    ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts)?.blocks ?? [],
+  );
+  expect(blocks.includes("Sources:"), "The outcome lost its sources caption");
+  await waitForReaction(ctx, automatic.threadTs, "white_check_mark");
+  return { blocks, shortId: automatic.taskId.slice(0, 8) };
+}
+
 export const slackReplyFooterToggle: Scenario = {
   name: "slack-reply-footer-toggle",
   order: 134.5,
@@ -75,43 +108,13 @@ export const slackReplyFooterToggle: Scenario = {
       await finish(ctx, leadId, taskId, { status: "completed", output: "Release checks sent." });
       await waitForReaction(ctx, threadTs, "white_check_mark");
 
-      const automatic = await askAndClaim(ctx, "summarize the release");
-      // The footer-on frame of the same card is the slack-task-output-citations scenario.
-      ctx.markThread("footer-off", CHANNEL, automatic.threadTs);
-      const completing = await ctx.connectMcp(automatic.leadId);
-      const summary = "Release checks passed.";
-      try {
-        expectToolOk(
-          await callTool(completing, "store-progress", {
-            taskId: automatic.taskId,
-            status: "completed",
-            output: `${summary} [citation:1]`,
-            citations: [
-              { index: 1, kind: "url", ref: "https://example.com/checks", label: "Checks" },
-            ],
-          }),
-          "Complete the Slack task with a citation",
-        );
-      } finally {
-        await completing.close();
-      }
-      const outcome = await waitForOutcome(ctx, automatic.threadTs, summary);
-      const stopped = await ctx.slack.waitForApiCall("chat.stopStream", {
-        timeoutMs: 30_000,
-        where: (call) => call.args.ts === outcome.ts && call.args.channel === CHANNEL,
-      });
-      expect(stopped.ok, "The outcome did not finish streaming");
-      const outcomeBlocks = JSON.stringify(
-        ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts)?.blocks ?? [],
-      );
-      expect(outcomeBlocks.includes("Sources:"), "The outcome lost its sources caption");
-      expect(
-        !outcomeBlocks.includes(automatic.taskId.slice(0, 8)),
-        "The outcome still has a footer",
-      );
-      await waitForReaction(ctx, automatic.threadTs, "white_check_mark");
+      const off = await summarize(ctx, "footer-off");
+      expect(!off.blocks.includes(off.shortId), "The outcome still has a footer");
     } finally {
       await ctx.restartSut();
     }
+    // The default setting again: the same card, with its footer. The pair is the visual proof.
+    const on = await summarize(ctx, "footer-on");
+    expect(on.blocks.includes(on.shortId), "The outcome has no footer with the default setting");
   },
 };

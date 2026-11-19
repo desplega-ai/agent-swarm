@@ -4,7 +4,7 @@ React + Vite + shadcn/ui + Tailwind + AG Grid + react-query dashboard for the Ag
 
 Provider key rows show compact limits, remaining percentages, and reset countdowns. Put quota explanations and account details in a popover, not expanded rows.
 
-Keep this file small: with the root `CLAUDE.md` it must fit in 32,768 bytes, the part Codex loads (`bun run check:agents-md-size`). Reference material lives in [docs/](./docs/).
+Keep this file small: with the root `CLAUDE.md` it must fit in the 32,768 bytes that Codex loads (`bun run check:agents-md-size`). Reference material lives in [docs/](./docs/).
 
 ## Design Context
 
@@ -18,15 +18,15 @@ Load the `dashboard-ui` maintainer skill ([.claude/internal-skills/dashboard-ui/
 
 <important if="you are building or changing UI in apps/ui: a page, a component, styles, motion, the session log viewer, or you process in-page review notes">
 
-Read the reference for the area before you write code. The last column is the rule that causes damage when missed.
+Before a page, component or style edit, read [docs/primitives.md](./docs/primitives.md) and [docs/theming.md](./docs/theming.md). For the other areas, read the reference before you write code. The last column is the rule that causes damage when missed, not the whole contract.
 
 | Area | Read first | Do not miss |
 |---|---|---|
-| Pages, layout, components, tags and chips, destructive buttons | [docs/primitives.md](./docs/primitives.md) | Compose from the primitives in `src/components/ui/` and `src/components/shared/` instead of a hand-rolled `<div>` layout. Chips use `<Badge size="tag">`. Destructive actions use `variant="destructive-outline"` with an `AlertDialog`. `src/components/ui/` is canonical: read the parity section before you copy from the brand kit (`~/Downloads/swarm-design-system`). |
+| Pages, layout, components, tags and chips, destructive buttons | [docs/primitives.md](./docs/primitives.md) | Compose from the primitives in `src/components/ui/` and `src/components/shared/` instead of a hand-rolled `<div>` layout. A detail page uses `DetailPageBody` with its rail. Logic that appears at 2 or more call sites moves to `src/lib/` or `src/hooks/`. Chips use `<Badge size="tag">`. Destructive actions use `variant="destructive-outline"` with an `AlertDialog`. `src/components/ui/` is canonical: read the parity section before you copy from the brand kit (`~/Downloads/swarm-design-system`). |
 | Tailwind classes, colors, tokens, theme presets | [docs/theming.md](./docs/theming.md) | Use semantic token classes (`bg-background`, `text-muted-foreground`, `bg-status-success`). Palette literals such as `bg-zinc-950` fail `bun run check:tokens`. |
-| Animation, transitions, animated icons | [docs/motion.md](./docs/motion.md) | Under 300ms, exits faster than enters, `ease-swift` / `ease-snappy`, transform and opacity only, no animation on keyboard-driven or high-frequency interactions. |
-| Session log parsing, `SessionLogViewer`, `src/logs-parser` | [docs/session-log-parser.md](./docs/session-log-parser.md) | Harness-specific logic stays inside adapters. After a parser change run `bun run build:claude-mod` from the repo root and commit the bundle. |
-| In-page review notes (`DEV_NOTES=1 bun run dev`) | [docs/dev-notes.md](./docs/dev-notes.md) | Mark a note done only after the change is verified in the browser. |
+| Animation, transitions, animated icons | [docs/motion.md](./docs/motion.md) | Under 300ms (sheets and drawers: 400ms in, 250ms out), exits faster than enters, `ease-swift` / `ease-snappy`, transform and opacity only, no animation on keyboard-driven or high-frequency interactions. |
+| Session log parsing, `SessionLogViewer`, `src/logs-parser` | [docs/session-log-parser.md](./docs/session-log-parser.md) | Harness-specific logic stays inside adapters. Order records by `(createdAt, lineNumber, fileIndex)` before the adapter runs: OpenCode delta reassembly depends on it. After a parser change run `bun run build:claude-mod` from the repo root and commit the bundle. |
+| In-page review notes, or a dev server that you start for a UI review (`DEV_NOTES=1 bun run dev`) | [docs/dev-notes.md](./docs/dev-notes.md) | Mark a note done only after the change is verified in the browser. |
 
 </important>
 

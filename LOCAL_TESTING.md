@@ -183,9 +183,19 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
-The renderer writes `frames/<scenario>/<label>/final-thread.png` for each thread a scenario marked with `ctx.markThread`.
-A PR that changes what users see in Slack attaches those frames in `## Before / after`: one run on `main` (or with the flag off) and one on the branch.
-A Chat SDK Slack scenario runs on its own HTTP-mode mock. With `--visuals`, that mock writes `slack-chat-sdk-journal-<n>.jsonl` next to `slack-journal.jsonl`, and `flip.ctx.markThread` records which journal holds the thread.
+The renderer writes `frames/<scenario>/<label>/final-thread.png` for each thread a scenario marked with `ctx.markThread(label, channel, ts)`.
+Mark the `ts` of the thread root. A label matches `^[a-z0-9-]+$`, and any other label throws.
+Pick the group by renderer. `visuals-v2` runs with `SLACK_RENDER_V2=true` and is the usual choice. Use `visuals-legacy` for a change in the legacy renderer, and both groups when both renderers change.
+
+A PR that changes what users see in Slack attaches a frame pair in `## Before / after`:
+
+- A flag: mark one thread per state in one scenario (`slack-reply-footer-toggle` marks `footer-off` and `footer-on`).
+- A changed rendering: run the scenario on `main` and on the branch.
+- A new scenario or new marks: `main` cannot render them. Copy the scenario file into a `main` worktree for the before frame, or show the after frame alone when the output itself is new.
+
+The renderer needs Chrome. Set `SLACK_MOCK_CHROME=<path>` when it does not find one. In a swarm worker container Chrome starts only with `--no-sandbox`, so point `SLACK_MOCK_CHROME` at a wrapper script that adds the flag.
+
+A Chat SDK Slack scenario runs on its own HTTP-mode mock. With `--visuals`, that mock writes `slack-http-journal-<scenario>-<n>.jsonl` next to `slack-journal.jsonl`. The runner names the file (`ctx.slackJournal()`), and `flip.ctx.markThread` records which journal holds the thread. `channel.png` always shows the Socket Mode workspace of the run.
 
 Use `--harness claude,codex,pi,opencode,dsh,cursor,amp,grok,fx,acp` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.

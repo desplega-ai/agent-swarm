@@ -73,17 +73,22 @@ export type ScenarioContext = {
   sutLog: () => Promise<string>;
   log: (message: string) => void;
   /**
-   * Mark a Slack thread for the visuals renderer (`--visuals`). `journal` names another
-   * journal file in the visuals directory, for a thread on a mock the scenario started
-   * itself. Default: the journal of the run's Socket Mode mock.
+   * Mark a Slack thread for the visuals renderer (`--visuals`). `journal` is the `file` of a
+   * `slackJournal()` result, for a thread on a mock the scenario started itself. Default:
+   * the journal of the run's Socket Mode mock.
    */
   markThread: (label: string, channel: string, ts: string, journal?: string) => void;
-  /** The `--visuals` directory (absolute path), when the run keeps Slack journals. */
-  visualsDir?: string;
+  /**
+   * A journal for a Slack mock that the scenario starts itself: start the mock with `path`
+   * as its `dataFile` and pass `file` to `markThread`. Undefined without `--visuals`, and
+   * on a rerun (a rerun keeps no thread marks).
+   */
+  slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
   restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
   nonce: string;
 };
+export type SlackJournal = { file: string; path: string };
 export type Scenario = {
   name: string;
   /**
@@ -111,8 +116,10 @@ export type Scenario = {
   run: (ctx: ScenarioContext) => Promise<void>;
 };
 
-type BaseContext = Omit<ScenarioContext, "markThread">;
+type BaseContext = Omit<ScenarioContext, "markThread" | "slackJournal">;
 
+/** Journals of the Slack mocks that scenarios start themselves (see `slackJournal`). */
+const EXTRA_JOURNAL_PREFIX = "slack-http-journal-";
 type ThreadMark = {
   scenario: string;
   label: string;
@@ -240,7 +247,6 @@ async function bootStack(
       apiKey: sut.apiKey,
       db,
       slack: slack.mock,
-      visualsDir: options.visualsDir ? resolve(options.visualsDir) : undefined,
       llm,
       async startAgent(agentOptions) {
         const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
@@ -284,8 +290,9 @@ async function runInStack(
   scenario: Scenario,
   ctx: BaseContext,
   markThread: ScenarioContext["markThread"],
+  slackJournal: ScenarioContext["slackJournal"] = () => undefined,
 ): Promise<ScenarioResult> {
-  const result = await runScenario(scenario, { ...ctx, markThread });
+  const result = await runScenario(scenario, { ...ctx, markThread, slackJournal });
   await stopActiveAgents();
   ctx.llm.reset();
   return result;
@@ -412,9 +419,13 @@ async function main(): Promise<number> {
   const journalPath = visualsDir ? `${visualsDir}/slack-journal.jsonl` : undefined;
   if (visualsDir && journalPath) {
     await Bun.$`mkdir -p ${visualsDir}`.quiet();
-    await Bun.file(journalPath)
-      .delete()
-      .catch(() => {});
+    // A mock replays a journal that is already there, so a reused directory starts clean.
+    const stale = [...new Bun.Glob(`${EXTRA_JOURNAL_PREFIX}*.jsonl`).scanSync(visualsDir)];
+    for (const path of [journalPath, ...stale.map((file) => `${visualsDir}/${file}`)]) {
+      await Bun.file(path)
+        .delete()
+        .catch(() => {});
+    }
   }
   // A fresh directory: the report unions every lcov in it, and stale ones would count.
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
@@ -429,12 +440,26 @@ async function main(): Promise<number> {
     if (options.skip.has(scenario.name)) continue;
     if (options.group && !scenario.groups?.includes(options.group)) continue;
     if (options.shard && bandOf(scenario.order) !== options.shard.index) continue;
-    const result = await runInStack(scenario, ctx, (label, channel, ts, journal) => {
-      if (!/^[a-z0-9-]+$/.test(label)) {
-        throw new Error(`Invalid visual thread label: ${label}`);
-      }
-      threadMarks.push({ scenario: scenario.name, label, channel, ts, journal });
-    });
+    // One journal file per extra mock, named after the scenario: the name does not depend
+    // on which other scenarios ran.
+    let extraJournals = 0;
+    const slackJournal = (): SlackJournal | undefined => {
+      if (!visualsDir) return undefined;
+      extraJournals += 1;
+      const file = `${EXTRA_JOURNAL_PREFIX}${scenario.name}-${extraJournals}.jsonl`;
+      return { file, path: `${visualsDir}/${file}` };
+    };
+    const result = await runInStack(
+      scenario,
+      ctx,
+      (label, channel, ts, journal) => {
+        if (!/^[a-z0-9-]+$/.test(label)) {
+          throw new Error(`Invalid visual thread label: ${label}`);
+        }
+        threadMarks.push({ scenario: scenario.name, label, channel, ts, journal });
+      },
+      slackJournal,
+    );
     scenarioResults.push(result);
     printScenario(result);
   }
