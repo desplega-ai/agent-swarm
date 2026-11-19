@@ -1285,6 +1285,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REPLY_FOOTER_ENABLED",
+        label: "Show Slack reply footer",
+        description: "Show task details below Slack replies, including the task link.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack#outcome-cards-and-message-provenance`,
+      },
+      {
         key: "SLACK_RENDER_V2_DELEGATION",
         label: "Slack delegated-result delivery",
         description:
