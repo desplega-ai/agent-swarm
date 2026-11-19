@@ -547,6 +547,17 @@ export class NativeScriptExecutor implements ScriptExecutor {
         ...(runAs ? { ownerUid: runAs.uid } : {}),
       };
       const result = exitCode === 0 ? await readResultFile(resultFile, runDirCheck) : undefined;
+      const envelope = result as { __swarmDurable?: number; result?: unknown } & NonNullable<
+        ExecutorOutput["durable"]
+      >;
+      const durable =
+        input.configPayload.durable && envelope?.__swarmDurable === 1
+          ? {
+              state: envelope.state,
+              destroyed: envelope.destroyed,
+              idleTtlSec: envelope.idleTtlSec,
+            }
+          : undefined;
       const runtimeError =
         exitCode === 0 ? undefined : await readRuntimeError(errorFile, runDirCheck);
       // Presence only; anything at the path (even a planted link) reads as started,
@@ -555,7 +566,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
       const error = classifyExit(exitCode, timedOut, killed, userCodeStarted);
 
       return {
-        result,
+        result: durable ? envelope.result : result,
+        ...(durable ? { durable } : {}),
         stdout: stdout.text,
         stderr: stderr.text,
         truncated: { stdout: stdout.truncated, stderr: stderr.truncated },

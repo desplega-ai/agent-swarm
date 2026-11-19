@@ -284,6 +284,9 @@ const scriptAuthoringNudge = (r: SwarmToolResult): string | undefined =>
 
 const scriptRunNudge = (r: SwarmToolResult): string | undefined => {
   const body = (r.data as { data?: { error?: unknown } } | undefined)?.data;
+  if (!r.ok && body?.error === "object busy") {
+    return "object busy: retry the call later, do not loop.";
+  }
   // nudgeMiddleware permits exactly one steer: timeout durability is more
   // specific than the generic authoring-contract advice, which stays fallback.
   return !r.ok && body?.error === "timeout" ? SCRIPT_RUN_TIMEOUT_NUDGE : scriptAuthoringNudge(r);

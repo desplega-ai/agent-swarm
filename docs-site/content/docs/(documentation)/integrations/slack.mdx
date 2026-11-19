@@ -221,6 +221,13 @@ A continuation normally resolves its parent's waiting card in place, without pos
 
 Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
+A Lead follow-up or resume result can merge into the previous outcome card instead of posting a new message. The previous card gets the new result under its own, separated by a blank line, and one footer links both tasks. An edit sends no notification, so the merge happens only when all of these are true:
+
+- The follow-up completed. A failed or deferred follow-up posts its own card.
+- The previous card is from the same agent, changed at most 2 minutes ago, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
+- No message, from a person or a bot, came after the previous card.
+- One card holds at most 5 results, and the merged text fits one card.
+
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.
@@ -328,6 +335,8 @@ If the bot is not yet a member of a **public, internal** channel, `slack-read`, 
 
 Set `SLACK_BLOCK_EXTERNAL_CHANNELS=true` (global swarm config, default `false`) to keep the bot out of channels shared with another organization. A channel is external when Slack reports `is_ext_shared` or `is_pending_ext_shared` for it, or when the event carries `is_ext_shared_channel`. Enterprise Grid org-shared channels stay internal. The key is read on every event, so a change on **Settings → Configuration** applies without a restart.
 
+When the flag is off, an external channel works like any other: an ask and the Lead's follow-ups on it post their outcome cards in the thread.
+
 When the flag is on:
 
 - **Inbound guard.** Messages, assistant threads, Work Object previews, follow-up buttons, and `/agent-swarm-status` in an external channel create no task and return no task data. This guard works even when the bot cannot leave.
@@ -408,7 +417,7 @@ For task-scoped uploads, `slack-upload-file` preserves the visible conversation 
 Both tools run on the API server, so a file they download is stored where the agent's container can reach it:
 
 - **From a task**, `slack-download-file` stores the file as an **attachment of that task**. This covers an explicit `taskId`, or the task the agent is working on. The result includes a ready-to-run `fetchCommand` that downloads the bytes into the container. `slack-read` enables files by default when reading through `taskId` or `inboxMessageId` (turn it off with `includeFiles: false`). Direct `channelId` reads default to `includeFiles: false`, including calls made from a task. Pass `includeFiles: true` to download and attach their files. A file the task already holds is reused, not stored twice.
-- **Without a task** (for example, from a script), the file is saved on the API server's disk: `slack-download-file` uses `savePath` (default `/workspace/shared/downloads/{agentId}/slack/`), and `slack-read` uses `/app/shared/downloads/slack/`. The result says the path is on the API server. Worker containers can only read it if your deployment mounts the shared volume at that path on the API.
+- **Without a task** (for example, from a script), the file is saved on the API server's disk: `slack-download-file` uses `savePath`, which must be inside `/workspace/shared/downloads/` (default `/workspace/shared/downloads/{agentId}/slack/`), and `slack-read` uses `/app/shared/downloads/slack/`. The bot token is sent only to the download URL that Slack returns for the file. The result says the path is on the API server. Worker containers can only read it if your deployment mounts the shared volume at that path on the API.
 
 ## Related
 

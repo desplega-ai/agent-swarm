@@ -542,6 +542,36 @@ export const AI_PROVIDERS: AiProvider[] = [
     ],
   },
   {
+    id: "zai-coding-plan",
+    name: "Z.ai Coding Plan",
+    group: "gateway",
+    type: "Gateway",
+    logo: { provider: "zai-coding-plan" },
+    harnesses: ["pi", "opencode"],
+    noun: "key",
+    vendor: "Z.ai",
+    poolVar: "ZAI_API_KEY",
+    liveCheck: true,
+    summary:
+      "Z.ai's GLM models (GLM-5.3-Flash, GLM-5.3 and more) for the pi and opencode harnesses, billed to a flat-rate coding plan.",
+    steps: [
+      {
+        text: "Subscribe to the GLM Coding Plan and create a key under the plan in the [Z.ai console](https://docs.z.ai/devpack/quick-start).",
+      },
+      { text: "Paste it below. Add one key per plan; agents rotate across them." },
+    ],
+    note: "A coding-plan key is not interchangeable with a pay-as-you-go Z.ai key.",
+    docs: { label: "Model gateways guide", href: `${DOCS}/provider-auth/model-gateways` },
+    fields: [
+      {
+        key: "ZAI_API_KEY",
+        label: "API key",
+        kind: "pool",
+        placeholder: "Paste the coding plan key",
+      },
+    ],
+  },
+  {
     id: "gateway",
     name: "Your own gateway",
     group: "gateway",

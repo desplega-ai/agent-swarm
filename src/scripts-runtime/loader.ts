@@ -1,5 +1,5 @@
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getMcpBaseUrl, getScriptApiBaseUrl } from "../utils/constants";
 import { type EgressPolicy, parseEgressAllowlist } from "../utils/egress-guard";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -9,9 +9,11 @@ import { buildEgressSecrets } from "./egress-secrets";
 import { isExecutorAllowedByDeployment, resolveScriptExecutor } from "./executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
+  type DurableInvocation,
   type EgressSecretEntry,
   type ExecutorOutput,
   type ScriptAgentFsDescriptor,
+  type ScriptCaller,
   type ScriptExecutorName,
   type ScriptFsMode,
   type ScriptResourcePolicy,
@@ -39,6 +41,8 @@ const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
 
 export type RunScriptInput = {
   source: string;
+  durable?: DurableInvocation;
+  caller?: ScriptCaller;
   args?: unknown;
   /**
    * Unforgeable host-only capability symbol set only when the host has already
@@ -107,10 +111,10 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     system: {
       apiKey: { value: apiKey, isSecret: true },
       agentId: { value: input.agentId, isSecret: false },
-      mcpBaseUrl: {
-        value: input.mcpBaseUrl ?? getMcpBaseUrl(),
-        isSecret: false,
-      },
+      // Script code reads mcpBaseUrl (and may fetch it, which the quickjs egress
+      // guard allows only for a public host). The SDK clients use sdkBaseUrl.
+      mcpBaseUrl: { value: input.mcpBaseUrl ?? getMcpBaseUrl(), isSecret: false },
+      sdkBaseUrl: { value: input.mcpBaseUrl ?? getScriptApiBaseUrl(), isSecret: false },
       ...(input.runtimeInstanceId
         ? { runtimeInstanceId: { value: input.runtimeInstanceId, isSecret: false as const } }
         : {}),
@@ -119,6 +123,8 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
         : {}),
     },
     user: input.userConfig ?? {},
+    durable: input.durable,
+    caller: input.caller,
     egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),
     failedBindings: input.failedBindings ?? [],
     apiConnections: input.apiConnections ?? [],

@@ -5,7 +5,7 @@ import {
   ask,
   createChildTask,
   enableSlackRenderV2Only,
-  expectNoWakeTime,
+  expectChannelWakeTime,
   findSlackTask,
   finish,
   registerLead,
@@ -141,14 +141,15 @@ async function deferOnChildAndWake(ctx: ScenarioContext): Promise<void> {
   const stored = await ctx.api("GET", `/api/tasks/${taskId}`);
   expectStatus(stored, [200], "read deferred task");
   const storedOutput = String(asRecord(stored.json).output);
+  const deferredUntil = String(asRecord(stored.json).deferredUntil);
   expect(
     storedOutput.startsWith(`Waiting on ${workerName} — or `) &&
       storedOutput.endsWith(" at the latest"),
     `Stored output must keep the event card with its ceiling, got: ${JSON.stringify(storedOutput)}`,
   );
 
-  // Slack shows who the deferral waits on, never the ceiling time.
-  const card = await waitForOutcome(ctx, message.ts, `Waiting on ${workerName}`);
+  // Slack shows who the deferral waits on and the labelled UTC ceiling for an unknown requester.
+  const card = await waitForOutcome(ctx, message.ts, `Waiting on ${workerName} · resumes by `);
   expect(card.bot_id === ctx.slack.bot.botId, "Deferral card must come from the bot");
   const stopped = await ctx.slack.waitForApiCall("chat.stopStream", {
     timeoutMs: 30_000,
@@ -157,7 +158,7 @@ async function deferOnChildAndWake(ctx: ScenarioContext): Promise<void> {
   expect(stopped.ok === true, "Deferral card did not finish streaming");
   expect(JSON.stringify(card).includes("⏳"), "Event-based deferral card must read as waiting");
   expect(!JSON.stringify(card).includes("✅"), "Event-based deferral card must not read as done");
-  expectNoWakeTime(ctx, message.ts, "v2 event-based");
+  expectChannelWakeTime(ctx, message.ts, "v2 event-based", deferredUntil);
   // Parked is not answered: no ✅ on the ask. (The tree reads "🔄 working"
   // here, since Researcher is still running; slack-defer-eta-v2 covers the
   // "⏳ waiting" header of a thread with nothing else running.)

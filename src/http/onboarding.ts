@@ -26,7 +26,7 @@ import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
 import { isCombEnabled } from "../utils/constants";
 import { splitCredentialPool } from "../utils/credentials";
-import { isPrivateAddress } from "../utils/egress-guard";
+import { createSsrfGuardedFetch, EgressDeniedError, isPrivateAddress } from "../utils/egress-guard";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
 import {
@@ -383,6 +383,8 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
       timeout: 15_000,
       maxRetries: 0,
       fetchOptions: { redirect: "manual" },
+      // The guard resolves the hostname and refuses a private address.
+      fetch: configuredEndpoint ? undefined : createSsrfGuardedFetch(publicEndpointSsrfOptions()),
     });
     const response = await client.embeddings.create({
       model,
@@ -420,6 +422,15 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     );
     return { ok: true, dimensions, latencyMs };
   } catch (error) {
+    if (error instanceof Error && error.cause instanceof EgressDeniedError) {
+      // Same answer as the URL check above: the step state stays as is.
+      return {
+        ok: false,
+        latencyMs: 0,
+        error: "The endpoint URL is not allowed.",
+        errorClass: "network",
+      };
+    }
     const errorClass = classifyMemoryError(error);
     const latencyMs = Math.max(0, Math.round(performance.now() - started));
     const message = memoryErrorMessage(errorClass, memoryErrorStatus(error));

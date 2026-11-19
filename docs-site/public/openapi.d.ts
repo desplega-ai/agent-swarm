@@ -1004,6 +1004,7 @@ export interface paths {
                                 };
                                 createdAt: string;
                                 updatedAt: string;
+                                favorite: boolean;
                             }[];
                         };
                     };
@@ -1051,7 +1052,7 @@ export interface paths {
                                 createdAt: string;
                                 updatedAt: string;
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1285,7 +1286,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1480,7 +1481,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -1646,7 +1647,7 @@ export interface paths {
                                 orphanFields: string[];
                                 userConfigChanged: string[];
                             };
-                            /** @description Advisory quickjs-executor compatibility findings for the app's scripts. */
+                            /** @description Advisory findings: quickjs-executor compatibility of the app's scripts, and whether the app lost its generated script types to the type budget. */
                             warnings?: string[];
                         };
                     };
@@ -3933,7 +3934,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Map of key -> boolean (true iff set in process.env) */
+                /** @description Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -6134,8 +6135,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * Send agent-fs comments to the swarm as one task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -6147,6 +6148,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        parentTaskId?: string;
                         orgId: string;
                         driveId: string;
                         commentIds: string[];
@@ -6870,6 +6873,9 @@ export interface paths {
                             spendCappedIndices: number[];
                             authFailureFence: number;
                             keyUsage: number[];
+                            keyPace: number[];
+                            /** @enum {string} */
+                            selectionStrategy: "pace" | "usage";
                             activeSessions: number[];
                         };
                     };
@@ -8502,7 +8508,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8546,7 +8552,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8562,7 +8568,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -14828,6 +14834,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    review_follow_ups: boolean;
                                     service_user_id: string | null;
                                 };
                             };
@@ -16071,6 +16078,8 @@ export interface paths {
             parameters: {
                 query?: {
                     status?: string;
+                    /** @description Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts. */
+                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                     agentId?: string;
                     scheduleId?: string;
                     workflowRunId?: string;
@@ -16156,6 +16165,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                             }[] | {
@@ -16196,7 +16210,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -16248,7 +16265,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16257,8 +16274,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task created under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -17118,6 +17153,11 @@ export interface paths {
                                 lastUpdatedAt: string;
                                 /** Format: date-time */
                                 finishedAt?: string;
+                                /**
+                                 * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                 * @enum {string}
+                                 */
+                                statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
                                 workflowRunId?: string;
@@ -19841,7 +19881,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
+                /** @description Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -19994,7 +20034,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
+                /** @description Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -23637,6 +23677,11 @@ export interface paths {
                                     lastUpdatedAt: string;
                                     /** Format: date-time */
                                     finishedAt?: string;
+                                    /**
+                                     * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+                                     * @enum {string}
+                                     */
+                                    statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                     peakContextPercent?: number;
                                     totalCostUsd?: number;
                                 };
@@ -28600,6 +28645,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -29092,6 +29154,23 @@ export interface paths {
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";
+                        avatar?: {
+                            /** @enum {string} */
+                            type: "lucide";
+                            icon: string;
+                            color?: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "url";
+                            /** Format: uri */
+                            url: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "agent-fs";
+                            path: string;
+                            orgId?: string;
+                            driveId?: string;
+                        } | null;
                         identities?: {
                             kind: string;
                             externalId: string;
@@ -32536,6 +32615,11 @@ export interface components {
             finishedAt?: string;
             /** Format: date-time */
             notifiedAt?: string;
+            /**
+             * @description Why the task reached its terminal status, e.g. `failed` + `agent` (the agent chose to fail) vs `failed` + `error` (rate limit, crash, exit code). Absent while open and on rows finished before the field existed.
+             * @enum {string}
+             */
+            statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
             failureReason?: string;
             output?: string;
             progress?: string;
@@ -32615,6 +32699,8 @@ export interface components {
             wasPaused: boolean;
             /** Format: date-time */
             deferredAt?: string;
+            /** Format: date-time */
+            deferredUntil?: string;
             compactionCount?: number;
             peakContextPercent?: number;
             peakContextTokens?: number;
@@ -33134,7 +33220,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
@@ -33510,7 +33596,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -33589,6 +33675,9 @@ export interface components {
             estTokens: number;
         };
         ScriptRun: {
+            objectScriptId?: string;
+            objectId?: string;
+            objectMethod?: string;
             /** Format: uuid */
             id: string;
             agentId: string;
@@ -33881,6 +33970,23 @@ export interface components {
              */
             status: "invited" | "active" | "suspended";
             mergedIntoUserId?: string | null;
+            avatar?: {
+                /** @enum {string} */
+                type: "lucide";
+                icon: string;
+                color?: string;
+            } | {
+                /** @enum {string} */
+                type: "url";
+                /** Format: uri */
+                url: string;
+            } | {
+                /** @enum {string} */
+                type: "agent-fs";
+                path: string;
+                orgId?: string;
+                driveId?: string;
+            };
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -36829,6 +36935,8 @@ export interface operations {
                 status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
                 agentId?: string;
                 scriptName?: string;
+                objectScriptId?: string;
+                objectId?: string;
                 limit?: number;
                 offset?: number | null;
             };
@@ -36846,6 +36954,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         runs: {
+                            objectScriptId?: string;
+                            objectId?: string;
+                            objectMethod?: string;
                             /** Format: uuid */
                             id: string;
                             agentId: string;
@@ -37508,7 +37619,7 @@ export interface operations {
                         name: string;
                         version: number;
                         contentDeduped: boolean;
-                        /** @description Advisory quickjs-executor compatibility findings. Never blocks the save. */
+                        /** @description Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save. */
                         warnings?: string[];
                     };
                 };
@@ -37548,6 +37659,10 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     source?: string;
+                    object?: {
+                        id: string;
+                        method: string;
+                    };
                     args?: unknown;
                     /** @default  */
                     intent?: string;
@@ -37573,6 +37688,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: unknown;
+                        object?: {
+                            id: string;
+                            stateVersion: number;
+                            destroyed: boolean;
+                        };
                         autoSaved?: {
                             slug: string;
                             reason: string;
@@ -37625,6 +37745,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Object busy, re-entry, or lease lost */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description workspace-rw scripts are not supported in v1 */
             501: {
                 headers: {
@@ -37666,6 +37795,15 @@ export interface operations {
                         results: {
                             name: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;
@@ -37764,6 +37902,15 @@ export interface operations {
                 content: {
                     "application/json": {
                         signature: {
+                            /** @enum {string} */
+                            kind?: "durable";
+                            methods?: {
+                                [key: string]: {
+                                    argsType: string;
+                                    resultType: string;
+                                    description: string;
+                                };
+                            };
                             argsType: string;
                             resultType: string;
                             description: string;
@@ -37833,6 +37980,8 @@ export interface operations {
                             updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
+                            /** @enum {string} */
+                            kind: "function" | "durable";
                         }[];
                     };
                 };
@@ -37920,6 +38069,15 @@ export interface operations {
                             createdAt: string;
                             updatedAt: string;
                             signature: {
+                                /** @enum {string} */
+                                kind?: "durable";
+                                methods?: {
+                                    [key: string]: {
+                                        argsType: string;
+                                        resultType: string;
+                                        description: string;
+                                    };
+                                };
                                 argsType: string;
                                 resultType: string;
                                 description: string;

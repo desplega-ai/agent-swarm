@@ -14,6 +14,7 @@ import type {
   RoutingReason,
   RoutingSource,
   TaskSlackParticipants,
+  TaskStatusKind,
 } from "../../../types";
 import {
   FallbackHopSchema,
@@ -23,6 +24,7 @@ import {
   RoutingAffinitySchema,
   SUPERSEDED_WORKFLOW_TASK_REASON,
   TaskSlackParticipantsSchema,
+  TaskStatusKindSchema,
   TERMINAL_TASK_STATUSES,
 } from "../../../types";
 import { normalizeOutputSchema } from "../../../utils/output-schema";
@@ -116,6 +118,7 @@ export type AgentTaskRow = {
   finishedAt: string | null;
   notifiedAt: string | null;
   failureReason: string | null;
+  statusKind: string | null;
   output: string | null;
   progress: string | null;
   compactionCount: number | null;
@@ -124,6 +127,7 @@ export type AgentTaskRow = {
   contextWindowSize: number | null;
   was_paused: number;
   deferredAt: string | null;
+  deferredUntil: string | null;
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
   requestedByUserId: string | null;
@@ -178,6 +182,7 @@ type AgentTaskSummaryRow = Pick<
   | "createdAt"
   | "lastUpdatedAt"
   | "finishedAt"
+  | "statusKind"
   | "peakContextPercent"
   | "totalCostUsd"
 >;
@@ -255,13 +260,19 @@ const LIST_COLUMNS = {
     agent_tasks.resolvedEffort, agent_tasks.profile, agent_tasks.resolvedProfile,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
-    agent_tasks.peakContextPercent`,
+    agent_tasks.statusKind, agent_tasks.peakContextPercent`,
   timeline: `agent_tasks.id, agent_tasks.agentId, agent_tasks.parentTaskId, ${TASK_PREVIEW_SQL},
     agent_tasks.title, agent_tasks.status, agent_tasks.createdAt, agent_tasks.lastUpdatedAt,
     agent_tasks.finishedAt, agent_tasks.peakContextTokens`,
 } as const;
 
 type TaskListFields = keyof typeof LIST_COLUMNS;
+
+/** A kind this build does not know (written by a newer one) reads as unknown. */
+function parseStatusKind(value: string | null | undefined): TaskStatusKind | undefined {
+  const parsed = TaskStatusKindSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
 
 /** The stored hop list; entries that do not parse are dropped, none reads as unset. */
 function parseFallbackHops(value: string | null | undefined): FallbackHop[] | undefined {
@@ -418,10 +429,12 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     finishedAt: row.finishedAt ?? undefined,
     notifiedAt: row.notifiedAt ?? undefined,
     failureReason: row.failureReason ?? undefined,
+    statusKind: parseStatusKind(row.statusKind),
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
     wasPaused: !!row.was_paused,
     deferredAt: row.deferredAt ?? undefined,
+    deferredUntil: row.deferredUntil ?? undefined,
     credentialKeySuffix: row.credentialKeySuffix ?? undefined,
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
@@ -480,6 +493,7 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
+    statusKind: parseStatusKind(row.statusKind),
     peakContextPercent: row.peakContextPercent ?? undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
   };
@@ -868,6 +882,8 @@ export const findTaskByGitHub = findTaskByVcs;
 export interface TaskFilters {
   /** Single status (back-compat) OR array of statuses (multi-status filter). */
   status?: AgentTaskStatus | AgentTaskStatus[];
+  /** Why the task ended (e.g. `error`); combine with `status` to tell `failed` kinds apart. */
+  statusKind?: TaskStatusKind;
   agentId?: string;
   search?: string;
   // New filters
@@ -1018,6 +1034,11 @@ export async function getAllTasks(
       conditions.push("status = ?");
       params.push(filters.status);
     }
+  }
+
+  if (filters?.statusKind) {
+    conditions.push("statusKind = ?");
+    params.push(filters.statusKind);
   }
 
   if (filters?.agentId) {
@@ -1201,6 +1222,11 @@ export async function getTasksCount(
       conditions.push("status = ?");
       params.push(filters.status);
     }
+  }
+
+  if (filters?.statusKind) {
+    conditions.push("statusKind = ?");
+    params.push(filters.statusKind);
   }
 
   if (filters?.agentId) {

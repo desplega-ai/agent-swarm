@@ -17,6 +17,7 @@ import { updateMcpServerChecked } from "../be/mcp-server-checked-update";
 import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
+import { isApiOnlyConfigKey, isInternalConfigKey } from "../be/swarm-config-guard";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { isCodexOAuthConfigKey } from "../providers/codex-oauth/env-keys";
@@ -29,7 +30,7 @@ import {
 } from "../rbac";
 import { AgentMcpServerSchema, McpServerSchema, McpServerWithInstallInfoSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
-import { agentFirstPrincipal, authUserId } from "./request-principal";
+import { agentFirstPrincipal, authUserId, refuseAgentTokenWithout } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -223,7 +224,11 @@ const getAgentMcpServersRoute = route({
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 async function canResolveMcpSecretsForHttpUser(req: IncomingMessage): Promise<boolean> {
-  const userId = authUserId(getRequestAuth(req));
+  const auth = getRequestAuth(req);
+  // Task tokens are ACP harness credentials and read no config secrets (as on
+  // /api/config/resolved). The worker resolves installed servers with its own key.
+  if (auth?.kind === "agent" && auth.tokenKind === "task") return false;
+  const userId = authUserId(auth);
   if (!userId) return true;
   if (!isRbacEnabled()) return true;
 
@@ -320,7 +325,14 @@ export async function handleMcpServers(
         return true;
       }
 
-      const configs = await getResolvedConfig(parsed.params.id);
+      // API-only and internal rows never leave the API, and Codex OAuth rows carry
+      // the refresh token: none of them resolve into an env var or a header.
+      const configs = (await getResolvedConfig(parsed.params.id)).filter(
+        (c) =>
+          !isApiOnlyConfigKey(c.key) &&
+          !isInternalConfigKey(c.key) &&
+          !isCodexOAuthConfigKey(c.key),
+      );
       const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
       const serversWithSecrets = await Promise.all(
@@ -441,6 +453,15 @@ export async function handleMcpServers(
       jsonError(res, "MCP server not found", 404);
       return true;
     }
+    if (
+      parsed.body.agentId !== singleHeader(req, "x-agent-id") &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.install.any", {
+        kind: "agent",
+        agentId: parsed.body.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     try {
       const agentMcpServer = await installMcpServer(parsed.body.agentId, parsed.params.id);
@@ -455,6 +476,15 @@ export async function handleMcpServers(
   if (uninstallMcpServerRoute.match(req.method, pathSegments)) {
     const parsed = await uninstallMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (
+      parsed.params.agentId !== singleHeader(req, "x-agent-id") &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.uninstall.any", {
+        kind: "agent",
+        agentId: parsed.params.agentId,
+      }))
+    ) {
+      return true;
+    }
 
     const removed = await uninstallMcpServer(parsed.params.agentId, parsed.params.id);
     uninstallMcpServerRoute.respond(res, 200, { success: removed });
@@ -611,6 +641,16 @@ export async function handleMcpServers(
   if (deleteMcpServerRoute.match(req.method, pathSegments)) {
     const parsed = await deleteMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = await getMcpServerById(parsed.params.id);
+    if (
+      existing &&
+      (await refuseAgentTokenWithout(req, res, "mcp-server.delete.any", {
+        kind: "owned",
+        ownerAgentId: existing.ownerAgentId,
+      }))
+    ) {
+      return true;
+    }
 
     const result = await deleteMcpServer(parsed.params.id);
     if (!result.deleted) {

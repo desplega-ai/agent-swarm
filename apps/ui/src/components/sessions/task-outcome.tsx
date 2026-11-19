@@ -105,8 +105,12 @@ function OutcomeProse({
 }) {
   const trimmed = text.trim();
   const rehypePlugins = useSwarmLinkPlugins();
+  // The Sessions Cite action accepts selections inside one outcome body.
   const prose = (
-    <div className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat">
+    <div
+      data-outcome-text=""
+      className="text-sm leading-relaxed text-foreground/85 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full prose-chat"
+    >
       <Streamdown components={STREAMDOWN_COMPONENTS} rehypePlugins={rehypePlugins}>
         {normalizeNewlines(trimmed)}
       </Streamdown>
@@ -129,7 +133,9 @@ function OutcomeProse({
 function OutcomeJson({ data, raw, hideCopy }: { data: unknown; raw: string; hideCopy: boolean }) {
   return (
     <OutcomeCopyShell copyText={raw} hideCopy={hideCopy}>
-      <JsonTree data={data} defaultExpandDepth={2} maxHeight="60vh" copyable className="pr-8" />
+      <div data-outcome-text="">
+        <JsonTree data={data} defaultExpandDepth={2} maxHeight="60vh" copyable className="pr-8" />
+      </div>
     </OutcomeCopyShell>
   );
 }
@@ -224,6 +230,7 @@ function OutcomeFrame({
         </Tooltip>
       </div>
       <div
+        data-outcome-text=""
         className={cn(
           "text-xs min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full",
           FRAME_TONE[tone].body,

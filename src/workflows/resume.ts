@@ -764,7 +764,10 @@ export async function cancelWorkflowRunRows(
     const withDependents =
       openTaskIds.length > 0 ? await getTaskIdsWithDependents() : new Set<string>();
     for (const taskId of openTaskIds) {
-      await cancelTask(taskId, cancelReason, { cascadeDependents: withDependents.has(taskId) });
+      await cancelTask(taskId, cancelReason, {
+        cascadeDependents: withDependents.has(taskId),
+        statusKind: "workflow",
+      });
     }
     await cancelOpenWorkflowTreeSteps(runIds, cancelReason, now);
     await disarmWorkflowTreeRetries(runIds, now);
@@ -871,7 +874,7 @@ export async function cancelWorkflowRunStep(
     }
 
     const task = await getTaskByWorkflowRunStepId(stepId);
-    if (task) await cancelTask(task.id, reason);
+    if (task) await cancelTask(task.id, reason, { statusKind: "workflow" });
     await updateWorkflowRunStep(stepId, {
       status: "cancelled",
       error: reason,

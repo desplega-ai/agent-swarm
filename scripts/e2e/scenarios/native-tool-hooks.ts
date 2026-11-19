@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readdir, stat } from "node:fs/promises";
 import { type CliResult, runCli } from "../cli";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
@@ -134,7 +135,12 @@ export const nativeToolHooks: Scenario = {
           permission_mode: "bypassPermissions",
           ...event,
         }),
-        env: { CLAUDE_PROJECT_DIR: cwd, TMPDIR: tmp ?? (await freshTmp()) },
+        // HOOK_WORKSPACE_DIR keeps a worker host's /workspace/.mcp.json from winning over cwd.
+        env: {
+          CLAUDE_PROJECT_DIR: cwd,
+          HOOK_WORKSPACE_DIR: cwd,
+          TMPDIR: tmp ?? (await freshTmp()),
+        },
       });
     }
 
@@ -266,6 +272,38 @@ export const nativeToolHooks: Scenario = {
         codexBlock.exitCode === 2 && codexBlock.stderr.includes("native-probe: sentinel blocked"),
         `codex-hook did not block the sentinel: exit ${codexBlock.exitCode}\n${codexBlock.stderr}`,
       );
+      // --- The status cache file: owner-only, honoured inside the 30 s TTL, a miss past it.
+      const cacheTmp = await freshTmp();
+      const warm = await codexHook(ctx.baseUrl, bash(`echo E2E_OK_${token}`), cacheTmp);
+      expect(warm.exitCode === 0, `codex-hook warm-up exit ${warm.exitCode}`);
+      const cacheFiles = (await readdir(cacheTmp)).filter((name) =>
+        name.startsWith("agent-swarm-native-hooks-"),
+      );
+      expect(
+        cacheFiles.length === 1,
+        `Expected one status cache file, saw ${cacheFiles.join(", ")}`,
+      );
+      const cacheFile = `${cacheTmp}/${cacheFiles[0]}`;
+      expect(
+        ((await stat(cacheFile)).mode & 0o777) === 0o600,
+        "the status cache file is not owner-only",
+      );
+      await Bun.write(cacheFile, JSON.stringify({ native: false, until: Date.now() + 10_000 }));
+      const inTtl = await codexHook(ctx.baseUrl, bash(`echo E2E_BLOCK_${token}`), cacheTmp);
+      expect(
+        inTtl.exitCode === 0 && !inTtl.stderr.includes("sentinel blocked"),
+        `codex-hook ignored a cached answer inside the TTL: exit ${inTtl.exitCode}\n${inTtl.stderr}`,
+      );
+      await Bun.write(
+        cacheFile,
+        JSON.stringify({ native: false, until: Date.now() + 365 * 24 * 3_600_000 }),
+      );
+      const pastTtl = await codexHook(ctx.baseUrl, bash(`echo E2E_BLOCK_${token}`), cacheTmp);
+      expect(
+        pastTtl.exitCode === 2 && pastTtl.stderr.includes("native-probe: sentinel blocked"),
+        `codex-hook trusted a cached expiry past the TTL: exit ${pastTtl.exitCode}\n${pastTtl.stderr}`,
+      );
+
       const codexRewrite = await codexHook(ctx.baseUrl, bash(`echo E2E_REWRITE_${token}`));
       const codexOut = hookOutput(codexRewrite, "codex rewrite");
       expect(
@@ -274,7 +312,8 @@ export const nativeToolHooks: Scenario = {
         `codex rewrite output was ${codexRewrite.stdout}`,
       );
       // An apply_patch rewrite reaches codex as updatedInput too (codex-cli 0.169.0 applies it).
-      const patchText = (file: string) => `*** Begin Patch\n*** Add File: ${file}\n+x\n*** End Patch\n`;
+      const patchText = (file: string) =>
+        `*** Begin Patch\n*** Add File: ${file}\n+x\n*** End Patch\n`;
       const codexPatch = await codexHook(ctx.baseUrl, {
         hook_event_name: "PreToolUse",
         tool_name: "apply_patch",
@@ -302,7 +341,7 @@ export const nativeToolHooks: Scenario = {
       });
       expect(codexPost.exitCode === 0, `codex post hook exit ${codexPost.exitCode}`);
 
-      // --- The run log holds what both shims sent: 2 blocks, 4 rewrites (2 claude, 2 codex), plus posts.
+      // --- The run log holds what both shims sent: 3 blocks, 4 rewrites (2 claude, 2 codex), plus posts.
       const seen = await pollUntil(
         async () =>
           count(await nativeRuns(ctx, extensionId as string), "post.tool.call", "continue") >= 2,
@@ -312,8 +351,8 @@ export const nativeToolHooks: Scenario = {
       expect(seen, "Both post reports did not reach the extension");
       const runs = await nativeRuns(ctx, extensionId);
       expect(
-        count(runs, "pre.tool.call", "block") === 2 && count(runs, "pre.tool.call", "modify") === 4,
-        `Expected 2 blocks and 4 rewrites in the run log, got ${JSON.stringify(
+        count(runs, "pre.tool.call", "block") === 3 && count(runs, "pre.tool.call", "modify") === 4,
+        `Expected 3 blocks and 4 rewrites in the run log, got ${JSON.stringify(
           runs.map((run) => `${run.event}:${run.action}`),
         )}`,
       );

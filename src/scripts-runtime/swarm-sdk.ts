@@ -1,4 +1,5 @@
 import { scrubObject } from "../utils/secret-scrubber";
+import { DURABLE_OBJECT_BASE_JS } from "./durable-object-base";
 import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import {
@@ -12,6 +13,8 @@ import {
 } from "./sdk-allowlist";
 import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
+
+export const DurableObject = new Function(`${DURABLE_OBJECT_BASE_JS}; return DurableObject;`)();
 
 type BridgeRequest = {
   method: string;
@@ -639,7 +642,7 @@ async function callBridgeApi(
   config: SwarmConfig,
   options: { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal } = {},
 ): Promise<unknown> {
-  const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
+  const baseUrl = Redacted.value(config.sdkBaseUrl).replace(/\/$/, "");
   const request = bridgeRequestFor(name, args);
 
   // Tools without a specific REST route go through the generic MCP bridge

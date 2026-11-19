@@ -6,7 +6,13 @@ import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScript, useScriptTypeDefs, useScriptVersions } from "@/api/hooks/use-scripts";
 import type { ScriptVersion } from "@/api/types";
 import { SavingsHeaderAmount, SavingsTab } from "@/components/savings/workflow-savings";
+import {
+  DurableBadge,
+  durableMethods,
+  isDurableSignature,
+} from "@/components/scripts/durable-badge";
 import { ScriptApiTab } from "@/components/scripts/script-api-tab";
+import { ScriptObjectsTab } from "@/components/scripts/script-objects-tab";
 import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { ActionSheetItem } from "@/components/sessions-v2/mobile/action-sheet";
@@ -25,18 +31,24 @@ import { formatSmartTime } from "@/lib/utils";
 // Server cap on GET /api/script-runs.
 const RUNS_FETCH_LIMIT = 500;
 
-const TABS = ["source", "runs", "savings", "versions", "api"] as const;
+const TABS = ["source", "objects", "runs", "savings", "versions", "api"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { searchParams, setParam } = useUrlSearchState();
   const tabParam = readStringParam(searchParams, "tab", "source");
-  const activeTab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "source";
+  const requestedTab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "source";
 
   const isPhone = useIsPhone();
   const { copy } = useCopyToClipboard();
   const { data: script, isLoading } = useScript(id ?? "");
+  const durable = isDurableSignature(script?.signature);
+  // Objects exist only on durable scripts; the API tab only on the others.
+  const activeTab: Tab =
+    (requestedTab === "objects" && !durable) || (requestedTab === "api" && durable)
+      ? "source"
+      : requestedTab;
   const { data: typeDefs } = useScriptTypeDefs();
   const { data: versions, isLoading: versionsLoading } = useScriptVersions(id ?? "");
   const { data: runsData, isLoading: runsLoading } = useScriptRuns({
@@ -126,6 +138,7 @@ export default function ScriptDetailPage() {
                 <Badge key="version" variant="outline" size="tag" className="font-mono">
                   v{script.version}
                 </Badge>,
+                durable ? <DurableBadge key="durable" /> : null,
                 script.isScratch ? (
                   <Badge key="scratch" variant="outline" size="tag">
                     SCRATCH
@@ -142,6 +155,7 @@ export default function ScriptDetailPage() {
               <Badge variant="outline" size="tag" className="font-mono">
                 v{script.version}
               </Badge>
+              {durable ? <DurableBadge /> : null}
               <SavingsHeaderAmount
                 target={{ scriptName: script.name }}
                 onOpen={() => setParam("tab", "savings", { defaultValue: "source" })}
@@ -172,12 +186,13 @@ export default function ScriptDetailPage() {
         <div className="flex items-center gap-3 max-md:contents">
           <TabsList sticky>
             <TabsTrigger value="source">Source</TabsTrigger>
+            {durable ? <TabsTrigger value="objects">Objects</TabsTrigger> : null}
             <TabsTrigger value="runs">Runs{runs.length ? ` ${runs.length}` : ""}</TabsTrigger>
             <TabsTrigger value="savings">Savings</TabsTrigger>
             <TabsTrigger value="versions">
               Versions{versions?.length ? ` ${versions.length}` : ""}
             </TabsTrigger>
-            <TabsTrigger value="api">API</TabsTrigger>
+            {durable ? null : <TabsTrigger value="api">API</TabsTrigger>}
           </TabsList>
           {activeTab === "runs" && !isPhone ? (
             <ScriptRunsStatusFilter paginationQueryKey="scriptRuns" />
@@ -191,6 +206,12 @@ export default function ScriptDetailPage() {
             className="flex-1 min-h-[320px]"
           />
         </TabsContent>
+
+        {durable ? (
+          <TabsContent value="objects" className="flex flex-col flex-1 min-h-0 mt-2">
+            <ScriptObjectsTab scriptId={script.id} methods={durableMethods(script.signature)} />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
           <ScriptRunsGrid
@@ -254,12 +275,14 @@ export default function ScriptDetailPage() {
           <SavingsTab target={{ scriptName: script.name }} />
         </TabsContent>
 
-        <TabsContent value="api" className="flex flex-col flex-1 min-h-0 mt-2">
-          <ScriptApiTab
-            scriptId={script.id}
-            ownerAgentId={script.scopeId ?? script.createdByAgentId}
-          />
-        </TabsContent>
+        {durable ? null : (
+          <TabsContent value="api" className="flex flex-col flex-1 min-h-0 mt-2">
+            <ScriptApiTab
+              scriptId={script.id}
+              ownerAgentId={script.scopeId ?? script.createdByAgentId}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

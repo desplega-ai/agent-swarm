@@ -471,6 +471,7 @@ value:getWorkflowRunStep
 value:getWorkflowRunStepsByRunId
 value:getWorkflowVersion
 value:getWorkflowVersions
+value:getWorkflowsByEventName
 value:getWorkflowsByScheduleId
 value:giveUpStaleChatRelays
 value:hasBudgetRefusalNotificationToday
@@ -1173,8 +1174,7 @@ upsertSkillFile
 upsertSkillFileUnchecked
 upsertSkillFiles
 upsertSwarmConfig
-withFavoriteFlags
-writeEnvFile`.split("\n");
+withFavoriteFlags`.split("\n");
 
 test("complete facade, selected public bindings and internal-only manifest remain exact", async () => {
   const facade = await Bun.file(new URL("../be/db.ts", import.meta.url)).text();

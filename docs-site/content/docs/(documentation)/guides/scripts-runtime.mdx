@@ -123,6 +123,12 @@ Bun's Node compatibility layer makes these available:
 Three layers retry transient failures: status 429, 502, 503 or 504, or a
 network error.
 
+`ctx.swarm` and `ctx.mcp` calls go to the API over loopback
+(`http://127.0.0.1:<PORT>`), not through `MCP_BASE_URL`, so a public proxy in
+front of the API is not in their path. The deployment env `SCRIPT_API_BASE_URL`
+overrides this address. `ctx.swarm.config.mcpBaseUrl` still holds
+`MCP_BASE_URL`, for scripts that fetch the API themselves.
+
 - **`ctx.swarm`** retries on its own. A 429 retries on every call, honouring
   `Retry-After`. A 502, 503, 504 or network error retries only on a read
   (GET routes and read tools such as `db_query`, `kv_get`, `get_*`, `list_*`)
@@ -452,6 +458,40 @@ Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, or
 `ctx.swarm.config`. When a durable workflow needs a registered connection or
 the drive, call a named script through `ctx.step.swarmScript`.
 
+### Durable objects
+
+A global script can default-export a class that extends `DurableObject` from
+`swarm-sdk`. Each object id is one instance with its own JSON state. Only one
+call runs on an instance at a time.
+
+```ts
+import { DurableObject } from "swarm-sdk";
+
+export default class Counter extends DurableObject<{ n: number }> {
+  initialState() { return { n: 0 }; }
+  async add(args: { by: number }) { this.state.n += args.by; return this.state.n; }
+}
+```
+
+Call a method with `script_run` and the `object` field:
+
+```json
+{ "name": "counter", "object": { "id": "team-a", "method": "add" }, "args": { "by": 2 } }
+```
+
+The response adds `object: { id, stateVersion, destroyed }`.
+
+- The API saves `this.state` (JSON, at most 2 MiB) only when the method returns
+  without an error.
+- `migrate(state, fromVersion)` runs once after a new script version.
+  `this.destroy()` deletes the state. `static idleTtlSec` expires idle state.
+- `kv_get` on namespace `durable:<scriptId>`, key `state/<id>`, returns the
+  scrubbed snapshot. KV writes on `durable:` namespaces are refused.
+- A busy instance returns 409 `object busy` after 30 s (5 s for a nested call).
+  A call to an instance already in the call chain returns 409. More than 16
+  nested script runs return 400.
+- Agent-scope upserts and inline runs of a DurableObject class are refused.
+
 ### Allowed bare imports
 
 The TypeScript import allowlist (`src/scripts-runtime/import-allowlist.ts`):
@@ -549,6 +589,10 @@ scripts run. The setting applies to every script run on that server.
 |---|---|---|
 | `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
 | `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
+
+Durable script runs (`launch-script-run`, `POST /api/script-runs`) have only a
+`native` runner. Under `quickjs` the server refuses new durable runs with a 400
+and marks any durable run it would restart as `failed`.
 
 `SCRIPT_QUICKJS_POOL_SIZE` (default `4`, 1 to 32) caps the `quickjs` worker
 threads. The pool reads it once, when it is first created, so restart the API

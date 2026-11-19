@@ -339,6 +339,26 @@ export function workedForLabel(start: string, end: string | undefined): string {
   return Number.isFinite(ms) && ms >= 0 ? `Worked for ${formatDuration(ms)}` : "Activity";
 }
 
+/**
+ * The fold line of an answer tried more than once (a deploy or a crash cut
+ * the first try): the tries' run times added up. A try with no end (a cut
+ * that left no `finishedAt`) counts to its last update.
+ */
+export function workedForTotalLabel(
+  tries: ReadonlyArray<
+    Pick<AgentTask, "acceptedAt" | "createdAt" | "finishedAt" | "lastUpdatedAt">
+  >,
+): string {
+  let total = 0;
+  for (const attempt of tries) {
+    const end = attempt.finishedAt ?? attempt.lastUpdatedAt;
+    const ms =
+      parseUTCDate(end).getTime() - parseUTCDate(attempt.acceptedAt ?? attempt.createdAt).getTime();
+    if (Number.isFinite(ms) && ms > 0) total += ms;
+  }
+  return total > 0 ? `Worked for ${formatDuration(total)}` : "Activity";
+}
+
 type Action = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
 
 const READ_TOOLS = new Set(["Read", "LS", "NotebookRead"]);

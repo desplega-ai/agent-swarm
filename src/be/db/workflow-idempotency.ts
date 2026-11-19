@@ -57,7 +57,7 @@ type AcceptedRow = {
   resourceDeletedAt: string | null;
 };
 
-function sha256(text: string): string {
+export function sha256(text: string): string {
   const hasher = new Bun.CryptoHasher("sha256");
   hasher.update(text);
   return hasher.digest("hex");
@@ -86,6 +86,11 @@ export function workflowRequestFingerprint(
   operation: WorkflowIdempotencyOperation,
   body: unknown,
 ): string {
+  return requestFingerprint(operation, body);
+}
+
+/** `workflowRequestFingerprint` for any operation name (`task.create`). */
+export function requestFingerprint(operation: string, body: unknown): string {
   return sha256(`${operation}\n${JSON.stringify(sortKeys(body ?? null))}`);
 }
 

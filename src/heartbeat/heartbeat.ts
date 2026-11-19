@@ -812,6 +812,7 @@ async function remediateCrashedWorkerTask(
     // CAS on the lastUpdatedAt this sweep read: progress since then wins.
     const failed = await failTask(task.id, decision.reason, {
       expectedLastUpdatedAt: task.lastUpdatedAt,
+      statusKind: "error",
     });
     if (failed) {
       await opts.onRemediated?.();
@@ -834,6 +835,7 @@ async function remediateCrashedWorkerTask(
 
   const superseded = await supersedeTask(task.id, {
     reason: decision.reason,
+    statusKind: "crash_recovery",
     resumeTaskId: null,
     // CAS on the lastUpdatedAt this sweep read: progress since then wins.
     expectedLastUpdatedAt: task.lastUpdatedAt,
@@ -1010,7 +1012,10 @@ export async function runRebootSweep(): Promise<void> {
       // Auto-fail the task. Its dependents are settled in the `finally` below
       // (re-pointed to the retry child, or cascade-failed when there is none)
       // instead of by failTask's unconditional cascade.
-      const failed = await failTask(task.id, reason, { cascadeDependents: false });
+      const failed = await failTask(task.id, reason, {
+        cascadeDependents: false,
+        statusKind: "error",
+      });
       if (!failed) continue;
 
       let retryTaskId: string | null = null;

@@ -55,12 +55,12 @@ export function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
 }
 
-export function shouldPostInlineCompletionOutput(task: AgentTask): boolean {
+export async function shouldPostInlineCompletionOutput(task: AgentTask): Promise<boolean> {
   if (task.status !== "completed") return false;
   if (!task.slackChannelId || !task.slackThreadTs) return false;
   if (task.slackReplySent) return false;
 
-  const output = slackTaskOutput(task)?.trim();
+  const output = (await slackTaskOutput(task))?.trim();
   return !!output && isTreeOutputTruncated(markdownToSlack(output));
 }
 
@@ -89,7 +89,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
   const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
-    output: await withUiSpecFallback(task.id, slackTaskOutput(task) ?? ""),
+    output: await withUiSpecFallback(task.id, (await slackTaskOutput(task)) ?? ""),
   });
 
   try {
@@ -111,6 +111,59 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
     return true;
   } catch (error) {
     console.error(`[Slack] Failed to send inline output for task ${task.id}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Posts a completed task's output as a plain agent message, the shape a
+ * `slack-reply` produces: the output, then a small `<agent> · <task>` footer.
+ * Used when the agent answered somewhere else (a Sessions follow-up) and the
+ * thread should read as if it had replied in Slack. Marks `slackReplySent`.
+ */
+export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId) return false;
+
+  const agent = await getAgentById(task.agentId);
+  if (!agent) {
+    console.error(`[Slack] Agent not found for task ${task.id}`);
+    return false;
+  }
+
+  const output = await withUiSpecFallback(
+    task.id,
+    (await slackTaskOutput(task)) || "Task completed.",
+  );
+  const body =
+    markdownToSlack(output) +
+    formatAttachmentsBlockForSlack(await getSlackOutputAttachments(task.id));
+  const sections = splitSlackSectionText(body);
+  const footer = {
+    type: "context",
+    elements: [{ type: "mrkdwn", text: `${agent.name} · ${getTaskLink(task.id)}` }],
+  };
+
+  try {
+    for (let i = 0; i < sections.length; i += MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE) {
+      const batch = sections.slice(i, i + MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE);
+      const isLast = i + MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE >= sections.length;
+      await sendWithPersona(app.client, {
+        channel: task.slackChannelId,
+        thread_ts: task.slackThreadTs,
+        text: batch.join("\n\n"),
+        username: getAgentDisplayName(agent),
+        icon: getAgentSlackIcon(agent),
+        blocks: [
+          ...batch.map((chunk) => ({ type: "section", text: { type: "mrkdwn", text: chunk } })),
+          ...(isLast ? [footer] : []),
+        ],
+      });
+    }
+    await markTaskSlackReplySent(task.id);
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to send reply for task ${task.id}:`, error);
     return false;
   }
 }
@@ -140,7 +193,10 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 
   try {
     if (task.status === "completed") {
-      const output = await withUiSpecFallback(task.id, slackTaskOutput(task) || "Task completed.");
+      const output = await withUiSpecFallback(
+        task.id,
+        (await slackTaskOutput(task)) || "Task completed.",
+      );
       const slackOutput = markdownToSlack(output);
       const attachmentsBlock = formatAttachmentsBlockForSlack(
         await getSlackOutputAttachments(task.id),
@@ -303,7 +359,7 @@ export async function updateToFinal(
   let completionBlockBatches: unknown[][] | undefined;
 
   if (task.status === "completed") {
-    const output = slackTaskOutput(task) || "Task completed.";
+    const output = (await slackTaskOutput(task)) || "Task completed.";
     const slackOutput = markdownToSlack(output);
     const attachmentsBlock = formatAttachmentsBlockForSlack(
       await getSlackOutputAttachments(task.id),

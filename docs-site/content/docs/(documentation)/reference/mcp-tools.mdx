@@ -146,6 +146,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `keyPrefix` | string | No | Filter by namespace subtree |
 | `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
 | `status` | string | No | Filter by status |
+| `statusKind` | string | No | Why the task ended, e.g. `error` vs `agent` for `failed` tasks. See [status kind](/docs/concepts/task-lifecycle#status-kind) |
 | `limit` | number | No | Max tasks to return (default: 25) |
 
 ### send-task
@@ -457,7 +458,7 @@ Upload a file to a Slack channel or thread (max 1 GB).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
+| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. The file must be a regular file inside `/workspace` or the working directory of the caller's current task. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
 | `content` | string | No | Base64-encoded file content. Use when the file isn't reachable from the API server. |
 | `filename` | string | No | Name for the file in Slack (required when using `content`) |
 | `taskId` | uuid | No | Task context for thread |
@@ -471,8 +472,8 @@ Download a file from Slack by file ID or URL.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `fileId` | string | No | Slack file ID |
-| `url` | string | No | Direct download URL |
-| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
+| `url` | string | No | Slack file URL. The tool reads the file ID from it and downloads from the URL Slack returns for that file. |
+| `savePath` | string | No | Only without a task: where to save. Must be inside `/workspace/shared/downloads/`. A relative path resolves from there. Default: `/workspace/shared/downloads/{agentId}/slack/` |
 
 ### slack-leave-thread
 
@@ -1251,6 +1252,7 @@ with `script-upsert`.
 | `scope` | string | No | Optional scope for named script resolution |
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
 | `executor` | `native` \| `quickjs` | No | Executor override for this run. When omitted, named scripts use their saved executor, else `SCRIPT_EXECUTOR` |
+| `object` | object | No | `{ id, method }`: call this object ID and method on the named global `DurableObject` script. See [Durable objects](/docs/guides/scripts-runtime#durable-objects) |
 
 ### script-upsert
 
@@ -1261,7 +1263,7 @@ the generated `.d.ts` and rejects on diagnostics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `source` | string | Yes | TypeScript source with a default export function |
+| `source` | string | Yes | TypeScript source with a default export function. A global script can instead `export default class X extends DurableObject<State>` (import `DurableObject` from `"swarm-sdk"`) |
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 | `executor` | `native` \| `quickjs` | No | Per-script executor override. Null or omitted inherits `SCRIPT_EXECUTOR` |
@@ -1543,6 +1545,7 @@ Create, update, delete, or list user profiles in the user registry. Lead-only. I
 | `dailyBudgetUsd` | number \| null | No | Daily budget cap in USD. `null` = unlimited. |
 | `status` | `invited \| active \| suspended` | No | User lifecycle status (defaults to `active`). |
 | `metadata` | object \| null | No | Free-form JSON metadata. `null` clears the field. |
+| `avatar` | object or null | No | Custom avatar, one of: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`; `{ type: "url", url: "https://…" }` (https only, no credentials); `{ type: "agent-fs", path: "/users/<id>/avatar.png", orgId?, driveId? }` (both IDs or neither for the swarm drive). Pass `null` to reset to initials. |
 
 > **Migration note (2026-05)**: the old top-level identity fields (`slackUserId`, `linearUserId`, `githubUsername`, `gitlabUsername`) were removed. Pass identities through the `identities` array instead.
 
@@ -1560,7 +1563,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 ### update-repo
 
-Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. See [Repo merge policy](/docs/guides/repo-merge-policy).
+Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. A non-lead agent on an agent session token also cannot change `url`, `clonePath` or `hooks`. A `url` or `clonePath` that starts with `-` is refused. See [Repo merge policy](/docs/guides/repo-merge-policy).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

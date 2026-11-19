@@ -64,19 +64,21 @@ describe("Slack inline completion output", () => {
     }
   });
 
-  test("posts only truncated completed Slack output that has not already been replied", () => {
+  test("posts only truncated completed Slack output that has not already been replied", async () => {
     const longOutput = `Here is the answer. ${"Detailed finding ".repeat(20)}`;
-    expect(shouldPostInlineCompletionOutput(task({ output: longOutput }))).toBe(true);
+    expect(await shouldPostInlineCompletionOutput(task({ output: longOutput }))).toBe(true);
     expect(
-      shouldPostInlineCompletionOutput(task({ output: longOutput, slackReplySent: true })),
+      await shouldPostInlineCompletionOutput(task({ output: longOutput, slackReplySent: true })),
     ).toBe(false);
-    expect(shouldPostInlineCompletionOutput(task({ output: "Short answer" }))).toBe(false);
+    expect(await shouldPostInlineCompletionOutput(task({ output: "Short answer" }))).toBe(false);
     expect(
-      shouldPostInlineCompletionOutput(task({ output: longOutput, slackChannelId: undefined })),
+      await shouldPostInlineCompletionOutput(
+        task({ output: longOutput, slackChannelId: undefined }),
+      ),
     ).toBe(false);
-    expect(shouldPostInlineCompletionOutput(task({ output: longOutput, status: "failed" }))).toBe(
-      false,
-    );
+    expect(
+      await shouldPostInlineCompletionOutput(task({ output: longOutput, status: "failed" })),
+    ).toBe(false);
   });
 
   test("formats markdown and preserves the full output in Slack-safe section chunks", () => {

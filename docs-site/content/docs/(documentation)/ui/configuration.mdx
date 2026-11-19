@@ -92,12 +92,12 @@ Workers read all four keys live, so a saved change needs no restart. Rules and l
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL`, `EMBEDDING_QUERY_PREFIX`, `EMBEDDING_DOCUMENT_PREFIX` |
 | Heartbeat & crash recovery | `API_DRAIN_MAX_MS`, `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME`, `HEARTBEAT_CHECKLIST_GATE_SCRIPT`, `HEARTBEAT_CHECKLIST_GATE_MODE`, `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` |
-| Harness & tools | `CLAUDE_TRUST_PRESEED`, `WORKTREE_REAPER_MODE`, `WORKTREE_TTL_HOURS`, `WORKTREE_SWEEP_INTERVAL_MINUTES`, `WORKTREE_REAPER_EXTRA_ROOTS`, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `CONTEXT_BOUND_NOTE_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
+| Harness & tools | `CLAUDE_TRUST_PRESEED`, `WORKTREE_REAPER_MODE`, `WORKTREE_TTL_HOURS`, `WORKTREE_SWEEP_INTERVAL_MINUTES`, `WORKTREE_REAPER_EXTRA_ROOTS`, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `CONTEXT_BOUND_NOTE_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `CREDENTIAL_SELECTION_STRATEGY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
-| Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_WORKER_POOL_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_SESSION_MAX_MB`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `WORKFLOW_RUNS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES` |
+| Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_WORKER_POOL_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_SESSION_MAX_MB`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `WORKFLOW_RUNS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES`, `APPS_MAX_MODELS`, `APPS_MAX_COLUMNS_PER_MODEL`, `APPS_MAX_ACTIONS` |
 | Integrations | `MCP_USER_EVENTS_ENABLED` (see [MCP Events](/docs/guides/mcp-events)), `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_TASK_TREE_ENABLED`, `SLACK_RENDER_V2_DELEGATION`, `UI_SPEC_ENABLED`, `UI_SPEC_ACTIONS_ENABLED`, `UI_SPEC_SCRIPT_ACTIONS`, `SLACK_TASK_WATCHER_INTERVAL_MS`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_SESSION_MIRROR`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_REACTION_SKIPPED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `COMPANY_EMAIL_DOMAINS` (see below), `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `BOOT_SCRUB_MODE` (see below), `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults), `PAGES_FRAME_ANCESTORS` (extra origins that may iframe public pages) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, `SEED_SCHEDULES_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `WORKFLOW_INPUT_ENV_ALLOWLIST`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, `SEED_SCHEDULES_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `EVENT_LOOP_STALL_WARN_MS`, `ANONYMIZED_TELEMETRY`, `IMPROVEMENTS_ENABLED` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `APP_URL`, `DASHBOARD_URL` (deprecated), the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
@@ -134,6 +134,8 @@ Settings with deeper behavior link out to the relevant guide (for example the [t
 `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` (default 7) sets how many days a pending approval request with no explicit timeout waits before the heartbeat sets it to `cancelled`. A request with an explicit timeout is never auto-cancelled; it becomes `timeout` when its deadline passes. `0` turns auto-cancellation off.
 
 `APPS_JSON_COLUMN_MAX_BYTES` (default `262144`, 256 KB) caps the serialized size, in bytes, of a Swarm Apps `json` column value or default. Accepted values run from `1024` through `16777216` (16 MB); the config API rejects anything else, and the server falls back to the default if the environment carries an out-of-range value. A saved change applies on the next config reload, without a restart. Rows written under a larger cap are not re-checked when the cap is lowered.
+
+`APPS_MAX_MODELS` (default `50`), `APPS_MAX_COLUMNS_PER_MODEL` (default `200`) and `APPS_MAX_ACTIONS` (default `100`) cap the models (tables), columns per model, and actions in one Swarm Apps definition. Each accepts `1` through `1000`; the config API rejects anything else, and the server falls back to the default if the environment carries an out-of-range value. The caps apply when a definition is saved, from the next config reload. Saved apps over a lowered cap keep working until their definition is written again. Generated script types are budgeted at 1 MiB per app and 4 MiB for all the apps one script names; an app past a budget loses its types. The app write warns when the app is over the per-app budget, and `script-upsert` warns for every app the script names that has no types. An app at the default caps fits the per-app budget; raising the caps can push one past it.
 
 ![Editing a configuration group](/ui/configuration-group.png)
 
@@ -262,6 +264,32 @@ for the worker task. Its metadata holds `followUpTaskId`, `decision`, `reason`, 
 Runs of schedules that are not on the list, and tasks with no schedule, write nothing. All three
 keys apply to the next follow-up without a restart. Rows follow `AGENT_LOG_RETENTION_DAYS`.
 
+## Workflow env allowlist
+
+The **Workflows & scheduler** group includes `WORKFLOW_INPUT_ENV_ALLOWLIST`, a comma-separated list
+of the API server env vars that a `${NAME}` reference may read. It limits only references in workflow
+inputs and in a webhook trigger's `hmacSecret`, which resolve against the API process environment. It
+does not limit script nodes, which run as the same user as the API and can read the environment by
+other means. When the list is set, a name outside it in a workflow input fails the run before any node
+runs, with an error that names the variable. In a webhook trigger's `hmacSecret` it rejects the
+delivery with a 500 and starts no run. In both cases the value is never read. Blanks in the list are
+ignored. If the setting is unset, there is no allowlist restriction. An explicitly empty or
+whitespace-only value blocks all `${NAME}` references in these fields, as does a list with only
+blank entries. A non-empty list might look like `MCP_BASE_URL,GITLAB_URL`.
+
+Config changes require an `aswt_` user token or a dashboard user session. With RBAC enabled, the
+user must also be an admin. Agents (including the lead), page sessions and the shared API key
+cannot change the setting through config. A dashboard connected with the shared key must switch
+to a user token to edit it. A holder of the operator key can still issue an admin token.
+
+A stored global value overrides the deployment environment and takes effect after the automatic
+config reload, without restarting the API. To block all env references, set
+`WORKFLOW_INPUT_ENV_ALLOWLIST=` in the deployment or store an empty string as the global value
+with `PUT /api/config`. To restore the deployment value, remove the stored override in the
+dashboard. To restore the unset behavior, remove the override and make sure the variable is
+absent from the API deployment environment. If you remove the deployment variable, restart
+the API with the updated environment. An empty assignment is not the same as removing it.
+
 ## Default SystemOne provider
 
 The **Workflows & scheduler** group includes `SYSTEM_ONE_DEFAULT_PROVIDER`: the decision host
@@ -358,6 +386,10 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
 
 <Callout type="info" title="MODEL_WINDOW_EXHAUSTED_POLICY controls what happens when every key has exhausted a model's weekly window">
   A Claude OAuth key can hit a weekly window scoped to a single model family — `seven_day_overage_included` (Fable), `seven_day_opus`, or `seven_day_sonnet` — without going `rate_limited` for the whole key; see [Model-scoped weekly windows](/docs/guides/harness-configuration#model-scoped-weekly-windows). `MODEL_WINDOW_EXHAUSTED_POLICY` decides what a worker does when every key in the pool has exhausted the task model's window: `fail` (default) fails the task immediately with the earliest reset time, so it can be re-dispatched with another model or modelTier; `fallback` restores the legacy behaviour of picking a key at random. Takes effect on the worker's next key pick; no restart required.
+</Callout>
+
+<Callout type="info" title="CREDENTIAL_SELECTION_STRATEGY decides which pooled key a worker picks">
+  `usage` (default) picks the lowest-utilization key. `pace` picks the key furthest under even use: for each live window, used minus the share of the window that has passed, taking the window furthest over pace. A key with 39% used two days before its weekly reset goes before one with 18% used five days before it, so quota that resets soon gets used. The API reports the pace delta under either setting. Neither excludes a key; see [Claude Code pools](/docs/guides/harness-configuration#claude-code). Takes effect on the worker's next key pick; no restart required.
 </Callout>
 
 ## Model tier defaults
@@ -709,6 +741,14 @@ Configure credentials on the Integrations page, then select the transport here.
 A saved `http` value uses the native signed HTTP receiver. The setup wizard configures
 Socket Mode and selects `socket` whenever you save its Slack tokens.
 See [Slack integration](/docs/integrations/slack) for the request URL and app manifest setup.
+
+### Slack deferral timezone
+
+Slack deferral cards show wake-up times in the requester's saved timezone. A Slack message
+fills an empty user timezone from the sender's Slack profile. If the requester has no
+timezone, **Default Slack deferral timezone** (`SLACK_DEFAULT_TIMEZONE`) supplies an IANA
+zone such as `America/New_York`. The default is UTC. Cards label fallback times with the
+zone abbreviation or UTC offset at the wake-up instant.
 
 ### Slack task-tree visibility
 

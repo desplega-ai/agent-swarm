@@ -40,7 +40,7 @@ export type QuickJSJob = {
 };
 
 // Set while a ctx.swarm or ctx.mcp host call runs. Those calls go to the swarm
-// API (mcpBaseUrl) with the host bearer; the egress guard trusts that origin
+// API (sdkBaseUrl) with the host bearer; the egress guard trusts that origin
 // only inside this scope; a direct script fetch of it follows the policy.
 const swarmHostCalls = new AsyncLocalStorage<true>();
 
@@ -545,6 +545,12 @@ async function evaluateJob(
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
     agentFs: job.configPayload.agentFs,
+    caller:
+      job.configPayload.durable?.caller ??
+      job.configPayload.caller ??
+      (job.configPayload.system.agentId.value
+        ? { kind: "agent", agentId: job.configPayload.system.agentId.value }
+        : null),
     signal: host.signal,
   });
   const sqlApiSlugs = new Set(
@@ -672,7 +678,7 @@ async function evaluateJob(
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};\nglobalThis.__swarm_host_validated_args = ${Boolean(job.hostValidatedArgs)};`;
+    const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};\nglobalThis.__swarm_host_validated_args = ${Boolean(job.hostValidatedArgs)};\nglobalThis.__swarm_durable = ${JSON.stringify(job.configPayload.durable ?? null)};\nglobalThis.__swarm_caller = ${JSON.stringify(hostCtx.caller)};`;
     const ok =
       evaluate(init, "swarm-init.js") &&
       evaluate(SANDBOX_WEB_SHIMS, "swarm-web-shims.js") &&
@@ -696,7 +702,24 @@ async function evaluateJob(
     });
     const outcome = await Promise.race([done, timeout]);
 
-    if (outcome.ok) return output({ result: outcome.result, exitCode: 0 });
+    if (outcome.ok) {
+      const envelope = outcome.result as {
+        __swarmDurable?: number;
+        result?: unknown;
+      } & NonNullable<ExecutorOutput["durable"]>;
+      if (job.configPayload.durable && envelope?.__swarmDurable === 1) {
+        return output({
+          result: envelope.result,
+          durable: {
+            state: envelope.state,
+            destroyed: envelope.destroyed,
+            idleTtlSec: envelope.idleTtlSec,
+          },
+          exitCode: 0,
+        });
+      }
+      return output({ result: outcome.result, exitCode: 0 });
+    }
     const error = classify(outcome.error);
     if (error === "timeout") {
       stderr.append(`Script exceeded its ${job.resources.wallClockMs} ms wall-clock limit\n`);

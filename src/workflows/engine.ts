@@ -57,7 +57,7 @@ import {
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
-import { resolveNodeTimeoutMs, startStepDeadline } from "./node-timeout";
+import { runWithNodeDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import {
   hasOwedSuccessors,
@@ -1127,18 +1127,13 @@ async function runClaimedStep(
     inputCtx: interpolationCtx,
   };
 
-  const deadline = startStepDeadline(resolveNodeTimeoutMs(node));
-
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {
-    result = await Promise.race([
-      executor.run({
-        config: interpolatedConfig,
-        context: executionCtx,
-        meta: { ...meta, signal: deadline.signal },
-      }),
-      deadline.expired,
-    ]).finally(deadline.clear);
+    result = await runWithNodeDeadline(node, executor, {
+      config: interpolatedConfig,
+      context: executionCtx,
+      meta,
+    });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
 

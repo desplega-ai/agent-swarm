@@ -51,6 +51,25 @@ The step injects its HTTP probe, clock, sleep and logger for unit tests.
 module against local HTTP servers. This is a per-step migration from Bash
 tracked in #2047. Other boot stages still run in the shell.
 
+## Worker MCP config
+
+Boot writes `/workspace/.mcp.json` with only the swarm HTTP server (plus the
+optional agentmail server); resolved credentials are never baked in because the
+per-session dispatcher re-fetches installed servers with fresh secrets (issue
+#369). The same step pre-registers `mcp__<server>__*` permission patterns in
+`~/.claude/settings.json`. It is skipped for claude-managed, which reads MCP
+from the Anthropic agent definition instead of a local file.
+
+`docker-entrypoint.sh` delegates this to the standalone
+`src/commands/entrypoint-mcp-config.ts` Bun step in the entrypoint's root phase,
+piping `API_KEY` on stdin so the key never reaches argv and passing the resolved
+`MCP_URL` as an argument (it is a shell-local, never exported). An unreachable
+control-plane API stays best-effort, matching the previous `curl -sf`; a
+malformed `~/.claude/settings.json` still aborts the boot, now with an explicit
+`[entrypoint] FATAL:` line. `src/tests/entrypoint-mcp-config.test.ts` injects the
+environment, fetch and file IO, and also runs the real Bash shim. Per-step
+migration tracked in #2047.
+
 ## Worker runtime dependency validation
 
 `spawnProviderProcess` validates the selected harness with
@@ -361,7 +380,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.2-rc.3` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.2-rc.5` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -426,7 +445,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.4.0`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.4.1`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.

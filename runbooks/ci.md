@@ -72,7 +72,7 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 3. `bun run lint:slop`: the anti-slop Oxlint rules over the whole lint scope (about 5 s)
 4. `bun check` on the root project, plus `apps/ui` (`bun check -b`) when it changed
 5. Drift: each generator below runs only when its inputs changed, and the step fails when regenerating changes a checked-in output. Output that is current but not yet committed passes with a reminder; CI checks the pushed tree.
-6. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+6. `test:root` on the nearest affected tests, using `scripts/pre-push-tests.sh` scoping (`PRE_PUSH_FULL=1` runs the full suite)
 7. E2E Contract, scoped by `scripts/e2e/scope.ts` (below). `bun run check:local --skip-e2e` skips it.
 
 | Drift generator | Runs when the change touches | Same filter as CI? |
@@ -99,6 +99,8 @@ E2E scoping (`bun scripts/e2e/scope.ts <changed files>` prints the decision and 
 Selected scenarios bring their `needs`. Every scoped run still boots the whole API, so a boot failure shows up. The local run is never `--strict`: coverage and the manifest stay with CI's merged strict run.
 
 "Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure and prints the wall time of every step that ran. It does not scan for secrets; the prek pre-push hooks own that.
+
+The pre-push hook and step 6 are a fast smoke check, not the full suite. A CI or merge-queue test failure in a file they never ran is expected, not a hook bug: fix that test on the PR and push again, without bypassing the hooks. Use `PRE_PUSH_FULL=1` only to reproduce a CI failure locally or when you touch shared test infrastructure.
 
 In Claude Code, the repo's `.claude/settings.json` also runs `biome format --write` on each edited file in that scope (`scripts/claude-format-on-edit.sh`). The hook always exits 0, so it never blocks an edit.
 

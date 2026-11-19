@@ -80,19 +80,20 @@ describe("summarizeRun — v7 §2.1 cell additions", () => {
   });
 
   test("empty cell (no attempts yet): zeroed counts, null aggregates", () => {
-    const cell = summarizeRun(run(), []).cells[0]!;
+    const summary = summarizeRun(run(), []);
+    const cell = summary.cells[0]!;
     expect(cell.attempts).toBe(0);
     expect(cell.passed).toBe(0);
     expect(cell.pricedAttempts).toBe(0);
     expect(cell.avgCostUsd).toBeNull();
-    // Hard rule: nothing in the summary may be NaN/Infinity.
-    const flat = JSON.parse(
-      JSON.stringify(summarizeRun(run(), []), (_k, v) => {
-        if (typeof v === "number" && !Number.isFinite(v)) throw new Error("non-finite number");
-        return v;
-      }),
-    );
-    expect(flat).toBeDefined();
+    expect(cell.meanScore).toBeNull();
+    expect(cell.scoreCI).toBeNull();
+    expect(cell.passRate).toBeNull();
+    expect(cell.passRateCI).toBeNull();
+    JSON.stringify(summary, (_key, value) => {
+      if (typeof value === "number") expect(value).toBeFinite();
+      return value;
+    });
   });
 });
 
@@ -108,7 +109,10 @@ describe("summarizeRun — Phase 3 convergent reliability metric", () => {
   }
 
   test("multi-attempt cell exposes meanScore / scoreCI / passRate / passRateCI", () => {
-    const cell = summarizeRun(run({ attemptsPerCell: 5 }), cohort(scores5, passed5)).cells[0]!;
+    const config = run({ attemptsPerCell: 5 });
+    const cell = summarizeRun(config, cohort(scores5, passed5)).cells[0]!;
+    const reversed = summarizeRun(config, cohort(scores5, passed5).reverse()).cells[0]!;
+    expect(reversed.scoreCI).toEqual(cell.scoreCI);
     // meanScore is the headline (and equals the avgScore alias).
     expect(cell.meanScore).toBeCloseTo(0.62, 5);
     expect(cell.avgScore).toBe(cell.meanScore);
@@ -129,35 +133,16 @@ describe("summarizeRun — Phase 3 convergent reliability metric", () => {
     expect(cell.passedAny).toBe(true);
   });
 
-  test("scoreCI width shrinks for n=10 vs n=3 on the same distribution", () => {
-    const base = [0.4, 0.6, 0.5, 0.7, 0.3];
-    const passedBase = [false, false, false, false, false];
-    const n3 = summarizeRun(
-      run({ attemptsPerCell: 3 }),
-      cohort([0.4, 0.6, 0.5], [false, false, false]),
-    ).cells[0]!;
-    const n10 = summarizeRun(
+  test("scoreCI narrows when the same score distribution appears twice", () => {
+    const failed = scores5.map(() => false);
+    const small = summarizeRun(run({ attemptsPerCell: 5 }), cohort(scores5, failed)).cells[0]!;
+    const large = summarizeRun(
       run({ attemptsPerCell: 10 }),
-      cohort([...base, ...base], [...passedBase, ...passedBase]),
+      cohort([...scores5, ...scores5], [...failed, ...failed]),
     ).cells[0]!;
-    const width3 = n3.scoreCI!.hi - n3.scoreCI!.lo;
-    const width10 = n10.scoreCI!.hi - n10.scoreCI!.lo;
-    expect(width10).toBeLessThan(width3);
-  });
-
-  test("CI bounds are deterministic across summarizeRun calls (seeded)", () => {
-    const a = summarizeRun(run({ attemptsPerCell: 5 }), cohort(scores5, passed5)).cells[0]!;
-    const b = summarizeRun(run({ attemptsPerCell: 5 }), cohort(scores5, passed5)).cells[0]!;
-    expect(a.scoreCI!.lo).toBe(b.scoreCI!.lo);
-    expect(a.scoreCI!.hi).toBe(b.scoreCI!.hi);
-  });
-
-  test("empty cell → meanScore / scoreCI / passRate / passRateCI all null (never NaN)", () => {
-    const cell = summarizeRun(run(), []).cells[0]!;
-    expect(cell.meanScore).toBeNull();
-    expect(cell.scoreCI).toBeNull();
-    expect(cell.passRate).toBeNull();
-    expect(cell.passRateCI).toBeNull();
+    expect(large.scoreCI!.hi - large.scoreCI!.lo).toBeLessThan(
+      small.scoreCI!.hi - small.scoreCI!.lo,
+    );
   });
 
   test("all-error cell (nothing finished with a score) → reliability fields null", () => {

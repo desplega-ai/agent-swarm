@@ -17,8 +17,10 @@ import {
   foldWaits,
   isDeferral,
   keepSeenApprovals,
+  type LeadStep,
   onlyWaits,
   partSteps,
+  shownTry,
   type TurnPart,
   type WorkerSummary,
   workerSummary,
@@ -144,6 +146,12 @@ function turnWeight(turn: { person?: unknown; parts: TurnPart[] }): number {
   );
 }
 
+function fileReviewRequest(task: AgentTask): string | null {
+  return task.source === "comb" && task.taskType === "comb-review" && task.parentTaskId
+    ? `Sent file comments for review. [View follow-up](/tasks/${task.id})`
+    : null;
+}
+
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
  * message, then its parts (a deferred wake-up starts a new part). A part
@@ -161,7 +169,7 @@ export function TurnTimeline({
   showHandoffs,
   typing,
   onLayoutChange,
-  requestText,
+  requestText = fileReviewRequest,
 }: {
   rootTaskId: string;
   chain: AgentTask[];
@@ -176,7 +184,7 @@ export function TurnTimeline({
    * The person's words in a task whose prompt wraps them (a json-render app
    * page's action prompt), or null for any other task. A task it names opens
    * a turn, and its bubble shows only those words. Pass a stable function.
-   * Omitted: turns follow the task sources and show `task.task`.
+   * By default, file reviews link to the follow-up that holds the full request.
    */
   requestText?: (task: AgentTask) => string | null;
 }) {
@@ -200,7 +208,7 @@ export function TurnTimeline({
     turn.parts.some(
       (part) =>
         !!part.live ||
-        !TERMINAL_STATUSES.has(part.reply.status) ||
+        !TERMINAL_STATUSES.has(shownTry(part.answer).status) ||
         partSteps(part).some(
           (step) => !TERMINAL_STATUSES.has(step.tries[step.tries.length - 1].status),
         ),
@@ -375,7 +383,7 @@ function PartView({
       {card ? (
         <TaskCard task={part.reply} className="pb-0" />
       ) : (
-        <Reply task={part.reply} onToggle={onStepToggle} />
+        <Reply step={part.answer} onToggle={onStepToggle} />
       )}
       {summary && steps.length > 1 ? (
         <div className="flex min-w-0 flex-col gap-1">
@@ -401,7 +409,7 @@ function PartView({
       ) : null}
       {part.result ? (
         <div className={rows.length > 0 ? "mt-3" : undefined}>
-          <Reply task={part.result} onToggle={onStepToggle} />
+          <Reply step={part.result} onToggle={onStepToggle} />
         </div>
       ) : null}
       {approvals.map((approval) => (
@@ -414,11 +422,12 @@ function PartView({
 }
 
 /** A swarm reply, or one muted line when the reply only says the swarm waits. */
-function Reply({ task, onToggle }: { task: AgentTask; onToggle: () => void }) {
+function Reply({ step, onToggle }: { step: LeadStep; onToggle: () => void }) {
+  const task = shownTry(step);
   return isDeferral(task) ? (
     <DeferralLine task={task} onToggle={onToggle} />
   ) : (
-    <SwarmReply task={task} />
+    <SwarmReply task={task} earlier={step.tries.slice(0, -1)} />
   );
 }
 

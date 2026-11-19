@@ -341,6 +341,7 @@ describe("handleMergeRequest", () => {
     for (const id of [mrTask.id, noteTask.id]) {
       const task = await getTaskById(id);
       expect(task?.status).toBe("failed");
+      expect(task?.statusKind).toBe("external");
       expect(task?.failureReason).toBe("MR was merged");
     }
   });
@@ -693,6 +694,7 @@ describe("handleIssue", () => {
     );
 
     expect((await getTaskById(issue.taskId!))?.failureReason).toBe("Issue was closed");
+    expect((await getTaskById(issue.taskId!))?.statusKind).toBe("external");
     expect((await getTaskById(mr.taskId!))?.status).not.toBe("failed");
   });
 });

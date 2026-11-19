@@ -290,6 +290,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded \| skipped` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
+| `statusKind` | `agent \| runner \| deferred \| error \| cascade \| external \| user \| workflow \| system \| graceful_shutdown \| context_limits \| manual_supersede \| crash_recovery \| provider_fallback \| workflow_retry` | No | - | Filter by why the task ended. Pair with status, e.g. status 'failed' + statusKind 'error' (crash, rate limit, exit code) vs 'agent' (the agent chose to fail). |
 | `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
@@ -468,6 +469,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 | `dailyBudgetUsd` | `number` | No | - | Daily budget in USD (null clears the cap) |
 | `status` | `invited \| active \| suspended` | No | - | User status — invited / active / suspended |
 | `metadata` | `object` | No | - | Free-form JSON metadata (null clears the field) |
+| `avatar` | `unknown` | No | - | Custom avatar, one of: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }; { type: 'url', url: 'https://…' } (https image, no credentials); { type: 'agent-fs', path: '/users/<id>/avatar.png', orgId?, driveId? } (an image in agent-fs; pass both IDs or neither for the swarm drive). Pass null to reset to initials. |
 | `comms` | `object` | No | - | Merge per key into metadata.comms, preserving omitted preferences and sibling metadata keys. A preference set to null removes only that preference; comms: null removes the whole comms object. When metadata is also provided, it is applied first and replaces the whole blob. |
 
 ### db-query
@@ -569,7 +571,7 @@ Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use
 | `key` | `string` | Yes | - | Configuration key (e.g., 'AGENTMAIL_WEBHOOK_SECRET'). |
 | `value` | `string` | Yes | - | Configuration value. |
 | `isSecret` | `boolean` | No | - | If true, value is masked in API responses (default: false). |
-| `envPath` | `string` | No | - | Optional: file path to write the value as KEY=VALUE in a .env file. |
+| `envPath` | `string` | No | - | Optional: a path stored with the row as metadata. The server does not write files. |
 | `description` | `string` | No | - | Optional human-readable description of this config entry. |
 | `exportToEnv` | `boolean` | No | - | Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. |
 
@@ -659,7 +661,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, vercel. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, zai-coding-plan, vercel. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -737,6 +739,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | No | - | Name of a reusable script to run. |
+| `object` | `object` | No | - | Call this object ID and method on the named global DurableObject script. |
 | `source` | `string` | No | - | Inline TypeScript source to run without a compile-time typecheck. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" for promotion-safe typing. |
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
@@ -752,7 +755,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). |
+| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). A global script can instead `export default class X extends DurableObject<State>` (import `DurableObject` from "swarm-sdk"). |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -1103,7 +1106,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines. An agent session token also needs the lead role to change url, clonePath or hooks.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2549,7 +2552,7 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
 | `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
-| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
+| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. The file must be a regular file inside /workspace or the working directory of your current task. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
 | `content` | `string` | No | - | Base64-encoded file content. Use this when the file lives on the caller's filesystem and isn't reachable by the API server (e.g. anything under /tmp on a worker/lead container). Either filePath OR content must be provided. |
 | `filename` | `string` | No | - | Name to give the file in Slack. Required when using content, defaults to original filename when using filePath. |
 | `initialComment` | `string` | No | - | Optional message to post with the file. |
@@ -2558,14 +2561,14 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved on the API server's disk, which your container usually can't read.
+Download a file from Slack by file ID or Slack file URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved under /workspace/shared/downloads/ on the API server's disk, which your container usually can't read.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
-| `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
+| `url` | `string` | No | - | Slack file URL (url_private_download or url_private from a file object). The file ID in it is looked up in Slack. |
 | `taskId` | `uuid` | No | - | Task to attach the file to. Defaults to the task you are working on; must be a task you own or created. |
-| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Defaults to /workspace/shared/downloads/{agentId}/slack/. |
+| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Must be inside /workspace/shared/downloads/; a relative path resolves from there. Defaults to /workspace/shared/downloads/{agentId}/slack/. |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
 
 ### slack-delete
@@ -2843,7 +2846,6 @@ Execute an Agent Swarm external command route. v1 supports target='composio' and
 | `body` | `unknown` | No | - | Optional JSON request body. |
 | `query` | `object` | No | - | Optional query parameters appended to the Composio path. |
 | `headers` | `object` | No | - | Optional extra headers. Auth headers are injected by the server. |
-| `baseUrl` | `string` | No | - | Optional Composio API base URL override. |
 | `useOrgKey` | `boolean` | No | false | Use COMPOSIO_ORG_API_KEY/x-org-api-key instead of COMPOSIO_API_KEY/x-api-key. |
 | `raw` | `boolean` | No | false | Return raw text instead of JSON-pretty output text. |
 

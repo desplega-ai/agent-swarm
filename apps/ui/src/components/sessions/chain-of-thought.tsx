@@ -12,12 +12,15 @@
  *
  * Visible states:
  *   - active (`pending` / `offered` / `in_progress`): always rendered, the
- *     newest step shimmers. While the task is active the queries poll (4 s
- *     activity, 5 s transcript and steering) so new steps flow in live.
+ *     newest step shimmers. Only an `in_progress` task polls (4 s activity,
+ *     5 s transcript and steering) so new steps flow in live. A queued task
+ *     reads once and waits for the caller's session poll to flip it live; a
+ *     caller that passes no task row gets its row polled instead.
  *   - terminal (`completed` / `failed` / `cancelled` / `superseded`): one
  *     "Worked for 3m 12s" line, collapsed by default, that expands on click.
  *
- * Transcript fetches run only for active tasks or expanded history.
+ * Transcript fetches run only once an agent started the task, or for
+ * expanded history.
  * Steering history loads even when folded, so messages remain visible.
  * A caller that passes its task row skips the task fetch until expansion.
  * Finished tasks do not poll their steering history.
@@ -28,11 +31,14 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useTask, useTaskSessionLogs, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
-import { Transcript } from "@/components/shared/transcript/transcript";
+import { RelativeTime } from "@/components/shared/relative-time";
+import { resumeLabel, Transcript } from "@/components/shared/transcript/transcript";
 import {
   buildTranscriptRows,
   workedForLabel,
+  workedForTotalLabel,
 } from "@/components/shared/transcript/transcript-rows";
+import { formatRelative } from "@/lib/relative-time";
 import { parseSessionLogs } from "@/logs-parser";
 
 const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
@@ -69,19 +75,46 @@ export interface ChainOfThoughtProps {
   status: AgentTaskStatus;
   /** The task row the caller already has (a session chain row): it labels a closed fold. */
   task?: AgentTask;
+  /**
+   * The earlier tries of the same answer, oldest first: a deploy or a crash
+   * cut each one, and the server resumed the work in the next. The fold
+   * counts every try, and open, shows each try's activity over a line that
+   * says why the next one started.
+   */
+  earlier?: AgentTask[];
+  /** Rendered inside another task's fold: no fold of its own, every row shown. */
+  embedded?: boolean;
   className?: string;
 }
 
-export function ChainOfThought({ taskId, status, task: known, className }: ChainOfThoughtProps) {
+export function ChainOfThought({
+  taskId,
+  status,
+  task: known,
+  earlier = [],
+  embedded = false,
+  className,
+}: ChainOfThoughtProps) {
   const isActive = ACTIVE_STATUSES.has(status);
-  const [expanded, setExpanded] = useState(false);
-  // Poll while the task is active so new activity rows flow in. Stop polling
-  // once the task reaches a terminal state. A closed fold over a known row
-  // needs no task fetch (an empty id disables the query).
-  const { data: fetched } = useTask(known && !isActive && !expanded ? "" : taskId, {
-    refetchInterval: isActive ? 4000 : false,
-  });
+  const [expanded, setExpanded] = useState(embedded);
+  // The enabled id depends on the caller's status only: a closed fold over a
+  // known row needs no task fetch (an empty id disables the query).
+  const { data: fetched, refetch: refetchTask } = useTask(
+    known && !isActive && !expanded ? "" : taskId,
+    {
+      // Only a working task polls. A queued one with no caller row polls its
+      // own row to notice the start; with a row, the session poll does that.
+      refetchInterval: (query) =>
+        status === "in_progress" ||
+        query.state.data?.status === "in_progress" ||
+        (isActive && !known)
+          ? 4000
+          : false,
+    },
+  );
   const task = fetched ?? known;
+  // Either source may be the fresher one: the caller's session poll or this row.
+  const isLive = status === "in_progress" || fetched?.status === "in_progress";
 
   // Same gate as everywhere else. Both hooks are react-query-cached globals
   // (`/health` version + `/stats`), so calling them per timeline row costs one
@@ -90,22 +123,26 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages, refetch: refetchSteering } = useTaskSteeringMessages(taskId, {
     enabled: steerGate.supported && steeringEnabled,
-    refetchInterval: isActive ? 5000 : false,
+    refetchInterval: isLive ? 5000 : false,
   });
-  const wasActive = useRef(isActive);
+  const wasLive = useRef(isLive);
   useEffect(() => {
-    // Read the final acknowledgement before the finished task stops polling.
-    if (wasActive.current && !isActive && steerGate.supported && steeringEnabled) {
+    // A queued row read once is stale when the session poll says it started.
+    if (!wasLive.current && isLive) void refetchTask();
+    // Read the final acknowledgement once the task stops working and polling.
+    if (wasLive.current && !isLive && steerGate.supported && steeringEnabled) {
       void refetchSteering();
     }
-    wasActive.current = isActive;
-  }, [isActive, steerGate.supported, steeringEnabled, refetchSteering]);
+    wasLive.current = isLive;
+  }, [isLive, steerGate.supported, steeringEnabled, refetchSteering, refetchTask]);
   // Shares the detail sheet's query key, so opening the sheet reuses it. A
   // disabled query still returns the cached transcript, so a turn watched
-  // live keeps its steps once it ends.
+  // live keeps its steps once it ends. A queued task has no transcript yet:
+  // it loads once an agent accepted the task (a paused one keeps its steps).
+  const started = isLive || !!task?.acceptedAt;
   const { data: sessionLogs } = useTaskSessionLogs(taskId, {
-    enabled: isActive || expanded,
-    refetchInterval: isActive ? 5000 : false,
+    enabled: (isActive && started) || expanded,
+    refetchInterval: isLive ? 5000 : false,
   });
   const rows = useMemo(
     () =>
@@ -141,14 +178,55 @@ export function ChainOfThought({ taskId, status, task: known, className }: Chain
           : waitingLabelFor(liveStatus)
       }
       fold={
-        task
+        task && !embedded
           ? {
-              label: workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
+              label:
+                earlier.length > 0
+                  ? workedForTotalLabel([...earlier, task])
+                  : workedForLabel(task.acceptedAt ?? task.createdAt, task.finishedAt),
               open: expanded,
               onOpenChange: setExpanded,
             }
           : null
       }
+      earlier={
+        task && earlier.length > 0 ? <EarlierTries tries={earlier} last={task} /> : undefined
+      }
     />
+  );
+}
+
+/**
+ * The earlier tries of an answer, each its own activity, then a line that
+ * says why the next try started ("Resumed after a shutdown · 4m ago").
+ */
+function EarlierTries({ tries, last }: { tries: AgentTask[]; last: AgentTask }) {
+  return (
+    <>
+      {tries.map((attempt, index) => {
+        const next = tries[index + 1] ?? last;
+        return (
+          <div key={attempt.id} className="flex min-w-0 flex-col gap-3">
+            <ChainOfThought taskId={attempt.id} status={attempt.status} task={attempt} embedded />
+            <ResumeRule next={next} />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** A rule between two tries: why the later one started, and when. */
+function ResumeRule({ next }: { next: AgentTask }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 font-mono text-meta tracking-wider text-muted-foreground uppercase">
+      <span aria-hidden className="h-px flex-1 bg-border" />
+      <span className="truncate">{resumeLabel(next.tags)}</span>
+      <span aria-hidden>·</span>
+      <RelativeTime at={next.createdAt} focusable={false} className="shrink-0 whitespace-nowrap">
+        {formatRelative(next.createdAt)}
+      </RelativeTime>
+      <span aria-hidden className="h-px flex-1 bg-border" />
+    </div>
   );
 }

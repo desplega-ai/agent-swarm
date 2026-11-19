@@ -43,6 +43,7 @@ export function MediaIconGlyph({
   fallback,
   className,
   imageClassName,
+  imageFallback,
   alt = "",
 }: {
   icon: MediaIcon | null | undefined;
@@ -52,24 +53,27 @@ export function MediaIconGlyph({
   className?: string;
   /** Size and rounding for an image icon, e.g. to fill a tile while the glyph stays small. */
   imageClassName?: string;
+  /** What holds an image icon's slot while it loads or when it cannot show. Defaults to the fallback glyph. */
+  imageFallback?: ReactNode;
   /** Alt text for an image icon. Empty by default: the icon sits next to its name. */
   alt?: string;
 }) {
   const { Icon, color } = resolveLucide(icon, fallback);
   const imageClasses = imageClassName ?? className;
   const glyph = <Icon aria-hidden className={className} style={color ? { color } : undefined} />;
+  const imageGlyph = imageFallback ?? glyph;
   if (icon?.type === "url") {
     return (
       <ImageWithFallback
         src={icon.url}
         alt={alt}
         className={imageClass(imageClasses)}
-        fallback={glyph}
+        fallback={imageGlyph}
       />
     );
   }
   if (icon?.type === "agent-fs") {
-    return <AgentFsIconImage icon={icon} alt={alt} className={imageClasses} glyph={glyph} />;
+    return <AgentFsIconImage icon={icon} alt={alt} className={imageClasses} glyph={imageGlyph} />;
   }
   return glyph;
 }

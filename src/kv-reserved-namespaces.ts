@@ -1,10 +1,14 @@
+import { scrubObject } from "./utils/secret-scrubber";
+
 /**
  * Namespace families owned by internal subsystems which write through the raw
  * DB helpers. Generic HTTP/MCP KV callers may read these namespaces for
  * inspection, but must not mutate them. A family is `<name>` and `<name>:*`,
- * mapped here to the error a generic write gets.
+ * mapped here to the error a generic write gets. A name may span segments
+ * (`integrations:kapso`), so its siblings under `integrations:` stay writable.
  */
 const RESERVED_FAMILIES = new Map([
+  ["durable", "namespace holds durable object state; it is written only by object calls"],
   ["apps", "namespace is reserved for swarm apps; use the app row endpoints"],
   // step-9: Comb's "Send to swarm" claims (`comb:sent`).
   ["comb", "namespace is reserved for Comb; use POST /api/comb/review-batches"],
@@ -25,6 +29,17 @@ const RESERVED_FAMILIES = new Map([
   [
     "session-labels",
     "namespace is reserved for session source labels; GET /api/session-tree returns them",
+  ],
+  // Slack profile emails read from users.info (src/slack/enrich.ts). They decide the
+  // email-domain allowlist and the Slack-to-user auto-link, so only the API writes them.
+  [
+    "integration:user-enrichment",
+    "namespace is reserved for integration profile enrichment; the API writes it from the provider",
+  ],
+  // Kapso number routing and inbound dedupe (src/integrations/kapso/config.ts).
+  [
+    "integrations:kapso",
+    "namespace is reserved for Kapso routing; use register-kapso-number or unregister-kapso-number",
   ],
 ]);
 
@@ -53,7 +68,10 @@ export function isReservedNamespace(namespace: string): boolean {
 }
 
 export function reservedNamespaceError(namespace: string): string | null {
-  return RESERVED_FAMILIES.get(namespace.split(":", 1)[0] ?? "") ?? null;
+  for (const [family, error] of RESERVED_FAMILIES) {
+    if (namespace === family || namespace.startsWith(`${family}:`)) return error;
+  }
+  return null;
 }
 
 /** The error a generic KV read of a private family gets, or null. */
@@ -67,4 +85,9 @@ export function reservedRoomKeyError(key: string): string | null {
   return key.startsWith("_room/")
     ? "room snapshot keys are reserved; use the room endpoints"
     : null;
+}
+
+/** Scrub durable state before generic KV reads return it. */
+export function scrubReservedRead(namespace: string, value: unknown): unknown {
+  return namespace.split(":", 1)[0] === "durable" ? scrubObject(value) : value;
 }

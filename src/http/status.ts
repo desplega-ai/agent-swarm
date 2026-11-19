@@ -148,6 +148,7 @@ export const StatusCombSchema = z.object({
   live_url: z.string(),
   org_id: z.string().nullable(),
   drive_id: z.string().nullable(),
+  review_follow_ups: z.boolean(),
   /** agent-fs user id of the swarm service account, which writes Comb's "sent" replies. */
   service_user_id: z.string().nullable(),
 });
@@ -810,6 +811,7 @@ function getCombStatus(serviceUserId: string | null): StatusAgentFs["comb"] {
     live_url: comb.liveUrl,
     org_id: comb.orgId,
     drive_id: comb.driveId,
+    review_follow_ups: comb.enabled,
     service_user_id: comb.enabled ? serviceUserId : null,
   };
 }

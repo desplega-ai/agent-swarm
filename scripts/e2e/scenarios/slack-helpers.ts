@@ -133,6 +133,20 @@ export async function settleWorkerFollowUp(
   leadId: string,
   childTaskId: string,
 ): Promise<void> {
+  const followUpId = await findWorkerFollowUp(ctx, leadId, childTaskId);
+  await claim(ctx, leadId, followUpId);
+  await finish(ctx, leadId, followUpId, {
+    status: "completed",
+    output: "Reviewed the delegated result — looks good.",
+  });
+}
+
+/** The id of the Lead's worker-completion follow-up for `childTaskId`. */
+export async function findWorkerFollowUp(
+  ctx: ScenarioContext,
+  leadId: string,
+  childTaskId: string,
+): Promise<string> {
   let followUpId: string | undefined;
   const found = await pollUntil(async () => {
     const response = await ctx.api("GET", `/api/tasks?agentId=${leadId}&fields=full&limit=50`);
@@ -149,11 +163,7 @@ export async function settleWorkerFollowUp(
     found && followUpId,
     `No worker-completion follow-up for child ${childTaskId} within 15 seconds`,
   );
-  await claim(ctx, leadId, followUpId as string);
-  await finish(ctx, leadId, followUpId as string, {
-    status: "completed",
-    output: "Reviewed the delegated result — looks good.",
-  });
+  return followUpId as string;
 }
 
 /** Creates a delegated child task under `parentTaskId`, inheriting the parent's Slack thread. */
@@ -365,13 +375,14 @@ export async function waitForOutcome(
   }
 }
 
-/**
- * Slack never shows a deferral's wake-up time: no `at the latest` ceiling, no
- * `today at` / `tomorrow at` / `on 09-24 at` day, no HH:MM clock. Checks the
- * visible text and blocks of every message in the thread (not the raw
- * payload, whose ids and links are not read by a human).
- */
-export function expectNoWakeTime(ctx: ScenarioContext, threadTs: string, label: string): void {
+export function expectChannelWakeTime(
+  ctx: ScenarioContext,
+  threadTs: string,
+  label: string,
+  deferredUntil: string,
+  timeZone = "UTC",
+  fallback = true,
+): void {
   const visible = JSON.stringify(
     ctx.slack
       .messages("general")
@@ -380,12 +391,27 @@ export function expectNoWakeTime(ctx: ScenarioContext, threadTs: string, label: 
   );
   for (const [what, pattern] of [
     ["an `at the latest` ceiling", /at the latest/],
-    ["a wake-up day", /\b(?:today|tomorrow|on \d{2}-\d{2}) at\b/],
-    ["an HH:MM wake-up time", /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/],
+    ["a stored-card wake-up day", /\b(?:today|tomorrow|on \d{2}-\d{2}) at\b/],
   ] as const) {
     const match = visible.match(pattern);
     expect(!match, `${label} Slack thread showed ${what}: ${JSON.stringify(match?.[0])}`);
   }
+  const target = new Date(deferredUntil);
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(target);
+  const abbreviation = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+    .formatToParts(target)
+    .find((part) => part.type === "timeZoneName")!.value;
+  const labelled = `${clock} ${abbreviation}`;
+  expect(
+    visible.includes(labelled) === fallback,
+    `${label} expected fallback label: ${fallback}, got ${visible}`,
+  );
+  expect(visible.includes(clock), `${label} Slack thread did not show the wake-up time ${clock}`);
 }
 
 /**

@@ -476,6 +476,8 @@ export interface AgentTask {
   routingSource?: "declared" | "engine_default";
   /** Set by `defer-task`: the task ended waiting on something else. */
   deferredAt?: string;
+  /** The deferral's wake-up ceiling (ISO); the awaited event can resume it sooner. */
+  deferredUntil?: string;
   routingNote?: string;
   taskType?: string;
   tags: string[];
@@ -491,6 +493,8 @@ export interface AgentTask {
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt?: string;
+  /** Why a terminal task ended, e.g. `failed` + `agent` vs `failed` + `error`. Absent on older rows. */
+  statusKind?: string;
   failureReason?: string;
   output?: string;
   progress?: string;
@@ -684,6 +688,8 @@ export interface User {
   /** Set while a merge job still moves this user into another one; the row disappears when it is done. */
   mergedIntoUserId?: string | null;
   metadata?: Record<string, unknown>;
+  /** Custom avatar, same shapes as an agent's. Null/missing = initials. */
+  avatar?: MediaIcon | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -862,6 +868,8 @@ export interface UpdateUserInput {
   status?: "invited" | "active" | "suspended";
   metadata?: Record<string, unknown> | null;
   comms?: UserCommsPrefs | null;
+  /** `null` resets to initials. */
+  avatar?: MediaIcon | null;
 }
 
 /**
@@ -1137,7 +1145,8 @@ export type FavoriteItemType =
   | "agent-fs-path"
   | "key"
   | "session"
-  | "hidden-key";
+  | "hidden-key"
+  | "app";
 
 export interface UserFavorite {
   id: string;
@@ -2038,6 +2047,10 @@ export interface ScriptRun {
   lastHeartbeatAt?: string;
   idempotencyKey?: string;
   requestedByUserId?: string;
+  /** Set on a durable object call: the class script, the object id and the method. */
+  objectScriptId?: string;
+  objectId?: string;
+  objectMethod?: string;
 }
 
 export type ScriptRunListItem = Omit<ScriptRun, "source" | "args" | "output">;
@@ -2094,6 +2107,8 @@ export interface ScriptListItem {
   createdByAgentId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** `durable` for a DurableObject class script. */
+  kind?: "function" | "durable";
 }
 
 /** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
@@ -2103,6 +2118,20 @@ export interface ScriptDetail extends ScriptListItem {
   contentHash: string;
   signature: unknown;
   argsJsonSchema: unknown;
+}
+
+/** One durable object, read from the KV namespace `durable:<scriptId>` (key `state/<id>`). */
+export interface DurableObjectEntry {
+  id: string;
+  codeVersion: number | null;
+  stateVersion: number | null;
+  /** Secrets are scrubbed by the KV read. */
+  state: unknown;
+  updatedAt: number;
+  /** Idle TTL expiry (epoch ms), or null when the object never expires. */
+  expiresAt: number | null;
+  /** A call holds the object's lease right now. */
+  busy: boolean;
 }
 
 /** Row served by `GET /api/scripts/{id}/versions` — mirrors ScriptVersionRecord in src/types.ts. */
@@ -3797,6 +3826,8 @@ export interface StatusComb {
    * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
    */
   service_user_id?: string | null;
+  /** The API supports sending review batches as follow-ups. */
+  review_follow_ups?: boolean;
 }
 
 /**
@@ -3841,6 +3872,7 @@ export interface CombRepairedComment {
 }
 
 export interface CombReviewBatchInput {
+  parentTaskId?: string;
   orgId: string;
   driveId: string;
   /** agent-fs root comment ids, 1 to 50. */
@@ -4360,6 +4392,8 @@ export interface AppListItem {
   icon?: AppIcon | null;
   createdAt: string;
   updatedAt: string;
+  /** Whether the viewer starred the app. Set on the list, not on the detail. */
+  favorite?: boolean;
 }
 
 export interface AppDetail extends AppListItem {

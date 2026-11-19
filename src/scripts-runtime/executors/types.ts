@@ -13,11 +13,33 @@ export type EgressSecretEntry = ResolvedCredentialBinding;
  */
 export type ScriptAgentFsDescriptor = { apiUrl: string; orgId: string; driveId: string };
 
+/** The invoking agent, or the saved script that made a nested call. */
+export type ScriptCaller =
+  | { kind: "agent"; agentId: string }
+  | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
+  | null;
+
+/** Host-owned snapshot and call target for one DurableObject method invocation. */
+export type DurableInvocation = {
+  id: string;
+  method: string;
+  state?: unknown;
+  codeVersion: number;
+  storedCodeVersion: number;
+  caller?: ScriptCaller;
+};
+
 export type SwarmConfigPayload = {
   system: {
     apiKey: { value: string; isSecret: true };
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
+    /**
+     * Where `ctx.swarm` and `ctx.mcp` send their requests, when it differs from
+     * `mcpBaseUrl` (API-side runs: this server's loopback address). Script code
+     * sees only `mcpBaseUrl`.
+     */
+    sdkBaseUrl?: { value: string; isSecret: false };
     /**
      * Per-boot runtime identity of the invoking worker process. System
      * context like the agent identity — scripts never supply or override it.
@@ -40,6 +62,8 @@ export type SwarmConfigPayload = {
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  caller?: ScriptCaller;
+  durable?: DurableInvocation;
 };
 
 export type ScriptResourcePolicy = {
@@ -111,6 +135,8 @@ export type ScriptRuntimeError = {
 
 export type ExecutorOutput = {
   result: unknown | undefined;
+  /** State stays separate from the result so the loader does not scrub it. */
+  durable?: { state: unknown; destroyed: boolean; idleTtlSec: number | null };
   stdout: string;
   stderr: string;
   truncated: { stdout: boolean; stderr: boolean };

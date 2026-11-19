@@ -258,16 +258,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.326)
+# Override the pinned Claude Code version (default: 2.1.327)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.326`
+- `CLAUDE_CODE_VERSION=2.1.327`
 - `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.169.0`
-- `OPENCODE_VERSION=2.3.0` (installs `@opencode/cli` and `@opencode/sdk`)
+- `CODEX_VERSION=0.170.0`
+- `OPENCODE_VERSION=2.3.2` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -279,7 +279,7 @@ The worker image also now bundles the Ubuntu runtime libraries Playwright's Chro
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
-Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
+Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout. For Husky, the helper runs `npm install --ignore-scripts`, then the repo's local `husky install`. Only the lead, the operator key or a dashboard user may change a repo's `url`, `clonePath` or `hooks`.
 
 The entrypoint also sets a system `init.templateDir` whose `pre-push` shim reaches clones outside the registered clone path (for example a `mktemp -d` checkout). The shim runs prek only when prek is installed, the checkout has a `prek.toml` or `.pre-commit-config.yaml`, and `origin` is an auto-cloned repo registered with hooks enabled. Otherwise it exits 0. `install-repo-hooks.sh` replaces the shim with prek's own hook.
 
@@ -527,7 +527,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.32. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.34. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 

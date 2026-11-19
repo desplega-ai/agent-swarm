@@ -5,7 +5,7 @@
  * previously lived in `src/slack/handlers.ts` (Q17.E):
  *
  *   * `enrichSlackUserEmail(slackUserId)` — kv-backed cache of the user's
- *     email + display name from `client.users.info`. 24h TTL on success;
+ *     email, display name and timezone from `client.users.info`. 24h TTL on success;
  *     failures are NEVER cached so rate-limit recovery just works on retry.
  *
  *   * `resolveSlackUserId(client, slackUserId, ctx)` — the three-step cascade
@@ -26,6 +26,7 @@ import { getKv, upsertKv } from "../be/db";
 import { type IdentityResolution, resolveIdentity } from "../be/identity";
 import { recordUnmappedIdentity } from "../be/unmapped-identities";
 import {
+  fillMissingUserTimezone,
   findOrCreateUserByEmail,
   findUserByEmail,
   findUserByExternalId,
@@ -33,6 +34,7 @@ import {
   linkIdentity,
 } from "../be/users";
 import type { SlackParticipantTrust } from "../types";
+import { isValidTimezone } from "../utils/deferral-time";
 
 const ENRICHMENT_NAMESPACE = "integration:user-enrichment:slack";
 const ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -42,67 +44,55 @@ const ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
  * Q17.E. We keep `name` so future People-page renders don't need to refetch.
  */
 interface EnrichedSlackUser {
-  email: string;
+  email: string | null;
   name: string | null;
+  timezone: string | null;
   fetchedAt: string;
 }
 
-/**
- * Fetch a Slack user's email, caching successful results for 24h in the
- * `integration:user-enrichment:slack` kv namespace.
- *
- * Returns `null` (without caching) when:
- *   * `client.users.info` throws (network / 5xx / rate-limit).
- *   * The profile is missing `profile.email` (bot accounts, restricted users).
- *
- * Caching null would defeat retry-on-recovery, so we intentionally skip the
- * cache write on every failure path.
- */
+/** Old cached profiles lack the timezone field. Refresh them on the next lookup. */
+async function enrichSlackUser(
+  client: WebClient,
+  slackUserId: string,
+): Promise<EnrichedSlackUser | null> {
+  const cached = (await getKv(ENRICHMENT_NAMESPACE, slackUserId))?.value as
+    | EnrichedSlackUser
+    | undefined;
+  if (cached?.email && cached.timezone !== undefined) return cached;
+
+  let profile: EnrichedSlackUser;
+  try {
+    const { user } = await client.users.info({ user: slackUserId });
+    profile = {
+      email: user?.profile?.email ?? null,
+      name: user?.profile?.real_name ?? user?.real_name ?? null,
+      timezone: isValidTimezone(user?.tz) ? user.tz : null,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(`[Slack] enrichSlackUser failed for ${slackUserId}:`, error);
+    return cached?.email ? cached : null;
+  }
+
+  // A linked user can supply a timezone even when Slack withholds their email.
+  // Leave no-email results uncached so an email can be discovered on retry.
+  if (profile.email) {
+    await upsertKv({
+      namespace: ENRICHMENT_NAMESPACE,
+      key: slackUserId,
+      value: profile,
+      valueType: "json",
+      expiresAt: Date.now() + ENRICHMENT_TTL_MS,
+    });
+  }
+  return profile;
+}
+
 export async function enrichSlackUserEmail(
   client: WebClient,
   slackUserId: string,
 ): Promise<string | null> {
-  // Cache hit — return the persisted email straight through.
-  const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
-  if (cached !== null) {
-    const payload = cached.value as EnrichedSlackUser;
-    if (payload?.email) {
-      return payload.email;
-    }
-    // Defensive: if a stale row landed without email somehow, fall through to
-    // refetch rather than handing back `null` from cache.
-  }
-
-  // Cache miss — hit the Slack API.
-  let email: string | null = null;
-  let name: string | null = null;
-  try {
-    const result = await client.users.info({ user: slackUserId });
-    email = result.user?.profile?.email ?? null;
-    name = result.user?.profile?.real_name ?? result.user?.real_name ?? null;
-  } catch (error) {
-    console.error(`[Slack] enrichSlackUserEmail failed for ${slackUserId}:`, error);
-    return null;
-  }
-
-  if (!email) {
-    // Q17.E: do NOT cache the no-email case.
-    return null;
-  }
-
-  await upsertKv({
-    namespace: ENRICHMENT_NAMESPACE,
-    key: slackUserId,
-    value: {
-      email,
-      name,
-      fetchedAt: new Date().toISOString(),
-    } satisfies EnrichedSlackUser,
-    valueType: "json",
-    expiresAt: Date.now() + ENRICHMENT_TTL_MS,
-  });
-
-  return email;
+  return (await enrichSlackUser(client, slackUserId))?.email ?? null;
 }
 
 /** Audit-trail actor for the auto-link cascade. */
@@ -163,7 +153,8 @@ export async function resolveSlackParticipant(
   const foreignTeam = sameTeam === false;
 
   let user = await findUserByExternalId("slack", slackUserId);
-  const email = user?.email || (await enrichSlackUserEmail(client, slackUserId));
+  const profile = user?.email && user.timezone ? null : await enrichSlackUser(client, slackUserId);
+  const email = user?.email || profile?.email;
 
   // Another team's profile email is set by that team, not verified as owned by
   // this sender, so it never links to an existing user. An operator can link
@@ -172,10 +163,7 @@ export async function resolveSlackParticipant(
   const linkable = !eventContext.userTeam || sameTeam === true;
   if (!user && email && linkable) {
     if (isCompanyEmail(email, domains)) {
-      // Pull the cached name back out for the user-row hints. The kv read is
-      // cheap (single primary-key lookup) and avoids a second `users.info`.
-      const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
-      const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
+      const name = profile?.name ?? undefined;
       user = (await findOrCreateUserByEmail(email, { name, role: "member" }, SLACK_WEBHOOK_ACTOR))
         .user;
     } else {
@@ -195,6 +183,10 @@ export async function resolveSlackParticipant(
       }
       user = (await findUserByExternalId("slack", slackUserId)) ?? user;
     }
+  }
+
+  if (user && !user.timezone && profile?.timezone) {
+    await fillMissingUserTimezone(user.id, profile.timezone);
   }
 
   if (!user && !email) {

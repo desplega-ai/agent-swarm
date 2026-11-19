@@ -134,6 +134,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
+  statusKind: true,
   peakContextPercent: true,
   totalCostUsd: true,
 });

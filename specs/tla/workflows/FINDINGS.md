@@ -1164,3 +1164,18 @@ slightly, from the split poller dispatch. `src/tests/workflow-tla-races.test.ts`
 | `Probe-join-retry.cfg` / control | holds / found | 3,014,429 / 1,509 | - / 19 |
 | `Probe-join-retry-user.cfg` | CX17 found | 1,120,354 | 33 |
 | `Probe-join-retry-sweep.cfg` | CX18 found | 16,592,523 | 42 |
+
+## Sync with #3258 and #3303 (`main` @ `975280ca9`)
+
+Neither PR changes a modelled guard, ordering or write path, so the `.tla` and `.cfg` files are
+unchanged. #3258 only rewrites retry-validation tests. #3303 adds a `statusKind` column to every
+task terminal write; the workflow cancel paths (`cancelWorkflowRunRows`, `cancelWorkflowRunStep`)
+pass `statusKind: "workflow"` to `cancelTask`, whose `WHERE` is unchanged, and no modelled guard
+reads the column. Its three added lines in `cancelWorkflowRunRows` shift every later `resume.ts`
+line, so ACTIONS.md re-pins the `Cancel`, sub-workflow and wait-listener rows.
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.

@@ -595,6 +595,7 @@ declare module "swarm-sdk" {
     script_run(args: {
       name?: string;
       source?: string;
+      object?: { id: string; method: string };
       args?: unknown;
       intent?: string;
       scope?: ScriptScope;
@@ -1210,7 +1211,25 @@ declare module "swarm-sdk" {
     exitCode: number;
   }
 
+  /** The invoking agent, or the saved script that made a nested call. */
+  export type ScriptCaller =
+    | { kind: "agent"; agentId: string }
+    | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
+    | null;
+
+  export abstract class DurableObject<S> {
+    constructor(id: string);
+    readonly id: string;
+    state: S;
+    abstract initialState(): S | Promise<S>;
+    migrate?(state: unknown, fromVersion: number): S | Promise<S>;
+    destroy(): void;
+    static idleTtlSec?: number;
+  }
+
   export interface ScriptContext {
+    /** Frozen caller identity supplied by the host. */
+    caller: ScriptCaller;
     run?: ScriptRunContext;
     step?: ScriptWorkflowSteps;
     swarm: SwarmSdk & { config: SwarmConfig };

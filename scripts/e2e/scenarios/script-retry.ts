@@ -1,6 +1,13 @@
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { expectRunOk, registerAgent, runScript } from "./script-helpers";
+import {
+  callToolOk,
+  expectRunOk,
+  registerAgent,
+  runScript,
+  toolText,
+  withMcp,
+} from "./script-helpers";
 
 const EXECUTORS = ["native", "quickjs"] as const;
 
@@ -286,7 +293,7 @@ const BRIDGE_SCRIPT = `export default async function (args: { prefix: string }, 
 }`;
 
 /**
- * A loopback proxy in front of the API. The SUT's MCP_BASE_URL points here for the scenario,
+ * A loopback proxy in front of the API. The SUT's SCRIPT_API_BASE_URL points here for the scenario,
  * so script bridge calls pass through it. A KV path whose key ends in a marker fails once:
  * `-r502` / `-r429` on the first GET, `-w502` / `-w429` on the first PUT. The failing request
  * is not forwarded, so a refused write never lands. Everything else is forwarded as is.
@@ -342,7 +349,7 @@ function startFaultProxy(target: string) {
 
 /**
  * Flow `script-retry`: ctx.swarm bridge calls retry a transient API failure, on both
- * executors. The operator points MCP_BASE_URL at a fault-injecting proxy. A read retries a
+ * executors. The deployment env points SCRIPT_API_BASE_URL at a fault-injecting proxy. A read retries a
  * 502 and waits out a 429's Retry-After; a write is not repeated after a 502 (it may have
  * landed) but is retried after a 429 (refused before any work), and lands once.
  */
@@ -352,9 +359,9 @@ export const scriptRetryBridge: Scenario = {
   async run(ctx) {
     const agentId = await registerAgent(ctx, "retry-bridge");
     const proxy = startFaultProxy(ctx.baseUrl.replace(/\/+$/, ""));
-    const configId = await setGlobal(ctx, "MCP_BASE_URL", proxy.origin);
+    // Deployment env only (a reserved config key), so it is set on a restart.
+    await ctx.restartSut({ env: { SCRIPT_API_BASE_URL: proxy.origin } });
     try {
-      await reloadConfig(ctx);
       for (const executor of EXECUTORS) {
         const label = `bridge retry (${executor})`;
         const prefix = `bridge-${executor}-${ctx.nonce}`;
@@ -411,9 +418,90 @@ export const scriptRetryBridge: Scenario = {
         );
       }
     } finally {
+      await ctx.restartSut();
+      proxy.stop();
+    }
+  },
+};
+
+// ── script calls to the API stay on loopback ──
+
+const LOOPBACK_SCRIPT = `export default async function (args: { key: string }, ctx: any) {
+  const set = await ctx.swarm.kv_set({ key: args.key, value: "loopback" });
+  const get = await ctx.swarm.kv_get({ key: args.key });
+  const visible = ctx.stdlib.Redacted.value(ctx.swarm.config.mcpBaseUrl);
+  return { set: set.success, value: get.data?.value ?? null, visible };
+}`;
+
+/**
+ * Flow `script-retry`: a script's `ctx.swarm` calls and the `script-run` MCP tool reach the
+ * API over loopback, not through `MCP_BASE_URL`. Prod names a public proxy there, and a
+ * nested call through it can fail at the proxy. Here `MCP_BASE_URL` names a closed port, so
+ * any call that still used it would fail. `SCRIPT_API_BASE_URL` is deployment env only.
+ */
+const CLOSED_MCP_BASE_URL = "http://127.0.0.1:9";
+
+export const scriptApiLoopback: Scenario = {
+  name: "script-api-loopback",
+  order: 491,
+  async run(ctx) {
+    for (const scope of ["global", "agent"] as const) {
+      const refused = await ctx.api("PUT", "/api/config", {
+        body: {
+          scope,
+          scopeId: scope === "agent" ? crypto.randomUUID() : null,
+          key: "SCRIPT_API_BASE_URL",
+          value: "https://attacker.example",
+        },
+      });
+      expectStatus(refused, [400], `PUT ${scope} SCRIPT_API_BASE_URL`);
+      expect(refused.text.includes("reserved"), `reserved error ${refused.text}`);
+    }
+
+    const agentId = await registerAgent(ctx, "api-loopback");
+    const configId = await setGlobal(ctx, "MCP_BASE_URL", CLOSED_MCP_BASE_URL);
+    try {
+      await reloadConfig(ctx);
+      for (const executor of EXECUTORS) {
+        const label = `loopback (${executor})`;
+        const key = `loopback-${executor}-${ctx.nonce}`;
+        const run = await runScript(ctx, agentId, {
+          source: LOOPBACK_SCRIPT,
+          args: { key },
+          executor,
+          intent: `e2e api loopback ${executor} ${ctx.nonce}`,
+        });
+        expectRunOk(run, label);
+        const out = asRecord(run.result);
+        expect(
+          out.set === true && out.value === "loopback",
+          `${label}: ctx.swarm must reach the API with MCP_BASE_URL closed: ${JSON.stringify(out)}`,
+        );
+        // Script code still sees MCP_BASE_URL: a quickjs script may fetch it, and the
+        // egress guard refuses a loopback address outside ctx.swarm.
+        expect(
+          out.visible === CLOSED_MCP_BASE_URL,
+          `${label}: config.mcpBaseUrl must stay MCP_BASE_URL, got ${String(out.visible)}`,
+        );
+      }
+
+      const key = `loopback-mcp-${ctx.nonce}`;
+      await withMcp(ctx, agentId, async (mcp) => {
+        const result = await callToolOk(mcp, "script-run", {
+          source: LOOPBACK_SCRIPT,
+          args: { key },
+          intent: `e2e api loopback mcp ${ctx.nonce}`,
+        });
+        expect(
+          toolText(result).includes("loopback"),
+          `script-run tool must reach the API with MCP_BASE_URL closed: ${toolText(result).slice(0, 400)}`,
+        );
+      });
+      const stored = await ctx.api("GET", `/api/kv/${key}`, { agentId });
+      expectStatus(stored, [200], "script-run tool write landed");
+    } finally {
       await ctx.api("DELETE", `/api/config/${configId}`);
       await reloadConfig(ctx);
-      proxy.stop();
     }
   },
 };

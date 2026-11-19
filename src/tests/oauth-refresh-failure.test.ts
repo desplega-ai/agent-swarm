@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  deleteSwarmConfig,
+  getDbClient,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
 import {
   getAuthorizationById,
   getOAuthApp,
@@ -159,7 +166,12 @@ describe("OAuth refresh failure semantics", () => {
       allowedHosts: ["api.acme.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:HEALTHY_CONFIG]",
     });
-    process.env.HEALTHY_CONFIG = "healthy-config-value";
+    const healthyConfig = await upsertSwarmConfig({
+      scope: "global",
+      key: "HEALTHY_CONFIG",
+      value: "healthy-config-value",
+      isSecret: true,
+    });
     mockTokenEndpoint(["acme-refresh"]);
 
     try {
@@ -180,7 +192,7 @@ describe("OAuth refresh failure semantics", () => {
       // The authorization is now persisted as broken.
       expect((await getAuthorizationById(authId))?.status).toBe("refresh-failed");
     } finally {
-      delete process.env.HEALTHY_CONFIG;
+      await deleteSwarmConfig(healthyConfig.id);
     }
   });
 

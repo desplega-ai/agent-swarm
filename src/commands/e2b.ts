@@ -110,6 +110,14 @@ export type LaunchSpec = {
 
 /** The byte-identical specs for the legacy `start-api` / `start-worker` paths. */
 const API_SPEC: LaunchSpec = { swarmRole: "api", envScope: "api", metadataSwarmRole: "api" };
+
+const API_ONLY_RUNTIME_KEYS = [
+  "SECRETS_ENCRYPTION_KEY",
+  "SECRETS_ENCRYPTION_KEY_FILE",
+  "API_AGENT_FS_API_KEY",
+  "SLACK_SIGNING_SECRET",
+  "TRANSCRIPTION_API_KEY",
+] as const;
 const WORKER_SPEC: LaunchSpec = {
   swarmRole: "worker",
   envScope: "worker",
@@ -472,6 +480,12 @@ export async function loadRuntimeEnv(
 
   delete runtime.E2B_API_KEY;
   delete runtime.E2B_ACCESS_TOKEN;
+  if (role !== "api") {
+    // Only the API reads these: the config master key and the API-only config
+    // keys (API_ONLY_CONFIG_KEYS in src/be/swarm-config-guard.ts). Drop them
+    // after every env layer so a lead or worker sandbox never receives them.
+    for (const key of API_ONLY_RUNTIME_KEYS) delete runtime[key];
+  }
   return runtime;
 }
 

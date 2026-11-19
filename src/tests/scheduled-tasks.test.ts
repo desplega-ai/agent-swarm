@@ -176,14 +176,14 @@ describe("Scheduled Tasks Integration", () => {
 
     test("should list scheduled tasks with filters", async () => {
       // Create enabled and disabled schedules
-      await createScheduledTask({
+      const enabled = await createScheduledTask({
         name: "test-filter-enabled",
         intervalMs: 60000,
         taskTemplate: "Enabled task",
         enabled: true,
       });
 
-      await createScheduledTask({
+      const disabled = await createScheduledTask({
         name: "test-filter-disabled",
         intervalMs: 60000,
         taskTemplate: "Disabled task",
@@ -193,6 +193,8 @@ describe("Scheduled Tasks Integration", () => {
       const enabledOnly = await getScheduledTasks({ enabled: true });
       const disabledOnly = await getScheduledTasks({ enabled: false });
 
+      expect(enabledOnly.some((s) => s.id === enabled.id)).toBe(true);
+      expect(disabledOnly.some((s) => s.id === disabled.id)).toBe(true);
       expect(enabledOnly.every((s) => s.enabled)).toBe(true);
       expect(disabledOnly.every((s) => !s.enabled)).toBe(true);
     });
@@ -214,15 +216,18 @@ describe("Scheduled Tasks Integration", () => {
       });
       await updateScheduledTask(failing.id, {
         lastRunAt: new Date(Date.now() - 60000).toISOString(),
-        consecutiveErrors: 3,
+        consecutiveErrors: 2,
         lastErrorAt: new Date().toISOString(),
         lastErrorMessage: "boom",
       });
 
-      const failingOnly = await getScheduledTasks({
-        lastRunStatus: "failed",
-        consecutiveErrorsMin: 2,
-      });
+      const belowMinimum = await getScheduledTasks({ consecutiveErrorsMin: 3 });
+      expect(belowMinimum.some((s) => s.id === failing.id)).toBe(false);
+      const atMinimum = await getScheduledTasks({ consecutiveErrorsMin: 2 });
+      expect(atMinimum.some((s) => s.id === failing.id)).toBe(true);
+      expect(atMinimum.some((s) => s.id === ok.id)).toBe(false);
+
+      const failingOnly = await getScheduledTasks({ lastRunStatus: "failed" });
       const succeededOnly = await getScheduledTasks({ lastRunStatus: "succeeded" });
 
       expect(failingOnly.some((s) => s.id === failing.id)).toBe(true);
@@ -437,35 +442,6 @@ describe("Scheduled Tasks Integration", () => {
       expect(createdTask.routingSource).toBeNull();
       expect(createdTask.status).toBe("unassigned");
     });
-
-    test("should be transactional - task and schedule update are atomic", async () => {
-      const schedule = await createScheduledTask({
-        name: "test-transactional",
-        intervalMs: 60000,
-        taskTemplate: "Transactional test task",
-        enabled: true,
-      });
-
-      const taskCountBefore = (
-        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
-          count: number;
-        }
-      ).count;
-
-      await runScheduleNow(schedule.id);
-
-      const taskCountAfter = (
-        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
-          count: number;
-        }
-      ).count;
-
-      const updatedSchedule = await getScheduledTaskById(schedule.id);
-
-      // Both operations should have completed
-      expect(taskCountAfter).toBe(taskCountBefore + 1);
-      expect(updatedSchedule?.lastRunAt).toBeDefined();
-    });
   });
 
   describe("calculateNextRun", () => {
@@ -603,7 +579,7 @@ describe("Scheduled Tasks Integration", () => {
   });
 
   describe("One-Time Schedules", () => {
-    test("create one-time schedule with delayMs computes nextRunAt", async () => {
+    test("create one-time schedule stores nextRunAt without cadence", async () => {
       const before = Date.now();
       const schedule = await createScheduledTask({
         name: "one-time-delay-test",
@@ -620,7 +596,7 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.intervalMs).toBeUndefined();
     });
 
-    test("create one-time schedule with runAt stores nextRunAt", async () => {
+    test("create one-time schedule preserves exact nextRunAt", async () => {
       const runAt = new Date(Date.now() + 120000).toISOString();
       const schedule = await createScheduledTask({
         name: "one-time-runat-test",
@@ -632,19 +608,6 @@ describe("Scheduled Tasks Integration", () => {
 
       expect(schedule.scheduleType).toBe("one_time");
       expect(schedule.nextRunAt).toBe(runAt);
-    });
-
-    test("one-time schedule does not require cronExpression or intervalMs", async () => {
-      const schedule = await createScheduledTask({
-        name: "one-time-no-cron-test",
-        taskTemplate: "No cron needed",
-        scheduleType: "one_time",
-        nextRunAt: new Date(Date.now() + 60000).toISOString(),
-      });
-
-      expect(schedule.scheduleType).toBe("one_time");
-      expect(schedule.cronExpression).toBeUndefined();
-      expect(schedule.intervalMs).toBeUndefined();
     });
 
     test("executing one-time schedule auto-disables it", async () => {

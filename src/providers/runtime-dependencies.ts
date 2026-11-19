@@ -30,11 +30,14 @@ export function resolveCodexCommand(
   }
 }
 
-/** OpenCode is external in compiled workers; source runs may use node_modules. */
-export function resolveOpencodeSdkSpecifier(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  if (env.OPENCODE_SDK_PATH) return env.OPENCODE_SDK_PATH;
+/**
+ * OpenCode is external in compiled workers; source runs may use node_modules.
+ * The worker imports this path into its own process, so only the worker's
+ * deployment env may set it, never the session env that carries swarm config.
+ */
+export function resolveOpencodeSdkSpecifier(): string {
+  const override = process.env.OPENCODE_SDK_PATH;
+  if (override) return override;
   for (const root of ["/usr/lib/node_modules", "/usr/local/lib/node_modules"]) {
     const candidate = `${root}/@opencode/sdk/dist/index.js`;
     if (existsSync(candidate)) return candidate;
@@ -94,7 +97,7 @@ export async function validateProviderDependencies(
     case "dsh":
       requireExecutable(
         env.DSH_BINARY || "dsh",
-        "Use worker-full, install @deepseek-ai/dsh@0.2.2-rc.3, or set DSH_BINARY to a trusted executable.",
+        "Use worker-full, install @deepseek-ai/dsh@0.2.2-rc.5, or set DSH_BINARY to a trusted executable.",
       );
       return;
     case "amp":
@@ -117,7 +120,7 @@ export async function validateProviderDependencies(
             : resolveAcpTarget(config);
       const hint =
         provider === "grok"
-          ? "Use worker-full, install @xai-official/grok@1.0.88, or set GROK_BINARY to a trusted executable."
+          ? "Use worker-full, install @xai-official/grok@1.0.89, or set GROK_BINARY to a trusted executable."
           : provider === "fx"
             ? "Use worker-full, install the pinned fx release (Dockerfile.worker FX_VERSION), or set FX_BINARY."
             : `ACP_TARGET='${target.target}'. ${acpInstallHints[target.target]}`;
@@ -125,7 +128,7 @@ export async function validateProviderDependencies(
       return;
     }
     case "opencode": {
-      const specifier = resolveOpencodeSdkSpecifier(env);
+      const specifier = resolveOpencodeSdkSpecifier();
       try {
         dependencies.resolveModule(specifier);
       } catch {

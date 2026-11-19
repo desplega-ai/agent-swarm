@@ -6,6 +6,7 @@ import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
+  createTaskExtended,
   ExtensionAgentAssignmentError,
   failTask,
   getAgentById,
@@ -47,6 +48,12 @@ import {
   modelProfileRefError,
   taskProfileError,
 } from "../be/db/model-profiles";
+import {
+  findAcceptedTaskCreate,
+  recordAcceptedTaskCreate,
+  type TaskIdempotencyClaim,
+} from "../be/db/task-idempotency";
+import { IdempotencyKeyTakenError, requestFingerprint } from "../be/db/workflow-idempotency";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
@@ -63,7 +70,7 @@ import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rb
 import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { prepareTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import {
@@ -97,6 +104,7 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
   splitLegacyModelAlias,
   TaskAttachmentSchema,
+  TaskStatusKindSchema,
 } from "../types";
 import { runTaskUiAction } from "../ui-spec/actions";
 import { ensure } from "../utils/business-use";
@@ -105,6 +113,11 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { readsRepoSecrets } from "./config";
+import {
+  IDEMPOTENT_REPLAYED_HEADER,
+  idempotencyKeyHeader,
+  readIdempotencyKey,
+} from "./idempotency-key";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
@@ -173,6 +186,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
+  statusKind: true,
   peakContextPercent: true,
   totalCostUsd: true,
 });
@@ -271,6 +285,9 @@ const listTasks = route({
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
     status: z.string().optional(),
+    statusKind: TaskStatusKindSchema.optional().describe(
+      "Why the task ended, e.g. `status=failed&statusKind=error` (crash, rate limit, exit code) vs `statusKind=agent` (the agent chose to fail). Valid kinds per status: TASK_STATUS_KINDS in src/types.ts.",
+    ),
     agentId: z.string().optional(),
     scheduleId: z.string().optional(),
     /** Only tasks of this workflow run (indexed; independent of fleet size). */
@@ -339,6 +356,7 @@ const createTask = route({
   rbac: { permission: "task.create.own" },
   summary: "Create a new task",
   tags: ["Tasks"],
+  headers: idempotencyKeyHeader("creates one task (a replay returns that task as it is now)"),
   body: z
     .object({
       task: z.string().min(1),
@@ -402,11 +420,13 @@ const createTask = route({
     201: { description: "Task created", schema: AgentTaskSchema },
     400: {
       description:
-        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key",
     },
+    409: { description: "Idempotency-Key was already used for a different request" },
+    410: { description: "The task created under this Idempotency-Key was deleted" },
     403: {
       description:
-        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
+        "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -1096,6 +1116,7 @@ export async function handleTasks(
     });
     const filters = {
       status,
+      statusKind: parsed.query.statusKind,
       agentId: parsed.query.agentId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       workflowRunId: parsed.query.workflowRunId,
@@ -1137,8 +1158,38 @@ export async function handleTasks(
   }
 
   if (createTask.match(req.method, pathSegments)) {
+    const idempotency = readIdempotencyKey(req, res, myAgentId);
+    if (idempotency === null) return true;
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const claim: TaskIdempotencyClaim | undefined = idempotency && {
+      ...idempotency,
+      fingerprint: requestFingerprint("task.create", parsed.body),
+    };
+    // Answer from the task this key already created, if any. Before the
+    // routing and create checks: the key is scoped to this caller, and a retry
+    // gets the original task even if the same request would no longer pass.
+    // The replay returns the task as it is now (output included), so it needs
+    // the same session read access as GET /api/tasks/{id}: a revoked share
+    // must not keep reading the task through its old key.
+    const replayCreate = async (): Promise<boolean> => {
+      const accepted = claim && (await findAcceptedTaskCreate(claim));
+      if (!accepted) return false;
+      const task =
+        accepted.fingerprint === claim.fingerprint ? await getTaskById(accepted.taskId) : null;
+      if (accepted.fingerprint !== claim.fingerprint) {
+        jsonError(res, "Idempotency-Key was already used for a different request", 409);
+      } else if (!task) {
+        jsonError(res, "The task this Idempotency-Key created was deleted", 410);
+      } else if (!(await canReadSession(req, myAgentId, task.id))) {
+        jsonError(res, SESSION_READ_DENIED, 403);
+      } else {
+        res.setHeader(IDEMPOTENT_REPLAYED_HEADER, "true");
+        createTask.respond(res, 201, task);
+      }
+      return true;
+    };
+    if (await replayCreate()) return true;
 
     // Trusted identity first, then the body hint; see resolveTaskRequester.
     const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
@@ -1252,7 +1303,7 @@ export async function handleTasks(
     }
 
     try {
-      const task = await createTaskWithSiblingAwareness(
+      const prepared = await prepareTaskWithSiblingAwareness(
         parsed.body.task,
         {
           key: assetKey,
@@ -1301,6 +1352,17 @@ export async function handleTasks(
         },
         { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );
+      // Extension pre-hooks ran above, outside the transaction; the key record
+      // commits with the task, so a rollback drops both.
+      const task = claim
+        ? await getDbClient().transaction(async () => {
+            // A concurrent request with this key committed while this one got ready.
+            if (await findAcceptedTaskCreate(claim)) throw new IdempotencyKeyTakenError();
+            const created = await createTaskExtended(prepared.description, prepared.options);
+            await recordAcceptedTaskCreate(claim, created.id);
+            return created;
+          })
+        : await createTaskExtended(prepared.description, prepared.options);
 
       ensure({
         id: "created",
@@ -1325,6 +1387,8 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      // A concurrent request with this key committed first; nothing of this one did.
+      if (error instanceof IdempotencyKeyTakenError && (await replayCreate())) return true;
       if (error instanceof TaskRoutingAuthorizationError) {
         console.warn(
           "[HTTP] Task assignment rejected:",
@@ -1396,16 +1460,36 @@ export async function handleTasks(
   if (updateSession.match(req.method, pathSegments)) {
     const parsed = await updateSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await updateTaskClaudeSessionId(
-      parsed.params.id,
-      parsed.body.claudeSessionId,
-      parsed.body.provider,
-      parsed.body.providerMeta,
-      parsed.body.model,
-      "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
-      "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
-      "effort" in parsed.body ? parsed.body.effort : undefined,
-    );
+    const auth = getRequestAuth(req);
+    // An agent session token writes only its own task's session: a task token
+    // its bound task, any other agent token a task its agent holds. The holder is
+    // the offeree while a task is offered or in review (its review session), else
+    // strictly the assignee, so a stale offer never grants a write.
+    // Check and write in one transaction so a reassignment cannot slip between.
+    const task = await getDbClient().transaction(async () => {
+      if (auth?.kind === "agent") {
+        if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
+        const existing = await getTaskById(parsed.params.id);
+        if (!existing) return null;
+        const offerOpen = existing.status === "offered" || existing.status === "reviewing";
+        const holder = offerOpen ? existing.offeredTo : existing.agentId;
+        if (holder !== auth.agentId) return "forbidden";
+      }
+      return await updateTaskClaudeSessionId(
+        parsed.params.id,
+        parsed.body.claudeSessionId,
+        parsed.body.provider,
+        parsed.body.providerMeta,
+        parsed.body.model,
+        "harnessVariant" in parsed.body ? parsed.body.harnessVariant : undefined,
+        "harnessVariantMeta" in parsed.body ? parsed.body.harnessVariantMeta : undefined,
+        "effort" in parsed.body ? parsed.body.effort : undefined,
+      );
+    });
+    if (task === "forbidden") {
+      jsonError(res, "Task belongs to another token agent", 403);
+      return true;
+    }
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1467,7 +1551,12 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = await cancelTask(parsed.params.id, reason);
+    // Who cancelled comes from the resolved principal, never the body: an agent
+    // (X-Agent-ID, including ctx.swarm.task_cancel) records `agent`, as MCP
+    // cancel-task does; the dashboard and operator record `user`.
+    const cancelledTask = await cancelTask(parsed.params.id, reason, {
+      statusKind: principal.kind === "agent" ? "agent" : "user",
+    });
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -1958,21 +2047,25 @@ export async function handleTasks(
           const result = await completeTask(
             parsed.params.id,
             parsed.body.output || "Completed by runner wrapper (no explicit output)",
+            { statusKind: "runner" },
           );
           if (!result) {
             return { error: "Failed to complete task", status: 500 };
           }
           updatedTask = result;
         } else if (parsed.body.status === "skipped") {
-          const result = await skipTask(parsed.params.id, skipReason!);
+          const result = await skipTask(parsed.params.id, skipReason!, { statusKind: "runner" });
           if (!result) {
             return { error: "Failed to mark task as skipped", status: 500 };
           }
           updatedTask = result;
         } else {
+          // The runner posts `failed` for a crash, a non-zero exit, a provider
+          // error or an output-schema parse failure: none is the agent's call.
           const result = await failTask(
             parsed.params.id,
             parsed.body.failureReason || "Process exited without explicit completion",
+            { statusKind: "error" },
           );
           if (!result) {
             return { error: "Failed to mark task as failed", status: 500 };
@@ -2403,7 +2496,9 @@ export async function handleTasks(
     // `task.failed`. Once it queues the step's retry it moves the task to
     // `superseded` itself (`scheduleTaskStepRetry`).
     if (task.workflowRunStepId != null) {
-      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON);
+      const failed = await failTask(parsed.params.id, SUPERSEDED_WORKFLOW_TASK_REASON, {
+        statusKind: "error",
+      });
       if (task.agentId) {
         await updateAgentStatusFromCapacity(task.agentId);
       }

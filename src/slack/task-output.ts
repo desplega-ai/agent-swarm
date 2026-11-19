@@ -1,4 +1,6 @@
+import { resolveRequesterTimezone } from "../be/requester-timezone";
 import type { AgentTask } from "../types";
+import { formatDeferralDateTime } from "../utils/deferral-time";
 
 /**
  * Legacy deferral output, written before `defer-task` started storing the
@@ -23,16 +25,16 @@ const EVENT_DEFERRAL_CARD = new RegExp(`^Waiting on ([^\\n]+?) — or ${WHEN} at
 /**
  * The Slack-facing form of a task's stored output.
  *
- * A deferral's card never shows its wake-up time in Slack: the stored card
- * (`Checking back today at 18:38`, `Waiting on Researcher — or today at 18:38
- * at the latest`) keeps it for the API and the UI, and Slack reads
- * `Checking back later` / `Waiting on Researcher`. Rows written before
- * `defer-task` stored the card carried the agent's internal handoff note and
- * a raw schedule UUID link instead; they read `Checking back later` too.
+ * Re-render an engine-authored deferral from its wake-up instant using the
+ * requester's current timezone. Older rows without an instant get a text-only card.
  */
-export function slackTaskOutput(
-  task: Pick<AgentTask, "output" | "tags" | "outputSchema" | "status">,
-): string | undefined {
+export async function slackTaskOutput(
+  task: Pick<
+    AgentTask,
+    "output" | "tags" | "outputSchema" | "status" | "deferredUntil" | "requestedByUserId"
+  >,
+  now: Date = new Date(),
+): Promise<string | undefined> {
   const output = task.output ?? undefined;
   if (
     !output ||
@@ -42,12 +44,21 @@ export function slackTaskOutput(
   ) {
     return output;
   }
-  // Only match the engine-authored card from defer-task, not continuation results.
-  if (LEGACY_DEFERRAL_NOTICE.test(output) || TIME_DEFERRAL_CARD.test(output)) {
-    return "Checking back later";
-  }
   const waitingOn = output.match(EVENT_DEFERRAL_CARD)?.[1];
-  return waitingOn ? `Waiting on ${waitingOn}` : output;
+  if (!waitingOn && !LEGACY_DEFERRAL_NOTICE.test(output) && !TIME_DEFERRAL_CARD.test(output)) {
+    return output;
+  }
+  if (!task.deferredUntil) return waitingOn ? `Waiting on ${waitingOn}` : "Checking back later";
+
+  const { tz, isFallback } = await resolveRequesterTimezone(
+    task.requestedByUserId,
+    process.env.SLACK_DEFAULT_TIMEZONE,
+  );
+  const { date, time } = formatDeferralDateTime(new Date(task.deferredUntil), now, tz, isFallback);
+  const resumes = date === "today" ? time : `${date} ${time}`;
+  return waitingOn
+    ? `Waiting on ${waitingOn} · resumes by ${resumes}`
+    : `Checking back ${date === "today" ? "at " : ""}${resumes}`;
 }
 
 /**

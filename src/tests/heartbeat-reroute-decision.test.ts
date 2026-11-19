@@ -322,6 +322,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     // R1 was terminalized (no longer pending) and a Lead-owned decision exists.
     expect((await getTaskById(r1.id))!.status).not.toBe("pending");
+    expect((await getTaskById(r1.id))!.statusKind).toBe("system");
     const decisions = (await getChildTasks(original.id)).filter(
       (c) => c.taskType === "reroute-decision",
     );
@@ -404,6 +405,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     ).toBe(0);
     const updated = (await getTaskById(capped.id))!;
     expect(updated.status).toBe("failed");
+    expect(updated.statusKind).toBe("error");
     expect(updated.failureReason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
   });
 
