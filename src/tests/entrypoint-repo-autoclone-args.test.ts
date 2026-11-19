@@ -180,6 +180,16 @@ describe("docker-entrypoint.sh repo auto-clone", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  test("skips a clone path that starts with a dash", async () => {
+    const log = await runLoop(freshCase("dash-path"), {
+      url: "https://github.com/o/r",
+      name: "r",
+      clonePath: "-repo",
+      defaultBranch: "main",
+    });
+    expect(log).toBe("");
+  });
+
   test("a url or branch that starts with a dash is skipped, never passed to git as an option", async () => {
     const dir = freshCase("dash");
     const clonePath = join(dir, "repos", "r");
