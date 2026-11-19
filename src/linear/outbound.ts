@@ -10,6 +10,9 @@ let subscribed = false;
 
 const LOOP_PREVENTION_WINDOW_MS = 5_000;
 
+/** Handlers started by the event bus and not yet finished. */
+const inFlight = new Set<Promise<void>>();
+
 /**
  * `EventEmitter.emit()` calls listeners synchronously and discards whatever
  * they return, so a rejected async handler is never seen by the emitting side
@@ -27,13 +30,25 @@ function observed(
   handler: (data: unknown) => Promise<void>,
 ): (data: unknown) => void {
   return (data: unknown): void => {
-    handler(data).catch((error) => {
-      console.error(
-        `[Linear Outbound] ${eventName} handler failed:`,
-        scrubSecrets(error instanceof Error ? error.message : String(error)),
-      );
-    });
+    const run = handler(data)
+      .catch((error) => {
+        console.error(
+          `[Linear Outbound] ${eventName} handler failed:`,
+          scrubSecrets(error instanceof Error ? error.message : String(error)),
+        );
+      })
+      .finally(() => inFlight.delete(run));
+    inFlight.add(run);
   };
+}
+
+/**
+ * Resolves once every outbound handler started so far has finished. The event
+ * bus fires handlers without awaiting them, so tests use this instead of a
+ * fixed sleep, which is too short on a loaded CI runner.
+ */
+export async function whenLinearOutboundIdle(): Promise<void> {
+  while (inFlight.size > 0) await Promise.all([...inFlight]);
 }
 
 const onTaskCreated = observed("task.created", handleTaskCreated);

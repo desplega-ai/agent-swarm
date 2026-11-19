@@ -8,6 +8,7 @@ import {
   initLinearOutboundSync,
   LINEAR_BODY_MAX,
   teardownLinearOutboundSync,
+  whenLinearOutboundIdle,
 } from "../linear/outbound";
 import { taskSessionMap } from "../linear/sync";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -79,7 +80,7 @@ describe("Linear Outbound Sync", () => {
     });
 
     // Allow async handler to run
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -111,7 +112,7 @@ describe("Linear Outbound Sync", () => {
       });
 
       workflowEventBus.emit("task.completed", { taskId: task.id, output: "All done!" });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await whenLinearOutboundIdle();
 
       expect(mockCreateComment).toHaveBeenCalledTimes(1);
       const arg = (mockCreateComment.mock.calls[0] as unknown[])[0] as { body: string };
@@ -135,7 +136,7 @@ describe("Linear Outbound Sync", () => {
       failureReason: "Build error in module X",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -158,7 +159,7 @@ describe("Linear Outbound Sync", () => {
     const output = `## Answer\n\n${"x".repeat(5000)}`;
 
     workflowEventBus.emit("task.completed", { taskId, output });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
@@ -182,7 +183,7 @@ describe("Linear Outbound Sync", () => {
     taskSessionMap.set(taskId, "session-failed");
 
     workflowEventBus.emit("task.failed", { taskId, failureReason: "tsc:check failed" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
@@ -205,7 +206,7 @@ describe("Linear Outbound Sync", () => {
     taskSessionMap.set(taskId, "session-empty");
 
     workflowEventBus.emit("task.completed", { taskId, output: "  " });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
       "session-empty",
@@ -261,7 +262,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
@@ -286,7 +287,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
@@ -311,7 +312,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -335,7 +336,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -349,7 +350,7 @@ describe("Linear Outbound Sync", () => {
       progress: "📋 Reviewing task details",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     // Posts as `action` so the update renders as a structured card in Linear's AgentSession
     // panel. Linear's spec requires BOTH `action` AND `parameter` for action-type activities;
@@ -376,7 +377,7 @@ describe("Linear Outbound Sync", () => {
     const longProgress = "x".repeat(5000);
     workflowEventBus.emit("task.progress", { taskId, progress: longProgress });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
     const args = mockPostAgentSessionAction.mock.calls[0] as unknown[];
@@ -389,7 +390,7 @@ describe("Linear Outbound Sync", () => {
       progress: "should be dropped",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
     expect(mockPostAgentSessionAction).not.toHaveBeenCalled();
@@ -402,7 +403,7 @@ describe("Linear Outbound Sync", () => {
       taskId: "outbound-task-progress-empty",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
     expect(mockPostAgentSessionAction).not.toHaveBeenCalled();
@@ -417,7 +418,7 @@ describe("Linear Outbound Sync", () => {
       source: "linear",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
@@ -446,7 +447,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await whenLinearOutboundIdle();
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
