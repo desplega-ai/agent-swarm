@@ -163,11 +163,12 @@ async function main(): Promise<void> {
   const firstThread = renderedScenarios.flatMap((scenario) => scenario.threads)[0];
   if (!firstThread) throw new Error("The visual manifest has no marked Slack threads");
   // The channel view after the whole run: one screenshot, so serve the full journal once
-  // instead of rendering a frame per channel event. It shows the first thread's workspace.
+  // instead of rendering a frame per channel event. Always the run's Socket Mode workspace:
+  // a thread's own journal holds one scenario, not the run.
   const mock = await SlackMock.start({
     port: 0,
     seed: false,
-    dataFile: journalOf(firstThread),
+    dataFile: join(options.visualsDir, manifest.journal),
     manifest: manifest.slackManifest,
     log: false,
   });
