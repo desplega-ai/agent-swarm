@@ -25,6 +25,7 @@ import {
   getTaskUrl,
 } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
+import { isSlackReplyFooterEnabled } from "@/slack/config";
 import { externalChannelToolError, getChannelBlockReason } from "@/slack/external-channel";
 import { getAgentDisplayName, getAgentSlackIcon, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -174,7 +175,6 @@ export const registerSlackReplyTool = (server: McpServer) => {
           ),
         );
 
-        const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
           ...(cardSlack && slackMessage ? buildMrkdwnSectionBlocks(slackMessage) : []),
           ...(renderedBlocks ?? buildMrkdwnSectionBlocks(slackMessage)),
@@ -195,7 +195,11 @@ export const registerSlackReplyTool = (server: McpServer) => {
         }
         if (messageBlocks.length > 50)
           return toolErr("At most 50 blocks are allowed including citation sources.");
-        if (taskId && tree) {
+        if (
+          taskId &&
+          isSlackReplyFooterEnabled() &&
+          (await getSlackTreeMessageByThread(slackChannelId, slackThreadTs))
+        ) {
           if (messageBlocks.length >= 50) {
             return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
           }
