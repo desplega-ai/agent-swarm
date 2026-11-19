@@ -74,6 +74,7 @@ export function ScheduleTargetFields({
               type="button"
               size="sm"
               variant={value.targetType === opt.value ? "default" : "outline"}
+              aria-pressed={value.targetType === opt.value}
               onClick={() => onChange({ ...value, targetType: opt.value })}
             >
               {opt.label}
