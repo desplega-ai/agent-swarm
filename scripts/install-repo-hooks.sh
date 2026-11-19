@@ -56,7 +56,12 @@ if [ -d "$repo_dir/.husky" ]; then
     if (cd "$repo_dir" && npm install --ignore-scripts); then
       echo "    Ran npm install --ignore-scripts for Husky setup"
       if [ -x "$repo_dir/node_modules/.bin/husky" ]; then
-        if (cd "$repo_dir" && ./node_modules/.bin/husky install); then
+        husky_args=(install)
+        husky_version=$(cd "$repo_dir" && node -p 'require("./node_modules/husky/package.json").version' 2>/dev/null)
+        if [ "${husky_version%%.*}" -ge 9 ] 2>/dev/null; then
+          husky_args=()
+        fi
+        if (cd "$repo_dir" && ./node_modules/.bin/husky "${husky_args[@]}"); then
           echo "    Installed Husky hooks"
         else
           warn "husky install failed for ${repo_name}"

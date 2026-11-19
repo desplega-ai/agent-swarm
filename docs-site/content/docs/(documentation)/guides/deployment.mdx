@@ -587,7 +587,7 @@ For local Redis, set `SWARM_DEP_REDIS_ENABLED=true`; the root-stage entrypoint r
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
-The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout. For a repo with a `.husky` directory, the helper runs `npm install --ignore-scripts` (no dependency or repo lifecycle script runs) and then the repo's local `husky install`.
+The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout. For a repo with a `.husky` directory, the helper runs `npm install --ignore-scripts` (no dependency or repo lifecycle script runs) and then the repo's local `husky` for version 9 and later or `husky install` for earlier versions.
 
 Only the lead, the operator key or a dashboard user may change a repo's `url`, `clonePath` or `hooks` (`repo.exec-config.write`). An agent session token of a non-lead agent gets 403 on such a change. A repo that token creates stores `hooks: { enabled: false }` unless the request sets it, and an explicit `hooks: { enabled: true }` gets 403. A worker on the shared API key acts as the operator. A `url` or `clonePath` that starts with `-` is refused.
 
