@@ -5,15 +5,15 @@ import { join } from "node:path";
 import {
   checkPrBody,
   isFixTitle,
+  leadChoices,
   pickedChoices,
   prBodyWarnings,
   proseWordCount,
   riskLevel,
   templateLeadLines,
   templateSections,
-  UI_PATHS,
 } from "../../scripts/check-pr-body";
-import { runChild } from "./test-proc";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const TEMPLATE = `<!-- top comment -->
 
@@ -42,10 +42,10 @@ const URGENT = "## Urgency\n- [ ] asap\n- [x] nice to have\n";
 describe("check-pr-body", () => {
   test("template markers set when a section is required", () => {
     expect(templateSections(TEMPLATE)).toEqual([
-      { heading: "Intent", when: "always", choices: [], paths: [] },
-      { heading: "Repro", when: "fix", choices: [], paths: [] },
-      { heading: "Urgency", when: "always", choices: ["asap", "nice to have"], paths: [] },
-      { heading: "Evidence", when: "optional", choices: [], paths: [] },
+      { heading: "Intent", when: "always", choices: [] },
+      { heading: "Repro", when: "fix", choices: [] },
+      { heading: "Urgency", when: "always", choices: ["asap", "nice to have"] },
+      { heading: "Evidence", when: "optional", choices: [] },
     ]);
   });
 
@@ -110,18 +110,20 @@ describe("check-pr-body", () => {
   test("the real template fails unedited and passes once every part is filled", async () => {
     const template = await Bun.file(".github/pull_request_template.md").text();
     const leads = templateLeadLines(template);
-    expect(leads).toEqual(["Why", "Risk"]);
+    expect(leads).toEqual(["Why", "Risk", "Urgency"]);
     const sections = templateSections(template).filter((s) => s.when !== "optional");
     expect(sections.length).toBeGreaterThan(0);
-    const all = { title: "fix: x", author: "desplega-bot", changedFiles: ["apps/ui/a.tsx"] };
+    const all = { title: "fix: x", author: "desplega-bot" };
     // Unknown risk keeps the outline required, so every section and lead line is reported.
     expect(checkPrBody(template, template, all)).toHaveLength(sections.length + leads.length);
 
     const filled = [
       "**Why:** because.",
       "**Risk:** medium",
+      "**Urgency:** nice to have",
       ...sections.map(
-        (s) => `## ${s.heading}\n\n${s.choices.length ? `- [x] ${s.choices[0]}` : "filled"}\n`,
+        (s) =>
+          `## ${s.heading}\n\n${s.when === "evidence" ? "```diff\n+ new\n```" : s.when === "bot" ? "- [Task](https://example.com/task)" : s.choices.length ? `- [x] ${s.choices[0]}` : "filled"}\n`,
       ),
     ].join("\n");
     expect(checkPrBody(template, filled, all)).toEqual([]);
@@ -133,18 +135,9 @@ describe("check-pr-body", () => {
     expect(when).toMatchObject({
       "Review map": "always",
       "Change outline": "outline",
-      "Before / after": "ui",
-      Repro: "fix",
-      Urgency: "always",
+      "Before / after": "evidence",
       "Swarm provenance": "bot",
     });
-    const evidence = templateSections(template).find((s) => s.heading === "Before / after");
-    expect(evidence?.paths).toEqual([
-      "apps/ui/",
-      "apps/templates-ui/",
-      "src/slack/",
-      "src/integrations/chat-sdk/",
-    ]);
   });
 });
 
@@ -156,10 +149,6 @@ describe("check-pr-body: lead lines, risk and conditional sections", () => {
 **Risk:** <!-- low | medium | high -->
 
 ## Outline <!-- outline -->
-
-<!-- g -->
-
-## Before / after <!-- ui -->
 
 <!-- g -->
 
@@ -211,56 +200,163 @@ describe("check-pr-body: lead lines, risk and conditional sections", () => {
     expect(checkPrBody(T, leads("low"), human)).toEqual([]);
   });
 
-  test("Before / after is required only when the diff touches a UI app", () => {
-    const body = `${leads("medium")}${outline}`;
-    const missing = ["missing section: ## Before / after"];
-    expect(checkPrBody(T, body, { ...human, changedFiles: ["apps/ui/src/App.tsx"] })).toEqual(
-      missing,
-    );
-    expect(checkPrBody(T, body, { ...human, changedFiles: ["apps/templates-ui/x.ts"] })).toEqual(
-      missing,
-    );
-    expect(checkPrBody(T, body, { ...human, changedFiles: ["src/apps/ui-thing.ts"] })).toEqual([]);
-    expect(checkPrBody(T, body, human)).toEqual([]);
-  });
-
-  test("a ui marker with paths replaces the default path list", () => {
-    const own = T.replace("<!-- ui -->", "<!--  ui:  src/slack/   Live/App/ -->");
-    expect(templateSections(own).find((s) => s.when === "ui")?.paths).toEqual([
-      "src/slack/",
-      "Live/App/",
-    ]);
-    expect(templateSections(T).find((s) => s.when === "ui")?.paths).toEqual(UI_PATHS);
-    const body = `${leads("medium")}${outline}`;
-    const missing = ["missing section: ## Before / after"];
-    expect(checkPrBody(own, body, { ...human, changedFiles: ["src/slack/blocks.ts"] })).toEqual(
-      missing,
-    );
-    expect(checkPrBody(own, body, { ...human, changedFiles: ["./Live/App/x.tsx"] })).toEqual(
-      missing,
-    );
-    // The default paths no longer count, and a prefix must match from the path start.
-    expect(checkPrBody(own, body, { ...human, changedFiles: ["apps/ui/src/App.tsx"] })).toEqual([]);
-    expect(checkPrBody(own, body, { ...human, changedFiles: ["x/src/slack/a.ts"] })).toEqual([]);
-  });
-
-  test("a 'No visual change' line fills Before / after", () => {
-    const ui = { ...human, changedFiles: ["apps/ui/src/lib/configuration-catalog.ts"] };
-    const body = `${leads("medium")}${outline}## Before / after\n\n`;
-    expect(checkPrBody(T, body, ui)).toEqual(["empty section: ## Before / after"]);
-    expect(
-      checkPrBody(T, `${body}No visual change: the entry reuses the boolean switch.\n`, ui),
-    ).toEqual([]);
-  });
-
   test("Swarm provenance is required for the bot and for a local run without an author", () => {
     const body = `${leads("medium")}${outline}`;
     const missing = ["missing section: ## Swarm provenance"];
     expect(checkPrBody(T, body, { author: "desplega-bot" })).toEqual(missing);
     expect(checkPrBody(T, body, {})).toEqual(missing);
     expect(checkPrBody(T, body, human)).toEqual([]);
-    const withProvenance = `${body}\n## Swarm provenance\n- Task: link\n`;
+    const withProvenance = `${body}\n## Swarm provenance\n- [Task](https://example.com/task)\n`;
     expect(checkPrBody(T, withProvenance, { author: "desplega-bot" })).toEqual([]);
+  });
+});
+
+describe("check-pr-body: evidence", () => {
+  const template = "## Proof <!-- evidence -->";
+  test("evidence is always required and prose alone fails", () => {
+    expect(templateSections(template)).toEqual([
+      { heading: "Proof", when: "evidence", choices: [] },
+    ]);
+    expect(checkPrBody(template, "")).toEqual(["missing section: ## Proof"]);
+    for (const text of [
+      "",
+      "I tested it.",
+      "<!-- ``` -->",
+      "No visible change:",
+      "No visual change:   ",
+    ]) {
+      expect(checkPrBody(template, `## Proof\n${text}`)).toEqual([
+        '## Proof: show a snippet, a table, an image or a video, or write "No visible change: <reason>"',
+      ]);
+    }
+  });
+  test.each([
+    "```diff\n+ new\n```",
+    "~~~text\nafter\n~~~",
+    "| Before | After |\n|---|---|\n| a | b |",
+    "![after](https://example.com/image.png)",
+    '<img src="https://example.com/a.png">',
+    '<video src="https://example.com/clip"></video>',
+    "https://example.com/a.mp4",
+    "https://example.com/a.mov",
+    "https://example.com/a.webm",
+    "https://github.com/user-attachments/assets/abc",
+    "No visible change: internal refactor.",
+    "NO VISUAL CHANGE: internal refactor.",
+  ])("accepts evidence: %s", (text) => {
+    expect(checkPrBody(template, `## Proof\n${text}`)).toEqual([]);
+  });
+});
+
+describe("check-pr-body: lead choices", () => {
+  const template =
+    "**Schedule:** <!-- one of: asap | this week | nice to have --> <!-- guidance -->";
+  test("choices accept case and trailing text with whole words", () => {
+    for (const value of ["ASAP", "this week (requested)", "nice to have, please"]) {
+      expect(checkPrBody(template, `**Schedule:** ${value}`)).toEqual([]);
+    }
+    for (const value of ["asapish", "tomorrow"]) {
+      expect(checkPrBody(template, `**Schedule:** ${value}`)).toEqual([
+        "**Schedule:** must start with one of: asap, this week, nice to have",
+      ]);
+    }
+    expect(checkPrBody(template, "")).toEqual(["missing line: **Schedule:**"]);
+    expect(checkPrBody(template, "**Schedule:** <!-- g -->")).toEqual([
+      "empty line: **Schedule:**",
+    ]);
+  });
+  test("old checkbox sections provide a transition only when the lead is missing", () => {
+    const body = "## Schedule\n- [ ] asap\n- [x] THIS WEEK";
+    expect(checkPrBody(template, body)).toEqual([]);
+    expect(leadChoices(template, body)).toEqual({ schedule: "this week" });
+    for (const checks of ["- [x] tomorrow", "- [x] asap\n- [x] this week", "- [x] asap (please)"]) {
+      expect(checkPrBody(template, `## Schedule\n${checks}`)).toEqual([
+        "missing line: **Schedule:**",
+      ]);
+      expect(leadChoices(template, `## Schedule\n${checks}`)).toEqual({});
+    }
+    expect(checkPrBody(template, `**Schedule:** invalid\n${body}`)).toHaveLength(1);
+  });
+  test("leadChoices returns valid canonical values and ignores guidance", () => {
+    expect(leadChoices(template, "**Schedule:** ASAP (requested)")).toEqual({ schedule: "asap" });
+    expect(leadChoices(template, "**Schedule:** asapish")).toEqual({});
+    expect(leadChoices("**Why:** <!-- low | high -->", "**Why:** low")).toEqual({});
+    expect(checkPrBody("<!--\n**Hidden:** guidance\n-->\n**Why:**", "**Why:** reason")).toEqual([]);
+  });
+});
+
+describe("check-pr-body: bot content", () => {
+  const template = "## Links <!-- bot -->";
+  test.each([
+    "desplega-bot",
+    "someone",
+    undefined,
+  ])("validates present content for %s", (author) => {
+    const ctx = { author };
+    expect(
+      checkPrBody(template, "## Links\n- https://example.com/a\n* https://example.com/b", ctx),
+    ).toEqual([
+      // One problem per root cause: a bare URL does not also report a missing task link.
+      "## Links: write each link as [label](url), not as a bare URL",
+    ]);
+    expect(checkPrBody(template, "## Links\n  - [Task](https://example.com/a)", ctx)).toEqual([]);
+    expect(
+      checkPrBody(template, "## Links\n[Task](https://example.com/a)\nMore text", ctx),
+    ).toEqual(["## Links: a list of links only. Move other text to another section"]);
+    expect(checkPrBody(template, "## Links\n- Task pending", ctx)).toEqual(
+      author === "someone" ? [] : ["## Links: link the task as [Task](url)"],
+    );
+    expect(
+      checkPrBody(
+        template,
+        "## Links\n<details><summary>Links https://example.com/hidden</summary>\n- [Task](https://example.com/a)\n* [Tree](https://example.com/b)\n</details><!-- ignored -->",
+        ctx,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("check-pr-body: marker warnings", () => {
+  test("lead word limits warn only above the limit", () => {
+    const template = "**Reason:** <!-- max words: 2 -->";
+    expect(prBodyWarnings("**Reason:** one two <!-- three -->", template)).toEqual([]);
+    expect(prBodyWarnings("**Reason:** one two three", template)).toEqual([
+      "**Reason:** has 3 words. Target: 2 or fewer",
+    ]);
+  });
+  test("table row limits exclude headers and separators", () => {
+    const template = "## Data <!-- max rows: 1 -->";
+    const body = "## Data\n| A | B |\n|:---|---:|\n| a | b |";
+    expect(prBodyWarnings(body, template)).toEqual([]);
+    expect(prBodyWarnings(`${body}\n| c | d |`, template)).toEqual([
+      "## Data: 2 table rows. Target: 1 or fewer",
+    ]);
+  });
+  test("bullet limits exclude details, nested items, comments and code", () => {
+    const template = "## Notes <!-- max bullets: 1 -->";
+    const body =
+      "## Notes\n- first\n  - nested\n<details open>\n- hidden\n</details>\n<!-- - guidance -->\n```\n- code\n```";
+    expect(prBodyWarnings(body, template)).toEqual([]);
+    expect(prBodyWarnings(`${body}\n* second`, template)).toEqual([
+      "## Notes: 2 bullets. Target: 1 or fewer",
+    ]);
+  });
+  test("code limits count fenced lines across fence styles", () => {
+    const template = "## Code <!-- max code lines: 2 -->";
+    const body = "## Code\n````md\n```\n````\n~~~\nsecond\n~~~";
+    expect(prBodyWarnings(body, template)).toEqual([]);
+    expect(prBodyWarnings(`${body}\n\`\`\`\nthird\n\`\`\``, template)).toEqual([
+      "## Code: 3 code lines. Target: 2 or fewer",
+    ]);
+  });
+  test("presigned links warn only with a template", () => {
+    const body = "https://example.com/a?X-Amz-Signature=abc";
+    expect(prBodyWarnings(body, "")).toEqual([
+      "a presigned link expires. Use a GitHub attachment for images and videos",
+    ]);
+    expect(prBodyWarnings("https://example.com/a", "")).toEqual([]);
+    expect(prBodyWarnings(body)).toEqual([]);
+    expect(prBodyWarnings(`${body} ${"word ".repeat(301)}`)).toHaveLength(1);
   });
 });
 
@@ -291,78 +387,134 @@ describe("check-pr-body: prose budget", () => {
 describe("check-pr-body: PR_TEMPLATE_PATH", () => {
   // The org-wide check (desplega-ai/.github) runs this script against another
   // repo's template or the org default, so the CLI must honor the override.
-  test("the CLI checks the body against the template the env names", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "pr-body-template-"));
-    try {
-      const templatePath = join(dir, "template.md");
-      const bodyPath = join(dir, "body.md");
-      await Bun.write(templatePath, "## Only section\n\n<!-- guidance -->\n");
-      await Bun.write(bodyPath, "## Only section\n\nFilled.\n");
-      const run = (env: Record<string, string>) =>
-        runChild(["bun", "scripts/check-pr-body.ts", "--body-file", bodyPath], {
-          env: {
-            PATH: process.env.PATH,
-            HOME: process.env.HOME,
-            PR_TITLE: "chore: x",
-            PR_AUTHOR: "someone",
-            PR_CHANGED_FILES_FILE: bodyPath,
-            ...env,
-          },
-        });
-
-      const custom = await run({ PR_TEMPLATE_PATH: templatePath });
-      expect(custom.stderr).not.toContain("does not match");
-      expect(custom.exitCode).toBe(0);
-
-      // Control: without the override, the repo template applies and this body fails it.
-      const repoDefault = await run({});
-      expect(repoDefault.exitCode).toBe(1);
-      expect(repoDefault.stderr).toContain("does not match .github/pull_request_template.md");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("check-pr-body: PR_BODY_PROBLEMS_FILE", () => {
-  // pr-body-comment.yml posts this file as the fork PR comment.
-  test("a failing body writes its problems as a Markdown list; a passing body writes nothing", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "pr-body-problems-"));
-    try {
-      const templatePath = join(dir, "template.md");
-      const bodyPath = join(dir, "body.md");
-      const problemsPath = join(dir, "problems.md");
-      await Bun.write(
-        templatePath,
-        "**Why:** <!-- one line -->\n\n## Only section\n\n<!-- guidance -->\n",
-      );
-      const run = (body: string) =>
-        Bun.write(bodyPath, body).then(() =>
+  test(
+    "the CLI checks the body against the template the env names",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pr-body-template-"));
+      try {
+        const templatePath = join(dir, "template.md");
+        const bodyPath = join(dir, "body.md");
+        await Bun.write(templatePath, "## Only section\n\n<!-- guidance -->\n");
+        await Bun.write(bodyPath, "## Only section\n\nFilled.\n");
+        const run = (env: Record<string, string>) =>
           runChild(["bun", "scripts/check-pr-body.ts", "--body-file", bodyPath], {
             env: {
               PATH: process.env.PATH,
               HOME: process.env.HOME,
               PR_TITLE: "chore: x",
               PR_AUTHOR: "someone",
-              PR_CHANGED_FILES_FILE: bodyPath,
-              PR_TEMPLATE_PATH: templatePath,
-              PR_BODY_PROBLEMS_FILE: problemsPath,
+              ...env,
             },
-          }),
+          });
+
+        const custom = await run({ PR_TEMPLATE_PATH: templatePath });
+        expect(custom.stderr).not.toContain("does not match");
+        expect(custom.exitCode).toBe(0);
+
+        // Control: without the override, the repo template applies and this body fails it.
+        const repoDefault = await run({});
+        expect(repoDefault.exitCode).toBe(1);
+        expect(repoDefault.stderr).toContain("does not match .github/pull_request_template.md");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+});
+
+describe("check-pr-body: PR_BODY_PROBLEMS_FILE", () => {
+  // pr-body-comment.yml posts this file as the fork PR comment.
+  test(
+    "a failing body writes its problems as a Markdown list; a passing body writes nothing",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "pr-body-problems-"));
+      try {
+        const templatePath = join(dir, "template.md");
+        const bodyPath = join(dir, "body.md");
+        const problemsPath = join(dir, "problems.md");
+        await Bun.write(
+          templatePath,
+          "**Why:** <!-- one line -->\n\n## Only section\n\n<!-- guidance -->\n",
+        );
+        const run = (body: string) =>
+          Bun.write(bodyPath, body).then(() =>
+            runChild(["bun", "scripts/check-pr-body.ts", "--body-file", bodyPath], {
+              env: {
+                PATH: process.env.PATH,
+                HOME: process.env.HOME,
+                PR_TITLE: "chore: x",
+                PR_AUTHOR: "someone",
+                PR_TEMPLATE_PATH: templatePath,
+                PR_BODY_PROBLEMS_FILE: problemsPath,
+              },
+            }),
+          );
+
+        const failing = await run("## Summary\n\nWrote my own headings.\n");
+        expect(failing.exitCode).toBe(1);
+        expect(await Bun.file(problemsPath).text()).toBe(
+          "- missing line: **Why:**\n- missing section: ## Only section\n",
         );
 
-      const failing = await run("## Summary\n\nWrote my own headings.\n");
-      expect(failing.exitCode).toBe(1);
-      expect(await Bun.file(problemsPath).text()).toBe(
-        "- missing line: **Why:**\n- missing section: ## Only section\n",
-      );
+        await rm(problemsPath);
+        const passing = await run("**Why:** reason.\n\n## Only section\n\nFilled.\n");
+        expect(passing.exitCode).toBe(0);
+        expect(await Bun.file(problemsPath).exists()).toBe(false);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+});
 
-      await rm(problemsPath);
-      const passing = await run("**Why:** reason.\n\n## Only section\n\nFilled.\n");
-      expect(passing.exitCode).toBe(0);
-      expect(await Bun.file(problemsPath).exists()).toBe(false);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+describe("check-pr-body: CLI outputs", () => {
+  test(
+    "writes lead choices, section picks and risk while warnings do not fail",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "prb-output-"));
+      try {
+        const templatePath = join(dir, "template.txt");
+        const bodyPath = join(dir, "body.txt");
+        const outputPath = join(dir, "output.txt");
+        await Bun.write(
+          templatePath,
+          "**Why:** <!-- max words: 1 -->\n**Risk:**\n**Urgency:** <!-- one of: asap | later -->\n## Mode <!-- pick one -->\n- [ ] quick",
+        );
+        for (const urgency of ["**Urgency:** ASAP", "## Urgency\n- [x] asap"]) {
+          await Bun.write(outputPath, "");
+          await Bun.write(
+            bodyPath,
+            `**Why:** two words\n**Risk:** low\n${urgency}\n## Mode\n- [x] quick`,
+          );
+          const result = await runChild(
+            [
+              "bun",
+              "scripts/check-pr-body.ts",
+              "--title",
+              "feat: x",
+              "--body-file",
+              bodyPath,
+              "--author",
+              "someone",
+            ],
+            {
+              env: {
+                PATH: process.env.PATH,
+                PR_TEMPLATE_PATH: templatePath,
+                GITHUB_OUTPUT: outputPath,
+              },
+            },
+          );
+          expect(result.exitCode).toBe(0);
+          expect(result.stderr).toContain("**Why:** has 2 words. Target: 1 or fewer");
+          expect(await Bun.file(outputPath).text()).toBe("mode=quick\nurgency=asap\nrisk=low\n");
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });

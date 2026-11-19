@@ -12,12 +12,14 @@
  * heading line changes the rule:
  *   `<!-- optional -->`  the section may be deleted.
  *   `<!-- fix -->`       required only when the PR title is `fix: ...` or `fix(scope): ...`.
- *   `<!-- ui -->`        required only when a changed file is under a `UI_PATHS` prefix.
- *   `<!-- ui: a/ b/ -->` the same, with the template's own path prefixes (space-separated)
- *                        in place of `UI_PATHS`. Each repo lists the paths a reviewer must see.
- *   `<!-- bot -->`       required only when the author is desplega-bot (or unknown: a local run).
+ *   `<!-- evidence -->`  requires code, a table, media, or a reason for no visible change.
+ *   `<!-- bot -->`       required for the swarm bot or an unknown author.
+ *                       Present content uses list items and labeled links. Bot content needs a link.
  *   `<!-- outline -->`   required unless Risk is low and the diff is `SMALL_DIFF_LINES` or fewer.
  *   `<!-- pick one -->`  the body must check exactly one of the template's `- [ ]` items.
+ * Heading budgets: `max rows: N`, `max bullets: N`, `max code lines: N` warn only.
+ * Lead markers: `one of: a | b | c` restricts values; `max words: N` warns only.
+ * Other comments provide guidance.
  * Any other required section counts as filled when its text, with HTML comments
  * removed, is not blank. Keep template guidance inside HTML comments so an
  * unedited template fails.
@@ -33,14 +35,12 @@
  * Usage:
  *   bun scripts/check-pr-body.ts --title "fix(slack): ..." --body-file /tmp/pr-body.md
  *   PR_TITLE="..." PR_BODY="..." PR_AUTHOR="..." bun scripts/check-pr-body.ts
- * Optional: `--changed-files-file <file>` / PR_CHANGED_FILES_FILE (one path per
- * line; a local run without it uses `git diff` against origin/main) and
- * `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions), and
+ * Optional: `--changed-lines <n>` / PR_CHANGED_LINES (additions + deletions), and
  * PR_TEMPLATE_PATH (the template to check against; default below), and
  * PR_BODY_PROBLEMS_FILE (on failure, the problems are written there as a Markdown list).
  *
  * CI: `.github/workflows/pr-body.yml` passes the env above. On success, each
- * picked choice and the risk level are written to GITHUB_OUTPUT (for example
+ * picked section choice, lead choice and the risk level are written to GITHUB_OUTPUT (for example
  * `urgency=asap`, `risk=high`).
  */
 
@@ -58,21 +58,17 @@ const TEMPLATE_PATH = process.env.PR_TEMPLATE_PATH || ".github/pull_request_temp
 
 export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export type Risk = (typeof RISK_LEVELS)[number];
-/** The path prefixes of a bare `<!-- ui -->` marker. A template sets its own with `<!-- ui: a/ b/ -->`. */
-export const UI_PATHS = ["apps/ui/", "apps/templates-ui/"];
 export const SMALL_DIFF_LINES = 50;
 export const PROSE_WORD_WARN = 300;
 
-/** `flags`: each HTML comment on the heading line, whitespace collapsed, case kept (a flag may carry paths). */
+/** `flags`: each HTML comment on the heading line, whitespace collapsed, case kept. */
 type Section = { heading: string; flags: string[]; content: string };
 
 export type TemplateSection = {
   heading: string;
-  when: "always" | "optional" | "fix" | "ui" | "bot" | "outline";
+  when: "always" | "optional" | "fix" | "evidence" | "bot" | "outline";
   /** The allowed `- [ ]` items when the section is marked `pick one`, else empty. */
   choices: string[];
-  /** The path prefixes that make a `ui` section required, else empty. */
-  paths: string[];
 };
 
 /** What the check knows about the PR besides its body. Unknown fields relax nothing except as noted. */
@@ -80,8 +76,6 @@ export type PrContext = {
   title?: string;
   /** GitHub login. Unknown counts as the swarm bot, as for the leak check. */
   author?: string;
-  /** Changed file paths. Unknown: `<!-- ui -->` sections are not required. */
-  changedFiles?: string[];
   /** Additions + deletions. Unknown: a low-risk PR may still skip `<!-- outline -->`. */
   changedLines?: number;
 };
@@ -96,9 +90,6 @@ const checkboxes = (content: string, checked: boolean) =>
 const LEAD_LINE = /^\s*\*\*([^*:\n]+):\*\*(.*)$/gm;
 
 export const isFixTitle = (title: string) => /^fix(\([^)]*\))?!?:/i.test(title.trim());
-export const touchesUi = (files: string[], paths: string[] = UI_PATHS) =>
-  files.some((f) => paths.some((p) => f.replace(/^\.?\//, "").startsWith(p)));
-
 /** Split markdown into the preamble and level-1/level-2 sections. Headings inside code fences or HTML comments do not count. */
 function parseSections(markdown: string): { preamble: string; sections: Section[] } {
   const sections: Section[] = [];
@@ -118,21 +109,16 @@ function parseSections(markdown: string): { preamble: string; sections: Section[
   return { preamble, sections };
 }
 
-const WHEN_FLAGS = ["optional", "fix", "ui", "bot", "outline"] as const;
-
-const UI_FLAG = /^ui(?::(.*))?$/i;
+const WHEN_FLAGS = ["optional", "fix", "evidence", "bot", "outline"] as const;
 
 export function templateSections(template: string): TemplateSection[] {
   return parseSections(template).sections.map((s) => {
-    const uiFlag = s.flags.map((f) => UI_FLAG.exec(f)).find(Boolean);
-    const flags = s.flags.map((f) => (UI_FLAG.test(f) ? "ui" : f.toLowerCase()));
+    const flags = s.flags.map((f) => f.toLowerCase());
     const when = WHEN_FLAGS.find((f) => flags.includes(f)) ?? "always";
-    const own = (uiFlag?.[1] ?? "").split(" ").filter(Boolean);
     return {
       heading: s.heading,
       when,
       choices: flags.includes("pick one") ? checkboxes(s.content, false) : [],
-      paths: when === "ui" ? (own.length > 0 ? own : UI_PATHS) : [],
     };
   });
 }
@@ -141,6 +127,61 @@ export function templateSections(template: string): TemplateSection[] {
 export function templateLeadLines(template: string): string[] {
   const { preamble } = parseSections(template);
   return [...stripComments(preamble).matchAll(LEAD_LINE)].map((m) => (m[1] ?? "").trim());
+}
+
+/** Read constraints only from inline lead markers. */
+function leadRules(template: string) {
+  const preamble = parseSections(template).preamble.replace(COMMENT, (comment) =>
+    comment.includes("\n") ? "" : comment,
+  );
+  return [...preamble.matchAll(LEAD_LINE)].map((m) => {
+    const flags = [...(m[2] ?? "").matchAll(COMMENT)].map((c) => (c[1] ?? "").trim());
+    const choice = flags.find((f) => /^one of:/i.test(f));
+    return {
+      label: (m[1] ?? "").trim(),
+      choices: choice
+        ? choice
+            .replace(/^one of:\s*/i, "")
+            .split("|")
+            .map(normalize)
+        : [],
+      maxWords: markerLimit(flags, "words"),
+    };
+  });
+}
+
+function markerLimit(flags: string[], unit: string): number | undefined {
+  const match = flags.map((f) => new RegExp(`^max ${unit}:\\s*(\\d+)$`, "i").exec(f)).find(Boolean);
+  return match ? Number(match[1]) : undefined;
+}
+
+function chosenLead(rule: ReturnType<typeof leadRules>[number], body: string): string | undefined {
+  const value = bodyLeadLines(body).get(rule.label.toLowerCase());
+  if (value !== undefined) {
+    const normalized = normalize(value);
+    return rule.choices.find(
+      (choice) =>
+        normalized.startsWith(choice) &&
+        (normalized.length === choice.length ||
+          !/[\p{L}\p{N}_]/u.test(normalized[choice.length] ?? "")),
+    );
+  }
+  // Transition aid for PRs opened with the old checkbox section.
+  const section = parseSections(body).sections.find(
+    (s) => normalize(s.heading) === normalize(rule.label),
+  );
+  const checked = section ? checkboxes(section.content, true) : [];
+  return checked.length === 1 && rule.choices.includes(checked[0] ?? "") ? checked[0] : undefined;
+}
+
+/** Valid lead choices, keyed by lowercase label, including the checkbox transition form. */
+export function leadChoices(template: string, body: string): Record<string, string> {
+  const choices: Record<string, string> = {};
+  for (const rule of leadRules(template)) {
+    const choice = chosenLead(rule, body);
+    if (choice !== undefined) choices[rule.label.toLowerCase()] = choice;
+  }
+  return choices;
 }
 
 /** The filled lead lines of a body, keyed by lowercase label. Comments removed. */
@@ -172,13 +213,87 @@ export function proseWordCount(body: string): number {
 }
 
 /** Non-blocking advice. An empty list means no warning. */
-export function prBodyWarnings(body: string): string[] {
+export function prBodyWarnings(body: string, template?: string): string[] {
   const words = proseWordCount(body);
-  return words > PROSE_WORD_WARN
-    ? [
-        `about ${words} prose words (budget ~250, warn above ${PROSE_WORD_WARN}). Show the change: outline, tables, <details>.`,
-      ]
-    : [];
+  const warnings =
+    words > PROSE_WORD_WARN
+      ? [
+          `about ${words} prose words (budget ~150, warn above ${PROSE_WORD_WARN}). Show the change: outline, tables, <details>.`,
+        ]
+      : [];
+  if (template === undefined) return warnings;
+  const leads = bodyLeadLines(body);
+  for (const rule of leadRules(template)) {
+    const count = (leads.get(rule.label.toLowerCase()) ?? "").split(/\s+/).filter(Boolean).length;
+    if (rule.maxWords !== undefined && count > rule.maxWords) {
+      warnings.push(`**${rule.label}:** has ${count} words. Target: ${rule.maxWords} or fewer`);
+    }
+  }
+  for (const section of parseSections(template).sections) {
+    const found = parseSections(body).sections.find(
+      (s) => normalize(s.heading) === normalize(section.heading),
+    );
+    if (!found) continue;
+    const text = stripComments(found.content);
+    const lines = text.split("\n");
+    let fence: string | undefined;
+    let codeLines = 0;
+    for (const line of lines) {
+      if (fence) {
+        if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = undefined;
+        else codeLines++;
+      } else {
+        fence = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      }
+    }
+    const counts = {
+      rows: tableDataRows(stripFencedCode(text, "")),
+      bullets: (
+        stripFencedCode(text, "")
+          .replace(/<details\b[^>]*>[\s\S]*?<\/details>/gi, "")
+          .match(/^[-*] +/gm) ?? []
+      ).length,
+      "code lines": codeLines,
+    };
+    for (const [unit, count] of Object.entries(counts)) {
+      const limit = markerLimit(section.flags, unit);
+      if (limit !== undefined && count > limit) {
+        warnings.push(
+          `## ${section.heading}: ${count} ${unit === "rows" ? "table rows" : unit}. Target: ${limit} or fewer`,
+        );
+      }
+    }
+  }
+  if (body.includes("X-Amz-"))
+    warnings.push("a presigned link expires. Use a GitHub attachment for images and videos");
+  return warnings;
+}
+
+const TABLE_SEPARATOR = /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/;
+function tableDataRows(text: string): number {
+  const lines = text.split("\n");
+  let rows = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (!/^\s*\|/.test(lines[i - 1] ?? "") || !TABLE_SEPARATOR.test(lines[i] ?? "")) continue;
+    while (/^\s*\|/.test(lines[i + 1] ?? "") && !TABLE_SEPARATOR.test(lines[i + 1] ?? "")) {
+      rows++;
+      i++;
+    }
+  }
+  return rows;
+}
+
+function hasEvidence(text: string): boolean {
+  return (
+    /^ {0,3}(?:`{3,}|~{3,})/m.test(text) ||
+    text
+      .split("\n")
+      .some((line, i, lines) => /^\s*\|/.test(line) && TABLE_SEPARATOR.test(lines[i + 1] ?? "")) ||
+    /!\[[^\]\n]*\]\([^)]+\)|<img\b|<video\b/i.test(text) ||
+    /https?:\/\/[^\s<>]+\.(?:mp4|mov|webm)(?=$|[\s)<>])/im.test(text) ||
+    /https:\/\/github\.com\/user-attachments\/assets\/[^\s<>]+/i.test(text) ||
+    /^\s*No vis(?:ible|ual) change:[ \t]*\S.*$/im.test(text)
+  );
 }
 
 /** One problem per leak category. Names the category, never the matched text (CI logs are public). */
@@ -193,13 +308,12 @@ export const shouldCheckLeaks = (author: string | undefined) =>
 function sectionRequired(section: TemplateSection, body: string, ctx: PrContext): boolean {
   switch (section.when) {
     case "always":
+    case "evidence":
       return true;
     case "optional":
       return false;
     case "fix":
       return isFixTitle(ctx.title ?? "");
-    case "ui":
-      return touchesUi(ctx.changedFiles ?? [], section.paths);
     case "bot":
       return shouldCheckLeaks(ctx.author);
     case "outline": {
@@ -219,20 +333,43 @@ export function checkPrBody(template: string, body: string, context: string | Pr
   const problems: string[] = [];
 
   const leads = bodyLeadLines(body);
-  for (const label of templateLeadLines(template)) {
+  for (const rule of leadRules(template)) {
+    const { label } = rule;
     const value = leads.get(label.toLowerCase());
     const name = `**${label}:**`;
+    const chosen = chosenLead(rule, body);
+    if (value === undefined && chosen !== undefined) continue;
     if (value === undefined) problems.push(`missing line: ${name}`);
     else if (!value) problems.push(`empty line: ${name}`);
-    else if (label.toLowerCase() === "risk" && !riskLevel(body)) {
+    else if (rule.choices.length > 0 && chosen === undefined) {
+      problems.push(`${name} must start with one of: ${rule.choices.join(", ")}`);
+    } else if (label.toLowerCase() === "risk" && !riskLevel(body)) {
       problems.push(`${name} must start with one of: ${RISK_LEVELS.join(", ")}`);
     }
   }
 
   for (const section of templateSections(template)) {
-    if (!sectionRequired(section, body, ctx)) continue;
+    const required = sectionRequired(section, body, ctx);
     const found = bodySections.find((s) => normalize(s.heading) === normalize(section.heading));
     const name = `## ${section.heading}`;
+    if (section.when === "bot" && found && stripComments(found.content).trim()) {
+      const text = stripComments(found.content)
+        .replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/gi, "")
+        .replace(/<\/?details\b[^>]*>/gi, "");
+      const link = /(?<!!)\[[^\]\n]+\]\(<?https?:\/\/[^\s]+?>?\)/i;
+      const bareUrl = /https?:\/\//i.test(text.replace(new RegExp(link.source, "gi"), ""));
+      if (bareUrl) {
+        problems.push(`${name}: write each link as [label](url), not as a bare URL`);
+      }
+      if (text.split("\n").some((line) => line.trim() && !/^\s*[-*] /.test(line))) {
+        problems.push(`${name}: a list of links only. Move other text to another section`);
+      }
+      // A bare URL already has its own problem line above.
+      if (shouldCheckLeaks(ctx.author) && !bareUrl && !link.test(text)) {
+        problems.push(`${name}: link the task as [Task](url)`);
+      }
+    }
+    if (!required) continue;
     if (!found) {
       problems.push(`missing section: ${name}`);
     } else if (section.choices.length > 0) {
@@ -240,6 +377,10 @@ export function checkPrBody(template: string, body: string, context: string | Pr
       if (picked.length !== 1 || !section.choices.includes(picked[0] ?? "")) {
         problems.push(`${name}: check exactly one of: ${section.choices.join(", ")}`);
       }
+    } else if (section.when === "evidence" && !hasEvidence(stripComments(found.content))) {
+      problems.push(
+        `${name}: show a snippet, a table, an image or a video, or write "No visible change: <reason>"`,
+      );
     } else if (!stripComments(found.content).trim()) {
       problems.push(`empty section: ${name}`);
     }
@@ -276,24 +417,14 @@ const ruleText = (s: TemplateSection): string => {
       return " (optional)";
     case "fix":
       return " (required for fix: titles)";
-    case "ui":
-      return ` (required when the diff touches ${s.paths.join(" or ")})`;
+    case "evidence":
+      return " (required: a snippet, a table, an image, a video, or No visible change: <reason>)";
     case "bot":
       return " (required when desplega-bot is the author)";
     case "outline":
       return ` (may be skipped when Risk is low and the diff is ${SMALL_DIFF_LINES} lines or fewer)`;
   }
 };
-
-async function localChangedFiles(): Promise<string[] | undefined> {
-  try {
-    const base = (await Bun.$`git merge-base origin/main HEAD`.quiet().text()).trim();
-    const out = await Bun.$`git diff --name-only ${base}`.quiet().text();
-    return out.split("\n").filter(Boolean);
-  } catch {
-    return undefined;
-  }
-}
 
 if (import.meta.main) {
   const arg = (name: string) => {
@@ -305,21 +436,14 @@ if (import.meta.main) {
   const title = arg("--title") ?? process.env.PR_TITLE;
   const template = await Bun.file(TEMPLATE_PATH).text();
   const author = arg("--author") ?? process.env.PR_AUTHOR;
-  const filesFile = arg("--changed-files-file") ?? process.env.PR_CHANGED_FILES_FILE;
-  const changedFiles = filesFile
-    ? (await Bun.file(filesFile).text()).split("\n").filter(Boolean)
-    : await localChangedFiles();
   const linesArg = arg("--changed-lines") ?? process.env.PR_CHANGED_LINES;
   const changedLines = linesArg && /^\d+$/.test(linesArg) ? Number(linesArg) : undefined;
 
   if (title === undefined) {
     console.warn("No PR title given (--title or PR_TITLE). Sections for fix PRs were not checked.");
   }
-  if (changedFiles === undefined) {
-    console.warn("Changed files unknown. Sections marked `ui` were not checked.");
-  }
-  const ctx: PrContext = { title, author, changedFiles, changedLines };
-  for (const warning of prBodyWarnings(body)) {
+  const ctx: PrContext = { title, author, changedLines };
+  for (const warning of prBodyWarnings(body, template)) {
     console.warn(process.env.GITHUB_ACTIONS ? `::warning title=PR body::${warning}` : warning);
   }
   const leaks = shouldCheckLeaks(author) ? checkPrBodyLeaks(body) : [];
@@ -329,7 +453,11 @@ if (import.meta.main) {
     // Expose each picked choice (urgency=asap) and the risk level to later workflow jobs.
     const outputFile = process.env.GITHUB_OUTPUT;
     if (outputFile) {
-      const outputs = { ...pickedChoices(template, body), risk: riskLevel(body) ?? "" };
+      const outputs = {
+        ...pickedChoices(template, body),
+        ...leadChoices(template, body),
+        risk: riskLevel(body) ?? "",
+      };
       appendFileSync(
         outputFile,
         Object.entries(outputs)
@@ -346,7 +474,11 @@ if (import.meta.main) {
   console.error(`PR body does not match ${TEMPLATE_PATH}:`);
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error("\nLead lines:");
-  for (const label of templateLeadLines(template)) console.error(`  **${label}:**`);
+  for (const rule of leadRules(template)) {
+    console.error(
+      `  **${rule.label}:**${rule.choices.length ? ` (one of: ${rule.choices.join(", ")})` : ""}`,
+    );
+  }
   console.error("Sections, in order:");
   for (const s of templateSections(template)) console.error(`  ## ${s.heading}${ruleText(s)}`);
   if (leaks.length > 0) {

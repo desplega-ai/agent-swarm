@@ -101,7 +101,7 @@ Use `<Streamdown>{text}</Streamdown>` from `streamdown` for all markdown renderi
 
 ## PR evidence
 
-A PR that changes what the dashboard shows carries screenshots of the change running locally (static/layout changes included), as GitHub user attachments in the PR body's `## Before / after` section. Add a recording only for a new or changed interaction or flow. When nothing visible changes (a configuration-catalog entry that reuses an existing control `kind`, a type-only refactor), write `No visual change: <reason>` there and capture no media. Capture with the `agent-browser` skill (`qa-use` only when asked). Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port conflicts: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
+A PR that changes what the dashboard shows carries screenshots of the change running locally (static/layout changes included), as GitHub user attachments in the PR body's `## Before / after` section. Add a recording only for a new or changed interaction or flow. When nothing visible changes (a configuration-catalog entry that reuses an existing control `kind`, a type-only refactor), write `No visible change: <reason>` there and capture no media. Capture with the `agent-browser` skill (`qa-use` only when asked). Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port conflicts: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
 
 ## UI E2E
 
