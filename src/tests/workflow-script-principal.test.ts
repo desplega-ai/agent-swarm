@@ -38,9 +38,11 @@ import {
 } from "../be/seed/workflows-seeder";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
 import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow";
 import type { Workflow } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import {
   getExecutorRegistry,
   initWorkflows,
@@ -92,6 +94,8 @@ beforeAll(async () => {
   await initWorkflows();
   leadId = (await createAgent({ name: "principal-lead", isLead: true, status: "idle" })).id;
   workerId = (await createAgent({ name: "principal-worker", isLead: false, status: "idle" })).id;
+  // The workflow write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(workerId);
 
   await runSeeder(createWorkflowsSeeder(), { quiet: true });
   // The runner is stubbed, so the entry node only needs its global row to resolve.
@@ -152,6 +156,7 @@ beforeAll(async () => {
     });
 
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
     res.setHeader("Content-Type", "application/json");
     const handled = await handleWorkflows(
       req,

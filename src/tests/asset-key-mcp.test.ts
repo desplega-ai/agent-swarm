@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreatePageTool } from "../tools/create-page";
 import { registerCreateScheduleTool } from "../tools/schedules/create-schedule";
 import { registerSendTaskTool } from "../tools/send-task";
@@ -44,6 +45,8 @@ beforeAll(async () => {
       maxTasks: 10,
     })
   ).id;
+  // The workflow write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(agentId);
   targetAgentId = (
     await createAgent({
       name: "asset-key-target",

@@ -20,6 +20,7 @@ import { updateAgentCredStatus } from "../be/db/agents";
 import { createModelProfile, deleteModelProfile } from "../be/db/model-profiles";
 import { reloadModelsCatalog } from "../be/model-catalog-store";
 import { handleSchedules } from "../http/schedules";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreateScheduleTool } from "../tools/schedules/create-schedule";
 import { registerPatchScheduleTool } from "../tools/schedules/patch-schedule";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
@@ -67,6 +68,8 @@ beforeAll(async () => {
     })
   ).id;
   await updateAgentCredStatus(claudeId, READY);
+  // The schedule write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(claudeId);
   codexId = (
     await createAgent({ name: "sp-codex", isLead: false, status: "idle", harnessProvider: "codex" })
   ).id;

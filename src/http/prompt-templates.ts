@@ -16,6 +16,7 @@ import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/reg
 import { resolveTemplate } from "../prompts/resolver";
 import { type PromptTemplate, PromptTemplateHistorySchema, PromptTemplateSchema } from "../types";
 import { interpolate } from "../utils/template";
+import { ensureHttpPermission } from "./config";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -156,6 +157,7 @@ const checkoutRoute = route({
   pattern: ["api", "prompt-templates", null, "checkout"],
   summary: "Checkout a specific version of a prompt template from history",
   tags: ["PromptTemplates"],
+  rbac: { permission: "prompt-template.write.any" },
   params: z.object({ id: z.string() }),
   body: z.object({ version: z.number() }),
   responses: {
@@ -165,6 +167,7 @@ const checkoutRoute = route({
     },
     400: { description: "Validation error" },
     404: { description: "Template or version not found" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
   auth: { apiKey: true },
 });
@@ -175,6 +178,7 @@ const resetRoute = route({
   pattern: ["api", "prompt-templates", null, "reset"],
   summary: "Reset a prompt template to its code-defined default",
   tags: ["PromptTemplates"],
+  rbac: { permission: "prompt-template.write.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: {
@@ -182,6 +186,7 @@ const resetRoute = route({
       schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     404: { description: "Template not found or no code default available" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
   auth: { apiKey: true },
 });
@@ -212,6 +217,7 @@ const deleteByIdRoute = route({
   pattern: ["api", "prompt-templates", null],
   summary: "Delete a prompt template override",
   tags: ["PromptTemplates"],
+  rbac: { permission: "prompt-template.write.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: {
@@ -220,6 +226,7 @@ const deleteByIdRoute = route({
     },
     400: { description: "Cannot delete default template" },
     404: { description: "Template not found" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
   auth: { apiKey: true },
 });
@@ -251,6 +258,7 @@ const upsertRoute = route({
   pattern: ["api", "prompt-templates"],
   summary: "Create or update a prompt template override",
   tags: ["PromptTemplates"],
+  rbac: { permission: "prompt-template.write.any" },
   body: z.object({
     eventType: z.string().min(1),
     scope: z.enum(["global", "agent", "repo"]).optional(),
@@ -266,9 +274,13 @@ const upsertRoute = route({
       schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     400: { description: "Validation error" },
+    403: { description: "Caller is not a lead agent, operator, or user" },
   },
   auth: { apiKey: true },
 });
+
+const PROMPT_TEMPLATE_DENIED =
+  "Changing prompt templates requires the lead agent, operator, or user authentication";
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -359,6 +371,10 @@ export async function handlePromptTemplates(
 
   // 4-segment with param: /api/prompt-templates/{id}/checkout
   if (checkoutRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(req, res, "prompt-template.write.any", PROMPT_TEMPLATE_DENIED))
+    )
+      return true;
     const parsed = await checkoutRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
@@ -378,6 +394,10 @@ export async function handlePromptTemplates(
 
   // 4-segment with param: /api/prompt-templates/{id}/reset
   if (resetRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(req, res, "prompt-template.write.any", PROMPT_TEMPLATE_DENIED))
+    )
+      return true;
     const parsed = await resetRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
@@ -426,6 +446,10 @@ export async function handlePromptTemplates(
 
   // 3-segment with param: DELETE /api/prompt-templates/{id}
   if (deleteByIdRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(req, res, "prompt-template.write.any", PROMPT_TEMPLATE_DENIED))
+    )
+      return true;
     const parsed = await deleteByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
@@ -461,6 +485,10 @@ export async function handlePromptTemplates(
 
   // 2-segment: PUT /api/prompt-templates
   if (upsertRoute.match(req.method, pathSegments)) {
+    if (
+      !(await ensureHttpPermission(req, res, "prompt-template.write.any", PROMPT_TEMPLATE_DENIED))
+    )
+      return true;
     const parsed = await upsertRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 

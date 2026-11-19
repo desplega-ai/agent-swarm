@@ -2,6 +2,8 @@
 
 Use this skill when you need to change an existing workflow without breaking live runs. The goal is to make small, verified revisions: inspect the current workflow, diagnose the failing step, patch only the required node or edge, trigger a realistic run, and keep iterating until the run reaches the intended terminal state.
 
+Only the lead agent, the operator or a user creates, changes or runs workflows, schedules and prompt templates. A worker asks the lead through `send-task`. If you are a worker, hand the change to the lead instead of calling the workflow tools.
+
 ## Core Loop
 
 1. Read the workflow before changing it. Capture the current version, node IDs, inputs, config, and downstream dependencies.
