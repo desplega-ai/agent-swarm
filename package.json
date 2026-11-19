@@ -209,7 +209,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "2.8.0",
     "@ai-sdk/openai": "^3.0.41",
-    "@anthropic-ai/claude-agent-sdk": "0.3.327",
+    "@anthropic-ai/claude-agent-sdk": "0.3.328",
     "@anthropic-ai/sdk": "^1.10.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@aws-sdk/client-bedrock": "3.1048.0",
@@ -219,7 +219,7 @@
     "@chat-adapter/slack": "4.45.0",
     "@chat-adapter/teams": "4.45.0",
     "@chat-adapter/telegram": "4.45.0",
-    "@cursor/sdk": "1.4.1",
+    "@cursor/sdk": "1.4.2",
     "@desplega.ai/agent-fs-just-bash": "0.18.34",
     "@desplega.ai/business-use": "^0.4.2",
     "@earendil-works/pi-agent-core": "^1.5.2",
