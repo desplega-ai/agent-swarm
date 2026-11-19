@@ -359,9 +359,9 @@ export default async function compoundInsights(args: any, ctx: any) {
   const includeByAgent = parsed.data.includeByAgent !== false;
   const publishPage = parsed.data.publishPage !== false;
 
-  // `days` is a validated positive int, so it is safe to interpolate into the
-  // SQLite datetime modifier. EXCLUDED_FAIL is a fixed constant list.
-  const w = `datetime('now','-${days} days')`;
+  // Match the stored ISO timestamps so text comparisons preserve time order.
+  // `days` is a validated positive int and EXCLUDED_FAIL is a fixed list.
+  const w = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${days} days')`;
   const exclList = EXCLUDED_FAIL.map((r) => `'${r}'`).join(",");
   // A "real" failure = status failed AND not one of the bookkeeping reasons.
   const realFail = `t.status='failed' AND (t.failureReason IS NULL OR t.failureReason NOT IN (${exclList}))`;
@@ -508,7 +508,7 @@ export default async function compoundInsights(args: any, ctx: any) {
               FROM agent_memory
               WHERE accessCount = 0
                 AND (sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL)
-                AND createdAt < datetime('now','-${days} days')
+                AND createdAt < ${w}
               GROUP BY source ORDER BY count DESC`,
       }),
     );
