@@ -1173,11 +1173,12 @@ No `eval` risk, declarative, easiest to author. Missing keys → no-match. Type 
 filter: "(payload) => payload.labels.some(l => l.name === 'release') && payload.number > 1000"
 ```
 
-Compiled with `new Function(...)` inside a sandbox that shadows `require`, `process`, `Bun`, `globalThis`, `global`, `fetch`, `setTimeout`, `setInterval`, `eval`, `Function`, `AsyncFunction` to `undefined`. Result is coerced to boolean. Throws → no-match.
+Evaluated in a fresh QuickJS runtime (`src/workflows/predicate-sandbox.ts`), the same sandbox `code-match` nodes use. The filter has no access to API-process globals (`process`, `Bun`, `fetch`, `require`) and receives a JSON copy of the payload. Result is coerced to boolean. Throws or returns a Promise → no-match.
 
 Hardening (all enforced):
 
-- 50ms execution timeout — infinite loops and catastrophic-backtracking regex resolve to no-match.
+- 50ms execution timeout, enforced inside the interpreter — infinite loops and catastrophic-backtracking regex resolve to no-match. `code-match` nodes get 1s.
+- 64 MB memory and 1 MB stack limits per evaluation.
 - 2KB cap on filter source length (rejected at the Zod boundary).
 - Parsed at executor-init time so syntax errors fail the workflow definition, not the first event.
 

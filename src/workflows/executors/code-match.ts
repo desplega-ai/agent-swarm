@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { evaluatePredicate } from "../predicate-sandbox";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
@@ -16,18 +17,8 @@ export const CodeMatchOutputSchema = z.object({
 
 // ─── Executor ───────────────────────────────────────────────
 
-const SANDBOX_KEYS = [
-  "require",
-  "process",
-  "Bun",
-  "globalThis",
-  "global",
-  "fetch",
-  "setTimeout",
-  "setInterval",
-] as const;
-
-const SANDBOX_VALUES = SANDBOX_KEYS.map(() => undefined);
+// CPU budget for one predicate. It runs synchronously on the API thread.
+const CODE_MATCH_TIMEOUT_MS = 1_000;
 
 export class CodeMatchExecutor extends BaseExecutor<
   typeof CodeMatchConfigSchema,
@@ -44,16 +35,14 @@ export class CodeMatchExecutor extends BaseExecutor<
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof CodeMatchOutputSchema>>> {
     try {
-      // Build a sandboxed function — shadow dangerous globals in the function scope.
-      // "import" is a reserved keyword and cannot be a parameter name, so it is
-      // blocked by "use strict" scope.
-      const fn = new Function(
-        ...SANDBOX_KEYS,
-        "input",
-        `"use strict"; return (${config.code})(input);`,
-      );
-
-      const rawResult = fn(...SANDBOX_VALUES, context);
+      const result = await evaluatePredicate(config.code, context, {
+        timeoutMs: CODE_MATCH_TIMEOUT_MS,
+        strict: true,
+      });
+      if (!result.ok) {
+        return { status: "failed", error: `code-match execution error: ${result.error}` };
+      }
+      const rawResult = result.value;
 
       // Map result to port name
       let port: string;
