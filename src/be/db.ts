@@ -228,6 +228,13 @@ import { pageSearchSql } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
+import {
+  boundSessionLogLine,
+  sessionLogAccountKey,
+  sessionLogBudgetBytes,
+  sessionLogBudgetMarker,
+  sessionLogRowCost,
+} from "./db/session-log-bounds";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
@@ -4894,13 +4901,17 @@ function rowToSessionLog(row: SessionLogRow): SessionLog {
   };
 }
 
+/** Stores a worker log batch. Returns the rows actually stored, which is below
+ * `lines.length` once the session's byte budget runs out. */
 export async function createSessionLogs(logs: {
   taskId?: string;
   sessionId: string;
   iteration: number;
   cli: string;
   lines: string[];
-}): Promise<void> {
+  /** Server-derived scope for uploads with no task (pool workers/operator). */
+  budgetOwner?: string;
+}): Promise<number> {
   // Bounded batches, one short transaction each (reference shape:
   // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
   // counts, and a single transaction across thousands of scrub+INSERT
@@ -4908,7 +4919,14 @@ export async function createSessionLogs(logs: {
   // the whole sweep. The regex scrub runs outside the transaction so only
   // the inserts hold the lock.
   const BATCH_SIZE = 200;
-  for (let start = 0; start < logs.lines.length; start += BATCH_SIZE) {
+  const budget = sessionLogBudgetBytes();
+  const accountKey = sessionLogAccountKey(
+    logs.sessionId,
+    logs.taskId ? `task:${logs.taskId}` : (logs.budgetOwner ?? "operator"),
+  );
+  let exhausted = false;
+  let stored = 0;
+  for (let start = 0; start < logs.lines.length && !exhausted; start += BATCH_SIZE) {
     // Yield to the event loop between batches.
     if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
     const batch: Array<{ content: string; reasoning: ReturnType<typeof extractReasoning> }> = [];
@@ -4920,11 +4938,56 @@ export async function createSessionLogs(logs: {
       // content that is already scrubbed at the adapter emit site. We scrub
       // again here so any future write path that bypasses the adapter still
       // lands clean text in the persistent session_logs table.
-      const content = scrubSecrets(line);
+      const content = boundSessionLogLine(scrubSecrets(line));
       // Parsed here, next to the scrub, so the write lock covers inserts only.
       batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
     }
+    if (batch.length === 0) break;
     await getDbClient().transaction(async (tx) => {
+      // Budget accounting shares this transaction with the inserts, so two
+      // concurrent batches cannot both spend the same remaining bytes: the
+      // second one blocks on the write lock and then reads the first's total.
+      const account = await tx.get<{ bytes: number; exhaustedAt: string | null }>(
+        "SELECT bytes, exhaustedAt FROM session_log_bytes WHERE sessionId = ?",
+        [accountKey],
+      );
+      // `exhaustedAt`, not a byte comparison: the batch stops *before* the row
+      // that would cross, so a spent session's total stays under the bound.
+      if (account?.exhaustedAt) {
+        exhausted = true;
+        return;
+      }
+      let written = account?.bytes ?? 0;
+      for (const [index, { content }] of batch.entries()) {
+        const next = written + sessionLogRowCost(content, logs);
+        if (next > budget) {
+          // Stop before the row that crosses, so the stored total never passes
+          // the configured bound.
+          batch.length = index;
+          exhausted = true;
+          break;
+        }
+        written = next;
+      }
+      if (exhausted) {
+        console.warn(
+          `[session-logs] session ${logs.sessionId} reached the ${Math.round(
+            budget / (1024 * 1024),
+          )} MB budget; dropping further logs for this session`,
+        );
+        // The marker is the one row allowed past the bound: it is what tells a
+        // reader the transcript is cut rather than finished.
+        const marker = sessionLogBudgetMarker(logs.sessionId, budget);
+        batch.push({ content: marker, reasoning: extractReasoning(logs.cli, marker) });
+        written += sessionLogRowCost(marker, logs);
+      }
+      stored += batch.length;
+      await tx.run(
+        `INSERT INTO session_log_bytes (sessionId, bytes, exhaustedAt)
+         VALUES (?, ?, ?)
+         ON CONFLICT(sessionId) DO UPDATE SET bytes = excluded.bytes, exhaustedAt = excluded.exhaustedAt`,
+        [accountKey, written, exhausted ? new Date().toISOString() : null],
+      );
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting
       // at the POST's index. Reading the newest row by rowid walks the
@@ -4977,6 +5040,7 @@ export async function createSessionLogs(logs: {
       }
     });
   }
+  return stored;
 }
 
 // Session log reads order by rowid, which is insert order. Rows written before

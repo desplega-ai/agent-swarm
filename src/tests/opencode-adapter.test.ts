@@ -785,6 +785,149 @@ describe("OpencodeSession — persisted rows render in the dashboard", () => {
   });
 });
 
+describe("OpencodeSession — persisted bytes stay bounded", () => {
+  /** Total bytes the runner would store for a session's `raw_log` events. */
+  const storedBytes = (emitted: ProviderEvent[]) =>
+    emitted
+      .filter((e) => e.type === "raw_log")
+      .reduce((sum, e) => sum + (e as { content: string }).content.length, 0);
+
+  test("a tool result is stored once, not as a raw event beside its mirror", async () => {
+    const result = "x".repeat(50_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { command: "ls" } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: result }],
+      }),
+      succeeded,
+    ]);
+
+    const rows = emitted
+      .filter((e) => e.type === "raw_log")
+      .map((e) => (e as { content: string }).content)
+      .filter((content) => content.includes(result));
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0] as string)).toMatchObject({ type: "tool_end", result });
+  });
+
+  test("a tool payload past the cap is truncated with a marker", async () => {
+    const huge = "y".repeat(400_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { script: huge } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: huge }],
+      }),
+      succeeded,
+    ]);
+
+    const toolEnd = emitted.find((e) => e.type === "tool_end") as { result: string };
+    expect(toolEnd.result).toContain("[truncated");
+    expect(toolEnd.result.length).toBeLessThan(huge.length);
+    const toolStart = emitted.find((e) => e.type === "tool_start") as {
+      args: { script: string };
+    };
+    expect(toolStart.args.script).toContain("[truncated");
+    // The bug: one 400 KB payload used to persist ~800 KB across two rows.
+    expect(storedBytes(emitted)).toBeLessThan(huge.length);
+  });
+
+  test("a tool payload that is wide rather than long is bounded too", async () => {
+    // No single field is over the per-string cap, so only the aggregate
+    // ceiling can catch this one.
+    const nested = {
+      files: Array.from({ length: 400 }, (_, i) => ({
+        path: `/src/file-${i}.ts`,
+        body: "w".repeat(10_000),
+      })),
+    };
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: nested }),
+      succeeded,
+    ]);
+
+    expect(storedBytes(emitted)).toBeLessThan(JSON.stringify(nested).length);
+  });
+
+  test("a control-heavy payload is bounded after JSON escaping", async () => {
+    // 50k NUL bytes are 50 KB raw but 300 KB once escaped, which the API's
+    // row cap would cut into invalid JSON the dashboard parser drops.
+    const control = "\u0000".repeat(50_000);
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { body: control } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: control }],
+      }),
+      succeeded,
+    ]);
+
+    let checked = 0;
+    for (const event of emitted) {
+      const row = event as { type: string; content?: string };
+      if (row.type !== "raw_log" || !row.content) continue;
+      checked++;
+      expect(new TextEncoder().encode(row.content).length).toBeLessThan(256 * 1024);
+      // Whatever is stored must still parse: a cut row would not.
+      expect(() => JSON.parse(row.content as string)).not.toThrow();
+    }
+    // Otherwise the loop would pass by checking nothing at all.
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  test("a multi-byte payload is bounded in bytes, not characters", async () => {
+    // 80k UTF-16 units is under a character-based 100k cap, but 160 KB of
+    // UTF-8 — which the API's row cap would then cut mid-value.
+    const emoji = "😀".repeat(40_000);
+    const utf8 = (value: string) => new TextEncoder().encode(value).length;
+    const { emitted } = await runSession([
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { body: emoji } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: emoji }],
+      }),
+      succeeded,
+    ]);
+
+    const toolEnd = emitted.find((e) => e.type === "tool_end") as { result: string };
+    expect(utf8(toolEnd.result)).toBeLessThanOrEqual(100_000);
+    const toolStart = emitted.find((e) => e.type === "tool_start") as { args: { body: string } };
+    expect(utf8(toolStart.args.body)).toBeLessThanOrEqual(100_000);
+  });
+
+  test("assistant text grows linearly with its parts, not quadratically", async () => {
+    const part = "z".repeat(10_000);
+    const parts = Array.from({ length: 40 }, (_, ordinal) =>
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: "msg_1",
+        ordinal,
+        text: part,
+      }),
+    );
+    const { emitted } = await runSession([...parts, succeeded]);
+
+    // Cumulative mirrors would store 40 rows averaging half the message:
+    // ~8 MB against the ~400 KB the parts themselves cost.
+    expect(storedBytes(emitted)).toBeLessThan(parts.length * part.length * 2);
+    // The runner still sees the full cumulative text for its final output.
+    const messages = emitted.filter((e) => e.type === "message");
+    expect((messages.at(-1) as { content: string }).content).toHaveLength(
+      part.length * parts.length,
+    );
+  });
+});
+
 describe("OpencodeSession — session end is bounded", () => {
   test("a profile sync that never answers cannot strand the host or completion", async () => {
     let syncCalls = 0;
