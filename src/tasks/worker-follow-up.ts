@@ -534,7 +534,8 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  * verifier's would-skip decision after commit; the follow-up is never skipped.
  * With `enforce`, a completed run of a schedule in
  * `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS` returns null here: its follow-up is
- * created after commit unless the verifier says `would_skip`.
+ * created after commit unless the verifier says `would_skip`. Follow-up
+ * instructions or a rejected `chainedTaskId` keep the follow-up up front.
  */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
@@ -737,7 +738,8 @@ export async function createWorkerTaskFollowUp(args: {
       { origin: "followUp" },
     );
   const gateConfig = readFollowUpGateConfig();
-  if (isFollowUpGateEnforced({ task, status, config: gateConfig })) {
+  const chainRejected = chainRejection !== null;
+  if (isFollowUpGateEnforced({ task, status, config: gateConfig, chainRejected })) {
     try {
       // The verifier reads the committed run, so the follow-up waits for it after commit.
       scheduleFollowUpGateEnforce({
@@ -764,6 +766,7 @@ export async function createWorkerTaskFollowUp(args: {
         status,
         followUpTaskId: followUp.id,
         leadAgentId: leadAgent.id,
+        chainRejected,
       });
     } catch (err) {
       console.warn(

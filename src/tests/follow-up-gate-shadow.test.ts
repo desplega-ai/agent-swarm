@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   getDbClient,
@@ -658,6 +659,90 @@ describe("follow-up gate enforce", () => {
       reason: "follow_up_instructions",
     });
     expect(calls.runVerifier).toBe(0);
+  });
+
+  describe("a rejected chainedTaskId keeps the recovery follow-up", () => {
+    const chainChild = (parentTaskId: string, creatorAgentId = workerId) =>
+      createTaskExtended("chained work", {
+        agentId: workerId,
+        creatorAgentId,
+        parentTaskId,
+        followUpConfig: { disabled: true },
+      });
+
+    test.each([
+      ["an unknown id", async () => crypto.randomUUID(), "no task has this id"],
+      [
+        "a terminal child",
+        async (task: AgentTask) => {
+          const child = await chainChild(task.id);
+          await completeTask(child.id, "done");
+          return child.id;
+        },
+        "it is completed, not live",
+      ],
+      [
+        "a child of another task",
+        async () => (await chainChild((await workerTask()).id)).id,
+        "not this task",
+      ],
+      [
+        "a child created by another agent",
+        async (task: AgentTask) => (await chainChild(task.id, leadId)).id,
+        "not created by the agent that completed this task",
+      ],
+    ] as const)("%s", async (_, chainedTaskIdFor, reason) => {
+      for (const mode of ["enforce", "shadow"] as const) {
+        enforceEnv(
+          mode === "shadow"
+            ? { FOLLOW_UP_GATE_MODE: "shadow", FOLLOW_UP_GATE_SCHEDULE_IDS: GATED }
+            : {},
+        );
+        const calls = stubDeps(async () => ({ ok: true, controls: { ok: true } }));
+        const task = await workerTask();
+        const followUp = await createWorkerTaskFollowUp({
+          task,
+          status: "completed",
+          output: "done",
+          chainedTaskId: await chainedTaskIdFor(task),
+          completingAgentId: workerId,
+        });
+        expect(followUp).not.toBeNull();
+        const followUps = await getDbClient().query<{ id: string; task: string; agentId: string }>(
+          "SELECT id, task, agentId FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
+          [task.id],
+        );
+        expect(followUps).toHaveLength(1);
+        expect(followUps[0]!.agentId).toBe(leadId);
+        expect(followUps[0]!.task).toContain(reason);
+        expect((await shadowRows(task.id))[0]!.meta).toMatchObject({
+          mode,
+          decision: "ineligible",
+          reason: "chain_rejected",
+          followUpTaskId: followUp!.id,
+        });
+        expect(calls.runVerifier).toBe(0);
+      }
+    });
+
+    test("a live chained child still suppresses the follow-up and the gate", async () => {
+      enforceEnv();
+      const calls = stubDeps(async () => ({ ok: false, controls: { ok: true } }));
+      const task = await workerTask();
+      const child = await chainChild(task.id);
+      expect(
+        await createWorkerTaskFollowUp({
+          task,
+          status: "completed",
+          output: "done",
+          chainedTaskId: child.id,
+          completingAgentId: workerId,
+        }),
+      ).toBeNull();
+      expect(await followUpsOf(task.id)).toHaveLength(0);
+      expect(await shadowRows(task.id)).toHaveLength(0);
+      expect(calls.runVerifier).toBe(0);
+    });
   });
 
   test("a shadow-listed schedule keeps shadow behaviour in enforce mode", async () => {

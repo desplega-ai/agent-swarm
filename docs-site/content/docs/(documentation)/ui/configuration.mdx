@@ -260,7 +260,7 @@ for the worker task. Its metadata holds `followUpTaskId`, `decision`, `reason`, 
 | --- | --- |
 | `would_skip` | `ok` is `true` and `controls.ok` is `true` |
 | `would_keep` | any other result: `ok` is `false` or `null`, or the controls did not pass |
-| `ineligible` | a failed run, or a task whose `followUpConfig` carries `onCompleted` or `onFailed` instructions. The verifier does not run. |
+| `ineligible` | a failed run, a task whose `followUpConfig` carries `onCompleted` or `onFailed` instructions, or a completion whose `chainedTaskId` was rejected (`chain_rejected`). The verifier does not run. |
 | `error` | the verifier threw, timed out, returned no object, is not configured or not found (`no_verifier`), or two runs were already in flight (`concurrency_cap`) |
 
 Runs of schedules that are not on the list, and tasks with no schedule, write nothing. All three
@@ -272,7 +272,8 @@ For a completed run of an enforced schedule, the follow-up is not created up fro
 run commits, the verifier runs with the same deadline and cap. `would_skip` skips the follow-up
 and also writes a `task_follow_up_suppressed` row with reason `follow_up_gate`. Every other
 decision creates the follow-up: `would_keep`, `ineligible`, and each `error` reason (the verifier
-threw, timed out, is missing, or hit the cap). A failed run always gets its follow-up up front.
+threw, timed out, is missing, or hit the cap). A failed run, a run with follow-up instructions,
+and a completion with a rejected `chainedTaskId` always get their follow-up up front.
 The `task_follow_up_gate_shadow` row carries `mode: "enforce"`, `skipped`, and a `followUpTaskId`
 that is `null` when the follow-up was skipped. Shadow-only schedules keep `mode: "shadow"`.
 

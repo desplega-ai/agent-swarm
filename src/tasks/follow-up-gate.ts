@@ -34,7 +34,8 @@ export type GateIneligibleReason =
   | "not_scheduled"
   | "schedule_not_gated"
   | "status_failed"
-  | "follow_up_instructions";
+  | "follow_up_instructions"
+  | "chain_rejected";
 
 function scheduleIdSet(raw: string | undefined): Set<string> {
   return new Set(
@@ -66,6 +67,8 @@ export function classifyFollowUpGate(input: {
   task: Pick<AgentTask, "scheduleId" | "followUpConfig">;
   status: "completed" | "failed";
   config: FollowUpGateConfig;
+  /** The completion named a `chainedTaskId` that was rejected. */
+  chainRejected?: boolean;
 }): { eligible: true } | { eligible: false; reason: GateIneligibleReason } {
   const { task, status, config } = input;
   if (config.mode === "off") return { eligible: false, reason: "mode_off" };
@@ -78,6 +81,8 @@ export function classifyFollowUpGate(input: {
   if (task.followUpConfig?.onCompleted?.trim() || task.followUpConfig?.onFailed?.trim()) {
     return { eligible: false, reason: "follow_up_instructions" };
   }
+  // The rejected-handoff warning lives only in the follow-up, so keep it.
+  if (input.chainRejected) return { eligible: false, reason: "chain_rejected" };
   return { eligible: true };
 }
 
@@ -156,6 +161,7 @@ type GateArgs = {
   task: Pick<AgentTask, "id" | "scheduleId" | "followUpConfig">;
   status: "completed" | "failed";
   leadAgentId: string;
+  chainRejected?: boolean;
 };
 
 type ShadowArgs = GateArgs & { followUpTaskId: string };
@@ -188,7 +194,12 @@ type ShadowRecord = {
  */
 export function scheduleFollowUpGateShadow(args: ShadowArgs): void {
   const config = readFollowUpGateConfig();
-  const verdict = classifyFollowUpGate({ task: args.task, status: args.status, config });
+  const verdict = classifyFollowUpGate({
+    task: args.task,
+    status: args.status,
+    config,
+    chainRejected: args.chainRejected,
+  });
   if (
     !verdict.eligible &&
     (verdict.reason === "mode_off" ||
