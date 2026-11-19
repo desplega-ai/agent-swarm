@@ -31,12 +31,15 @@ Links:
 ## Before / after <!-- evidence -->
 
 <!-- The smallest view of what a user, an agent or an operator sees change. Not the code that makes it.
+Say where each view comes from: the command, and main@<sha> against this branch.
 - API or MCP result, CLI output, log line, generated file, prompt or skill text: a `diff` block with the old and the new lines.
 - Config or env default, computed value, performance: a table (before | after).
 - Slack: frames from the Slack mock. `bun run e2e --only <scenario> --visuals <dir>`, then `bun run e2e:visuals <dir>`.
 - Dashboard: one screenshot pair. Add a recording only for a new or changed interaction or flow.
 - Something new: show the "after" alone.
+- A one-line change: plain text, "Before: ... After: ...".
 - Nothing that a user, an agent or an operator can see (a refactor, a test fix, an internal hardening): one line, "No visible change: <reason>".
+  CLI output, a log line, an API result, a prompt, a skill text and a docs page are all visible. The reviewer checks this line against the diff.
 At most 2 images and 1 recording here. Put more in <details>. -->
 
 ## Review map <!-- max rows: 5 -->
@@ -59,14 +62,15 @@ Order: schema/API, then types, then behaviour, then files. -->
 <!-- Delete this section when there is nothing to say. 3 bullets or fewer: migrations, new config or env keys, breaking or
 deploy-visible changes, deliberate omissions, and known risks that you did not test. No rationale essays. -->
 
-## Verified <!-- max bullets: 3 -->
+## Verified <!-- max bullets: 3 --> <!-- fix mentions: main -->
 
-<!-- "command → result". For a fix, the first bullet is the repro on main: "On main@<sha>: <command> → fails, <message>".
+<!-- "command → result". For a fix, the first bullet is the control on main: "On main@<sha>: <command> → fails, <message>".
+The check requires the word "main" in this section for a fix title.
 Do not list the CI gates: CI shows them. A pre-existing red is one line, with the counts in <details>. -->
 
-## Swarm provenance <!-- bot -->
+## Swarm provenance <!-- bot --> <!-- link: Task -->
 
-<!-- Required when desplega-bot is the author. Optional for others. A list of links only, each as [label](url).
+<!-- Required when desplega-bot is the author, with a [Task](url) link. Optional for others. Links only, each as [label](url).
 Auth-gated links are allowed here and only here.
 
 <details><summary>Links</summary>

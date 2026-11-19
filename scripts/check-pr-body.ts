@@ -12,13 +12,18 @@
  * heading line changes the rule:
  *   `<!-- optional -->`  the section may be deleted.
  *   `<!-- fix -->`       required only when the PR title is `fix: ...` or `fix(scope): ...`.
- *   `<!-- evidence -->`  requires code, a table, media, or a reason for no visible change.
- *   `<!-- bot -->`       required for the swarm bot or an unknown author.
- *                       Present content uses list items and labeled links. Bot content needs a link.
+ *   `<!-- evidence -->`  always required. Needs a fence with content, a table with a data row,
+ *                       an image or video with a source, "Before: ... After: ...", or
+ *                       "No visible change: <reason>". An empty shape is not evidence.
+ *   `<!-- bot -->`       required for the swarm bot or an unknown author. Present content is
+ *                       links only, each as [label](url).
+ *   `<!-- link: Task -->` with `bot`: the bot must link that label.
+ *   `<!-- fix mentions: main -->` for a fix title, the section must hold that word.
  *   `<!-- outline -->`   required unless Risk is low and the diff is `SMALL_DIFF_LINES` or fewer.
  *   `<!-- pick one -->`  the body must check exactly one of the template's `- [ ]` items.
  * Heading budgets: `max rows: N`, `max bullets: N`, `max code lines: N` warn only.
- * Lead markers: `one of: a | b | c` restricts values; `max words: N` warns only.
+ * Lead markers: `one of: a | b | c` restricts the value (a reason in parentheses may follow);
+ * `max words: N` warns only.
  * Other comments provide guidance.
  * Any other required section counts as filled when its text, with HTML comments
  * removed, is not blank. Keep template guidance inside HTML comments so an
@@ -158,12 +163,11 @@ function markerLimit(flags: string[], unit: string): number | undefined {
 function chosenLead(rule: ReturnType<typeof leadRules>[number], body: string): string | undefined {
   const value = bodyLeadLines(body).get(rule.label.toLowerCase());
   if (value !== undefined) {
-    const normalized = normalize(value);
+    // `**asap**` counts. `asap, but it can wait` does not: free text must not route a review.
+    const normalized = normalize(value.replace(/[*_`]/g, ""));
     return rule.choices.find(
       (choice) =>
-        normalized.startsWith(choice) &&
-        (normalized.length === choice.length ||
-          !/[\p{L}\p{N}_]/u.test(normalized[choice.length] ?? "")),
+        normalized === choice || (normalized.startsWith(`${choice} (`) && normalized.endsWith(")")),
     );
   }
   // Transition aid for PRs opened with the old checkbox section.
@@ -283,16 +287,24 @@ function tableDataRows(text: string): number {
   return rows;
 }
 
+/**
+ * True when the section shows something. An empty fence, a header-only table and an `<img>`
+ * with no source are not evidence. Whether the evidence is true is the reviewer's call.
+ */
 function hasEvidence(text: string): boolean {
+  const fences = [
+    ...text.matchAll(/^ {0,3}(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^ {0,3}\1[`~]*[ \t]*$/gm),
+  ];
   return (
-    /^ {0,3}(?:`{3,}|~{3,})/m.test(text) ||
-    text
-      .split("\n")
-      .some((line, i, lines) => /^\s*\|/.test(line) && TABLE_SEPARATOR.test(lines[i + 1] ?? "")) ||
-    /!\[[^\]\n]*\]\([^)]+\)|<img\b|<video\b/i.test(text) ||
+    fences.some((m) => (m[2] ?? "").trim() !== "") ||
+    tableDataRows(text) > 0 ||
+    /!\[[^\]\n]*\]\(\s*<?[^)\s>]+/.test(text) ||
+    /<(?:img|video|source)\b[^>]*\bsrc\s*=\s*["']?[^"'\s>]+/i.test(text) ||
     /https?:\/\/[^\s<>]+\.(?:mp4|mov|webm)(?=$|[\s)<>])/im.test(text) ||
     /https:\/\/github\.com\/user-attachments\/assets\/[^\s<>]+/i.test(text) ||
-    /^\s*No vis(?:ible|ual) change:[ \t]*\S.*$/im.test(text)
+    /^\s*No vis(?:ible|ual) change:[ \t]*\S.*$/im.test(text) ||
+    // A one-line change may be plain text: "Before: ... After: ...".
+    (/\bbefore\s*:\s*\S/i.test(text) && /\bafter\s*:\s*\S/i.test(text))
   );
 }
 
@@ -342,31 +354,73 @@ export function checkPrBody(template: string, body: string, context: string | Pr
     if (value === undefined) problems.push(`missing line: ${name}`);
     else if (!value) problems.push(`empty line: ${name}`);
     else if (rule.choices.length > 0 && chosen === undefined) {
-      problems.push(`${name} must start with one of: ${rule.choices.join(", ")}`);
+      problems.push(
+        `${name} must be one of: ${rule.choices.join(", ")} (a reason in parentheses may follow)`,
+      );
     } else if (label.toLowerCase() === "risk" && !riskLevel(body)) {
       problems.push(`${name} must start with one of: ${RISK_LEVELS.join(", ")}`);
     }
   }
 
+  // `key: value` markers on each template heading, by normalized heading.
+  const markers = new Map(
+    parseSections(template).sections.map((t) => [
+      normalize(t.heading),
+      Object.fromEntries(
+        t.flags.flatMap((f) => {
+          const m = /^([a-z ]+):\s*(.+)$/i.exec(f);
+          return m ? [[(m[1] ?? "").trim().toLowerCase(), (m[2] ?? "").trim()]] : [];
+        }),
+      ) as Record<string, string>,
+    ]),
+  );
   for (const section of templateSections(template)) {
     const required = sectionRequired(section, body, ctx);
     const found = bodySections.find((s) => normalize(s.heading) === normalize(section.heading));
     const name = `## ${section.heading}`;
-    if (section.when === "bot" && found && stripComments(found.content).trim()) {
-      const text = stripComments(found.content)
+    const present = found ? stripComments(found.content).trim() : "";
+    if (section.when === "bot" && found && present) {
+      const text = present
         .replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/gi, "")
         .replace(/<\/?details\b[^>]*>/gi, "");
-      const link = /(?<!!)\[[^\]\n]+\]\(<?https?:\/\/[^\s]+?>?\)/i;
-      const bareUrl = /https?:\/\//i.test(text.replace(new RegExp(link.source, "gi"), ""));
+      const link = /(?<!!)\[([^\]\n]+)\]\(<?https?:\/\/[^\s]+?>?\)/;
+      const noLinks = text.replace(new RegExp(link.source, "gi"), "");
+      const bareUrl = /https?:\/\//i.test(noLinks);
       if (bareUrl) {
         problems.push(`${name}: write each link as [label](url), not as a bare URL`);
       }
-      if (text.split("\n").some((line) => line.trim() && !/^\s*[-*] /.test(line))) {
-        problems.push(`${name}: a list of links only. Move other text to another section`);
+      // What is left of a line after its links and its list marker: separators only.
+      // A bare URL and its `Label:` already have their own problem line.
+      const prose = noLinks
+        .split("\n")
+        .map((l) =>
+          l
+            .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+            .replace(/(?:[\p{L}][\p{L} /]{0,24}:\s*)?https?:\/\/\S+/giu, ""),
+        );
+      if (prose.some((l) => /[\p{L}\p{N}]/u.test(l))) {
+        problems.push(
+          `${name}: links only, each as [label](url). Move other text to another section`,
+        );
       }
-      // A bare URL already has its own problem line above.
-      if (shouldCheckLeaks(ctx.author) && !bareUrl && !link.test(text)) {
-        problems.push(`${name}: link the task as [Task](url)`);
+      // `<!-- link: Task -->` on the heading: the bot must link that label.
+      const label = markers.get(normalize(section.heading))?.link;
+      const labels = [...text.matchAll(new RegExp(link.source, "gi"))].map((m) =>
+        normalize(m[1] ?? ""),
+      );
+      // With a bare URL, the fix for that problem line adds the label too.
+      if (label && !bareUrl && shouldCheckLeaks(ctx.author) && !labels.includes(normalize(label))) {
+        problems.push(`${name}: link the ${label.toLowerCase()} as [${label}](url)`);
+      }
+    }
+    // `<!-- fix mentions: main -->`: a fix shows its control (the failure before the fix).
+    const mention = markers.get(normalize(section.heading))?.["fix mentions"];
+    if (mention && found && isFixTitle(ctx.title ?? "")) {
+      const text = stripComments(found.content).trim();
+      if (text && !new RegExp(`\\b${mention}\\b`, "i").test(text)) {
+        problems.push(
+          `${name}: for a fix, show the control on "${mention}" (the failure before the fix)`,
+        );
       }
     }
     if (!required) continue;
@@ -379,7 +433,7 @@ export function checkPrBody(template: string, body: string, context: string | Pr
       }
     } else if (section.when === "evidence" && !hasEvidence(stripComments(found.content))) {
       problems.push(
-        `${name}: show a snippet, a table, an image or a video, or write "No visible change: <reason>"`,
+        `${name}: show a snippet, a table with a data row, an image or a video, write "Before: ... After: ...", or write "No visible change: <reason>"`,
       );
     } else if (!stripComments(found.content).trim()) {
       problems.push(`empty section: ${name}`);

@@ -123,7 +123,7 @@ describe("check-pr-body", () => {
       "**Urgency:** nice to have",
       ...sections.map(
         (s) =>
-          `## ${s.heading}\n\n${s.when === "evidence" ? "```diff\n+ new\n```" : s.when === "bot" ? "- [Task](https://example.com/task)" : s.choices.length ? `- [x] ${s.choices[0]}` : "filled"}\n`,
+          `## ${s.heading}\n\n${s.when === "evidence" ? "```diff\n+ new\n```" : s.when === "bot" ? "- [Task](https://example.com/task)" : s.choices.length ? `- [x] ${s.choices[0]}` : "- On main: it fails. filled"}\n`,
       ),
     ].join("\n");
     expect(checkPrBody(template, filled, all)).toEqual([]);
@@ -224,9 +224,17 @@ describe("check-pr-body: evidence", () => {
       "<!-- ``` -->",
       "No visible change:",
       "No visual change:   ",
+      // Shapes with nothing in them are not evidence.
+      "```\n```",
+      "```diff\n   \n```",
+      "| Before | After |\n|---|---|",
+      "<img>",
+      '<img alt="x">',
+      "![alt]()",
+      "Before: it failed.",
     ]) {
       expect(checkPrBody(template, `## Proof\n${text}`)).toEqual([
-        '## Proof: show a snippet, a table, an image or a video, or write "No visible change: <reason>"',
+        '## Proof: show a snippet, a table with a data row, an image or a video, write "Before: ... After: ...", or write "No visible change: <reason>"',
       ]);
     }
   });
@@ -243,6 +251,8 @@ describe("check-pr-body: evidence", () => {
     "https://github.com/user-attachments/assets/abc",
     "No visible change: internal refactor.",
     "NO VISUAL CHANGE: internal refactor.",
+    "Before: no setup guide. After: the guide covers eight clients.",
+    "Before: 201\nAfter: 400",
   ])("accepts evidence: %s", (text) => {
     expect(checkPrBody(template, `## Proof\n${text}`)).toEqual([]);
   });
@@ -251,14 +261,21 @@ describe("check-pr-body: evidence", () => {
 describe("check-pr-body: lead choices", () => {
   const template =
     "**Schedule:** <!-- one of: asap | this week | nice to have --> <!-- guidance -->";
-  test("choices accept case and trailing text with whole words", () => {
-    for (const value of ["ASAP", "this week (requested)", "nice to have, please"]) {
+  test("a choice is an exact value, with an optional reason in parentheses", () => {
+    for (const value of ["ASAP", "this week (requested)", "**nice to have**", "`asap`"]) {
       expect(checkPrBody(template, `**Schedule:** ${value}`)).toEqual([]);
     }
-    for (const value of ["asapish", "tomorrow"]) {
+    // Free text after the value must not pick a choice: the value routes a review.
+    for (const value of [
+      "asapish",
+      "tomorrow",
+      "asap - actually nice to have",
+      "nice to have, please",
+    ]) {
       expect(checkPrBody(template, `**Schedule:** ${value}`)).toEqual([
-        "**Schedule:** must start with one of: asap, this week, nice to have",
+        "**Schedule:** must be one of: asap, this week, nice to have (a reason in parentheses may follow)",
       ]);
+      expect(leadChoices(template, `**Schedule:** ${value}`)).toEqual({});
     }
     expect(checkPrBody(template, "")).toEqual(["missing line: **Schedule:**"]);
     expect(checkPrBody(template, "**Schedule:** <!-- g -->")).toEqual([
@@ -286,33 +303,87 @@ describe("check-pr-body: lead choices", () => {
 });
 
 describe("check-pr-body: bot content", () => {
-  const template = "## Links <!-- bot -->";
+  const template = "## Links <!-- bot --> <!-- link: Task -->";
+  const LINKS_ONLY =
+    "## Links: links only, each as [label](url). Move other text to another section";
+  const TASK = "## Links: link the task as [Task](url)";
   test.each([
     "desplega-bot",
     "someone",
     undefined,
   ])("validates present content for %s", (author) => {
     const ctx = { author };
+    const bot = author !== "someone";
+    const task = bot ? [TASK] : [];
+    // One problem per root cause: a bare URL does not also report prose.
     expect(
       checkPrBody(template, "## Links\n- https://example.com/a\n* https://example.com/b", ctx),
-    ).toEqual([
-      // One problem per root cause: a bare URL does not also report a missing task link.
-      "## Links: write each link as [label](url), not as a bare URL",
-    ]);
-    expect(checkPrBody(template, "## Links\n  - [Task](https://example.com/a)", ctx)).toEqual([]);
-    expect(
-      checkPrBody(template, "## Links\n[Task](https://example.com/a)\nMore text", ctx),
-    ).toEqual(["## Links: a list of links only. Move other text to another section"]);
-    expect(checkPrBody(template, "## Links\n- Task pending", ctx)).toEqual(
-      author === "someone" ? [] : ["## Links: link the task as [Task](url)"],
-    );
+    ).toEqual(["## Links: write each link as [label](url), not as a bare URL"]);
+    // The old "Label: url" form is one root cause, so it gives one problem line.
     expect(
       checkPrBody(
         template,
-        "## Links\n<details><summary>Links https://example.com/hidden</summary>\n- [Task](https://example.com/a)\n* [Tree](https://example.com/b)\n</details><!-- ignored -->",
+        "## Links\n- Task: https://example.com/a · tree: https://example.com/b\n- Plan / research: https://example.com/c",
         ctx,
       ),
+    ).toEqual(["## Links: write each link as [label](url), not as a bare URL"]);
+    // Other text is still reported next to a bare URL.
+    expect(
+      checkPrBody(
+        template,
+        "## Links\n- Task: https://example.com/a\n\nSkipped/risk: untested.",
+        ctx,
+      ),
+    ).toEqual(["## Links: write each link as [label](url), not as a bare URL", LINKS_ONLY]);
+    expect(
+      checkPrBody(template, "## Links\n[Task](https://example.com/a)\nMore text", ctx),
+    ).toEqual([LINKS_ONLY]);
+    // Prose inside a list item, after its link.
+    expect(
+      checkPrBody(template, "## Links\n- [CI](https://example.com) Task link kept elsewhere.", ctx),
+    ).toEqual([LINKS_ONLY, ...task]);
+    expect(checkPrBody(template, "## Links\n- Task pending", ctx)).toEqual([LINKS_ONLY, ...task]);
+    // Another label is not the task, for the bot.
+    expect(checkPrBody(template, "## Links\n- [Workflow run](https://example.com/w)", ctx)).toEqual(
+      task,
+    );
+    for (const ok of [
+      "- [Task](https://example.com/a) · [tree](https://example.com/b)",
+      "  - [task](https://example.com/a)",
+      "1. [Task](https://example.com/a)\n2. [Ask](https://example.com/b)",
+      "[Task](https://example.com/a)",
+      "<details><summary>Links https://example.com/hidden</summary>\n\n- [Task](https://example.com/a)\n* [Tree](https://example.com/b)\n\n</details><!-- ignored https://example.com/c -->",
+    ]) {
+      expect(checkPrBody(template, `## Links\n${ok}`, ctx)).toEqual([]);
+    }
+  });
+  test("without a link marker, no label is required", () => {
+    expect(
+      checkPrBody("## Links <!-- bot -->", "## Links\n- [Run](https://example.com/w)", {
+        author: "desplega-bot",
+      }),
     ).toEqual([]);
+  });
+});
+
+describe("check-pr-body: fix control", () => {
+  const template = "## Checked <!-- fix mentions: main -->";
+  const problem = [
+    '## Checked: for a fix, show the control on "main" (the failure before the fix)',
+  ];
+  test("a fix title needs the word in the section", () => {
+    expect(checkPrBody(template, "## Checked\n- done", "fix: x")).toEqual(problem);
+    expect(
+      checkPrBody(template, "## Checked\n- On main@abc: `cmd` → fails", "fix(api): x"),
+    ).toEqual([]);
+    expect(checkPrBody(template, "## Checked\n- tests pass\n- On MAIN it fails", "fix: x")).toEqual(
+      [],
+    );
+    // "remains" does not contain the word "main".
+    expect(checkPrBody(template, "## Checked\n- the bug remains", "fix: x")).toEqual(problem);
+  });
+  test("other titles are not checked", () => {
+    expect(checkPrBody(template, "## Checked\n- done", "feat: x")).toEqual([]);
   });
 });
 

@@ -95,13 +95,12 @@ bun run check:dep-graph
 
 <important if="you are writing a pull request description or filing a GitHub issue on this repo">
 
-The description carries the intent a reviewer checks the diff against. Write for a human who reads it in 60 seconds: short direct sentences, about 150 prose words (code blocks, mermaid, tables and `<details>` are free). Show the change, do not narrate it. The check fails on a missing part and only warns on length. The template comment gives the rule of each section.
+The description carries the intent a reviewer checks the diff against. Write for a human who reads it in 60 seconds, in about 150 prose words. Show the change, do not narrate it. The check fails on a missing part and only warns on length. The template comment gives the rule of each section. What it cannot tell you:
 
-- **Why**: one sentence, 25 words or fewer: who sees what after the merge, not how it works. Paraphrase the ask as it was given, not rewritten to match what you built. Link public sources only (Fixes #N). Customer names and private-chat quotes stay out.
-- **Urgency**: copy it from the request. With none given, write "nice to have". "asap" requests a review from tarasyarema, "this week" from desplega-bot.
-- **Before / after**, on every PR: the smallest view of what a user, an agent or an operator sees change (a `diff` block, a table, Slack mock frames, a screenshot pair), or the line `No visible change: <reason>`. Media goes in as GitHub user attachments.
-- **Verified**: "command → result". For a fix, the first bullet is the repro on main. Known risks and skipped work go in **Heads-up**.
-- **Swarm provenance** (required for desplega-bot, optional for others): a list of links only, each as `[label](url)`: the swarm task and its tree, the Slack permalink of the ask, any workflow run, the plan or research (agent-fs live app link). These auth-gated links belong in this section and nowhere else. Slack ids, ts values and private-chat quotes are blocked everywhere (`src/utils/pr-body-leaks.ts`).
+- **Why**: say who sees what after the merge. Paraphrase the ask as it was given, not rewritten to match what you built. Link public sources only (Fixes #N). Customer names and private-chat quotes stay out.
+- **Urgency**: copy it from the request. With none given, write "nice to have".
+- **Before / after**: show what a user, an agent or an operator sees change, not the code that makes it. `No visible change: <reason>` is for a change that nobody can see (a refactor, a test fix, an internal hardening).
+- **Swarm provenance** (required for desplega-bot): always link the task, as `[label](url)`. Auth-gated links (task, session, workflow run, agent-fs, Slack permalink) belong in this section and nowhere else. Slack ids, ts values and private-chat quotes are blocked everywhere (`src/utils/pr-body-leaks.ts`).
 
 Issues use a form from `.github/ISSUE_TEMPLATE/` (bug, feature request, question). `gh issue create` skips forms: write each field label as a `### <label>` heading, fill the required fields, and apply the form's label.
 
