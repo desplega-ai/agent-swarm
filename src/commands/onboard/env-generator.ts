@@ -1,11 +1,17 @@
+import pkg from "../../../package.json";
 import { expandServices } from "./service-names.ts";
 import type { OnboardState } from "./types.ts";
 
 /**
  * Generate a .env file string from onboard wizard state.
  * Uses real values from state (not placeholders).
+ * `imageVersion` is the default AGENT_SWARM_VERSION pin: this CLI's release.
  */
-export function generateEnv(state: OnboardState, env: NodeJS.ProcessEnv = process.env): string {
+export function generateEnv(
+  state: OnboardState,
+  env: NodeJS.ProcessEnv = process.env,
+  imageVersion: string = pkg.version,
+): string {
   const expanded = expandServices(state.services, state.agentIds);
   const lines: string[] = [];
 
@@ -16,12 +22,15 @@ export function generateEnv(state: OnboardState, env: NodeJS.ProcessEnv = proces
   lines.push(`MCP_BASE_URL=http://localhost:${port}`);
   lines.push("APP_URL=https://app.agent-swarm.dev");
 
-  // Image pin. Blank resolves to `latest`, which moves on every commit to main
-  // and is not a release. Left blank so a fresh install behaves as before;
-  // operators set a published release from
-  // https://github.com/desplega-ai/agent-swarm/releases before depending on it.
-  lines.push("# Pin a release, e.g. AGENT_SWARM_VERSION=1.150.0. Blank tracks `latest`.");
-  lines.push("AGENT_SWARM_VERSION=");
+  // Image pin. Defaults to this CLI's own release, so the API and agent images
+  // match the agent-fs and TEI pins that ship in the same release. Blank would
+  // resolve to `latest`, which moves on every commit to main and is not a
+  // release. AGENT_SWARM_VERSION in the installer's environment overrides it.
+  const pinned = env.AGENT_SWARM_VERSION?.trim() || imageVersion;
+  lines.push(
+    "# Image release for the API and agents. Change it to upgrade. Blank tracks `latest`.",
+  );
+  lines.push(`AGENT_SWARM_VERSION=${pinned}`);
 
   // Install path — read by src/telemetry.ts at boot to attribute the
   // "which entry point produced this install" cohort. Boolean/enum only,

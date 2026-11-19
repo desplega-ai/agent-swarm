@@ -24,6 +24,7 @@ mock.module("@/contexts/current-user-context", () => ({
 }));
 // The real grants hook: outside a provider it answers "operator tab".
 mock.module("@/lib/use-can", () => require("../../lib/use-can"));
+mock.module("@/lib/composer-citations", () => require("../../lib/composer-citations"));
 mock.module("./steer-mode-toggle", () => ({ SteerModeToggle: () => null }));
 // The dock has its own tests; the stub sends whatever is in the box.
 mock.module("@/components/sessions/composer-dock", () => ({
@@ -61,4 +62,15 @@ test("without a source the steer leaves it to the client's default", async () =>
   await sendFrom(<SteerComposer taskId="t1" value="faster" />);
   expect(steers).toHaveLength(1);
   expect(steers[0]?.source).toBeUndefined();
+});
+
+test("steering sends cited excerpts with the draft", async () => {
+  await sendFrom(
+    <SteerComposer
+      taskId="t1"
+      value="Check this again"
+      citations={{ quotes: ["Rebuild paused"], remove: () => {}, clear: () => {} }}
+    />,
+  );
+  expect(steers[0]?.message).toBe("> Rebuild paused\n\nCheck this again");
 });

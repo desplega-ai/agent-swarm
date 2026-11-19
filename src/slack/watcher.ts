@@ -181,7 +181,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
           progress: child.progress ?? undefined,
           duration: childDuration,
           slackReplySent: child.slackReplySent,
-          output: slackTaskOutput(child),
+          output: await slackTaskOutput(child),
           failureReason: child.failureReason ?? undefined,
           attachments: childAttachments,
           steered: childSteered,
@@ -204,7 +204,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
       progress: task.progress ?? undefined,
       duration,
       slackReplySent: task.slackReplySent,
-      output: slackTaskOutput(task),
+      output: await slackTaskOutput(task),
       failureReason: task.failureReason ?? undefined,
       attachments: rootAttachments,
       steered: rootSteered,
@@ -342,7 +342,7 @@ export async function processTreeMessages(): Promise<void> {
     let outputDeliverySucceeded = true;
     for (const node of nodes.flatMap((root) => [root, ...root.children])) {
       const task = await getTaskById(node.taskId);
-      if (!task || !shouldPostInlineCompletionOutput(task)) continue;
+      if (!task || !(await shouldPostInlineCompletionOutput(task))) continue;
 
       const sent = await sendInlineTaskOutput(task);
       if (sent) {
@@ -567,7 +567,7 @@ export async function processPendingSlackRelays(now = Date.now()): Promise<void>
     // separately; cleanupCompletedTree acknowledges the durable obligation
     // after the final tree update succeeds.
     if (taskToTree.has(task.id)) {
-      if (!shouldPostInlineCompletionOutput(task)) {
+      if (!(await shouldPostInlineCompletionOutput(task))) {
         notifiedCompletions.set(task.id, now);
         continue;
       }

@@ -1,3 +1,4 @@
+import type { ScriptRunStatus } from "../../types";
 import { openSealedJson } from "../sealed-json";
 import { getDbClient } from "./runtime";
 
@@ -35,4 +36,36 @@ export async function setScriptRunFollowUpGuard(
     decision,
     runId,
   ]);
+}
+
+/** Filters shared by the script-runs list and count queries. */
+export type ScriptRunFilter = {
+  status?: ScriptRunStatus;
+  agentId?: string;
+  scriptName?: string;
+  /** Object calls on this durable script (`script_runs.objectScriptId`). */
+  objectScriptId?: string;
+  /** Exact object id; pair it with `objectScriptId`. */
+  objectId?: string;
+};
+
+export function scriptRunFilterSql(opts?: ScriptRunFilter): {
+  conditions: string[];
+  params: string[];
+} {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  const columns = [
+    ["status", opts?.status],
+    ["agentId", opts?.agentId],
+    ["scriptName", opts?.scriptName],
+    ["objectScriptId", opts?.objectScriptId],
+    ["objectId", opts?.objectId],
+  ] as const;
+  for (const [column, value] of columns) {
+    if (!value) continue;
+    conditions.push(`${column} = ?`);
+    params.push(value);
+  }
+  return { conditions, params };
 }

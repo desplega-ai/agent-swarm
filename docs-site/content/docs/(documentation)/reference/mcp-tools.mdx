@@ -458,7 +458,7 @@ Upload a file to a Slack channel or thread (max 1 GB).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
+| `filePath` | string | No | Path to file (either filePath or content required). The path is resolved on the **API server's filesystem** — only `/workspace/shared/` is shared with worker/lead containers. The file must be a regular file inside `/workspace` or the working directory of the caller's current task. For files that only live on the caller (e.g. `/tmp`, `/workspace/personal/`), pass them inline via `content` instead. |
 | `content` | string | No | Base64-encoded file content. Use when the file isn't reachable from the API server. |
 | `filename` | string | No | Name for the file in Slack (required when using `content`) |
 | `taskId` | uuid | No | Task context for thread |
@@ -1565,7 +1565,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 ### update-repo
 
-Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. See [Repo merge policy](/docs/guides/repo-merge-policy).
+Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. A non-lead agent on an agent session token also cannot change `url`, `clonePath` or `hooks`. A `url` or `clonePath` that starts with `-` is refused. See [Repo merge policy](/docs/guides/repo-merge-policy).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

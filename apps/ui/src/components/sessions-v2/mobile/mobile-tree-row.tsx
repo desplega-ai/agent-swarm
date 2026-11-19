@@ -46,6 +46,7 @@ import { useLongPress } from "@/hooks/use-long-press";
 import { type SwipeSide, useSwipeRow } from "@/hooks/use-swipe-row";
 import { peerColor } from "@/lib/comb/presence";
 import { chatSourceOf, groupLabel } from "@/lib/session-groups";
+import { showsUnread } from "@/lib/session-status";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 import { type ContainerRow, containerFacts, GroupNameField, RowIcon } from "../sidebar/group-node";
 import { type SourceRow, sourceRowLabel } from "../sidebar/section-header";
@@ -140,7 +141,7 @@ function MobileSessionRowView({
     onLongPress(rowKey);
   });
   const title = sessionDisplayTitle(session.root);
-  const unread = session.readState === "unread";
+  const unread = showsUnread(session);
   const wake = session.readState === "later" ? session.snoozeUntil : null;
   const activity = activityOf(session);
   const group = flat ? groupLabel(session.groupKey, me, labels) : "";

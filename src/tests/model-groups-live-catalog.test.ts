@@ -15,6 +15,10 @@ import {
   type LiveModelsCatalog,
   modelGroupsForHarness,
 } from "../../apps/ui/src/lib/agent-runtime-models";
+import { loadModelsSnapshot } from "../../apps/ui/src/lib/models-snapshot";
+
+// The UI loads the models.dev snapshot lazily; these assertions read it.
+await loadModelsSnapshot();
 
 const LIVE_ONLY_MODEL_ID = "test-vendor/test-model-live-only";
 

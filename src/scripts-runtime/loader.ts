@@ -1,5 +1,5 @@
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getMcpBaseUrl, getScriptApiBaseUrl } from "../utils/constants";
 import { type EgressPolicy, parseEgressAllowlist } from "../utils/egress-guard";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -111,10 +111,10 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     system: {
       apiKey: { value: apiKey, isSecret: true },
       agentId: { value: input.agentId, isSecret: false },
-      mcpBaseUrl: {
-        value: input.mcpBaseUrl ?? getMcpBaseUrl(),
-        isSecret: false,
-      },
+      // Script code reads mcpBaseUrl (and may fetch it, which the quickjs egress
+      // guard allows only for a public host). The SDK clients use sdkBaseUrl.
+      mcpBaseUrl: { value: input.mcpBaseUrl ?? getMcpBaseUrl(), isSecret: false },
+      sdkBaseUrl: { value: input.mcpBaseUrl ?? getScriptApiBaseUrl(), isSecret: false },
       ...(input.runtimeInstanceId
         ? { runtimeInstanceId: { value: input.runtimeInstanceId, isSecret: false as const } }
         : {}),

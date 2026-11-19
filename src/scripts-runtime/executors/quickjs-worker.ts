@@ -46,7 +46,8 @@ function egressFetch(job: QuickJSJob): typeof fetch {
   if (job.network === "open") return pristineFetch;
   let swarmOrigin: string | null = null;
   try {
-    swarmOrigin = new URL(job.configPayload.system.mcpBaseUrl.value).origin;
+    const { sdkBaseUrl, mcpBaseUrl } = job.configPayload.system;
+    swarmOrigin = new URL((sdkBaseUrl ?? mcpBaseUrl).value).origin;
   } catch {}
   return createGuardedFetch(pristineFetch, {
     policy: job.network,

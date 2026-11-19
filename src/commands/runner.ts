@@ -132,6 +132,7 @@ import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
   buildContextPreamble,
   buildResumeContextPreamble,
+  buildSessionFollowUpPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
 import {
@@ -546,6 +547,14 @@ export async function ensureRepoForTask(
 
     let warning: string | null = null;
 
+    // git, gh and glab would read a leading "-" as an option (clone, and the fetch of an
+    // existing clone), not as the repo, the target or the branch.
+    if (url.startsWith("-") || clonePath.startsWith("-") || defaultBranch.startsWith("-")) {
+      throw new Error(
+        `Refusing to use repo ${name}: its url, clonePath and defaultBranch must not start with "-"`,
+      );
+    }
+
     if (!gitHeadExists) {
       console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
       const provider = detectVcsProvider(url);
@@ -554,7 +563,7 @@ export async function ensureRepoForTask(
       } else if (provider === "gitlab") {
         await Bun.$`glab repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
       } else {
-        await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
+        await Bun.$`git clone --branch ${defaultBranch} --single-branch -- ${url} ${clonePath}`.quiet();
       }
       // Validate the clone actually created the directory
       if (!existsSync(clonePath)) {
@@ -7909,8 +7918,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           "task" in trigger.task
             ? (trigger.task as { task: string; id?: string; contextKey?: string })
             : null;
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
+        const taskObj = trigger.task as
+          | { parentTaskId?: string; taskType?: string; source?: string }
+          | undefined;
         const isResumeTask = taskObj?.taskType === "resume";
+        // A Sessions message to the Lead reads against the session's last Lead
+        // turns, not one parent: a fresh session per message keeps no transcript.
+        const isSessionFollowUp = isLead && !isResumeTask && taskObj?.source === "ui";
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
 
         // The prompt enrichment below needs several API reads that do not
@@ -7938,7 +7952,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           taskObj?.parentTaskId && apiUrl
             ? isResumeTask
               ? buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
-              : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+              : isSessionFollowUp
+                ? buildSessionFollowUpPreamble(apiUrl, apiKey, taskObj.parentTaskId)
+                : buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
             : null,
           fetchProfileSyncRejectionBanner({
             ...apiConfig,

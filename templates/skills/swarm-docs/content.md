@@ -90,8 +90,10 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/guides/food-supplier-ingredient-change-review). Reference.
 - [Preparing a batch traceability packet for a mock recall with AI agents](https://docs.agent-swarm.dev/docs/guides/food-batch-traceability-exercise). Reference.
 - [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-rfp-bid-qualification). Reference.
+- [Reviewing why sales opportunities were won or lost with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-win-loss-review). Reference.
 - [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-offboarding-access-review). Reference.
+- [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-training-completion-evidence-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
 - [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/guides/business-continuity-tabletop-preparation). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.

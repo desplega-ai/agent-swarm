@@ -12,6 +12,7 @@ import {
   unexpectedMigrationDetails,
   withAppDefinitionLock,
 } from "@/apps/schema-migrate";
+import { appWriteTypesWarnings } from "@/apps/script-types";
 import { createApp, getApp, updateApp } from "@/apps/store";
 import { snapshotApp } from "@/apps/version";
 import { getAgentById } from "@/be/db";
@@ -46,6 +47,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
         appId: z.string().optional(),
         url: z.string().optional(),
         migration: AppMigrationReportOutputSchema.optional(),
+        warnings: z.array(z.string()).optional(),
         issues: z
           .array(z.looseObject({ path: z.string().optional(), message: z.string().optional() }))
           .optional(),
@@ -139,9 +141,10 @@ export const registerAppUpsertTool = (server: McpServer) => {
           }
           if (!app) return toolErr("Failed to save app.");
           const url = `/apps/${app.id}`;
+          const warnings = await appWriteTypesWarnings(app.id);
           return toolOk(`App "${app.name}" saved.`, {
-            details: `App: ${url}`,
-            data: { appId: app.id, url, migration },
+            details: [`App: ${url}`, ...warnings].join("\n"),
+            data: { appId: app.id, url, migration, ...(warnings.length > 0 ? { warnings } : {}) },
           });
         });
       }
@@ -167,9 +170,10 @@ export const registerAppUpsertTool = (server: McpServer) => {
       });
       if (!app) return toolErr("Failed to save app.");
       const url = `/apps/${app.id}`;
+      const warnings = await appWriteTypesWarnings(app.id);
       return toolOk(`App "${app.name}" saved.`, {
-        details: `App: ${url}`,
-        data: { appId: app.id, url },
+        details: [`App: ${url}`, ...warnings].join("\n"),
+        data: { appId: app.id, url, ...(warnings.length > 0 ? { warnings } : {}) },
       });
     },
   );

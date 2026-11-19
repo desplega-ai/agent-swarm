@@ -18,7 +18,16 @@
  * chunk loads. `value` stays a plain string either way.
  */
 
-import { ArrowBigUp, ArrowUp, CornerDownLeft, Eye, FileText, Paperclip, X } from "lucide-react";
+import {
+  ArrowBigUp,
+  ArrowUp,
+  CornerDownLeft,
+  Eye,
+  FileText,
+  Paperclip,
+  Quote,
+  X,
+} from "lucide-react";
 import {
   type ChangeEvent,
   type ClipboardEvent,
@@ -36,6 +45,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useObjectUrl } from "@/hooks/use-object-url";
 import { CHAT_COLUMN } from "@/lib/chat-width";
+import type { ComposerCitations } from "@/lib/composer-citations";
 import { isLongPaste, pastedFileName } from "@/lib/composer-paste";
 import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
@@ -160,6 +170,7 @@ export interface ComposerDockProps {
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
   attachmentErrorMessage?: string | null;
+  citations?: ComposerCitations;
   /**
    * Extra buttons for the action row, before the attach button. The session
    * panel's "Add screenshot" goes here.
@@ -275,6 +286,7 @@ export function ComposerDock({
   attachments = [],
   onAttachmentsChange,
   attachmentErrorMessage,
+  citations,
   extraActions,
   autoFocus,
   fullWidth,
@@ -288,7 +300,9 @@ export function ComposerDock({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { engaged, handlers: engageHandlers } = useBoxEngaged(bar, formRef);
   // A bar folds to one line while the user is elsewhere and the box is empty.
-  const folded = bar && !engaged && value.length === 0 && attachments.length === 0 && !isPending;
+  const hasCitations = !!citations?.quotes.length;
+  const folded =
+    bar && !engaged && !value.length && !attachments.length && !hasCitations && !isPending;
   const dragCounterRef = useRef(0);
   const [isDragActive, setIsDragActive] = useState(false);
   const [dropErrorMessage, setDropErrorMessage] = useState<string | null>(null);
@@ -301,7 +315,7 @@ export function ComposerDock({
     if (attachments.length === 0) setDropErrorMessage(null);
   }, [attachments.length]);
 
-  const canSubmit = !disabled && !isPending && value.trim().length > 0;
+  const canSubmit = !disabled && !isPending && (hasCitations || value.trim().length > 0);
   const canAttach = !disabled && !isPending && !!onAttachmentsChange;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -457,6 +471,39 @@ export function ComposerDock({
         onDrop={onDrop}
       >
         {decoration}
+        {hasCitations && citations ? (
+          <fieldset
+            aria-label="Cited excerpts"
+            className="max-h-40 min-w-0 space-y-1.5 overflow-auto px-3 pt-2.5"
+          >
+            {citations.quotes.map((quote, index) => (
+              <div
+                key={`${index}:${quote}`}
+                className="flex items-start gap-2 rounded-md border-l-2 border-border bg-muted/55 px-2 py-1.5 text-sm"
+              >
+                <Quote
+                  size={14}
+                  aria-hidden="true"
+                  className="mt-0.5 shrink-0 text-muted-foreground"
+                />
+                <blockquote className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                  {quote}
+                </blockquote>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="-my-0.5 size-6 shrink-0 pointer-coarse:my-0 pointer-coarse:size-11"
+                  aria-label={`Remove citation ${index + 1}`}
+                  disabled={disabled || isPending}
+                  onClick={() => citations.remove(index)}
+                >
+                  <X size={14} aria-hidden="true" />
+                </Button>
+              </div>
+            ))}
+          </fieldset>
+        ) : null}
         {isDragActive ? (
           <div
             className={cn(

@@ -9,9 +9,14 @@ import { AMP_ESTIMATE_MODELS, ampBillsCacheWrites, resolveAmpModel } from "../ut
 
 const PER_MILLION = 1_000_000;
 
-// Providers whose reported input token counts INCLUDE cache reads
-// (OpenAI-style), so uncached input = max(0, input − cacheRead). Only codex is
-// verified inclusive (its own SDK contract, see codex-adapter.ts). Everyone
+// Providers whose reported input token counts INCLUDE cache reads and cache
+// writes (OpenAI-style), so uncached input = max(0, input − cacheRead −
+// cacheWrite). Only codex is verified inclusive (its own SDK contract, see
+// codex-adapter.ts). Codex reports cache writes only when it runs on an OpenAI
+// API key, and they are inside input as well: on real gpt-5.6-terra sessions
+// input = cacheRead + cacheWrite + a few dozen tokens (e.g. 385,142 = 341,438 +
+// 43,674 + 30), so subtracting only the reads billed every written token twice,
+// at the `input` rate and again at `cache_write`. Everyone
 // else reports input DISJOINT from cache reads and is billed as-is:
 // claude/claude-managed/pi per Anthropic semantics, opencode verified against
 // prod events 2026-08-06 (53/53 finalized messages show input < cacheRead —
@@ -83,7 +88,7 @@ async function priceModel(
 
   const cacheReadRate = (await lookupRate(provider, lookupModel, "cached_input", atEpochMs)) ?? 0;
   const uncachedInputTokens = INCLUSIVE_INPUT_PROVIDERS.has(provider)
-    ? Math.max(0, usage.inputTokens - usage.cacheReadTokens)
+    ? Math.max(0, usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens)
     : usage.inputTokens;
 
   let cacheWriteCostUnits = 0;

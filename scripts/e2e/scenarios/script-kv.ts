@@ -293,6 +293,35 @@ export const scriptKv: Scenario = {
       [403],
       "reserved namespace",
     );
+    // Slack profile emails decide the email-domain allowlist and the user auto-link:
+    // only the API's users.info writer stores them, not an agent and not the lead.
+    const enrichNs = "integration:user-enrichment:slack";
+    const enrichKey = `U${ctx.nonce}`;
+    const forgedProfile = { email: "e2e@example.com", name: "e2e", fetchedAt: "2026-01-01" };
+    for (const [method, caller] of [
+      ["PUT", agentId],
+      ["PUT", leadId],
+      ["DELETE", agentId],
+    ] as const) {
+      const res = await ctx.api(method, `/api/kv/_/${enrichNs}/${enrichKey}`, {
+        agentId: caller,
+        body: method === "PUT" ? { value: forgedProfile } : undefined,
+      });
+      expectStatus(res, [403], `${method} on the Slack enrichment cache`);
+      expect(res.text.includes("profile enrichment"), `wrong refusal: ${res.text}`);
+    }
+    expect(
+      ctx.db.get("SELECT key FROM kv_entries WHERE namespace = ? AND key = ?", [
+        enrichNs,
+        enrichKey,
+      ]) == null,
+      "a refused enrichment write left a row",
+    );
+    expectStatus(
+      await ctx.api("GET", `/api/kv/_/${enrichNs}/${enrichKey}`, { agentId }),
+      [404],
+      "the Slack enrichment cache stays readable",
+    );
     expectStatus(
       await ctx.api("PUT", "/api/kv/_/task:page:someone/x", { agentId, body: { value: 1 } }),
       [403],
@@ -417,6 +446,8 @@ export const scriptKv: Scenario = {
         ["kv-set", { key: "x", value: 1.5, valueType: "integer" }],
         ["kv-set", { key: "x", value: 1, namespace: `mcp:overflow:${otherId}` }],
         ["kv-delete", { key: "x", namespace: `task:agent:${otherId}` }],
+        ["kv-set", { key: "x", value: 1, namespace: "integration:user-enrichment:slack" }],
+        ["kv-delete", { key: "x", namespace: "integration:user-enrichment:slack" }],
         ["kv-incr", { key: "x", namespace: "apps" }],
         ["kv-get", { key: "x", namespace: `mcp:overflow:${otherId}` }],
         ["kv-get", { key: "x", namespace: "session-labels" }],

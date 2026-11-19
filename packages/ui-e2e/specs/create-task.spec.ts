@@ -1,4 +1,25 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "../fixtures";
+
+/**
+ * Fill the dialog's "Task description" box.
+ *
+ * The dock lazy-loads its Tiptap editor and first mounts a plain-textarea
+ * Suspense fallback. A fill that starts on the fallback while the chunk
+ * swap commits mid-action types into a node React has just detached: the
+ * input event reaches nothing, the draft never lands in the form, and
+ * "Start as a session" navigates without `?seed=` (seen on CI shard 6,
+ * 2026-11-18, 390px legacy). Wait for the editor to take over the box
+ * first, then check the text stuck.
+ */
+async function fillTaskDescription(dialog: Locator, text: string) {
+  await expect(dialog.locator(".ProseMirror")).toBeVisible({ timeout: 15_000 });
+  const box = dialog.getByRole("textbox", { name: "Task description" });
+  await box.fill(text);
+  // One paragraph per line: the draft must be in the editor, not lost on a
+  // node the swap detached.
+  await expect(box.locator("p")).toHaveText(text.split("\n"));
+}
 
 for (const width of [1280, 390]) {
   for (const legacy of [false, true]) {
@@ -20,7 +41,7 @@ for (const width of [1280, 390]) {
           creates.push(request.postData() ?? "");
         }
       });
-      await dialog.getByRole("textbox", { name: "Task description" }).fill(prompt);
+      await fillTaskDescription(dialog, prompt);
       await expect(dialog.getByLabel("Task type", { exact: true })).not.toBeVisible();
       await dialog.getByRole("button", { name: "Advanced settings" }).click();
       await expect(dialog.getByLabel("Task type", { exact: true })).toBeVisible();
@@ -44,7 +65,7 @@ test("create task keeps advanced settings when collapsed and submits them", asyn
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks?new=true");
   const dialog = page.getByRole("dialog", { name: "Create task" });
-  await dialog.getByRole("textbox", { name: "Task description" }).fill("e2e custom task creation");
+  await fillTaskDescription(dialog, "e2e custom task creation");
   await dialog.getByRole("combobox", { name: "Assign to agent" }).click();
   await page.getByRole("option", { name: "e2e-worker-a", exact: true }).click();
   await dialog.getByRole("button", { name: "Advanced settings" }).click();
@@ -85,7 +106,7 @@ test("failed task creation keeps the draft for retry", async ({ page, seed }) =>
   });
   await page.goto("/tasks?new=true");
   const dialog = page.getByRole("dialog", { name: "Create task" });
-  await dialog.getByRole("textbox", { name: "Task description" }).fill("Keep this task draft");
+  await fillTaskDescription(dialog, "Keep this task draft");
   await dialog.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Task creation unavailable");
   await expect(dialog.getByRole("textbox", { name: "Task description" })).toHaveText(

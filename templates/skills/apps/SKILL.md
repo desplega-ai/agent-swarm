@@ -181,7 +181,7 @@ When a schema patch reports stale page/query bindings, repair them in that same 
 
 Optional top-level `layout: "sidebar"` turns on the app shell (see Pages, routes, and page trees). Without it every page renders on the plain canvas, exactly as before.
 
-Model, reusable-element, element-prop, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 0-10 models and at most 20 reusable elements; each declared model has 1-40 columns. Zero-model apps are valid for pure UI utilities as long as their pages and reusable elements validate.
+Model, reusable-element, element-prop, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 0-50 models, at most 100 actions, and at most 20 reusable elements; each declared model has 1-200 columns. Operators can change the model, column and action caps per swarm (`APPS_MAX_MODELS`, `APPS_MAX_COLUMNS_PER_MODEL`, `APPS_MAX_ACTIONS`, 1-1000 each); the save error names the current cap. Zero-model apps are valid for pure UI utilities as long as their pages and reusable elements validate.
 
 ### Reusable elements
 
@@ -413,7 +413,7 @@ Use a task action named Tackle when a person should hand one issue row to the sw
 
 For direct MCP calls, `app-query` accepts `{ appId, query, params? }` and returns rows from that declared named query; every supplied param must be referenced by a `$param` filter in that query. Use it when an agent needs to read app state without scraping the UI.
 
-Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. Scripts can create, list, get, patch, and delete rows with the seven row tools. Actions remain REST/MCP-only and have no script SDK method.
+Saved scripts use the generated SDK name `ctx.swarm.app_query({ appId, query, params? })`. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work. Saved scripts also get generated per-app types automatically: each app contributes an `App_<Name>` namespace with one row interface per model (enum columns as literal unions) and a typed `app_query` overload per named query, all visible via `script-query-types`. A script is typechecked against only the apps it names (literal app id or `App_<Name>`). Types are budgeted at 1 MiB per app and 4 MiB for all the apps one script names. An app past a budget loses its types (calls still work, untyped): `app-upsert` and `app-patch` warn when the app is over the per-app budget, and `script-upsert` warns for each untyped app the script names. Scripts can create, list, get, patch, and delete rows with the seven row tools. Actions remain REST/MCP-only and have no script SDK method.
 
 ### Pages, routes, and page trees
 

@@ -35,6 +35,12 @@ export type SwarmConfigPayload = {
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
     /**
+     * Where `ctx.swarm` and `ctx.mcp` send their requests, when it differs from
+     * `mcpBaseUrl` (API-side runs: this server's loopback address). Script code
+     * sees only `mcpBaseUrl`.
+     */
+    sdkBaseUrl?: { value: string; isSecret: false };
+    /**
      * Per-boot runtime identity of the invoking worker process. System
      * context like the agent identity — scripts never supply or override it.
      */

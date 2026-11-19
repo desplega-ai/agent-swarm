@@ -153,12 +153,26 @@ const rowAuditColumnsShape = {
   updated_by: z.string().nullable().optional(),
 };
 
+/** `durable` when the stored signature marks a DurableObject class script. */
+function scriptKind(signatureJson: string): "function" | "durable" {
+  try {
+    return (JSON.parse(signatureJson) as { kind?: unknown } | null)?.kind === "durable"
+      ? "durable"
+      : "function";
+  } catch {
+    return "function";
+  }
+}
+
 /** Lean projection served by `GET /api/scripts` — mirrors `ScriptListItem`. */
 const scriptListItemSchema = ScriptRecordSchema.omit({
   source: true,
   signatureJson: true,
   argsJsonSchema: true,
   contentHash: true,
+}).extend({
+  /** `durable` for a DurableObject class script, else `function`. */
+  kind: z.enum(["function", "durable"]),
 });
 
 /**
@@ -269,7 +283,9 @@ const upsertRoute = route({
         warnings: z
           .array(z.string())
           .optional()
-          .describe("Advisory quickjs-executor compatibility findings. Never blocks the save."),
+          .describe(
+            "Advisory findings: quickjs-executor compatibility, and apps the script names that have no generated script types. Never blocks the save.",
+          ),
       }),
     },
     400: { description: "Validation or typecheck failure" },
@@ -767,9 +783,12 @@ export async function handleScripts(
       });
     }
 
-    const warnings = quickJSCompatWarnings(
-      checkQuickJSCompat(parsed.body.source, { fsMode: parsed.body.fsMode }),
-    );
+    const warnings = [
+      ...quickJSCompatWarnings(
+        checkQuickJSCompat(parsed.body.source, { fsMode: parsed.body.fsMode }),
+      ),
+      ...(typecheck.warnings ?? []),
+    ];
     upsertRoute.respond(res, 200, {
       name: result.script.name,
       version: result.script.version,
@@ -1103,6 +1122,7 @@ export async function handleScripts(
       updatedBy: script.updatedBy,
       createdAt: script.createdAt,
       updatedAt: script.updatedAt,
+      kind: scriptKind(script.signatureJson),
     }));
     listScriptsRoute.respond(res, 200, { scripts });
     return true;
