@@ -723,7 +723,6 @@ const updateTaskProgressRoute = route({
     403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
   },
-  rbac: { permission: "task.progress.write" },
 });
 
 const finishTask = route({
