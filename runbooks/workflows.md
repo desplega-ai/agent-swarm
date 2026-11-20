@@ -466,7 +466,7 @@ Reserved `env` names:
 
 Loader controls could execute native code before the wrapper installs its resource limits. Shell controls can execute startup files or be rewritten by Bash, so they are not supported application variables. Use names such as `GITLAB_TOKEN`, `PROJECT_ID`, or `MY_SETTING` instead. This filter does not provide isolation from other same-UID processes.
 
-Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args` (argv) or `config.env` (environment). For `runtime: "bash"`, the engine runs `bash -c <script> ...args`, so `args: ["a", "b"]` gives `$0=a` and `$1=b`; for `runtime: "ts"`, it runs `bun -e <script> -- ...args`, so the same args give `Bun.argv[1]="a"` and `Bun.argv[2]="b"`. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
+Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args` (argv) or `config.env` (environment). For `runtime: "bash"`, the engine runs `bash -c <script> ...args`, so `args: ["a", "b"]` gives `$0=a` and `$1=b`; for `runtime: "ts"`, it runs `bun -e <script> -- ...args`, so the same args give `Bun.argv[1]="a"` and `Bun.argv[2]="b"`. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code. The same allowlist applies to `code-match` `config.code` and a string `wait` `config.filter`, which are compiled as JavaScript. In `code-match` code, read trigger, alias and `item` values from the function's `input` argument. A string wait filter receives only the event payload, so correlate on run values with the object form of `filter`.
 
 Use `env` for credentials instead of positional arguments or shell wrappers:
 
@@ -1175,11 +1175,14 @@ No `eval` risk, declarative, easiest to author. Missing keys → no-match. Type 
 filter: "(payload) => payload.labels.some(l => l.name === 'release') && payload.number > 1000"
 ```
 
-Compiled with `new Function(...)` inside a sandbox that shadows `require`, `process`, `Bun`, `globalThis`, `global`, `fetch`, `setTimeout`, `setInterval`, `eval`, `Function`, `AsyncFunction` to `undefined`. Result is coerced to boolean. Throws → no-match.
+Evaluated in a fresh QuickJS runtime (`src/workflows/predicate-sandbox.ts`), the same sandbox `code-match` nodes use. The filter has no access to API-process globals (`process`, `Bun`, `fetch`, `require`) and receives a JSON copy of the payload. Result is coerced to boolean. Throws or returns a Promise → no-match.
+
+Compatibility with the earlier `new Function` evaluator is pinned by the `workflow-predicate-compat` e2e scenario: same `!!` coercion and code-match port mapping (custom `toString`, `"[object Promise]"` for async), strict `this === undefined` in code-match, and `console.*` calls kept as no-ops. Differences by design: the input is a JSON copy (no `Date` instances, keys with `undefined` values are dropped, mutations stay local), the guest has its own `globalThis`, `eval` and `Function` instead of `undefined`, plain objects keep `Object.prototype`, Bun-only globals (`structuredClone`, `URL`, `TextEncoder`) are absent, and error text after the `code-match execution error:` prefix uses QuickJS wording. QuickJS interprets roughly 20x slower than JSC, so a predicate that took over ~2ms (filter) or ~40ms (code-match) under Bun now hits its deadline.
 
 Hardening (all enforced):
 
-- 50ms execution timeout — infinite loops and catastrophic-backtracking regex resolve to no-match.
+- 50ms execution timeout, enforced inside the interpreter — infinite loops and catastrophic-backtracking regex resolve to no-match. `code-match` nodes get 1s.
+- 64 MB memory and 1 MB stack limits per evaluation.
 - 2KB cap on filter source length (rejected at the Zod boundary).
 - Parsed at executor-init time so syntax errors fail the workflow definition, not the first event.
 
