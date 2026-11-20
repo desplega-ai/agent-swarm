@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.328
+ARG CLAUDE_CODE_VERSION=2.1.329
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.170.0
+ARG CODEX_VERSION=0.171.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -568,9 +568,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795089646-g8be92a
-ARG AMP_SHA512_AMD64=6fe5d437c2f8acfba2eb85aa79f6e84ac67a0e00514595bc478355cddd688de9726679b470dc2e960cf49922f232207ce06b849e82d1363729107fabefe91032
-ARG AMP_SHA512_ARM64=006fb50d365e23c56c1092edb1fd667eaf2503cf85de59e4dede877880dc21891be40ce99b3e268897fc0fe5027ca37b68b21747fb5c201e06351fd47de8d123
+ARG AMP_VERSION=0.0.1795147237-g4dbcdb
+ARG AMP_SHA512_AMD64=ec123bced25214f65f6d6bd8ff46d6c56f691f585e924fcfa28fd36a354a92d2aa71d36055d8761cafbccfff737ffa8c72bb9d44a82daa2c772b8ea74cb012e4
+ARG AMP_SHA512_ARM64=d7131d429e22e48cace8214b2c151bd85dda032443c1e2d65f96e24cad531e27b09ad102a297086d6442fdfdf1e39b8187d0ed17b0cd9fe74aeaa44ba8b7ee84
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -605,7 +605,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.69.0
+ARG GEMINI_CLI_VERSION=0.70.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
