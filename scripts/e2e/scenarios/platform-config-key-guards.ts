@@ -95,7 +95,7 @@ export const platformConfigKeyGuards: Scenario = {
 
       // ── API self-calls ignore a stored MCP_BASE_URL ────────────────────────
       // The row is injected into the API env, but calls the API makes to itself
-      // with its own key (keep-warm sweep, script tool proxy) stay on loopback.
+      // with its own key (keep-warm sweep, script tool proxy, memory_rate) stay on loopback.
       const redirect = startProxy();
       cleanup.add("stop redirect listener", async () => redirect.server.stop(true));
       const baseRow = await track({ key: "MCP_BASE_URL", value: redirect.origin });
@@ -112,6 +112,15 @@ export const platformConfigKeyGuards: Scenario = {
         await mcp.callTool("script-search", { query: ctx.nonce });
       } finally {
         await mcp.close();
+      }
+      // memory_rate posts the rating back to this API with its own key.
+      const taskMcp = await ctx.connectMcp(agentId, {
+        headers: { "X-Source-Task-ID": crypto.randomUUID() },
+      });
+      try {
+        await taskMcp.callTool("memory_rate", { id: crypto.randomUUID(), useful: true });
+      } finally {
+        await taskMcp.close();
       }
       expect(
         redirect.received.length === 0,
