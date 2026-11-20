@@ -150,7 +150,139 @@ describe("tasks", () => {
   });
 });
 
+/** Settle `promise` or report that it is still pending after `ms`. */
+const within = (promise: Promise<unknown>, ms = 1000) =>
+  Promise.race([
+    promise.then(
+      (value) => ({ resolved: value }),
+      (error) => ({ rejected: error }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ pending: true }), ms)),
+  ]) as Promise<{ resolved?: unknown; rejected?: SwarmError; pending?: true }>;
+
+/** A fetch that never answers and ignores its signal, like a stalled proxy. */
+const stalledFetch = (requests: string[] = []) =>
+  (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(init?.method ?? "GET");
+    return new Promise<Response>(() => {});
+  }) as unknown as typeof fetch;
+
+/** A 200 whose body stream errors with `error` (immediately, or when `signal` aborts). */
+const brokenBodyFetch = (error: () => unknown, signal?: AbortSignal) =>
+  (async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          if (signal) signal.addEventListener("abort", () => controller.error(error()));
+          else controller.error(error());
+        },
+      }),
+    )) as unknown as typeof fetch;
+
+describe("wait and run stop on time", () => {
+  test("the timeout bounds a request that never answers", async () => {
+    const swarm = createSwarm({ apiKey: "k", fetch: stalledFetch() });
+    const out = await within(swarm.tasks.wait("t1", { timeoutMs: 10 }));
+    expect(out.rejected?.code).toBe("timeout");
+  });
+
+  test("a terminal response that lands after the deadline is a timeout", async () => {
+    const swarm = createSwarm({
+      apiKey: "k",
+      fetch: (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return Response.json(task("completed"));
+      }) as unknown as typeof fetch,
+    });
+    const out = await within(swarm.tasks.wait("t1", { timeoutMs: 10 }));
+    expect(out.rejected?.code).toBe("timeout");
+  });
+
+  test("the caller's abort during a stalled request stays aborted, not timeout", async () => {
+    const swarm = createSwarm({ apiKey: "k", fetch: stalledFetch() });
+    const controller = new AbortController();
+    const pending = within(swarm.tasks.wait("t1", { signal: controller.signal }));
+    setTimeout(() => controller.abort(), 5);
+    expect((await pending).rejected?.code).toBe("aborted");
+  });
+
+  test("wait removes its listener from the caller's signal on every exit", async () => {
+    const controller = new AbortController();
+    const live = new Set<unknown>();
+    const { signal } = controller;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((type: string, fn: EventListener, o?: AddEventListenerOptions) => {
+      live.add(fn);
+      add(type, fn, o);
+    }) as typeof signal.addEventListener;
+    signal.removeEventListener = ((type: string, fn: EventListener) => {
+      live.delete(fn);
+      remove(type, fn);
+    }) as typeof signal.removeEventListener;
+    const { swarm } = swarmWith([{ body: task("completed") }]);
+    await swarm.tasks.wait("t1", { signal });
+    expect(live.size).toBe(0);
+    const stalled = createSwarm({ apiKey: "k", fetch: stalledFetch() });
+    await stalled.tasks.wait("t1", { signal, timeoutMs: 5 }).catch(() => {});
+    expect(live.size).toBe(0);
+  });
+
+  test("run with an already-aborted signal never submits the task", async () => {
+    const requests: string[] = [];
+    const swarm = createSwarm({ apiKey: "k", fetch: stalledFetch(requests) });
+    const controller = new AbortController();
+    controller.abort();
+    const out = await within(swarm.tasks.run("hi", { signal: controller.signal }));
+    expect(out.rejected?.code).toBe("aborted");
+    expect(requests).toEqual([]);
+  });
+
+  test("abort stops run while the submit is stalled", async () => {
+    const requests: string[] = [];
+    const swarm = createSwarm({ apiKey: "k", fetch: stalledFetch(requests) });
+    const controller = new AbortController();
+    const pending = within(swarm.tasks.run("hi", { signal: controller.signal }));
+    setTimeout(() => controller.abort(), 5);
+    expect((await pending).rejected?.code).toBe("aborted");
+    expect(requests).toEqual(["POST"]);
+  });
+});
+
 describe("errors", () => {
+  test("a body that fails mid-read becomes network_error, and wait retries it", async () => {
+    const reset = () => new TypeError("connection reset during body");
+    const swarm = createSwarm({ apiKey: "k", fetch: brokenBodyFetch(reset) });
+    const error = await swarm.tasks.get("t1").catch((e) => e);
+    expect(error).toBeInstanceOf(SwarmError);
+    expect(error.code).toBe("network_error");
+
+    let first = true;
+    const flaky = createSwarm({
+      apiKey: "k",
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (!first) return Response.json(task("completed"));
+        first = false;
+        return brokenBodyFetch(reset)(input, init);
+      }) as unknown as typeof fetch,
+    });
+    const done = await flaky.tasks.wait("t1", { intervalMs: 1 });
+    expect(done.status).toBe("completed");
+  });
+
+  test("an abort mid-body becomes an aborted SwarmError", async () => {
+    const controller = new AbortController();
+    const swarm = createSwarm({
+      apiKey: "k",
+      fetch: brokenBodyFetch(() => controller.signal.reason, controller.signal),
+    });
+    const pending = within(swarm.tasks.wait("t1", { signal: controller.signal }));
+    setTimeout(() => controller.abort(), 5);
+    const out = await pending;
+    expect(out.rejected).toBeInstanceOf(SwarmError);
+    expect(out.rejected?.code).toBe("aborted");
+  });
+
   test("maps status to code and keeps the server message, body and Retry-After", async () => {
     const { swarm } = swarmWith([
       { status: 429, body: { error: "slow down" }, headers: { "retry-after": "7" } },

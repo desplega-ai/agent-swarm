@@ -118,6 +118,7 @@ export type WaitOptions = {
 export type SendOptions = {
   /** Makes retries safe: the same key never creates a second task. */
   idempotencyKey?: string;
+  signal?: AbortSignal;
 };
 
 export type Swarm = ReturnType<typeof createSwarm>;
@@ -154,6 +155,19 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
+/** Reject with `signal.reason` as soon as the signal aborts, even if `promise` never settles. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([promise, aborted]).finally(() =>
+    signal.removeEventListener("abort", onAbort),
+  );
+}
+
 /**
  * Create a client. With no options it reads its config from the environment,
  * so `createSwarm()` works anywhere `AGENT_SWARM_API_KEY` is set.
@@ -180,29 +194,40 @@ export function createSwarm(options: SwarmOptions = {}) {
     path: string,
     init: { body?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {},
   ): Promise<T> {
+    const aborted = (cause?: unknown) =>
+      new SwarmError("aborted", `${method} ${path} aborted.`, { cause });
+    if (init.signal?.aborted) throw aborted(init.signal.reason);
     let response: Response;
+    let text: string;
+    // The body read sits inside the same try: a reset or abort mid-body is a
+    // transport failure too, not a raw TypeError or DOMException.
     try {
-      response = await doFetch(`${base}${path}`, {
-        method,
-        headers: {
-          ...options.headers,
-          authorization: `Bearer ${apiKey}`,
-          ...(agentId ? { "x-agent-id": agentId } : {}),
-          ...(init.body === undefined ? {} : { "content-type": "application/json" }),
-          ...init.headers,
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-        signal: init.signal,
-      });
+      [response, text] = await abortable(
+        (async () => {
+          const res = await doFetch(`${base}${path}`, {
+            method,
+            headers: {
+              ...options.headers,
+              authorization: `Bearer ${apiKey}`,
+              ...(agentId ? { "x-agent-id": agentId } : {}),
+              ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+              ...init.headers,
+            },
+            body: init.body === undefined ? undefined : JSON.stringify(init.body),
+            signal: init.signal,
+          });
+          return [res, await res.text()] as const;
+        })(),
+        init.signal,
+      );
     } catch (cause) {
-      if (init.signal?.aborted) throw new SwarmError("aborted", "Request aborted.", { cause });
+      if (init.signal?.aborted) throw aborted(cause);
       const detail = cause instanceof Error ? cause.message : String(cause);
       throw new SwarmError("network_error", `${method} ${path} failed: ${detail}`, {
         hint: HINTS.network_error,
         cause,
       });
     }
-    const text = await response.text();
     let body: unknown;
     try {
       body = text ? JSON.parse(text) : undefined;
@@ -235,6 +260,7 @@ export function createSwarm(options: SwarmOptions = {}) {
       call<Task>("POST", "/api/tasks", {
         body: typeof input === "string" ? { task: input } : input,
         headers: opts.idempotencyKey ? { "idempotency-key": opts.idempotencyKey } : undefined,
+        signal: opts.signal,
       }),
 
     /** A task with its latest logs and attachments. */
@@ -246,46 +272,72 @@ export function createSwarm(options: SwarmOptions = {}) {
 
     /**
      * Resolve once the task reaches a terminal status (any of TERMINAL_STATUSES).
-     * Transient network and 5xx errors are retried until the timeout.
+     * Transient network and 5xx errors are retried until the timeout. The timeout
+     * bounds the whole wait, including a request that stalls.
      */
     async wait(taskId: string, opts: WaitOptions = {}): Promise<TaskDetails> {
       const { timeoutMs = 30 * 60_000, intervalMs = 2000, signal } = opts;
-      const deadline = Date.now() + timeoutMs;
       let last: TaskDetails | undefined;
-      for (;;) {
-        try {
-          last = await call<TaskDetails>("GET", `/api/tasks/${id(taskId)}?logsLimit=1`, {
-            signal,
-          });
-          if (TERMINAL_STATUSES.includes(last.status)) return last;
-        } catch (error) {
-          const transient =
-            error instanceof SwarmError &&
-            (error.code === "network_error" || error.code === "server_error");
-          if (!transient) throw error;
+      // One signal stops the in-flight request and the sleep; `timedOut` records
+      // which of the deadline or the caller's signal fired first.
+      const stop = new AbortController();
+      let timedOut = false;
+      const onAbort = () => stop.abort(signal?.reason);
+      // shortcut: setTimeout caps at 2^31-1 ms (~24.8 days); clamp rather than fire at once.
+      const timer = setTimeout(
+        () => {
+          if (stop.signal.aborted) return;
+          timedOut = true;
+          stop.abort();
+        },
+        Math.min(timeoutMs, 2 ** 31 - 1),
+      );
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+      const stopped = (cause?: unknown) =>
+        timedOut
+          ? new SwarmError(
+              "timeout",
+              `Task ${taskId} is still ${last?.status ?? "unknown"} after ${timeoutMs}ms.`,
+              { task: last, hint: "Raise timeoutMs, or call tasks.wait(id) again later.", cause },
+            )
+          : new SwarmError("aborted", `Stopped waiting for task ${taskId}.`, { task: last, cause });
+      try {
+        for (;;) {
+          let details: TaskDetails | undefined;
+          try {
+            details = await call<TaskDetails>("GET", `/api/tasks/${id(taskId)}?logsLimit=1`, {
+              signal: stop.signal,
+            });
+          } catch (error) {
+            if (stop.signal.aborted) throw stopped(error);
+            const transient =
+              error instanceof SwarmError &&
+              (error.code === "network_error" || error.code === "server_error");
+            if (!transient) throw error;
+          }
+          // A response that lands after the deadline or abort does not count.
+          if (stop.signal.aborted) throw stopped();
+          if (details) {
+            last = details;
+            if (TERMINAL_STATUSES.includes(last.status)) return last;
+          }
+          try {
+            await sleep(intervalMs, stop.signal);
+          } catch (cause) {
+            throw stopped(cause);
+          }
         }
-        const left = deadline - Date.now();
-        if (left <= 0) {
-          throw new SwarmError(
-            "timeout",
-            `Task ${taskId} is still ${last?.status ?? "unknown"} after ${timeoutMs}ms.`,
-            { task: last, hint: "Raise timeoutMs, or call tasks.wait(id) again later." },
-          );
-        }
-        try {
-          await sleep(Math.min(intervalMs, left), signal);
-        } catch (cause) {
-          throw new SwarmError("aborted", `Stopped waiting for task ${taskId}.`, {
-            task: last,
-            cause,
-          });
-        }
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
       }
     },
 
     /**
      * Send a task and wait for it. Resolves with the completed task; throws a
      * `task_failed` SwarmError (with `.task`) when it ends any other way.
+     * `signal` also covers the submit: an aborted signal never creates the task.
      */
     async run(
       input: string | SendTaskInput,
