@@ -13,7 +13,7 @@
     "test": "bun test"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
+    "@types/bun": "^1.4.4",
     "typescript": "^5.9.3"
   }
 }
