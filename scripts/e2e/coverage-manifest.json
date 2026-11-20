@@ -368,6 +368,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "github-provider-emulated": {
+      "description": "Against @emulators/github: a maintainer's mention in an issue comment and a PR body become tasks through signed App webhooks, an outsider's mention and a mention-free issue do not, the minted installation token writes as the App bot, and a real merge wakes a vcs.pr.merged waiter",
+      "scenarios": ["github-emulate-flows"]
+    },
     "github-app-worker-tokens": {
       "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
       "scenarios": ["github-installation-token-repos"]
@@ -387,6 +391,10 @@
     "kv": {
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
       "scenarios": ["script-kv"]
+    },
+    "linear-provider-emulated": {
+      "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
+      "scenarios": ["linear-emulate-flows"]
     },
     "mcp-server-lifecycle": {
       "description": "MCP server definitions created over HTTP and MCP tools, installed per agent, OAuth client pre-registered, deleted.",
