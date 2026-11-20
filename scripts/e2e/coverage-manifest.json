@@ -775,6 +775,10 @@
       "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
       "scenarios": ["route-caller-identity"]
     },
+    "llm-emulator-backend": {
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "scenarios": ["llm-emulate-ai"]
+    },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
