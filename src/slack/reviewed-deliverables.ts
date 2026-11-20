@@ -94,7 +94,10 @@ function shortUrlLabel(parsed: URL): string {
  * own name, a bare link gets one from its URL (a file name, `Page`). A GitHub
  * PR or issue is always `PR #12` / `Issue #12`.
  */
-function describeLink(url: string, attachment?: TaskAttachment): Omit<DeliverableLink, "url"> {
+export function describeLink(
+  url: string,
+  attachment?: TaskAttachment,
+): Omit<DeliverableLink, "url"> {
   const name = attachment?.name.replace(/\s+/g, " ").trim();
   const labelled = (icon: string, fallback: string) => ({
     icon,
@@ -135,23 +138,72 @@ function describeLink(url: string, attachment?: TaskAttachment): Omit<Deliverabl
   return labelled("🌐", shortUrlLabel(parsed));
 }
 
-function linkKey(url: string): string {
-  return url.replace(/\/+$/, "");
+/** A URL compared by target: `www.`, host case and trailing slashes do not count. */
+export function linkKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hostname = parsed.hostname.replace(/^www\./, "");
+    return parsed.href.replace(/\/+(?=$|[?#])/, "");
+  } catch {
+    return url.replace(/\/+$/, "");
+  }
+}
+
+/** A Slack `<url|label>` link: the label is escaped, the destination keeps its own escapes. */
+export function slackLink(url: string, name: string): string {
+  const label = name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<${url.replace(/[\s\\<>|]/g, encodeURIComponent)}|${label}>`;
+}
+
+// Escapes, code, and text that is already a link come first, so a URL inside
+// them is never matched on its own. Group 2 is a bare URL.
+const LINKIFY_PATTERN = new RegExp(
+  [
+    String.raw`\\[\s\S]`,
+    "```[\\s\\S]*?(?:```|$)",
+    "~~~[\\s\\S]*?(?:~~~|$)",
+    String.raw`(?<!\`)(\`+)(?!\`)(?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?(?<!\`)\1(?!\`)`,
+    String.raw`<https?:\/\/[^<>\s]*(?:\|[^<>\n]*)?>`,
+    String.raw`!?\[[^\]]*\]\([^)\s]*(?:\s+"[^"]*")?\)`,
+    `(${OUTPUT_URL_PATTERN.source})`,
+  ].join("|"),
+  "g",
+);
+
+/**
+ * Bare http(s) URLs in Markdown as Slack `<url|label>` links, labelled like
+ * the "Links:" caption. Code, `<url|label>` and `[label](url)` stay as written.
+ */
+export function linkifyBareUrls(text: string): string {
+  return text.replace(
+    LINKIFY_PATTERN,
+    (match, _code, url: string | undefined, offset: number, whole: string) => {
+      // A URL that runs on into a bracket (a `[REDACTED]` marker, a query in
+      // braces) has no known end: leave it bare rather than link half of it.
+      if (!url || /[[({<`]/.test(whole[offset + match.length] ?? "")) return match;
+      const href = url.replace(/[.,;:!?*_~]+$/, "");
+      return `${slackLink(href, describeLink(href).label)}${url.slice(href.length)}`;
+    },
+  );
 }
 
 /**
  * The deliverables of the worker task a Lead follow-up reviews: its output
  * attachments, then the http(s) links in its output. Worker cards do not post
  * while delegation is off, so the follow-up card is the only place a person
- * sees them. Links already in the Lead's answer (`leadText`) or in `seen`
- * are skipped. In a channel Slack does not confirm as internal (Slack
+ * sees them. Links in `seen` (the card's answer, sources and own
+ * attachment) are skipped. In a channel Slack does not confirm as internal (Slack
  * Connect, or a failed lookup), only public share links the worker already
  * made are kept: an app or agent-fs file link needs a login the other
  * organization does not have, and would disclose an internal path.
  */
 export async function reviewedTaskDeliverables(
   task: AgentTask,
-  leadText: string,
   seen: readonly string[],
   client: WebClient | undefined,
 ): Promise<{ links: DeliverableLink[]; omitted: number; moreUrl?: string }> {
@@ -185,7 +237,7 @@ export async function reviewedTaskDeliverables(
   const links: DeliverableLink[] = [];
   for (const candidate of candidates) {
     const key = linkKey(candidate.url);
-    if (!/^https?:\/\//.test(candidate.url) || skip.has(key) || leadText.includes(key)) continue;
+    if (!/^https?:\/\//.test(candidate.url) || skip.has(key)) continue;
     if (!internal && !isPublicShareUrl(candidate.url)) continue;
     skip.add(key);
     links.push(candidate);

@@ -52,7 +52,11 @@ import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
-import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import {
+  renderTaskCitations,
+  taskCitationSourceGroups,
+  taskCitationUrls,
+} from "../utils/task-citations";
 import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -81,7 +85,14 @@ import {
   type SlackReactionEvent,
 } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
-import { reviewedTaskDeliverables } from "./reviewed-deliverables";
+import {
+  describeLink,
+  linkifyBareUrls,
+  linkKey,
+  outputLinks,
+  reviewedTaskDeliverables,
+  slackLink,
+} from "./reviewed-deliverables";
 import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
@@ -1502,17 +1513,8 @@ async function recordSlackDelivery(
   });
 }
 
-function linkCaption(url: string, name: string, icon = "📎"): string | undefined {
-  if (!/^https?:\/\//.test(url)) return undefined;
-  const label = name
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  // Keep the mrkdwn link destination intact without changing existing URL escapes.
-  const destination = url.replace(/[\s\\<>|]/g, encodeURIComponent);
-  return `${icon} <${destination}|${label}>`;
+function linkCaption(url: string, name: string, icon: string): string | undefined {
+  return /^https?:\/\//.test(url) ? `${icon} ${slackLink(url, name)}` : undefined;
 }
 
 /** The task's own card: its Slack blocks and the text that stands in for them. */
@@ -1570,38 +1572,43 @@ function withUiSpecFallbackText(
 
 /**
  * Secondary metadata for an outcome card, as captions (`context` blocks)
- * under the answer: cited sources, general sources, the primary
- * attachment, then a Lead review's worker deliverables. `content` is the
- * unrendered answer, whose `[citation:N]` markers decide which sources count
- * as cited.
+ * under the answer: cited sources, general sources, then "Links:" with the
+ * primary attachment and a Lead review's worker deliverables. `content` is
+ * the unrendered answer, whose `[citation:N]` markers decide which sources
+ * count as cited. A URL shows once: a link in the answer or in a source is
+ * not listed under "Links:" again.
  */
 async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<unknown[]> {
   const moreUrl = getTaskUrl(task.id);
-  const sources = taskCitationSourceGroups(content, await getTaskCitations(task.id)).map((group) =>
+  const citations = await getTaskCitations(task.id);
+  const sources = taskCitationSourceGroups(content, citations).map((group) =>
     buildCaptionBlock(group.items, { heading: group.heading, moreUrl }),
   );
+  const seen = [...outputLinks(content), ...taskCitationUrls(citations)];
   const attachments = await getSlackOutputAttachments(task.id);
   const primary = attachments.find((item) => item.isPrimary) ?? attachments[0];
   const ownUrl = primary ? taskAttachmentDisplayUrl(primary) : undefined;
-  const attachment = primary && ownUrl ? linkCaption(ownUrl, primary.name) : undefined;
+  const ownShown = !!ownUrl && !new Set(seen.map(linkKey)).has(linkKey(ownUrl));
   // A Lead review card also lists the reviewed worker's deliverables.
   const reviewed = await reviewedTaskDeliverables(
     task,
-    content,
-    ownUrl ? [ownUrl] : [],
+    ownUrl ? [...seen, ownUrl] : seen,
     getSlackApp()?.client,
   );
-  const reviewedItems = reviewed.links
+  const links = [
+    ...(primary && ownUrl && ownShown ? [{ url: ownUrl, ...describeLink(ownUrl, primary) }] : []),
+    ...reviewed.links,
+  ];
+  const items = links
     .map((link) => linkCaption(link.url, link.label, link.icon))
     .filter((item): item is string => !!item);
   if (reviewed.omitted > 0) {
     const more = `+${reviewed.omitted} more`;
-    reviewedItems.push(reviewed.moreUrl ? `<${reviewed.moreUrl}|${more}>` : more);
+    items.push(reviewed.moreUrl ? `<${reviewed.moreUrl}|${more}>` : more);
   }
   return [
     ...sources,
-    attachment ? buildCaptionBlock([attachment]) : undefined,
-    reviewedItems.length > 0 ? buildCaptionBlock(reviewedItems, { heading: "Links" }) : undefined,
+    items.length > 0 ? buildCaptionBlock(items, { heading: "Links" }) : undefined,
   ].filter(Boolean);
 }
 
@@ -1656,7 +1663,7 @@ function safeMarkdownBoundary(markdown: string, maxLength: number): number {
 /** The answer as Markdown, with citation markers resolved and no sources appended. */
 async function outcomePresentation(task: AgentTask, content: string): Promise<string> {
   const body = normalizeV2Text(
-    renderTaskCitations(content, await getTaskCitations(task.id), "slack", false),
+    renderTaskCitations(linkifyBareUrls(content), await getTaskCitations(task.id), "slack", false),
   );
   if (body.length <= MAX_OUTCOME_MARKDOWN_LENGTH) return body;
 

@@ -184,11 +184,26 @@ export const slackLeadFollowUpCard: Scenario = {
         { kind: "page", pageId, name: "Review notes" },
       ],
     });
+    // The Lead cites the worker's PR and attaches the worker's report: each
+    // URL still shows once on the card. A bare URL in the answer becomes a
+    // short `<url|label>` link; one in a code span stays as written.
     const postedOutput = `follow-up review posted ${ctx.nonce}`;
-    await finish(ctx, posted.leadId, posted.followUpId, {
-      status: "completed",
-      output: `${postedOutput}. Notes: ${quotedUrl}`,
-    });
+    const codeUrl = `https://docs.example.test/code-${ctx.nonce}`;
+    const leadConn = await ctx.connectMcp(posted.leadId);
+    try {
+      expectToolOk(
+        await callTool(leadConn, "store-progress", {
+          taskId: posted.followUpId,
+          status: "completed",
+          output: `${postedOutput}. Merged the PR [citation:1]. Notes: ${quotedUrl}. Repro: \`${codeUrl}\``,
+          citations: [{ index: 1, kind: "url", ref: prUrl, label: "Merged PR" }],
+          attachments: [{ kind: "url", url: reportUrl, name: `report ${ctx.nonce}` }],
+        }),
+        "complete the Lead review with a citation and an attachment",
+      );
+    } finally {
+      await leadConn.close();
+    }
     const landed = await pollUntil(
       () => threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length > 0,
       30_000,
@@ -209,7 +224,7 @@ export const slackLeadFollowUpCard: Scenario = {
       `Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`,
       `/pages/${pageId}|Review notes>`,
       "📃 <http",
-      `🔀 <${prUrl}|PR #42>`,
+      `Sources: <${prUrl}|[1]> Merged PR`,
       `📄 <${fileUrl}|summary-${ctx.nonce}.md>`,
       `🎬 <${videoUrl}|demo-${ctx.nonce}.mp4>`,
       `🔗 <${postedShareUrl}|Shared file>`,
@@ -220,10 +235,22 @@ export const slackLeadFollowUpCard: Scenario = {
         `The follow-up card shows ${JSON.stringify(needle)} ${shown} times, expected 1`,
       );
     }
+    // A cited link stays a source: it is not listed again under "Links:".
+    const prAsLink = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, "🔀");
+    expect(prAsLink === 0, `The cited PR is also listed under "Links:" ${prAsLink} times`);
     const quoted = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, quotedUrl);
     expect(
       quoted === 0,
       `A link already in the Lead's answer is repeated ${quoted} times in captions`,
+    );
+    const answer = JSON.stringify(
+      threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).map((message) => message.text),
+    );
+    expect(
+      answer.includes(`<${quotedUrl}|docs.example.test/quoted-`) &&
+        answer.includes(`\`${codeUrl}\``) &&
+        !answer.includes(`<${codeUrl}`),
+      `The answer does not link its bare URL and keep its code span as written: ${answer}`,
     );
     // Watch several ticks: the card must not repeat.
     await pollUntil(() => false, slackAbsenceWindowMs(ctx));
