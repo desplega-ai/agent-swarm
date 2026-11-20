@@ -79,6 +79,9 @@ if [ -z "$base" ]; then
   base=$(git merge-base HEAD FETCH_HEAD) || build 'merge-base failed'
   [ -n "$base" ] || build 'merge-base empty'
   echo "vercel-ignore: merge-base resolved $base"
+  # On main the merge-base is HEAD, so the diff below is always empty. A project
+  # with no earlier deployment would then never build its first production one.
+  [ "$base" != "$(git rev-parse HEAD)" ] || build 'no previous deployment on main'
 fi
 
 git diff --quiet "$base" HEAD -- "$@" package.json bun.lock turbo.json
