@@ -454,6 +454,8 @@ Both executors emit the `success` port. To branch on a check, add a `validation`
 - `cwd`: optional working directory.
 - `timeout`: optional wall-clock timeout in milliseconds, from `1000` through `300000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
 
+A `script` node runs as a native subprocess. When the API server sets `SCRIPT_EXECUTOR=quickjs`, the step fails before it spawns; use a `swarm-script` node there.
+
 Reserved `env` names:
 
 | Group | Rejected names |

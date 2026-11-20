@@ -408,8 +408,8 @@
       "scenarios": ["platformb-models"]
     },
     "model-groups": {
-      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
-      "scenarios": ["platformb-model-groups"]
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
+      "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
@@ -735,7 +735,8 @@
         "workflow-engine-system-one",
         "workflow-script-node",
         "workflow-predicate-sandbox",
-        "workflow-predicate-compat"
+        "workflow-predicate-compat",
+        "workflow-script-node-executor-setting"
       ]
     },
     "workflow-savings": {

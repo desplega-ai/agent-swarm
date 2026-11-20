@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isExecutorAllowedByDeployment } from "../../scripts-runtime/executors/registry";
 import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
 import {
@@ -135,6 +136,9 @@ export const ScriptOutputSchema = z.object({
 
 const DEFAULT_TIMEOUT = 30_000;
 
+export const WORKFLOW_SCRIPT_NATIVE_REFUSED =
+  'Workflow script nodes run as a native subprocess, which is not permitted when deployment SCRIPT_EXECUTOR="quickjs"';
+
 export class ScriptExecutor extends BaseExecutor<
   typeof ScriptConfigSchema,
   typeof ScriptOutputSchema
@@ -150,6 +154,15 @@ export class ScriptExecutor extends BaseExecutor<
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof ScriptOutputSchema>>> {
     const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT;
+
+    // Same deployment ceiling as inline and durable script runs; checked per run because the setting can change after the workflow was saved.
+    if (!isExecutorAllowedByDeployment("native")) {
+      return {
+        status: "failed",
+        error: WORKFLOW_SCRIPT_NATIVE_REFUSED,
+        output: { exitCode: -1, stdout: "", stderr: WORKFLOW_SCRIPT_NATIVE_REFUSED },
+      };
+    }
 
     try {
       // The timeout lives INSIDE runScript so it can actually SIGKILL the child.

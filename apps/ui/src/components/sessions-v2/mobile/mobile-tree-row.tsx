@@ -59,7 +59,13 @@ import {
   shortAgo,
 } from "../sidebar/session-row";
 import { formatWakeShort } from "../sidebar/snooze-times";
-import { NeedsYouBadge, ReadMark, rowPropsEqual, UNREAD_TITLE } from "../sidebar/tree-row";
+import {
+  NeedsYouBadge,
+  ReadMark,
+  rowPropsEqual,
+  TREE_CURSOR_CLASS,
+  UNREAD_TITLE,
+} from "../sidebar/tree-row";
 
 /** One indent step at most (UX review R9): 16 px, or 28 px nested. */
 function indent(level: number): CSSProperties {
@@ -91,6 +97,7 @@ interface MobileSessionRowProps {
   rowKey: string;
   session: SessionListItem;
   domId: string;
+  cursor?: boolean;
   level: number;
   flat: boolean;
   me: string | null;
@@ -116,6 +123,7 @@ function MobileSessionRowView({
   rowKey,
   session,
   domId,
+  cursor,
   level,
   flat,
   me,
@@ -221,6 +229,7 @@ function MobileSessionRowView({
         </div>
       ) : null}
       <div
+        data-cursor={cursor ? "true" : undefined}
         style={{ ...(flat ? indent(0) : indentIn(level)), ...swipe.style }}
         className={cn(
           // Press feedback, as on the container rows (UX review R9).
@@ -229,6 +238,7 @@ function MobileSessionRowView({
           // The row covers the swipe action: the list card's fill on the group screen.
           as === "list" ? "bg-card" : "bg-background",
           selected && "bg-accent",
+          TREE_CURSOR_CLASS,
         )}
       >
         <span className="grid size-5 shrink-0 place-items-center">
@@ -308,6 +318,7 @@ export const MobileSessionRow = memo(MobileSessionRowView, rowPropsEqual);
 interface MobileContainerRowProps {
   row: ContainerRow;
   domId: string;
+  cursor: boolean;
   ownerName?: string;
   describedBy?: string;
   onRowClick: (rowKey: string, event: MouseEvent) => void;
@@ -320,6 +331,7 @@ interface MobileContainerRowProps {
 function MobileContainerRowView({
   row,
   domId,
+  cursor,
   ownerName,
   describedBy,
   onRowClick,
@@ -336,6 +348,7 @@ function MobileContainerRowView({
       id={domId}
       role="treeitem"
       tabIndex={-1}
+      data-cursor={cursor ? "true" : undefined}
       aria-level={row.level + 1}
       aria-expanded={searchMatch ? undefined : row.open}
       aria-label={label}
@@ -351,6 +364,7 @@ function MobileContainerRowView({
       className={cn(
         "flex min-h-12 items-center gap-3 pr-4 active:bg-accent",
         TOUCH_ROW,
+        TREE_CURSOR_CLASS,
         row.level === 0 && "mt-1",
       )}
     >
@@ -477,10 +491,12 @@ function TouchCounts({
 function MobileSourceRowView({
   row,
   domId,
+  cursor,
   onRowClick,
 }: {
   row: SourceRow;
   domId: string;
+  cursor: boolean;
   onRowClick: (rowKey: string, event: MouseEvent) => void;
 }) {
   return (
@@ -488,6 +504,7 @@ function MobileSourceRowView({
       id={domId}
       role="treeitem"
       tabIndex={-1}
+      data-cursor={cursor ? "true" : undefined}
       aria-level={1}
       aria-expanded={row.open}
       aria-label={sourceRowLabel(row)}
@@ -496,6 +513,7 @@ function MobileSourceRowView({
         // The logo sits in the rows' icon column, and the name in their label column.
         "mx-1.5 mt-3 flex min-h-11 items-center gap-3 rounded-sm pr-2.5 pl-2.5 font-mono text-meta text-muted-foreground active:bg-accent",
         TOUCH_ROW,
+        TREE_CURSOR_CLASS,
       )}
     >
       <span className="grid size-5 shrink-0 place-items-center">
@@ -512,12 +530,14 @@ export const MobileSourceRow = memo(MobileSourceRowView, rowPropsEqual);
 /** "Show 10 more", "View all N" (a chevron: it pushes a screen), and "New group". */
 export function MobileActionRow({
   id,
+  cursor,
   level,
   kind,
   label,
   onClick,
 }: {
   id: string;
+  cursor: boolean;
   level: number;
   kind: "more" | "all" | "add";
   label: ReactNode;
@@ -529,6 +549,7 @@ export function MobileActionRow({
       id={id}
       role="treeitem"
       tabIndex={-1}
+      data-cursor={cursor ? "true" : undefined}
       aria-level={level + 1}
       onClick={onClick}
       // "New group" is a row of its level. The others end a container's list.
@@ -536,6 +557,7 @@ export function MobileActionRow({
       className={cn(
         "flex min-h-12 items-center gap-3 pr-4 text-base font-medium text-muted-foreground active:bg-accent",
         TOUCH_ROW,
+        TREE_CURSOR_CLASS,
       )}
     >
       {kind === "add" ? (

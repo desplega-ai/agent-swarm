@@ -2,8 +2,8 @@
  * Model strings the `amp` harness accepts. Pure, so the API server can validate
  * a task or agent `model` without importing the worker-side adapter.
  *
- * Amp has no model flag. A mode lets Amp choose the model server-side; a
- * `provider/model` id pins one through the per-task plugin agent.
+ * Amp has no model flag. The per-task plugin agent runs a `provider/model`:
+ * the pin, else the model of the selected mode (AMP_MODE_MODELS).
  */
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
 
@@ -31,7 +31,23 @@ export function ampBillsCacheWrites(model: string): boolean {
   return /^(anthropic\/)?claude/i.test(model);
 }
 
-/** A pinned model runs on top of this built-in mode's prompt and tools. */
+/**
+ * The plugin agent's model for each mode. Amp's CLI (live on 0.0.1795060840)
+ * requires a plugin agent to name a `provider/model` (`extends` throws, and a plugin
+ * mode cannot wrap a built-in mode), so a mode runs the model Amp ran for it
+ * (the AMP_ESTIMATE_MODELS measurement), with that model's own prompt and tools.
+ */
+export const AMP_MODE_MODELS: Readonly<Record<AmpMode, string>> = {
+  low: "zhipuai/glm-5.3-flash",
+  medium: "anthropic/claude-opus-5-5",
+  high: "openai/gpt-6-astra",
+  ultra: "anthropic/claude-fable-5-1",
+};
+
+/** Amp's plugin agents default to `medium` effort, which GLM-5.3 Flash rejects (low, high, max). */
+export const AMP_MODE_EFFORTS: Readonly<Partial<Record<AmpMode, string>>> = { low: "low" };
+
+/** The mode a pinned model is reported and cost-estimated under. */
 export const AMP_PIN_BASE_MODE: AmpMode = "medium";
 
 /** `provider/model`, the form Amp's plugin agents take (`openai/gpt-5-nano`). */
@@ -40,7 +56,7 @@ const AMP_PIN_RE = /^[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 export interface AmpModelSelection {
   /** The model string as stored on the task: a mode or `provider/model`. */
   model: string;
-  /** The built-in mode whose prompt and tools the session runs on. */
+  /** The built-in mode the session is reported under; without a pin, its model runs. */
   baseMode: AmpMode;
   /** The pinned `provider/model`, when the task named a concrete model. */
   pin?: string;

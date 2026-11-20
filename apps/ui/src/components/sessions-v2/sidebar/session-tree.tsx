@@ -407,7 +407,10 @@ export function SessionTree({
     last: () => cursor.moveTo(navRows.length - 1),
     open: () => {
       cursor.enterKeyMode();
-      if (cursorRow) activate(cursorRow);
+      if (!cursorRow) return;
+      if (phone && selection.selectionMode && cursorRow.type === "session") {
+        selection.toggle(cursorRow.session.root.id, cursorRow.key);
+      } else activate(cursorRow);
     },
     expand: () => {
       cursor.enterKeyMode();
@@ -758,6 +761,8 @@ export function SessionTree({
     body = (
       <MobileTreeBody
         treeRef={treeRef}
+        cursorKey={cursorRow?.key}
+        keyboard={keyboard}
         label={searching ? "Search results" : "Sessions"}
         segments={segmentsOf(rows)}
         rowsByKey={rowsByKey}
@@ -779,6 +784,9 @@ export function SessionTree({
         onRowClick={onRowClick}
         onRenameDone={onRenameDone}
         onCreateDone={edits.onCreateDone}
+        onKeyDown={onTreeKeyDown}
+        onFocus={cursor.onFocus}
+        onBlur={cursor.onBlur}
         onPointerDown={onTreePointerDown}
         renderRow={renderRow}
       />

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useScripts } from "@/api/hooks/use-scripts";
 import { useWorkflows } from "@/api/hooks/use-workflows";
 import type { ScheduledTaskTargetType } from "@/api/types";
@@ -34,15 +35,18 @@ const TARGET_TYPE_OPTIONS: { value: ScheduledTaskTargetType; label: string }[] =
   { value: "script", label: "Script" },
 ];
 
-/** Returns null when scriptArgsText is empty/valid JSON; an error string otherwise. */
-export function validateScriptArgsText(text: string): string | null {
+/** Returns null for blank input or a JSON object, and an error otherwise. */
+function validateScriptArgsText(text: string): string | null {
   if (!text.trim()) return null;
   try {
-    JSON.parse(text);
-    return null;
+    const args: unknown = JSON.parse(text);
+    if (args === null || typeof args !== "object" || Array.isArray(args)) {
+      return "Script args must be a JSON object (or left empty).";
+    }
   } catch {
     return "Script args must be valid JSON (or left empty).";
   }
+  return null;
 }
 
 /**
@@ -60,6 +64,8 @@ export function ScheduleTargetFields({
 }) {
   const { data: workflows } = useWorkflows();
   const { data: scripts } = useScripts({ scope: "global" });
+  const scriptArgsId = useId();
+  const scriptArgsErrorId = `${scriptArgsId}-error`;
   const scriptArgsError =
     value.targetType === "script" ? validateScriptArgsText(value.scriptArgsText) : null;
 
@@ -74,6 +80,7 @@ export function ScheduleTargetFields({
               type="button"
               size="sm"
               variant={value.targetType === opt.value ? "default" : "outline"}
+              aria-pressed={value.targetType === opt.value}
               onClick={() => onChange({ ...value, targetType: opt.value })}
             >
               {opt.label}
@@ -140,15 +147,22 @@ export function ScheduleTargetFields({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Script Args (JSON)</Label>
+            <Label htmlFor={scriptArgsId}>Script Args (JSON)</Label>
             <Textarea
+              id={scriptArgsId}
+              aria-invalid={!!scriptArgsError}
+              aria-describedby={scriptArgsError ? scriptArgsErrorId : undefined}
               placeholder="{}"
               value={value.scriptArgsText}
               onChange={(e) => onChange({ ...value, scriptArgsText: e.target.value })}
               rows={3}
               className="font-mono text-xs"
             />
-            {scriptArgsError && <p className="text-xs text-destructive">{scriptArgsError}</p>}
+            {scriptArgsError && (
+              <p id={scriptArgsErrorId} className="text-xs text-destructive">
+                {scriptArgsError}
+              </p>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             The script runs directly on schedule — no agent task is created.
