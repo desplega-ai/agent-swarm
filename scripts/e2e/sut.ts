@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { basename } from "node:path";
-import { createPostgresDatabase, type DbTarget, dropPostgresDatabase, type Engine } from "./db";
+import {
+  createPostgresDatabase,
+  type DbFixture,
+  type DbTarget,
+  dropPostgresDatabase,
+  type Engine,
+  loadDbFixture,
+  restoreSqliteFixture,
+} from "./db";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
@@ -257,6 +265,8 @@ export async function startSut(
   extraEnv: Record<string, string> = {},
   coverageDir?: string,
   engine: Engine = "sqlite",
+  /** Runs after the SUT state paths exist and before the API process starts. */
+  prepare?: (sut: Sut) => Promise<void>,
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
@@ -350,8 +360,42 @@ export async function startSut(
     flushLog: () => {},
     drains: Promise.resolve(),
   };
+  await prepare?.(sut);
   await launch(sut, keep);
   return sut;
+}
+
+/**
+ * Boot a second, independent SUT on a database fixture (for example the database file a
+ * base commit made). SQLite restores the dump into the SUT's file. Other engines get the
+ * fixture through the data copy command (ledger M6), which does not exist yet.
+ */
+export async function startFixtureSut(
+  keep: boolean,
+  fixtureName: string,
+  extraEnv: Record<string, string>,
+  engine: Engine,
+): Promise<{ sut: Sut; fixture: DbFixture }> {
+  const fixture = await loadDbFixture(fixtureName);
+  if (engine !== "sqlite") {
+    throw new Error(
+      `fixture ${fixtureName}: boot on engine ${engine} needs the data copy command (ledger M6)`,
+    );
+  }
+  const sut = await startSut(
+    keep,
+    { SLACK_DISABLE: "true" },
+    extraEnv,
+    undefined,
+    engine,
+    async (prepared) => {
+      await restoreSqliteFixture(prepared.dbPath, fixture);
+      const keyFile = prepared.env.SECRETS_ENCRYPTION_KEY_FILE;
+      if (keyFile && typeof fixture.meta.secretsKey === "string")
+        await Bun.write(keyFile, fixture.meta.secretsKey);
+    },
+  );
+  return { sut, fixture };
 }
 
 /**

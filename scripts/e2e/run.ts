@@ -48,7 +48,16 @@ import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { repoRoot, restartSut, type Sut, startSut, stopSut, sutDbTarget, tailLog } from "./sut";
+import {
+  repoRoot,
+  restartSut,
+  type Sut,
+  startFixtureSut,
+  startSut,
+  stopSut,
+  sutDbTarget,
+  tailLog,
+} from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -86,9 +95,21 @@ export type ScenarioContext = {
   slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
   restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
+  /**
+   * Boot a second API on a database fixture from `scripts/e2e/fixtures` (Slack off). The
+   * main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
+   */
+  startFixtureSut: (fixture: string) => Promise<FixtureSut>;
   nonce: string;
 };
 export type SlackJournal = { file: string; path: string };
+export type FixtureSut = {
+  api: ApiClient;
+  db: ReadOnlyDb;
+  /** The fixture's companion JSON (ids and values it holds). */
+  meta: Record<string, unknown>;
+  stop: () => Promise<void>;
+};
 export type Scenario = {
   name: string;
   /**
@@ -259,6 +280,25 @@ async function bootStack(
       async sutLog() {
         sut.flushLog();
         return Bun.file(sut.logPath).text();
+      },
+      async startFixtureSut(fixtureName) {
+        const fixtureStack: Stack = {};
+        stacks.add(fixtureStack);
+        const { sut: fixtureSut, fixture } = await startFixtureSut(
+          options.keep,
+          fixtureName,
+          options.sutEnv,
+          options.engine,
+        );
+        fixtureStack.sut = fixtureSut;
+        const fixtureDb = openReadOnlyDb(sutDbTarget(fixtureSut));
+        fixtureStack.db = fixtureDb;
+        return {
+          api: createApiClient(fixtureSut.baseUrl, fixtureSut.apiKey),
+          db: fixtureDb,
+          meta: fixture.meta,
+          stop: () => stopStack(fixtureStack, options.keep),
+        };
       },
       async restartSut(options) {
         const connectionCalls = slack.mock.apiCalls("apps.connections.open").length;

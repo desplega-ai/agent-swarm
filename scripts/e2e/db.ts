@@ -194,3 +194,21 @@ function adminUrl(): string {
     throw new Error("E2E_POSTGRES_URL must start with postgres:// or postgresql://");
   return url;
 }
+
+export type DbFixture = { name: string; file: Uint8Array; meta: Record<string, unknown> };
+
+/** A database fixture under scripts/e2e/fixtures: `<name>.sqlite.gz` + `<name>.json`. */
+export async function loadDbFixture(name: string): Promise<DbFixture> {
+  const dir = resolve(import.meta.dir, "fixtures");
+  const gz = new Uint8Array(await Bun.file(`${dir}/${name}.sqlite.gz`).arrayBuffer());
+  return {
+    name,
+    file: Bun.gunzipSync(gz),
+    meta: (await Bun.file(`${dir}/${name}.json`).json()) as Record<string, unknown>,
+  };
+}
+
+/** Put a fixture's SQLite file in place before the SUT boots on it. */
+export async function restoreSqliteFixture(path: string, fixture: DbFixture): Promise<void> {
+  await Bun.write(path, fixture.file);
+}
