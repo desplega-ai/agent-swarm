@@ -1138,16 +1138,18 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   );
 }
 
-/** A new ask card only needs text that has not already reached the thread. */
-async function newOutcomeContent(task: AgentTask, slackReplySent: boolean): Promise<string | null> {
-  if (
+function shouldOmitAskSummary(task: AgentTask, slackReplySent: boolean): boolean {
+  return (
     task.source === "slack" &&
     slackReplySent &&
     task.status === "completed" &&
     !isDeferredTask(task)
-  ) {
-    return null;
-  }
+  );
+}
+
+/** A new ask card only needs text that has not already reached the thread. */
+async function newOutcomeContent(task: AgentTask, slackReplySent: boolean): Promise<string | null> {
+  if (shouldOmitAskSummary(task, slackReplySent)) return null;
   return outcomeContent(task, slackReplySent);
 }
 
@@ -1983,7 +1985,7 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   if (isMergedSlackMessageTs(card.ts)) return false;
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   // An attachment-only post has no UI card to refresh.
-  if (card.streamChunksAppended === 0 && task.source === "slack" && task.slackReplySent)
+  if (card.streamChunksAppended === 0 && shouldOmitAskSummary(task, task.slackReplySent))
     return false;
   const content = await outcomeContent(task, task.slackReplySent);
   const presentation = await outcomePresentation(task, content);

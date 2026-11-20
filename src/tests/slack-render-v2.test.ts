@@ -46,6 +46,7 @@ import {
   startTask,
   supersedeTask,
   updateAgentProfile,
+  updateSlackMessageRecord,
   upsertSwarmConfig,
 } from "../be/db";
 import { getSlackProcessingThreads } from "../be/db/slack-trees";
@@ -164,6 +165,17 @@ async function backdateLastUpdated(taskIds: string[], secondsAgo: number): Promi
   for (const id of taskIds) {
     await getDbClient().run(`UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?`, [ts, id]);
   }
+}
+
+/** Exercise refresh on a settled status card recorded without any stream chunks. */
+async function expectZeroChunkStatusCardRefresh(taskId: string, expectedText: string) {
+  const card = (await getSlackOutcomeMessage(taskId))!;
+  await updateSlackMessageRecord(card.id, { streamChunksAppended: 0 });
+  calls.length = 0;
+  expect(await refreshSlackOutcomeCard(taskId)).toBe(true);
+  expect(calls.filter((call) => call.method === "chat.update").map((call) => call.payload)).toEqual(
+    [expect.objectContaining({ ts: card.ts, text: expectedText })],
+  );
 }
 
 /** Lets a test hold one Slack call open (after it is recorded) to observe overlap. */
@@ -2402,6 +2414,7 @@ describe("Slack renderer v2", () => {
     expect(update?.payload.ts).toBe(tree?.ts);
     expect(update?.payload.text).toContain("↳ ❌ failing ask");
     expect(update?.payload.text).not.toContain("workspace.slack.com");
+    await expectZeroChunkStatusCardRefresh(ask.id, `❌ **Failed:** ${reason.trim()}`);
   });
 
   test("renders cancellation distinctly and carries the complete reason", async () => {
@@ -2436,6 +2449,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
     expect(update?.payload.text).toContain("↳ 🚫 cancelled ask");
+    await expectZeroChunkStatusCardRefresh(ask.id, remote!.text);
   });
 
   test("serializes concurrent tree writers and leaves the newest terminal state visible", async () => {
@@ -2752,6 +2766,9 @@ describe("Slack renderer v2", () => {
     expect(posts[0]?.payload.blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text } }]);
     expect(calls.some(({ method }) => method === "chat.startStream")).toBe(false);
     expect(outcome?.finalizedAt).toBeDefined();
+    calls.length = 0;
+    expect(await refreshSlackOutcomeCard(ask.id)).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 
   test("renders a legacy deferral as ⏳ without its ETA, even after a slack-reply", async () => {
@@ -2788,6 +2805,7 @@ describe("Slack renderer v2", () => {
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
     expect((await getTaskById(ask.id))?.output).toBe(deferralLine);
     expect(started?.payload.markdown_text).not.toBe(`✅ ${lead.name} completed`);
+    await expectZeroChunkStatusCardRefresh(ask.id, "⏳ Checking back later");
   });
 
   test("a deferral card opens with ⏳ and closes in place when the wake-up settles", async () => {
