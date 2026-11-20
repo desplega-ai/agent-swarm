@@ -239,7 +239,15 @@
         "divergence-list-order",
         "divergence-timestamps",
         "divergence-values",
-        "divergence-error-mapping"
+        "divergence-error-mapping",
+        "trigger-asset-keys",
+        "trigger-model-profiles",
+        "trigger-session-maintenance",
+        "trigger-fts-sync",
+        "trigger-chat-relay",
+        "trigger-immutability",
+        "trigger-rbac-default-role",
+        "trigger-cascades"
       ]
     },
     "caller-scoped-writes": {
