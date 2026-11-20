@@ -1,0 +1,17 @@
+PASS pool: 8 concurrent pg_sleep in parallel :: 304ms
+PASS session setting default_transaction_isolation :: serializable
+PASS transaction pins one connection :: pid 191365
+PASS unsafe with $n params + camelCase quoted key preserved :: {"id":"1","camelCol":"x","flag":true} id type=string
+PASS savepoint rollback keeps outer tx usable (unique violation) :: caught errno=23505 code=ERR_POSTGRES_SERVER_ERROR
+PASS aborted tx without savepoint fails (25P02) :: errno=25P02
+PASS bytea round trip :: Buffer 0,1,2,255
+PASS jsonb returned parsed; string param needs ::text::jsonb :: $1::jsonb on string => jsonb string; $1::text::jsonb => object {"a":[1,2],"b":1} (key order lost)
+PASS timestamptz returned as Date :: Date 2026-11-20T10:00:00.123Z
+PASS bigint/numeric types :: big=string:9007199254740993 num=string:1.5
+PASS NUL byte in text rejected :: rejected errno=22021
+PASS pgvector order :: [1,0,0] [0.9,0.1,0] [0,1,0]
+PASS error codes: FK 23503, check 23514, not-null 23502 :: 23503,23514,23502
+PASS serialization failure 40001 surfaces with errno :: errno=40001
+PASS advisory lock session-level on reserved conn :: first=true second=false
+PASS tsvector search :: true
+bun 1.4.4 0 failed of 16

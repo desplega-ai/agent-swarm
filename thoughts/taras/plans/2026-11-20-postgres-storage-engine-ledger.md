@@ -1,0 +1,167 @@
+---
+date: 2026-11-20
+topic: "Ledger: Postgres as a second storage engine"
+brief: thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine-goal-prompt.md
+brainstorm: thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine.md
+branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
+---
+
+# Ledger: Postgres as a second storage engine
+
+## State
+
+| Milestone | State | Head |
+|---|---|---|
+| M0 Baseline and spikes | done | see git log |
+| M1 Stronger contract on SQLite | not started | |
+| M2 Storage packages on SQLite | not started | |
+| M3 Postgres engine | not started | |
+| M4 Engine-specific domains | not started | |
+| M5 Contract on Postgres | not started | |
+| M6 Data copy | not started | |
+| M7 Delivery | not started | |
+
+## Swarm adaptations (from the dispatching task, they win over the brief)
+
+- Repo is the fork `Capchase/agent-swarm`. The PR goes to the fork `main`, never upstream.
+- Worktree: `/workspace/personal/worktrees/pg-engine` (not `~/worktrees/...`).
+- "Stop and ask Taras" means: the agent ends its task `failed` with `STOP-ASK:` and the evidence. Lead relays it.
+- Postgres 16 + pgvector: no Docker in this container. The container has the Ubuntu packages `postgresql-16` 16.15 and `postgresql-16-pgvector` 0.6.0. The agent runs a private cluster (`initdb` + `pg_ctl`, port 55432, trust auth on 127.0.0.1, data in `/workspace/personal/pg-e2e/data`). CI uses `pgvector/pgvector:pg16` (pgvector 0.8.x). Risk: a pgvector feature newer than 0.6.0 works in CI and fails here. Rule: use only pgvector 0.6.0 features.
+- This ledger is mirrored to agent-fs `shared/swarm-postgres/ledger.md` after each milestone.
+
+## Base commit
+
+`99d7de13a9a3f10db1bbb08d36072e7563d9190d` (fork `main` = upstream `main`, verified with `git rev-parse origin/main upstream/main` on 2026-11-20).
+
+## Section 3 checks
+
+| # | Check | Last run | Result |
+|---|---|---|---|
+| 1 | `bun run e2e:strict` (SQLite) | M0, base commit | see "Failures at the base commit" |
+| 8 | no change to base migration files | M0 | pass (no migration touched) |
+| 16 | existing gates | M0, base commit | see "Failures at the base commit" |
+
+Other checks: not run yet. Most of their commands do not exist yet.
+
+## Failures at the base commit
+
+Filled in from the M0 runs below.
+
+## M0 results
+
+### Recount of section 6 (step 3)
+
+Command: `bun thoughts/taras/research/spikes/m0-counts.ts` (output: `thoughts/taras/research/spikes/m0-counts.out.txt`). Regex counts over non-test `src/` files, excluding migrations. They are upper bounds, not parsed SQL.
+
+| Hazard | Brief | Measured |
+|---|---|---|
+| `getDbClient()` call sites | ~1,460 in ~200 files | 1,480 in 207 files |
+| `.transaction(` sites | ~290 | 291 in 127 files |
+| Statements (string that starts with SELECT/INSERT/UPDATE/DELETE/WITH) | 1,800-2,200 | 2,454 string starts in 344 files (includes non-SQL strings such as log text; upper bound) |
+| WHERE-fragment builders (`conditions/where/clauses/filters.push(`) | ~180 | 178 in 19 files |
+| IN-list expansions (`map(() => "?")`) | ~140 | 107 in 47 files (other expansion styles exist, not counted) |
+| `strftime(` / `datetime('now'` | (idiom) | 79 in 16 files / 44 in 17 files |
+| `IS NOT <value>` (uppercase, not NULL, not DISTINCT) | 231 | 21 in 11 files |
+| `GLOB` | 41 | 45 in 18 files |
+| `rowid` | 117 | 184 in 33 files |
+| `INSERT OR IGNORE/REPLACE` | 24 | 24 in 12 files |
+| `changes()` / `.changes` / `lastInsertRowid` | 153 | 157 in 48 files |
+| `json_each` / `json_extract` | 19 files / 62 | 34 in 19 files / 65 in 22 files |
+| PRAGMA | 28 | 28 in 6 files |
+| `LIKE` | 111 | 132 in 35 files |
+| scalar `MAX(a, b)` / `MIN(a, b)` | (named) | 3 in 2 files |
+| `rowTo*` mappers / `JSON.parse` in those files | ~47 | 76 in 21 files / 92 |
+| Sites that match SQLite error text | ~14 | 26 matches in 14 files |
+| Seam allowlist (`check-async-db-seam.sh`) | 19 | 19 |
+| `new Database(` openers in runtime code | 3 | 5 in 4 files |
+| `bun:sqlite` importers (non-test src) | ~35 incl. scripts | 9 in 9 files (src only) |
+| SQL in seed-scripts | ~280 lines | 555 lines with a SQL keyword (upper bound, includes prose) |
+| Migration files / `CREATE TRIGGER` statements | 256 / 65 | 261 / 71 statements, 65 triggers at head |
+| docs-site pages naming SQLite | 19 | 19 |
+
+`getDbClient()` by directory: `src/be/db.ts` 425, `src/be/db/` 270 (39 files), `src/be/db-queries/` 81 (6), `src/http/` 70 (26), `src/be/memory/` 59 (15), `src/workflows/` 40 (12), `src/tools/` 23 (10), `src/apps/` 18 (6), `src/scheduler/` 11 (3), `src/heartbeat/` 5 (1).
+
+Head schema (from `ts-columns.ts`, migrations applied to an empty file): 158 tables (15 FTS shadow), 418 indexes, 65 triggers, 1 view, 1,824 columns. Declared types: TEXT 1,521, INTEGER 212, REAL 36, none 31, DATETIME 9, BLOB 8, JSONB 7. `memory_fts` (FTS5) and `memory_vec` (sqlite-vec) are not in the migration chain: `src/be/memory/providers/sqlite-store.ts:237` and `:402` create them at run time.
+
+Finding for D8: the schema mixes camelCase columns (`createdAt`) and snake_case columns (`created_at`, `kv_entries`, `codex_oauth_device_flows`). Quoting each identifier with an uppercase letter covers both.
+
+### Driver spike (step 5)
+
+Command: `PG_URL=postgres://postgres@127.0.0.1:55432/postgres bun thoughts/taras/research/spikes/bun-sql-spike.ts`. Output: `thoughts/taras/research/spikes/bun-sql-spike.out.txt`. Result: 16 of 16 pass on Bun 1.4.4 + Postgres 16.15 + pgvector 0.6.0. The same file compiled with `bun build --compile` also passes 16 of 16.
+
+**Driver choice: `Bun.SQL` (D14 holds). The postgres.js fallback is not needed.**
+
+Facts the client and the codec must handle:
+
+- Pool runs queries in parallel (8 x `pg_sleep(0.3)` in 303 ms).
+- `connection: { default_transaction_isolation: "serializable", TimeZone: "UTC" }` sets the session default (D6).
+- `sql.begin` pins one backend for the callback, also with parallel calls inside.
+- `tx.savepoint` after a unique violation (errno `23505`) keeps the outer transaction usable. Without a savepoint the next statement fails with `25P02`.
+- Errors carry the SQLSTATE in `errno` (`23505`, `23503`, `23514`, `23502`, `40001`, `22021`, `25P02`). `code` is always `ERR_POSTGRES_SERVER_ERROR`. Typed errors key on `errno`.
+- Two concurrent read-then-write SERIALIZABLE transactions produce `40001`.
+- `bigint`, `bigserial` and `numeric` return as strings. `timestamptz` returns as `Date`. `bytea` returns as `Buffer`. `jsonb` returns parsed.
+- **Hazard (new):** a JS string bound to `$1::jsonb` is sent as a JSON string, so the stored value is a jsonb *string* (`jsonb_typeof` = `string`). Bind JSON text as `$1::text::jsonb`, or bind the object. The dialect helper must emit the `::text::jsonb` form. The contract suite must test it.
+- NUL byte in `text` fails with `22021` (D11 must report it).
+- pgvector `<=>` order works. Session advisory lock on a reserved connection blocks a second session (D16 works).
+
+### Transaction sites (step 6)
+
+Command: `bun thoughts/taras/research/spikes/tx-sites.ts > thoughts/taras/research/2026-11-20-tx-sites.md`. 291 sites. 12 callbacks name a side-effect candidate in their own body. 12 have a catch block, 2 of them near constraint text. The scan does not follow calls into other functions: transitive side effects are not found. M2 step 6 (`check:tx-callbacks`) and `--tx-replay` close that gap by execution.
+
+### Timestamp formats (step 7)
+
+Command: `bun thoughts/taras/research/spikes/ts-columns.ts > thoughts/taras/research/2026-11-20-timestamp-columns.md`.
+
+- 44 columns default to `strftime('%Y-%m-%dT%H:%M:%fZ','now')` (ISO with `Z`).
+- 62 columns default to `datetime('now')` or `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`).
+- 6 columns hold epoch milliseconds as INTEGER (`unixepoch('subsec') * 1000`): `kv_entries`, `codex_oauth_device_flows`, `model_catalog_overlay`. On Postgres these stay `bigint`, not `timestamptz`.
+- 190 timestamp-named columns have no default (the app writes them, mostly `toISOString()`).
+- Invalid timestamps in real data: not measured. No copy of production data was supplied. The step is conditional in the brief, so this is not a STOP-ASK.
+
+### Repository domain map (step 8)
+
+Input (generated): `thoughts/taras/research/2026-11-20-domain-map-input.md` lists the `src/be/db.ts` sections with line ranges and, for each table, the files whose SQL names it.
+
+| Domain | Tables | Current files |
+|---|---|---|
+| tasks | `agent_tasks`, `agent_tasks_fts*`, `task_attachments`, `task_citations`, `task_context_snapshots`, `task_idempotency_keys`, `task_steering_messages`, `task_templates`, `task_ui_action_runs`, `task_ui_specs`, `deferred_task_waits`, `deferred_task_wait_members`, `deferred_event_waits`, `routing_decisions`, `human_free_reclassify_queue`, `checklist_items` | `db.ts` L592-3818, L13050-13119; `db/tasks/`, `db/task-idempotency.ts`; `db-queries/task-artifacts.ts`; `be/checklist.ts` |
+| agents | `agents`, `agent_log`, `agent_history`, `agent_mcp_servers`, `agent_skills`, `active_sessions`, `services`, `context_versions` | `db.ts` L572-591, L2235-2402, L3819-4042, L7244-7381; `db/agents.ts`, `db/active-sessions.ts`, `db/context-versions.ts` |
+| messaging | `channels`, `channel_messages`, `channel_read_state`, `channel_activity_cursors`, `inbox_messages`, `inbox_item_state`, `agentmail_inbox_mappings` | `db.ts` L4043-4869, L5706-5881, L7157-7243, L12800-12914 |
+| sessions and cost | `session_logs`, `session_costs`, `session_members`, `session_shares`, `session_summaries`, `session_summary_recompute`, `session_tokens`, `request_composition`, `budgets`, `budget_refusal_notifications`, `pricing`, `automation_savings_*` | `db.ts` L4870-5705, L11620-12512, L13120-13684; `db/session-*.ts`, `db/request-composition.ts`; `be/savings/` |
+| schedules | `scheduled_tasks` | `db.ts` L5985-6542; `src/scheduler/` |
+| config | `swarm_config`, `swarm_repos`, `api_key_status`, `seed_state` | `db.ts` L6543-7156; `db/config-secrets.ts`, `db/api-keys.ts`; `be/seed/state-db.ts` |
+| workflows | `workflows`, `workflow_versions`, `workflow_runs`, `workflow_run_steps`, `workflow_run_definitions`, `workflow_idempotency_keys`, `wait_states`, `approval_requests` | `db.ts` L7584-8583, L9775-10496; `db/workflow*`, `db/workflows/`, `db/approvals.ts`; `src/workflows/` |
+| pages, metrics, apps | `pages`, `page_versions`, `metrics`, `metric_versions`, `apps`, `app_versions`, `app_user_config`, `user_favorites`, `primitive_objects` | `db.ts` L8584-9240, L12915-13049; `db/page-*.ts`; `src/apps/`; `be/primitives/` |
+| prompt templates | `prompt_templates`, `prompt_template_history` | `db.ts` L9241-9774 |
+| skills | `skills`, `skill_files`, `skill_invocations`, `skills_fts*`, `skills_meta_fts*` | `db.ts` L10497-11619; `db/skill-*.ts` |
+| users and RBAC | `users`, `user_external_ids`, `user_identity_events`, `user_merge_jobs`, `user_tokens`, `roles`, `role_permissions`, `principal_roles`, `permission_audit`, `connector_codes` | `db.ts` L12513-12799; `db/users/`, `db/user-references.ts` |
+| memory | `agent_memory`, `agent_memory_edge`, `agent_memory_version`, `memory_link`, `memory_rating`, `memory_retrieval`, run-time `memory_fts`, `memory_vec` | `src/be/memory/` (15 files) |
+| kv | `kv_entries` | `db.ts` L13823-14753; `db/kv-windows.ts` |
+| scripts | `scripts`, `script_versions`, `script_runs`, `script_run_journal`, `script_run_sources`, `script_apis`, `script_connections`, `script_credential_bindings`, `script_embeddings` | `db/script-*.ts`; `be/scripts/` |
+| integrations | `slack_*`, `chat_*`, `tracker_sync`, `tracker_agent_mapping`, `mcp_servers`, `mcp_event_subscriptions`, `oauth_*`, `codex_oauth_device_flows`, `agent_fs_object_webhooks`, `events` | `db-queries/` (mcp-oauth, mcp-servers, oauth, slack-inbound, tracker); `db/slack-*.ts`, `db/codex-oauth-device-flows.ts`; `be/events.ts` |
+| models | `model_catalog`, `model_catalog_meta`, `model_catalog_overlay`, `model_groups`, `model_group_members`, `model_profiles`, `model_alias_resolutions`, `harness_model_support` | `db/model-*.ts` |
+| extensions | `extensions`, `extension_versions`, `extension_files`, `extension_assets`, `extension_runs` | `be/extensions/` |
+| runtime pools | `runtime_pools`, `runtime_instances`, `runtime_controllers`, `runtime_cache_releases` | `be/runtime-pools/` |
+| assets and import | `asset_key_mappings`, `asset_key_history`, `import_items`, `import_pending_assignments` | `db.ts` L1492-1985 |
+
+## Decisions inside my authority
+
+- D4 entity types: open. Decided in M2, recorded here.
+- Driver: `Bun.SQL` (spike above).
+
+## Deviations
+
+- Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
+
+## Open risks
+
+- Size: 1,480 call sites and 2,454 statement strings. One session per milestone is not enough for M2 to M4.
+- jsonb string binding (spike finding above).
+
+## New allowlist, exclusion or quarantine entries
+
+None.
+
+## Edited scenarios
+
+None.
