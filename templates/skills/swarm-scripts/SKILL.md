@@ -202,7 +202,7 @@ Order of preference:
 
 A raw secret, or the output of `get-config` with `includeSecrets: true`, must not appear in script source, script `args`, a schedule's `taskTemplate` or `scriptArgs`, or a task description. Those are stored as plain text and replayed on every run.
 
-Registration is lead-only: `script-connections` and `credential-bindings`. A worker that needs a missing connection puts the request in its task output: `slug`, `baseUrl` or spec URL, `allowedHosts`, and the auth (config key or OAuth provider). Leads: `upsert-openapi` with a spec URL keeps operations refreshable; `credential-bindings` `oauth-app-upsert` then `oauth-authorize-url` sets up an OAuth provider (`tokenAuthStyle` and `tokenBodyFormat` cover Notion-style token endpoints).
+Registration is lead-only: `script-connections` and `credential-bindings`. A worker that needs a missing connection puts the request in its task output: `slug`, `baseUrl` or spec URL, `allowedHosts`, and the auth (config key or OAuth provider). When a secret has no credential binding yet, step 3 is a stopgap: say so in the task output and ask the lead to register a binding for that config key, so later runs use it. Leads: `upsert-openapi` with a spec URL keeps operations refreshable; `credential-bindings` `oauth-app-upsert` then `oauth-authorize-url` sets up an OAuth provider (`tokenAuthStyle` and `tokenBodyFormat` cover Notion-style token endpoints).
 
 Full reference: the "Script connections" guide on the docs site.
 

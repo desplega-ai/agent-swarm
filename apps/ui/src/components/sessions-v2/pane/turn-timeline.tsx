@@ -154,10 +154,10 @@ function fileReviewRequest(task: AgentTask): string | null {
 
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
- * message, then its parts (a deferred wake-up starts a new part). A part
- * shows the swarm's reply, a row per worker step (two or more fold into a
- * group under one head), the swarm's latest answer, and a live line while the
- * lead works. A reply that only waits (a deferral) is one muted line, and
+ * message, then its parts in time order (a deferred wake-up or a later lead
+ * answer starts a new part). A part shows the swarm's reply, a row per worker
+ * step created before the next part (two or more fold into a group under one
+ * head), and a live line while the lead works. A reply that only waits (a deferral) is one muted line, and
  * waiting parts in a row fold into one. Handoffs On shows the internal rows. Tasks that fit no turn
  * render as plain task cards at the end. A typing person shows as a bubble
  * row in the flow, so it never covers a message.
@@ -407,15 +407,10 @@ function PartView({
         // One step (or handoffs only): plain rows, lined up with the reply text.
         <div className="-mx-1.5 flex min-w-0 flex-col">{list}</div>
       ) : null}
-      {part.result ? (
-        <div className={rows.length > 0 ? "mt-3" : undefined}>
-          <Reply step={part.result} onToggle={onStepToggle} />
-        </div>
-      ) : null}
       {approvals.map((approval) => (
         <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
-      {/* The lead works again: a live line under the latest answer, never in its place. */}
+      {/* The lead works again: a live line under the part's answer, never in its place. */}
       {part.live ? <SwarmReply task={part.live} /> : null}
     </div>
   );

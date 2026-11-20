@@ -266,7 +266,12 @@
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
-      "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-limits", "knowledge-apps-primitives"]
+      "scenarios": [
+        "knowledge-apps",
+        "knowledge-apps-large-model",
+        "knowledge-apps-limits",
+        "knowledge-apps-primitives"
+      ]
     },
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit; an operator-key dashboard writes only its logged-in user's personal keys",
@@ -408,8 +413,8 @@
       "scenarios": ["platformb-models"]
     },
     "model-groups": {
-      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
-      "scenarios": ["platformb-model-groups"]
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
+      "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
@@ -505,7 +510,12 @@
     },
     "script-retry": {
       "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), a ctx.swarm call that retries a real 429 from the API, and ctx.swarm plus the script-run tool reaching the API over loopback while MCP_BASE_URL is closed.",
-      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge", "script-api-loopback"]
+      "scenarios": [
+        "script-retry-helper",
+        "script-retry-fetch",
+        "script-retry-bridge",
+        "script-api-loopback"
+      ]
     },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
@@ -549,7 +559,7 @@
     },
     "slack-agent-tools": {
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
-      "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+      "scenarios": ["platformb-slack-tools", "slack-reply-card", "slack-reply-footer-toggle"]
     },
     "slack-file-download-bounds": {
       "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
@@ -731,13 +741,18 @@
       ]
     },
     "workflow-engine-nodes": {
-      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
+      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction; code-match and string wait filters run outside the API realm and read only config interpolation sources; swarm-script and sub-workflow nodes act as the creator only when the pinned definition was last saved by the creator, a lead or a person",
       "scenarios": [
         "workflow-engine-instant-nodes",
         "workflow-engine-async-nodes",
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
-        "workflow-script-node"
+        "workflow-script-node",
+        "workflow-predicate-sandbox",
+        "workflow-predicate-compat",
+        "workflow-script-node-executor-setting",
+        "workflow-executable-config-sources",
+        "workflow-edited-script-principal"
       ]
     },
     "workflow-savings": {

@@ -734,8 +734,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "354_durable_objects.sql");
       // 362 rebuilds user_favorites, which this fixture does not create (see 301).
       markMigrationApplied(database, "362_favorites_app.sql");
-      // 364 alters pages, which this fixture does not create (see 269).
-      markMigrationApplied(database, "364_page_kit.sql");
+      // 367 alters workflow_runs, which this fixture does not create.
+      markMigrationApplied(database, "367_workflow_run_principal.sql");
+      // 369 alters pages, which this fixture does not create (see 269).
+      markMigrationApplied(database, "369_page_kit.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

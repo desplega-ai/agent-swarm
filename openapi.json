@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.5",
+    "version": "2.14.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -466,6 +466,9 @@
             "type": "string"
           },
           "resolvedProfile": {
+            "type": "string"
+          },
+          "modelGroup": {
             "type": "string"
           },
           "fallbackHops": {
@@ -3735,6 +3738,7 @@
               "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
+              "task_model_group_resolved",
               "task_dependency_repointed",
               "task_released",
               "task_deferred_wait_woke",
@@ -40021,6 +40025,9 @@
                               "resolvedProfile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -40346,6 +40353,10 @@
                     ]
                   },
                   "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelGroup": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -41741,6 +41752,9 @@
                             "type": "string"
                           },
                           "resolvedProfile": {
+                            "type": "string"
+                          },
+                          "modelGroup": {
                             "type": "string"
                           },
                           "provider": {
@@ -47961,6 +47975,9 @@
                   "profile": {
                     "type": "string"
                   },
+                  "modelGroup": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -48143,6 +48160,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -48516,6 +48536,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -48712,6 +48735,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -48953,6 +48979,9 @@
                           ]
                         },
                         "profile": {
+                          "type": "string"
+                        },
+                        "modelGroup": {
                           "type": "string"
                         },
                         "scheduleType": {
@@ -49211,6 +49240,9 @@
                     "profile": {
                       "type": "string"
                     },
+                    "modelGroup": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -49410,6 +49442,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49594,6 +49632,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -49826,6 +49867,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -50010,6 +50057,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -67599,6 +67649,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -67787,6 +67840,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -74831,7 +74887,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -74924,7 +74980,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {

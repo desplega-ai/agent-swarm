@@ -71,6 +71,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import { isSlackReplyFooterEnabled } from "./config";
 import { getChannelBlockReason } from "./external-channel";
 import {
   completedStatusIcon,
@@ -1667,7 +1668,7 @@ async function outcomeFooter(
   duration: string,
 ): Promise<unknown[]> {
   const task = members[0];
-  if (!task) return [];
+  if (!task || !isSlackReplyFooterEnabled()) return [];
   const memberIds = new Set(members.map((member) => member.id));
   const descendants = [
     ...new Map(

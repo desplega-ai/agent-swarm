@@ -566,15 +566,15 @@ docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```bash
 docker build -f Dockerfile.worker -t agent-swarm-worker .
 
-# Override the pinned Claude Code version (default: 2.1.327)
+# Override the pinned Claude Code version (default: 2.1.329)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.327`
+- `CLAUDE_CODE_VERSION=2.1.329`
 - `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.170.0`
+- `CODEX_VERSION=0.171.0`
 - `OPENCODE_VERSION=2.3.2` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
@@ -587,7 +587,7 @@ For local Redis, set `SWARM_DEP_REDIS_ENABLED=true`; the root-stage entrypoint r
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
-The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout. For a repo with a `.husky` directory, the helper runs `npm install --ignore-scripts` (no dependency or repo lifecycle script runs) and then the repo's local `husky install`.
+The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout. For a repo with a `.husky` directory, the helper runs `npm install --ignore-scripts` (no dependency or repo lifecycle script runs) and then the repo's local `husky` for version 9 and later or `husky install` for earlier versions.
 
 Only the lead, the operator key or a dashboard user may change a repo's `url`, `clonePath` or `hooks` (`repo.exec-config.write`). An agent session token of a non-lead agent gets 403 on such a change. A repo that token creates stores `hooks: { enabled: false }` unless the request sets it, and an explicit `hooks: { enabled: true }` gets 403. A worker on the shared API key acts as the operator. A `url` or `clonePath` that starts with `-` is refused.
 

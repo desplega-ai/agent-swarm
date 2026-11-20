@@ -1580,9 +1580,11 @@ export function scrubObject<T>(
   seen = new WeakSet<object>(),
   // Rows of one result repeat the same keys: scrub each distinct key once per call.
   keyCache = new Map<string, string>(),
+  // A hot caller passes `createSweepScrubber()` to skip rules a text cannot trigger.
+  scrub: (text: string) => string = scrubSecrets,
 ): T {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return scrubSecrets(value) as T;
+  if (typeof value === "string") return scrub(value) as T;
   if (typeof value !== "object") return value;
 
   if (seen.has(value)) {
@@ -1591,7 +1593,7 @@ export function scrubObject<T>(
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => scrubObject(item, seen, keyCache)) as T;
+    return value.map((item) => scrubObject(item, seen, keyCache, scrub)) as T;
   }
 
   // Keys are scrubbed too: a map keyed by a token leaks it as a key. Two keys
@@ -1603,7 +1605,7 @@ export function scrubObject<T>(
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     let scrubbed = keyCache.get(key);
     if (scrubbed === undefined) {
-      scrubbed = scrubSecrets(key);
+      scrubbed = scrub(key);
       keyCache.set(key, scrubbed);
     }
     let outKey = scrubbed;
@@ -1613,7 +1615,7 @@ export function scrubObject<T>(
         n++;
       nextSuffix.set(scrubbed, n + 1);
     }
-    out[outKey] = scrubObject(child, seen, keyCache);
+    out[outKey] = scrubObject(child, seen, keyCache, scrub);
   }
   return out as T;
 }

@@ -29,7 +29,8 @@ function asString(value: unknown): string | undefined {
  * Errors for agent-task nodes (and foreach bodies) that pin a model or a
  * profile their `agentId` cannot run. A static `profile` must exist, must not
  * sit beside `model`/`modelTier`, and must pass the profile check when
- * `agentId` is static too.
+ * `agentId` is static too. A static `modelGroup` is judged the same way
+ * (exclusive with all three; with a static `agentId` a member must run there).
  */
 export async function workflowModelErrors(
   def: WorkflowDefinition,
@@ -55,6 +56,17 @@ export async function workflowModelErrors(
           vcsRepo: config.vcsRepo === undefined ? vcsRepo : asString(config.vcsRepo),
         });
         if (error) errors.push(`Node "${node.id}" ${path}.profile: ${error}`);
+      }
+      if (isStatic(config.modelGroup)) {
+        const error = await taskProfileError({
+          modelGroup: config.modelGroup,
+          profile: asString(config.profile),
+          model: asString(config.model),
+          modelTier: asString(config.modelTier),
+          agentId: isStatic(config.agentId) ? config.agentId : undefined,
+          vcsRepo: config.vcsRepo === undefined ? vcsRepo : asString(config.vcsRepo),
+        });
+        if (error) errors.push(`Node "${node.id}" ${path}.modelGroup: ${error}`);
       }
       if (!isStatic(config.model) || !isStatic(config.agentId)) continue;
       const modelTier = typeof config.modelTier === "string" ? config.modelTier : undefined;

@@ -163,7 +163,9 @@ test.describe("desktop", () => {
     });
     // The test API turns steering off; the dashboard reads the flag from stats.
     await page.route("**/api/stats", async (route) => {
-      const response = await route.fetch();
+      // The steer box polls stats, so a reused keep-alive socket the API already closed
+      // fails as ECONNRESET ("socket hang up"). maxRetries retries exactly that error.
+      const response = await route.fetch({ maxRetries: 2 });
       return route.fulfill({
         response,
         json: { ...(await response.json()), steeringEnabled: true },
@@ -415,6 +417,48 @@ test.describe("phone", () => {
   test.beforeEach(({ seed, isMobile }) => {
     test.skip(!seed, "remote run without seed");
     test.skip(!isMobile, "phone layout, runs on the mobile-iphone project");
+  });
+
+  test("Tab enters the phone session tree and Enter opens a session", async ({
+    page,
+    api,
+    seed,
+    clean,
+  }) => {
+    const session = await startSession(api, seed!.user.id, "phone keyboard");
+    await page.goto("/sessions");
+    const tree = page.getByRole("tree", { name: "Sessions" });
+    const rows = tree.getByRole("treeitem");
+    const container = rows.first();
+    const row = sessionRow(tree, session.title);
+    await expect(row).toBeVisible();
+
+    await page.getByRole("button", { name: "More", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(tree).toBeFocused();
+    await expect(tree).toHaveAttribute(
+      "aria-activedescendant",
+      await container.evaluate((item) => item.id),
+    );
+    await expect(container).toHaveAttribute("data-cursor", "true");
+
+    await expect(container).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("ArrowLeft");
+    await expect(container).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("ArrowRight");
+    await expect(container).toHaveAttribute("aria-expanded", "true");
+
+    const rowId = await row.evaluate((item) => item.id);
+    const rowIds = await rows.evaluateAll((items) => items.map((item) => item.id));
+    const rowIndex = rowIds.indexOf(rowId);
+    for (let i = 0; i < rowIndex; i++) await page.keyboard.press("ArrowDown");
+    await expect(tree).toHaveAttribute("aria-activedescendant", rowId);
+    await expect(row.locator('[data-cursor="true"]')).toBeVisible();
+    await expect(container).not.toHaveAttribute("data-cursor", "true");
+
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}(\\?|$)`));
+    await clean.assertClean();
   });
 
   test("the list opens the session detail and back returns", async ({ page, api, seed, clean }) => {

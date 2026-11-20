@@ -7,7 +7,7 @@ test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
 async function forceHealth(page: Page, apiUrl: string, health: "ok" | "broken") {
   await page.route(`${apiUrl}/status`, async (route) => {
-    const response = await route.fetch();
+    const response = await route.fetch({ maxRetries: 2 });
     const body = await response.json();
     await route.fulfill({ response, json: { ...body, health } });
   });

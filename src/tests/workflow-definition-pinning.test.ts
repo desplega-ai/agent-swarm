@@ -17,6 +17,7 @@ import {
   initDb,
   PINNED_WORKFLOW_KEYS,
   pinWorkflowDefinition,
+  resolveApprovalRequest,
   resolveWaitState,
   toPinnedDefinition,
 } from "../be/db";
@@ -396,6 +397,7 @@ describe("a run finishes on the definition it started with", () => {
     const requestId = (registry.get("mock-hitl") as MockHitlExecutor).lastRequestId!;
 
     await editTo(workflow.id, twoNode("B", hitlFirst));
+    await resolveApprovalRequest(requestId, { status: "approved", responses: { q1: true } });
     workflowEventBus.emit("approval.resolved", {
       requestId,
       status: "approved",
