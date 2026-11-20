@@ -97,7 +97,10 @@ test("Kubernetes controllers and pools save through the dashboard @local", async
     await page.getByRole("button", { name: "Save pool", exact: true }).click();
     await expect(page.getByText(`Saved ${name}`, { exact: true })).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel("Slots per runtime", { exact: true })).toHaveValue("2");
+    // A cold reload resolves the runtime-pools gate before it loads the form.
+    const slots = page.getByLabel("Slots per runtime", { exact: true });
+    await expect(slots).toBeVisible({ timeout: 15_000 });
+    await expect(slots).toHaveValue("2");
     await clean.assertClean();
   } finally {
     await page.goto("/settings/connections");

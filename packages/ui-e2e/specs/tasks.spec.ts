@@ -14,6 +14,8 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await page.goto("/tasks");
   await page.getByPlaceholder("Search by description or ID...").fill(TASK_PROMPT);
 
+  // Other specs can leave newer tasks above the seed in the virtualized grid.
+  await page.getByPlaceholder("Search by description or ID...").fill(TASK_PROMPT);
   const row = page.getByRole("row", { name: new RegExp(TASK_PROMPT) });
   await expect(row).toBeVisible();
   await expect(row.getByText("IN PROGRESS")).toBeVisible();
