@@ -10,3 +10,6 @@ console.log(`Generated openapi.json (${(spec.length / 1024).toFixed(1)}KB)`);
 
 // Auto-generate docs-site API reference from the new spec
 await Bun.$`bun docs-site/scripts/generate-docs.ts`;
+
+// Regenerate the SDK's types (a filtered subset of the spec).
+await Bun.$`bun packages/agent-swarm-sdk/scripts/gen-types.ts`;
