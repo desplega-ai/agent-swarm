@@ -1,0 +1,111 @@
+---
+title: 'Investigating a payroll discrepancy for human review with AI agents'
+description: "Agent Swarm gathers the authorized records behind one reported payroll discrepancy and hands a payroll owner a source-linked pack. People decide."
+agent:
+  offer: false
+  when: "Someone wants operations and payroll staff to assemble the evidence for one employee's reported payroll discrepancy before a payroll owner decides"
+---
+
+Agent Swarm can gather the authorized records for one reported payroll discrepancy, run defined deterministic checks and hand an authorized payroll owner a source-linked evidence pack. Validating that evidence, deciding whether a correction is needed, making any correction and talking to the employee stay with people. What it takes off the team is the assembly: the approved hours in a time tool, the payroll-period data in another system, the policy version in a document, and the manager who signed off the overtime somewhere else.
+
+The scope is one employee, one pay period, one reported discrepancy. It is not employee expense review, not bank reconciliation ([unmatched bank transactions](/docs/playbooks/use-cases/agent-assisted-bank-reconciliation-review)) and not training completion tracking. Each is a different handoff with a different owner.
+
+## When another tool fits better
+
+**The payroll system's own audit and correction workflow.** Most payroll products keep a change history for a pay run and offer a correction path. When the record that explains the difference already lives there, that workflow is the cheaper answer, and it keeps the correction inside the system that will apply it.
+
+**A payroll provider or a payroll service.** When the problem is volume, tax filings, statutory calculations or multi-country rules, the work belongs with a provider built for it. A provider also carries the obligations that come with running payroll. Agent Swarm does none of that and does not replace it.
+
+Agent Swarm fits the cross-system case. The time records sit in one tool, the payroll-period data in another, the policy in a document, the approval in a manager's queue, and the person who decides a correction may not be the person who runs payroll. Assembling that evidence, across systems with different owners and clocks, is the work. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where it belongs.
+
+## An illustrative workflow
+
+This is a fictional, custom workflow. It is not a built-in payroll feature, not a prebuilt payroll integration and not a customer result. It needs integrations, data access and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative payroll discrepancy flow, from a reported discrepancy to a payroll owner's decision recorded in the payroll system." chart={`flowchart LR
+  A["Discrepancy reported<br/>(employee or payroll staff)"] --> B["Gather authorized<br/>records<br/>(time, payroll period,<br/>policy version)"]
+  B --> C["Deterministic checks<br/>swarm-script to JSON"]
+  C --> D["Agent assembles<br/>source-linked pack"]
+  D --> G{{"human-in-the-loop<br/>payroll owner"}}
+  G -- "decide" --> R["Correct in the payroll<br/>system, by a person"]
+  G -- "no change" --> S["Close with the<br/>reason recorded"]
+`} />
+
+**1. A reported discrepancy arrives.** The trigger is a person, not a monitor: an employee asks why a payment differs from expectation, or payroll staff flag the same thing while checking a run. The report names the employee, the pay period and what the reporter expected.
+
+**2. Configured connections collect the approved records.** The time records for the period, the payroll-period data for that employee, and the policy version in force on each work date. Scripts reach those systems through [script connections](/docs/guides/script-connections), with credentials from the [scripts credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**3. Deterministic steps run the defined checks.** A `swarm-script` node compares approved hours with paid hours, looks for records dated outside the period, resolves the policy version effective on the work dates, and flags an approval that is missing. The output is JSON, so no model does the arithmetic and the same inputs produce the same flags every run. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-comparison split.
+
+**4. An agent assembles the evidence pack.** Each finding carries a link to the record it came from, the record version and the timestamp it was read, plus a list of evidence that could not be collected. The pack does not decide who is right and does not propose an amount as final.
+
+**5. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow and resumes only on a human response. The authorized payroll owner validates the evidence and decides whether any correction is needed. If it is, a person makes it in the payroll system; the workflow has no path to a payment, a rate or a payroll record.
+
+## Worked example: one pay period
+
+This example is fictional. Pellworth Instruments, the entry ids and the dates are invented, no record came from a real system, and nothing here is a measured outcome.
+
+An employee reports that overtime worked in the first half of March was not paid. Payroll closes that period on 2027-03-15 and pays on 2027-03-25.
+
+| Check | What the deterministic step compared | Result | Source, read 2027-03-17 |
+| --- | --- | --- | --- |
+| Approved hours against paid hours | 6.5 overtime hours approved on the shift dated 2027-03-06, against overtime hours in the payroll-period export | 6.5 approved, 0 paid | Time tool entry `SH-88214`, export revision 3 |
+| Record dated outside the period | Shift dates in the submitted hours against the period start and end | One entry dated 2027-03-16 sits outside the closed period | Time tool entry `SH-88301`, submitted 2027-03-16 |
+| Policy version on the work dates | Overtime multiplier policy versions against the date of the approved shift | Policy v4 took effect 2027-03-01; the export applied the v3 multiplier to a 2027-03-06 shift | Policy register, versions 3 and 4 |
+| Approval recorded | Approver field on each overtime entry in the period | The 2027-03-06 entry has no approver recorded | Time tool entry `SH-88214` |
+
+What the pack also lists as missing, without filling any of it in: the manager's confirmation that the 2027-03-06 overtime was authorized, the notice that moved the policy to v4, and the export's change log for revision 3. Three named gaps, three owners.
+
+The pack states the approved hours, the paid hours, the policy version it read and the dates. It does not say the employee is owed 6.5 hours at the v4 multiplier. That needs the approver's confirmation, a reading of the policy notice and a payroll owner's decision.
+
+## Missing evidence, access and escalation
+
+**A record is missing.** The pack names the record, the system that should hold it and the owner who can produce it. It does not ask anyone to paste an approval or a payslip into a chat, and it does not estimate a value to fill the gap.
+
+**Two records disagree.** When the time tool and the payroll export hold different hours for the same shift, the pack shows both with their versions and read timestamps and picks neither. Settling it needs the people who own each system.
+
+**Access is refused or a system is not connected.** The pack names the record and the person who can grant access. Who may read pay and time records, and who grants it, belongs in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record, written down before the first run.
+
+**Nobody answers the gate.** The gate carries a timeout and a fallback path, which the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends for every blocking approval: a reminder before the timeout, then a named backup owner, then an explicit hold so the case appears on an open list. The workflow never proceeds on silence and never closes a case on its own.
+
+## Limits
+
+**No prebuilt payroll integration.** Nothing here connects to a payroll product out of the box. Every source, field and rule is configuration the team builds and tests against a closed period first.
+
+**No automatic corrections.** The workflow cannot change a rate, an hours record, a payslip or a payment. Its last step is a decision a person records.
+
+**No tax or statutory calculation.** It does not compute withholding, contributions, statutory pay or a net figure.
+
+**No compliance claim.** A complete pack does not make a pay run compliant with employment law or a collective agreement. It assembles evidence for a person who knows which rules apply.
+
+**No access the team has not configured.** The workflow reads only the sources and fields the team connects, under permissions the team grants. Anything else is reported as missing.
+
+**No customer result.** No company has published an outcome from this workflow.
+
+When the discrepancy turns on a statutory calculation, a tax filing or a multi-country rule, a payroll provider or the payroll system's own audit trail is the better answer, and the pack adds a step without removing one.
+
+## What stays human-owned
+
+- **Deciding a correction.** Whether the evidence supports a correction, and what it should be, is the payroll owner's call.
+- **Making the correction.** A person applies it in the payroll system, in a later run or an off-cycle payment. The workflow has no path to either.
+- **Employee communication.** Telling the employee what was found and what happens next belongs to the person who owns the relationship.
+- **Access grants.** Who may read pay and time records is a written decision, made by a person.
+- **Policy interpretation.** Which policy version governs a period, and whether an exception applies, is a reading of the agreement by someone qualified to make it.
+
+## Before you run it
+
+- Authorized access is in place for each record the pack will read, and the owner of each system has agreed to it.
+- Every record's version and date range match the pay period under review, not a neighbouring one.
+- Missing evidence is listed with the owner who can supply it, and every gap is either resolved or left open on the record.
+- A named payroll owner has signed off the pack and the decision, and a backup owner is named for the gate.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing it at a payroll discrepancy is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then an agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, its decision paths, the timeout and the fallback owner.
+- [Script connections](/docs/guides/script-connections): register a time system or a payroll API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls with the raw secret out of source, arguments and logs.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): who may read pay records, a named owner per workflow, roles and approval thresholds.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): when the payroll system's own audit trail or a payroll provider is the better answer.

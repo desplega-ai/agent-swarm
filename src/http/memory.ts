@@ -201,6 +201,7 @@ const reEmbedMemory = route({
   summary: "Re-embed all memories using the current embedding provider",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: { permission: "memory.reembed" },
   body: z.object({
     agentId: z
       .string()
