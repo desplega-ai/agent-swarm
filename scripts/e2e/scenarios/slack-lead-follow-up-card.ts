@@ -25,7 +25,10 @@ import {
 const GENERAL = "C0GENERAL0";
 
 type DelegatedAsk = { leadId: string; threadTs: string; askTaskId: string; followUpId: string };
-type WorkerResult = { output: string; attachments: { kind: "url"; url: string; name: string }[] };
+type WorkerAttachment =
+  | { kind: "url"; url: string; name: string }
+  | { kind: "page"; pageId: string; name: string };
+type WorkerResult = { output: string; attachments: WorkerAttachment[] };
 
 /**
  * How many times `needle` appears in the captions (context blocks) of the
