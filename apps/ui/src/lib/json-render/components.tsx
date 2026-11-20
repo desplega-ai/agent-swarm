@@ -3606,6 +3606,7 @@ function KanbanComponent({ props }: { props: KanbanComponentProps }) {
               {(item) => (
                 <KanbanCard
                   className={cn(!draggable && "cursor-default")}
+                  dragEnabled={draggable}
                   column={item.column}
                   id={item.id}
                   key={item.id}
@@ -3619,7 +3620,16 @@ function KanbanComponent({ props }: { props: KanbanComponentProps }) {
                         : undefined
                     }
                   >
-                    <p className="m-0 font-medium text-sm">{item.name || "Untitled"}</p>
+                    {props.onCardClick ? (
+                      <button
+                        type="button"
+                        className="cursor-pointer text-left font-medium text-sm"
+                      >
+                        {item.name || "Untitled"}
+                      </button>
+                    ) : (
+                      <p className="m-0 font-medium text-sm">{item.name || "Untitled"}</p>
+                    )}
                     {cardFields.map((field) => (
                       <div
                         className="flex items-center justify-between gap-2 text-xs"

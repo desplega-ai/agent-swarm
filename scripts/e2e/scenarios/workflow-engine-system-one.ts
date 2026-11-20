@@ -491,8 +491,9 @@ export const workflowEngineSystemOne: Scenario = {
         );
       }
 
-      // ── extraction: clairic-27b reports a null value with `span: null` ──────
-      // Verbatim shape of a clairic-27b answer for a field the input does not hold.
+      // ── extraction: clairic-27b reports an answer it could not locate as a null span ──
+      // Verbatim shapes of clairic-27b answers: a null value, a value with no unique literal
+      // match, and list items it could not locate (`spans` entries of null).
       const nullAnswer = {
         type: "text",
         value: null,
@@ -501,12 +502,63 @@ export const workflowEngineSystemOne: Scenario = {
         span: null,
         p_null: 0.97,
       };
-      for (const [label, orderId, ok] of [
-        ["null value, null span", nullAnswer, true],
-        ["null value, no span", { type: "text", value: null, p_null: 0.99 }, true],
-        ["value with a null span", { ...nullAnswer, value: "A-1", raw: '"A-1"' }, false],
-        ["value with a reversed span", { type: "text", value: "A-1", span: [9, 3] }, false],
-      ] as const) {
+      const textField = { type: "text", instructions: "Order number" };
+      const listField = { type: "list", items: "text", instructions: "Areas touched" };
+      const listAnswer = (spans: unknown) => ({
+        type: "list",
+        value: ["CLAUDE.md", "apps/ui/CLAUDE.md"],
+        confidences: [0.88, 0.51],
+        valid: true,
+        p_null: 0.05,
+        spans,
+      });
+      const spanCases: Array<{
+        label: string;
+        field: Record<string, unknown>;
+        answer: Record<string, unknown>;
+        // The answer as the node outputs it, or the validation error the step fails on.
+        out?: Record<string, unknown>;
+        error?: string;
+      }> = [
+        { label: "null value, null span", field: textField, answer: nullAnswer, out: { value: null } },
+        {
+          label: "null value, no span",
+          field: textField,
+          answer: { type: "text", value: null, p_null: 0.99 },
+          out: { value: null },
+        },
+        {
+          label: "value with a null span",
+          field: textField,
+          answer: { ...nullAnswer, value: "docs", raw: '"docs"' },
+          out: { value: "docs" },
+        },
+        {
+          label: "value with a reversed span",
+          field: textField,
+          answer: { type: "text", value: "A-1", span: [9, 3] },
+          error: 'answer "order_id".span must be [start, end] offsets',
+        },
+        {
+          label: "list with null spans",
+          field: listField,
+          answer: listAnswer([null, null]),
+          out: { value: ["CLAUDE.md", "apps/ui/CLAUDE.md"], spans: [null, null] },
+        },
+        {
+          label: "list with a null and a located span",
+          field: listField,
+          answer: listAnswer([[24, 33], null]),
+          out: { spans: [[24, 33], null] },
+        },
+        {
+          label: "list with a reversed span",
+          field: listField,
+          answer: listAnswer([null, [33, 24]]),
+          error: 'answer "order_id".spans must be a list of [start, end] offsets',
+        },
+      ];
+      for (const { label, field, answer: orderId, out, error: wantError } of spanCases) {
         ctx.llm.setSystemOneResponder(() => ({
           model: "clairic-27b",
           answers: { order_id: orderId },
@@ -515,7 +567,14 @@ export const workflowEngineSystemOne: Scenario = {
         const spanFlow = await createWorkflow(
           ctx,
           `wf-s1-extract-span-${label.replaceAll(" ", "-").replaceAll(",", "")}`,
-          { nodes: [extractionNode(`Order ${marker}`, { provider: "cloudflare" })] },
+          {
+            nodes: [
+              extractionNode(`Order ${marker}`, {
+                provider: "cloudflare",
+                fields: { order_id: field },
+              }),
+            ],
+          },
           {},
           workerId,
         );
@@ -523,20 +582,23 @@ export const workflowEngineSystemOne: Scenario = {
         const spanDetail = await waitForRun(
           ctx,
           spanRun.runId,
-          ok ? "completed" : "failed",
+          out ? "completed" : "failed",
           20_000,
           `extraction run (${label})`,
         );
-        if (ok) {
+        if (out) {
           const answer = asRecord(asRecord(outputOf(spanDetail, "extract").answers).order_id);
+          const matches = Object.entries(out).every(
+            ([key, want]) => JSON.stringify(answer[key]) === JSON.stringify(want),
+          );
           expect(
-            answer.value === null && !("span" in answer) && !("raw" in answer),
-            `${label}: the answer is a null value without a span: ${JSON.stringify(answer)}`,
+            matches && !("raw" in answer) && (field === listField || !("span" in answer)),
+            `${label}: the answer keeps its value and drops the null span: ${JSON.stringify(answer)}`,
           );
         } else {
           const error = String(stepOf(spanDetail, "extract").error);
           expect(
-            error.includes('answer "order_id".span must be [start, end] offsets'),
+            error.includes(String(wantError)),
             `${label}: the step fails on the span: ${error}`,
           );
         }

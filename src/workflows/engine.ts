@@ -1502,7 +1502,7 @@ export function interpolateNodeConfig(
 
     // The interpolated script body is handed straight to `bash -c` / `bun -e` /
     // `python3 -c` (ScriptExecutor.runScript), and code-match code and string
-    // wait filters are compiled with `new Function` in this process, so
+    // wait filters run as JavaScript in the QuickJS predicate sandbox, so
     // string-substituting untrusted text into them is a direct code injection
     // vector. Restrict the source to an ALLOWLIST of operator/system-authored
     // sources rather than blocking
