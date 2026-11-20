@@ -46,7 +46,7 @@ import {
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
 import { slackContextKey } from "../tasks/context-key";
-import type { AgentTask, TaskAttachment } from "../types";
+import type { AgentTask } from "../types";
 import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
 import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -81,6 +81,7 @@ import {
   type SlackReactionEvent,
 } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
+import { reviewedTaskDeliverables } from "./reviewed-deliverables";
 import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
@@ -1501,12 +1502,9 @@ async function recordSlackDelivery(
   });
 }
 
-function attachmentCaption(attachments: TaskAttachment[]): string | undefined {
-  const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
-  if (!attachment) return undefined;
-  const url = taskAttachmentDisplayUrl(attachment);
+function linkCaption(url: string, name: string): string | undefined {
   if (!/^https?:\/\//.test(url)) return undefined;
-  const label = attachment.name
+  const label = name
     .replace(/\s+/g, " ")
     .trim()
     .replace(/&/g, "&amp;")
@@ -1572,17 +1570,41 @@ function withUiSpecFallbackText(
 
 /**
  * Secondary metadata for an outcome card, as captions (`context` blocks)
- * under the answer: cited sources, general sources, then the primary
- * attachment. `content` is the unrendered answer, whose `[citation:N]`
- * markers decide which sources count as cited.
+ * under the answer: cited sources, general sources, the primary
+ * attachment, then a Lead review's worker deliverables. `content` is the
+ * unrendered answer, whose `[citation:N]` markers decide which sources count
+ * as cited.
  */
 async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<unknown[]> {
   const moreUrl = getTaskUrl(task.id);
   const sources = taskCitationSourceGroups(content, await getTaskCitations(task.id)).map((group) =>
     buildCaptionBlock(group.items, { heading: group.heading, moreUrl }),
   );
-  const attachment = attachmentCaption(await getSlackOutputAttachments(task.id));
-  return [...sources, attachment ? buildCaptionBlock([attachment]) : undefined].filter(Boolean);
+  const attachments = await getSlackOutputAttachments(task.id);
+  const primary = attachments.find((item) => item.isPrimary) ?? attachments[0];
+  const ownUrl = primary ? taskAttachmentDisplayUrl(primary) : undefined;
+  const attachment = primary && ownUrl ? linkCaption(ownUrl, primary.name) : undefined;
+  // A Lead review card also lists the reviewed worker's deliverables.
+  const reviewed = await reviewedTaskDeliverables(
+    task,
+    content,
+    ownUrl ? [ownUrl] : [],
+    getSlackApp()?.client,
+  );
+  const reviewedItems = reviewed.links
+    .map((link) => linkCaption(link.url, link.label))
+    .filter((item): item is string => !!item);
+  if (reviewed.omitted > 0) {
+    const more = `+${reviewed.omitted} more`;
+    reviewedItems.push(reviewed.moreUrl ? `<${reviewed.moreUrl}|${more}>` : more);
+  }
+  return [
+    ...sources,
+    attachment ? buildCaptionBlock([attachment]) : undefined,
+    reviewedItems.length > 0
+      ? buildCaptionBlock(reviewedItems, { heading: "From the worker" })
+      : undefined,
+  ].filter(Boolean);
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };
