@@ -217,3 +217,23 @@ CI uses `bun install --frozen-lockfile`. A single root install now covers `apps/
 - **`apps/templates-ui/`** — same Vercel pattern.
 
 Frontend-touching PRs additionally need `agent-browser` screenshots uploaded to agent-fs (reviewer convention, not a CI job). See [testing.md](./testing.md).
+
+## CHANGELOG.md
+
+`CHANGELOG.md` is edited only by release PRs (`release: vX.Y.Z`); feature, fix, chore and docs PRs never touch it, not even an `[Unreleased]` entry. On a `CHANGELOG.md` merge conflict in a non-release PR, restore the merge-base version so the PR diff shows no CHANGELOG change.
+
+## Drift checks by trigger file
+
+Run a generator only when you touched its trigger files, and commit the output it regenerates. `bun run check:local` runs the generators whose inputs changed.
+
+- Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
+- Edited `content.md` or `config.json` under `templates/skills/` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file
+- Edited the frontmatter of a page under `docs-site/content/docs/`, or added, moved or removed a page? → `bun run build:docs-index` and commit `templates/skills/swarm-docs/content.md`
+- Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
+- Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly, they're generated from `typecheck.ts`)
+- Edited `apps/ui/src/logs-parser/**` or `src/utils/dsh-usage.ts`? → `bun run build:claude-mod` and commit `claude-mod/vendor/logs-parser.js` (the Claude Code mod's bundle of the parser)
+- Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
+- Edited `templates/extensions/` or `ExtensionManifestSchema`? → `bun run build:extension-catalog && bun run build:extension-schema` and commit both generated files
+- Touched `apps/ui/`: or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
+- Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .`, CI builds all three images
+- Touched `Dockerfile.ui` / `apps/ui/nginx.conf`? → `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
