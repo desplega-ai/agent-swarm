@@ -103,6 +103,15 @@ comments save next to the video, and **Send to swarm** makes one task for each r
 
 https://video-edit.agent-swarm.dev serves this folder as a static site, in the same way as
 [talks/2026-09-21-ai-builders-memory/](../../talks/2026-09-21-ai-builders-memory/README.md). `vercel.json` sets no
-framework, no install and no build. A Vercel project of its own has this folder as `rootDirectory`, `main` as the
-production branch, and the domain. The Vercel Git integration deploys a merge to `main`. No GitHub Action deploys it.
-Do not rename or move this folder without a change to `rootDirectory` in the project.
+framework, no install and no build. The Vercel Git integration deploys a merge to `main`. No GitHub Action deploys it.
+
+| Setting | Value |
+| --- | --- |
+| Project | `agent-swarm-video-review` (`prj_VIhT8nda7zN1u4kdyFuW0t5UJX7K`), team `desplega-labs` |
+| Git repository | `desplega-ai/agent-swarm` |
+| Production branch | `main` |
+| `rootDirectory` | `examples/video-review` |
+| Production domain | `video-edit.agent-swarm.dev` |
+
+`rootDirectory`, the Git link and the domain are project settings, not `vercel.json` properties. Do not rename or
+move this folder without a change to `rootDirectory` in the project.
