@@ -157,6 +157,7 @@ const jiraRefresh = route({
     500: { description: "Refresh failed (e.g. revoked grant, network error)" },
     503: { description: "Jira integration not configured" },
   },
+  rbac: { permission: "oauth-authorization.manage" },
 });
 
 const jiraWebhook = route({
@@ -173,6 +174,7 @@ const jiraWebhook = route({
     401: { description: "Invalid URL token" },
     503: { description: "Jira webhook handler not configured" },
   },
+  rbac: { ungated: "inbound Jira webhook: the URL token is the credential, no bearer principal" },
 });
 
 // Admin: register a new dynamic webhook with Atlassian. apiKey is required

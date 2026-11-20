@@ -129,6 +129,7 @@ const previewRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "read-only render over POST; open to agents like the prompt-template tools" },
 });
 
 const renderRoute = route({
@@ -148,6 +149,7 @@ const renderRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "read-only render over POST; open to agents like the prompt-template tools" },
 });
 
 const checkoutRoute = route({
@@ -167,6 +169,10 @@ const checkoutRoute = route({
     404: { description: "Template or version not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "prompt-template overrides: open to agents like the prompt-template tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const resetRoute = route({
@@ -184,6 +190,10 @@ const resetRoute = route({
     404: { description: "Template not found or no code default available" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "prompt-template overrides: open to agents like the prompt-template tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const getByIdRoute = route({
@@ -222,6 +232,10 @@ const deleteByIdRoute = route({
     404: { description: "Template not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "prompt-template overrides: open to agents like the prompt-template tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const listRoute = route({
@@ -268,6 +282,10 @@ const upsertRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "prompt-template overrides: open to agents like the prompt-template tools; no verb covers them, so user roles need admin",
+  },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

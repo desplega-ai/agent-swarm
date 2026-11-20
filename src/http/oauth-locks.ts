@@ -46,6 +46,10 @@ const acquireLockRoute = route({
     409: { description: "Lock is currently held by another caller" },
     400: { description: "Validation error" },
   },
+  rbac: {
+    ungated:
+      "internal OAuth refresh coordination between API processes and workers; no user flow calls it",
+  },
 });
 
 const releaseLockRoute = route({
@@ -59,6 +63,10 @@ const releaseLockRoute = route({
   responses: {
     204: { description: "Released (a mismatched/expired owner is a no-op, also 204)" },
     400: { description: "Validation error" },
+  },
+  rbac: {
+    ungated:
+      "internal OAuth refresh coordination between API processes and workers; no user flow calls it",
   },
 });
 

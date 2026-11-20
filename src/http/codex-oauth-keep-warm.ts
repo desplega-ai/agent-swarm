@@ -88,6 +88,10 @@ const keepWarmRoute = route({
       schema: z.object({ results: z.array(slotOutcomeSchema) }),
     },
   },
+  rbac: {
+    ungated:
+      "internal OAuth refresh coordination between API processes and workers; no user flow calls it",
+  },
 });
 
 export async function handleCodexOAuthKeepWarm(

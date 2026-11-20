@@ -301,6 +301,7 @@ const createUserRoute = route({
     409: { description: "A user with this email already exists (user_exists)" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 const listUnmapped = route({
@@ -356,6 +357,7 @@ const resolveUnmapped = route({
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 const DISMISS_RBAC = {
@@ -472,6 +474,7 @@ const updateUserRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 const mintUserMcpTokenRoute = route({
@@ -503,6 +506,10 @@ const mintUserMcpTokenRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "mints another user's bearer token, so no scoped grant admits it (operator-only admission)",
+  },
 });
 
 const revokeUserMcpTokenRoute = route({
@@ -521,6 +528,7 @@ const revokeUserMcpTokenRoute = route({
     404: { description: "User or token not found" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "same posture as POST /api/users/{id}/mcp-tokens (operator-only admission)" },
 });
 
 const createConnectorCodeRoute = route({
@@ -710,6 +718,7 @@ const mergeUsersRoute = route({
     },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 const listMergeJobsRoute = route({
@@ -795,6 +804,7 @@ const addIdentityRoute = route({
     409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 const deleteIdentityRoute = route({
@@ -813,6 +823,7 @@ const deleteIdentityRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "user.manage" },
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
