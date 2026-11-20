@@ -22,6 +22,64 @@ const legacyIntegrationRedirects = [
   })),
 );
 
+// Use-case guides written by the Omnia insights loop moved from /docs/guides to
+// /docs/playbooks/use-cases. These URLs are cited externally, so keep them 301.
+const movedUseCaseGuides = [
+  "agent-assisted-bank-reconciliation-review",
+  "ai-delivery-delay-handoff",
+  "ai-demand-forecast-accuracy-review",
+  "ai-inventory-exception-handoff",
+  "ai-invoice-discrepancy-review",
+  "ai-operations-governance",
+  "ai-operations-shift-handoff",
+  "ai-payroll-discrepancy-review",
+  "ai-returns-exception-handoff",
+  "ai-rfp-bid-qualification",
+  "ai-service-capacity-planning",
+  "ai-support-escalation-handoff",
+  "ai-training-completion-evidence-review",
+  "ai-win-loss-review",
+  "business-continuity-tabletop-preparation",
+  "choosing-an-ai-operating-model",
+  "competitor-change-brief",
+  "contractor-license-expiry-review",
+  "customer-billing-dispute-review",
+  "customer-commitment-tracking",
+  "customer-pricing-change-review",
+  "customer-renewal-review",
+  "digital-content-license-rights-review",
+  "employee-offboarding-access-review",
+  "employee-onboarding-readiness-review",
+  "food-batch-traceability-exercise",
+  "food-supplier-ingredient-change-review",
+  "guest-accessibility-request-handoff",
+  "maintenance-work-order-triage",
+  "marketing-campaign-launch-review",
+  "marketplace-catalog-discrepancy-review",
+  "marketplace-fraud-alert-investigation",
+  "marketplace-moderation-appeals",
+  "marketplace-payout-exception-review",
+  "meeting-decision-follow-up",
+  "near-miss-investigation-review",
+  "partner-data-feed-freshness-review",
+  "partner-onboarding-readiness",
+  "privacy-data-request-handoff",
+  "service-level-breach-review",
+  "small-tech-team-operating-model",
+  "supplier-order-confirmation-review",
+  "supplier-performance-review",
+  "supplier-security-evidence-review",
+  "support-knowledge-conflict-review",
+];
+
+const useCaseGuideRedirects = movedUseCaseGuides.flatMap((slug) =>
+  ["", ".md", ".mdx"].map((extension) => ({
+    source: `/docs/guides/${slug}${extension}`,
+    destination: `/docs/playbooks/use-cases/${slug}${extension}`,
+    statusCode: 301,
+  })),
+);
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
@@ -31,6 +89,7 @@ const config = {
   async redirects() {
     return [
       ...legacyIntegrationRedirects,
+      ...useCaseGuideRedirects,
       {
         source: "/docs/api-reference/workflowevents",
         destination: "/docs/api-reference/workflows",

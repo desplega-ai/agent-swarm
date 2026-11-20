@@ -7947,10 +7947,12 @@ export async function createWorkflowRun(data: {
   triggeredByAgentId?: string;
   /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
   definitionHash?: string;
+  /** JSON `WorkflowRunPrincipal` decided from the pinned definition (migration 367). */
+  principal?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId, principal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7970,6 +7972,7 @@ export async function createWorkflowRun(data: {
       (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
         ? null
         : (getCurrentRunProvenance()?.sourceStepId ?? null),
+      data.principal ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");

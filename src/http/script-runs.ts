@@ -223,6 +223,10 @@ const deleteScriptRunRoute = route({
     204: { description: "Script run cancelled, or already terminal" },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script workflow runs: open to agents like the script tools; no verb covers cancel, so user roles need admin",
+  },
 });
 
 const getInternalStepRoute = route({
@@ -254,6 +258,10 @@ const postInternalStepRoute = route({
     201: { description: "Journal step written", schema: z.object({ ok: z.literal(true) }) },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
+  },
 });
 
 const heartbeatRoute = route({
@@ -267,6 +275,10 @@ const heartbeatRoute = route({
   responses: {
     204: { description: "Heartbeat recorded" },
     404: { description: "Script run not found" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 
@@ -283,6 +295,10 @@ const statusRoute = route({
     204: { description: "Status updated" },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
+  },
 });
 
 const rawLlmRoute = route({
@@ -296,6 +312,10 @@ const rawLlmRoute = route({
   responses: {
     200: { description: "LLM call completed", schema: RawLlmOutputSchema },
     500: { description: "LLM call failed" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 
@@ -325,6 +345,10 @@ const agentTaskRoute = route({
     404: { description: "Script run not found" },
     409: { description: "Agent task failed, was cancelled, or was superseded" },
     422: { description: "Blocked by the follow-up re-delegation guard" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 

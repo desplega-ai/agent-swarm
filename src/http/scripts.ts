@@ -316,6 +316,7 @@ const runRoute = route({
     409: { description: "Object busy, re-entry, or lease lost" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
+  rbac: { permission: "script.run" },
 });
 
 const searchRoute = route({

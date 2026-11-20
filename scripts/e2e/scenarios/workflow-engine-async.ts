@@ -273,6 +273,17 @@ export const workflowEngineAsyncNodes: Scenario = {
       "run-scoped signal for an unknown run",
     );
 
+    // Names the extension post-bridge forwards are server-emitted only: extension handlers
+    // trust those payloads, so neither signal route may emit them.
+    for (const name of ["approval.resolved", "task.completed", "gitlab.merge_request.opened"]) {
+      for (const path of ["/api/workflow-events", `/api/workflow-runs/${runId}/events`]) {
+        const forged = await ctx.api("POST", path, {
+          body: { name, payload: { requestId: crypto.randomUUID(), status: "approved" } },
+        });
+        expectStatus(forged, [403], `server-only event ${name} via ${path}`);
+      }
+    }
+
     // Run-scoped wait: a global broadcast of the same name carries no run id, so it
     // does not wake the wait. The run-scoped signal does, only with a matching filter.
     const runEvent = `e2e.run.${ctx.nonce}`;

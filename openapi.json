@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.14.0",
+    "version": "2.14.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -74853,7 +74853,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -74946,7 +74946,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {

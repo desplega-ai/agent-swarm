@@ -1,0 +1,93 @@
+---
+title: 'Coordinating a guest accessibility request between guest support and property operations with AI agents'
+description: "Agent Swarm prepares a source-linked handoff for a guest's accessibility question, and a person verifies the facts and owns the reply."
+agent:
+  offer: false
+  when: "Someone wants guest support and property operations to coordinate a guest's accessibility question with a human owner"
+---
+
+Agent Swarm can prepare a source-linked handoff packet for a human operations owner when a guest asks an accessibility question about a property, and a person verifies the facts and owns the guest response. The packet carries the guest's question as written, the approved property information that bears on it, and whatever the sources leave uncertain. What the workflow takes off the team is the assembly: the listing record, the facts sheet and an older note rarely agree, and the person answering is usually not the one who can check the building.
+
+The scope is one guest accessibility question, verified before anyone answers it. It is not the triage of a booking record discrepancy, which is worked through in [Investigating booking discrepancies with AI agents](https://www.agent-swarm.dev/blog/omnia/ai-booking-exception-triage). It is not a maintenance work order, covered by the [property maintenance request guide](/docs/playbooks/use-cases/maintenance-work-order-triage). It is not a support issue escalated to engineering, described in [the support escalation handoff guide](/docs/playbooks/use-cases/ai-support-escalation-handoff).
+
+## When another tool fits better
+
+**A direct support workflow.** If one property is in question, or a handful, and one person answers from a listing they know and a call they can make, that call settles it. A packet adds a queue in front of a conversation that already works.
+
+**A specialist accessibility service or an access audit.** An assessment of what a property physically offers, made by someone qualified to inspect it, is a different output. Agent Swarm does not inspect or certify a property, and does not replace an audit or a professional opinion about access.
+
+Agent Swarm fits the shape where the facts sit across several systems and teams: the guest's words in support, the approved description in the listing record, the fields operations maintains in a facts sheet, and an older note or a facilities record that may hold what the listing never captured. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that coordination work belongs.
+
+## An illustrative workflow
+
+This is a fictional, illustrative custom setup, not a built-in accessibility feature and not a customer result. It needs integrations and configuration your team builds and tests. The scenario names roles, not a real property or contact, and no contact with a property is needed to write or publish it.
+
+<Mermaid title="Illustrative guest accessibility request, from a guest's question to a human-verified reply." chart={`flowchart LR
+  A["Guest asks about<br/>access at a property"] --> B["Configured source scripts<br/>swarm-script to JSON"]
+  B --> C["Approved property facts<br/>+ date on every record"]
+  C --> D["Agent assembles<br/>source-linked packet"]
+  D --> E["Marks missing, stale<br/>or conflicting facts"]
+  E --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "verified" --> R["Owner checks with<br/>property contact,<br/>sends reply"]
+  G -- "cannot confirm" --> S["Feature stays<br/>unconfirmed"]
+`} />
+
+**1. An operations owner defines the approved sources and the facts that may be quoted.** Which systems hold the property's approved information, which fields count as a property fact, and who the owner and the property contact are. A listing record, a facts sheet and any accessibility note the operator maintains belong on that list; nothing else enters the packet. The list, and who may change it, belongs in the workflow's [governance record](/docs/playbooks/use-cases/ai-operations-governance).
+
+**2. Configured source scripts gather the question and the records.** A guest writes to support asking whether a property has step-free access. `swarm-script` steps reach each approved source through [script connections](/docs/guides/script-connections) and take credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in script source. They pull the guest's message as written, the approved property records and the date each was last updated, and emit JSON. Code does the fetching, so no model chooses what to open, and each source connector is a custom integration skill your team writes and tests, as [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) describes.
+
+**3. An agent assembles the packet and marks the gaps.** Each property fact carries its source and the date it was last read. A field no source returned, a record older than the team's threshold and two sources that disagree are named as separate items, and the packet asks for human verification. It does not fill a gap with a plausible value.
+
+**4. A human-in-the-loop gate pauses the run.** A [human-in-the-loop node](/docs/playbooks/patterns/hitl-gates) posts a short summary with a link to the packet and resumes only when the named operations owner responds, with a timeout and a fallback, because silence is not approval.
+
+**5. The owner verifies with the property contact and owns the reply.** The owner checks the unconfirmed items with the appropriate property contact through the operator's established process, decides what can be confirmed today, and sends the guest response. Where the contact cannot confirm a feature, the feature stays unconfirmed and the reply says so.
+
+## What the packet shows
+
+- **The guest's question, verbatim,** with the channel it arrived on and the date. A paraphrased question about access gets the wrong detail answered.
+- **Each property fact with its source and last-updated date,** so a reader can tell a maintained record from an old note.
+- **A missing or conflicting list,** with the facts no source returned and the facts two sources disagree on, kept as separate items.
+- **An explicit not-confirmed status per feature,** rather than a blank field a reader might take as a yes.
+- **The named operations owner and the property contact role,** so the next step has an addressee instead of a queue.
+
+## Worked example
+
+The details here are invented to show the shape of a packet, not a customer or a measured result.
+
+A listing says a property has an accessible entrance. The facts sheet has no step count for it, and an older note mentions a step at the side door, next to a door the note calls the main one.
+
+The packet marks step-free access as unconfirmed and shows the three records side by side with their dates instead of choosing between them. The owner takes the unconfirmed items to the property contact. If the contact confirms the entrance and its approach, the owner says so, with the date it was checked. If not, step-free access stays unconfirmed, and the guest gets an answer that separates what the listing states from what the team has verified. No promise about the property is made in either case.
+
+## Limits and escalation
+
+**Permissions and source scripts are configuration your team owns.** The workflow reads only what the team authorizes, and every connector carries its own read scope. How long a packet is kept, and who may reopen it, need a written answer before the first request arrives.
+
+**Stored listings can be incomplete or stale.** A record that was accurate at the last tenancy may be wrong today, so the packet shows dates instead of assuming freshness.
+
+**Disability-related information a guest shares may be sensitive.** Collect only what the question requires, keep the packet in access-controlled storage rather than chat or task text, and never infer a diagnosis or a condition. Apply the operator's privacy process, including the [personal-data request handoff guide](/docs/playbooks/use-cases/privacy-data-request-handoff) where a guest asks about their own records. Swarm memory is visible to every agent, so keep guest details out of it and pass the packet by file reference.
+
+**No certification and no guarantee.** The workflow produces a record of what the sources say for a person to verify. It does not certify a property, does not establish that a stay will suit a guest, and does not answer a legal or regulatory question about access. Whether a property meets an obligation is a judgment for people who can answer for it.
+
+**Escalate when verification does not resolve.** When records conflict, when the property contact cannot be reached, or when the request touches safety, the owner escalates to a named operations lead through the channel the operator already uses. The request stays on an open list until someone answers it.
+
+**No agent sends or promises an accommodation.** The agent does not contact the guest, does not confirm a feature and does not offer a modification or a refund. Every message to the guest is written or approved by a person.
+
+## What stays human-owned
+
+- **Verification with the property contact.** Whether a feature exists, and whether it works the way a record implies, is confirmed by someone who can check the property.
+- **The decision on what is confirmed.** The owner decides which facts are solid enough to state, and which stay unconfirmed.
+- **The guest response.** A person writes or approves the reply, including how uncertainty is described.
+- **Any accommodation.** Whether to offer one, what it is and who arranges it is the operator's decision, made outside this workflow.
+
+Assembling a packet is reversible. Telling a guest that a property will work for them is not.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a guest accessibility request is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): configured source skills, deterministic collection that emits JSON, then agent synthesis.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback.
+- [Personal-data request handoff](/docs/playbooks/use-cases/privacy-data-request-handoff): sensitive-data handling when a guest asks about their own records.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow and approval thresholds.
