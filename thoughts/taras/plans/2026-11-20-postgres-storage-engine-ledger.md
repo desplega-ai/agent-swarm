@@ -45,7 +45,8 @@ Other checks: not run yet. Most of their commands do not exist yet.
 
 ## Failures at the base commit
 
-Filled in from the M0 runs below.
+- `bun run e2e:strict` at the base commit (run 2026-11-20, 16 min 40 s, log kept outside the repo): **exit 1**. 215 scenarios pass, 0 fail, 1 flaky (`model-group-resolution`: first attempt 400 `model-group-unavailable`, passed on rerun). The strict gate fails on coverage only: `state task-statuses: 1 value(s) the suite never produced: in_progress` (task-engine 98.4%). This failure exists before any change on the branch.
+- `bunx biome check scripts/e2e`: `scripts/e2e/scenarios/slack-inbound-gates.ts:13` unused variable `ALICE` at the base commit.
 
 ## M0 results
 
