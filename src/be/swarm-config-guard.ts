@@ -82,6 +82,9 @@ const RESERVED_KEYS = new Set([
   // tokens, so only the deployment env may redirect it.
   "GITHUB_URL",
   "GITHUB_API_URL",
+  // Linear host (E2E emulator): the API base receives the OAuth client secret and tokens.
+  "LINEAR_URL",
+  "LINEAR_API_URL",
   // Picks which App installation workers get tokens for; a config writer must not choose it.
   "GITHUB_APP_INSTALLATION_ID",
   // Owners whose repos get a token for their own installation; same reason.

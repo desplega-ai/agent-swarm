@@ -193,6 +193,7 @@
     "@oxlint/plugins": "1.93.0",
     "@types/bun": "latest",
     "dependency-cruiser": "^18.7.2",
+    "emulate": "0.14.0",
     "happy-dom": "^21.0.4",
     "konsistent": "1.0.0-beta.13",
     "openapi-typescript": "^7",

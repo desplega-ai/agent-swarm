@@ -23,6 +23,7 @@
       "!mockups",
       "!claude-mod/vendor/logs-parser.js",
       "!talks",
+      "!examples/video-review",
       "!templates/community/open-prompt-showreel/example/tla-races/reel.html",
       "!!docs-site/public/openapi.d.ts"
     ]
