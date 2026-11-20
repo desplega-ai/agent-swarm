@@ -69,7 +69,7 @@ interface AnimatedIconHandle {
   stopAnimation: () => void;
 }
 
-/** A vendored animated icon from `components/icons/` (see CLAUDE.md § Motion). */
+/** A vendored animated icon from `components/icons/` (see docs/motion.md). */
 type AnimatedIconComponent = ForwardRefExoticComponent<
   { size?: number; className?: string } & RefAttributes<AnimatedIconHandle>
 >;

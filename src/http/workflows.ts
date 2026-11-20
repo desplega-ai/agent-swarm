@@ -199,6 +199,10 @@ const createWorkflowRoute = route({
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow created under this Idempotency-Key was deleted" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const getWorkflowRoute = route({
@@ -255,6 +259,10 @@ const updateWorkflowRoute = route({
     403: { description: "Env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const patchWorkflowRoute = route({
@@ -273,6 +281,10 @@ const patchWorkflowRoute = route({
     400: { description: "Invalid patch or resulting definition" },
     403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -293,6 +305,10 @@ const patchWorkflowNodeRoute = route({
     403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow or node not found" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const deleteWorkflowRoute = route({
@@ -305,6 +321,10 @@ const deleteWorkflowRoute = route({
   responses: {
     204: { description: "Workflow deleted" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -338,6 +358,10 @@ const triggerWorkflowRoute = route({
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow triggered under this Idempotency-Key was deleted" },
   },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const validateTriggerRoute = route({
@@ -354,6 +378,10 @@ const validateTriggerRoute = route({
     },
     400: { description: "Payload failed validation; body matches the TriggerSchemaError contract" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -441,6 +469,10 @@ const retryWorkflowRunRoute = route({
     400: { description: "Cannot retry" },
     404: { description: "Run not found" },
   },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const cancelWorkflowRunRoute = route({
@@ -456,6 +488,10 @@ const cancelWorkflowRunRoute = route({
     400: { description: "Cannot cancel" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const listExecutorTypesRoute = route({
@@ -516,6 +552,10 @@ const webhookTriggerRoute = route({
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "inbound workflow webhook: the workflow's webhook secret is the credential, no bearer principal",
   },
 });
 

@@ -111,6 +111,10 @@ export async function createX402Client(
 
   // Create and configure x402 client
   const client = new x402Client();
+  // @x402/core >= 2.31 caps each payment at $1 by default. SpendingTracker below
+  // already enforces maxAutoApprove and the daily limit, so drop only the USD cap
+  // and keep the core's default-asset allowlist.
+  client.setSpendControls({ maxAmountPerPayment: false });
   registerExactEvmScheme(client, { signer });
 
   // Create spending tracker
@@ -130,13 +134,35 @@ export async function createX402Client(
   const invocation = new AsyncLocalStorage<{ reservationId?: string }>();
 
   client.onBeforePaymentCreation(async (context) => {
-    const { selectedRequirements } = context;
+    // The hook is typed for v2, but x402 v1 requirements reach it too: v1 names the
+    // price `maxAmountRequired` (v2: `amount`) and carries `resource` as a URL string.
+    // Pick the field by protocol version: a v1 scheme signs `maxAmountRequired` and
+    // ignores any `amount` sent alongside it, so a fallback chain is bypassable.
+    const version = context.paymentRequired.x402Version;
+    const requirements = context.selectedRequirements as {
+      amount?: unknown;
+      maxAmountRequired?: unknown;
+      resource?: unknown;
+    };
+    const url =
+      context.paymentRequired.resource?.url ||
+      (typeof requirements.resource === "string" ? requirements.resource : "") ||
+      "unknown";
 
-    // V2 PaymentRequirements uses `amount` (smallest unit, e.g. "10000" for $0.01 USDC)
-    const rawValue = selectedRequirements.amount;
-    const amountUsd = usdcToUsd(rawValue);
+    const rawAmount =
+      version === 1
+        ? requirements.maxAmountRequired
+        : version === 2
+          ? requirements.amount
+          : undefined;
+    const amountUsd = usdcToUsd(rawAmount);
+    if (amountUsd === null) {
+      return {
+        abort: true,
+        reason: `Payment requirements (x402 v${version}) carry no parseable amount, refusing to pay. URL: ${url}`,
+      };
+    }
 
-    const url = context.paymentRequired.resource?.url || "unknown";
     const result = spendingTracker.reserve(amountUsd, url);
 
     if (!result.ok) {
@@ -199,16 +225,11 @@ export async function createX402Fetch(
 }
 
 /**
- * Convert USDC raw value (6 decimals) to USD.
- * USDC uses 6 decimal places, so 1000000 = $1.00
+ * Convert a USDC raw value (smallest unit, 6 decimals) to USD: 1000000 = $1.00.
+ * Returns null unless the value is a non-negative integer string, so a missing or
+ * malformed amount blocks the payment instead of counting as $0.
  */
-function usdcToUsd(rawValue: string): number {
-  try {
-    return Number(BigInt(rawValue)) / 1_000_000;
-  } catch {
-    // If the value can't be parsed as BigInt, fall back to parseFloat
-    const parsed = Number.parseFloat(rawValue);
-    if (Number.isNaN(parsed)) return 0;
-    return parsed / 1_000_000;
-  }
+function usdcToUsd(rawValue: unknown): number | null {
+  if (typeof rawValue !== "string" || !/^\d+$/.test(rawValue)) return null;
+  return Number(BigInt(rawValue)) / 1_000_000;
 }

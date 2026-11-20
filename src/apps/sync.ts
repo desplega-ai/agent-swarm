@@ -4,7 +4,7 @@ import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { createSweepScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
   type AppValidationIssue,
@@ -853,7 +853,9 @@ async function executePass(args: {
     // Pull OUTSIDE the lock; reconcile inside it. Pulled values persist into
     // rows any app.use principal can later read, so secrets are redacted here
     // at the persistence boundary — the finish() scrub only covers the pass
-    // summary, never pull.records.
+    // summary, never pull.records. The sweep scrubber skips rules a clean text
+    // cannot trigger: the default one re-reads the env per string and blocks
+    // the event loop for tens of ms on a few hundred rows.
     const pull = scrubObject(
       source.connector === "script"
         ? await pullFromScript({
@@ -863,6 +865,9 @@ async function executePass(args: {
             source,
           })
         : await pullFromSwarmTasks(source, args.invokedBy),
+      undefined,
+      undefined,
+      createSweepScrubber(),
     );
     pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);

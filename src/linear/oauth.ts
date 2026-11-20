@@ -2,6 +2,7 @@ import { upsertKv } from "../be/db";
 import { getOAuthApp } from "../be/db-queries/oauth";
 import { oauthAppRowToProviderConfig } from "../oauth/ensure-token";
 import { buildAuthorizationUrl, type OAuthProviderConfig } from "../oauth/wrapper";
+import { linearApiUrl } from "./host";
 
 /** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */
 const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
@@ -47,7 +48,7 @@ export async function getLinearAuthorizationUrl(
  */
 export async function captureLinearAppUserId(accessToken: string): Promise<void> {
   const query = `query { viewer { id organization { id } } }`;
-  const res = await fetch("https://api.linear.app/graphql", {
+  const res = await fetch(linearApiUrl("/graphql"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -89,7 +90,7 @@ export async function captureLinearAppUserId(accessToken: string): Promise<void>
  */
 export async function revokeLinearToken(accessToken: string): Promise<boolean> {
   try {
-    const res = await fetch("https://api.linear.app/oauth/revoke", {
+    const res = await fetch(linearApiUrl("/oauth/revoke"), {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
