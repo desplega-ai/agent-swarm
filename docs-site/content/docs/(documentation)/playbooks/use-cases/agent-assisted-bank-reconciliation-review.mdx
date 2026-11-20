@@ -1,0 +1,105 @@
+---
+title: 'Preparing unmatched bank transactions for finance review with AI agents'
+description: "Agent Swarm gathers the statement and ledger records behind an unmatched bank transaction and hands a finance owner a source-linked packet. People decide."
+agent:
+  offer: false
+  when: "Someone wants a finance team to investigate an unmatched bank transaction during reconciliation while people decide the match"
+---
+
+Agent Swarm can be configured to gather the permitted bank-statement and ledger records for one unmatched transaction, compare them against matching rules the finance team writes down, and hand the named finance owner a source-linked exception packet. That owner validates the match, decides any ledger correction and owns every payment or banking action. What it removes is the assembly: finding the statement line and the records that bear on it across systems that each hold a piece, then naming where they disagree.
+
+The scope is one exception: a line on a bank statement that does not tie to the company's own ledger at reconciliation. It is not a supplier invoice compared with a purchase order ([supplier invoice discrepancy review](/docs/playbooks/use-cases/ai-invoice-discrepancy-review)), a partner payout calculation ([marketplace payout exception review](/docs/playbooks/use-cases/marketplace-payout-exception-review)) or a customer disputing a charge ([customer billing dispute review](/docs/playbooks/use-cases/customer-billing-dispute-review)). Each is a different handoff with a different owner.
+
+## When another tool fits better
+
+**The accounting system's bank-feed matching.** If the account is simple and the volume routine, the reconciler built into the accounting system already ingests the feed and proposes matches. It is the cheaper answer and where the work belongs.
+
+**A specialist reconciliation product.** If the bottleneck is matching many lines against stable rules, a product built for reconciliation fits better. It brings its own matching engine and review screens.
+
+**A direct human review.** For low volume, one person reading the statement against the ledger is faster.
+
+Agent Swarm fits a different shape: an exception whose evidence sits in several systems with different owners. The statement line belongs to the bank feed, the ledger entry to the accounting system, the invoice that explains the amount to a document store, the remitter to a customer master, and the decision to a finance owner who may sit outside the accounting team. When those pieces are apart, the work is assembling evidence for whoever decides. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in banking or reconciliation feature and not a customer result. The bank-specific sources, matching rules and sample data below are fictional custom configuration the team builds and tests.
+
+<Mermaid title="Illustrative unmatched bank transaction flow, from a flagged statement line to a human decision on the match." chart={`flowchart LR
+  A["Transaction flagged<br/>(statement line unmatched)"] --> B["Finance owner sets<br/>matching rules and<br/>permitted sources"]
+  B --> C["Configured scripts collect<br/>statement and ledger records"]
+  C --> D["Deterministic matching<br/>swarm-script to JSON"]
+  D --> E["Agent writes<br/>source-linked packet"]
+  E --> G{{"human-in-the-loop<br/>finance owner"}}
+  G -- "approve" --> R["Record the match,<br/>route any correction"]
+  G -- "reject" --> S["Archive, request records<br/>or escalate"]
+`} />
+
+**1. A transaction is flagged.** The trigger is a check the team already runs: a statement line with no ledger counterpart, or a reconciliation difference raised at close. The workflow does not decide what counts as unmatched.
+
+**2. The finance owner defines the matching rules and the permitted records.** Which reference fields to compare, the amount tolerance, the currency, the date window a settlement still falls inside, and which systems are the record of truth. Written down, they make the comparison reproducible; left implicit, two people get two answers from the same line.
+
+**3. Configured connections collect the authorized records.** The statement line and its neighbors, the candidate ledger entries for the window, the remitter's master record and the documents that explain the amount. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**4. Deterministic steps do the matching.** A `swarm-script` node compares references, amounts, currencies and dates against the rules and emits JSON, so the arithmetic runs the same way every time and no model does a subtraction. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
+
+**5. An agent writes the exception packet.** The Researcher turns the JSON and the source records into one document: the statement line, each candidate, the rule it passed or failed, the flags, what could not be retrieved, and the open questions for the finance owner. Every line links its source record and the date it was read, and a missing record stays empty rather than showing a plausible amount.
+
+**6. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a short summary and a link to the full packet in Slack, and resumes only on a human response. On approve, the owner records the match and routes any correction. On reject, the packet is archived with the reason, returned for records, or escalated to the finance lead. The [workflows](/docs/concepts/workflows) reference covers the node types.
+
+## Worked example: one unmatched credit
+
+This example is fictional and every name in it is invented: Tarnside Fabrication, Harbourline Bank, Wexford Plant Hire and the remitter string. No record below came from a real system, and none of it is a measured result.
+
+A statement line dated 2026-11-03 shows a credit of EUR 4,812.40 from a remitter named `L. VOSS`, with the reference cut at nine characters, `TARN-2041`. No ledger entry carries that identifier.
+
+| Candidate | Source record (read date) | Rule checked | Result | Flag |
+| --- | --- | --- | --- | --- |
+| Invoice 20417, EUR 4,845.00, issued 2026-11-01 | Ledger export, 2026-11-04 | Reference prefix against invoice number; currency; settlement date inside the 10-day window; amount within EUR 5.00 | Passes reference, currency and date. EUR 32.60 short | Partial settlement or deducted fee |
+| Invoice 20390, EUR 4,812.40, issued 2026-09-19, customer Wexford Plant Hire | Ledger export, 2026-11-04 | Amount; reference prefix; settlement date inside the window | Passes amount to the cent. Fails reference and date, 45 days out | Ambiguous match, exact amount by coincidence |
+| No candidate | Customer master export, 2026-11-04 | Remitter against known customers and open invoices | Fails: no record for `L. VOSS` | Missing record |
+
+The packet also attaches the fee schedule line of EUR 32.60 for that corridor and the statement lines either side. It proposes no match and no posting.
+
+Four questions go to the finance owner, named in the packet with a backup:
+
+- Does invoice 20417 remain the intended match, given that the reference prefix is the only field pointing at it?
+- Is the EUR 32.60 a fee the customer deducted, and do the terms make the customer responsible for it?
+- Who is `L. VOSS`, and is this a third party paying on a customer's behalf?
+- Was a credit note for EUR 32.60 issued in the same week, from any source?
+
+## Missing evidence and escalation
+
+**A statement record is missing or incomplete.** When the feed stops before the flagged date, or a line arrives without a reference, the packet names the record, states the cutoff it could read and names the owner of the bank feed. It does not reconstruct the line.
+
+**A ledger record is missing.** When an invoice or customer entry the rules expect does not exist, the packet names the record, the query that ran and the system that should hold it.
+
+**Access is denied or a system is not connected.** The packet names the record and the person who can grant access. It does not work around the gap by asking someone to paste a statement into a chat, and it does not estimate an amount to fill the hole. Who may read statement and ledger data belongs in the team's [governance](/docs/playbooks/use-cases/ai-operations-governance) entry.
+
+**Two candidates tie.** When two records pass the same rules, or two amounts are equally plausible, the packet shows both with their sources and dates and ranks neither. A tie belongs to the finance owner, not a prompt to loosen the tolerance until one candidate wins.
+
+**Nobody answers the gate.** The gate carries a timeout and a fallback path, as the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends: a reminder, then a named backup owner, then an explicit hold. The workflow never proceeds on silence, and it never closes an item on its own.
+
+## Limits
+
+**It needs configuration the team builds.** Source access, permissions, matching rules and tolerances are custom work. Nothing about a statement feed or an accounting system's reference formats arrives working, and the rules need testing against past periods first.
+
+**Matching can be wrong in both directions.** Truncated references and deducted fees produce false positives, where an unrelated record looks like the match. Rules that are too tight miss legitimate matches and leave a clean transaction on the exception list. Both stay visible in a packet that shows the rule and not only a score, which is why a person validates.
+
+**The packet is not an audit.** It is not proof that the books are correct, not a control over the reconciliation and not a compliance record. It assembles the evidence a person uses, with its sources and its gaps.
+
+## What stays human-owned
+
+- **Validating the match.** Whether a candidate is the right one, and whether the rules were applied to the right period, is a person's judgement. The packet makes that check fast. It does not make it.
+- **Ledger corrections and postings.** Whether a line is accepted as reconciled, reclassified, written off or carried forward belongs to finance. The workflow has no path to a journal entry or a change to a ledger record.
+- **Payments and banking actions.** The swarm does not move money, initiate or reverse a transfer, or contact the bank. It has no path to a payment instruction.
+- **Sign-off on the reconciliation.** The person who signs owns the policy behind it: what tolerance is acceptable and which differences are immaterial.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing it at a bank reconciliation exception is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then a Researcher agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): reaching a statement feed, a ledger and a document store without the raw secret in script source.
+- [Workflows](/docs/concepts/workflows): the `swarm-script` and `human-in-the-loop` node definitions this shape uses.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): when the accounting system's own matching or a specialist product is the better answer.
