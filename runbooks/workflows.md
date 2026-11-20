@@ -1092,6 +1092,8 @@ curl -X POST http://localhost:3013/api/workflow-events \
   -d '{ "name": "release.cut", "payload": { "version": "1.2.3" } }'
 ```
 
+Both routes answer 403 for names only the server emits: provider webhook names (`isReservedProviderEvent`) and every name the extension post-bridge forwards (`isExtensionBridgedEvent` in `src/extensions/post-bridge.ts`: `approval.resolved`, the bridged `task.*` names, `slack.message`, `chat.message.*`, `agentmail.message.received`, `kapso.message.received`, and any `github.` / `gitlab.` / `azure-devops.` / `bitbucket.` name). Wait on those names; do not fire them.
+
 ### Built-in event names (no extra wiring required)
 
 The following events are already emitted on `workflowEventBus` today and are usable from a wait node out of the box:

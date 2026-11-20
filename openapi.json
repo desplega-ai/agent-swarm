@@ -74853,7 +74853,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -74946,7 +74946,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
