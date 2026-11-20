@@ -131,7 +131,10 @@ export async function createX402Client(
 
   client.onBeforePaymentCreation(async (context) => {
     // The hook is typed for v2, but x402 v1 requirements reach it too: v1 names the
-    // price `maxAmountRequired` (v2: `amount`) and carries `resource` as a URL string
+    // price `maxAmountRequired` (v2: `amount`) and carries `resource` as a URL string.
+    // Pick the field by protocol version: a v1 scheme signs `maxAmountRequired` and
+    // ignores any `amount` sent alongside it, so a fallback chain is bypassable.
+    const version = context.paymentRequired.x402Version;
     const requirements = context.selectedRequirements as {
       amount?: unknown;
       maxAmountRequired?: unknown;
@@ -142,11 +145,17 @@ export async function createX402Client(
       (typeof requirements.resource === "string" ? requirements.resource : "") ||
       "unknown";
 
-    const amountUsd = usdcToUsd(requirements.amount ?? requirements.maxAmountRequired);
+    const rawAmount =
+      version === 1
+        ? requirements.maxAmountRequired
+        : version === 2
+          ? requirements.amount
+          : undefined;
+    const amountUsd = usdcToUsd(rawAmount);
     if (amountUsd === null) {
       return {
         abort: true,
-        reason: `Payment requirements carry no parseable amount, refusing to pay. URL: ${url}`,
+        reason: `Payment requirements (x402 v${version}) carry no parseable amount, refusing to pay. URL: ${url}`,
       };
     }
 
