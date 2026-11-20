@@ -240,13 +240,14 @@ describe("createX402Client spending reservations (real x402 core client)", () =>
   });
 
   // x402 v1 names the price `maxAmountRequired` and puts the URL on the requirements
-  const v1PaymentRequired = (maxAmountRequired?: string) =>
+  const v1PaymentRequired = (maxAmountRequired?: string, extra: Record<string, unknown> = {}) =>
     ({
       x402Version: 1,
       accepts: [
         {
           scheme: "exact",
           network: "base-sepolia",
+          ...extra,
           ...(maxAmountRequired === undefined ? {} : { maxAmountRequired }),
           resource: "https://paid.example/v1-resource",
           description: "test",
@@ -265,6 +266,24 @@ describe("createX402Client spending reservations (real x402 core client)", () =>
     await expect(
       client.x402Client.createPaymentPayload(v1PaymentRequired("5000000")),
     ).rejects.toThrow("exceeds per-request limit");
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(0);
+    expect(summary.todayCount).toBe(0);
+    expect(summary.reserved).toBe(0);
+  });
+
+  test("v1: limits the signed maxAmountRequired even when a decoy amount is present", async () => {
+    const client = await createX402Client({ maxAutoApprove: 1, dailyLimit: 1 });
+
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired("5000000", { amount: "0" })),
+    ).rejects.toThrow("exceeds per-request limit");
+
+    // A v1 payload with only `amount` has nothing the v1 scheme signs against
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired(undefined, { amount: "1" })),
+    ).rejects.toThrow("no parseable amount");
 
     const summary = client.getSpendingSummary();
     expect(summary.todaySpent).toBe(0);
