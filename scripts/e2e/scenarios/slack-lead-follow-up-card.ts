@@ -170,9 +170,16 @@ export const slackLeadFollowUpCard: Scenario = {
     const reportUrl = `https://docs.example.test/report-${ctx.nonce}`;
     const prUrl = `https://github.com/example/repo-${ctx.nonce}/pull/42`;
     const quotedUrl = `https://docs.example.test/quoted-${ctx.nonce}`;
+    const fileUrl = `https://app.example.test/file/~/org/drive/reports/summary-${ctx.nonce}.md`;
+    const videoUrl = `https://cdn.example.test/demo-${ctx.nonce}.mp4`;
+    const postedShareUrl = `https://live.agent-fs.dev/share/posted${ctx.nonce}`;
+    const pageId = crypto.randomUUID();
     const posted = await delegatedAsk(ctx, GENERAL, workerId, "posted", {
-      output: `posted worker result ${ctx.nonce}: opened ${prUrl}. Notes at ${quotedUrl}.`,
-      attachments: [{ kind: "url", url: reportUrl, name: `report ${ctx.nonce}` }],
+      output: `posted worker result ${ctx.nonce}: opened ${prUrl}. Notes at ${quotedUrl}. File ${fileUrl}, demo ${videoUrl}, share ${postedShareUrl}`,
+      attachments: [
+        { kind: "url", url: reportUrl, name: `report ${ctx.nonce}` },
+        { kind: "page", pageId, name: "Review notes" },
+      ],
     });
     const postedOutput = `follow-up review posted ${ctx.nonce}`;
     await finish(ctx, posted.leadId, posted.followUpId, {
@@ -195,7 +202,15 @@ export const slackLeadFollowUpCard: Scenario = {
       `The follow-up card does not list the worker's attachment and output link once each: ${JSON.stringify(threadMessages(ctx, GENERAL, posted.threadTs, postedOutput))}`,
     );
     // Each link is a short label with a type icon under a "Links:" heading.
-    for (const needle of [`Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`, `🔀 <${prUrl}|PR #42>`]) {
+    for (const needle of [
+      `Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`,
+      `/pages/${pageId}|Review notes>`,
+      "📃 <http",
+      `🔀 <${prUrl}|PR #42>`,
+      `📄 <${fileUrl}|summary-${ctx.nonce}.md>`,
+      `🎬 <${videoUrl}|demo-${ctx.nonce}.mp4>`,
+      `🔗 <${postedShareUrl}|Shared file>`,
+    ]) {
       const shown = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, needle);
       expect(
         shown === 1,
