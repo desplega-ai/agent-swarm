@@ -38,7 +38,7 @@ This file is the authoring guide.
 | `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
 | `slack.ts` | `@desplega.ai/slack-mock` lifecycle (Socket Mode, started before the SUT). |
-| `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. |
+| `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. With `--visuals`, the Chat SDK mock writes its own journal, so its threads render too. |
 | `mocks/llm.ts` | Mock inference host: OpenAI chat + responses + embeddings, SystemOne decisions and extraction. |
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
@@ -169,7 +169,8 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
-| `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
+| `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. A scenario that proves a visible Slack change joins a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`) and marks each thread a reviewer must see: the Slack Visuals PR comment and the PR's `## Before / after` frames come from those marks. On the Chat SDK mock, use `flip.ctx.markThread` (that mock has its own journal). Mark the thread root, with a label that matches `^[a-z0-9-]+$`. |
+| `ctx.slackJournal` | With `--visuals`, a journal file for a Slack mock that the scenario starts itself: `path` is the mock's `dataFile`, `file` is the fourth argument of `ctx.markThread`. Undefined otherwise. |
 
 ### Mocked edges
 

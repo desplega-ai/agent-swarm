@@ -7,7 +7,7 @@ The "PR Body" check enforces this template. Local check:
   bun scripts/check-pr-body.ts --title "<title>" --body-file <file>
 - The **Why:** and **Risk:** lines are required.
 - Every ## section is required, except sections marked:
-  "fix" (only for fix: titles), "ui" (only when the diff touches apps/ui/ or apps/templates-ui/),
+  "fix" (only for fix: titles), "ui" (only when the diff touches a path listed in that heading's marker),
   "bot" (only when desplega-bot is the author), "outline" (skip only when Risk is low and the diff is 50 lines or fewer).
 
 Risk is how deep to read. Urgency is when. Set Risk yourself; copy Urgency from the request.
@@ -44,15 +44,22 @@ Links:
 - structure: a tree with paths on the nodes.
 Order: schema/API, then types, then behaviour, then files. -->
 
-## Before / after <!-- ui -->
+## Before / after <!-- ui: apps/ui/ apps/templates-ui/ src/slack/ src/integrations/chat-sdk/ -->
 
-<!-- Required when the diff touches apps/ui/ or apps/templates-ui/. Optional elsewhere (CLI output, a log line, an API response).
+<!-- Required when the diff touches a path in the marker above. Optional elsewhere (CLI output, a log line, an API response).
+Show the surface the reviewer must verify, not every touched file:
+- Dashboard (apps/ui/, apps/templates-ui/): screenshots of the changed view.
+- Slack (src/slack/, src/integrations/chat-sdk/): frames from the Slack mock. Before = main, or the flag off. After = this branch.
+  `bun run e2e --only <scenario> --visuals <dir>`, then `bun run e2e:visuals <dir>`.
+- Nothing visible changed (a config-catalog entry that reuses an existing control, a handler, a refactor, another chat platform):
+  write one line, "No visual change: <reason>", and delete the table.
 
 | Before (main) | After |
 |---|---|
 | ![before](github-attachment-url) | ![after](github-attachment-url) |
 
-Recording: a GitHub attachment mp4 on its own line, or an agent-fs share-create link. Required for interaction or flow changes. -->
+Recording: a GitHub attachment mp4 on its own line, or an agent-fs share-create link. Required only for a new or changed
+interaction or flow. One more instance of an existing control is not a changed interaction. -->
 
 ## Repro <!-- fix -->
 
