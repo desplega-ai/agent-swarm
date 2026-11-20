@@ -298,7 +298,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/keys/report-usage": BACKLOG_REASON,
   "POST /api/mcp-bridge": BACKLOG_REASON,
   "POST /api/memory/rate": BACKLOG_REASON,
-  "POST /api/memory/re-embed": BACKLOG_REASON,
   "POST /api/memory/search": BACKLOG_REASON,
   "POST /api/metrics/definitions": BACKLOG_REASON,
   "POST /api/metrics/definitions/{id}/run": BACKLOG_REASON,
