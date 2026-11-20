@@ -151,6 +151,9 @@ const createSchedule = route({
     400: { description: "Validation error" },
     409: { description: "Duplicate name" },
   },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
+  },
 });
 
 const runScheduleNow = route({
@@ -172,6 +175,7 @@ const runScheduleNow = route({
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
   },
+  rbac: { permission: "schedule.run.any" },
 });
 
 const listSchedules = route({
@@ -245,6 +249,9 @@ const updateSchedule = route({
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
+  },
 });
 
 const patchSchedule = route({
@@ -280,6 +287,9 @@ const deleteSchedule = route({
   responses: {
     200: { description: "Schedule deleted", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Schedule not found" },
+  },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
   },
 });
 

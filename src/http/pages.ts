@@ -180,6 +180,10 @@ const createPageRoute = route({
     400: { description: "Invalid body, unknown theme, or invalid themeTokens" },
     409: { description: "Slug already exists for this agent" },
   },
+  rbac: {
+    ungated:
+      "agents publish pages like the create-page tool; no verb covers page writes, so user roles need admin",
+  },
 });
 
 const getPageRoute = route({
@@ -291,6 +295,10 @@ const updatePageRoute = route({
     404: { description: "Page not found" },
     413: { description: "Payload too large" },
   },
+  rbac: {
+    ungated:
+      "agents publish pages like the create-page tool; no verb covers page writes, so user roles need admin",
+  },
 });
 
 /**
@@ -364,6 +372,7 @@ const deletePageRoute = route({
     204: { description: "Page deleted" },
     404: { description: "Page not found" },
   },
+  rbac: { permission: "page.delete.any" },
 });
 
 const listPagesRoute = route({

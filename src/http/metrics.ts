@@ -225,6 +225,10 @@ const createMetricRoute = route({
     400: { description: "Invalid metric definition" },
     409: { description: "Slug already exists for this agent" },
   },
+  rbac: {
+    ungated:
+      "metric definitions: open to agents like the metric tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const listMetricsRoute = route({
@@ -277,6 +281,10 @@ const updateMetricRoute = route({
     200: { description: "Metric updated", schema: metricIdVersionSchema },
     404: { description: "Metric not found" },
   },
+  rbac: {
+    ungated:
+      "metric definitions: open to agents like the metric tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const deleteMetricRoute = route({
@@ -289,6 +297,10 @@ const deleteMetricRoute = route({
   responses: {
     204: { description: "Metric deleted" },
     404: { description: "Metric not found" },
+  },
+  rbac: {
+    ungated:
+      "metric definitions: open to agents like the metric tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -330,6 +342,10 @@ const runMetricRoute = route({
     200: { description: "Metric result", schema: metricRunResultSchema },
     400: { description: "Invalid or disallowed query" },
     404: { description: "Metric not found" },
+  },
+  rbac: {
+    ungated:
+      "metric definitions: open to agents like the metric tools; no verb covers them, so user roles need admin",
   },
 });
 

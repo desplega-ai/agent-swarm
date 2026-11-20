@@ -494,6 +494,10 @@ const updateSession = route({
     200: { description: "Session ID updated", schema: AgentTaskSchema },
     404: { description: "Task not found" },
   },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const cancelTaskRoute = route({
@@ -708,6 +712,7 @@ const updateTaskProgressRoute = route({
   session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
+  rbac: { permission: "task.progress.write" },
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
@@ -748,6 +753,10 @@ const finishTask = route({
       description: "Differing terminal result text was discarded",
       schema: FinishTaskConflictSchema,
     },
+  },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
   },
 });
 
@@ -876,6 +885,10 @@ const supersedeTaskRoute = route({
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
   },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const updateTaskVcsRoute = route({
@@ -898,6 +911,10 @@ const updateTaskVcsRoute = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const updateTaskTitleRoute = route({

@@ -11,6 +11,7 @@ import {
   riskLevel,
   templateLeadLines,
   templateSections,
+  UI_PATHS,
 } from "../../scripts/check-pr-body";
 import { runChild } from "./test-proc";
 
@@ -41,10 +42,10 @@ const URGENT = "## Urgency\n- [ ] asap\n- [x] nice to have\n";
 describe("check-pr-body", () => {
   test("template markers set when a section is required", () => {
     expect(templateSections(TEMPLATE)).toEqual([
-      { heading: "Intent", when: "always", choices: [] },
-      { heading: "Repro", when: "fix", choices: [] },
-      { heading: "Urgency", when: "always", choices: ["asap", "nice to have"] },
-      { heading: "Evidence", when: "optional", choices: [] },
+      { heading: "Intent", when: "always", choices: [], paths: [] },
+      { heading: "Repro", when: "fix", choices: [], paths: [] },
+      { heading: "Urgency", when: "always", choices: ["asap", "nice to have"], paths: [] },
+      { heading: "Evidence", when: "optional", choices: [], paths: [] },
     ]);
   });
 
@@ -137,6 +138,13 @@ describe("check-pr-body", () => {
       Urgency: "always",
       "Swarm provenance": "bot",
     });
+    const evidence = templateSections(template).find((s) => s.heading === "Before / after");
+    expect(evidence?.paths).toEqual([
+      "apps/ui/",
+      "apps/templates-ui/",
+      "src/slack/",
+      "src/integrations/chat-sdk/",
+    ]);
   });
 });
 
@@ -214,6 +222,35 @@ describe("check-pr-body: lead lines, risk and conditional sections", () => {
     );
     expect(checkPrBody(T, body, { ...human, changedFiles: ["src/apps/ui-thing.ts"] })).toEqual([]);
     expect(checkPrBody(T, body, human)).toEqual([]);
+  });
+
+  test("a ui marker with paths replaces the default path list", () => {
+    const own = T.replace("<!-- ui -->", "<!--  ui:  src/slack/   Live/App/ -->");
+    expect(templateSections(own).find((s) => s.when === "ui")?.paths).toEqual([
+      "src/slack/",
+      "Live/App/",
+    ]);
+    expect(templateSections(T).find((s) => s.when === "ui")?.paths).toEqual(UI_PATHS);
+    const body = `${leads("medium")}${outline}`;
+    const missing = ["missing section: ## Before / after"];
+    expect(checkPrBody(own, body, { ...human, changedFiles: ["src/slack/blocks.ts"] })).toEqual(
+      missing,
+    );
+    expect(checkPrBody(own, body, { ...human, changedFiles: ["./Live/App/x.tsx"] })).toEqual(
+      missing,
+    );
+    // The default paths no longer count, and a prefix must match from the path start.
+    expect(checkPrBody(own, body, { ...human, changedFiles: ["apps/ui/src/App.tsx"] })).toEqual([]);
+    expect(checkPrBody(own, body, { ...human, changedFiles: ["x/src/slack/a.ts"] })).toEqual([]);
+  });
+
+  test("a 'No visual change' line fills Before / after", () => {
+    const ui = { ...human, changedFiles: ["apps/ui/src/lib/configuration-catalog.ts"] };
+    const body = `${leads("medium")}${outline}## Before / after\n\n`;
+    expect(checkPrBody(T, body, ui)).toEqual(["empty section: ## Before / after"]);
+    expect(
+      checkPrBody(T, `${body}No visual change: the entry reuses the boolean switch.\n`, ui),
+    ).toEqual([]);
   });
 
   test("Swarm provenance is required for the bot and for a local run without an author", () => {

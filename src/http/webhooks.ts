@@ -198,6 +198,9 @@ const githubWebhook = route({
     401: { description: "Invalid signature" },
     503: { description: "GitHub integration not configured" },
   },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
+  },
 });
 
 const gitlabWebhook = route({
@@ -211,6 +214,9 @@ const gitlabWebhook = route({
     200: { description: "Event processed", schema: WebhookDispatchResultSchema },
     401: { description: "Invalid token" },
     503: { description: "GitLab integration not configured" },
+  },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
   },
 });
 
@@ -266,6 +272,9 @@ const agentmailWebhook = route({
     401: { description: "Invalid signature" },
     503: { description: "AgentMail integration not configured or inbound archive unavailable" },
   },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
+  },
 });
 
 const kapsoWebhook = route({
@@ -285,6 +294,9 @@ const kapsoWebhook = route({
     },
     401: { description: "Invalid signature" },
     503: { description: "Kapso integration not configured" },
+  },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
   },
 });
 

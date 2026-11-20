@@ -115,6 +115,9 @@ const dbQueryRoute = route({
     429: { description: "Too many concurrent bounded db-query executions; retry shortly" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated: "read-only SQL for agents, same posture as the db-query tool; user roles need admin",
+  },
 });
 
 export async function handleDbQuery(

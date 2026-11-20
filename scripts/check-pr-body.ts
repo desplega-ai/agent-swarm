@@ -13,6 +13,8 @@
  *   `<!-- optional -->`  the section may be deleted.
  *   `<!-- fix -->`       required only when the PR title is `fix: ...` or `fix(scope): ...`.
  *   `<!-- ui -->`        required only when a changed file is under a `UI_PATHS` prefix.
+ *   `<!-- ui: a/ b/ -->` the same, with the template's own path prefixes (space-separated)
+ *                        in place of `UI_PATHS`. Each repo lists the paths a reviewer must see.
  *   `<!-- bot -->`       required only when the author is desplega-bot (or unknown: a local run).
  *   `<!-- outline -->`   required unless Risk is low and the diff is `SMALL_DIFF_LINES` or fewer.
  *   `<!-- pick one -->`  the body must check exactly one of the template's `- [ ]` items.
@@ -56,10 +58,12 @@ const TEMPLATE_PATH = process.env.PR_TEMPLATE_PATH || ".github/pull_request_temp
 
 export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export type Risk = (typeof RISK_LEVELS)[number];
+/** The path prefixes of a bare `<!-- ui -->` marker. A template sets its own with `<!-- ui: a/ b/ -->`. */
 export const UI_PATHS = ["apps/ui/", "apps/templates-ui/"];
 export const SMALL_DIFF_LINES = 50;
 export const PROSE_WORD_WARN = 300;
 
+/** `flags`: each HTML comment on the heading line, whitespace collapsed, case kept (a flag may carry paths). */
 type Section = { heading: string; flags: string[]; content: string };
 
 export type TemplateSection = {
@@ -67,6 +71,8 @@ export type TemplateSection = {
   when: "always" | "optional" | "fix" | "ui" | "bot" | "outline";
   /** The allowed `- [ ]` items when the section is marked `pick one`, else empty. */
   choices: string[];
+  /** The path prefixes that make a `ui` section required, else empty. */
+  paths: string[];
 };
 
 /** What the check knows about the PR besides its body. Unknown fields relax nothing except as noted. */
@@ -90,8 +96,8 @@ const checkboxes = (content: string, checked: boolean) =>
 const LEAD_LINE = /^\s*\*\*([^*:\n]+):\*\*(.*)$/gm;
 
 export const isFixTitle = (title: string) => /^fix(\([^)]*\))?!?:/i.test(title.trim());
-export const touchesUi = (files: string[]) =>
-  files.some((f) => UI_PATHS.some((p) => f.replace(/^\.?\//, "").startsWith(p)));
+export const touchesUi = (files: string[], paths: string[] = UI_PATHS) =>
+  files.some((f) => paths.some((p) => f.replace(/^\.?\//, "").startsWith(p)));
 
 /** Split markdown into the preamble and level-1/level-2 sections. Headings inside code fences or HTML comments do not count. */
 function parseSections(markdown: string): { preamble: string; sections: Section[] } {
@@ -100,7 +106,7 @@ function parseSections(markdown: string): { preamble: string; sections: Section[
   let current: Section | null = null;
   for (const { line, heading: raw } of markdownHeadings(markdown)) {
     if (raw !== null) {
-      const flags = [...raw.matchAll(COMMENT)].map((m) => normalize(m[1] ?? ""));
+      const flags = [...raw.matchAll(COMMENT)].map((m) => (m[1] ?? "").trim().replace(/\s+/g, " "));
       current = { heading: stripComments(raw).trim(), flags, content: "" };
       sections.push(current);
     } else if (current) {
@@ -114,12 +120,21 @@ function parseSections(markdown: string): { preamble: string; sections: Section[
 
 const WHEN_FLAGS = ["optional", "fix", "ui", "bot", "outline"] as const;
 
+const UI_FLAG = /^ui(?::(.*))?$/i;
+
 export function templateSections(template: string): TemplateSection[] {
-  return parseSections(template).sections.map((s) => ({
-    heading: s.heading,
-    when: WHEN_FLAGS.find((f) => s.flags.includes(f)) ?? "always",
-    choices: s.flags.includes("pick one") ? checkboxes(s.content, false) : [],
-  }));
+  return parseSections(template).sections.map((s) => {
+    const uiFlag = s.flags.map((f) => UI_FLAG.exec(f)).find(Boolean);
+    const flags = s.flags.map((f) => (UI_FLAG.test(f) ? "ui" : f.toLowerCase()));
+    const when = WHEN_FLAGS.find((f) => flags.includes(f)) ?? "always";
+    const own = (uiFlag?.[1] ?? "").split(" ").filter(Boolean);
+    return {
+      heading: s.heading,
+      when,
+      choices: flags.includes("pick one") ? checkboxes(s.content, false) : [],
+      paths: when === "ui" ? (own.length > 0 ? own : UI_PATHS) : [],
+    };
+  });
 }
 
 /** The `**Label:**` lines before the template's first heading, in order. */
@@ -184,7 +199,7 @@ function sectionRequired(section: TemplateSection, body: string, ctx: PrContext)
     case "fix":
       return isFixTitle(ctx.title ?? "");
     case "ui":
-      return touchesUi(ctx.changedFiles ?? []);
+      return touchesUi(ctx.changedFiles ?? [], section.paths);
     case "bot":
       return shouldCheckLeaks(ctx.author);
     case "outline": {
@@ -253,13 +268,21 @@ export function pickedChoices(template: string, body: string): Record<string, st
   return picked;
 }
 
-const RULE_TEXT: Record<TemplateSection["when"], string> = {
-  always: "",
-  optional: " (optional)",
-  fix: " (required for fix: titles)",
-  ui: ` (required when the diff touches ${UI_PATHS.join(" or ")})`,
-  bot: " (required when desplega-bot is the author)",
-  outline: ` (may be skipped when Risk is low and the diff is ${SMALL_DIFF_LINES} lines or fewer)`,
+const ruleText = (s: TemplateSection): string => {
+  switch (s.when) {
+    case "always":
+      return "";
+    case "optional":
+      return " (optional)";
+    case "fix":
+      return " (required for fix: titles)";
+    case "ui":
+      return ` (required when the diff touches ${s.paths.join(" or ")})`;
+    case "bot":
+      return " (required when desplega-bot is the author)";
+    case "outline":
+      return ` (may be skipped when Risk is low and the diff is ${SMALL_DIFF_LINES} lines or fewer)`;
+  }
 };
 
 async function localChangedFiles(): Promise<string[] | undefined> {
@@ -293,7 +316,7 @@ if (import.meta.main) {
     console.warn("No PR title given (--title or PR_TITLE). Sections for fix PRs were not checked.");
   }
   if (changedFiles === undefined) {
-    console.warn("Changed files unknown. Sections for UI PRs were not checked.");
+    console.warn("Changed files unknown. Sections marked `ui` were not checked.");
   }
   const ctx: PrContext = { title, author, changedFiles, changedLines };
   for (const warning of prBodyWarnings(body)) {
@@ -325,8 +348,7 @@ if (import.meta.main) {
   console.error("\nLead lines:");
   for (const label of templateLeadLines(template)) console.error(`  **${label}:**`);
   console.error("Sections, in order:");
-  for (const s of templateSections(template))
-    console.error(`  ## ${s.heading}${RULE_TEXT[s.when]}`);
+  for (const s of templateSections(template)) console.error(`  ## ${s.heading}${ruleText(s)}`);
   if (leaks.length > 0) {
     console.error(
       "\nThis repo is public. Paraphrase the motivation and link only public sources (Fixes #N, a public PR or issue). Task, session, agent-fs and Slack permalinks go only under ## Swarm provenance.",

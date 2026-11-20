@@ -331,6 +331,7 @@ const commitCursorsRoute = route({
     },
     400: { description: "Invalid request" },
   },
+  rbac: { ungated: "lead worker commits its channel-activity cursors; no user flow calls it" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

@@ -153,6 +153,7 @@ const searchMemory = route({
     },
     400: { description: "Missing query or agent ID" },
   },
+  rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
 
 // Mirrors `MemoryEditResult` (src/be/memory/types.ts) — `store.edit()`'s
@@ -201,6 +202,7 @@ const reEmbedMemory = route({
   summary: "Re-embed all memories using the current embedding provider",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: { permission: "memory.reembed" },
   body: z.object({
     agentId: z
       .string()
@@ -710,6 +712,7 @@ const rateMemory = route({
     400: { description: "Validation error or explicit-self R6 spam-guard rejection" },
     409: { description: "Duplicate explicit-self rating for (taskId, memoryId)" },
   },
+  rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
 
 // Mirrors `RetrievalListRow` (src/be/memory/retrieval-store.ts).

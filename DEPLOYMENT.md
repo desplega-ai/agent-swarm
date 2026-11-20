@@ -55,6 +55,8 @@ API_KEY=your-secret-api-key
 HARNESS_PROVIDER=claude
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
 AGENT_SWARM_VERSION=1.150.0                # Pin a release. Blank tracks `:latest` — see Step 4
+MINIO_ROOT_USER=agentfs                    # MinIO login, also agent-fs's storage key
+MINIO_ROOT_PASSWORD=                       # Run `openssl rand -hex 24` and paste here
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
@@ -265,7 +267,7 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.329`
-- `PI_CODING_AGENT_VERSION=1.5.2`
+- `PI_CODING_AGENT_VERSION=1.6.0`
 - `CODEX_VERSION=0.171.0`
 - `OPENCODE_VERSION=2.3.2` (installs `@opencode/cli` and `@opencode/sdk`)
 

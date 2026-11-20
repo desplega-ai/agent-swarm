@@ -339,6 +339,7 @@ const reloadConfigRoute = route({
     },
     500: { description: "Reload failed" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 const getConfigById = route({

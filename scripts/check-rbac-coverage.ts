@@ -13,12 +13,10 @@
  *     live `can()` call site outside src/rbac/ (no dead verbs).
  *
  *  3. ROUTES — every non-GET route registered via the `route()` factory must
- *     declare its posture: either an inline typed `rbac:` field on the route
- *     def (preferred for new routes), or an entry in ROUTE_RBAC_BACKLOG
- *     below. The backlog documents pre-RBAC routes pinned ungated at slice 1;
- *     it should only ever shrink (entries migrate to inline `rbac:` fields).
+ *     declare its posture with an inline typed `rbac:` field on the route def.
+ *     There is no backlog: a route without one fails the check.
  *
- * Stale allowlist/backlog entries fail the check, so the maps stay honest.
+ * Stale allowlist entries fail the check, so the map stays honest.
  * Modelled on scripts/check-sdk-tool-registration.ts.
  *
  * When this check fails for something you added, decide explicitly:
@@ -118,11 +116,9 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/oauth-access-token.ts": PIN_REASON,
   "src/tools/poll-task.ts": PIN_REASON,
   "src/tools/post-message.ts": PIN_REASON,
-  "src/tools/prompt-templates/delete.ts": PIN_REASON,
   "src/tools/prompt-templates/get.ts": PIN_REASON,
   "src/tools/prompt-templates/list.ts": PIN_REASON,
   "src/tools/prompt-templates/preview.ts": PIN_REASON,
-  "src/tools/prompt-templates/set.ts": PIN_REASON,
   "src/tools/read-messages.ts": PIN_REASON,
   "src/tools/register-agentmail-inbox.ts": PIN_REASON,
   "src/tools/repos/get-repos.ts": PIN_REASON,
@@ -238,148 +234,15 @@ function checkVerbs(): string[] {
 
 // ─── 3. Routes ───────────────────────────────────────────────────────────────
 
-/**
- * Non-GET routes pinned WITHOUT a principal gate at slice 1 (they still
- * require bearer auth via handleCore; "ungated" means no per-principal
- * authorization beyond that). This backlog must only shrink: when a route
- * gains a gate — or you make the posture explicit — move the decision to an
- * inline `rbac:` field on the route def and delete the entry here.
- */
-const BACKLOG_REASON =
-  "pre-RBAC route pinned ungated at slice 1 (bearer auth only, no principal gate)";
-
-const ROUTE_RBAC_BACKLOG: Record<string, string> = {
-  "DELETE /@swarm/api/{path}": BACKLOG_REASON,
-  "DELETE /api/active-sessions/{id}": BACKLOG_REASON,
-  "DELETE /api/active-sessions/by-task/{taskId}": BACKLOG_REASON,
-  "DELETE /api/budgets/{scope}/{scopeId}": BACKLOG_REASON,
-  "DELETE /api/metrics/definitions/{id}": BACKLOG_REASON,
-  "DELETE /api/oauth/refresh-locks/{key}": BACKLOG_REASON,
-  "DELETE /api/pages/{id}": BACKLOG_REASON,
-  "DELETE /api/pricing/{provider}/{model}/{tokenClass}/{effectiveFrom}": BACKLOG_REASON,
-  "DELETE /api/prompt-templates/{id}": BACKLOG_REASON,
-  "DELETE /api/schedules/{id}": BACKLOG_REASON,
-  "DELETE /api/script-runs/{id}": BACKLOG_REASON,
-  "DELETE /api/users/{id}/identities/{kind}/{externalId}": BACKLOG_REASON,
-  "DELETE /api/users/{id}/mcp-tokens/{tokenId}": BACKLOG_REASON,
-  "DELETE /api/workflows/{id}": BACKLOG_REASON,
-  "PATCH /@swarm/api/{path}": BACKLOG_REASON,
-  "PATCH /api/agents/{id}/harness-provider": BACKLOG_REASON,
-  "PATCH /api/agents/{id}/runtime": BACKLOG_REASON,
-  "PATCH /api/keys/name": BACKLOG_REASON,
-  "PATCH /api/tasks/{id}/vcs": BACKLOG_REASON,
-  "PATCH /api/users/{id}": BACKLOG_REASON,
-  "PATCH /api/workflows/{id}": BACKLOG_REASON,
-  "PATCH /api/workflows/{id}/nodes/{nodeId}": BACKLOG_REASON,
-  "POST /@swarm/api/{path}": BACKLOG_REASON,
-  "POST /api/active-sessions": BACKLOG_REASON,
-  "POST /api/active-sessions/cleanup": BACKLOG_REASON,
-  "POST /api/active-sessions/recover-orphaned-tasks": BACKLOG_REASON,
-  "POST /api/agentmail/webhook": BACKLOG_REASON,
-  "POST /api/agents": BACKLOG_REASON,
-  "POST /api/approval-requests": BACKLOG_REASON,
-  "POST /api/channel-activity/commit-cursors": BACKLOG_REASON,
-  "POST /api/config/reload": BACKLOG_REASON,
-  "POST /api/db-query": BACKLOG_REASON,
-  "POST /api/events": BACKLOG_REASON,
-  "POST /api/events/batch": BACKLOG_REASON,
-  "POST /api/fs/agent-credentials": BACKLOG_REASON,
-  "POST /api/github/webhook": BACKLOG_REASON,
-  "POST /api/gitlab/webhook": BACKLOG_REASON,
-  "POST /api/integrations/claude-managed/test": BACKLOG_REASON,
-  "POST /api/integrations/kapso/webhook": BACKLOG_REASON,
-  "POST /api/internal/raw-llm": BACKLOG_REASON,
-  "POST /api/internal/script-runs/{runId}/agent-task": BACKLOG_REASON,
-  "POST /api/internal/script-runs/{runId}/heartbeat": BACKLOG_REASON,
-  "POST /api/internal/script-runs/{runId}/status": BACKLOG_REASON,
-  "POST /api/internal/script-runs/{runId}/steps": BACKLOG_REASON,
-  "POST /api/keys/clear-rate-limit": BACKLOG_REASON,
-  "POST /api/keys/report-rate-limit": BACKLOG_REASON,
-  "POST /api/keys/report-usage": BACKLOG_REASON,
-  "POST /api/mcp-bridge": BACKLOG_REASON,
-  "POST /api/memory/rate": BACKLOG_REASON,
-  "POST /api/memory/re-embed": BACKLOG_REASON,
-  "POST /api/memory/search": BACKLOG_REASON,
-  "POST /api/metrics/definitions": BACKLOG_REASON,
-  "POST /api/metrics/definitions/{id}/run": BACKLOG_REASON,
-  "POST /api/oauth/keep-warm/codex": BACKLOG_REASON,
-  "POST /api/oauth/refresh-locks/{key}": BACKLOG_REASON,
-  "POST /api/pages": BACKLOG_REASON,
-  "POST /api/pricing/{provider}/{model}/{tokenClass}": BACKLOG_REASON,
-  "POST /api/prompt-templates/{id}/checkout": BACKLOG_REASON,
-  "POST /api/prompt-templates/{id}/reset": BACKLOG_REASON,
-  "POST /api/prompt-templates/preview": BACKLOG_REASON,
-  "POST /api/prompt-templates/render": BACKLOG_REASON,
-  "POST /api/schedules": BACKLOG_REASON,
-  "POST /api/schedules/{id}/run": BACKLOG_REASON,
-  "POST /api/scripts/run": BACKLOG_REASON,
-  "POST /api/session-costs": BACKLOG_REASON,
-  "POST /api/session-logs": BACKLOG_REASON,
-  "POST /api/tasks/{id}/context": BACKLOG_REASON,
-  "POST /api/tasks/{id}/finish": BACKLOG_REASON,
-  "POST /api/tasks/{id}/progress": BACKLOG_REASON,
-  "POST /api/tasks/{id}/supersede": BACKLOG_REASON,
-  "POST /api/trackers/jira/refresh": BACKLOG_REASON,
-  "POST /api/trackers/jira/webhook/{token}": BACKLOG_REASON,
-  "POST /api/trackers/linear/refresh": BACKLOG_REASON,
-  "POST /api/trackers/linear/webhook": BACKLOG_REASON,
-  "POST /api/users": BACKLOG_REASON,
-  "POST /api/users/{id}/identities": BACKLOG_REASON,
-  "POST /api/users/{id}/mcp-tokens": BACKLOG_REASON,
-  "POST /api/users/{id}/merge": BACKLOG_REASON,
-  "POST /api/users/unmapped/{kind}/{externalId}/resolve": BACKLOG_REASON,
-  "POST /api/webhooks/{workflowId}": BACKLOG_REASON,
-  "POST /api/workflow-events": BACKLOG_REASON,
-  "POST /api/workflow-runs/{id}/cancel": BACKLOG_REASON,
-  "POST /api/workflow-runs/{id}/retry": BACKLOG_REASON,
-  "POST /api/workflow-runs/{runId}/events": BACKLOG_REASON,
-  "POST /api/workflows": BACKLOG_REASON,
-  "POST /api/workflows/{id}/trigger": BACKLOG_REASON,
-  "POST /api/workflows/{id}/trigger/validate": BACKLOG_REASON,
-  "POST /api/x/script/{endpointId}": BACKLOG_REASON,
-  "POST /status/test-connection": BACKLOG_REASON,
-  "PUT /@swarm/api/{path}": BACKLOG_REASON,
-  "PUT /api/active-sessions/heartbeat/{taskId}": BACKLOG_REASON,
-  "PUT /api/active-sessions/provider-session/{taskId}": BACKLOG_REASON,
-  "PUT /api/agents/{id}/activity": BACKLOG_REASON,
-  "PUT /api/agents/{id}/credential-status": BACKLOG_REASON,
-  "PUT /api/agents/{id}/name": BACKLOG_REASON,
-  "PUT /api/agents/{id}/profile": BACKLOG_REASON,
-  "PUT /api/budgets/{scope}/{scopeId}": BACKLOG_REASON,
-  "PUT /api/metrics/definitions/{id}": BACKLOG_REASON,
-  "PUT /api/pages/{id}": BACKLOG_REASON,
-  "PUT /api/prompt-templates": BACKLOG_REASON,
-  "PUT /api/schedules/{id}": BACKLOG_REASON,
-  "PUT /api/tasks/{id}/session": BACKLOG_REASON,
-  "PUT /api/workflows/{id}": BACKLOG_REASON,
-};
-
 function checkRoutes(): string[] {
   const errors: string[] = [];
-  const seen = new Set<string>();
-
   for (const def of routeRegistry) {
-    if (def.method === "get") continue;
+    if (def.method === "get" || def.rbac !== undefined) continue;
     const key = `${def.method.toUpperCase()} ${def.path}`;
-    seen.add(key);
-    const inline = def.rbac !== undefined;
-    const backlogged = key in ROUTE_RBAC_BACKLOG;
-
-    if (inline && backlogged) {
-      errors.push(`${key}: has an inline rbac field — remove the stale ROUTE_RBAC_BACKLOG entry.`);
-    } else if (!inline && !backlogged) {
-      errors.push(
-        `${key}: non-GET route with no RBAC decision.\n` +
-          `    Preferred: add \`rbac: { permission: "<verb>" }\` or \`rbac: { ungated: "<reason>" }\` to the route() def.\n` +
-          `    Or backlog it:  "${key}": BACKLOG_REASON,`,
-      );
-    }
-  }
-
-  for (const key of Object.keys(ROUTE_RBAC_BACKLOG)) {
-    if (!seen.has(key)) {
-      errors.push(`ROUTE_RBAC_BACKLOG has a stale entry (route gone or now GET): ${key}`);
-    }
+    errors.push(
+      `${key}: non-GET route with no RBAC decision.\n` +
+        `    Add \`rbac: { permission: "<verb>" }\` or \`rbac: { ungated: "<reason>" }\` to the route() def.`,
+    );
   }
   return errors;
 }

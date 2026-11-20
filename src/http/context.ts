@@ -67,6 +67,10 @@ const postContext = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true, agentId: true },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const getContext = route({

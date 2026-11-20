@@ -1,0 +1,101 @@
+---
+title: 'Reviewing purchase order and supplier confirmation differences with AI agents'
+description: "Agent Swarm compares an approved purchase order with the supplier's confirmation and hands purchasing a source-linked packet of differences."
+agent:
+  offer: false
+  when: "Someone wants purchasing and operations to catch differences between a purchase order and a supplier order confirmation before delivery"
+---
+
+Agent Swarm can assemble the differences between an approved purchase order and the supplier's order confirmation into a source-linked packet for purchasing and operations to review, once a team configures the workflow around its own records, while people verify those records, decide what changes and handle every supplier communication. What it takes off the team is the assembly: finding both records where each team keeps them and comparing them line by line under rules the team wrote, with what is missing named before the goods ship.
+
+The scope is one confirmation against one order, before delivery. Three neighbouring jobs have their own owners. An invoice that disagrees with its purchase order, once billing has started, is worked through in [Reviewing supplier invoice and purchase order discrepancies with AI agents](/docs/playbooks/use-cases/ai-invoice-discrepancy-review). How a supplier has performed over a period is a review of history, covered in [Reviewing supplier performance across delivery, quality and service records with AI agents](/docs/playbooks/use-cases/supplier-performance-review). A stock count that disagrees with the system record is handled in [Handing off inventory discrepancies from operations to purchasing with AI agents](/docs/playbooks/use-cases/ai-inventory-exception-handoff).
+
+## When another tool fits better
+
+Two established options cover much of this ground.
+
+**Your procurement or ERP platform's acknowledgement matching.** If order confirmation is routine, volume is high and the purchase order and the confirmation already sit in one system, the platform's own match closes the gap. A rule inside the system that owns the record beats a workflow assembled outside it.
+
+**A person reading each confirmation.** If one buyer places a few orders a month with one or two suppliers, that buyer already reads every confirmation and knows which fields move. A process someone can hold in their head does not need a workflow.
+
+Agent Swarm fits a different shape: the records are spread across systems and people. The approved order lives in an ERP, the confirmation arrives as a PDF in a shared inbox, the promised dates sit in a planning sheet, and the person who knows whether a date holds sits in another team. Assembling those pieces is the work. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is a fictional scenario, not a built-in procurement feature, not a supplier integration and not a customer result. The supplier connections, matching rules and extraction from confirmations are custom work your team configures and tests.
+
+<Mermaid title="Illustrative order confirmation review, from an approved purchase order to a purchasing owner's decision at a gate." chart={`flowchart LR
+  A["Approved purchase order<br/>(revision in force)"] --> B["Configured source scripts<br/>read both records"]
+  C["Supplier confirmation<br/>(PDF or email)"] --> B
+  B --> D["Deterministic matching<br/>swarm-script to JSON"]
+  D --> E["Agent writes the<br/>source-linked packet"]
+  E --> G{{"human-in-the-loop<br/>purchasing owner"}}
+  G -- "accept" --> R["Purchasing decides<br/>the next step"]
+  G -- "reject" --> S["Correct the run<br/>or escalate"]
+`} />
+
+**1. The run starts on a trigger the team chose.** Either a confirmation lands in a monitored inbox, or a confirmation due date passes on an order that is still open. Both are configured events, not a supplier integration that ships with the product.
+
+**2. Configured scripts retrieve both records.** One source script reads the purchase order revision in force, another reads the confirmation, whether a PDF or an email. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**3. Matching runs in code, not in a model.** A deterministic `swarm-script` step applies the team's rules to item identifiers, quantities, unit prices and delivery dates, and emits JSON. The comparison runs the same way every time, and no model does the arithmetic or reads a number off a page. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-first pattern.
+
+**4. The rules raise named flags.** Four are worth writing before the first run: a missing confirmation, where the due date passed with nothing received; an ambiguous item, with no unique identifier match across the two records; a version conflict, where the confirmation references an order revision older than the one in force; and a unit mismatch, where the two records state quantities in units the configured rule cannot convert.
+
+**5. An agent writes the exception packet.** Each difference appears once, with its value on both sides, a link to the record it came from and the timestamp it was read. Missing records are named as missing. The packet opens with what needs a decision, then the evidence, then what the run could not check.
+
+**6. A person decides at a gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow for the purchasing owner, posts a short summary with a link to the packet, and resumes only on a human response. Approve and reject each have a defined branch, and a timeout escalates to a named backup owner. A missing answer is never agreement.
+
+## Worked example
+
+The records below are fictional: three lines on one purchase order, and a confirmation that differs on four points.
+
+| Field | Purchase order, PO-1042 rev 2 | Supplier confirmation | Source | Flag |
+| --- | --- | --- | --- | --- |
+| Line 1 quantity | 400 units | 320 units | [PO-1042 rev 2](#record-order-record); [confirmation page 1](#record-supplier-confirmation) | Quantity short |
+| Line 2 promised date | 16 March | 27 March | [PO-1042 rev 2](#record-order-record); [confirmation page 2](#record-supplier-confirmation) | Later delivery date |
+| Line 3 unit price | EUR 12.40 | EUR 13.05 | [PO-1042 rev 2](#record-order-record); [confirmation page 2](#record-supplier-confirmation) | Unit price change |
+| Revision referenced | rev 2 | rev 1 | [PO-1042 rev 2](#record-order-record); [confirmation header](#record-supplier-confirmation) | Version conflict |
+
+### Sources in this example
+
+Every source in the table opens the fictional record it names. The packet carries the same three parts on each line: the record, the place inside it, and the time the run read it.
+
+- <a id="record-order-record" />**Purchase order PO-1042, revision 2.** The approved order as the order system holds it: three lines with item identifiers, quantities, unit prices and promised dates, revision 2 in force. Read at 09:12 on 12 March 2026 through a configured [script connection](/docs/guides/script-connections).
+- <a id="record-supplier-confirmation" />**Supplier confirmation.** A two-page PDF that arrived in the monitored inbox: the line grid on page 1, promised dates and unit prices on page 2, and the order revision it answers stated in the header block. Read at 09:12 on 12 March 2026, in the same run as the order record.
+
+The packet states what the run knows and stops there. It does not say whether the short quantity is a supplier error or a deliberate allocation, or whether the later date breaks a production plan.
+
+Resolving it takes three people and no agent decision. Purchasing checks both records against the source systems and confirms which revision is approved. Operations judges what the eleven extra days on line 2 do to the schedule that depends on the delivery. Purchasing then chooses: accept the confirmation as it stands, ask for a corrected confirmation, or change the order. A person contacts the supplier in every case. The agent writes no supplier message, sends no email and edits no order.
+
+## Risks and limits
+
+**Stale sources.** A confirmation that arrives after the run, or an order revised after the packet was built, is invisible until the next run. The read timestamp on every line shows how old the evidence is.
+
+**Incomplete records.** A missing confirmation, an order without a delivery date, a confirmation with no line-level detail: each is named as a gap, with the owner who can supply it. The packet never estimates a quantity or infers a date to fill a hole.
+
+**Differing units of measure.** A supplier confirming boxes against an order placed in single units is a real difference, not a formatting one. The conversion rule is configured per item and recorded with the run. With no rule, the line is flagged rather than converted by guesswork.
+
+**Permissions.** The workflow reads only what its connections reach. When a record sits behind a system the swarm is not connected to, the packet names the record and the owner who can grant access. Access is written into the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record: who may read the order and the confirmation, and who grants that.
+
+**Incorrect extraction.** Fields pulled out of a PDF or an email body can come out wrong: a quantity read from the wrong column, a date parsed day-first instead of month-first. Every extracted field carries its source, and a person verifies it against the record before acting. Extraction is not treated as authoritative, and a line that fails to parse is flagged rather than filled.
+
+## What stays human-owned
+
+- **Verifying the records.** Whether the two documents are the right ones, at the right revision, is a person's check.
+- **Accepting or rejecting a difference.** The workflow presents differences. Which ones matter, and whether one is acceptable, is a commercial judgement.
+- **Changes to the order.** The agent does not amend the purchase order, the confirmation or any record that owns them.
+- **Supplier communication.** Every message to the supplier is written and sent by a person who owns the relationship. The workflow has no path that contacts a supplier.
+- **Contractual and commercial decisions.** Price, terms, penalties and what the agreement obliges anyone to do stay with the people accountable for them. The workflow makes no compliance determination.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at an order confirmation is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then an agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, the approve and reject branches, the timeout and fallback, and the gate message.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and source-of-truth rules.
+- [Team collaboration](/docs/features/team-collaboration): shared context across the people and teams who inherit the case.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): how to choose between the platform's own matching, manual review and a shared agent platform.

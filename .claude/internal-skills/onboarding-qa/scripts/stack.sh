@@ -114,6 +114,7 @@ getkv() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
 setkv AGENT_SWARM_VERSION "$version"
 [ -n "$(getkv API_KEY)" ] || setkv API_KEY "$(openssl rand -hex 24)"
 [ -n "$(getkv MINIO_ROOT_PASSWORD)" ] || setkv MINIO_ROOT_PASSWORD "$(openssl rand -hex 24)"
+setkv MINIO_ROOT_USER agentfs
 setkv MCP_BASE_URL http://api:3013
 setkv APP_URL https://app.agent-swarm.dev
 setkv PUBLIC_MCP_BASE_URL "https://$api_host"

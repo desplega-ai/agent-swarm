@@ -117,6 +117,7 @@ const linearRefresh = route({
     500: { description: "Refresh failed" },
     503: { description: "Linear integration not configured" },
   },
+  rbac: { permission: "oauth-authorization.manage" },
 });
 
 const linearWebhook = route({
@@ -130,6 +131,9 @@ const linearWebhook = route({
     200: { description: "Event accepted", schema: LinearWebhookAcceptedSchema },
     401: { description: "Invalid signature" },
     503: { description: "Linear integration not configured" },
+  },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
   },
 });
 
