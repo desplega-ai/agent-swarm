@@ -436,6 +436,10 @@
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
       "scenarios": ["design-system"]
     },
+    "otel-log-export": {
+      "description": "OTEL_EXPORT_API_LOGS mirrors API console output to an OTLP/HTTP collector through the SDK-registered LoggerProvider, with exported request spans as the reachability control",
+      "scenarios": ["platform-otel-log-export"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
