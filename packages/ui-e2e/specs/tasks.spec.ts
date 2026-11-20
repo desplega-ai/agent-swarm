@@ -12,10 +12,13 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test("tasks list opens the seeded task and its session logs", async ({ page, seed, clean }) => {
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks");
-  await page.getByPlaceholder("Search by description or ID...").fill(TASK_PROMPT);
 
   // Other specs can leave newer tasks above the seed in the virtualized grid.
-  await page.getByPlaceholder("Search by description or ID...").fill(TASK_PROMPT);
+  // Fill once: the box mirrors the URL `search` param, and a second fill can
+  // append to the first value and filter the list to zero rows.
+  const search = page.getByPlaceholder("Search by description or ID...");
+  await search.fill(TASK_PROMPT);
+  await expect(search).toHaveValue(TASK_PROMPT);
   const row = page.getByRole("row", { name: new RegExp(TASK_PROMPT) });
   await expect(row).toBeVisible();
   await expect(row.getByText("IN PROGRESS")).toBeVisible();
