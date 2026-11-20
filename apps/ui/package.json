@@ -25,7 +25,7 @@
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
     "@fontsource-variable/lexend": "^5.3.0",
     "@fontsource/opendyslexic": "^5.3.0",
-    "@json-render/core": "^0.19.0",
+    "@json-render/core": "^0.22.0",
     "@json-render/react": "^0.22.0",
     "@monaco-editor/react": "^4.7.0",
     "@nivo/bar": "^0.99.0",
@@ -76,7 +76,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.7",
+    "@biomejs/biome": "2.4.5",
     "@happy-dom/global-registrator": "^21.0.4",
     "@resvg/resvg-js": "^2.6.2",
     "@testing-library/dom": "^10.4.2",

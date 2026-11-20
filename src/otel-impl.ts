@@ -204,10 +204,12 @@ export async function boot(serviceRole: string, options: BootOptions = {}): Prom
     // the same resource (service.name, agentswarm.service.role, etc.). Temporality
     // is intentionally NOT hardcoded — operators should set
     // OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta for Datadog.
-    metricReader: new PeriodicExportingMetricReader({
-      exporter: new OTLPMetricExporter(),
-      exportIntervalMillis: 60_000,
-    }),
+    metricReaders: [
+      new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter(),
+        exportIntervalMillis: 60_000,
+      }),
+    ],
   });
 
   sdk.start();

@@ -183,7 +183,7 @@
     "seed:scripts": "bun scripts/seed-scripts.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.7",
+    "@biomejs/biome": "^2.3.10",
     "@desplega.ai/slack-mock": "^0.6.1",
     "@desplega/model-catalog": "workspace:*",
     "@desplega/model-routing": "workspace:*",
@@ -238,8 +238,8 @@
     "@opentelemetry/api-logs": "^0.223.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.301.2",
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
-    "@opentelemetry/resources": "^2.12.1",
-    "@opentelemetry/sdk-metrics": "^2.12.1",
+    "@opentelemetry/resources": "^3.1.1",
+    "@opentelemetry/sdk-metrics": "^3.1.1",
     "@opentelemetry/sdk-node": "^0.301.2",
     "@opentelemetry/semantic-conventions": "^1.45.0",
     "@slack/bolt": "^4.7.3",
