@@ -520,8 +520,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Install the Ubuntu 24.04 packages Playwright's Chromium binary needs at
 # runtime. `playwright install chromium` (below) only installs the browser
 # binary itself; it does not apt-install these shared libs.
+# fonts-noto-color-emoji: without an emoji font, headless Chromium draws every
+# emoji as an empty box, which blanks the icons in Slack mock frames
+# (`bun run e2e:visuals`) and agent-browser screenshots. CI's ubuntu-latest
+# runner has the font, so only frames rendered inside this image were affected.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+      fonts-noto-color-emoji \
       libasound2t64 \
       libatk-bridge2.0-0t64 \
       libatk1.0-0t64 \
