@@ -8,6 +8,7 @@ import {
   finish,
   registerLead,
   waitForEyes,
+  waitForOutcomeAbsence,
   waitForReaction,
 } from "./slack-helpers";
 
@@ -170,5 +171,6 @@ export const slackReplyCard: Scenario = {
     await finish(ctx, leadId, taskId, { status: "completed", output: "Card report sent." });
     // The agent already replied (slackReplySent), so the engine posts no outcome message.
     await waitForReaction(ctx, ask.ts, "white_check_mark");
+    await waitForOutcomeAbsence(ctx, ask.ts, " completed");
   },
 };

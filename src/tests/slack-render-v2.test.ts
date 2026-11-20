@@ -28,6 +28,7 @@ import {
   getDbClient,
   getInboxMessageById,
   getLogsByEventType,
+  getPendingSlackRelayTasks,
   getSlackOutcomeMessage,
   getSlackRenderV2ActivatedAt,
   getSlackTreeMessage,
@@ -2381,6 +2382,7 @@ describe("Slack renderer v2", () => {
     const tree = await ensureSlackThreadTree([ask.id]);
     await Bun.sleep(2);
     const reason = `expected test failure ${"detail ".repeat(200)}`;
+    await markTaskSlackReplySent(ask.id);
     await failTask(ask.id, reason);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -2414,6 +2416,7 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
     await cancelTask(ask.id, `requester changed direction ${"context ".repeat(200)}`);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -2629,7 +2632,7 @@ describe("Slack renderer v2", () => {
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
-  test("collapses the outcome card to a minimal form when the agent already replied", async () => {
+  test("settles the original Slack ask without posting after the agent already replied", async () => {
     const lead = await createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
     const ask = await createTaskExtended("ask with an inline reply", {
@@ -2637,37 +2640,30 @@ describe("Slack renderer v2", () => {
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
+      slackTriggerMessageTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    expect((await getPendingSlackRelayTasks()).some((task) => task.id === ask.id)).toBe(true);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
     await processSlackRenderV2();
 
-    const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
-    expect(started?.payload).toMatchObject({
-      username: getAgentDisplayName(lead),
-      icon_emoji: getAgentEmoji(lead),
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(
+      calls.filter(({ method }) => ["chat.startStream", "chat.postMessage"].includes(method)),
+    ).toEqual([]);
+    expect((await getSlackOutcomeMessage(ask.id))?.deliveryAbandonedAt).toBeDefined();
+    expect((await getPendingSlackRelayTasks()).some((task) => task.id === ask.id)).toBe(false);
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, timestamp: threadTs, name: "white_check_mark" },
     });
-    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
-    const stopped = calls.find((call) => call.method === "chat.stopStream")!;
-    const completedAsk = (await getTaskById(ask.id))!;
-    const duration = formatV2Duration(
-      new Date(completedAsk.createdAt),
-      new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
-    );
-    expect(stopped.payload.blocks).toEqual([
-      {
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
-      },
-    ]);
-    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
   test("redacts a runtime-rotated config secret from persisted output and its Slack outcome", async () => {
@@ -2710,7 +2706,7 @@ describe("Slack renderer v2", () => {
     expect(started?.payload.markdown_text).not.toContain(secret);
   });
 
-  test("re-reads slackReplySent inside streamOutcomeCard to avoid a stale caller snapshot", async () => {
+  test("a stale ask snapshot posts only its output attachments once after slack-reply", async () => {
     const lead = await createAgent({ name: "Stale Snapshot Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_STALE_SNAPSHOT");
     const ask = await createTaskExtended("ask observed before its reply landed", {
@@ -2722,17 +2718,39 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
+    for (const [name, intent] of [
+      ["notes", "user-upload"],
+      ["report", "artifact"],
+      ["table", "artifact"],
+    ] as const) {
+      await insertTaskAttachment({
+        taskId: ask.id,
+        kind: "url",
+        name,
+        url: `https://example.com/${name}`,
+        intent,
+      });
+    }
     await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
     // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
     const staleSnapshot = { ...(await getTaskById(ask.id))!, slackReplySent: false };
     await markTaskSlackReplySent(ask.id);
     calls.length = 0;
 
+    permalinkFailuresRemaining = 1;
+    await expect(streamOutcomeCard(staleSnapshot)).rejects.toThrow("temporary permalink failure");
+    _resetSlackRenderV2ForTests();
     const outcome = await streamOutcomeCard(staleSnapshot);
-
-    const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
-    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
+    const posts = calls.filter(({ method }) => method === "chat.postMessage");
+    expect(posts).toHaveLength(1);
+    const text = String(posts[0]?.payload.text);
+    expect(text).toContain("https://example.com/report");
+    expect(text).toContain("https://example.com/table");
+    expect(text).not.toContain("notes");
+    expect(text).not.toContain("completed");
+    expect(text).not.toContain("PRIVATE OUTPUT");
+    expect(posts[0]?.payload.blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text } }]);
+    expect(calls.some(({ method }) => method === "chat.startStream")).toBe(false);
     expect(outcome?.finalizedAt).toBeDefined();
   });
 
@@ -4139,6 +4157,7 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     });
     await startTask(followUp.id);
     await completeTask(followUp.id, "wrap-up done");
+    await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "Ask completed.");
     await backdateLastUpdated([ask.id, child.id, followUp.id], 60);
     calls.length = 0;
@@ -4154,7 +4173,7 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
         call.method === "chat.startStream" &&
         String(call.payload.markdown_text).includes("**Results**"),
     );
-    expect(conclusionStream).toBeDefined();
+    expect(String(conclusionStream?.payload.markdown_text)).toStartWith("**Results**");
     expect(String(conclusionStream?.payload.markdown_text)).toContain(
       `↳ ✅ ${worker.name} — [result](${childCard!.permalink})`,
     );
@@ -4309,6 +4328,7 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
       followUpConfig: { disabled: true },
     });
     await startTask(child.id);
+    await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "Ask completed; the child never finished.");
     await backdateLastUpdated([ask.id, child.id], 120);
     calls.length = 0;

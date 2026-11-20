@@ -20,6 +20,7 @@ import {
   isPendingSlackMessage,
   isSettledSlackMessage,
   markSlackDeferralResolved,
+  markSlackRelayDelivered,
   markSlackTreeRendered,
   noteSlackOutcomeDeliveryFailure,
   reserveSlackMessage,
@@ -64,6 +65,8 @@ import {
 import { getSlackApp } from "./app";
 import {
   buildCaptionBlock,
+  buildMrkdwnSectionBlocks,
+  formatAttachmentsBlockForSlack,
   getTaskLink,
   getTaskUrl,
   MAX_SECTION_LENGTH,
@@ -1135,6 +1138,19 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   );
 }
 
+/** A new ask card only needs text that has not already reached the thread. */
+async function newOutcomeContent(task: AgentTask, slackReplySent: boolean): Promise<string | null> {
+  if (
+    task.source === "slack" &&
+    slackReplySent &&
+    task.status === "completed" &&
+    !isDeferredTask(task)
+  ) {
+    return null;
+  }
+  return outcomeContent(task, slackReplySent);
+}
+
 async function agentDisplayNameFor(task: AgentTask): Promise<string> {
   return task.agentId ? ((await getAgentById(task.agentId))?.name ?? "Agent") : "Agent";
 }
@@ -1238,10 +1254,10 @@ async function classifyLeadFollowUp(
 }
 
 /**
- * Settles a Lead follow-up's card as abandoned without posting anything, so
+ * Settles an intentionally omitted card without posting anything, so
  * slackThreadHasOutcomeWork stops counting it and the thread can close.
  */
-async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): Promise<void> {
+async function settleWithoutOutcomeCard(task: AgentTask, reason: string): Promise<void> {
   if (!task.slackChannelId || !task.slackThreadTs) return;
   // A bound card is a stream Slack already holds; it keeps its own bounded
   // recovery. A pending one has no bound message, so it is settled here.
@@ -1280,7 +1296,7 @@ async function mayPostLeadFollowUpCard(
   if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) {
     // A reservation left by a failed delivery would keep the thread open.
     if (await getSlackOutcomeMessage(task.id)) {
-      await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
+      await settleWithoutOutcomeCard(task, "slack_reply_sent: Lead follow-up not posted");
     }
     return false;
   }
@@ -1303,7 +1319,7 @@ async function mayPostLeadFollowUpCard(
     // reply. A reply under the ask or a sibling's task does not count: in a
     // fan-out, every sibling follow-up shares those. The reconcile SQL counts
     // this task as outcome work until its card is settled, so always settle it.
-    await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
+    await settleWithoutOutcomeCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }
   const askId = ownerAskId.get(task.id);
@@ -1321,7 +1337,7 @@ async function mayPostLeadFollowUpCard(
   const blockReason = await getChannelBlockReason(app.client, task.slackChannelId);
   if (blockReason === "external") {
     // "unverified" is not settled: it retries on the next tick.
-    await settleLeadFollowUpWithoutCard(task, "external_channel: Lead follow-up not posted");
+    await settleWithoutOutcomeCard(task, "external_channel: Lead follow-up not posted");
     return false;
   }
   return blockReason === null;
@@ -1437,22 +1453,22 @@ async function askConclusionContent(
   closure: AgentTask[],
   state: Extract<ClosureState, "settled" | "timedOut">,
   slackReplySent: boolean,
-): Promise<string> {
+): Promise<string | null> {
   const body =
     state === "timedOut" && !isOutcomeStatus(task.status)
       ? "⏳ **Still in progress**"
-      : await outcomeContent(task, slackReplySent);
+      : await newOutcomeContent(task, slackReplySent);
   if (closure.length === 0 && state !== "timedOut") return body;
 
   const resultsLines = await conclusionResultsLines(closure);
-  const sections = [body];
+  const sections = body ? [body] : [];
   if (resultsLines.length > 0) sections.push(`**Results**\n${resultsLines.join("\n")}`);
   if (state === "timedOut") {
     sections.unshift("⚠️ **Concluded with unfinished work**");
     const unfinishedLines = await conclusionTimeoutLines(task, closure);
     if (unfinishedLines.length > 0) sections.push(unfinishedLines.join("\n"));
   }
-  return sections.join("\n\n");
+  return sections.length ? sections.join("\n\n") : null;
 }
 
 /** Reaction gate mapping (plan section 3.5): a cancel is not a failure. */
@@ -1707,7 +1723,7 @@ async function outcomeFooter(
 export async function streamOutcomeCard(
   task: AgentTask,
   options?: {
-    buildContent?: (task: AgentTask, slackReplySent: boolean) => Promise<string>;
+    buildContent?: (task: AgentTask, slackReplySent: boolean) => Promise<string | null>;
     conclusionKind?: SlackConclusionKind;
     /** The render tick's shared cap on native status writes. */
     statusBudget?: StatusBudget;
@@ -1732,20 +1748,51 @@ export async function streamOutcomeCard(
   // Slack round trips in the outer render loop that run before this function is
   // called for the task.
   const slackReplySent = (await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent;
-  const content = await (options?.buildContent ?? outcomeContent)(task, slackReplySent);
-  const presentation = await outcomePresentation(task, content);
+  let content = await (options?.buildContent ?? newOutcomeContent)(task, slackReplySent);
+  const attachmentsText =
+    content === null
+      ? formatAttachmentsBlockForSlack(await getSlackOutputAttachments(task.id)).trim()
+      : "";
+  if (content === null && !attachmentsText) {
+    if (!existing || isPendingSlackMessage(existing)) {
+      // slack-reply fulfilled the relay. Settle the trigger and the durable
+      // obligation before retiring the pending card from reconciliation.
+      await finalizeTerminalSlackReactions([task]);
+      await markSlackRelayDelivered(task.id);
+      await settleWithoutOutcomeCard(task, "slack_reply_sent: Slack ask already answered");
+      noteOutcomeDeliverySuccess(task.id);
+      outcomeReservedWithoutAttempt.delete(task.id);
+      await clearAssistantStatus(
+        app.client,
+        task.slackChannelId,
+        task.slackThreadTs,
+        options?.statusBudget,
+      );
+      return null;
+    }
+    // A reply can land after a stream started. Finish that same message and
+    // replace its old task output without sending a second notification.
+    content = await outcomeContent(task, slackReplySent);
+  }
+  const presentation = attachmentsText || (await outcomePresentation(task, content ?? ""));
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
-  // Sources, attachments, and the footer are captions under the answer, never
-  // part of the streamed text, so notifications carry the answer alone.
-  const captions = [
-    ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter([task], tasks, duration)),
-  ];
-  // The task's own card goes first in the blocks, under the answer. The
-  // streamed text stays the answer alone.
-  const uiSpec = await outcomeUiSpec(task);
+  const captions =
+    content === null
+      ? []
+      : [
+          ...(await outcomeCaptionBlocks(task, content)),
+          ...(await outcomeFooter([task], tasks, duration)),
+        ];
+  const uiSpec = content === null ? null : await outcomeUiSpec(task);
   const blocksFor = (withCard: boolean) =>
     withCard && uiSpec ? [...uiSpec.blocks, ...captions] : captions;
+  const messageBody = (withCard: boolean) => {
+    const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+    const blocks = attachmentsText
+      ? buildMrkdwnSectionBlocks(text)
+      : [{ type: "markdown", text }, ...blocksFor(withCard)];
+    return { text, blocks };
+  };
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
@@ -1757,7 +1804,7 @@ export async function streamOutcomeCard(
     ? { username: getAgentDisplayName(agent), ...getAgentSlackIcon(agent) }
     : {};
   Object.assign(startPayload, persona);
-  if (!task.slackChannelId.startsWith("D") && task.slackUserId) {
+  if (!attachmentsText && !task.slackChannelId.startsWith("D") && task.slackUserId) {
     const teamId = await slackTeamId(app.client);
     if (teamId) {
       startPayload.recipient_user_id = task.slackUserId;
@@ -1780,7 +1827,7 @@ export async function streamOutcomeCard(
     reservationWasCreated = reserved.created;
   }
   let streamedFreshContent = false;
-  let deliveredViaFallback = false;
+  let postedAsMessage = false;
   if (isPendingSlackMessage(outcome)) {
     // A reservation noteOutcomeDeliveryFailure pre-created without ever
     // attempting a Slack call has nothing to reconcile against — treat it
@@ -1791,7 +1838,11 @@ export async function streamOutcomeCard(
     const treatAsFresh = reservationWasCreated || outcomeReservedWithoutAttempt.delete(task.id);
     let reconciled = treatAsFresh
       ? undefined
-      : await findReservedSlackMessage(app.client, outcome, presentation);
+      : await findReservedSlackMessage(
+          app.client,
+          outcome,
+          attachmentsText ? undefined : presentation,
+        );
     if (reconciled?.ts) {
       // The DB, not process memory, is the source of truth for ownership: a
       // message matched by identical presentation text can belong to a
@@ -1804,42 +1855,48 @@ export async function streamOutcomeCard(
     }
     streamedFreshContent = !reconciled;
     let started = reconciled;
-    if (!started) {
+    if (!started && !attachmentsText) {
       try {
         started = await callSlackWithRetry(app.client, "chat.startStream", startPayload);
       } catch (error) {
-        // chat.startStream can fail for reasons callSlackWithRetry does not
-        // retry (e.g. user_not_found). Without a fallback the agent's answer
-        // — already computed above — is dropped entirely. Fall back to a
-        // plain chat.postMessage so a streaming-API error never swallows a
-        // reply.
+        // A streaming API error must not swallow an answer we can post normally.
         console.error(
           `[Slack] chat.startStream failed for task ${task.id}; falling back to chat.postMessage:`,
           error,
         );
-        started = await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
-          const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
-          return callSlackWithRetry(app.client, "chat.postMessage", {
-            channel: task.slackChannelId,
-            thread_ts: task.slackThreadTs,
-            text,
-            blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
-            ...persona,
-          });
-        });
-        deliveredViaFallback = true;
       }
+    }
+    if (!started) {
+      // An attachment-only post has no stream text to reconcile. Identify it
+      // by its reservation if Slack accepts the post before its ts is bound.
+      const metadata = attachmentsText
+        ? {
+            event_type: SLACK_RENDER_METADATA_EVENT,
+            event_payload: { message_id: outcome.id, kind: "outcome" },
+          }
+        : undefined;
+      started = await withUiSpecBlockFallback(uiSpec, task.id, (withCard) =>
+        callSlackWithRetry(app.client, "chat.postMessage", {
+          channel: task.slackChannelId,
+          thread_ts: task.slackThreadTs,
+          ...messageBody(withCard),
+          ...persona,
+          metadata,
+        }),
+      );
+      postedAsMessage = true;
     }
     if (typeof started.ts !== "string" || !started.ts) {
       throw new Error("Slack did not return a timestamp for the outcome stream");
     }
     const persisted = await bindSlackMessageTimestamp(outcome.id, started.ts, {
-      streamChunksAppended: 1,
+      streamChunksAppended: attachmentsText ? 0 : 1,
     });
     if (!persisted) throw new Error("Failed to persist the outcome stream timestamp");
     outcome = persisted;
   }
-  if (!deliveredViaFallback) {
+  // A bound attachment post needs only its permalink on a retry.
+  if (!postedAsMessage && !(attachmentsText && outcome.streamChunksAppended === 0)) {
     try {
       await withUiSpecBlockFallback(uiSpec, task.id, (withCard) =>
         callSlackWithRetry(app.client, "chat.stopStream", {
@@ -1863,15 +1920,13 @@ export async function streamOutcomeCard(
       // slackReplySent snapshot may have since changed. The stream is closed
       // now, so chat.update is allowed: overwrite the text and the caption
       // blocks with the freshly computed presentation.
-      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
-        const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
-        return callSlackWithRetry(app.client, "chat.update", {
+      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) =>
+        callSlackWithRetry(app.client, "chat.update", {
           channel: task.slackChannelId,
           ts: outcome.ts,
-          text,
-          blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
-        });
-      });
+          ...messageBody(withCard),
+        }),
+      );
     }
   }
   // chat.startStream/chat.postMessage posting a new message in the thread is
@@ -1927,6 +1982,9 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   // A merged row whose host card is gone has no Slack message to edit.
   if (isMergedSlackMessageTs(card.ts)) return false;
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
+  // An attachment-only post has no UI card to refresh.
+  if (card.streamChunksAppended === 0 && task.source === "slack" && task.slackReplySent)
+    return false;
   const content = await outcomeContent(task, task.slackReplySent);
   const presentation = await outcomePresentation(task, content);
   if (!presentation) return false;
@@ -2091,6 +2149,7 @@ async function mergeLeadFollowUpCard(
       hostTask.agentId !== agentId ||
       hostTask.status !== "completed" ||
       isDeferredTask(hostTask) ||
+      (hostTask.source === "slack" && hostTask.slackReplySent) ||
       (await slackDelegationOwnsChildCard(hostTask)) ||
       (await outcomeUiSpec(hostTask)) ||
       (await outcomeUiSpec(task))
@@ -2442,7 +2501,7 @@ async function processSlackThread(
       !endedBefore(task, outcomeWindow.finishedAfter)
     ) {
       // The reconcile SQL cannot walk the parent chain, so it counts this one.
-      await settleLeadFollowUpWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
+      await settleWithoutOutcomeCard(task, "no_slack_ask: Lead follow-up not posted");
       continue;
     }
     if (!(await taskNeedsDirectOutcome(task, activatedAt, leadFollowUp))) continue;
