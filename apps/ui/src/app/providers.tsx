@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { MotionConfig } from "motion/react";
 import { type ReactNode, useEffect } from "react";
+import { invalidateFavoriteQueries } from "@/api/hooks/use-favorites";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CurrentUserProvider } from "@/contexts/current-user-context";
 import { ConfigContext, useConfigProvider } from "@/hooks/use-config";
@@ -62,6 +63,8 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <PersistQueryClientProvider
       client={queryClient}
+      // A fast reload can restore entity lists written before the last star toggle.
+      onSuccess={() => invalidateFavoriteQueries(queryClient)}
       persistOptions={{
         buster: `ui-${__APP_VERSION__}`,
         maxAge: 1000 * 60 * 60 * 6,
