@@ -59,6 +59,7 @@ import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { runWithNodeDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
+import { decideWorkflowRunPrincipal } from "./run-principal";
 import {
   hasOwedSuccessors,
   holdSuccessorRouting,
@@ -367,6 +368,9 @@ async function createRunWithInitialState(
         ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
         : initial;
     const definitionHash = await pinWorkflowDefinition(pinSource);
+    // Decided from the same read as the pin, so a re-save while the run is in
+    // flight cannot lend the creator's identity to a definition another agent wrote.
+    const principal = await decideWorkflowRunPrincipal(pinSource, options.triggeredByAgentId);
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -377,6 +381,7 @@ async function createRunWithInitialState(
       parentStepAttempt: parentStepId ? attempt : undefined,
       triggeredByAgentId: options.triggeredByAgentId,
       definitionHash,
+      principal: JSON.stringify(principal),
     });
     await updateWorkflowRun(
       runId,

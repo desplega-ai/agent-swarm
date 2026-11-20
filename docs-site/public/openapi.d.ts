@@ -30835,7 +30835,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30914,7 +30914,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;

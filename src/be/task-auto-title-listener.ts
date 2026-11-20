@@ -12,7 +12,7 @@
  */
 
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getScriptApiBaseUrl } from "../utils/constants";
 import { parseEnvFlag } from "../utils/env-flag";
 import { generateTaskTitle, TASK_TITLE_TIMEOUT_MS } from "../utils/internal-ai/task-title";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -103,7 +103,7 @@ async function titleTask(
     task: task.task,
     env,
     // Loopback context for the codex OAuth probe; only used when no API key is set.
-    apiUrl: getMcpBaseUrl(),
+    apiUrl: getScriptApiBaseUrl(),
     apiKey: getApiKey(),
     callerTag: `task-title:${task.source}`,
     signal: AbortSignal.timeout(TASK_TITLE_TIMEOUT_MS),

@@ -79,6 +79,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
 - [Investigating a stale partner data feed with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-data-feed-freshness-review). Reference.
 - [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-onboarding-readiness). Reference.
+- [Preparing a campaign launch review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketing-campaign-launch-review). Reference.
 - [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/guides/digital-content-license-rights-review). Reference.
 - [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
 - [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-operations-shift-handoff). Reference.
@@ -96,6 +97,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-training-completion-evidence-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
 - [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/guides/business-continuity-tabletop-preparation). Reference.
+- [Preparing a workplace near-miss evidence packet for a human investigator with AI agents](https://docs.agent-swarm.dev/docs/guides/near-miss-investigation-review). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
