@@ -954,6 +954,74 @@ export const workflowApprovals: Scenario = {
         (await getRunDetail(ctx, linkRun.runId)).run.status === "cancelled",
         "the workflow run was cancelled with its request",
       );
+
+      // A published approval.resolved event routes the step only on the stored request:
+      // a foreign request id, or the step's own still-pending one, leaves it waiting.
+      const eventFlow = await createWorkflow(
+        ctx,
+        "appr-event",
+        {
+          nodes: [
+            {
+              id: "ask",
+              type: "human-in-the-loop",
+              config: { title: `Event ${marker}`, questions: [GO], approvers: { policy: "any" } },
+              next: { approved: "yes", rejected: "no" },
+            },
+            { id: "yes", type: "script", config: { runtime: "bash", script: "echo yes" } },
+            { id: "no", type: "script", config: { runtime: "bash", script: "echo no" } },
+          ],
+        },
+        {},
+        workerId,
+      );
+      const eventRun = await triggerWorkflow(ctx, eventFlow, {}, { agentId: workerId });
+      const eventCard = await waitForApproval(ctx, eventRun.runId);
+      const eventStepId = String(stepOf(await getRunDetail(ctx, eventRun.runId), "ask").id);
+      for (const requestId of [crypto.randomUUID(), String(eventCard.id)]) {
+        expectStatus(
+          await ctx.api("POST", "/api/workflow-events", {
+            agentId: workerId,
+            body: {
+              name: "approval.resolved",
+              payload: {
+                requestId,
+                status: "approved",
+                responses: { go: { approved: true } },
+                workflowRunId: eventRun.runId,
+                workflowRunStepId: eventStepId,
+              },
+            },
+          }),
+          [200],
+          "publish approval.resolved",
+        );
+      }
+      // The bus listener runs fire-and-forget and leaves no state to poll when it ignores an event.
+      await Bun.sleep(500);
+      const eventDetail = await getRunDetail(ctx, eventRun.runId);
+      expect(
+        stepOf(eventDetail, "ask").status === "waiting" && !hasStep(eventDetail, "yes"),
+        `a published event did not route the step: ${JSON.stringify(stepOf(eventDetail, "ask"))}`,
+      );
+      expect(
+        (await approvalsForRun(ctx, eventRun.runId, "pending")).length === 1,
+        "the request stays pending",
+      );
+      await respondApproval(ctx, String(eventCard.id), { go: { approved: false } });
+      const eventAnswered = await waitForRun(
+        ctx,
+        eventRun.runId,
+        "completed",
+        20_000,
+        "event card",
+      );
+      expect(
+        stepOf(eventAnswered, "ask").nextPort === "rejected",
+        "the stored answer routes the step",
+      );
+      expect(!hasStep(eventAnswered, "yes"), "the approved branch did not run");
+
       const authoring = await ctx.api("POST", "/api/workflows", {
         body: {
           name: `appr-bad-${ctx.nonce}`,

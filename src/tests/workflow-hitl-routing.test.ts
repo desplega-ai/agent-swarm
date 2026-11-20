@@ -129,6 +129,19 @@ const mockDeps: ExecutorDependencies = {
   interpolate: (t: string) => t,
 };
 
+/** Store the answer on the request row, as the respond route does before it emits. */
+async function storeAnswer(
+  requestId: string,
+  status: "approved" | "rejected" | "timeout" | "cancelled",
+  responses: Record<string, unknown> | null,
+): Promise<void> {
+  if (status === "cancelled") {
+    await db.cancelApprovalRequestById(requestId, { reason: "test", resolvedBy: null });
+  } else {
+    await db.resolveApprovalRequest(requestId, { status, responses });
+  }
+}
+
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
@@ -197,6 +210,7 @@ async function runHITLWorkflow(
   expect(requestId).toBeTruthy();
 
   // Emit approval.resolved event — this triggers resumeFromApprovalResolution
+  await storeAnswer(requestId, approvalStatus, approvalStatus === "approved" ? { q1: true } : null);
   eventBus.emit("approval.resolved", {
     requestId,
     status: approvalStatus,
@@ -387,6 +401,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question
+    await storeAnswer(requestId1, "rejected", null);
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -420,6 +435,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1); // Different request
 
     // APPROVE — should go to success
+    await storeAnswer(requestId2, "approved", { q1: true });
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -504,6 +520,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question (async)
+    await storeAnswer(requestId1, "rejected", null);
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -551,6 +568,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1);
 
     // APPROVE — should go to success
+    await storeAnswer(requestId2, "approved", { q1: true });
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
