@@ -1,0 +1,94 @@
+---
+title: 'Reviewing marketplace partner launch readiness with AI agents'
+description: "Agent Swarm's configured agents gather a partner's requirements, listing status and payout setup, then hand an operations owner a readiness brief to review."
+agent:
+  offer: false
+  when: "Someone wants operations, finance and support to review whether a new marketplace partner is ready to launch"
+---
+
+Agent Swarm can prepare a launch readiness brief for human review: for one new marketplace partner, configured agents use the source access, scripts and custom source skills the team sets up to gather approved requirements, listing status, payout setup and open support items, and hand a named operations owner a source-linked checklist. That owner reviews the brief, finance verifies payout readiness, and the workflow pauses for the owner to decide launch or hold; partner access, payout changes, the launch decision and every message to the partner stay with people. What it takes off the team is the assembly: chasing one launch checklist across four systems owned by four teams, and finding out in the last week which item had nobody behind it.
+
+The scope is one decision: whether a marketplace partner about to launch meets the requirements the team already wrote down. It is not customer onboarding after the partner goes live, not a review of a prospective supplier's security evidence ([that guide](/docs/playbooks/use-cases/supplier-security-evidence-review)), not a post-settlement payout discrepancy ([Reviewing marketplace partner payout discrepancies with AI agents](/docs/playbooks/use-cases/marketplace-payout-exception-review)), and not a review of listings that already disagree with the approved catalog ([Reviewing inconsistent product listings across sales channels with AI agents](/docs/playbooks/use-cases/marketplace-catalog-discrepancy-review)).
+
+## When another tool fits better
+
+**An existing partner-management or vendor-onboarding system.** If a system already holds the launch requirements, tracks each one's status and shows an owner, it is the cheaper answer. A workflow that rebuilds that status view duplicates the tool the team already pays for.
+
+**A shared checklist, when launches are few.** Two or three partner launches a year, one person owning the list and the requirements in a single document: a spreadsheet already does this. Adding agents only builds machinery around a file that works.
+
+Agent Swarm fits a different shape. The requirements live in an onboarding document, listing status in the marketplace's own admin, payout setup in finance's systems and open support items in a helpdesk queue, each owned by a different team. Nobody holds the whole picture, and the week before launch goes into assembling it. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in partner onboarding feature or a customer result. It needs integrations, permissions and configuration the team sets up and tests.
+
+<Mermaid title="Illustrative partner launch readiness flow, from a planned launch date to a human decision to launch or hold." chart={`flowchart LR
+  A["Partner nears<br/>planned launch date"] --> B["Operations owner names<br/>approved requirements<br/>and record sources"]
+  B --> C["Gather authorized records<br/>(requirements, listings,<br/>payout setup, support items)"]
+  C --> D["Deterministic checks<br/>swarm-script to JSON"]
+  D --> E["Agent drafts<br/>source-linked checklist"]
+  E --> F["Finance verifies<br/>payout readiness"]
+  F --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "launch" --> R["Launch proceeds<br/>through the normal process"]
+  G -- "hold" --> S["Held, with missing<br/>items and their owners"]
+`} />
+
+**1. A new supplier nears its planned launch date.** The operations owner opens the review. The date comes from the team's launch plan; the workflow does not choose a launch date.
+
+**2. The operations owner names the approved requirement list and the record of truth for each area.** Which requirements block a launch, which version of the list is current, and which system holds the answer for each one. Written down once, the same review runs the same way for the next partner.
+
+**3. Configured source access collects the records.** Approved onboarding requirements, listing status, payout setup status and open support items. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [scripts credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source.
+
+**4. Deterministic steps flag the gaps.** A `swarm-script` node checks for missing fields, missing or past dates and items with no owner, then emits JSON. No model decides whether a requirement is met. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-synthesis pattern.
+
+**5. An agent drafts a source-linked checklist for the named operations owner.** One line per requirement, each linking the record it came from and when that record was read. Where information is missing, conflicting or stale, the line says so and stays unresolved. Nothing is filled with a plausible value.
+
+**6. Finance verifies payout readiness in its own systems.** Bank details, the fee schedule, the tax record and the settlement account are finance's to confirm. The brief carries the status finance states; it does not validate a payment account.
+
+**7. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) holds the workflow, posts a summary to Slack that links the full checklist, and resumes only on a human response. The operations owner decides launch or hold. On hold, the checklist names the missing items and the people who own them.
+
+## What the brief flags
+
+Every item below is illustrative. No partner is named, and none comes from a customer case.
+
+**A required field is empty.** The onboarding record has a field the approved list requires and it holds nothing. The line names the field and the system that should have carried it.
+
+**The listing is not approved, or was approved against an older requirement version.** The listing's approval date or the requirement version behind it is older than the list the team says is current.
+
+**Payout setup is incomplete, or unverified.** Bank details or tax information are missing, or what is on file has not been confirmed by finance. The brief shows both: what is on file and who confirmed it.
+
+**Open support items before launch.** The helpdesk queue holds partner tickets nobody closed. The brief counts them and links the oldest.
+
+**Dates that disagree.** The launch date in the plan, the listing go-live date and the settlement start differ. All three appear with their sources, and none is treated as correct.
+
+**A stale record.** A value last read days ago, marked with its read timestamp, so the owner knows to re-check before deciding.
+
+## Configuration and permissions
+
+The team decides what the workflow can see.
+
+- **Which sources are connected.** Each connection is a decision, recorded in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record with the named owner.
+- **Read-only access, granted per source.** Partner records, listings, payout configuration and support queues are read, not written. Nothing in the workflow changes a listing, a fee or a partner record.
+- **Custom source skills or integrations.** Where a system has no connection, the team writes one. That is custom implementation, tested against its own access rules, not a shipped feature.
+- **Where the brief is stored.** On [agent-fs](https://github.com/desplega-ai/agent-fs), beside the records it cites. The gate message links to it instead of pasting partner details into a chat.
+- **Who the named owner is.** One person receives the brief and decides.
+
+Agents see only what the team authorizes. A system the swarm is not connected to is reported as a gap, with the owner who can grant access. It is never worked around by asking someone to paste a value into a chat.
+
+## What stays with people
+
+Four things stay human in every version of this workflow.
+
+- **Partner access.** Whether the partner gets accounts, keys or access to any system is decided and executed by people through the normal process.
+- **Payout changes.** Bank details, fee schedules and settlement terms are finance's. The workflow has no path to change one.
+- **The launch or hold decision.** The gate records a person's decision with a name and a time. That record is an approval of the brief; it does not make the brief correct.
+- **Any partner or customer communication.** The workflow sends nothing to the partner. A launch message belongs to the person who owns the relationship.
+
+None of this guarantees a compliant launch, verifies a partner's identity or validates a payment account. It assembles evidence for the people who make those calls.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources)
+- [HITL gates](/docs/playbooks/patterns/hitl-gates)
+- [Reviewing marketplace partner payout discrepancies with AI agents](/docs/playbooks/use-cases/marketplace-payout-exception-review)
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model)
