@@ -38,6 +38,7 @@
     "scripts-credential-broker",
     "script-workflow-runs",
     "dreaming",
+    "video-review",
     "claude-bridge-experimental",
     "claude-artifacts-read",
     "worker-credential-recovery",

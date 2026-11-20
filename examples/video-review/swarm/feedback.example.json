@@ -1,0 +1,49 @@
+{
+ "tool": "video-review",
+ "schema": 1,
+ "video": "/videos/launch/teaser-v3.mp4",
+ "feedbackFile": "/videos/launch/.review/teaser-v3.feedback.json",
+ "name": "teaser-v3.mp4",
+ "fps": 30,
+ "frames": 409,
+ "durationSec": 13.633,
+ "videoEtag": "\"<etag of the cut that was reviewed>\"",
+ "updatedAt": "2026-11-19T11:51:50.877Z",
+ "updatedBy": "<who saved>",
+ "comments": [
+  {
+   "id": 1, "inFrame": 45, "outFrame": 45, "in": "0:01.50", "out": "0:01.50", "startSec": 1.5, "endSec": 1.533,
+   "text": "Title card holds too long. Cut about 10 frames.",
+   "strokes": [],
+   "createdAt": "2026-11-19T11:50:14.327Z",
+   "sentIn": 1
+  },
+  {
+   "id": 2, "inFrame": 150, "outFrame": 150, "in": "0:05.00", "out": "0:05.00", "startSec": 5, "endSec": 5.033,
+   "text": "Logo sits off-center here. Nudge it right to the arrow.",
+   "strokes": [
+    { "tool": "arrow", "color": "#ff3b30", "width": 0.005, "frame": 150, "points": [[0.2992, 0.6994], [0.4493, 0.4993]] }
+   ],
+   "createdAt": "2026-11-19T11:50:15.684Z",
+   "sentIn": 1
+  },
+  {
+   "id": 3, "inFrame": 380, "outFrame": 380, "in": "0:12.67", "out": "0:12.67", "startSec": 12.667, "endSec": 12.7,
+   "text": "End card: hold the logo 1s longer.",
+   "strokes": [],
+   "createdAt": "2026-11-19T11:51:50.877Z"
+  }
+ ],
+ "iterations": [
+  {
+   "n": 1,
+   "taskId": "<task id of round 1>",
+   "parentTaskId": null,
+   "sentAt": "2026-11-19T11:51:25.641Z",
+   "note": "First pass",
+   "videoEtag": "\"<etag>\"",
+   "comments": [ { "n": 1, "inFrame": 45, "outFrame": 45, "text": "Title card holds too long. Cut about 10 frames.", "strokes": [] } ]
+  }
+ ],
+ "thread": { "rootTaskId": "<task id of round 1>", "parentTaskId": null }
+}

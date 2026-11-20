@@ -238,4 +238,86 @@ describe("createX402Client spending reservations (real x402 core client)", () =>
     expect(summary.todaySpent).toBe(5);
     expect(summary.reserved).toBe(0);
   });
+
+  // x402 v1 names the price `maxAmountRequired` and puts the URL on the requirements
+  const v1PaymentRequired = (maxAmountRequired?: string, extra: Record<string, unknown> = {}) =>
+    ({
+      x402Version: 1,
+      accepts: [
+        {
+          scheme: "exact",
+          network: "base-sepolia",
+          ...extra,
+          ...(maxAmountRequired === undefined ? {} : { maxAmountRequired }),
+          resource: "https://paid.example/v1-resource",
+          description: "test",
+          mimeType: "application/json",
+          payTo: "0x4f27DC247a55EA5920F8311A25672Ed1B590792d",
+          maxTimeoutSeconds: 60,
+          asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          extra: { name: "USDC", version: "2" },
+        },
+      ],
+    }) as unknown as typeof paymentRequired;
+
+  test("v1: blocks a payment above the per-request limit", async () => {
+    const client = await createX402Client({ maxAutoApprove: 1, dailyLimit: 1 });
+
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired("5000000")),
+    ).rejects.toThrow("exceeds per-request limit");
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(0);
+    expect(summary.todayCount).toBe(0);
+    expect(summary.reserved).toBe(0);
+  });
+
+  test("v1: limits the signed maxAmountRequired even when a decoy amount is present", async () => {
+    const client = await createX402Client({ maxAutoApprove: 1, dailyLimit: 1 });
+
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired("5000000", { amount: "0" })),
+    ).rejects.toThrow("exceeds per-request limit");
+
+    // A v1 payload with only `amount` has nothing the v1 scheme signs against
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired(undefined, { amount: "1" })),
+    ).rejects.toThrow("no parseable amount");
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(0);
+    expect(summary.todayCount).toBe(0);
+    expect(summary.reserved).toBe(0);
+  });
+
+  test("v1: records the signed amount and enforces the daily limit", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 5 });
+
+    await client.x402Client.createPaymentPayload(v1PaymentRequired("5000000"));
+    await expect(
+      client.x402Client.createPaymentPayload(v1PaymentRequired("5000000")),
+    ).rejects.toThrow("would exceed daily limit");
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(5);
+    expect(summary.todayCount).toBe(1);
+    expect(client.spendingTracker.getTodayRecords()[0]?.url).toBe(
+      "https://paid.example/v1-resource",
+    );
+  });
+
+  test("blocks requirements with no parseable amount", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 10 });
+
+    for (const amount of [undefined, "", "abc", "1.5", "-5"]) {
+      await expect(
+        client.x402Client.createPaymentPayload(v1PaymentRequired(amount)),
+      ).rejects.toThrow("no parseable amount");
+    }
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todayCount).toBe(0);
+    expect(summary.reserved).toBe(0);
+  });
 });

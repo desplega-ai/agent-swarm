@@ -85,6 +85,8 @@ export function PersonBubble({
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
             "w-full max-w-full min-w-0 rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere @min-[30rem]/turns:w-fit @min-[30rem]/turns:min-w-32 md:text-sm",
+            // Monaco measures its parent. Give fenced code the available column width.
+            "has-[[data-monaco-snippet]]:w-full",
             mine ? "rounded-tr-sm bg-muted" : "rounded-tl-sm border border-border bg-card",
             // A message from Slack or a chat channel stays greyed (SPEC R2).
             external && "border border-dashed bg-surface text-muted-foreground",
