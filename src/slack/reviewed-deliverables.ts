@@ -1,6 +1,7 @@
 import type { WebClient } from "@slack/web-api";
 import { getAgentById, getTaskById } from "../be/db";
 import type { AgentTask } from "../types";
+import { getAgentFsLiveUrl, getPublicMcpBaseUrl, isAgentFsProxyEnabled } from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { getTaskUrl } from "./blocks";
 import { getChannelExternality } from "./external-channel";
@@ -16,10 +17,35 @@ const PUBLIC_SHARE_PATH = /^\/(?:share|site)\/[^/]+/;
 
 export type DeliverableLink = { url: string; label: string };
 
-/** True for an agent-fs public share link: anyone with it can open it without a login. */
+function urlOrigin(url: string | undefined): string | undefined {
+  if (!url?.trim()) return undefined;
+  try {
+    return new URL(url.trim()).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The origins that serve agent-fs public shares: the live host, the public
+ * agent-fs API when set, and the API itself when it proxies `/share` and
+ * `/site`. Read per call, so a config change applies without a restart.
+ */
+function publicShareOrigins(): Set<string> {
+  const origins = [getAgentFsLiveUrl(), process.env.AGENT_FS_PUBLIC_URL];
+  if (isAgentFsProxyEnabled()) origins.push(getPublicMcpBaseUrl());
+  return new Set(origins.map(urlOrigin).filter((origin): origin is string => !!origin));
+}
+
+/**
+ * True for an agent-fs public share link: anyone with it can open it without
+ * a login. Both the origin and the path must match: worker output is free
+ * text, so a `/share/` path on any other host proves nothing.
+ */
 export function isPublicShareUrl(url: string): boolean {
   try {
-    return PUBLIC_SHARE_PATH.test(new URL(url).pathname);
+    const parsed = new URL(url);
+    return publicShareOrigins().has(parsed.origin) && PUBLIC_SHARE_PATH.test(parsed.pathname);
   } catch {
     return false;
   }

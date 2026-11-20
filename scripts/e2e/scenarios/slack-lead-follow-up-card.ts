@@ -521,12 +521,16 @@ export const slackLeadFollowUpCard: Scenario = {
       members: [alice],
     });
     // Only a public share link the worker made reaches a Slack Connect
-    // thread; its app file link and internal attachment do not.
-    const shareUrl = `https://api.example.test/share/tok${ctx.nonce}`;
+    // thread; its app file link and internal attachment do not. A `/share/`
+    // path on a host that does not serve agent-fs shares is dropped too:
+    // worker output is free text. The SUT leaves AGENT_FS_LIVE_URL unset, so
+    // the default live host serves the shares.
+    const shareUrl = `https://live.agent-fs.dev/share/tok${ctx.nonce}`;
+    const spoofedShareUrl = `https://internal.example.test/share/tok${ctx.nonce}`;
     const appFileUrl = `https://app.example.test/file/~/org/drive/notes-${ctx.nonce}.md`;
     const internalUrl = `https://docs.example.test/internal-${ctx.nonce}`;
     const external = await delegatedAsk(ctx, externalId, workerId, "external", {
-      output: `external worker result ${ctx.nonce}: public ${shareUrl}, app ${appFileUrl}`,
+      output: `external worker result ${ctx.nonce}: public ${shareUrl}, app ${appFileUrl}, other ${spoofedShareUrl}`,
       attachments: [{ kind: "url", url: internalUrl, name: `internal ${ctx.nonce}` }],
     });
     // A message after the ask's card stops a merge into it: as in production,
@@ -558,8 +562,11 @@ export const slackLeadFollowUpCard: Scenario = {
       const count = (url: string) =>
         captionOccurrences(ctx, externalId, external.threadTs, externalOutput, url);
       expect(
-        count(shareUrl) === 1 && count(appFileUrl) === 0 && count(internalUrl) === 0,
-        `The Slack Connect card must list only the share link: share=${count(shareUrl)} app=${count(appFileUrl)} internal=${count(internalUrl)}`,
+        count(shareUrl) === 1 &&
+          count(appFileUrl) === 0 &&
+          count(internalUrl) === 0 &&
+          count(spoofedShareUrl) === 0,
+        `The Slack Connect card must list only the share link: share=${count(shareUrl)} app=${count(appFileUrl)} internal=${count(internalUrl)} spoofed=${count(spoofedShareUrl)}`,
       );
       const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
         "SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
