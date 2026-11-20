@@ -38,6 +38,35 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await clean.assertClean();
 });
 
+test("fenced code uses the message column on Sessions and Tasks", async ({ page, api, seed }) => {
+  test.skip(!seed, "remote run without seed");
+  const { id } = await api.post<{ id: string }>("/api/tasks", {
+    task: [
+      "add",
+      "```",
+      "<script async src='https://example.org/analytics.js'></script>",
+      "```",
+      "please",
+    ].join("\n"),
+    source: "ui",
+    requestedByUserId: seed!.user.id,
+  });
+  for (const [route, label] of [
+    ["sessions", "Your message"],
+    ["tasks", "Task prompt"],
+  ]) {
+    await page.goto(`/${route}/${id}`);
+    const row = page.getByRole("region", { name: label, exact: true }).filter({ visible: true });
+    const snippet = row.locator("[data-monaco-snippet]");
+    await expect(snippet).toBeVisible();
+    // Allow room for the avatar and padding, but catch a block sized only by "please".
+    const rowWidth = (await row.boundingBox())!.width;
+    const snippetWidth = (await snippet.boundingBox())!.width;
+    expect(snippetWidth).toBeGreaterThan(rowWidth - 100);
+    expect(snippetWidth).toBeLessThanOrEqual(rowWidth);
+  }
+});
+
 test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
