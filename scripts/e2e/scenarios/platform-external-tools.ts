@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -222,9 +223,9 @@ export const platformExternalTools: Scenario = {
 
       // ── WhatsApp through Kapso ─────────────────────────────────────────────
       const phoneNumberId = `pn-${ctx.nonce}`;
-      const kapsoBefore = ctx.db.query("SELECT 1 FROM kv_entries WHERE namespace = ?", [
-        KAPSO_NUMBERS,
-      ]).length;
+      const kapsoBefore = ctx.db.query(
+        sql`SELECT 1 FROM kv_entries WHERE namespace = ${KAPSO_NUMBERS}`,
+      ).length;
       expectToolError(
         await callTool(worker, "send-whatsapp-message", {
           phoneNumberId,
@@ -355,7 +356,7 @@ export const platformExternalTools: Scenario = {
         "Permission denied",
       );
       expect(
-        ctx.db.query("SELECT 1 FROM kv_entries WHERE namespace = ?", [KAPSO_NUMBERS]).length ===
+        ctx.db.query(sql`SELECT 1 FROM kv_entries WHERE namespace = ${KAPSO_NUMBERS}`).length ===
           kapsoBefore,
         "refused Kapso registrations persist nothing",
       );
@@ -366,8 +367,7 @@ export const platformExternalTools: Scenario = {
       const inboxEmail = `${inboxId}@agentmail.to`;
       const mappingRow = () =>
         ctx.db.get<{ agentId: string; inboxEmail: string | null }>(
-          "SELECT agentId, inboxEmail FROM agentmail_inbox_mappings WHERE inboxId = ?",
-          [inboxId],
+          sql`SELECT "agentId", "inboxEmail" FROM agentmail_inbox_mappings WHERE "inboxId" = ${inboxId}`,
         );
       const empty = expectToolOk(
         await callTool(worker, "register-agentmail-inbox", { action: "list" }),
@@ -625,8 +625,7 @@ export const platformCodexDeviceLogin: Scenario = {
         "the user-code request names the client and originator",
       );
       const stored = ctx.db.get<{ state: string }>(
-        "SELECT state FROM codex_oauth_device_flows WHERE flow_id = ?",
-        [flowId],
+        sql`SELECT state FROM codex_oauth_device_flows WHERE flow_id = ${flowId}`,
       );
       expect(
         stored !== null &&
@@ -768,8 +767,7 @@ export const platformCodexDeviceLogin: Scenario = {
         "the list never carries the refresh token",
       );
       const credentialRow = ctx.db.get<{ value: string; isSecret: number; encrypted: number }>(
-        "SELECT value, isSecret, encrypted FROM swarm_config WHERE scope = 'global' AND key = ?",
-        [configKey],
+        sql`SELECT value, "isSecret", encrypted FROM swarm_config WHERE scope = 'global' AND key = ${configKey}`,
       );
       expect(
         credentialRow !== null &&

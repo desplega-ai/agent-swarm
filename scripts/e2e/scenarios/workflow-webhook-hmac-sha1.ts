@@ -4,6 +4,7 @@
 // body, a SHA-256 digest, or a signature on a fallback header is rejected before
 // a run is saved.
 import { createHmac } from "node:crypto";
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { createWorkflow, type WorkflowDef, waitForRun } from "./workflow-helpers";
@@ -14,9 +15,9 @@ const definition: WorkflowDef = {
 
 function runCount(ctx: ScenarioContext, workflowId: string): number {
   return Number(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?", [
-      workflowId,
-    ])?.n ?? 0,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${workflowId}`,
+    )?.n ?? 0,
   );
 }
 

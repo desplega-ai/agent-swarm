@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -76,9 +77,9 @@ export const knowledgePages: Scenario = {
         authMode: string;
         contentType: string;
         view_count: number;
-      }>("SELECT agentId, slug, authMode, contentType, view_count FROM pages WHERE id = ?", [
-        pub.id,
-      ]);
+      }>(
+        sql`SELECT "agentId", slug, "authMode", "contentType", view_count FROM pages WHERE id = ${pub.id}`,
+      );
       expect(
         row?.agentId === owner && row.authMode === "public" && row.contentType === "text/html",
         "page row was not persisted",
@@ -161,8 +162,9 @@ export const knowledgePages: Scenario = {
       expect(response.text.includes(pub.id), "the feedback overlay is bound to the page id");
       const counted = await pollUntil(
         () =>
-          (ctx.db.get<{ view_count: number }>("SELECT view_count FROM pages WHERE id = ?", [pub.id])
-            ?.view_count ?? 0) >= 3,
+          (ctx.db.get<{ view_count: number }>(
+            sql`SELECT view_count FROM pages WHERE id = ${pub.id}`,
+          )?.view_count ?? 0) >= 3,
         5_000,
         100,
       );
@@ -371,7 +373,7 @@ export const knowledgePages: Scenario = {
         listing.limit === 2 &&
           listing.offset === 0 &&
           listing.total ===
-            dbCount(ctx, "SELECT count(*) AS n FROM pages WHERE agentId = ?", [owner]) &&
+            dbCount(ctx, sql`SELECT count(*) AS n FROM pages WHERE "agentId" = ${owner}`) &&
           asRecords(listing, "pages").length === 2 &&
           asRecords(listing, "pages").every((page) => page.body === undefined),
         `slim page list with a real total: ${JSON.stringify({ total: listing.total, limit: listing.limit })}`,
@@ -582,8 +584,10 @@ export const knowledgePages: Scenario = {
         "create_page with the same slug updates the page and snapshots it",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM page_versions WHERE pageId = ?", [toolPageId]) ===
-          1,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM page_versions WHERE "pageId" = ${toolPageId}`,
+        ) === 1,
         "the upsert must snapshot the previous state",
       );
       response = await ctx.api("GET", `/p/${toolPageId}`, { apiKey: null });
@@ -620,9 +624,11 @@ export const knowledgePages: Scenario = {
       );
       expect(asRecord(outcome.data.deletedPage).id === toolPageId, "delete-page result");
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM pages WHERE id = ?", [toolPageId]) === 0 &&
-          dbCount(ctx, "SELECT count(*) AS n FROM page_versions WHERE pageId = ?", [toolPageId]) ===
-            0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM pages WHERE id = ${toolPageId}`) === 0 &&
+          dbCount(
+            ctx,
+            sql`SELECT count(*) AS n FROM page_versions WHERE "pageId" = ${toolPageId}`,
+          ) === 0,
         "deleting a page cascades to its versions",
       );
       expectToolOk(
@@ -645,7 +651,7 @@ export const knowledgePages: Scenario = {
       expectStatus(response, [204], "the operator deletes any page");
       cleanupPages.splice(cleanupPages.indexOf(pub.id), 1);
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM page_versions WHERE pageId = ?", [pub.id]) === 0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM page_versions WHERE "pageId" = ${pub.id}`) === 0,
         "deleting a page deletes its version history",
       );
     } finally {

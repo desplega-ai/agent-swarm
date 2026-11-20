@@ -1,3 +1,4 @@
+import { sql, sqlList } from "../db";
 // statusKind tells apart why a task ended (failed + agent vs failed + error) while every
 // `status` read keeps matching: a `status = 'failed'` filter still returns both kinds.
 import { asRecord, expect, expectStatus } from "../http";
@@ -146,8 +147,7 @@ export const coreTaskStatusKind: Scenario = {
       // Back-compat: the status filter, in SQL and over HTTP, still matches every kind.
       const failedIds = [agentFailed, errored, dependent];
       const sqlRows = ctx.db.query<{ id: string }>(
-        `SELECT id FROM agent_tasks WHERE status = 'failed' AND id IN (?, ?, ?)`,
-        failedIds,
+        sql`SELECT id FROM agent_tasks WHERE status = 'failed' AND id IN (${sqlList(failedIds)})`,
       );
       expect(sqlRows.length === 3, `status = 'failed' matched ${sqlRows.length} of 3 rows`);
       const byStatus = await listIds(ctx, `status=failed&agentId=${agentId}`);
@@ -177,7 +177,9 @@ export const coreTaskStatusKind: Scenario = {
       });
       const toolRows = listOf(viaTool.data, "tasks");
       expect(
-        toolRows.length === 1 && toolRows[0]?.id === dependent && toolRows[0]?.statusKind === "cascade",
+        toolRows.length === 1 &&
+          toolRows[0]?.id === dependent &&
+          toolRows[0]?.statusKind === "cascade",
         `get-tasks statusKind=cascade returned ${JSON.stringify(toolRows)}`,
       );
       const details = await expectToolOk(conn, "get-task-details", { taskId: errored });

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { cancelTask, registerAgent } from "./knowledge-helpers";
@@ -144,7 +145,7 @@ export const knowledgeAssets: Scenario = {
         `a move normalizes the key to its directory form: ${JSON.stringify(moved)}`,
       );
       expect(
-        ctx.db.get<{ key: string }>('SELECT "key" AS key FROM pages WHERE id = ?', [pageId])
+        ctx.db.get<{ key: string }>(sql`SELECT "key" AS key FROM pages WHERE id = ${pageId}`)
           ?.key === `${base}/moved-pages/`,
         "pages.key was not updated",
       );
@@ -156,7 +157,7 @@ export const knowledgeAssets: Scenario = {
       moved = asRecord(response.json);
       expect(moved.entityType === "app" && moved.key === `${base}/apps/`, "app move");
       expect(
-        ctx.db.get<{ key: string }>('SELECT "key" AS key FROM apps WHERE id = ?', [appId])?.key ===
+        ctx.db.get<{ key: string }>(sql`SELECT "key" AS key FROM apps WHERE id = ${appId}`)?.key ===
           `${base}/apps/`,
         "apps.key was not updated",
       );
@@ -172,7 +173,7 @@ export const knowledgeAssets: Scenario = {
       expectStatus(response, [200], "move a script namespace");
       expect(asRecord(response.json).entityType === "script", "script move");
       expect(
-        ctx.db.get<{ key: string }>('SELECT "key" AS key FROM scripts WHERE id = ?', [scriptId])
+        ctx.db.get<{ key: string }>(sql`SELECT "key" AS key FROM scripts WHERE id = ${scriptId}`)
           ?.key === `${base}/scripts/`,
         "scripts.key was not updated",
       );
@@ -193,7 +194,7 @@ export const knowledgeAssets: Scenario = {
         `cascade moves the descendants: ${JSON.stringify(moved)}`,
       );
       expect(
-        ctx.db.get<{ key: string }>('SELECT "key" AS key FROM agent_tasks WHERE id = ?', [childId])
+        ctx.db.get<{ key: string }>(sql`SELECT "key" AS key FROM agent_tasks WHERE id = ${childId}`)
           ?.key === `${base}/moved-tasks/`,
         "the child task key follows the cascade",
       );
@@ -202,7 +203,7 @@ export const knowledgeAssets: Scenario = {
       });
       expectStatus(response, [200], "move a task without cascade");
       expect(
-        ctx.db.get<{ key: string }>('SELECT "key" AS key FROM agent_tasks WHERE id = ?', [childId])
+        ctx.db.get<{ key: string }>(sql`SELECT "key" AS key FROM agent_tasks WHERE id = ${childId}`)
           ?.key === `${base}/moved-tasks/`,
         "without cascade the child stays put",
       );

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -85,8 +86,7 @@ export const platformLeadTools: Scenario = {
         "the secret never reaches the tool text",
       );
       const stored = ctx.db.get<{ value: string; encrypted: number }>(
-        "SELECT value, encrypted FROM swarm_config WHERE id = ?",
-        [String(secretRow.id)],
+        sql`SELECT value, encrypted FROM swarm_config WHERE id = ${String(secretRow.id)}`,
       );
       expect(
         stored?.encrypted === 1 && stored.value !== `s3cret-${ctx.nonce}`,
@@ -157,8 +157,7 @@ export const platformLeadTools: Scenario = {
       );
       expect(
         ctx.db.get(
-          "SELECT 1 AS one FROM swarm_config WHERE key IN ('API_KEY', 'onboarding_state', 'RUNTIME_DEFAULT_DELIVERY', 'SLACK_SIGNING_SECRET') AND lastUpdatedAt >= ?",
-          [String(plain.createdAt)],
+          sql`SELECT 1 AS one FROM swarm_config WHERE key IN ('API_KEY', 'onboarding_state', 'RUNTIME_DEFAULT_DELIVERY', 'SLACK_SIGNING_SECRET') AND "lastUpdatedAt" >= ${String(plain.createdAt)}`,
         ) === null,
         "refused writes persist nothing",
       );
@@ -211,7 +210,7 @@ export const platformLeadTools: Scenario = {
         "not found",
       );
       const internal = ctx.db.get<{ id: string }>(
-        "SELECT id FROM swarm_config WHERE key = 'onboarding_state'",
+        sql`SELECT id FROM swarm_config WHERE key = 'onboarding_state'`,
       );
       if (internal) {
         expectToolError(
@@ -220,7 +219,7 @@ export const platformLeadTools: Scenario = {
           "managed by",
         );
         expect(
-          ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE id = ?", [internal.id]) !== null,
+          ctx.db.get(sql`SELECT 1 AS one FROM swarm_config WHERE id = ${internal.id}`) !== null,
           "the internal row survives",
         );
       }
@@ -233,7 +232,7 @@ export const platformLeadTools: Scenario = {
         "delete-config names the key",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE id = ?", [String(plain.id)]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM swarm_config WHERE id = ${String(plain.id)}`) === null,
         "the row is gone",
       );
       expectToolError(
@@ -302,10 +301,9 @@ export const platformLeadTools: Scenario = {
         "lead installs for another agent",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?", [
-          workerId,
-          swarmId,
-        ]) !== null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "agentId" = ${workerId} AND "mcpServerId" = ${swarmId}`,
+        ) !== null,
         "the cross-agent install is persisted",
       );
       expectToolOk(
@@ -313,10 +311,9 @@ export const platformLeadTools: Scenario = {
         "lead uninstalls for another agent",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?", [
-          workerId,
-          swarmId,
-        ]) === null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "agentId" = ${workerId} AND "mcpServerId" = ${swarmId}`,
+        ) === null,
         "the cross-agent uninstall is persisted",
       );
       const leadUpdate = expectToolOk(
@@ -335,7 +332,7 @@ export const platformLeadTools: Scenario = {
         "lead deletes a server it does not own",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM mcp_servers WHERE id = ?", [workerServerId]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM mcp_servers WHERE id = ${workerServerId}`) === null,
         "the lead's delete lands",
       );
 
@@ -366,8 +363,7 @@ export const platformLeadTools: Scenario = {
       await trackConfig("KAPSO_WEBHOOK_HMAC_SECRET", hmacSecret, true);
       const mapping = () =>
         ctx.db.get<{ value: string }>(
-          "SELECT value FROM kv_entries WHERE namespace = 'integrations:kapso:numbers' AND key = ?",
-          [phoneNumberId],
+          sql`SELECT value FROM kv_entries WHERE namespace = 'integrations:kapso:numbers' AND key = ${phoneNumberId}`,
         );
       cleanup.add("unregister the number", async () => {
         await callTool(lead, "unregister-kapso-number", { phoneNumberId });
@@ -528,8 +524,7 @@ export const platformLeadTools: Scenario = {
         source: string;
         tags: string;
       }>(
-        "SELECT agentId, taskType, priority, source, tags FROM agent_tasks WHERE taskType = 'kapso-inbound' AND task LIKE ?",
-        [`%${ctx.nonce}%`],
+        sql`SELECT "agentId", "taskType", priority, source, tags FROM agent_tasks WHERE "taskType" = 'kapso-inbound' AND task LIKE ${`%${ctx.nonce}%`}`,
       );
       expect(
         task?.agentId === workerId && task.source === "system" && task.priority === 70,
@@ -542,8 +537,7 @@ export const platformLeadTools: Scenario = {
       );
       expect(
         ctx.db.query(
-          "SELECT id FROM agent_tasks WHERE taskType = 'kapso-inbound' AND task LIKE ?",
-          [`%${ctx.nonce}%`],
+          sql`SELECT id FROM agent_tasks WHERE "taskType" = 'kapso-inbound' AND task LIKE ${`%${ctx.nonce}%`}`,
         ).length === 1,
         "the redelivery created no second task",
       );

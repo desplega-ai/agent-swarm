@@ -1,4 +1,5 @@
 import { connect } from "node:net";
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import { SkipError } from "../report";
 import type { Scenario, ScenarioContext } from "../run";
@@ -73,10 +74,10 @@ export const platformbRuntime: Scenario = {
     const connection = await ctx.connectMcp(workerId);
     try {
       const poolsBefore = Number(
-        ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runtime_pools")?.n,
+        ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM runtime_pools`)?.n,
       );
       const controllersBefore = Number(
-        ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runtime_controllers")?.n,
+        ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM runtime_controllers`)?.n,
       );
 
       const poolName = `e2e-pool-${ctx.nonce}`;
@@ -122,14 +123,15 @@ export const platformbRuntime: Scenario = {
 
       // Nothing was created or bound.
       expect(
-        Number(ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runtime_pools")?.n) ===
+        Number(ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM runtime_pools`)?.n) ===
           poolsBefore &&
-          Number(ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM runtime_controllers")?.n) ===
-            controllersBefore,
+          Number(
+            ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM runtime_controllers`)?.n,
+          ) === controllersBefore,
         "A disabled runtime-pool tool wrote a pool or a controller",
       );
       expect(
-        ctx.db.get("SELECT 1 FROM runtime_pools WHERE name = ?", [poolName]) === null,
+        ctx.db.get(sql`SELECT 1 FROM runtime_pools WHERE name = ${poolName}`) === null,
         "The refused pool exists",
       );
       const agent = await ctx.api("GET", `/api/agents/${workerId}`);

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -129,8 +130,7 @@ export const mcpSurface: Scenario = {
         `task-action to_backlog returned isError: ${contentText(moved)}`,
       );
       const backlogRow = ctx.db.get<{ status: string }>(
-        "SELECT status FROM agent_tasks WHERE id = ?",
-        [backlogTaskId],
+        sql`SELECT status FROM agent_tasks WHERE id = ${backlogTaskId}`,
       );
       expect(backlogRow?.status === "backlog", `backlog task has status ${backlogRow?.status}`);
     } finally {

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -19,8 +20,7 @@ async function waitForEmbedding(ctx: ScenarioContext, memoryId: string): Promise
   const embedded = await pollUntil(
     () =>
       ctx.db.get<{ n: number }>(
-        "SELECT count(*) AS n FROM agent_memory WHERE id = ? AND embeddingModel IS NOT NULL",
-        [memoryId],
+        sql`SELECT count(*) AS n FROM agent_memory WHERE id = ${memoryId} AND "embeddingModel" IS NOT NULL`,
       )?.n === 1,
     15_000,
     200,
@@ -74,9 +74,9 @@ export const knowledgeMemory: Scenario = {
         name: string;
         tags: string;
         key: string | null;
-      }>("SELECT agentId, scope, source, name, tags, key FROM agent_memory WHERE id = ?", [
-        privateId,
-      ]);
+      }>(
+        sql`SELECT "agentId", scope, source, name, tags, key FROM agent_memory WHERE id = ${privateId}`,
+      );
       expect(
         privateRow?.agentId === agentA && privateRow.scope === "agent",
         "memory row owner/scope",
@@ -90,8 +90,7 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM agent_memory_version WHERE memory_id = ? AND operation = 'create'",
-          [privateId],
+          sql`SELECT count(*) AS n FROM agent_memory_version WHERE memory_id = ${privateId} AND operation = 'create'`,
         ) === 1,
         "memory create wrote no version row",
       );
@@ -121,14 +120,13 @@ export const knowledgeMemory: Scenario = {
       );
       const keyedId = String((keyed.data.memoryIds as unknown[])[0]);
       expect(
-        ctx.db.get<{ key: string }>("SELECT key FROM agent_memory WHERE id = ?", [keyedId])?.key ===
-          keyOne,
+        ctx.db.get<{ key: string }>(sql`SELECT key FROM agent_memory WHERE id = ${keyedId}`)
+          ?.key === keyOne,
         "keyed memory did not persist its key",
       );
       expect(
         ctx.db.get<{ expiresAt: string | null }>(
-          "SELECT expiresAt FROM agent_memory WHERE id = ?",
-          [keyedId],
+          sql`SELECT "expiresAt" FROM agent_memory WHERE id = ${keyedId}`,
         )?.expiresAt === null,
         "a /longterm key must clear the expiry",
       );
@@ -419,8 +417,7 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM memory_retrieval WHERE taskId = ? AND memoryId = ? AND eventType = 'search'",
-          [taskId, privateId],
+          sql`SELECT count(*) AS n FROM memory_retrieval WHERE "taskId" = ${taskId} AND "memoryId" = ${privateId} AND "eventType" = 'search'`,
         ) === 1,
         "memory-search inside a task did not record a retrieval row",
       );
@@ -436,15 +433,14 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM memory_retrieval WHERE taskId = ? AND memoryId = ? AND intent = ?",
-          [taskId, swarmId, "e2e: HTTP retrieval bridge"],
+          sql`SELECT count(*) AS n FROM memory_retrieval WHERE "taskId" = ${taskId} AND "memoryId" = ${swarmId} AND intent = ${"e2e: HTTP retrieval bridge"}`,
         ) === 1,
         "HTTP search with intent + X-Source-Task-ID did not record a retrieval row",
       );
       expect(
-        (ctx.db.get<{ accessCount: number }>("SELECT accessCount FROM agent_memory WHERE id = ?", [
-          swarmId,
-        ])?.accessCount ?? 0) >= 1,
+        (ctx.db.get<{ accessCount: number }>(
+          sql`SELECT "accessCount" FROM agent_memory WHERE id = ${swarmId}`,
+        )?.accessCount ?? 0) >= 1,
         "search with an intent must count as an access",
       );
 
@@ -474,8 +470,7 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM memory_retrieval WHERE taskId = ? AND memoryId = ? AND eventType = 'get'",
-          [taskId, swarmId],
+          sql`SELECT count(*) AS n FROM memory_retrieval WHERE "taskId" = ${taskId} AND "memoryId" = ${swarmId} AND "eventType" = 'get'`,
         ) === 1,
         "GET with intent + X-Source-Task-ID did not record a 'get' retrieval",
       );
@@ -511,9 +506,10 @@ export const knowledgeMemory: Scenario = {
         "swarm memory shows no backlink from the linker",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM memory_link WHERE from_memory_id = ?", [
-          linkerId,
-        ]) >= 2,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM memory_link WHERE from_memory_id = ${linkerId}`,
+        ) >= 2,
         "memory_link rows were not persisted",
       );
 
@@ -568,8 +564,7 @@ export const knowledgeMemory: Scenario = {
       );
       const neverRetrievedId = String((neverRetrieved.data.memoryIds as unknown[])[0]);
       const alphaBefore = ctx.db.get<{ alpha: number }>(
-        "SELECT alpha FROM agent_memory WHERE id = ?",
-        [privateId],
+        sql`SELECT alpha FROM agent_memory WHERE id = ${privateId}`,
       )?.alpha;
       response = await ctx.api("POST", "/api/memory/rate", {
         agentId: agentA,
@@ -592,8 +587,7 @@ export const knowledgeMemory: Scenario = {
         `llm rating was not applied: ${response.text}`,
       );
       const alphaAfter = ctx.db.get<{ alpha: number }>(
-        "SELECT alpha FROM agent_memory WHERE id = ?",
-        [privateId],
+        sql`SELECT alpha FROM agent_memory WHERE id = ${privateId}`,
       )?.alpha;
       expect(
         typeof alphaBefore === "number" &&
@@ -604,8 +598,7 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM memory_rating WHERE memoryId = ? AND source = 'llm'",
-          [privateId],
+          sql`SELECT count(*) AS n FROM memory_rating WHERE "memoryId" = ${privateId} AND source = 'llm'`,
         ) === 1,
         "memory_rating row for the llm event",
       );
@@ -719,8 +712,7 @@ export const knowledgeMemory: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM memory_rating WHERE memoryId = ? AND source = 'explicit-self'",
-          [swarmId],
+          sql`SELECT count(*) AS n FROM memory_rating WHERE "memoryId" = ${swarmId} AND source = 'explicit-self'`,
         ) === 1,
         "memory_rate wrote no memory_rating row",
       );
@@ -795,9 +787,10 @@ export const knowledgeMemory: Scenario = {
       );
       expect(outcome.data.changed === false && outcome.data.version === 3, "no-op edit unchanged");
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM agent_memory_version WHERE memory_id = ?", [
-          privateId,
-        ]) === 3,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM agent_memory_version WHERE memory_id = ${privateId}`,
+        ) === 3,
         "edits must write one version row each (create + 2 edits)",
       );
       expectToolError(
@@ -1135,8 +1128,7 @@ export const knowledgeMemory: Scenario = {
       const reEmbed = asRecord(response.json);
       const expectedForA = dbCount(
         ctx,
-        "SELECT count(*) AS n FROM agent_memory WHERE agentId = ?",
-        [agentA],
+        sql`SELECT count(*) AS n FROM agent_memory WHERE "agentId" = ${agentA}`,
       );
       expect(
         reEmbed.started === true && reEmbed.totalMemories === expectedForA,
@@ -1168,7 +1160,7 @@ export const knowledgeMemory: Scenario = {
         "memory-delete own agent-scope memory",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM agent_memory WHERE id = ?", [privateId]) === 0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM agent_memory WHERE id = ${privateId}`) === 0,
         "memory-delete left the row behind",
       );
       expectToolOk(
@@ -1206,10 +1198,10 @@ export const knowledgeMemory: Scenario = {
         expectStatus(response, [200], "operator cleanup delete");
       }
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM agent_memory WHERE agentId = ? AND key = ?", [
-          agentA,
-          longKey,
-        ]) === 0,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM agent_memory WHERE "agentId" = ${agentA} AND key = ${longKey}`,
+        ) === 0,
         "chunk rows of the long document remain",
       );
     } finally {

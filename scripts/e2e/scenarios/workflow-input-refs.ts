@@ -83,10 +83,7 @@ export const workflowInputRefs: Scenario = {
         definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
         input: { b: "literal" },
       });
-      const literalId = asString(
-        asRecord(literal.structured.workflow).id,
-        "literal workflow id",
-      );
+      const literalId = asString(asRecord(literal.structured.workflow).id, "literal workflow id");
       workflowIds.push(literalId);
       await callToolErr(
         connection,

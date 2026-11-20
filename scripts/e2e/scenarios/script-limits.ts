@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { expectRunOk, registerAgent, runScript, upsertScript } from "./script-helpers";
@@ -293,8 +294,7 @@ export default async function (args: { url: string }) {
 
     // timeouts leave the failed run recorded as an inline run row
     const failedRows = ctx.db.query<{ status: string }>(
-      "SELECT status FROM script_runs WHERE agentId = ? AND status = 'failed'",
-      [agentId],
+      sql`SELECT status FROM script_runs WHERE "agentId" = ${agentId} AND status = 'failed'`,
     );
     expect(failedRows.length >= 1, "timed-out endpoint runs must be recorded as failed runs");
 

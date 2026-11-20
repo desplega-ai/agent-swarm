@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { createAssignedTask, createUser, readTask, registerWorker } from "./core-helpers";
@@ -6,8 +7,7 @@ type BudgetRow = { daily_budget_usd: number };
 
 function storedBudget(ctx: ScenarioContext, scope: string, scopeId: string): BudgetRow | null {
   return ctx.db.get<BudgetRow>(
-    "SELECT daily_budget_usd FROM budgets WHERE scope = ? AND scope_id = ?",
-    [scope, scopeId],
+    sql`SELECT daily_budget_usd FROM budgets WHERE scope = ${scope} AND scope_id = ${scopeId}`,
   );
 }
 
@@ -50,8 +50,7 @@ async function crud(ctx: ScenarioContext, agentId: string) {
     "The list omits the budget",
   );
   const audit = ctx.db.query<{ eventType: string }>(
-    "SELECT eventType FROM agent_log WHERE eventType LIKE 'budget.%' AND metadata LIKE ?",
-    [`%${agentId}%`],
+    sql`SELECT "eventType" FROM agent_log WHERE "eventType" LIKE 'budget.%' AND metadata LIKE ${`%${agentId}%`}`,
   );
   expect(
     audit.some((entry) => entry.eventType === "budget.upserted"),
@@ -82,8 +81,7 @@ async function crud(ctx: ScenarioContext, agentId: string) {
   expect(storedBudget(ctx, "agent", agentId) === null, "The budget row survived the delete");
   expect(
     ctx.db.query<{ eventType: string }>(
-      "SELECT eventType FROM agent_log WHERE eventType = 'budget.deleted' AND metadata LIKE ?",
-      [`%${agentId}%`],
+      sql`SELECT "eventType" FROM agent_log WHERE "eventType" = 'budget.deleted' AND metadata LIKE ${`%${agentId}%`}`,
     ).length === 1,
     "No budget.deleted audit entry",
   );
@@ -156,8 +154,7 @@ async function refusals(ctx: ScenarioContext) {
   // One notification per task and day, however often the worker polls.
   expect(
     ctx.db.query<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM budget_refusal_notifications WHERE task_id = ?",
-      [agentTask],
+      sql`SELECT COUNT(*) AS n FROM budget_refusal_notifications WHERE task_id = ${agentTask}`,
     )[0]?.n === 1,
     "A repeated refusal wrote a second notification",
   );

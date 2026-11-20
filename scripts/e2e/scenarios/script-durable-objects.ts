@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -173,8 +174,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
       `${executor}: concurrent calls must serialize without losing additions`,
     );
     const beforeFailure = ctx.db.get<{ value: string }>(
-      "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
-      [durableNamespace, "state/a"],
+      sql`SELECT value FROM kv_entries WHERE namespace = ${durableNamespace} AND key = ${"state/a"}`,
     );
     const failed = await runScript(ctx, agentId, {
       name: runtimeName,
@@ -187,8 +187,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
     );
     expect(
       ctx.db.get<{ value: string }>(
-        "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
-        [durableNamespace, "state/a"],
+        sql`SELECT value FROM kv_entries WHERE namespace = ${durableNamespace} AND key = ${"state/a"}`,
       )?.value === beforeFailure?.value && asRecord((await call("a", "read")).result).n === 4,
       `${executor}: thrown method must preserve the stored snapshot`,
     );
@@ -202,8 +201,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
       expect(
         String(asRecord(refused.json).error).includes("not callable") &&
           ctx.db.get<{ n: number }>(
-            "SELECT count(*) AS n FROM kv_entries WHERE namespace = ? AND key IN (?, ?)",
-            [durableNamespace, `lease/${refusedId}`, `state/${refusedId}`],
+            sql`SELECT count(*) AS n FROM kv_entries WHERE namespace = ${durableNamespace} AND key IN (${`lease/${refusedId}`}, ${`state/${refusedId}`})`,
           )?.n === 0,
         `${executor}: reserved method must create no lease or state`,
       );
@@ -336,8 +334,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
     });
     expectRunOk(secretIdRun, `${executor} secret-shaped object id`);
     const secretIdRow = ctx.db.get<{ id: string }>(
-      "SELECT id FROM script_runs WHERE objectScriptId = ? AND objectId = ?",
-      [runtime.id, fakeSecret],
+      sql`SELECT id FROM script_runs WHERE "objectScriptId" = ${runtime.id} AND "objectId" = ${fakeSecret}`,
     );
     expect(secretIdRow, `${executor}: run must retain the exact object identity`);
     const history = await ctx.api("GET", `/api/script-runs/${secretIdRow.id}`, { agentId });
@@ -385,8 +382,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
     const storedMigration = asRecord(
       JSON.parse(
         ctx.db.get<{ value: string }>(
-          "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
-          [durableNamespace, "state/a"],
+          sql`SELECT value FROM kv_entries WHERE namespace = ${durableNamespace} AND key = ${"state/a"}`,
         )?.value ?? "null",
       ),
     );
@@ -398,8 +394,7 @@ export default class Counter extends DurableObject<{ n: number; secret?: string 
     );
     expect(
       ctx.db.get<{ n: number }>(
-        "SELECT count(*) AS n FROM script_runs WHERE objectScriptId = ? AND objectId = ? AND objectMethod = ? AND status = 'completed'",
-        [runtime.id, "a", "add"],
+        sql`SELECT count(*) AS n FROM script_runs WHERE "objectScriptId" = ${runtime.id} AND "objectId" = ${"a"} AND "objectMethod" = ${"add"} AND status = 'completed'`,
       )?.n === 2,
       `${executor}: run rows must record the object script, id, and method`,
     );
@@ -481,9 +476,9 @@ export const scriptDurableObjects: Scenario = {
       await callToolOk(mcp, "kv-list", { namespace });
     });
     expect(
-      ctx.db.get<{ n: number }>("SELECT count(*) AS n FROM kv_entries WHERE namespace = ?", [
-        namespace,
-      ])?.n === 0,
+      ctx.db.get<{ n: number }>(
+        sql`SELECT count(*) AS n FROM kv_entries WHERE namespace = ${namespace}`,
+      )?.n === 0,
       "refused durable writes must create no rows",
     );
 
@@ -523,8 +518,7 @@ export default class Counter extends DurableObject<{ n: number }> {
       "durable signature lost its types or descriptions",
     );
     const row = ctx.db.get<{ signatureJson: string; typeChecked: number }>(
-      "SELECT signatureJson, typeChecked FROM scripts WHERE id = ?",
-      [saved.id],
+      sql`SELECT "signatureJson", "typeChecked" FROM scripts WHERE id = ${saved.id}`,
     );
     expect(
       row?.typeChecked === 1 && JSON.parse(row.signatureJson).kind === "durable",
@@ -547,13 +541,11 @@ export default class Counter extends DurableObject<{ n: number }> {
       "inline refusal must identify the DurableObject source",
     );
     const agentScripts = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM scripts WHERE scope = 'agent' AND scopeId = ?",
-      [agentId],
+      sql`SELECT count(*) AS n FROM scripts WHERE scope = 'agent' AND "scopeId" = ${agentId}`,
     );
     expect(agentScripts?.n === 0, "refused durable source must not persist as an agent script");
     const inlineRuns = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_runs WHERE agentId = ?",
-      [agentId],
+      sql`SELECT count(*) AS n FROM script_runs WHERE "agentId" = ${agentId}`,
     );
     expect(inlineRuns?.n === 0, "refused durable source must not execute");
 

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -87,8 +88,7 @@ export const platformbRepoMergePolicy: Scenario = {
 
       // Defaults are filled and the record is stored in the guidelines JSON, no new column.
       const row = ctx.db.get<{ guidelines: string }>(
-        "SELECT guidelines FROM swarm_repos WHERE id = ?",
-        [repoId],
+        sql`SELECT guidelines FROM swarm_repos WHERE id = ${repoId}`,
       );
       const stored = asRecord(asRecord(JSON.parse(row?.guidelines ?? "{}")).mergePolicy);
       const auto = asRecord(stored.autoMerge);

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -41,7 +42,7 @@ async function events(ctx: ScenarioContext, agentId: string, taskId: string) {
     `Unexpected stored event ${response.text}`,
   );
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM events WHERE id = ?", [String(stored.id)])
+    ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE id = ${String(stored.id)}`)
       ?.n === 1,
     "events table lacks the stored event",
   );
@@ -230,8 +231,7 @@ async function maintenance(ctx: ScenarioContext) {
   expectStatus(response, [200], "advance the cursor");
   expect(
     ctx.db.get<{ lastSeenTs: string }>(
-      "SELECT lastSeenTs FROM channel_activity_cursors WHERE channelId = ?",
-      [channelId],
+      sql`SELECT "lastSeenTs" FROM channel_activity_cursors WHERE "channelId" = ${channelId}`,
     )?.lastSeenTs === "1700000000.000200",
     "The cursor was not advanced in place",
   );

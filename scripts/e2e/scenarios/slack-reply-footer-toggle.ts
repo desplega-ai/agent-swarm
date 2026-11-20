@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asString, expect, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callTool, expectToolOk } from "./platformb-helpers";
@@ -74,9 +75,9 @@ export const slackReplyFooterToggle: Scenario = {
       expect(
         await pollUntil(
           () =>
-            !!ctx.db.get("SELECT id FROM slack_messages WHERE kind = 'tree' AND thread_ts = ?", [
-              threadTs,
-            ]),
+            !!ctx.db.get(
+              sql`SELECT id FROM slack_messages WHERE kind = 'tree' AND thread_ts = ${threadTs}`,
+            ),
           15_000,
         ),
         "The thread needs a task tree to exercise the reply footer condition",

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -21,7 +22,7 @@ async function setTree(ctx: ScenarioContext, enabled: boolean): Promise<string> 
     await pollUntil(
       () =>
         ctx.db.get<{ enabled: number }>(
-          "SELECT task_tree_enabled AS enabled FROM slack_render_v2_state WHERE id = 1",
+          sql`SELECT task_tree_enabled AS enabled FROM slack_render_v2_state WHERE id = 1`,
         )?.enabled === Number(enabled),
       15_000,
     ),
@@ -50,19 +51,18 @@ export const slackTaskTreeToggle: Scenario = {
       await waitForReaction(ctx, message.ts, "white_check_mark");
       const treeCount = () =>
         ctx.db.get<{ n: number }>(
-          "SELECT count(*) AS n FROM slack_messages WHERE kind = 'tree' AND thread_ts = ?",
-          [message.ts],
+          sql`SELECT count(*) AS n FROM slack_messages WHERE kind = 'tree' AND thread_ts = ${message.ts}`,
         )?.n;
       expect(treeCount() === 0, "disabled renderer created a tree");
       await setTree(ctx, true);
       const cutoff = ctx.db.get<{ cutoff: string }>(
-        "SELECT task_tree_enabled_at AS cutoff FROM slack_render_v2_state WHERE id = 1",
+        sql`SELECT task_tree_enabled_at AS cutoff FROM slack_render_v2_state WHERE id = 1`,
       )?.cutoff;
       expect(!!cutoff, "re-enable did not persist a cutoff");
       await ctx.restartSut();
       expect(
         ctx.db.get<{ cutoff: string }>(
-          "SELECT task_tree_enabled_at AS cutoff FROM slack_render_v2_state WHERE id = 1",
+          sql`SELECT task_tree_enabled_at AS cutoff FROM slack_render_v2_state WHERE id = 1`,
         )?.cutoff === cutoff,
         "restart changed the cutoff",
       );
@@ -73,8 +73,7 @@ export const slackTaskTreeToggle: Scenario = {
         await pollUntil(
           () =>
             !!ctx.db.get(
-              "SELECT id FROM slack_messages WHERE kind = 'tree' AND thread_ts = ? AND ts NOT LIKE 'pending:%'",
-              [next.ts],
+              sql`SELECT id FROM slack_messages WHERE kind = 'tree' AND thread_ts = ${next.ts} AND ts NOT LIKE 'pending:%'`,
             ),
           30_000,
         ),

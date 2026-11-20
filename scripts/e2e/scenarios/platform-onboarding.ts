@@ -1,3 +1,4 @@
+import { sql, sqlList } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { cleanupStack, putConfig, reloadConfig } from "./platform-helpers";
@@ -102,7 +103,7 @@ export const platformOnboarding: Scenario = {
       );
       expect(
         ctx.db.get<{ value: string }>(
-          "SELECT value FROM swarm_config WHERE key = 'onboarding_state'",
+          sql`SELECT value FROM swarm_config WHERE key = 'onboarding_state'`,
         ) !== null,
         "the state is stored in swarm_config",
       );
@@ -219,8 +220,7 @@ export const platformOnboarding: Scenario = {
       const embeddingKeys = ["EMBEDDING_API_BASE_URL", "EMBEDDING_MODEL", "EMBEDDING_API_KEY"];
       const storedEmbeddingRows = () =>
         ctx.db.query<{ key: string }>(
-          "SELECT key FROM swarm_config WHERE scope = 'global' AND key IN (?, ?, ?)",
-          embeddingKeys,
+          sql`SELECT key FROM swarm_config WHERE scope = 'global' AND key IN (${sqlList(embeddingKeys)})`,
         );
       const before = storedEmbeddingRows().length;
       for (const [body, label] of [

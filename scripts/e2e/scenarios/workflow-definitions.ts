@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Workflow definitions over HTTP and MCP: create/list/get/update/patch/delete, version
 // history, executor types, trigger payload validation, and the authoring errors each
 // surface answers with. Run behaviour lives in workflow-engine-*.
@@ -194,8 +195,7 @@ export const workflowDefinitions: Scenario = {
     expect(asRecords({ t: workflow.triggers }, "t")[0]?.type === "webhook", "trigger round-trips");
     expect(workflow.warnings === undefined, "a clean workflow carries no save warnings");
     const row = ctx.db.get<{ name: string; enabled: number; createdByAgentId: string }>(
-      "SELECT name, enabled, createdByAgentId FROM workflows WHERE id = ?",
-      [id],
+      sql`SELECT name, enabled, "createdByAgentId" FROM workflows WHERE id = ${id}`,
     );
     expect(row?.name === workflow.name && row.enabled === 1, "workflow row persisted");
 
@@ -510,8 +510,7 @@ export const workflowDefinitions: Scenario = {
     const doomedRun = await triggerWorkflow(ctx, doomed, {}, { agentId: workerId });
     await waitForRun(ctx, doomedRun.runId, "completed");
     const runsBefore = ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?",
-      [doomed],
+      sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${doomed}`,
     );
     expect(runsBefore?.n === 1, "the doomed workflow has one run");
     const deleted = await ctx.api("DELETE", `/api/workflows/${doomed}`);
@@ -520,12 +519,10 @@ export const workflowDefinitions: Scenario = {
     expectStatus(await ctx.api("GET", `/api/workflows/${doomed}`), [404], "get after delete");
     expectStatus(await ctx.api("DELETE", `/api/workflows/${doomed}`), [404], "delete twice");
     const left = ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?",
-      [doomed],
+      sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${doomed}`,
     );
     const leftSteps = ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM workflow_run_steps WHERE runId = ?",
-      [doomedRun.runId],
+      sql`SELECT COUNT(*) AS n FROM workflow_run_steps WHERE "runId" = ${doomedRun.runId}`,
     );
     expect(left?.n === 0 && leftSteps?.n === 0, "delete removes the runs and their steps");
     expectStatus(
@@ -568,7 +565,7 @@ export const workflowDefinitions: Scenario = {
         "create-workflow reports the workflow",
       );
       expect(
-        ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM workflows WHERE id = ?", [mcpId])
+        ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workflows WHERE id = ${mcpId}`)
           ?.n === 1,
         "create-workflow persisted the row",
       );
@@ -683,8 +680,7 @@ export const workflowDefinitions: Scenario = {
       );
 
       const mcpVersions = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM workflow_versions WHERE workflowId = ?",
-        [mcpId],
+        sql`SELECT COUNT(*) AS n FROM workflow_versions WHERE "workflowId" = ${mcpId}`,
       );
       expect(mcpVersions?.n === 3, `three tool edits wrote three versions, got ${mcpVersions?.n}`);
 

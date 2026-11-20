@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -39,7 +40,7 @@ export const slackChatSdkInteractivity: Scenario = {
       });
       await slack.flush();
       const logBefore = (await ctx.sutLog()).length;
-      const tasksBefore = ctx.db.query<{ id: string }>("SELECT id FROM agent_tasks").length;
+      const tasksBefore = ctx.db.query<{ id: string }>(sql`SELECT id FROM agent_tasks`).length;
 
       const ack = await slack.clickButton({
         channel: "general",
@@ -57,7 +58,7 @@ export const slackChatSdkInteractivity: Scenario = {
       // Give a (wrong) async handler time to create a task or fail before asserting absence.
       await Bun.sleep(1_000);
       expect(
-        ctx.db.query<{ id: string }>("SELECT id FROM agent_tasks").length === tasksBefore,
+        ctx.db.query<{ id: string }>(sql`SELECT id FROM agent_tasks`).length === tasksBefore,
         "A Chat SDK block_actions delivery created or cancelled a task",
       );
       const added = (await ctx.sutLog()).slice(logBefore);

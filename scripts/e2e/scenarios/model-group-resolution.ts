@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { Cleanup, retireAgent } from "./platformb-helpers";
@@ -124,8 +125,7 @@ export const modelGroupResolution: Scenario = {
         `Group task resolved to ${String(task.resolvedProfile)} (${String(task.modelSource)})`,
       );
       const log = ctx.db.get<{ metadata: string }>(
-        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_model_group_resolved'",
-        [pinnedId],
+        sql`SELECT metadata FROM agent_log WHERE "taskId" = ${pinnedId} AND "eventType" = 'task_model_group_resolved'`,
       );
       const meta = JSON.parse(log?.metadata ?? "{}") as {
         member?: string;

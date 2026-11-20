@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { expect, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -38,8 +39,7 @@ type DelegatedAsk = {
 
 function outcomeRow(ctx: ScenarioContext, taskId: string): CardRow | null {
   return ctx.db.get<CardRow>(
-    "SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-    [taskId],
+    sql`SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
   );
 }
 

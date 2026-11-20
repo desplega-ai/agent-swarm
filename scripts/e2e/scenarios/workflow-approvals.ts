@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Approval requests: the REST contract (create, read, list, answer, cancel), who may
 // answer and how many answers a policy needs, the late-answer timeout, the MCP tools
 // agents use to ask a person, and approval cards raised by workflow nodes.
@@ -192,8 +193,7 @@ export const workflowApprovals: Scenario = {
       );
       expect(asRecords(created, "questions").length === 5, "all questions are stored");
       const stored = ctx.db.get<{ status: string; title: string }>(
-        "SELECT status, title FROM approval_requests WHERE id = ?",
-        [id],
+        sql`SELECT status, title FROM approval_requests WHERE id = ${id}`,
       );
       expect(stored?.status === "pending" && stored.title === `Ship ${marker}`, "row persisted");
 
@@ -582,8 +582,7 @@ export const workflowApprovals: Scenario = {
       const working = await pollUntil(
         async () => {
           const row = ctx.db.get<{ status: string }>(
-            "SELECT status FROM agent_tasks WHERE id = ?",
-            [taskId],
+            sql`SELECT status FROM agent_tasks WHERE id = ${taskId}`,
           );
           return row?.status === "in_progress";
         },
@@ -705,16 +704,14 @@ export const workflowApprovals: Scenario = {
       const followUp = await pollUntil(
         () =>
           ctx.db.query<{ id: string }>(
-            "SELECT id FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'hitl-follow-up'",
-            [taskId],
+            sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${taskId} AND "taskType" = 'hitl-follow-up'`,
           ).length === 1,
         15_000,
         200,
       );
       expect(followUp, "the answer created one hitl-follow-up task under the source task");
       const followUpTask = ctx.db.get<{ id: string; agentId: string }>(
-        "SELECT id, agentId FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'hitl-follow-up'",
-        [taskId],
+        sql`SELECT id, "agentId" FROM agent_tasks WHERE "parentTaskId" = ${taskId} AND "taskType" = 'hitl-follow-up'`,
       );
       expect(followUpTask?.agentId === workerId, "the follow-up goes to the agent that asked");
       settleTasks = true;

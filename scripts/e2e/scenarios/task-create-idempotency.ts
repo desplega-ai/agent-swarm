@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // POST /api/tasks with an Idempotency-Key: a retried key returns the task it first created,
 // never a second one (the Sessions composer's Retry on a failed follow-up).
 import { asRecord, asString, expect, expectStatus } from "../http";
@@ -11,7 +12,7 @@ export const taskCreateIdempotency: Scenario = {
     const key = `task-idem-${ctx.nonce}`;
     const body = { task: `Idempotent follow-up ${ctx.nonce}`, source: "ui" };
     const countTasks = (task: string) =>
-      ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks WHERE task = ?", [task])?.n;
+      ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM agent_tasks WHERE task = ${task}`)?.n;
 
     const first = await ctx.api("POST", "/api/tasks", {
       headers: { "Idempotency-Key": key },
@@ -45,7 +46,10 @@ export const taskCreateIdempotency: Scenario = {
     const freshBody = { task: `Idempotent race ${ctx.nonce}`, source: "ui" };
     const freshRace = await Promise.all(
       [0, 1, 2].map(() =>
-        ctx.api("POST", "/api/tasks", { headers: { "Idempotency-Key": freshKey }, body: freshBody }),
+        ctx.api("POST", "/api/tasks", {
+          headers: { "Idempotency-Key": freshKey },
+          body: freshBody,
+        }),
       ),
     );
     const freshIds = new Set(

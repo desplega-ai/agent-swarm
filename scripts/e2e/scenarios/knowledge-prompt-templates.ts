@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -153,15 +154,13 @@ export const knowledgePromptTemplates: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM prompt_template_history WHERE templateId = ? AND changeReason = ?",
-          [overrideId, "e2e: first override"],
+          sql`SELECT count(*) AS n FROM prompt_template_history WHERE "templateId" = ${overrideId} AND "changeReason" = ${"e2e: first override"}`,
         ) === 1,
         "history row for the first override",
       );
       expect(
         ctx.db.get<{ changedBy: string | null }>(
-          "SELECT changedBy FROM prompt_template_history WHERE templateId = ? AND version = 1",
-          [overrideId],
+          sql`SELECT "changedBy" FROM prompt_template_history WHERE "templateId" = ${overrideId} AND version = 1`,
         )?.changedBy === "e2e-operator",
         "history records changedBy",
       );
@@ -252,8 +251,7 @@ export const knowledgePromptTemplates: Scenario = {
       expect(
         dbCount(
           ctx,
-          "SELECT count(*) AS n FROM prompt_template_history WHERE templateId = ? AND changeReason = ?",
-          [overrideId, "Checked out from version 1"],
+          sql`SELECT count(*) AS n FROM prompt_template_history WHERE "templateId" = ${overrideId} AND "changeReason" = ${"Checked out from version 1"}`,
         ) === 1,
         "checkout writes a history row",
       );
@@ -412,8 +410,7 @@ export const knowledgePromptTemplates: Scenario = {
       expect(toolTemplate.version === 1 && toolTemplate.scope === "agent", "tool template fields");
       expect(
         ctx.db.get<{ changedBy: string | null }>(
-          "SELECT changedBy FROM prompt_template_history WHERE templateId = ? AND version = 1",
-          [toolTemplateId],
+          sql`SELECT "changedBy" FROM prompt_template_history WHERE "templateId" = ${toolTemplateId} AND version = 1`,
         )?.changedBy === agent,
         "the tool records the calling agent as changedBy",
       );
@@ -507,9 +504,10 @@ export const knowledgePromptTemplates: Scenario = {
       );
       cleanup.splice(cleanup.indexOf(toolTemplateId), 1);
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM prompt_templates WHERE id = ?", [
-          toolTemplateId,
-        ]) === 0,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM prompt_templates WHERE id = ${toolTemplateId}`,
+        ) === 0,
         "delete-prompt-template left the row behind",
       );
 

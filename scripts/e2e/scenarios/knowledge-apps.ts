@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -162,7 +163,7 @@ export const knowledgeApps: Scenario = {
         "the stored definition keeps the models and gains a server-managed schemaVersion",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM apps WHERE id = ?", [appId]) === 1,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM apps WHERE id = ${appId}`) === 1,
         "app row was not persisted",
       );
 
@@ -424,8 +425,7 @@ export const knowledgeApps: Scenario = {
       cleanupTasks.push(childTaskId);
       expect(
         ctx.db.get<{ parentTaskId: string | null }>(
-          "SELECT parentTaskId FROM agent_tasks WHERE id = ?",
-          [childTaskId],
+          sql`SELECT "parentTaskId" FROM agent_tasks WHERE id = ${childTaskId}`,
         )?.parentTaskId === parentTask,
         "parentTaskId chains the action task",
       );
@@ -1112,10 +1112,11 @@ export const knowledgeApps: Scenario = {
       expect(asRecord(response.json).ok === true, "delete app body");
       cleanupApps.splice(cleanupApps.indexOf(appId), 1);
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM apps WHERE id = ?", [appId]) === 0 &&
-          dbCount(ctx, "SELECT count(*) AS n FROM kv_entries WHERE namespace = ?", [
-            `apps:${appId}`,
-          ]) === 0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM apps WHERE id = ${appId}`) === 0 &&
+          dbCount(
+            ctx,
+            sql`SELECT count(*) AS n FROM kv_entries WHERE namespace = ${`apps:${appId}`}`,
+          ) === 0,
         "deleting an app purges its rows",
       );
       response = await ctx.api("GET", `/api/apps/${appId}`);

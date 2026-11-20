@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -21,7 +22,7 @@ function as(userId: string): Actor {
 }
 
 function taskKey(ctx: ScenarioContext, taskId: string): string {
-  const row = ctx.db.get<{ key: string }>("SELECT key FROM agent_tasks WHERE id = ?", [taskId]);
+  const row = ctx.db.get<{ key: string }>(sql`SELECT key FROM agent_tasks WHERE id = ${taskId}`);
   expect(row !== null, `No agent_tasks row for ${taskId}`);
   return row.key;
 }
@@ -184,8 +185,7 @@ async function ownershipAndSharing(
     "a writer can steer",
   );
   const activeShares = ctx.db.query<{ access: string }>(
-    "SELECT access FROM session_shares WHERE rootTaskId = ? AND revokedAt IS NULL",
-    [rootId],
+    sql`SELECT access FROM session_shares WHERE "rootTaskId" = ${rootId} AND "revokedAt" IS NULL`,
   );
   expect(activeShares.length >= 1, "No active share rows in session_shares");
 
@@ -511,8 +511,7 @@ export const coreSessions: Scenario = {
     await sourceGroupList(ctx, workerId, owner);
     for (const id of [childId, rootId]) await cancelQuietly(ctx, id);
     const writerSteers = ctx.db.query<{ id: string }>(
-      "SELECT id FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
-      [rootId],
+      sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${rootId} AND "taskType" = 'follow-up'`,
     );
     for (const row of writerSteers) await cancelQuietly(ctx, row.id);
   },

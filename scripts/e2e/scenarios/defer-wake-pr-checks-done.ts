@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { expect, expectStatus, pollUntil } from "../http";
 import type { GithubCheckRun } from "../mocks/llm";
 import type { Scenario, ScenarioContext } from "../run";
@@ -24,15 +25,13 @@ const REQUIRED = ["Merge Gate", "lint"];
 
 function waitRow(ctx: ScenarioContext, scheduleId: string) {
   return ctx.db.get<{ status: string; firedBy: string | null }>(
-    "SELECT status, firedBy FROM deferred_event_waits WHERE scheduleId = ?",
-    [scheduleId],
+    sql`SELECT status, "firedBy" FROM deferred_event_waits WHERE "scheduleId" = ${scheduleId}`,
   );
 }
 
 function wakeTasks(ctx: ScenarioContext, parentTaskId: string) {
   return ctx.db.query<{ id: string; task: string }>(
-    "SELECT id, task FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'deferred'",
-    [parentTaskId],
+    sql`SELECT id, task FROM agent_tasks WHERE "parentTaskId" = ${parentTaskId} AND "taskType" = 'deferred'`,
   );
 }
 

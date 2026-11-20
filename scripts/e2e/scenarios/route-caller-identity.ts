@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // An agent-bound token (aseph_) acts only as its own agent on three routes that take an
 // agent identity from the request: a script endpoint's run-as agent, a manual schedule run,
 // and the owner of indexed memory. The lead's token keeps cross-agent access. The shared
@@ -133,8 +134,7 @@ export default async function (_args: z.infer<typeof argsSchema>, _ctx: any) {
       });
       const memoryRows = (agentId: string) =>
         ctx.db.get<{ n: number }>(
-          "SELECT COUNT(*) AS n FROM agent_memory WHERE agentId = ? AND name LIKE ?",
-          [agentId, "Identity note %"],
+          sql`SELECT COUNT(*) AS n FROM agent_memory WHERE "agentId" = ${agentId} AND name LIKE ${"Identity note %"}`,
         )?.n ?? 0;
 
       const crossIndex = await ctx.api("POST", "/api/memory/index", {

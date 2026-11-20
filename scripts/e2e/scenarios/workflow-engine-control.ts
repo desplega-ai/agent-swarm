@@ -3,6 +3,7 @@
 // and the run tools. Slow runs start first so their waits overlap.
 import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -395,8 +396,7 @@ export const workflowEngineControl: Scenario = {
         "same key, different create body",
       );
       const idemCount = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM workflows WHERE name = ?",
-        [createBody.name],
+        sql`SELECT COUNT(*) AS n FROM workflows WHERE name = ${createBody.name}`,
       );
       expect(idemCount?.n === 1, "one workflow exists for the keyed create");
 
@@ -435,8 +435,7 @@ export const workflowEngineControl: Scenario = {
         "malformed key error",
       );
       const keyedRuns = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?",
-        [idemId],
+        sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${idemId}`,
       );
       expect(keyedRuns?.n === 1, "the keyed trigger started exactly one run");
       await waitForRun(ctx, keyedRunId, "completed", 20_000, "keyed run");
@@ -720,8 +719,7 @@ export const workflowEngineControl: Scenario = {
         "agent-task retry",
       );
       const retryTasks = ctx.db.query<{ status: string }>(
-        "SELECT status FROM agent_tasks WHERE workflowRunId = ? ORDER BY createdAt",
-        [agentRetryRun.runId],
+        sql`SELECT status FROM agent_tasks WHERE "workflowRunId" = ${agentRetryRun.runId} ORDER BY "createdAt"`,
       );
       expect(
         retryTasks.map((task) => task.status).join(",") === "failed,completed" &&

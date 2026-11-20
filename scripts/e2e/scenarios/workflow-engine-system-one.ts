@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // SystemOne in the workflow engine: the save warning and the run-start gate when a
 // provider is not configured, the `system-one-decide` tool, a decision with a human
 // review band (approved with an override, rejected, out of band), and the
@@ -520,7 +521,12 @@ export const workflowEngineSystemOne: Scenario = {
         out?: Record<string, unknown>;
         error?: string;
       }> = [
-        { label: "null value, null span", field: textField, answer: nullAnswer, out: { value: null } },
+        {
+          label: "null value, null span",
+          field: textField,
+          answer: nullAnswer,
+          out: { value: null },
+        },
         {
           label: "null value, no span",
           field: textField,
@@ -630,8 +636,7 @@ export const workflowEngineSystemOne: Scenario = {
         `extraction step fails on its unresolved token: ${String(extractStep.error)}`,
       );
       const stepRow = ctx.db.get<{ nodeType: string }>(
-        "SELECT nodeType FROM workflow_run_steps WHERE runId = ? AND nodeId = 'extract'",
-        [extractRun.runId],
+        sql`SELECT "nodeType" FROM workflow_run_steps WHERE "runId" = ${extractRun.runId} AND "nodeId" = 'extract'`,
       );
       expect(stepRow?.nodeType === "system-one-extraction", "the step row has the extraction type");
       expect(

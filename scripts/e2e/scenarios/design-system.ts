@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -161,7 +162,10 @@ export const designSystem: Scenario = {
       const active = await stateOf(ctx);
       expect(active.status === "active", "GET reports active");
       expect(asRecord(active.previous).status === "declined", "previous holds the replaced value");
-      const viaTool = expectToolOk(await callTool(session, "design-system-get", {}), "design-system-get");
+      const viaTool = expectToolOk(
+        await callTool(session, "design-system-get", {}),
+        "design-system-get",
+      );
       expect(viaTool.data.status === "active", "design-system-get reports active");
 
       // ── A page without theme takes the org tokens, fonts and light lock ─────────────────
@@ -186,14 +190,21 @@ export const designSystem: Scenario = {
       });
       expectRunOk(run, "design-system-seed");
       const seeded = asRecord(run.result);
-      expect(seeded.saved === false, `seed does not save by default: ${JSON.stringify(seeded).slice(0, 300)}`);
+      expect(
+        seeded.saved === false,
+        `seed does not save by default: ${JSON.stringify(seeded).slice(0, 300)}`,
+      );
       const previewApiUrl = asString(seeded.previewApiUrl, "preview api url");
-      const preview = ctx.db.get<{ theme: string | null; theme_tokens: string | null; authMode: string }>(
-        "SELECT theme, theme_tokens, authMode FROM pages WHERE id = ?",
-        [previewApiUrl.slice(previewApiUrl.lastIndexOf("/") + 1)],
+      const preview = ctx.db.get<{
+        theme: string | null;
+        theme_tokens: string | null;
+        authMode: string;
+      }>(
+        sql`SELECT theme, theme_tokens, "authMode" FROM pages WHERE id = ${previewApiUrl.slice(previewApiUrl.lastIndexOf("/") + 1)}`,
       );
       expect(
-        preview?.theme === "hive" && String(preview.theme_tokens).includes('"--radius-xl":"0.75rem"'),
+        preview?.theme === "hive" &&
+          String(preview.theme_tokens).includes('"--radius-xl":"0.75rem"'),
         `the preview page carries the seeded tokens: ${JSON.stringify(preview)}`,
       );
       expect(preview?.authMode === "authed", "the preview page is not public");

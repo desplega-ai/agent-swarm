@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -124,16 +125,14 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
       "create with an unknown auth mode",
     );
     const dbEndpoint = ctx.db.get<{ authMode: string; enabled: number; hasToken: number }>(
-      "SELECT authMode, enabled, bearerTokenEncrypted IS NOT NULL AS hasToken FROM script_apis WHERE id = ?",
-      [endpointId],
+      sql`SELECT "authMode", enabled, "bearerTokenEncrypted" IS NOT NULL AS "hasToken" FROM script_apis WHERE id = ${endpointId}`,
     );
     expect(
       dbEndpoint?.authMode === "bearer" && dbEndpoint.enabled === 1 && dbEndpoint.hasToken === 1,
       "the endpoint row must hold an encrypted token",
     );
     const plaintextInDb = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_apis WHERE bearerTokenEncrypted = ?",
-      [token],
+      sql`SELECT count(*) AS n FROM script_apis WHERE "bearerTokenEncrypted" = ${token}`,
     );
     expect(plaintextInDb?.n === 0, "the bearer token must not be stored in plaintext");
 
@@ -240,8 +239,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
       `callCount and lastUsedAt must track runs: ${JSON.stringify(usedPrimary)}`,
     );
     const endpointRuns = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_runs WHERE apiEndpointId = ?",
-      [endpointId],
+      sql`SELECT count(*) AS n FROM script_runs WHERE "apiEndpointId" = ${endpointId}`,
     );
     expect(Number(endpointRuns?.n) >= 2, "endpoint calls must be recorded as runs");
 
@@ -469,8 +467,7 @@ export default async function (args: z.infer<typeof argsSchema>) { return args.n
     });
     expect(asRecord(removedScript.json).deleted === true, "delete the script");
     const orphans = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_apis WHERE scriptId = ?",
-      [scriptId],
+      sql`SELECT count(*) AS n FROM script_apis WHERE "scriptId" = ${scriptId}`,
     );
     expect(orphans?.n === 0, "deleting a script must delete its endpoints");
     expectNotFound(

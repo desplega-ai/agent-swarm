@@ -22,7 +22,9 @@ export const knowledgeAppsLargeModel: Scenario = {
         name: `E2E large model ${ctx.nonce}`,
         description: "list scan windows",
         definition: {
-          models: { item: { columns: { n: { kind: "number" }, bucket: { kind: "string", index: true } } } },
+          models: {
+            item: { columns: { n: { kind: "number" }, bucket: { kind: "string", index: true } } },
+          },
           queries: {},
           actions: {},
           pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
@@ -77,7 +79,9 @@ export const knowledgeAppsLargeModel: Scenario = {
       const longA = `${"x".repeat(130)}a`;
       const longB = `${"x".repeat(130)}b`;
       const bulk = await ctx.api("POST", `${rowsPath}/bulk`, {
-        body: { rows: [{ values: { n: -1, bucket: longA } }, { values: { n: -2, bucket: longB } }] },
+        body: {
+          rows: [{ values: { n: -1, bucket: longA } }, { values: { n: -2, bucket: longB } }],
+        },
       });
       expectStatus(bulk, [200], "create long-value rows");
       response = await ctx.api("GET", `${rowsPath}?filter.bucket=${longA}&limit=10`);
@@ -90,7 +94,9 @@ export const knowledgeAppsLargeModel: Scenario = {
 
       // A patch moves the row to its new bucket; a delete drops it.
       const [movedId] = await idsOf(`filter.bucket=${longA}`);
-      response = await ctx.api("PATCH", `${rowsPath}/${movedId}`, { body: { values: { bucket: "moved" } } });
+      response = await ctx.api("PATCH", `${rowsPath}/${movedId}`, {
+        body: { values: { bucket: "moved" } },
+      });
       expectStatus(response, [200], "patch the indexed column");
       expect((await idsOf(`filter.bucket=${longA}`)).length === 0, "old bucket loses the row");
       expect((await idsOf("filter.bucket=moved")).join() === movedId, "new bucket has the row");

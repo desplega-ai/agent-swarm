@@ -86,10 +86,7 @@ export const workflowPredicateSandbox: Scenario = {
     const loop = await triggerWorkflow(ctx, loopId);
     const failed = await waitForRun(ctx, loop.runId, "failed", 10_000, "code-match busy loop");
     const spinError = String(stepOf(failed, "spin").error ?? "");
-    expect(
-      spinError.startsWith("code-match execution error: "),
-      `busy loop error: ${spinError}`,
-    );
+    expect(spinError.startsWith("code-match execution error: "), `busy loop error: ${spinError}`);
 
     const loopEvent = `e2e.predicate.loop.${ctx.nonce}`;
     const spinWaitId = await createWorkflow(ctx, "predicate-sandbox-filter-loop", {

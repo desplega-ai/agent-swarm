@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { Cleanup, registerLead, registerWorker, retireAgent } from "./platformb-helpers";
@@ -141,9 +142,8 @@ export const platformbModelGroups: Scenario = {
       });
       expectStatus(response, [200], "reorder group members");
       const rows = ctx.db.query<{ position: number; profileName: string }>(
-        `SELECT m.position, m.profileName FROM model_group_members m
-           JOIN model_groups g ON g.id = m.groupId WHERE g.name = ? ORDER BY m.position`,
-        [groupName],
+        sql`SELECT m.position, m."profileName" FROM model_group_members m
+           JOIN model_groups g ON g.id = m."groupId" WHERE g.name = ${groupName} ORDER BY m.position`,
       );
       expect(
         JSON.stringify(rows.map((r) => [r.position, r.profileName])) ===

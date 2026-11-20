@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -30,10 +31,9 @@ type SteerRow = {
 
 function steerRow(ctx: ScenarioContext, id: string): SteerRow {
   const row = ctx.db.get<SteerRow>(
-    `SELECT status, delivered_mode, handled_note, promoted_task_id, created_by_kind,
+    sql`SELECT status, delivered_mode, handled_note, promoted_task_id, created_by_kind,
             created_by_user_id, source, mode
-     FROM task_steering_messages WHERE id = ?`,
-    [id],
+     FROM task_steering_messages WHERE id = ${id}`,
   );
   expect(row !== null, `No task_steering_messages row for ${id}`);
   return row;

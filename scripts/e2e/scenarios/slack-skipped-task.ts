@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -103,8 +104,7 @@ async function skipOneAsk(
   }
 
   const row = ctx.db.get<{ status: string; failureReason: string | null; output: string | null }>(
-    "SELECT status, failureReason, output FROM agent_tasks WHERE id = ?",
-    [taskId],
+    sql`SELECT status, "failureReason", output FROM agent_tasks WHERE id = ${taskId}`,
   );
   expect(row?.status === "skipped", `${label} task ${taskId} is ${row?.status}, not skipped`);
   expect(

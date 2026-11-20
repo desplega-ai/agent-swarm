@@ -1,15 +1,89 @@
-// The only file in scripts/e2e allowed to touch bun:sqlite. Seed data goes
+// The only file in scripts/e2e allowed to open a database handle. Seed data goes
 // through the public API; this handle is for assertions only, so the
 // connection is read-only and every write throws.
+//
+// Scenarios write SQL with the `sql` tag, so one text runs on both engines: the tag
+// renders `?` placeholders for SQLite and `$n` for Postgres. Identifiers with an
+// uppercase letter are double-quoted in the scenario text (decision D8 of the
+// Postgres brief), which both engines accept.
 import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { resolve } from "node:path";
+
+export type Engine = "sqlite" | "postgres";
+
+const LIST = Symbol("sqlList");
+const IDENT = Symbol("sqlIdent");
+type SqlList = { [LIST]: readonly unknown[] };
+type SqlIdent = { [IDENT]: string };
+
+/** A table or column name chosen by the scenario (never by input): rendered double-quoted. */
+export function sqlIdent(name: string): SqlIdent {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Not a plain identifier: ${name}`);
+  return { [IDENT]: name };
+}
+
+/** Expand an array into a placeholder list inside `sql`: `IN (${sqlList(ids)})`. */
+export function sqlList(values: readonly unknown[]): SqlList {
+  if (values.length === 0) throw new Error("sqlList needs at least one value");
+  return { [LIST]: values };
+}
+
+export class SqlQuery {
+  constructor(
+    readonly strings: readonly string[],
+    readonly values: readonly unknown[],
+  ) {}
+
+  render(engine: Engine): { text: string; params: unknown[] } {
+    const params: unknown[] = [];
+    const slot = (value: unknown) => {
+      params.push(value);
+      return engine === "postgres" ? `$${params.length}` : "?";
+    };
+    const walk = (query: SqlQuery): string => {
+      let text = query.strings[0] ?? "";
+      query.values.forEach((value, index) => {
+        if (value instanceof SqlQuery) text += walk(value);
+        else if (value && typeof value === "object" && LIST in value)
+          text += (value as SqlList)[LIST].map(slot).join(", ");
+        else if (value && typeof value === "object" && IDENT in value)
+          text += `"${(value as SqlIdent)[IDENT]}"`;
+        else text += slot(value);
+        text += query.strings[index + 1] ?? "";
+      });
+      return text;
+    };
+    return { text: walk(this), params };
+  }
+}
+
+/**
+ * Portable query text: `sql\`SELECT "taskId" FROM agent_tasks WHERE id = ${id}\``.
+ * A value may be another `sql` fragment (inlined), `sqlList(values)` or `sqlIdent(name)`.
+ */
+export function sql(strings: TemplateStringsArray, ...values: unknown[]): SqlQuery {
+  return new SqlQuery([...strings], values);
+}
 
 export type ReadOnlyDb = {
-  query: <T>(sql: string, params?: SQLQueryBindings[]) => T[];
-  get: <T>(sql: string, params?: SQLQueryBindings[]) => T | null;
+  engine: Engine;
+  query: <T>(query: SqlQuery | string) => T[];
+  get: <T>(query: SqlQuery | string) => T | null;
   close: () => void;
 };
 
-export function openReadOnlyDb(path: string): ReadOnlyDb {
+const asQuery = (query: SqlQuery | string) =>
+  typeof query === "string" ? new SqlQuery([query], []) : query;
+
+export type DbTarget = { engine: "sqlite"; path: string } | { engine: "postgres"; url: string };
+
+export function openReadOnlyDb(target: DbTarget | string): ReadOnlyDb {
+  const resolved: DbTarget =
+    typeof target === "string" ? { engine: "sqlite", path: target } : target;
+  return resolved.engine === "postgres" ? openPostgres(resolved.url) : openSqlite(resolved.path);
+}
+
+function openSqlite(path: string): ReadOnlyDb {
   // Opened on first use: the file only exists once the SUT booted and ran its
   // migrations.
   let database: Database | undefined;
@@ -17,18 +91,106 @@ export function openReadOnlyDb(path: string): ReadOnlyDb {
     database ??= new Database(path, { readonly: true });
     return database;
   };
+  const prepare = (query: SqlQuery | string) => {
+    const { text, params } = asQuery(query).render("sqlite");
+    return { statement: handle().query(text), params: params as SQLQueryBindings[] };
+  };
   return {
-    query: <T>(sql: string, params: SQLQueryBindings[] = []) =>
-      handle()
-        .query(sql)
-        .all(...params) as T[],
-    get: <T>(sql: string, params: SQLQueryBindings[] = []) =>
-      (handle()
-        .query(sql)
-        .get(...params) as T | null) ?? null,
+    engine: "sqlite",
+    query: <T>(query: SqlQuery | string) => {
+      const { statement, params } = prepare(query);
+      return statement.all(...params) as T[];
+    },
+    get: <T>(query: SqlQuery | string) => {
+      const { statement, params } = prepare(query);
+      return (statement.get(...params) as T | null) ?? null;
+    },
     close: () => {
       database?.close();
       database = undefined;
     },
   };
+}
+
+// Postgres has no synchronous driver. Scenarios call ctx.db synchronously (often inside
+// a poll predicate), so a worker owns the async Bun.SQL pool and the main thread blocks
+// on Atomics.wait until the worker writes the JSON result into shared memory.
+const RESULT_BYTES = 64 * 1024 * 1024;
+const QUERY_TIMEOUT_MS = 30_000;
+
+function openPostgres(url: string): ReadOnlyDb {
+  let worker: Worker | undefined;
+  let control: Int32Array | undefined;
+  let data: Uint8Array | undefined;
+  const start = () => {
+    if (worker) return;
+    const controlBuffer = new SharedArrayBuffer(8);
+    const dataBuffer = new SharedArrayBuffer(RESULT_BYTES);
+    control = new Int32Array(controlBuffer);
+    data = new Uint8Array(dataBuffer);
+    worker = new Worker(resolve(import.meta.dir, "db-postgres-worker.ts"));
+    worker.postMessage({ type: "init", url, controlBuffer, dataBuffer });
+    worker.unref();
+  };
+  const call = (query: SqlQuery | string): unknown[] => {
+    start();
+    const { text, params } = asQuery(query).render("postgres");
+    Atomics.store(control!, 0, 0);
+    worker!.postMessage({ type: "query", text, params });
+    const state = Atomics.wait(control!, 0, 0, QUERY_TIMEOUT_MS);
+    if (state === "timed-out")
+      throw new Error(`ctx.db query timed out after ${QUERY_TIMEOUT_MS} ms: ${text}`);
+    const length = Atomics.load(control!, 1);
+    const payload = JSON.parse(new TextDecoder().decode(data!.slice(0, length))) as
+      | { ok: true; rows: unknown[] }
+      | { ok: false; error: string };
+    if (!payload.ok) throw new Error(`${payload.error}\n${text}`);
+    return payload.rows;
+  };
+  return {
+    engine: "postgres",
+    query: <T>(query: SqlQuery | string) => call(query) as T[],
+    get: <T>(query: SqlQuery | string) => (call(query)[0] as T | undefined) ?? null,
+    close: () => {
+      worker?.terminate();
+      worker = undefined;
+    },
+  };
+}
+
+/**
+ * `--engine postgres`: one new, empty database for each SUT boot on the server that
+ * `E2E_POSTGRES_URL` names. The URL must log in as a role that may CREATE DATABASE.
+ */
+export async function createPostgresDatabase(stamp: string): Promise<string> {
+  const admin = adminUrl();
+  const name = `e2e_${stamp.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
+  const client = new Bun.SQL({ url: admin, max: 1 });
+  try {
+    await client.unsafe(`CREATE DATABASE "${name}"`);
+  } finally {
+    await client.close();
+  }
+  const url = new URL(admin);
+  url.pathname = `/${name}`;
+  return url.toString();
+}
+
+export async function dropPostgresDatabase(databaseUrl: string): Promise<void> {
+  const name = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+  const client = new Bun.SQL({ url: adminUrl(), max: 1 });
+  try {
+    await client.unsafe(`DROP DATABASE IF EXISTS "${name.replaceAll('"', '""')}" WITH (FORCE)`);
+  } finally {
+    await client.close();
+  }
+}
+
+function adminUrl(): string {
+  const url = process.env.E2E_POSTGRES_URL;
+  if (!url)
+    throw new Error("--engine postgres needs E2E_POSTGRES_URL (a role that may CREATE DATABASE)");
+  if (!/^postgres(ql)?:\/\//.test(url))
+    throw new Error("E2E_POSTGRES_URL must start with postgres:// or postgresql://");
+  return url;
 }

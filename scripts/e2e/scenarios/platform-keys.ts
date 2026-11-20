@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -167,7 +168,9 @@ export const platformKeys: Scenario = {
     const row = ctx.db.get<{
       credentialKeySuffix: string | null;
       credentialKeyType: string | null;
-    }>("SELECT credentialKeySuffix, credentialKeyType FROM agent_tasks WHERE id = ?", [taskId]);
+    }>(
+      sql`SELECT "credentialKeySuffix", "credentialKeyType" FROM agent_tasks WHERE id = ${taskId}`,
+    );
     expect(
       row?.credentialKeySuffix === suffixA && row?.credentialKeyType === keyType,
       "report-usage stamps the credential on the task",
@@ -1143,10 +1146,9 @@ export const platformPoolKeys: Scenario = {
         "the pool shifts down",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM api_key_status WHERE keyType = ? AND keySuffix = ?", [
-          NAN_KEY,
-          goodSuffix,
-        ]) === null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM api_key_status WHERE "keyType" = ${NAN_KEY} AND "keySuffix" = ${goodSuffix}`,
+        ) === null,
         "deleting a member retires its key-status row",
       );
       const last = await ctx.api(
@@ -1316,15 +1318,14 @@ export const platformCodexAccounts: Scenario = {
         "delete returns the remaining accounts",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE key = ? AND scope = 'global'", [
-          configKey,
-        ]) === null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM swarm_config WHERE key = ${configKey} AND scope = 'global'`,
+        ) === null,
         "the credentials row is deleted",
       );
       expect(
         ctx.db.get(
-          "SELECT 1 AS one FROM api_key_status WHERE keyType = 'CODEX_OAUTH' AND keySuffix = ?",
-          [suffix],
+          sql`SELECT 1 AS one FROM api_key_status WHERE "keyType" = 'CODEX_OAUTH' AND "keySuffix" = ${suffix}`,
         ) === null,
         "deleting the account retires its key-status row",
       );

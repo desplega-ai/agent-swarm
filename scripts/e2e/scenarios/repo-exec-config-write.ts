@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
@@ -69,9 +70,9 @@ export const repoExecConfigWrite: Scenario = {
       const sharedKeyWorker = { agentId: worker.id };
       const base = `https://git.example.invalid/e2e/repo-exec-${ctx.nonce}`;
       const row = (id: string) =>
-        ctx.db.get<RepoRow>("SELECT url, clonePath, hooks, name FROM swarm_repos WHERE id = ?", [
-          id,
-        ]);
+        ctx.db.get<RepoRow>(
+          sql`SELECT url, "clonePath", hooks, name FROM swarm_repos WHERE id = ${id}`,
+        );
 
       // ── operator create: hooks still default to enabled ────────────────────
       const created = await ctx.api("POST", "/api/repos", {
@@ -231,9 +232,9 @@ export const repoExecConfigWrite: Scenario = {
       });
       expectStatus(workerHooksCreate, [403], "worker token creates a repo with hooks enabled");
       expect(
-        !ctx.db.get("SELECT id FROM swarm_repos WHERE name = ?", [
-          `repo-exec-worker-hooks-${ctx.nonce}`,
-        ]),
+        !ctx.db.get(
+          sql`SELECT id FROM swarm_repos WHERE name = ${`repo-exec-worker-hooks-${ctx.nonce}`}`,
+        ),
         "a refused create inserted a row",
       );
 

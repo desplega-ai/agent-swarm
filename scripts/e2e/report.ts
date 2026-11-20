@@ -124,6 +124,8 @@ export type Options = {
   shard?: Shard;
   /** `--coverage`: lcov per API process lands here (`./e2e-coverage`). */
   coverageDir?: string;
+  /** Storage engine of the SUT. `postgres` makes one new database per boot on E2E_POSTGRES_URL. */
+  engine: "sqlite" | "postgres";
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -152,6 +154,8 @@ Options:
   --strict                      Fail unless every route operation, MCP tool and workflow
                                 node type is covered or excluded in coverage-manifest.json,
                                 no exclusion is stale or dead, and every pinned flow passed
+  --engine sqlite|postgres      Storage engine of the API (default sqlite). postgres reads
+                                E2E_POSTGRES_URL and makes one new database per API boot
   --help                        Show this help`;
 
 function optionValue(args: string[], index: number, flag: string): string {
@@ -189,6 +193,11 @@ function sutEnvValue(value: string): [string, string] {
   return [value.slice(0, separator), value.slice(separator + 1)];
 }
 
+function engineValue(value: string): Options["engine"] {
+  if (value === "sqlite" || value === "postgres") return value;
+  throw new Error(`--engine must be sqlite or postgres, not ${value}`);
+}
+
 export function parseOptions(
   args: string[],
   scenarioNames: string[],
@@ -206,6 +215,7 @@ export function parseOptions(
     minToolCoverage: 0,
     strict: false,
     sutEnv: {},
+    engine: "sqlite",
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
@@ -224,6 +234,7 @@ export function parseOptions(
     else if (arg === "--min-route-coverage") options.minRouteCoverage = coverageValue(value(), arg);
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
     else if (arg === "--strict") options.strict = true;
+    else if (arg === "--engine") options.engine = engineValue(value());
     else if (arg === "--shard") options.shard = parseShard(value());
     else if (arg === "--coverage") options.coverageDir = resolve("e2e-coverage");
     else if (arg === "--list") options.list = true;

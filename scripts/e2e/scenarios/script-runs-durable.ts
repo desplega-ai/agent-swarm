@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -169,8 +170,7 @@ export const scriptRunsDurable: Scenario = {
       `journal step types are wrong: ${stepTypes.join(",")}`,
     );
     const journalRows = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_run_journal WHERE runId = ?",
-      [runId],
+      sql`SELECT count(*) AS n FROM script_run_journal WHERE "runId" = ${runId}`,
     );
     expect(journalRows?.n === 5, "script_run_journal must hold the five steps");
     expect(
@@ -184,8 +184,7 @@ export const scriptRunsDurable: Scenario = {
       output: string;
       taskType: string;
     }>(
-      "SELECT agentId, creatorAgentId, status, output, taskType FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-      [`script-run:${runId}:delegate`],
+      sql`SELECT "agentId", "creatorAgentId", status, output, "taskType" FROM agent_tasks WHERE "contextKey" = ${`script-run:${runId}:delegate`} AND "taskType" = 'script-run-step'`,
     );
     expect(
       stepTask?.taskType === "script-run-step" &&
@@ -196,8 +195,7 @@ export const scriptRunsDurable: Scenario = {
       `the delegated step task is wrong: ${JSON.stringify(stepTask)}`,
     );
     const failedTask = ctx.db.get<{ status: string; output: string }>(
-      "SELECT status, output FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-      [`script-run:${runId}:delegate-fail`],
+      sql`SELECT status, output FROM agent_tasks WHERE "contextKey" = ${`script-run:${runId}:delegate-fail`} AND "taskType" = 'script-run-step'`,
     );
     expect(failedTask?.status === "failed", "the refused step task must be failed");
 
@@ -529,8 +527,7 @@ export const scriptRunsDurable: Scenario = {
     expectStatus(replay, [200], "agent-task replay");
     expect(asRecord(replay.json).taskId === delegatedBody.taskId, "a replay must reuse the task");
     const stepTaskCount = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-      [`script-run:${taskRunId}:ok-step`],
+      sql`SELECT count(*) AS n FROM agent_tasks WHERE "contextKey" = ${`script-run:${taskRunId}:ok-step`} AND "taskType" = 'script-run-step'`,
     );
     expect(stepTaskCount?.n === 1, "a replayed step must not dispatch a duplicate task");
     const rejected = await ctx.api("POST", agentTask, {

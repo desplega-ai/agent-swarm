@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -167,8 +168,7 @@ export const objectsHttp: Scenario = {
       const asPerson = { apiKey: token } as const;
       const editorOf = (id: string) =>
         ctx.db.get<{ updated_by: string | null }>(
-          "SELECT updated_by FROM primitive_objects WHERE id = ?",
-          [id],
+          sql`SELECT updated_by FROM primitive_objects WHERE id = ${id}`,
         )?.updated_by;
 
       // ── read ────────────────────────────────────────────────────────────────────────────────
@@ -599,15 +599,13 @@ export const objectsHttp: Scenario = {
       await create(owner, "board-create", `qa/objhttp-watch-${ctx.nonce}.excalidraw`);
       const watched = () =>
         ctx.db.get<{ status: string }>(
-          "SELECT status FROM agent_fs_object_webhooks WHERE orgId = ? AND driveId = ?",
-          [org, drive],
+          sql`SELECT status FROM agent_fs_object_webhooks WHERE "orgId" = ${org} AND "driveId" = ${drive}`,
         )?.status === "active";
       const deadline = Date.now() + 10_000;
       while (!watched() && Date.now() < deadline) await Bun.sleep(100);
       expect(watched(), `the shared drive's webhook is active: ${JSON.stringify(hooks)}`);
       const fresh = ctx.db.get<{ fileVersion: number }>(
-        "SELECT fileVersion FROM primitive_objects WHERE id = ?",
-        [sheetId],
+        sql`SELECT "fileVersion" FROM primitive_objects WHERE id = ${sheetId}`,
       )?.fileVersion;
       from = stub.seen.length;
       response = await ctx.api("GET", `/api/objects/${sheetId}?knownVersion=${fresh}`, asPerson);

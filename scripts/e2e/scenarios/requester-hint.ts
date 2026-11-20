@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // A body `requestedByUserId` follows the POST /api/tasks rule on every write path that takes
 // it: the operator and lead agents may name a user, a non-lead agent may not. Covers steering
 // (POST /api/tasks/{id}/steer), script runs (POST /api/script-runs) and script step tasks
@@ -16,8 +17,7 @@ const NOOP = "export default async function () { return 1; }";
 
 function steerUser(ctx: ScenarioContext, steeringMessageId: unknown) {
   const row = ctx.db.get<{ created_by_kind: string; created_by_user_id: string | null }>(
-    "SELECT created_by_kind, created_by_user_id FROM task_steering_messages WHERE id = ?",
-    [String(steeringMessageId)],
+    sql`SELECT created_by_kind, created_by_user_id FROM task_steering_messages WHERE id = ${String(steeringMessageId)}`,
   );
   expect(row !== null, `No steering row ${String(steeringMessageId)}`);
   return row;
@@ -25,8 +25,7 @@ function steerUser(ctx: ScenarioContext, steeringMessageId: unknown) {
 
 function runUser(ctx: ScenarioContext, runId: string) {
   const row = ctx.db.get<{ requestedByUserId: string | null; created_by: string | null }>(
-    "SELECT requestedByUserId, created_by FROM script_runs WHERE id = ?",
-    [runId],
+    sql`SELECT "requestedByUserId", created_by FROM script_runs WHERE id = ${runId}`,
   );
   expect(row !== null, `No script run row ${runId}`);
   return row;
@@ -34,8 +33,7 @@ function runUser(ctx: ScenarioContext, runId: string) {
 
 function taskUser(ctx: ScenarioContext, taskId: string): string | null {
   const row = ctx.db.get<{ requestedByUserId: string | null }>(
-    "SELECT requestedByUserId FROM agent_tasks WHERE id = ?",
-    [taskId],
+    sql`SELECT "requestedByUserId" FROM agent_tasks WHERE id = ${taskId}`,
   );
   expect(row !== null, `No task row ${taskId}`);
   return row.requestedByUserId;

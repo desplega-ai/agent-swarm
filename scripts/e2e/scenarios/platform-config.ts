@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -105,8 +106,7 @@ export const platformConfig: Scenario = {
         "a secret is masked and encrypted on write",
       );
       const stored = ctx.db.get<{ value: string; encrypted: number }>(
-        "SELECT value, encrypted FROM swarm_config WHERE id = ?",
-        [String(secret.id)],
+        sql`SELECT value, encrypted FROM swarm_config WHERE id = ${String(secret.id)}`,
       );
       expect(
         stored?.encrypted === 1 && stored.value !== "s3cret-value",
@@ -254,7 +254,7 @@ export const platformConfig: Scenario = {
       );
       expect(
         ctx.db.get(
-          "SELECT 1 AS one FROM swarm_config WHERE key IN ('API_KEY', 'api_key', 'RUNTIME_POOLS_ENABLED', 'RUNTIME_DEFAULT_DELIVERY')",
+          sql`SELECT 1 AS one FROM swarm_config WHERE key IN ('API_KEY', 'api_key', 'RUNTIME_POOLS_ENABLED', 'RUNTIME_DEFAULT_DELIVERY')`,
         ) === null,
         "rejected writes persist nothing",
       );
@@ -266,7 +266,7 @@ export const platformConfig: Scenario = {
         "create the onboarding state row",
       );
       const internal = ctx.db.get<{ id: string }>(
-        "SELECT id FROM swarm_config WHERE key = 'onboarding_state'",
+        sql`SELECT id FROM swarm_config WHERE key = 'onboarding_state'`,
       );
       expect(internal, "the onboarding state is stored in swarm_config");
       expect(
@@ -383,9 +383,9 @@ export const platformConfig: Scenario = {
           "requires the lead agent",
         );
         expect(
-          ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE key = ?", [`${prefix}_DENIED`]) ===
+          ctx.db.get(sql`SELECT 1 AS one FROM swarm_config WHERE key = ${`${prefix}_DENIED`}`) ===
             null &&
-            ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE id = ?", [String(plain.id)]) !==
+            ctx.db.get(sql`SELECT 1 AS one FROM swarm_config WHERE id = ${String(plain.id)}`) !==
               null,
           "the denied calls changed nothing",
         );
@@ -411,7 +411,7 @@ export const platformConfig: Scenario = {
         "delete an unknown config",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM swarm_config WHERE id = ?", [String(plain.id)]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM swarm_config WHERE id = ${String(plain.id)}`) === null,
         "the deleted row is gone from the table",
       );
     } finally {

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // WORKFLOW_INPUT_ENV_ALLOWLIST limits which API env vars a workflow input may read with ${NAME}.
 // Set: a name outside the list fails the run before any node runs, and the value reaches no step row, run row or log;
 // a listed name still resolves. A webhook hmacSecret outside the list answers 500 and starts no run.
@@ -116,8 +117,7 @@ export const authzWorkflowEnv: Scenario = {
       const hookId = asString(asRecord(hook.json).id, "webhook workflow id");
       workflowIds.push(hookId);
       const runsBefore = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?",
-        [hookId],
+        sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${hookId}`,
       )?.n;
       const hookLogBefore = (await ctx.sutLog()).length;
       const hookBody = JSON.stringify({ event: "ping" });
@@ -134,8 +134,7 @@ export const authzWorkflowEnv: Scenario = {
         `the webhook error must name the allowlist and not leak the value: ${deliveryText.slice(0, 300)}`,
       );
       const runsAfter = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?",
-        [hookId],
+        sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${hookId}`,
       )?.n;
       expect(
         runsBefore === 0 && runsAfter === 0,

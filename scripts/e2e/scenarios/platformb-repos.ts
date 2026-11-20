@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -139,8 +140,7 @@ export const platformbRepos: Scenario = {
         hooks: string;
         guidelines: string | null;
       }>(
-        "SELECT url, name, clonePath, defaultBranch, autoClone, hooks, guidelines FROM swarm_repos WHERE id = ?",
-        [localId],
+        sql`SELECT url, name, "clonePath", "defaultBranch", "autoClone", hooks, guidelines FROM swarm_repos WHERE id = ${localId}`,
       );
       expect(row, "Local repo is not in swarm_repos");
       expect(
@@ -289,8 +289,7 @@ export const platformbRepos: Scenario = {
         "lastUpdatedAt went backwards",
       );
       const stored = ctx.db.get<{ defaultBranch: string; hooks: string | null }>(
-        "SELECT defaultBranch, hooks FROM swarm_repos WHERE id = ?",
-        [urlId],
+        sql`SELECT "defaultBranch", hooks FROM swarm_repos WHERE id = ${urlId}`,
       );
       expect(
         stored?.defaultBranch === "trunk" &&
@@ -452,7 +451,7 @@ export const platformbRepos: Scenario = {
         expect(asRecord(response.json).success === true, "Delete did not report success");
         expectStatus(await ctx.api("GET", `/api/repos/${id}`), [404], `read deleted repo ${id}`);
         expect(
-          ctx.db.get("SELECT id FROM swarm_repos WHERE id = ?", [id]) === null,
+          ctx.db.get(sql`SELECT id FROM swarm_repos WHERE id = ${id}`) === null,
           "Deleted repo is still in swarm_repos",
         );
         expectStatus(await ctx.api("DELETE", `/api/repos/${id}`), [404], "delete a repo twice");

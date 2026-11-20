@@ -48,7 +48,7 @@ import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
+import { repoRoot, restartSut, type Sut, startSut, stopSut, sutDbTarget, tailLog } from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -224,6 +224,7 @@ async function bootStack(
       { ...slack.mock.env, ...llm.env },
       options.sutEnv,
       options.coverageDir,
+      options.engine,
     );
     stack.sut = sut;
     try {
@@ -234,7 +235,7 @@ async function bootStack(
         `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${sut.logPath}:\n${await tailLog(sut.logPath, 40)}`,
       );
     }
-    const db = openReadOnlyDb(sut.dbPath);
+    const db = openReadOnlyDb(sutDbTarget(sut));
     stack.db = db;
     const api = createApiClient(sut.baseUrl, sut.apiKey);
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 
@@ -22,8 +23,7 @@ async function clearConfig(ctx: ScenarioContext): Promise<void> {
 
 function configRow(ctx: ScenarioContext, key: string) {
   return ctx.db.get<{ value: string; isSecret: number }>(
-    "SELECT value, isSecret FROM swarm_config WHERE scope = 'global' AND key = ?",
-    [key],
+    sql`SELECT value, "isSecret" FROM swarm_config WHERE scope = 'global' AND key = ${key}`,
   );
 }
 
@@ -266,7 +266,7 @@ export const coreOrg: Scenario = {
       const flag = configRow(ctx, "PUBLIC_RANKING_ENABLED");
       if (flag !== null) {
         const row = ctx.db.get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = 'global' AND key = 'PUBLIC_RANKING_ENABLED'",
+          sql`SELECT id FROM swarm_config WHERE scope = 'global' AND key = 'PUBLIC_RANKING_ENABLED'`,
         );
         if (row) await ctx.api("DELETE", `/api/config/${row.id}`);
       }
@@ -280,8 +280,7 @@ export const coreOrg: Scenario = {
         "SWARM_USED_BY_QUOTE",
       ]) {
         const row = ctx.db.get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = 'global' AND key = ?",
-          [key],
+          sql`SELECT id FROM swarm_config WHERE scope = 'global' AND key = ${key}`,
         );
         if (row) await ctx.api("DELETE", `/api/config/${row.id}`);
       }

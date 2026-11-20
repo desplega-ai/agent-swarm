@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { expect, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -16,8 +17,7 @@ type FinishedSlackTask = { taskId: string; messageTs: string; threadTs: string }
 
 function relayRow(ctx: ScenarioContext, taskId: string): RelayRow | null {
   return ctx.db.get<RelayRow>(
-    "SELECT delivered_at FROM slack_relay_obligations WHERE task_id = ?",
-    [taskId],
+    sql`SELECT delivered_at FROM slack_relay_obligations WHERE task_id = ${taskId}`,
   );
 }
 

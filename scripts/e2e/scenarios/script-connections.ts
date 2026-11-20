@@ -1,3 +1,4 @@
+import { sql as dbSql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -152,8 +153,7 @@ export const scriptConnections: Scenario = {
         "the connection record must never carry the inline secret",
       );
       const dbRow = ctx.db.get<{ kind: string; auth_type: string; credential_binding_id: string }>(
-        "SELECT kind, auth_type, credential_binding_id FROM script_connections WHERE id = ?",
-        [connectionId],
+        dbSql`SELECT kind, auth_type, credential_binding_id FROM script_connections WHERE id = ${connectionId}`,
       );
       expect(
         dbRow?.kind === "openapi" && dbRow.auth_type === "bearer" && dbRow.credential_binding_id,
@@ -682,8 +682,7 @@ export const scriptConnections: Scenario = {
 
       // ── delete removes the connection and its managed credential binding ──
       const bindingBefore = ctx.db.get<{ n: number }>(
-        "SELECT count(*) AS n FROM script_credential_bindings WHERE managed_by_connection_id = ?",
-        [connectionId],
+        dbSql`SELECT count(*) AS n FROM script_credential_bindings WHERE managed_by_connection_id = ${connectionId}`,
       );
       expect(bindingBefore?.n === 1, "the bearer connection must own one managed binding");
       const removed = await ctx.api("DELETE", `/api/script-connections/${connectionId}`);
@@ -703,8 +702,7 @@ export const scriptConnections: Scenario = {
         "get deleted",
       );
       const bindingAfter = ctx.db.get<{ n: number }>(
-        "SELECT count(*) AS n FROM script_credential_bindings WHERE managed_by_connection_id = ?",
-        [connectionId],
+        dbSql`SELECT count(*) AS n FROM script_credential_bindings WHERE managed_by_connection_id = ${connectionId}`,
       );
       expect(bindingAfter?.n === 0, "deleting a connection must delete its managed binding");
       const gone = await runScript(ctx, workerId, {

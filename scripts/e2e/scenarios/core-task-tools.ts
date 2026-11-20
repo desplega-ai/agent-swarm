@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
@@ -68,8 +69,7 @@ async function delegation(
   );
   expect(sent.message.includes(firstId), "send-task message does not name the task");
   const stored = ctx.db.get<{ creatorAgentId: string; taskType: string; tags: string }>(
-    "SELECT creatorAgentId, taskType, tags FROM agent_tasks WHERE id = ?",
-    [firstId],
+    sql`SELECT "creatorAgentId", "taskType", tags FROM agent_tasks WHERE id = ${firstId}`,
   );
   expect(
     stored?.creatorAgentId === creatorId &&
@@ -323,8 +323,7 @@ async function deferral(ctx: ScenarioContext, bystander: McpConnection) {
       taskTemplate: string;
       enabled: number;
     }>(
-      "SELECT targetAgentId, parentTaskId, taskType, scheduleType, taskTemplate, enabled FROM scheduled_tasks WHERE id = ?",
-      [scheduleId],
+      sql`SELECT "targetAgentId", "parentTaskId", "taskType", "scheduleType", "taskTemplate", enabled FROM scheduled_tasks WHERE id = ${scheduleId}`,
     );
     expect(
       schedule?.targetAgentId === workerId &&
@@ -372,16 +371,14 @@ async function deferral(ctx: ScenarioContext, bystander: McpConnection) {
     const woke = await pollUntil(
       () =>
         ctx.db.get<{ id: string }>(
-          "SELECT id FROM agent_tasks WHERE parentTaskId = ? AND agentId = ?",
-          [taskId, workerId],
+          sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${taskId} AND "agentId" = ${workerId}`,
         ) !== null,
       40_000,
       500,
     );
     expect(woke, "The scheduler never created the wake-up task");
     const wake = ctx.db.get<{ id: string; task: string; taskType: string }>(
-      "SELECT id, task, taskType FROM agent_tasks WHERE parentTaskId = ? AND agentId = ?",
-      [taskId, workerId],
+      sql`SELECT id, task, "taskType" FROM agent_tasks WHERE "parentTaskId" = ${taskId} AND "agentId" = ${workerId}`,
     );
     expect(
       wake?.taskType === "deferred" && wake.task.includes(`Check the build result ${ctx.nonce}`),

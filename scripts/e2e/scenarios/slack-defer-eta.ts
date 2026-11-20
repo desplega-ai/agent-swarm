@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { createUser } from "./platform-helpers";
@@ -37,8 +38,7 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
   const task = await findSlackTask(ctx, message.ts);
   expect(task.requestedByUserId === requester.id, "The Slack task lost its requester");
   const profile = ctx.db.get<{ timezone: string | null }>(
-    "SELECT timezone FROM users WHERE id = ?",
-    [requester.id],
+    sql`SELECT timezone FROM users WHERE id = ${requester.id}`,
   );
   expect(
     profile?.timezone === (profileZone || null),

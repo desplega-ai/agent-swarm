@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { expectRunOk, registerAgent, runScript } from "./script-helpers";
@@ -114,9 +115,9 @@ export default async (args: { name: string }) => ({
         `memory-eval published no page: ${JSON.stringify(report.pageError)}`,
       );
 
-      const page = ctx.db.get<{ body: string }>("SELECT body FROM pages WHERE id = ?", [
-        String(pageId),
-      ]);
+      const page = ctx.db.get<{ body: string }>(
+        sql`SELECT body FROM pages WHERE id = ${String(pageId)}`,
+      );
       const body = page?.body ?? "";
       expect(body.includes("var H = ["), "memory-eval page has no history data");
       expect(!body.includes(closingTag), "memory-eval page holds an unescaped closing script tag");

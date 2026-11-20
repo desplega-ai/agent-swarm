@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Schedules over HTTP and MCP: create (workflow, agent-task and one-time targets),
 // read, list filters, full and partial update, run-now, delete, and every validation
 // each surface enforces. Far-future timings keep the real scheduler from firing them.
@@ -242,13 +243,11 @@ export const workflowSchedules: Scenario = {
         "the refusal names the missing timing fields",
       );
       const noTimingRows = ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM scheduled_tasks WHERE name = ?",
-        [name("notiming")],
+        sql`SELECT COUNT(*) AS n FROM scheduled_tasks WHERE name = ${name("notiming")}`,
       );
       expect(noTimingRows?.n === 0, "the failed create left no row behind");
       const row = ctx.db.get<{ name: string; enabled: number; targetType: string }>(
-        "SELECT name, enabled, targetType FROM scheduled_tasks WHERE id = ?",
-        [flowId],
+        sql`SELECT name, enabled, "targetType" FROM scheduled_tasks WHERE id = ${flowId}`,
       );
       expect(
         row?.name === name("flow") && row.enabled === 1 && row.targetType === "workflow",
@@ -499,8 +498,7 @@ export const workflowSchedules: Scenario = {
         "the run's trigger data names the schedule",
       );
       const provenance = ctx.db.get<{ triggerType: string }>(
-        "SELECT triggerType FROM workflow_runs WHERE id = ?",
-        [runIds[0] as string],
+        sql`SELECT "triggerType" FROM workflow_runs WHERE id = ${runIds[0] as string}`,
       );
       expect(provenance?.triggerType === "schedule", "the run is recorded as schedule-triggered");
 
@@ -515,8 +513,7 @@ export const workflowSchedules: Scenario = {
         `run-now creates the task for the target agent: ${JSON.stringify(created)}`,
       );
       const taskRow = ctx.db.get<{ scheduleId: string | null; status: string }>(
-        "SELECT scheduleId, status FROM agent_tasks WHERE id = ?",
-        [String(created.id)],
+        sql`SELECT "scheduleId", status FROM agent_tasks WHERE id = ${String(created.id)}`,
       );
       expect(taskRow?.scheduleId === taskScheduleId, "the task links back to its schedule");
 
@@ -787,8 +784,7 @@ export const workflowSchedules: Scenario = {
       const toolRunRow = await (async () => {
         for (let attempt = 0; attempt < 50; attempt++) {
           const found = ctx.db.query<{ id: string; status: string }>(
-            "SELECT id, status FROM workflow_runs WHERE workflowId = ? AND triggerType = 'schedule' ORDER BY startedAt DESC",
-            [targetWorkflow],
+            sql`SELECT id, status FROM workflow_runs WHERE "workflowId" = ${targetWorkflow} AND "triggerType" = 'schedule' ORDER BY "startedAt" DESC`,
           );
           if (found.length >= 2) return found;
           await Bun.sleep(100);

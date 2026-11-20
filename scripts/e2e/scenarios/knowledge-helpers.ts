@@ -1,3 +1,4 @@
+import type { SqlQuery } from "../db";
 // Shared helpers for the knowledge-* scenarios (memory, skills, prompt templates, pages,
 // assets, apps, rooms, comb). Black box: HTTP, MCP, the operator key and agent ids only.
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
@@ -141,8 +142,8 @@ export async function cancelTask(ctx: ScenarioContext, taskId: string): Promise<
   expectStatus(response, [200], "cancel helper task");
 }
 
-export function dbCount(ctx: ScenarioContext, sql: string, params: (string | number)[]): number {
-  const row = ctx.db.get<{ n: number }>(sql, params);
+export function dbCount(ctx: ScenarioContext, query: SqlQuery): number {
+  const row = ctx.db.get<{ n: number }>(query);
   return row?.n ?? 0;
 }
 

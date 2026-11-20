@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { retireAgent } from "./core-helpers";
@@ -94,8 +95,7 @@ export const scriptCredentialBindingSources: Scenario = {
           header_template: string;
           allowed_hosts_json: string;
         }>(
-          "SELECT config_key, header_template, allowed_hosts_json FROM script_credential_bindings WHERE id = ?",
-          [id],
+          sql`SELECT config_key, header_template, allowed_hosts_json FROM script_credential_bindings WHERE id = ${id}`,
         );
         if (!stored) continue;
         await ctx.api("POST", "/api/credential-bindings", {

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -66,16 +67,14 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
     });
     expect(v2.version === 2 && !v2.contentDeduped && v2.id === scriptId, "v2 must bump in place");
     const row = ctx.db.get<ScriptRow>(
-      "SELECT version, typeChecked, isScratch, scope FROM scripts WHERE id = ?",
-      [scriptId],
+      sql`SELECT version, "typeChecked", "isScratch", scope FROM scripts WHERE id = ${scriptId}`,
     );
     expect(
       row?.version === 2 && row.typeChecked === 1 && row.isScratch === 0 && row.scope === "agent",
       `saved script row is wrong: ${JSON.stringify(row)}`,
     );
     const versionRows = ctx.db.query<{ version: number }>(
-      "SELECT version FROM script_versions WHERE scriptId = ? ORDER BY version",
-      [scriptId],
+      sql`SELECT version FROM script_versions WHERE "scriptId" = ${scriptId} ORDER BY version`,
     );
     expect(
       versionRows.map((entry) => entry.version).join(",") === "1,2",
@@ -304,8 +303,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
     expectStatus(globalSaved, [200], "global upsert by the lead");
     const globalId = await findScriptId(ctx, globalName, leadId, "global");
     const globalRow = ctx.db.get<ScriptRow>(
-      "SELECT version, typeChecked, isScratch, scope FROM scripts WHERE id = ?",
-      [globalId],
+      sql`SELECT version, "typeChecked", "isScratch", scope FROM scripts WHERE id = ${globalId}`,
     );
     expect(globalRow?.scope === "global", "global script was not stored with global scope");
     const globalRun = await runScript(ctx, otherId, { name: globalName, args: { n: 2 } });
@@ -391,9 +389,9 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
       const deleted = await callToolOk(mcp, "script-delete", { name: toolName });
       expect(asRecord(structured(deleted).data).deleted === true, "tool delete");
     });
-    const toolGone = ctx.db.get<{ n: number }>("SELECT count(*) AS n FROM scripts WHERE name = ?", [
-      toolName,
-    ]);
+    const toolGone = ctx.db.get<{ n: number }>(
+      sql`SELECT count(*) AS n FROM scripts WHERE name = ${toolName}`,
+    );
     expect(toolGone?.n === 0, "script-delete did not remove the script row");
 
     // ── delete: agent scope (idempotent), global scope as lead, rows gone ──
@@ -410,8 +408,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
       "versions after delete",
     );
     const orphanVersions = ctx.db.get<{ n: number }>(
-      "SELECT count(*) AS n FROM script_versions WHERE scriptId = ?",
-      [scriptId],
+      sql`SELECT count(*) AS n FROM script_versions WHERE "scriptId" = ${scriptId}`,
     );
     expect(orphanVersions?.n === 0, "deleting a script must cascade to its versions");
     const afterDelete = await ctx.api("POST", "/api/scripts/run", { agentId, body: { name } });

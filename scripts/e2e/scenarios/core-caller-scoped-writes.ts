@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
@@ -28,8 +29,7 @@ async function mintAgentToken(ctx: ScenarioContext, agentId: string): Promise<st
 function storedSessionId(ctx: ScenarioContext, taskId: string): string | null {
   return (
     ctx.db.get<{ claudeSessionId: string | null }>(
-      "SELECT claudeSessionId FROM agent_tasks WHERE id = ?",
-      [taskId],
+      sql`SELECT "claudeSessionId" FROM agent_tasks WHERE id = ${taskId}`,
     )?.claudeSessionId ?? null
   );
 }

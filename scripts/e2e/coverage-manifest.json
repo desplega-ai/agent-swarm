@@ -189,7 +189,7 @@
     },
     {
       "name": "script-run-step-types",
-      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
+      "query": "SELECT DISTINCT \"stepType\" AS value FROM script_run_journal",
       "universe": ["raw-llm", "agent-task", "swarm-script"],
       "excluded": []
     },
@@ -207,7 +207,7 @@
     },
     {
       "name": "script-fs-modes",
-      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
+      "query": "SELECT DISTINCT \"fsMode\" AS value FROM scripts",
       "universe": ["none", "workspace-rw"],
       "excluded": [
         {

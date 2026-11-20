@@ -69,7 +69,11 @@ export const connectorHandoff: Scenario = {
       await handoff(ctx, userId, publicOrigin);
     } finally {
       if (configId) {
-        expectStatus(await ctx.api("DELETE", `/api/config/${configId}`), [200], "delete public origin");
+        expectStatus(
+          await ctx.api("DELETE", `/api/config/${configId}`),
+          [200],
+          "delete public origin",
+        );
         // Settle env un-injection before the next scenario reads the origin.
         await reloadConfig(ctx);
       }

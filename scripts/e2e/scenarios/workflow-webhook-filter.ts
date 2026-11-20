@@ -1,3 +1,4 @@
+import { type SqlQuery, sql } from "../db";
 // A signed webhook delivery is filtered after the signature check and before a
 // run is saved. A match walks the workflow; a miss answers 200 and leaves no
 // run or step rows. The legacy events allowlist and the standard-webhooks
@@ -11,20 +12,22 @@ const definition: WorkflowDef = {
   nodes: [{ id: "note", type: "script", config: { runtime: "bash", script: "echo filtered" } }],
 };
 
-function countRows(ctx: ScenarioContext, sql: string, workflowId: string): number {
-  return Number(ctx.db.get<{ n: number }>(sql, [workflowId])?.n ?? 0);
+function countRows(ctx: ScenarioContext, query: SqlQuery): number {
+  return Number(ctx.db.get<{ n: number }>(query)?.n ?? 0);
 }
 
 function runCount(ctx: ScenarioContext, workflowId: string): number {
-  return countRows(ctx, "SELECT COUNT(*) AS n FROM workflow_runs WHERE workflowId = ?", workflowId);
+  return countRows(
+    ctx,
+    sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${workflowId}`,
+  );
 }
 
 function stepCount(ctx: ScenarioContext, workflowId: string): number {
   return countRows(
     ctx,
-    `SELECT COUNT(*) AS n FROM workflow_run_steps
-     WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-    workflowId,
+    sql`SELECT COUNT(*) AS n FROM workflow_run_steps
+     WHERE "runId" IN (SELECT id FROM workflow_runs WHERE "workflowId" = ${workflowId})`,
   );
 }
 

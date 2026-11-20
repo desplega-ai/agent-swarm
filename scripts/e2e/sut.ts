@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { basename } from "node:path";
+import { createPostgresDatabase, type DbTarget, dropPostgresDatabase, type Engine } from "./db";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
@@ -38,7 +39,11 @@ export type Sut = {
   port: number;
   baseUrl: string;
   apiKey: string;
+  /** SQLite file (default engine). Unused on Postgres, where `databaseUrl` holds the data. */
   dbPath: string;
+  engine: Engine;
+  /** `--engine postgres`: the per-boot database (decision D1 selects Postgres from it). */
+  databaseUrl?: string;
   logPath: string;
   logPaths: string[];
   tempPaths: string[];
@@ -190,7 +195,7 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
   await sut.process.exited.catch(() => {});
   await sut.drains.catch(() => {});
   if (keep) {
-    console.log(`KEEP db: ${sut.dbPath}`);
+    console.log(`KEEP db: ${keptDb(sut)}`);
     for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
     for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
   } else {
@@ -218,7 +223,19 @@ async function stopSutProcess(sut: Sut): Promise<void> {
   await sut.drains.catch(() => {});
 }
 
+/** Where the assertion handle (ctx.db) reads this SUT's data. */
+export function sutDbTarget(sut: Sut): DbTarget {
+  return sut.databaseUrl
+    ? { engine: "postgres", url: sut.databaseUrl }
+    : { engine: "sqlite", path: sut.dbPath };
+}
+
+function keptDb(sut: Sut): string {
+  return sut.databaseUrl ? new URL(sut.databaseUrl).pathname.slice(1) : sut.dbPath;
+}
+
 async function deleteSutState(sut: Sut): Promise<void> {
+  if (sut.databaseUrl) await dropPostgresDatabase(sut.databaseUrl).catch(() => {});
   for (const path of [sut.dbPath, `${sut.dbPath}-wal`, `${sut.dbPath}-shm`, ...sut.logPaths]) {
     await Bun.file(path)
       .delete()
@@ -239,6 +256,7 @@ export async function startSut(
   slackEnv: Record<string, string>,
   extraEnv: Record<string, string> = {},
   coverageDir?: string,
+  engine: Engine = "sqlite",
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
@@ -252,6 +270,7 @@ export async function startSut(
   const chatSdkRocketchatPort = await reservedPort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
+  const databaseUrl = engine === "postgres" ? await createPostgresDatabase(stamp) : undefined;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
@@ -269,6 +288,7 @@ export async function startSut(
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,
     DATABASE_PATH: dbPath,
+    ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
     // test, not development: the Slack socket-mode guard refuses to connect
     // under development, and every run drives Slack through the mock.
     NODE_ENV: "test",
@@ -318,6 +338,8 @@ export async function startSut(
     baseUrl: `http://127.0.0.1:${port}`,
     apiKey,
     dbPath,
+    engine,
+    databaseUrl,
     logPath,
     logPaths: [logPath],
     tempPaths: [fsDir, secretsDir, homeDir],
@@ -346,7 +368,7 @@ export async function restartSut(sut: Sut, extraEnv: Record<string, string> = {}
 export async function stopSut(sut: Sut, keep: boolean): Promise<void> {
   await stopSutProcess(sut);
   if (keep) {
-    console.log(`KEEP db: ${sut.dbPath}`);
+    console.log(`KEEP db: ${keptDb(sut)}`);
     for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
     for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
     return;
