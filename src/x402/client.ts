@@ -111,6 +111,10 @@ export async function createX402Client(
 
   // Create and configure x402 client
   const client = new x402Client();
+  // @x402/core >= 2.31 caps each payment at $1 by default. SpendingTracker below
+  // already enforces maxAutoApprove and the daily limit, so drop only the USD cap
+  // and keep the core's default-asset allowlist.
+  client.setSpendControls({ maxAmountPerPayment: false });
   registerExactEvmScheme(client, { signer });
 
   // Create spending tracker
