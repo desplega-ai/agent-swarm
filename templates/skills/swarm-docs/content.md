@@ -66,6 +66,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
 - [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
 - [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
+- [Following up on cross-functional meeting decisions with AI agents](https://docs.agent-swarm.dev/docs/guides/meeting-decision-follow-up). Reference.
 - [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
 - [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
 - [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
@@ -94,6 +95,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Reviewing why sales opportunities were won or lost with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-win-loss-review). Reference.
 - [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-offboarding-access-review). Reference.
+- [Coordinating a new hire's first-day readiness across HR, managers and operations with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-onboarding-readiness-review). Reference.
 - [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-training-completion-evidence-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
 - [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/guides/business-continuity-tabletop-preparation). Reference.
