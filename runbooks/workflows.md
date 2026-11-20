@@ -512,6 +512,8 @@ The node runs as the workflow's `createdByAgentId`. A workflow with no creator (
 | A `sub-workflow` node | the parent's principal (its creator, else its stamped agent); `agentId` in `inputs` is plain data |
 | Webhook or event trigger | none: the `workflow` sentinel with no agent token, global scripts only |
 
+Any agent can edit a workflow, so the creator stays the principal only while the workflow's `updatedByAgentId` is the creator, a lead, or empty (a person's edit). After another agent's edit, `swarm-script` and `sub-workflow` nodes fail with an error that names the editor, until the creator or a lead saves the workflow again.
+
 Retries and resumes reuse the run row, so they keep its principal. `trigger.agentId` remains ordinary trigger data for interpolation. Agent-scoped lookup uses the same principal; with none, only global scripts resolve. A seeded workflow should pin `scope: "global"` on every node so the starting agent cannot swap a script for its own copy.
 
 `timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime deliberately keeps a separate 60s CPU-time ulimit, so an I/O-bound or waiting script can use the full 5-minute wall-clock window while a hot loop is still terminated after roughly 60 CPU seconds. Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject values outside the allowed range before saving.
