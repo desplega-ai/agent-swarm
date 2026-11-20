@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { type LogRecord, logs, SeverityNumber } from "@opentelemetry/api-logs";
+import { type LogRecord, logs, SeverityNumber } from "@opentelemetry/api";
 import { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 import {
   installConsoleLogBridge,

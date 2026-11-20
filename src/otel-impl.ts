@@ -6,17 +6,18 @@ import {
   context,
   type Gauge,
   type Histogram,
+  logs,
   type Meter,
   metrics,
   propagation,
   ROOT_CONTEXT,
+  SeverityNumber,
   type Span,
   SpanKind,
   SpanStatusCode,
   type Tracer,
   trace,
 } from "@opentelemetry/api";
-import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import {
