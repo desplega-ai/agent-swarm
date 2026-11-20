@@ -55,7 +55,7 @@
     "dagre": "^0.8.5",
     "date-fns": "^4.4.0",
     "jotai": "^3.0.2",
-    "lucide-react": "^0.575.0",
+    "lucide-react": "^1.72.0",
     "mermaid": "^11.17.2",
     "modern-screenshot": "^4.7.0",
     "motion": "^13.5.1",
