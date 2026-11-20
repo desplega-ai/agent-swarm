@@ -104,7 +104,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             await checkpointStepFailure(
               run.id,
               step.id,
-              scriptBodyInterpolationError(node.id, scriptBodyUnresolved),
+              scriptBodyInterpolationError(node.id, scriptBodyUnresolved, node.type),
               step.retryCount,
               undefined,
               { fence },
