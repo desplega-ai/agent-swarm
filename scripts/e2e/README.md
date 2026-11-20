@@ -136,6 +136,7 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 400-499 | scripts: scripts, script runs, connections, kv, db-query, internal script-run routes |
 | 500-599 | knowledge: memory, skills, prompt templates, pages, assets, apps, rooms |
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
+| 9000-9499 | storage-engine parity: upgrade from a base-commit database, divergence, trigger and stress scenarios |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
 
 ### Shards

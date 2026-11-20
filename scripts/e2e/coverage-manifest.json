@@ -224,6 +224,16 @@
     }
   ],
   "flows": {
+    "storage-engine-parity": {
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "scenarios": [
+        "upgrade-base-db",
+        "divergence-fulltext-search",
+        "divergence-vector-search",
+        "divergence-like-case",
+        "divergence-text-order"
+      ]
+    },
     "caller-scoped-writes": {
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
