@@ -48,6 +48,8 @@ API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
 SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
 AGENT_SWARM_VERSION=                        # Pin a release here. Blank tracks `latest`. See "Pinning the Image Version" below.
+MINIO_ROOT_USER=agentfs                     # MinIO login, also agent-fs's storage key
+MINIO_ROOT_PASSWORD=                        # Run `openssl rand -hex 24` and paste here
 
 # Docker Compose agent IDs (optional overrides)
 # Leave blank to generate a UUID on first boot and reuse it across restarts.
@@ -173,7 +175,7 @@ docker compose --profile tls up -d
 curl -fsS https://swarm-api.example.com/health
 ```
 
-Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile. Caddy publishes host ports 80/443 by default; set `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` to remap them, for example under [rootless Podman](/docs/guides/podman-rootless#tls-profile-and-privileged-ports).
+Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). MinIO ports 9000 and 9001 bind to loopback unless you set `MINIO_BIND_ADDRESS`. Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile. Caddy publishes host ports 80/443 by default; set `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` to remap them, for example under [rootless Podman](/docs/guides/podman-rootless#tls-profile-and-privileged-ports).
 
 Signed URLs default to `https://${AGENT_FS_DOMAIN}` when `AGENT_FS_DOMAIN` is set, or `http://localhost:9000` otherwise. A non-empty `AGENT_FS_S3_PUBLIC_ENDPOINT` overrides either default and must be an origin browsers can reach over HTTPS for TLS deployments.
 
