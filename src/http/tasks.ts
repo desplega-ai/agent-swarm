@@ -45,6 +45,7 @@ import {
 import {
   getModelProfileByName,
   hasUnreadableCredentialAllowlist,
+  modelGroupRefError,
   modelProfileRefError,
   taskProfileError,
 } from "../be/db/model-profiles";
@@ -180,6 +181,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   resolvedEffort: true,
   profile: true,
   resolvedProfile: true,
+  modelGroup: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -398,6 +400,8 @@ const createTask = route({
       effort: ReasoningEffortSchema.optional(),
       /** Model profile name, applied at claim. Exclusive with `model` and `modelTier`. */
       profile: z.string().trim().min(1).optional(),
+      /** Model group name, resolved per agent at claim. Exclusive with `model`, `modelTier` and `profile`. */
+      modelGroup: z.string().trim().min(1).optional(),
       /**
        * Create in `draft` status instead of the normal pending/unassigned/offered
        * status (#1240) — the task exists and is visible to its owner, but is not
@@ -704,6 +708,7 @@ const updateTaskProgressRoute = route({
   session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
+  rbac: { permission: "task.progress.write" },
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
@@ -1279,6 +1284,7 @@ export async function handleTasks(
     // the worker loads config from, so the profile check judges the same pool.
     const profileError = await taskProfileError({
       profile: parsed.body.profile,
+      modelGroup: parsed.body.modelGroup,
       ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
       agentId: defaultAgentId,
       vcsRepo: vcsRepo ?? parentTask?.vcsRepo,
@@ -1349,6 +1355,7 @@ export async function handleTasks(
           }),
           effort: parsed.body.effort,
           profile: parsed.body.profile,
+          modelGroup: parsed.body.modelGroup,
         },
         { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );
@@ -1412,7 +1419,11 @@ export async function handleTasks(
         jsonError(res, error.message, 400);
         return true;
       }
-      // The profile was deleted between taskProfileError and the insert.
+      // The profile or group was deleted between taskProfileError and the insert.
+      if (modelGroupRefError(error)) {
+        jsonError(res, `Unknown model group "${parsed.body.modelGroup}"`, 400);
+        return true;
+      }
       if (modelProfileRefError(error) === "missing") {
         jsonError(res, `Unknown model profile "${parsed.body.profile}"`, 400);
         return true;

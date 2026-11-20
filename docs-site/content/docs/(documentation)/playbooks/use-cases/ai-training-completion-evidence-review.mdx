@@ -1,0 +1,104 @@
+---
+title: 'Preparing workforce training completion evidence for human review with AI agents'
+description: "Agent Swarm assembles one training requirement, the roster in scope and dated completion records, flags gaps in a source-linked review, and a named person decides."
+agent:
+  offer: false
+  when: "Someone wants operations and engineering to check training completion records across a distributed workforce before a review or deadline"
+---
+
+Agent Swarm can be configured to assemble one training requirement, the roster it applies to, and the dated completion records from operations systems. It compares them with deterministic rules and flags the missing or ambiguous evidence. Then it hands a named review owner one source-linked review. That person validates eligibility, decides on exceptions and owns the follow-up. What the workflow removes is the assembly. The requirement lives in a policy document or a course catalogue, the roster lives in an HR system, the completions arrive as an LMS export, a signed sheet or an uploaded certificate, and the person answering the review holds all of it in their head.
+
+The scope is narrow: a single requirement, checked against one roster once, before a deadline. It is not a contractor's credential expiry before an assignment ([contractor credential expiry checks](/docs/playbooks/use-cases/contractor-license-expiry-review)) and it is not a departing employee's access ([employee offboarding access review](/docs/playbooks/use-cases/employee-offboarding-access-review)).
+
+## When another tool fits better
+
+**A learning-management system that already runs the requirement.** If the same system assigns the courses, records a completion as a structured field, sends the reminders and reports completion by role or site, then its own report is the answer. When every record lives there, an agent workflow in front of it adds a queue to a system that already answered.
+
+**A small team and one course.** At two dozen people with one due date, a spreadsheet with a due-date column and a reminder is the honest answer. Nobody needs a pipeline to read it.
+
+Agent Swarm fits a different shape. The records sit in separate places: an LMS export, an HR roster, signed sheets from site sessions, certificates from vendor courses, a shift system at each site. The requirement itself changes by role or by site. Someone still has to put those sources side by side, and that person is the one being asked to prove the training happened. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative custom setup that a team configures and tests. It is not a built-in training or LMS integration, it does not ship prebuilt, it is not a customer result, and it does not determine legal or regulatory compliance.
+
+<Mermaid title="Illustrative training completion review flow, from one approved requirement, a roster and dated records to a human review decision." chart={`flowchart LR
+  A["Requirement version<br/>+ roster in scope<br/>+ dated completion records"] --> B["Collection scripts<br/>swarm-script to JSON"]
+  B --> C["Deterministic checks<br/>missing, late, superseded<br/>version, name mismatch"]
+  C --> D["Agent assembles<br/>source-linked review"]
+  D --> G{{"human-in-the-loop<br/>review owner"}}
+  G -- "confirm" --> R["Owner confirms<br/>completion"]
+  G -- "follow up or<br/>record exception" --> S["Owner requests<br/>evidence or logs<br/>an exception"]
+`} />
+
+**1. The team scopes one approved requirement version.** Which course or module, which roles or sites it applies to, the completion window or due date, and whether a refresher interval applies. A requirement with no due date or no version is reported as incomplete before anything is collected, because there is nothing to compare a record against.
+
+**2. Configured collection scripts read the three sources.** One step per source, each emitting JSON, so no model fetches a record or does date arithmetic. The scripts reach each system through [script connections](/docs/guides/script-connections), which register a system once as a connection or a credential binding, and the [credential broker](/docs/guides/scripts-credential-broker) substitutes the secret only for allowlisted hosts, so no key sits in a script's source or arguments. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents the split between deterministic collection and synthesis.
+
+**3. The comparison runs in code.** The checks flag a person with no completion record, a completion dated after the due date, a completion against an older version of the course, a completion older than the refresher interval, a name or employee ID that differs between roster and record, and a duplicate or conflicting record. A person on leave or a recent start date is listed for the owner's attention and never excluded by the workflow on its own authority. The same inputs produce the same flags on every run, and a change in the flags is a change in the sources or in the requirement.
+
+**4. An agent assembles the review.** Each line carries the roster's value, the record's value, a link to the record it came from and when that record was read. Anything it could not compare is listed with what is missing and who could supply it, rather than inferred from context.
+
+**5. A named owner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) stops the run, posts a summary with a link to the full review, and resumes when that person answers. The owner confirms a completion, requests follow-up, or records an exception with its reason. The workflow never marks anyone trained, never edits a record and never contacts an employee.
+
+## A fictional example
+
+Kestrelbridge Distribution is invented, and so are its people and its records. It is a facilities and distribution firm with warehouse staff across three sites and a small engineering team, and the review owner is Priya Raghunathan, its regional operations manager. Nothing below reports a real person, a real record or a measured result.
+
+The requirement is the 2027 annual safety refresher, version 4, due on 31 January 2027, for every warehouse role at all three sites and for the engineering team. The roster and the completion records were read on 12 February 2027. The addresses are illustrative placeholders, not real records.
+
+| Person | Record says | Requirement says | Flag | Source |
+| --- | --- | --- | --- | --- |
+| Warehouse operative, site 1 | No completion record | Version 4 by 31 January 2027 | No record at all for a person on the roster | `https://lms.kestrelbridge.example/exports/2027-refresher.csv` read 08:41 |
+| Warehouse operative, site 2 | Completed 4 February 2027 | Version 4 by 31 January 2027 | Completion is four days after the due date | `https://lms.kestrelbridge.example/exports/2027-refresher.csv` read 08:41 |
+| Shift lead, site 3 | Completed July 2023, version 2 | Version 4 by 31 January 2027 | Completion is against a superseded version | `https://lms.kestrelbridge.example/exports/2027-refresher.csv` read 08:41 |
+| Warehouse operative, site 1 | Certificate reads `J. Okonkwo` | Roster reads `Josephine Okonkwo` | Name on the certificate cannot be confirmed as the same person | `https://files.kestrelbridge.example/training/2027/okonkwo-certificate.pdf` read 08:44 |
+| Engineering technician | Completed 9 December 2026, version 4 | Version 4 by 31 January 2027 | No flag | `https://lms.kestrelbridge.example/exports/2027-refresher.csv` read 08:41 |
+
+What the review hands Raghunathan is the roster beside each record and the requirement's version and due date beside both, with a link and a read time behind every line. Each gap is named with the person or system that can close it. What it does not do is decide. Whether a late completion counts is her call. So is whether leave or a January start date justifies an exception, and whether the certificate's initial stands for the same person. A question about what the requirement legally obliges belongs to whoever owns compliance policy, or to counsel.
+
+## Limits and escalation
+
+**A record the scripts cannot reach is a gap, never an assumption.** A signed sheet left in a site office, a completion confirmed by phone to a supervisor, a vendor session nobody exported: all invisible to the workflow. A review that looks complete while missing one of those is worse than a review that names it, so each unreachable source is listed by name with the owner who could grant access.
+
+**A scan is copied, not read.** A sign-in sheet with an unreadable date, or a certificate that only exists as an image, is attached with its location and passed to the owner as unverified. The workflow does not read the date off a picture and does not infer a completion from a name that looks close enough.
+
+**The workflow does not judge whether the training content met any legal standard.** It compares a record against a requirement the team approved. Whether that requirement, or the course behind it, satisfies an obligation is outside what any script here can establish, and the review says so rather than implying compliance.
+
+**The requirement can move under the review.** A version reissued mid-window shows up as a difference in the flags. So does a due date extended or a role added to the scope. The change is recorded by whoever owns the requirement, never absorbed silently by the workflow.
+
+**Access is a written decision.** Who may read the LMS, the HR roster and the uploaded files, and who grants it, belongs in the team's governance record ([AI operations governance](/docs/playbooks/use-cases/ai-operations-governance)). Nobody is asked to paste a certificate into a thread instead.
+
+Stated plainly: no autonomous completion decisions and no record edits. The workflow contacts nobody and offers no legal or regulatory assurance. The run produces a review for a person, and the decision ends with that person.
+
+## Review checklist
+
+The review owner runs this before answering the review:
+
+- The requirement's version and due date were the ones in force on the review date, not a superseded copy.
+- Every person on the roster has a record, or a named gap with who can supply it.
+- Every completion date was read from the source, and the read time is on the line.
+- A completion against an older course version is treated as incomplete, not as close enough.
+- A name or employee ID difference is resolved against a second field before it is accepted.
+- Leave, a recent start date and a site transfer were considered for the people they affect.
+- Both the workflow and the review owner were authorized, per the access decision in the governance record, for every source the review used, and no record arrived by a paste outside it.
+- What was read, by whom and when is recorded against each source the review used.
+- The sign-off names one person, and the follow-up for each open gap has an owner.
+
+## What stays human-owned
+
+- **Deciding whether a completion satisfies the requirement.** No run ends with a person marked trained.
+- **Judging exceptions.** Leave, a recent start, a late completion and a role change are calls for the owner, with a reason recorded.
+- **Follow-up with a person or a manager.** The workflow drafts nothing sent to an employee and sends nothing.
+- **The compliance question**, including whether the training content or the requirement meets an obligation.
+- **Any change to a record in the source system.** Corrections happen where the record lives.
+
+## Building blocks
+
+Every piece here exists in agent-swarm today and has its own docs page. Pointing it at a training requirement is the part that has to be designed.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): the `swarm-script` and `script-run` pattern for deterministic JSON collection, and the synthesis that follows it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the `human-in-the-loop` node, its approve and reject paths, its timeout, and the message it posts.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a collection step reaches an LMS, an HR system or a document store with no raw secret in source.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, role permissions and approval thresholds, written down.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): which option fits your team.

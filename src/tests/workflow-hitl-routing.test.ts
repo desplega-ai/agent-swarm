@@ -129,6 +129,19 @@ const mockDeps: ExecutorDependencies = {
   interpolate: (t: string) => t,
 };
 
+/** Store the answer on the request row, as the respond route does before it emits. */
+async function storeAnswer(
+  requestId: string,
+  status: "approved" | "rejected" | "timeout" | "cancelled",
+  responses: Record<string, unknown> | null,
+): Promise<void> {
+  if (status === "cancelled") {
+    await db.cancelApprovalRequestById(requestId, { reason: "test", resolvedBy: null });
+  } else {
+    await db.resolveApprovalRequest(requestId, { status, responses });
+  }
+}
+
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
@@ -154,11 +167,21 @@ async function stepIsWaiting(runId: string, nodeId: string, notStepId?: string):
  * Helper: creates a workflow with a HITL node that has port-based routing,
  * starts it, waits for it to go async, then emits an approval event.
  * Returns the run ID and step details for verification.
+ *
+ * `notify` sends a misleading approval.resolved for the step before the answer
+ * is stored: one naming its still-pending request ("pending"), or one naming a
+ * resolved request bound to another step ("foreign"), each carrying `status`.
+ * `eventStatus` makes the real event's payload disagree with the stored answer.
+ * The step must route only on the stored request bound to it.
  */
 async function runHITLWorkflow(
   approvalStatus: "approved" | "rejected" | "timeout" | "cancelled",
   eventBus: InProcessEventBus,
   registry: ExecutorRegistry,
+  opts: {
+    notify?: { request: "pending" | "foreign"; status: "approved" | "rejected" | "timeout" };
+    eventStatus?: "approved" | "rejected" | "timeout";
+  } = {},
 ) {
   const def: WorkflowDefinition = {
     nodes: [
@@ -196,11 +219,36 @@ async function runHITLWorkflow(
   const requestId = hitlExecutor.lastRequestId!;
   expect(requestId).toBeTruthy();
 
+  if (opts.notify) {
+    let notifiedId = requestId;
+    if (opts.notify.request === "foreign") {
+      notifiedId = crypto.randomUUID();
+      await db.createApprovalRequest({
+        id: notifiedId,
+        title: "Another step's card",
+        questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
+        approvers: { policy: "any" },
+        workflowRunId: runId,
+        workflowRunStepId: steps.find((s) => s.nodeId === "start")!.id,
+      });
+      await storeAnswer(notifiedId, opts.notify.status, { q1: true });
+    }
+    eventBus.emit("approval.resolved", {
+      requestId: notifiedId,
+      status: opts.notify.status,
+      responses: { q1: true },
+      workflowRunId: runId,
+      workflowRunStepId: reviewStep!.id,
+    });
+  }
+
   // Emit approval.resolved event — this triggers resumeFromApprovalResolution
+  await storeAnswer(requestId, approvalStatus, approvalStatus === "approved" ? { q1: true } : null);
+  const eventStatus = opts.eventStatus ?? approvalStatus;
   eventBus.emit("approval.resolved", {
     requestId,
-    status: approvalStatus,
-    responses: approvalStatus === "approved" ? { q1: true } : null,
+    status: eventStatus,
+    responses: eventStatus === "approved" ? { q1: true } : null,
     workflowRunId: runId,
     workflowRunStepId: reviewStep!.id,
   });
@@ -250,7 +298,10 @@ describe("HITL port-based routing", () => {
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
     setupWorkflowResumeListener(eventBus, registry);
 
-    const { runId } = await runHITLWorkflow("approved", eventBus, registry);
+    // A notification for the still-pending card must not route the step.
+    const { runId } = await runHITLWorkflow("approved", eventBus, registry, {
+      notify: { request: "pending", status: "rejected" },
+    });
 
     const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
@@ -275,7 +326,10 @@ describe("HITL port-based routing", () => {
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
     setupWorkflowResumeListener(eventBus, registry);
 
-    const { runId } = await runHITLWorkflow("rejected", eventBus, registry);
+    // The stored answer wins over an event payload that disagrees with it.
+    const { runId } = await runHITLWorkflow("rejected", eventBus, registry, {
+      eventStatus: "approved",
+    });
 
     const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
@@ -291,6 +345,7 @@ describe("HITL port-based routing", () => {
     // Should NOT have the approved or timeout paths
     expect(stepNodeIds).not.toContain("deploy");
     expect(stepNodeIds).not.toContain("notify-timeout");
+    expect(steps.find((s) => s.nodeId === "review")!.output).toMatchObject({ status: "rejected" });
   });
 
   test("cancelled → routes to no port; the step stays waiting", async () => {
@@ -321,7 +376,10 @@ describe("HITL port-based routing", () => {
     registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
     setupWorkflowResumeListener(eventBus, registry);
 
-    const { runId } = await runHITLWorkflow("timeout", eventBus, registry);
+    // A resolved card bound to another step must not route this one.
+    const { runId } = await runHITLWorkflow("timeout", eventBus, registry, {
+      notify: { request: "foreign", status: "approved" },
+    });
 
     const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
@@ -387,6 +445,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question
+    await storeAnswer(requestId1, "rejected", null);
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -420,6 +479,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1); // Different request
 
     // APPROVE — should go to success
+    await storeAnswer(requestId2, "approved", { q1: true });
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -504,6 +564,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question (async)
+    await storeAnswer(requestId1, "rejected", null);
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -551,6 +612,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1);
 
     // APPROVE — should go to success
+    await storeAnswer(requestId2, "approved", { q1: true });
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",

@@ -74,6 +74,7 @@ export async function prepareStandaloneScheduleTask(
       model: schedule.model,
       modelTier: schedule.modelTier,
       profile: schedule.profile,
+      modelGroup: schedule.modelGroup,
       scheduleId: schedule.id,
       source: "schedule",
       requestedByUserId: schedule.createdBy,

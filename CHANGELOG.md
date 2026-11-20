@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-11-20
+
+### Added
+- Models: model groups resolve at `send-task`, schedules, workflows and claim, and provider-error fallbacks hop through the group order (#3396).
+- Follow-ups: `FOLLOW_UP_GATE_MODE=enforce` lets schedules listed in `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS` skip a follow-up the verifier marks `would_skip`; every other outcome keeps the follow-up (#3479).
+- Workflows: code-match nodes and string wait filters run in QuickJS (#3463), limited to config interpolation sources (#3476).
+- Slack: `SLACK_REPLY_FOOTER_ENABLED=false` hides the task details footer on replies (#3448).
+
+### Changed
+- agent-fs pins bumped 0.18.34 -> 0.18.35.
+- Dependencies: non-harness npm deps bumped to versions at least 7 days old (#3475); claude-code, cursor, amp, gemini and kiro worker harness bumps (#3444, #3461); vulnerable docs-site dependencies bumped (#3446); Dependabot runs weekly bun and docs-site npm updates with a 7-day cooldown (#3467).
+- Performance: `db-query` skips scrub rules a clean row cannot trigger (#3450).
+- Prompts: the merge policy lines separate agent hand-merge from swarm auto-merge (#3435).
+- Docs: a user MCP guide for ChatGPT, Claude, Codex, Cursor and Grok (#3449); TLA+ specs synced (#3447); skill seed patches (#3443); playbook link order fix (#3452).
+
+### Fixed
+- Security: identity routes without a swarm key require a user or operator principal (#3445); a stored `CLAUDE_BINARY` stays out of the API process env (#3451); `PUT /api/repos/{id}` declares `repo.exec-config.write` (#3477); Docker auto-clone skips paths that start with a dash (#3439).
+- Workflows: script nodes are refused when `SCRIPT_EXECUTOR` is quickjs (#3480); system-one-extraction accepts null spans (#3442, #3474).
+- Scripts: native args schema extraction is skipped on quickjs deployments (#3436); schedule script arguments must be JSON objects (#3459).
+- UI: Sessions show work in time order with Lead follow-up answers (#3434); keyboard access for the phone session tree (#3460) and Kanban card actions (#3407); the selected schedule execution type is shown (#3458).
+- Providers: amp names a model on the plugin agent mode instead of `extends` (#3462).
+- Worker: Husky install uses the version-appropriate command (#3454).
+- Tests: retention-defaults boot retries on a taken port (#3464); Linear outbound tests wait for handlers (#3440); UI e2e waits for the composer and retries `route.fetch` on socket resets (#3437, #3478); the worktree reaper git fixture is scoped (#3453).
+
 ## [2.14.0] - 2026-11-19
 
 ### Added
