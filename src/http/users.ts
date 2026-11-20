@@ -269,6 +269,13 @@ const listUsers = route({
   auth: { apiKey: true },
 });
 
+// User and identity admin can mint a grant-all admin (every new user gets the
+// admin role) or bind a chat identity to one, so a scoped `user.manage` grant
+// must not admit it. No verb keeps admission grant-all only, like the
+// mcp-token routes.
+const USER_ADMIN_UNGATED =
+  "creates users or binds identities, which can reach a grant-all admin (operator-only admission)";
+
 const createUserRoute = route({
   method: "post",
   path: "/api/users",
@@ -301,7 +308,7 @@ const createUserRoute = route({
     409: { description: "A user with this email already exists (user_exists)" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const listUnmapped = route({
@@ -357,7 +364,7 @@ const resolveUnmapped = route({
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const DISMISS_RBAC = {
@@ -474,7 +481,7 @@ const updateUserRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const mintUserMcpTokenRoute = route({
@@ -718,7 +725,7 @@ const mergeUsersRoute = route({
     },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const listMergeJobsRoute = route({
@@ -804,7 +811,7 @@ const addIdentityRoute = route({
     409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const deleteIdentityRoute = route({
@@ -823,7 +830,7 @@ const deleteIdentityRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "user.manage" },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
