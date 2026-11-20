@@ -168,7 +168,7 @@ export const slackLeadFollowUpCard: Scenario = {
     // delegation is off, so this card is the only place people see them. A
     // link the Lead's answer already carries is not repeated.
     const reportUrl = `https://docs.example.test/report-${ctx.nonce}`;
-    const prUrl = `https://github.com/example/repo/pull/${ctx.nonce}`;
+    const prUrl = `https://github.com/example/repo-${ctx.nonce}/pull/42`;
     const quotedUrl = `https://docs.example.test/quoted-${ctx.nonce}`;
     const posted = await delegatedAsk(ctx, GENERAL, workerId, "posted", {
       output: `posted worker result ${ctx.nonce}: opened ${prUrl}. Notes at ${quotedUrl}.`,
@@ -194,6 +194,14 @@ export const slackLeadFollowUpCard: Scenario = {
       deliverables,
       `The follow-up card does not list the worker's attachment and output link once each: ${JSON.stringify(threadMessages(ctx, GENERAL, posted.threadTs, postedOutput))}`,
     );
+    // Each link is a short label with a type icon under a "Links:" heading.
+    for (const needle of [`Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`, `🔀 <${prUrl}|PR #42>`]) {
+      const shown = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, needle);
+      expect(
+        shown === 1,
+        `The follow-up card shows ${JSON.stringify(needle)} ${shown} times, expected 1`,
+      );
+    }
     const quoted = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, quotedUrl);
     expect(
       quoted === 0,
@@ -567,6 +575,11 @@ export const slackLeadFollowUpCard: Scenario = {
           count(internalUrl) === 0 &&
           count(spoofedShareUrl) === 0,
         `The Slack Connect card must list only the share link: share=${count(shareUrl)} app=${count(appFileUrl)} internal=${count(internalUrl)} spoofed=${count(spoofedShareUrl)}`,
+      );
+      const shareLabel = `Links: 🔗 <${shareUrl}|Shared file>`;
+      expect(
+        count(shareLabel) === 1,
+        `The Slack Connect card does not label the share link as ${JSON.stringify(shareLabel)}`,
       );
       const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
         "SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",

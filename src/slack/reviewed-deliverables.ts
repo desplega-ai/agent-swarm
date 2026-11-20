@@ -1,7 +1,12 @@
 import type { WebClient } from "@slack/web-api";
 import { getAgentById, getTaskById } from "../be/db";
-import type { AgentTask } from "../types";
-import { getAgentFsLiveUrl, getPublicMcpBaseUrl, isAgentFsProxyEnabled } from "../utils/constants";
+import type { AgentTask, TaskAttachment } from "../types";
+import {
+  getAgentFsLiveUrl,
+  getAppUrl,
+  getPublicMcpBaseUrl,
+  isAgentFsProxyEnabled,
+} from "../utils/constants";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { getTaskUrl } from "./blocks";
 import { getChannelExternality } from "./external-channel";
@@ -9,13 +14,17 @@ import { getSlackOutputAttachments } from "./task-attachments";
 
 /** Most links one card lists; the rest are counted under "+N more". */
 const MAX_DELIVERABLE_LINKS = 6;
-const MAX_LINK_LABEL_LENGTH = 60;
+const MAX_LINK_LABEL_LENGTH = 40;
 const OUTPUT_URL_PATTERN = /https?:\/\/[^\s<>()[\]{}"'`|]+/g;
 // An agent-fs public share page (`/share/<token>`) or shared folder site
 // (`/site/<token>/`), on the agent-fs host or the API's proxy of it.
 const PUBLIC_SHARE_PATH = /^\/(?:share|site)\/[^/]+/;
 
-export type DeliverableLink = { url: string; label: string };
+const VIDEO_EXTENSION = /\.(?:mp4|mov|webm|m4v|mkv)$/i;
+const VIDEO_HOSTS = new Set(["youtube.com", "youtu.be", "loom.com", "vimeo.com"]);
+
+/** `icon` is a Unicode emoji, which Slack renders in mrkdwn. */
+export type DeliverableLink = { url: string; label: string; icon: string };
 
 function urlOrigin(url: string | undefined): string | undefined {
   if (!url?.trim()) return undefined;
@@ -58,11 +67,72 @@ export function outputLinks(text: string): string[] {
   );
 }
 
-function linkLabel(url: string): string {
-  const bare = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  return bare.length <= MAX_LINK_LABEL_LENGTH
-    ? bare
-    : `${bare.slice(0, MAX_LINK_LABEL_LENGTH - 1)}…`;
+function truncate(label: string): string {
+  return label.length <= MAX_LINK_LABEL_LENGTH
+    ? label
+    : `${label.slice(0, MAX_LINK_LABEL_LENGTH - 1)}…`;
+}
+
+function decoded(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/** `host/last-segment`, with `…` for the segments between. */
+function shortUrlLabel(parsed: URL): string {
+  const host = parsed.hostname.replace(/^www\./, "");
+  const segments = parsed.pathname.split("/").filter(Boolean).map(decoded);
+  if (segments.length === 0) return host;
+  return `${host}/${segments.length > 1 ? "…/" : ""}${segments.at(-1)}`;
+}
+
+/**
+ * A short label and a type icon for a deliverable: an attachment keeps its
+ * own name, a bare link gets one from its URL (a file name, `Page`). A GitHub
+ * PR or issue is always `PR #12` / `Issue #12`.
+ */
+function describeLink(url: string, attachment?: TaskAttachment): Omit<DeliverableLink, "url"> {
+  const name = attachment?.name.replace(/\s+/g, " ").trim();
+  const labelled = (icon: string, fallback: string) => ({
+    icon,
+    label: truncate(name || fallback),
+  });
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return labelled("🔗", url);
+  }
+  const host = parsed.hostname.replace(/^www\./, "");
+  const path = parsed.pathname;
+  const fileName = decoded(path.split("/").filter(Boolean).at(-1) ?? "") || shortUrlLabel(parsed);
+  const github = host === "github.com" ? path.match(/^\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/) : null;
+  // The server names its own PR attachments "GitHub pull request #N": always use the short form.
+  if (github) {
+    const pull = github[1] === "pull";
+    return { icon: pull ? "🔀" : "🎫", label: `${pull ? "PR" : "Issue"} #${github[2]}` };
+  }
+  if (attachment?.mimeType?.startsWith("video/") || VIDEO_EXTENSION.test(path)) {
+    return labelled("🎬", fileName);
+  }
+  if (VIDEO_HOSTS.has(host)) return labelled("🎬", "Video");
+  if (isPublicShareUrl(url)) {
+    return labelled("🔗", path.startsWith("/site/") ? "Shared site" : "Shared file");
+  }
+  const appPage = parsed.origin === urlOrigin(getAppUrl()) && /^\/pages\/[^/]+\/?$/.test(path);
+  if (attachment?.kind === "page" || appPage) return labelled("📃", "Page");
+  if (
+    attachment?.kind === "agent-fs" ||
+    attachment?.kind === "shared-fs" ||
+    attachment?.providerId === "agent-fs" ||
+    path.includes("/file/~/")
+  ) {
+    return labelled("📄", fileName);
+  }
+  return labelled("🌐", shortUrlLabel(parsed));
 }
 
 function linkKey(url: string): string {
@@ -102,11 +172,10 @@ export async function reviewedTaskDeliverables(
   const candidates: DeliverableLink[] = [];
   for (const attachment of await getSlackOutputAttachments(reviewed.id)) {
     const url = taskAttachmentDisplayUrl(attachment);
-    const label = attachment.name.replace(/\s+/g, " ").trim() || linkLabel(url);
-    candidates.push({ url, label });
+    candidates.push({ url, ...describeLink(url, attachment) });
   }
   for (const url of outputLinks(reviewed.output ?? "")) {
-    candidates.push({ url, label: linkLabel(url) });
+    candidates.push({ url, ...describeLink(url) });
   }
   if (candidates.length === 0) return none;
 

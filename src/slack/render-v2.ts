@@ -1502,7 +1502,7 @@ async function recordSlackDelivery(
   });
 }
 
-function linkCaption(url: string, name: string): string | undefined {
+function linkCaption(url: string, name: string, icon = "📎"): string | undefined {
   if (!/^https?:\/\//.test(url)) return undefined;
   const label = name
     .replace(/\s+/g, " ")
@@ -1512,7 +1512,7 @@ function linkCaption(url: string, name: string): string | undefined {
     .replace(/>/g, "&gt;");
   // Keep the mrkdwn link destination intact without changing existing URL escapes.
   const destination = url.replace(/[\s\\<>|]/g, encodeURIComponent);
-  return `📎 <${destination}|${label}>`;
+  return `${icon} <${destination}|${label}>`;
 }
 
 /** The task's own card: its Slack blocks and the text that stands in for them. */
@@ -1592,7 +1592,7 @@ async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<u
     getSlackApp()?.client,
   );
   const reviewedItems = reviewed.links
-    .map((link) => linkCaption(link.url, link.label))
+    .map((link) => linkCaption(link.url, link.label, link.icon))
     .filter((item): item is string => !!item);
   if (reviewed.omitted > 0) {
     const more = `+${reviewed.omitted} more`;
@@ -1601,9 +1601,7 @@ async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<u
   return [
     ...sources,
     attachment ? buildCaptionBlock([attachment]) : undefined,
-    reviewedItems.length > 0
-      ? buildCaptionBlock(reviewedItems, { heading: "From the worker" })
-      : undefined,
+    reviewedItems.length > 0 ? buildCaptionBlock(reviewedItems, { heading: "Links" }) : undefined,
   ].filter(Boolean);
 }
 
