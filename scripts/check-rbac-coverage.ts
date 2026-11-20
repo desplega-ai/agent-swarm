@@ -316,7 +316,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/session-logs": BACKLOG_REASON,
   "POST /api/tasks/{id}/context": BACKLOG_REASON,
   "POST /api/tasks/{id}/finish": BACKLOG_REASON,
-  "POST /api/tasks/{id}/progress": BACKLOG_REASON,
   "POST /api/tasks/{id}/supersede": BACKLOG_REASON,
   "POST /api/trackers/jira/refresh": BACKLOG_REASON,
   "POST /api/trackers/jira/webhook/{token}": BACKLOG_REASON,
