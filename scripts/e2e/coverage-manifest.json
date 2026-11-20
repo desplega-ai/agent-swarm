@@ -231,7 +231,11 @@
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
-        "divergence-text-order"
+        "divergence-text-order",
+        "divergence-concurrent-schedule-claim",
+        "stress-poll-claim",
+        "divergence-retention",
+        "divergence-db-query-denial"
       ]
     },
     "caller-scoped-writes": {
