@@ -136,6 +136,7 @@ const previewRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "read-only render over POST; open to agents like the prompt-template tools" },
 });
 
 const renderRoute = route({
@@ -155,6 +156,7 @@ const renderRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "read-only render over POST; open to agents like the prompt-template tools" },
 });
 
 const checkoutRoute = route({
