@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { deletePromptTemplate, getPromptTemplateById } from "@/be/db";
+import { deletePromptTemplate, getAgentById, getPromptTemplateById } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeletePromptTemplateTool = (server: McpServer) => {
@@ -28,6 +29,26 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
         const existing = await getPromptTemplateById(id);
         if (!existing) {
           return toolErr(`Prompt template "${id}" not found.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
+        }
+
+        const agent = await getAgentById(requestInfo.agentId);
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "prompt-template.write",
+          resource: {
+            kind: "owned",
+            ownerAgentId: existing.scope === "agent" ? existing.scopeId : null,
+          },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          return toolErr("Only a lead can delete global or repo templates, or another agent's.", {
             data: { yourAgentId: requestInfo.agentId },
           });
         }
