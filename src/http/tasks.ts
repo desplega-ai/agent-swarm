@@ -708,6 +708,7 @@ const updateTaskProgressRoute = route({
   session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
+  rbac: { permission: "task.progress.write" },
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
