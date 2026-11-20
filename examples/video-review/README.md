@@ -15,7 +15,8 @@ Guide: https://docs.agent-swarm.dev/docs/guides/video-review
 ## Local page
 
 Open https://video-edit.agent-swarm.dev, or open `index.html` from a clone. One HTML file: no server, no build, no
-dependency, no request to another origin.
+dependency. The video and the comments never leave the browser. The public site counts visits with Plausible. A
+clone or a `file://` copy makes no request to another origin.
 
 1. Choose a video, or drop a file on the page. The video is read through a blob URL. It stays on your computer.
 2. Set the frame rate before you choose the file (default 30, or `?fps=24` in the URL). It sets the length of one

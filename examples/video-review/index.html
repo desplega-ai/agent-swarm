@@ -2,9 +2,34 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Video review</title>
+<title>Video Review: frame-exact feedback for your agent</title>
 <meta name="description" content="Leave comments on a video: ranges on a timeline, marks on the picture, a JSON export for your agent. The video stays on your computer.">
-<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://video-edit.agent-swarm.dev/">
+<link rel="icon" type="image/png" href="logo.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agent Swarm">
+<meta property="og:url" content="https://video-edit.agent-swarm.dev/">
+<meta property="og:title" content="Video Review: frame-exact feedback for your agent">
+<meta property="og:description" content="Mark ranges on a timeline, draw on the picture, and hand the notes to your agent as JSON. The video stays on your computer.">
+<meta property="og:image" content="https://video-edit.agent-swarm.dev/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Video Review by Agent Swarm: comment on a video at exact frames, hand the notes to your agent">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Video Review: frame-exact feedback for your agent">
+<meta name="twitter:description" content="Mark ranges on a timeline, draw on the picture, and hand the notes to your agent as JSON. The video stays on your computer.">
+<meta name="twitter:image" content="https://video-edit.agent-swarm.dev/og.png">
+<script>
+// Visit counts (Plausible) on the public site only. A clone or a file:// copy makes no request to another origin.
+// The video and the comments are never sent: the page gives Plausible no data about them.
+if (location.hostname === 'video-edit.agent-swarm.dev') {
+  document.head.append(Object.assign(document.createElement('script'), { async: true, src: 'https://plausible.io/js/pa-OiR6agmjcKKXw6J19_izz.js' }));
+  window.plausible = window.plausible || function () { (plausible.q = plausible.q || []).push(arguments); };
+  plausible.init = plausible.init || function (i) { plausible.o = i || {}; };
+  plausible.init();
+}
+</script>
 <style>
   :root { --bg:#101113; --panel:#191b1f; --panel2:#14161a; --line:#2c2f36; --text:#e9eaed; --dim:#8d929c; --accent:#f59e0b; --c:transparent; }
   * { box-sizing: border-box; scrollbar-width: none; }
@@ -110,6 +135,7 @@
   #drop { width: min(560px, 100%); padding: 34px 30px 26px; border: 2px dashed #3d414b; border-radius: 12px; background: var(--panel);
           display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
   #start.over #drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+  #drop img { width: 44px; height: 44px; }
   #drop h2 { margin: 0; font-size: 20px; }
   #drop p { margin: 0; color: var(--dim); max-width: 44ch; }
   #choose { background: var(--accent); border-color: var(--accent); color: #16181c; font-weight: 700; font-size: 15px; padding: 9px 20px; }
@@ -202,7 +228,8 @@
 </aside>
 <div id="start" hidden>
   <div id="drop">
-    <h2>Video review</h2>
+    <img src="logo.png" alt="Agent Swarm">
+    <h2>Video Review</h2>
     <p>Mark ranges on the timeline, draw on the picture, write what must change. Then give the JSON to your agent.</p>
     <button id="choose">Choose a video</button>
     <p>or drop a file anywhere on this page</p>
@@ -211,6 +238,7 @@
     <footer>
       <a href="https://docs.agent-swarm.dev/docs/guides/video-review" target="_blank" rel="noopener">Guide</a>
       <a href="https://github.com/desplega-ai/agent-swarm/tree/main/examples/video-review" target="_blank" rel="noopener">Source</a>
+      <a href="https://www.agent-swarm.dev" target="_blank" rel="noopener">by Agent Swarm</a>
     </footer>
   </div>
   <input id="file" type="file" accept="video/*,.mkv" hidden>
@@ -236,7 +264,7 @@
 const query = new URLSearchParams(location.search);
 const CFG = window.REVIEW || {};
 let PROJECT = CFG.project || 'video';
-const TITLE = CFG.title || 'Video review';
+const TITLE = CFG.title || 'Video Review';
 let FPS = +query.get('fps') || CFG.fps || 24;
 const configUrl = new URL(query.get('config') || '.', location.href);
 const SOURCES = (CFG.sources || []).map(x => ({ ...x, src: new URL(x.src, configUrl).href }));
