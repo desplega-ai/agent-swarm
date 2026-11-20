@@ -55,6 +55,8 @@ API_KEY=your-secret-api-key
 HARNESS_PROVIDER=claude
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
 AGENT_SWARM_VERSION=1.150.0                # Pin a release. Blank tracks `:latest` — see Step 4
+MINIO_ROOT_USER=agentfs                    # MinIO login, also agent-fs's storage key
+MINIO_ROOT_PASSWORD=                       # Run `openssl rand -hex 24` and paste here
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
