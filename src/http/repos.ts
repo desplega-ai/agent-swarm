@@ -102,7 +102,9 @@ const updateRepo = route({
     404: { description: "Repo not found", schema: z.object({ error: z.string() }) },
     409: { description: "Duplicate repo", schema: z.object({ error: z.string() }) },
   },
-  rbac: { permission: "repo.merge-policy.write" },
+  // `url`, `clonePath` and `hooks` changes gate on `repo.exec-config.write` instead; the
+  // handler decides per changed field inside the update transaction.
+  rbac: { permission: "repo.merge-policy.write", alsoAdmits: ["repo.exec-config.write"] },
 });
 
 const deleteRepo = route({
