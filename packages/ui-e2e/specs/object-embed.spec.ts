@@ -123,7 +123,8 @@ test("ObjectEmbed sheet: an edited cell saves, recalculates and survives a reloa
     await editor.press("Escape");
 
     await page.reload();
-    await expect(a2).toHaveText("21");
+    // Reload loads the app, sheet chunk and virtualized grid before cells exist.
+    await expect(a2).toHaveText("21", { timeout: 10_000 });
     await expect(b2).toHaveText("42");
     await clean.assertClean();
   } finally {
