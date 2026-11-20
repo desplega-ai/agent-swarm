@@ -33,7 +33,10 @@ const addChecklistItem = route({
   pattern: ["api", "checklist", "items"],
   summary: "Add a checklist item",
   tags: ["Checklist"],
-  rbac: { permission: "checklist.write.own" },
+  rbac: {
+    permission: "checklist.write.own",
+    alsoAdmits: ["checklist.write.agent", "config.write.any"],
+  },
   body: z.object({
     kind: z.enum(["channel", "tool", "use_case", "custom"]),
     label: z.string().min(1).max(200),
@@ -67,7 +70,10 @@ const patchChecklistItem = route({
   pattern: ["api", "checklist", "items", null],
   summary: "Update a checklist item",
   tags: ["Checklist"],
-  rbac: { permission: "checklist.write.own" },
+  rbac: {
+    permission: "checklist.write.own",
+    alsoAdmits: ["checklist.write.agent", "config.write.any"],
+  },
   params: z.object({ id: z.string() }),
   body: z
     .object({
