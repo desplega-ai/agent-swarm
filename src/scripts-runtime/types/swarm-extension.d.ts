@@ -75,6 +75,7 @@ declare module "swarm-extension" {
     modelTier?: "smol" | "regular" | "smart" | "ultra" | undefined;
     effort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
+    modelGroup?: string | undefined;
     fallbackHops?:
       | {
           from: string;
@@ -264,6 +265,7 @@ declare module "swarm-extension" {
     resolvedEffort?: "low" | "medium" | "high" | "max" | "off" | "xhigh" | undefined;
     profile?: string | undefined;
     resolvedProfile?: string | undefined;
+    modelGroup?: string | undefined;
     fallbackHops?:
       | {
           from: string;

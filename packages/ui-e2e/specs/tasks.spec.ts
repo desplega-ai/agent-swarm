@@ -13,6 +13,12 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks");
 
+  // Other specs can leave newer tasks above the seed in the virtualized grid.
+  // Fill once: the box mirrors the URL `search` param, and a second fill can
+  // append to the first value and filter the list to zero rows.
+  const search = page.getByPlaceholder("Search by description or ID...");
+  await search.fill(TASK_PROMPT);
+  await expect(search).toHaveValue(TASK_PROMPT);
   const row = page.getByRole("row", { name: new RegExp(TASK_PROMPT) });
   await expect(row).toBeVisible();
   await expect(row.getByText("IN PROGRESS")).toBeVisible();
@@ -30,6 +36,35 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
   await clean.assertClean();
+});
+
+test("fenced code uses the message column on Sessions and Tasks", async ({ page, api, seed }) => {
+  test.skip(!seed, "remote run without seed");
+  const { id } = await api.post<{ id: string }>("/api/tasks", {
+    task: [
+      "add",
+      "```",
+      "<script async src='https://example.org/analytics.js'></script>",
+      "```",
+      "please",
+    ].join("\n"),
+    source: "ui",
+    requestedByUserId: seed!.user.id,
+  });
+  for (const [route, label] of [
+    ["sessions", "Your message"],
+    ["tasks", "Task prompt"],
+  ]) {
+    await page.goto(`/${route}/${id}`);
+    const row = page.getByRole("region", { name: label, exact: true }).filter({ visible: true });
+    const snippet = row.locator("[data-monaco-snippet]");
+    await expect(snippet).toBeVisible();
+    // Allow room for the avatar and padding, but catch a block sized only by "please".
+    const rowWidth = (await row.boundingBox())!.width;
+    const snippetWidth = (await snippet.boundingBox())!.width;
+    expect(snippetWidth).toBeGreaterThan(rowWidth - 100);
+    expect(snippetWidth).toBeLessThanOrEqual(rowWidth);
+  }
 });
 
 test.describe("below the 60rem page-width switch (tabs layout)", () => {

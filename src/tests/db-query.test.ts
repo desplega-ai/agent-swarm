@@ -351,8 +351,11 @@ describe("db-query bounded execution (Fix 1)", () => {
   test("D: caps the serialized payload at maxRows, not at the full match count, for a large result set", async () => {
     const db = getDb();
     db.run("CREATE TABLE codex_cap_test (id INTEGER PRIMARY KEY)");
-    const insert = db.prepare("INSERT INTO codex_cap_test DEFAULT VALUES");
-    for (let i = 0; i < 20_000; i++) insert.run();
+    // One statement = one commit. 20k autocommitted inserts fsync 20k times and
+    // blocked the main thread for 26s on a loaded CI runner (hang-watchdog kill).
+    db.run(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO codex_cap_test (id) SELECT i FROM n",
+    );
 
     const result = await executeReadOnlyQueryBounded("SELECT id FROM codex_cap_test", [], 5000, 3);
     expect(result.total).toBe(20_000);
@@ -402,8 +405,9 @@ describe("db-query bounded execution (Fix 1)", () => {
   test("F: /api/db-query caps rows at the new default and still reports the true total", async () => {
     const db = getDb();
     db.run("CREATE TABLE http_cap_test (id INTEGER PRIMARY KEY)");
-    const insert = db.prepare("INSERT INTO http_cap_test DEFAULT VALUES");
-    for (let i = 0; i < 1500; i++) insert.run();
+    db.run(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500) INSERT INTO http_cap_test (id) SELECT i FROM n",
+    );
 
     let server: Server | undefined;
     try {

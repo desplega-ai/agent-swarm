@@ -1,0 +1,98 @@
+---
+title: 'Preparing a batch traceability packet for a mock recall with AI agents'
+description: "Agent Swarm can assemble a source-linked traceability packet for a human-led mock recall exercise."
+agent:
+  offer: false
+  when: "Someone wants operations and food safety to run a mock recall traceability exercise for one ingredient lot"
+---
+
+Agent Swarm can help operations and food-safety teams assemble a source-linked traceability packet for a human-led mock recall exercise, when the records that answer it sit in several systems. Configured steps collect the supplier's lot documents, the receiving log, the batch records that consumed the lot and the shipments that carried those batches, trace the lot forward and backward, and put one packet in front of named food-safety and operations owners. Those owners validate the trace, decide what each finding means and record what has to change. What the workflow takes off the team is the assembly: chasing one lot's evidence across four systems inside an exercise that has a date on it.
+
+The scope is one fictional ingredient lot in a mock exercise. People validate the traceability result and decide every action; no live recall decision comes out of it. Three neighbouring jobs have their own guides: [reviewing a supplier's changed ingredient specification](/docs/playbooks/use-cases/food-supplier-ingredient-change-review), [periodic supplier performance](/docs/playbooks/use-cases/supplier-performance-review), and [inventory exceptions](/docs/playbooks/use-cases/ai-inventory-exception-handoff).
+
+## When another tool fits better
+
+Two established options cover this ground.
+
+**A purpose-built food traceability, ERP or lot-tracking system that already links lots end to end.** If one system holds the received lot, the batch that consumed it and the shipment that carried that batch, it answers a mock recall query from its own records, with its own audit trail. Agent Swarm ships no traceability module, no lot database, no recall tool and no regulatory template.
+
+**A qualified food-safety person working from the existing records, when the records are few or in one place.** For one lot whose paperwork lives in a single folder, a person who knows the product traces it by hand. An exercise that fits in a sitting does not need a workflow; routing it through one adds a step without evidence.
+
+Agent Swarm fits a different shape: the records are apart. The supplier's certificates arrive by email, receiving logs sit in a warehouse system, batch records in a production system, and shipments in a distribution system or a freight provider's portal. No single person holds the whole chain, and the exercise turns into chasing exports from four teams. Assembling the pieces is the work. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in food feature, not an integration and not a customer result. The supplier, the ingredient and the lot code below are invented, and every connection and comparison rule is custom configuration your team builds and tests, through [script connections](/docs/guides/script-connections) with credentials taken from the [credential broker](/docs/guides/scripts-credential-broker).
+
+<Mermaid title="Illustrative mock recall traceability exercise, from written scope and rules to a human response at a gate." chart={`flowchart LR
+  A["Exercise scope and rules<br/>(one lot, date window,<br/>systems in scope,<br/>what counts as broken)"] --> B["Deterministic collection<br/>(supplier, receiving,<br/>production, distribution<br/>records, JSON)"]
+  B --> C["Deterministic lot-link check<br/>(forward and backward)"]
+  C --> D["Agent writes the<br/>dated source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>food-safety and<br/>operations owners"}}
+  G -- "owners record findings" --> R["Findings and fixes<br/>recorded against<br/>the exercise"]
+  G -- "a link is missing" --> S["Request the missing<br/>record from its owner"]
+`} />
+
+**1. The owners write the exercise scope and rules first.** Before anything is collected, the food-safety and operations owners state the lot under test, the date window the exercise covers, which systems are in scope, and what counts as a broken or conflicting link: a receipt with no consuming batch, a batch with no shipment, a quantity that disagrees between two systems, a shipment dated before the batch that produced it. The rules belong in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record, so the next exercise starts from the same version.
+
+**2. Collection runs as a deterministic step.** A `swarm-script` step collects the four record sets and emits JSON, so the same inputs produce the same records and no model chooses which file to open. In the example, a fictional mill, Marrowfield Mills, ships a stoneground wheat flour under lot code MF-2291-L: the certificate of analysis, the receiving entry with its date and quantity, the batches that drew on the lot, and the shipments that carried them. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-first pattern.
+
+**3. The lot-link check runs in code.** The script traces the lot forward from receipt to the batches that consumed it and the shipments that carried them, and backward from each shipment to its batch and its receipt. It matches on the lot code and the quantities the records state, against the owners' rules. Code does the matching, not the agent, so the result stays repeatable when someone asks why a link was flagged.
+
+**4. An agent writes the packet.** The agent turns the checked JSON into one document: each lot link with its source record and that record's date, and every gap or conflict named with the two records that disagree. It does not decide which record is right and does not fill a missing link with a plausible one.
+
+**5. The packet is stored as a file and linked from the gate message.** The file lives where the owners can keep and cite it; the gate message carries a summary and the link. The [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, names a food-safety owner and an operations owner with a backup for each, carries a timeout and a fallback, and resumes only on a human response. It never proceeds on silence. Where a link is missing, an owner requests the record and the next run starts from it.
+
+## What the packet flags
+
+Five conditions are worth naming in the rules.
+
+- **A missing lot link.** A received lot with no production record showing what consumed it, or a finished batch with no distribution record showing where it went. The packet names the lot or batch and the team that should hold the next record.
+- **Conflicting quantities or lot codes.** The receiving log states one quantity and the supplier's certificate another, or a batch record carries a lot code the receiving log never recorded. Both appear with their values and dates.
+- **A date that does not fit the sequence.** A lot used in a batch dated before its receipt, or a shipment dated before the batch it carried. The packet shows both dates and leaves the sequence question to the owners.
+- **A source older than the exercise window, or not refreshed.** A record dated outside the window the owners set, or an extract that has not refreshed since the last run. The packet reports the date it carries and the date it was read.
+- **A record the swarm could not read.** A batch record in a system the workflow cannot reach, or a scanned delivery note with no extractable text. The packet names the record and who can supply it.
+
+Each is shown with both sources and left unresolved. A packet that picks one record over another hides the disagreement the exercise exists to find.
+
+## What stays human-owned
+
+Five decisions stay with people in every version of this workflow.
+
+- **Validating the traceability result.** Whether the chain the packet shows is the chain that happened is a judgement against the plant and the paperwork, made by someone qualified to make it.
+- **Deciding whether containment, a hold or a withdrawal would be needed.** What a broken link means for stock in a warehouse, on a line or with a customer is a decision people make with a name on it.
+- **Any customer, supplier or regulator notification.** Every message outside the team goes through the person who owns that relationship. The workflow reaches nobody.
+- **Escalation.** Who is told, how fast and in what order is the owners' call, recorded in the exercise write-up.
+- **Signing off the exercise and its lessons.** The findings, the fixes and their due dates are agreed by people; the packet is an input, not the record of it.
+
+An agent cannot establish that a trace is complete, does not replace qualified food-safety review, and has no path to hold stock or contact anyone. The pattern is the one the HITL guide states: gate the irreversible step and let the reversible ones run. Collecting records and writing the packet are reversible. Acting on a recall is not.
+
+## Limitations
+
+**A gap stays a gap.** Where a record is missing, the packet names the gap and the owner who can supply it. It does not infer a link from a likely match, a similar lot code or a previous exercise.
+
+**The packet covers only the systems the swarm may read.** Where batch records or shipment data sit behind an unconnected system, the packet says so and names who can grant access. It does not ask someone to paste an export into a chat.
+
+**Mock exercise timing is not evidence of live recall performance.** A packet assembled from stored records says nothing about how a real recall would run under a regulator's clock, with stock already moving and customers already asking.
+
+**Access control has a limit.** [RBAC](/docs/playbooks/use-cases/ai-operations-governance) is on by default, but the role check applies only to requests that carry a user token. A call made with an operator key, or by an agent, reaches the API outside it, so roles limit what people read, not what a workflow's own credentials can reach.
+
+## Review checklist
+
+- **Sources and freshness.** Name each record set, its date window, the freshness rule and the read dates the packet carries.
+- **Access scope.** Write down which systems the workflow may read, who granted that access and when it is reviewed.
+- **Gaps.** Confirm each missing or conflicting link is named with its two records and an owner, not resolved by the packet.
+- **Owners.** Name the food-safety and operations owners and a backup for each, and say who reads the packet before the gate.
+- **Approval and timeout.** State who decides, what the timeout is and what happens when nobody answers. Silence is never approval.
+- **Rules kept with the run.** Store the exercise scope and comparison rules beside the packet, so a later exercise reads against the same version.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing them at a batch traceability exercise is the illustrative part.
+
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, the approve and reject branches, the timeout and fallback, and the gate message.
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then an agent that synthesizes it.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source, arguments or logs.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and source-of-truth rules.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): how to choose between a spreadsheet, a traceability system and a shared agent platform.

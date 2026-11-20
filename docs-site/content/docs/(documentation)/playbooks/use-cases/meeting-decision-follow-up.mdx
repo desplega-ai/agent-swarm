@@ -1,0 +1,96 @@
+---
+title: 'Following up on cross-functional meeting decisions with AI agents'
+description: "Agent Swarm can prepare a source-linked decision and follow-up brief from an approved meeting transcript and task records, for people to review and own."
+agent:
+  offer: false
+  when: "Someone wants agents to prepare a source-linked decision and follow-up brief after an operations and engineering meeting that people review"
+  notWhen: "Someone wants a meeting recorder, live transcription or automatic commitment detection"
+---
+
+Agent Swarm can help a team prepare a source-linked meeting decision and follow-up brief after an operations and engineering meeting, when the team configures the workflow and reviews the result. People confirm the decisions, the owners and every communication. The scope is post-meeting decision follow-up for one cross-functional meeting series. It is not a meeting recorder, and it is not a replacement for a project tracker.
+
+## Limits: when a simpler tool fits better
+
+This page describes an illustrative configured design. It is not a customer story, not a measured result and not a built-in feature. Agent Swarm does not record meetings, does not transcribe them and does not automatically detect commitments from what people said. This page claims no integration with any meeting or notes tool.
+
+Two simpler options are usually the better choice.
+
+**A shared document, for a one-off meeting.** When a group meets once to settle something, a shared document with a small decisions table is enough: the decision, the owner, the date, and the line or link it came from.
+
+**The tracker you already trust, when it holds the decisions.** If it reliably holds decisions and owners after meetings, and people read it before the next one, that tracker is the record. A second list beside it splits the record.
+
+The design pays off in a narrower case: the series recurs, decisions cross two functions, notes and task records live in different systems, and one person reconstructs the outcome every week.
+
+## A fictional example: a weekly operations and engineering sync
+
+The company and its people are invented, and so are the carrier and the dates. This illustrates a configured run, not a result.
+
+A retailer with its own warehouse holds a weekly sync between the warehouse operations lead and the platform engineering lead. This week's item is a carrier label change: one carrier moves to a two-line label format, and the label printing code has to follow.
+
+Before the meeting, a person places the approved notes in the series folder in agent-fs, for example `meetings/ops-platform/notes.md`, and the relevant task records sit beside them. Nothing else feeds the run: no recorder, no live transcript.
+
+The agent drafts the items those two inputs support, each linked to the line or record that produced it.
+
+| Item | Type | Proposed owner | Date | Source |
+| --- | --- | --- | --- | --- |
+| Move the two largest carriers to the two-line label format | Proposed decision | Warehouse operations lead | Stated in the notes | Notes, label format paragraph |
+| Update the label printer mapping in the printing service | Proposed decision, owner open: "ops or platform?" | Not assigned | Stated in the notes | Notes, printing paragraph |
+| Confirm who tells the carrier account manager | Open question | Warehouse operations lead | None stated | Notes, closing lines |
+| Reorder label stock for the two-line format | Proposed decision | Warehouse operations lead | Unsupported: the notes give no date | Notes, stock paragraph |
+
+Two entries carry what the draft could not settle. The ownership of the printer mapping stays an open question, written as "ops or platform?", because the notes name both teams and neither person. The stock reorder has no date in the inputs, so the draft marks it unsupported and leaves the field empty. It never fills a date from a typical lead time or a similar past decision.
+
+The link is the point of the draft. A reader who doubts a line follows it to the words that produced it, and a reader who cannot find those words sees the problem immediately. The draft is a separate file: it never overwrites the notes and never writes into the tracker.
+
+## What people confirm and own
+
+A named meeting owner reads the draft before anyone acts on it. That person confirms or corrects each proposed decision, answers the open questions they can answer, and routes the rest to someone who can.
+
+Each owner then confirms their own assignment. An item its proposed owner rejects goes back to the meeting owner to reassign or drop.
+
+Nothing is sent and nothing is written to a tracker without approval. Where the design has an approval gate, the run pauses there and the meeting owner's answer decides whether the items go forward.
+
+Human review does not guarantee that the brief is correct. It is where errors get caught and owned: a misread decision, a wrong owner, an invented date. The value is an accountable reader with the source in front of them.
+
+## Exceptions that go to a person
+
+Five cases leave the draft and go to a person rather than to a plausible guess.
+
+- **Access restrictions.** The agent cannot read a file or record. It reports the source it could not read and never works around permissions. A folder it cannot open is a stated gap, not an empty source.
+- **Retention.** The team decides how long the approved notes and the drafts are kept, and who may read them later, before the first run.
+- **Sensitive transcripts.** Notes containing HR matters, legal advice or customer personal data are excluded or redacted before they become input, and a person makes that call.
+- **Missing sources.** An item with no source line is listed as unsourced rather than supported. The gap is the finding.
+- **Conflicting records.** The notes say one thing and a task record says another. The owner resolves it, and the draft shows both readings with their sources. The agent never reconciles the two silently, because a quietly reconciled conflict is the error nobody reviews.
+
+## Documented mechanics and custom configuration
+
+Four mechanics on this page ship with Agent Swarm and are documented. Everything else in the example is configuration your team writes.
+
+- **swarm-script nodes** run deterministic collection scripts that call each source and return one JSON payload, so the model is not doing the collection or the arithmetic ([Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources)).
+- **The human-in-the-loop workflow node** pauses the run, posts the request to Slack and resumes on approve or ends on reject ([HITL Gates](/docs/playbooks/patterns/hitl-gates)).
+- **Workflows** chain the collection, the drafting and the gate, and can run on a schedule or from a trigger ([Workflows](/docs/concepts/workflows)).
+- **agent-fs per-customer directories** give each account a persistent folder with durable shared context that any later session can read before acting ([Per-Customer Working Directories](/docs/playbooks/patterns/per-customer-working-directories)); a folder per meeting series instead of per account is the adaptation.
+
+The custom work is the rest. One script fetches the approved notes and the task records, and it is the only path the inputs take. Any connector to a notes tool or a ticketing system is your code, with its own credentials and permissions. The brief template, the fields that matter to your meetings, and the tests that show the run handles a missing source are yours too.
+
+Framing these mechanics for meeting follow-up is the adaptation this page describes. [Small-Company Workflows](/docs/playbooks/small-company-workflows) already names "a decision owner asking a question before a meeting" as a trigger for its recurring-report pattern.
+
+## Operator checklist
+
+Write these down before the first run, because each one turns a later argument into a decision now.
+
+1. **Approved inputs and permissions.** Which notes file counts as approved, who places it, and what the agent may read.
+2. **A meeting owner and a backup.** One named person who reviews the draft and answers the gate, and one who covers for them.
+3. **A source reference on every item.** No line without the source that produced it, and an unsourced item allowed to stay unsourced.
+4. **Dates stated in a source, or marked unsupported.** No date inferred from a typical cycle, a previous meeting or a target.
+5. **An exception path and a name for open questions.** Who receives an unreadable source, a conflict, or a question the meeting owner cannot answer.
+6. **Human approval before any message or tracker change.** The draft is input. A person sends, and a person edits the tracker.
+7. **The follow-up outcome, recorded at the next meeting.** Which items closed, which moved and which nobody picked up.
+
+## Related
+
+- [Reports from Multiple Sources](/docs/playbooks/reports-multiple-sources) for deterministic collection into one payload.
+- [Small-Company Workflows](/docs/playbooks/small-company-workflows) for the recurring-work patterns this design adapts.
+- [HITL Gates](/docs/playbooks/patterns/hitl-gates) for the approval node and its two branches.
+- [Customer commitment tracking](/docs/playbooks/use-cases/customer-commitment-tracking) for the same source-linked register shape, applied to commitments made to customers.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance) for where approval thresholds and workflow ownership belong.
