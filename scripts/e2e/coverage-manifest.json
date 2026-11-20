@@ -235,7 +235,11 @@
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "divergence-retention",
-        "divergence-db-query-denial"
+        "divergence-db-query-denial",
+        "divergence-list-order",
+        "divergence-timestamps",
+        "divergence-values",
+        "divergence-error-mapping"
       ]
     },
     "caller-scoped-writes": {
