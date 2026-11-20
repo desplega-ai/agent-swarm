@@ -733,7 +733,8 @@
         "workflow-engine-async-nodes",
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
-        "workflow-script-node"
+        "workflow-script-node",
+        "workflow-script-node-executor-setting"
       ]
     },
     "workflow-savings": {
