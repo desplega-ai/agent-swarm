@@ -23,10 +23,6 @@
     "reason": "M2 move: memory (M2, engine search parts M4)",
     "sites": 2
   },
-  "src/be/script-connections.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 2
-  },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1

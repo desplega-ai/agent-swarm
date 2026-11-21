@@ -272,7 +272,7 @@ async function pullFromScript(args: {
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.
   if (source.connection !== undefined) {
-    const reachable = listScriptConnections({ agentId });
+    const reachable = await listScriptConnections({ agentId });
     if (!reachable.some((connection) => connection.slug === source.connection)) {
       throw new SyncPassError(
         `connection "${source.connection}" not found or disabled for the sync run-as identity`,

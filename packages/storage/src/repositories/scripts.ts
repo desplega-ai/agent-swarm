@@ -756,7 +756,7 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
         "contentHash", "changedByAgentId", "changedAt", "changeReason"
       ) VALUES (
         ${v.id}, ${v.scriptId}, ${v.version}, ${v.source}, ${v.description}, ${v.intent},
-        ${v.signatureJson}, ${v.contentHash}, ${v.changedByAgentId}, ${v.changedAt}, ${v.changeReason}
+        ${jsonText(v.signatureJson)}, ${v.contentHash}, ${v.changedByAgentId}, ${v.changedAt}, ${v.changeReason}
       )`);
   }
 

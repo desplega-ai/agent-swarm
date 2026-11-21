@@ -651,7 +651,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   insertPageVersion(r: Omit<PageVersionRow, "id" | "createdAt">): Promise<PageVersionRow | null> {
     return this.db.get<PageVersionRow>(sql`
       INSERT INTO page_versions ("pageId", version, snapshot, "changedByAgentId")
-      VALUES (${r.pageId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}) RETURNING *`);
+      VALUES (${r.pageId}, ${r.version}, ${jsonText(r.snapshot)}, ${r.changedByAgentId}) RETURNING *`);
   }
 
   listPageVersions(pageId: string): Promise<PageVersionRow[]> {
@@ -670,7 +670,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   insertMetric(r: Omit<MetricRow, "id" | "createdAt" | "updatedAt">): Promise<MetricRow | null> {
     return this.db.get<MetricRow>(sql`
       INSERT INTO metrics ("agentId", slug, title, description, definition)
-      VALUES (${r.agentId}, ${r.slug}, ${r.title}, ${r.description}, ${r.definition}) RETURNING *`);
+      VALUES (${r.agentId}, ${r.slug}, ${r.title}, ${r.description}, ${jsonText(r.definition)}) RETURNING *`);
   }
 
   findMetric(id: string): Promise<MetricRow | null> {
@@ -721,7 +721,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   ): Promise<MetricVersionRow | null> {
     return this.db.get<MetricVersionRow>(sql`
       INSERT INTO metric_versions ("metricId", version, snapshot, "changedByAgentId")
-      VALUES (${r.metricId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}) RETURNING *`);
+      VALUES (${r.metricId}, ${r.version}, ${jsonText(r.snapshot)}, ${r.changedByAgentId}) RETURNING *`);
   }
 
   listMetricVersions(metricId: string): Promise<MetricVersionRow[]> {

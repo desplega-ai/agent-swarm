@@ -484,7 +484,7 @@ export abstract class BaseModelsRepository implements ModelsRepository {
          "reasoningOptions", pricing, status, "providerName", "checkedAt")
       VALUES (
         ${r.provider}, ${r.modelId}, ${r.name}, ${r.family}, ${r.releaseDate}, ${r.contextWindow},
-        ${r.maxOutput}, ${r.reasoning}, ${r.reasoningOptions}, ${r.pricing}, ${r.status},
+        ${r.maxOutput}, ${r.reasoning}, ${jsonText(r.reasoningOptions)}, ${r.pricing}, ${r.status},
         ${r.providerName}, ${r.checkedAt}
       )`);
   }

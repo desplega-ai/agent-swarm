@@ -307,7 +307,7 @@ describe("script MCP connections", () => {
         (candidate) => candidate.slug === "external",
       );
       expect(connection).toBeDefined();
-      const descriptor = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const descriptor = (await getScriptMcpConnectionDescriptors({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "external",
       );
       expect(descriptor).toEqual(
@@ -688,7 +688,7 @@ describe("script MCP connections", () => {
         mcpServerId: mcpServer.id,
         agentId: lead.id,
       });
-      const before = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const before = (await getScriptMcpConnectionDescriptors({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "refreshable",
       );
       expect(before?.tools.map((tool) => tool.name)).toEqual(["echo-tool"]);
@@ -697,7 +697,7 @@ describe("script MCP connections", () => {
       const refreshed = await refreshScriptConnection(connection.id);
 
       expect(refreshed?.generationError).toBeNull();
-      const after = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+      const after = (await getScriptMcpConnectionDescriptors({ agentId: lead.id })).find(
         (candidate) => candidate.slug === "refreshable",
       );
       expect(after?.tools.map((tool) => tool.name)).toEqual(["echo-tool", "new-tool"]);
