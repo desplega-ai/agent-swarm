@@ -6,9 +6,9 @@ import {
   type DbFixture,
   type DbTarget,
   dropPostgresDatabase,
-  preparePostgresQueryReader,
   type Engine,
   loadDbFixture,
+  preparePostgresQueryReader,
   restoreSqliteFixture,
 } from "./db";
 

@@ -15,6 +15,13 @@ const LIST = Symbol("sqlList");
 const IDENT = Symbol("sqlIdent");
 type SqlList = { [LIST]: readonly unknown[] };
 type SqlIdent = { [IDENT]: string };
+const ROWID = Symbol("insertionOrder");
+
+/**
+ * A table's insertion order in `sql` templates: SQLite's hidden `rowid`, or its
+ * Postgres stand-in, the `_rowid` identity column (ledger: the `_rowid` surrogate).
+ */
+export const insertionOrder = { [ROWID]: true } as const;
 
 /** A table or column name chosen by the scenario (never by input): rendered double-quoted. */
 export function sqlIdent(name: string): SqlIdent {
@@ -48,6 +55,8 @@ export class SqlQuery {
           text += (value as SqlList)[LIST].map(slot).join(", ");
         else if (value && typeof value === "object" && IDENT in value)
           text += `"${(value as SqlIdent)[IDENT]}"`;
+        else if (value && typeof value === "object" && ROWID in value)
+          text += engine === "postgres" ? `"_rowid"` : "rowid";
         else text += slot(value);
         text += query.strings[index + 1] ?? "";
       });

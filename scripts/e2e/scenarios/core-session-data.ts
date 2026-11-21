@@ -1,4 +1,4 @@
-import { sql } from "../db";
+import { insertionOrder, sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -38,7 +38,7 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
     "A batch without taskId must report success and its count",
   );
   const unassignedRows = ctx.db.query<{ taskId: string | null; content: string }>(
-    sql`SELECT "taskId", content FROM session_logs WHERE "sessionId" = ${unassignedSessionId} ORDER BY rowid`,
+    sql`SELECT "taskId", content FROM session_logs WHERE "sessionId" = ${unassignedSessionId} ORDER BY ${insertionOrder}`,
   );
   expect(
     unassignedRows.length === 2 &&
