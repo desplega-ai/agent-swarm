@@ -5,10 +5,15 @@ import {
   type OAuthAuthorizationRow,
   type OAuthAuthorizationSweepRow,
   type OAuthKeepAliveRow,
+  type SqlQuery,
   sql,
 } from "@desplega/storage";
 
 export class SqliteOAuthRepository extends BaseOAuthRepository {
+  protected nowIsoText(): SqlQuery {
+    return sql`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
+  }
+
   listApps(): Promise<OAuthAppRow[]> {
     return this.db.query<OAuthAppRow>(sql`SELECT * FROM oauth_apps ORDER BY rowid`);
   }

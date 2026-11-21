@@ -1,4 +1,4 @@
-import { nowIso } from "../dialect";
+import { jsonText, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlList } from "../sql";
 
@@ -332,6 +332,14 @@ export interface OAuthRepository {
 export abstract class BaseOAuthRepository implements OAuthRepository {
   constructor(protected readonly db: SqlExecutor) {}
 
+  /**
+   * The current time as ISO-8601 text with milliseconds and `Z`, for the
+   * `createdAt`/`updatedAt` columns of `oauth_apps` and
+   * `oauth_authorizations`, which stay text on every engine (legacy rows hold
+   * another format). `nowIso` is typed per engine and may not be text.
+   */
+  protected abstract nowIsoText(): SqlQuery;
+
   findAppByProvider(provider: string): Promise<OAuthAppRow | null> {
     return this.db.get<OAuthAppRow>(sql`
       SELECT * FROM oauth_apps
@@ -361,9 +369,9 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "requiresRefreshTokenRotation", "extraParamsJson", source, metadata
       ) VALUES (${provider}, ${app.displayName}, ${app.clientId}, ${app.clientSecretCiphertext},
         ${true}, ${app.authorizeUrl}, ${app.tokenUrl}, ${app.revocationUrl}, ${app.userinfoUrl},
-        ${app.redirectUri}, ${app.scopes}, ${app.scopeSeparator}, ${app.tokenAuthStyle},
-        ${app.tokenBodyFormat}, ${app.requiresRefreshTokenRotation}, ${app.extraParamsJson},
-        ${app.source}, ${app.metadata})
+        ${app.redirectUri}, ${jsonText(app.scopes)}, ${app.scopeSeparator}, ${app.tokenAuthStyle},
+        ${app.tokenBodyFormat}, ${app.requiresRefreshTokenRotation}, ${jsonText(app.extraParamsJson)},
+        ${app.source}, ${jsonText(app.metadata)})
       RETURNING id`);
     return (row as { id: string }).id;
   }
@@ -375,12 +383,12 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "clientSecret" = ${app.clientSecretCiphertext}, "clientSecretEncrypted" = ${true},
         "authorizeUrl" = ${app.authorizeUrl}, "tokenUrl" = ${app.tokenUrl},
         "revocationUrl" = ${app.revocationUrl}, "userinfoUrl" = ${app.userinfoUrl},
-        "redirectUri" = ${app.redirectUri}, scopes = ${app.scopes},
+        "redirectUri" = ${app.redirectUri}, scopes = ${jsonText(app.scopes)},
         "scopeSeparator" = ${app.scopeSeparator}, "tokenAuthStyle" = ${app.tokenAuthStyle},
         "tokenBodyFormat" = ${app.tokenBodyFormat},
         "requiresRefreshTokenRotation" = ${app.requiresRefreshTokenRotation},
-        "extraParamsJson" = ${app.extraParamsJson}, source = ${app.source},
-        metadata = ${app.metadata}, "updatedAt" = ${nowIso}
+        "extraParamsJson" = ${jsonText(app.extraParamsJson)}, source = ${app.source},
+        metadata = ${jsonText(app.metadata)}, "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
   }
 
@@ -388,7 +396,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
 
   async setAppMetadata(provider: string, metadata: string): Promise<void> {
     await this.db.run(sql`
-      UPDATE oauth_apps SET metadata = ${metadata}, "updatedAt" = ${nowIso}
+      UPDATE oauth_apps SET metadata = ${jsonText(metadata)}, "updatedAt" = ${this.nowIsoText()}
       WHERE provider = ${provider}`);
   }
 
@@ -446,7 +454,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "tokensEncrypted", "tokenVersion", status, "lastErrorMessage",
         "lastRefreshedAt", "connectedByUserId"
       ) VALUES (${row.id}, ${row.appId}, ${row.label}, ${row.userId}, ${row.accountEmail},
-        ${row.identityJson}, ${row.accessToken}, ${row.refreshToken}, ${row.tokenType},
+        ${jsonText(row.identityJson)}, ${row.accessToken}, ${row.refreshToken}, ${row.tokenType},
         ${row.expiresAt}, ${row.scope}, ${true}, 1, ${row.status}, ${row.lastErrorMessage},
         ${row.lastRefreshedAt}, ${row.connectedByUserId})`);
   }
@@ -455,13 +463,13 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
     await this.db.run(sql`
       UPDATE oauth_authorizations SET
         "userId" = ${row.userId}, "accountEmail" = ${row.accountEmail},
-        "identityJson" = ${row.identityJson}, "accessToken" = ${row.accessToken},
+        "identityJson" = ${jsonText(row.identityJson)}, "accessToken" = ${row.accessToken},
         "refreshToken" = ${row.refreshToken}, "tokenType" = ${row.tokenType},
         "expiresAt" = ${row.expiresAt}, scope = ${row.scope},
         "tokensEncrypted" = ${true}, "tokenVersion" = "tokenVersion" + 1, status = ${row.status},
         "lastErrorMessage" = ${row.lastErrorMessage}, "lastRefreshedAt" = ${row.lastRefreshedAt},
         "connectedByUserId" = ${row.connectedByUserId},
-        "updatedAt" = ${nowIso}
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
   }
 
@@ -482,7 +490,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "tokensEncrypted" = ${true}, "tokenVersion" = "tokenVersion" + 1,
         status = 'active', "lastErrorMessage" = NULL,
         "lastRefreshedAt" = ${nowIso},
-        "updatedAt" = ${nowIso}
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id} AND "tokenVersion" = ${expectedVersion}`);
     return result.changes === 1;
   }
@@ -493,8 +501,8 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
   ): Promise<void> {
     await this.db.run(sql`
       UPDATE oauth_authorizations SET
-        "accountEmail" = ${identity.accountEmail}, "identityJson" = ${identity.identityJson},
-        "updatedAt" = ${nowIso}
+        "accountEmail" = ${identity.accountEmail}, "identityJson" = ${jsonText(identity.identityJson)},
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
   }
 
@@ -514,7 +522,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
     const result = await this.db.run(sql`
       UPDATE oauth_authorizations SET
         status = 'refresh-failed', "lastErrorMessage" = ${message},
-        "updatedAt" = ${nowIso}
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id} AND status != 'revoked'`);
     return result.changes === 1;
   }
@@ -525,7 +533,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "accessToken" = ${emptyCiphertext}, "refreshToken" = NULL, "expiresAt" = NULL, scope = NULL,
         "tokensEncrypted" = ${true}, "tokenVersion" = "tokenVersion" + 1,
         status = 'revoked', "lastErrorMessage" = NULL, "lastRefreshedAt" = NULL,
-        "updatedAt" = ${nowIso}
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
     return result.changes === 1;
   }
@@ -533,7 +541,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
   async setAuthorizationStatus(id: string, status: string, message: string | null): Promise<void> {
     await this.db.run(sql`
       UPDATE oauth_authorizations
-      SET status = ${status}, "lastErrorMessage" = ${message}, "updatedAt" = ${nowIso}
+      SET status = ${status}, "lastErrorMessage" = ${message}, "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
   }
 
@@ -562,7 +570,7 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         state, "appId", label, flow, "codeVerifier", nonce,
         "redirectUri", "finalRedirect", "userId", "contextJson"
       ) VALUES (${row.state}, ${row.appId}, ${row.label}, ${row.flow}, ${row.codeVerifier},
-        ${row.nonce}, ${row.redirectUri}, ${row.finalRedirect}, ${row.userId}, ${row.contextJson})`);
+        ${row.nonce}, ${row.redirectUri}, ${row.finalRedirect}, ${row.userId}, ${jsonText(row.contextJson)})`);
   }
 
   findPending(state: string, flows: readonly string[]): Promise<OAuthPendingRow | null> {
@@ -637,8 +645,8 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "scopeSeparator", "tokenAuthStyle", "tokenBodyFormat",
         "requiresRefreshTokenRotation", source, "mcpServerId", metadata
       ) VALUES (${id}, ${app.provider}, ${app.clientId}, ${app.clientSecretCiphertext}, ${true},
-        ${app.authorizeUrl}, ${app.tokenUrl}, ${app.revocationUrl}, ${app.redirectUri}, ${app.scopes},
-        ' ', 'body', 'form', ${false}, ${app.source}, ${mcpServerId}, ${app.metadata})`);
+        ${app.authorizeUrl}, ${app.tokenUrl}, ${app.revocationUrl}, ${app.redirectUri}, ${jsonText(app.scopes)},
+        ' ', 'body', 'form', ${false}, ${app.source}, ${mcpServerId}, ${jsonText(app.metadata)})`);
   }
 
   async updateMcpApp(id: string, app: McpOAuthAppWrite): Promise<void> {
@@ -648,14 +656,14 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         "clientSecret" = ${app.clientSecretCiphertext}, "clientSecretEncrypted" = ${true},
         "authorizeUrl" = ${app.authorizeUrl}, "tokenUrl" = ${app.tokenUrl},
         "revocationUrl" = ${app.revocationUrl}, "redirectUri" = ${app.redirectUri},
-        scopes = ${app.scopes}, source = ${app.source}, metadata = ${app.metadata},
-        "updatedAt" = ${nowIso}
+        scopes = ${jsonText(app.scopes)}, source = ${app.source}, metadata = ${jsonText(app.metadata)},
+        "updatedAt" = ${this.nowIsoText()}
       WHERE id = ${id}`);
   }
 
   async setAppMetadataById(id: string, metadata: string): Promise<void> {
     await this.db.run(
-      sql`UPDATE oauth_apps SET metadata = ${metadata}, "updatedAt" = ${nowIso} WHERE id = ${id}`,
+      sql`UPDATE oauth_apps SET metadata = ${jsonText(metadata)}, "updatedAt" = ${this.nowIsoText()} WHERE id = ${id}`,
     );
   }
 
