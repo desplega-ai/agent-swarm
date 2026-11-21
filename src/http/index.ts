@@ -837,6 +837,16 @@ httpServer
     }
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
+    // Webhook signature handlers (if configured), before the first await below:
+    // /health answers as soon as the server listens, and a delivery that lands
+    // before its handler holds the secret gets a 401 (GitHub does not redeliver).
+    // On Postgres the awaited startup reads below take long enough for that to
+    // happen (github-emulate-flows, ledger part 10). Each init is synchronous.
+    initGitHub();
+    initGitLab();
+    initAzureDevOps();
+    initBitbucket();
+
     ensure({
       id: "listen",
       flow: "api",
@@ -918,21 +928,10 @@ httpServer
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();
 
-    // Initialize GitHub webhook handler (if configured)
-    initGitHub();
-
-    // Initialize GitLab webhook handler (if configured)
-    initGitLab();
-
-    // Initialize Azure DevOps service-hook handler (if configured)
-    initAzureDevOps();
     initAzureDevOpsOutbound();
 
     // MCP Events webhook delivery for /mcp-user subscribers (gated per event by MCP_USER_EVENTS_ENABLED)
     initMcpEventsDispatcher();
-
-    // Initialize Bitbucket Cloud webhook handler (if configured)
-    initBitbucket();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();
