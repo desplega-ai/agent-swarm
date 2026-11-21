@@ -59,6 +59,17 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
 }
 export { ensureAgentProfileColumns, removeLegacyTaskStatusCheck } from "./boot/legacy";
 export {
+  type CredentialBindingBlobRow,
+  findDefaultOAuthAuthorization,
+  type LegacyCredentialBinding,
+  listCredentialBindingBlobs,
+  listPlaintextOAuthSecrets,
+  type PlaintextOAuthApp,
+  type PlaintextOAuthAuthorization,
+  replaceCredentialBindingBlob,
+  storeEncryptedOAuthSecrets,
+} from "./boot/legacy-data";
+export {
   assertNotEmptySqliteDatabase,
   runSqliteMigrations,
   type SqliteMigrationOptions,

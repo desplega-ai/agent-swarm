@@ -71,7 +71,13 @@ export {
   assertScriptRunSourceSchema,
   backfillScriptRunSources,
   ensureAgentProfileColumns,
+  findDefaultOAuthAuthorization,
   isEmptySqliteDatabase,
+  type LegacyCredentialBinding,
+  listCredentialBindingBlobs,
+  listPlaintextOAuthSecrets,
   removeLegacyTaskStatusCheck,
+  replaceCredentialBindingBlob,
   runSqliteMigrations,
+  storeEncryptedOAuthSecrets,
 } from "@desplega/storage-sqlite";

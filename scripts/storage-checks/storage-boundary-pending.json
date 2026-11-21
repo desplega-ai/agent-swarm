@@ -51,10 +51,6 @@
     "reason": "M2 move: tasks",
     "sites": 7
   },
-  "src/be/connection-bindings-blob-migration.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 4
-  },
   "src/be/connector-codes.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 6
@@ -374,10 +370,6 @@
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 22
-  },
-  "src/be/oauth-encryption-backfill.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 4
   },
   "src/be/onboarding.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
