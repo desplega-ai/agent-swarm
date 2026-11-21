@@ -9464,7 +9464,10 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // (153 s on 493k prod rows). The sealed replay copy is what a resume
     // reads, so rewrite it first, while the scrubbed column still matches.
     const requesterRunIds = await users.listWorkflowRunIdsRequestedBy(id);
-    const sealedContexts = await users.listSealedWorkflowContextsRequestedBy(requesterRunIds, id);
+    const sealedContexts =
+      requesterRunIds.length > 0
+        ? await users.listSealedWorkflowContextsRequestedBy(requesterRunIds, id)
+        : [];
     for (const row of sealedContexts) {
       let context: Record<string, unknown>;
       try {
@@ -9483,7 +9486,9 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
         sealJson({ ...context, swarm }),
       );
     }
-    await users.rewriteWorkflowRunContextRequester(requesterRunIds, id, replacement);
+    if (requesterRunIds.length > 0) {
+      await users.rewriteWorkflowRunContextRequester(requesterRunIds, id, replacement);
+    }
 
     // Migration 319 indexes every discovered column (the user-delete-perf test
     // pins the plans), so these are index lookups rather than table scans.
