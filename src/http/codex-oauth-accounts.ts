@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, getEncryptionKey } from "../be/crypto";
-import { deleteKv, deleteSwarmConfigByKey, getDbClient, getKeyStatuses, getKv } from "../be/db";
+import { deleteKv, deleteSwarmConfigByKey, getKeyStatuses, getKv } from "../be/db";
+import { getStorage } from "../be/storage";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json";
 import { decodeJwt, extractChatgptPlanType } from "../providers/codex-oauth/flow";
 import { MAX_CODEX_OAUTH_SLOT } from "../providers/codex-oauth/storage";
@@ -58,9 +59,7 @@ const deleteAccount = route({
 type AccountRow = { key: string; value: string; encrypted: number };
 
 async function accountRows(): Promise<Array<AccountRow & { slot: number; legacy: boolean }>> {
-  const rows = await getDbClient().query<AccountRow>(
-    "SELECT key, value, encrypted FROM swarm_config WHERE scope = 'global' AND (key = 'codex_oauth' OR key GLOB 'codex_oauth_[0-9]*')",
-  );
+  const rows: AccountRow[] = await getStorage().repos.config.listCodexOauthConfigs();
   const hasSlotZero = rows.some((row) => row.key === "codex_oauth_0");
   return rows
     .flatMap((row) => {
@@ -160,7 +159,7 @@ export async function handleCodexOAuthAccounts(
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
     if (!(await ensureSecretRead(req, res))) return true;
-    const deletedKey = await getDbClient().transaction(async () => {
+    const deletedKey = await getStorage().transaction(async () => {
       const rows = await accountRows();
       const account = rows.find((row) => row.slot === parsed.params.slot);
       if (!account || !(await deleteSwarmConfigByKey("global", null, account.key))) return null;
@@ -172,17 +171,12 @@ export async function handleCodexOAuthAccounts(
       const suffix = credentials
         ? deriveCodexKeySuffix(credentials.access, credentials.accountId, account.slot)
         : null;
-      const retired = await getDbClient().query<{ keySuffix: string }>(
-        `DELETE FROM api_key_status
-           WHERE keyType = 'CODEX_OAUTH' AND scope = 'global' AND scopeId = ''
-             AND (keyIndex = ? OR keySuffix = ?)
-           RETURNING keySuffix`,
-        [account.slot, suffix],
+      const retired = await getStorage().repos.config.deleteGlobalKeysAtSlot(
+        "CODEX_OAUTH",
+        account.slot,
+        suffix,
       );
-      for (const keySuffix of new Set([
-        ...(suffix ? [suffix] : []),
-        ...retired.map((r) => r.keySuffix),
-      ])) {
+      for (const keySuffix of new Set([...(suffix ? [suffix] : []), ...retired])) {
         await deleteKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(keySuffix));
       }
       return account.key;

@@ -35,10 +35,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
   },
-  "src/be/approval-config-question.ts": {
-    "reason": "M2 move: config",
-    "sites": 2
-  },
   "src/be/approval-sweeps.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
@@ -105,7 +101,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 463
+    "sites": 427
   },
   "src/be/db/active-sessions.ts": {
     "reason": "M2 move: sessions and cost",
@@ -115,10 +111,6 @@
     "reason": "M2 move: agents",
     "sites": 22
   },
-  "src/be/db/api-keys.ts": {
-    "reason": "M2 move: config",
-    "sites": 10
-  },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 6
@@ -126,10 +118,6 @@
   "src/be/db/codex-oauth-device-flows.ts": {
     "reason": "M2 move: integrations",
     "sites": 5
-  },
-  "src/be/db/config-secrets.ts": {
-    "reason": "M2 move: config",
-    "sites": 2
   },
   "src/be/db/context-versions.ts": {
     "reason": "M2 move: agents",
@@ -411,10 +399,6 @@
     "reason": "M2 move: models",
     "sites": 2
   },
-  "src/be/model-profile-check.ts": {
-    "reason": "M2 move: models",
-    "sites": 4
-  },
   "src/be/model-tier-resolution.ts": {
     "reason": "M2 move: models",
     "sites": 10
@@ -458,10 +442,6 @@
   "src/be/rbac-roles.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 30
-  },
-  "src/be/repo-checked-update.ts": {
-    "reason": "M2 move: config",
-    "sites": 1
   },
   "src/be/runtime-pools/cache-cleanup.ts": {
     "reason": "M2 move: runtime pools",
@@ -663,10 +643,6 @@
     "reason": "M2 move: skills",
     "sites": 2
   },
-  "src/be/seed/state-db.ts": {
-    "reason": "M2 move: config",
-    "sites": 4
-  },
   "src/be/session-shares.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 9
@@ -746,10 +722,6 @@
   "src/http/budgets.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 1
-  },
-  "src/http/codex-oauth-accounts.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 3
   },
   "src/http/codex-oauth-device.ts": {
     "reason": "M2 move: integrations",

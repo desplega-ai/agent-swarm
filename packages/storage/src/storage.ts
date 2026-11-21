@@ -2,11 +2,13 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
   extensions: ExtensionsRepository;
+  config: ConfigRepository;
 };
 
 /**
