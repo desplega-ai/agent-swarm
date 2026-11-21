@@ -40,7 +40,6 @@ import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getStorage } from "../../storage";
 import { getAgentById } from "../agents";
-import { getDbClient } from "../runtime";
 
 type TaskReadDependencies = {
   checkDependencies: (taskId: string) => Promise<{ ready: boolean; blockedBy: string[] }>;
@@ -1040,45 +1039,10 @@ export async function getSlackTasksMissingTree(
   const since = new Date(
     (options.now ?? new Date()).getTime() - SLACK_MISSING_TREE_WINDOW_MS,
   ).toISOString();
-  const scope = thread
-    ? {
-        index: "idx_agent_tasks_slack_thread_cover",
-        sql: "AND task.slackChannelId = ? AND task.slackThreadTs = ?",
-        params: [thread.channelId, thread.threadTs],
-      }
-    : {
-        index: "idx_agent_tasks_slack_last_updated",
-        sql: "AND task.lastUpdatedAt >= ?",
-        params: [since],
-      };
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT task.* FROM slack_render_v2_state state
-       CROSS JOIN agent_tasks task INDEXED BY ${scope.index}
-       WHERE state.id = 1
-       AND task.source = 'slack'
-       AND task.slackChannelId IS NOT NULL
-       AND task.slackThreadTs IS NOT NULL
-       ${scope.sql}
-       AND task.createdAt >= state.activated_at
-       AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
-       AND NOT EXISTS (
-         SELECT 1 FROM agent_tasks earlier
-         WHERE earlier.source = 'slack'
-         AND earlier.slackChannelId = task.slackChannelId
-         AND earlier.slackThreadTs = task.slackThreadTs
-         AND earlier.createdAt < state.activated_at
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM slack_messages tree
-         WHERE tree.kind = 'tree'
-         AND tree.channel_id = task.slackChannelId
-         AND tree.thread_ts = task.slackThreadTs
-       )
-       ORDER BY task.lastUpdatedAt DESC
-       LIMIT 200`,
-    scope.params,
+  const rows = await getStorage().repos.slack.listSlackTasksMissingTree(
+    thread ? { thread } : { since },
   );
-  return rows.map(rowToAgentTask);
+  return rows.map(toTask);
 }
 
 /**

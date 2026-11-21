@@ -466,5 +466,32 @@ export function slackContract(engine: ContractEngine): void {
       expect(await repo.listResolvableDeferralOutcomes(10)).toEqual([]);
       expect(await repo.deleteSlackMessage("o1")).toBe(1);
     });
+
+    test("Slack tasks missing a tree: thread scope and the updated-since sweep", async () => {
+      await storage.executor.run(sql`DELETE FROM slack_render_v2_state`);
+      await repo.ensureRenderV2Activation(T0);
+      const task = (id: string, extra: Record<string, string>) =>
+        seedTask(storage, {
+          id,
+          source: "slack",
+          slackChannelId: "C",
+          slackThreadTs: "1.0",
+          createdAt: T1,
+          ...extra,
+        });
+      await task("a", { lastUpdatedAt: T1 });
+      await task("b", { lastUpdatedAt: T2 });
+      await task("c", { slackThreadTs: "2.0", lastUpdatedAt: T2, status: "backlog" });
+      const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+      expect(ids(await repo.listSlackTasksMissingTree({ since: T0 }))).toEqual(["b", "a"]);
+      expect(ids(await repo.listSlackTasksMissingTree({ since: T2 }))).toEqual(["b"]);
+      expect(
+        ids(await repo.listSlackTasksMissingTree({ thread: { channelId: "C", threadTs: "1.0" } })),
+      ).toEqual(["b", "a"]);
+      await storage.executor.run(sql`
+        INSERT INTO slack_messages (id, context_key, channel_id, thread_ts, ts, kind, created_at, updated_at)
+        VALUES ('tree', 'k', 'C', '1.0', '1.5', 'tree', ${T1}, ${T1})`);
+      expect(await repo.listSlackTasksMissingTree({ since: T0 })).toEqual([]);
+    });
   });
 }

@@ -91,10 +91,6 @@
     "reason": "M2 move: integrations",
     "sites": 2
   },
-  "src/be/db/tasks/read.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 2
-  },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",
     "sites": 3

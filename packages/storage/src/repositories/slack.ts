@@ -1,6 +1,7 @@
 import { greatestStrict, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlList } from "../sql";
+import type { TaskRow } from "./tasks";
 
 /**
  * Domain: Slack (`slack_inbound_receipts`, and the outcome card groups in
@@ -309,6 +310,15 @@ export interface SlackRepository {
     lastError: string,
     now: string,
   ): Promise<SlackMessageRow | null>;
+  /**
+   * Slack tasks created since render-v2 activation whose thread has no tree
+   * row and no task from before activation: one thread (no time window) or
+   * every task updated since `since`. Newest update first (ties in the scan
+   * order of the index that serves it), at most 200.
+   */
+  listSlackTasksMissingTree(
+    scope: { thread: SlackThreadRef } | { since: string },
+  ): Promise<TaskRow[]>;
 }
 
 export abstract class BaseSlackRepository implements SlackRepository {
@@ -811,4 +821,8 @@ export abstract class BaseSlackRepository implements SlackRepository {
       WHERE task_id = ${taskId} AND kind = 'outcome' AND delivery_abandoned_at IS NULL
       RETURNING *`);
   }
+
+  abstract listSlackTasksMissingTree(
+    scope: { thread: SlackThreadRef } | { since: string },
+  ): Promise<TaskRow[]>;
 }
