@@ -7,6 +7,17 @@ export {
   type StatementObserver,
   type TransactionOptions,
 } from "./client";
+export type {
+  CopyCell,
+  CopyColumn,
+  CopyProblem,
+  CopyReport,
+  CopyRow,
+  CopySource,
+  CopyTable,
+  CopyTableReport,
+  SkippedCopyTable,
+} from "./data-copy";
 export {
   type Dialect,
   forUpdate,

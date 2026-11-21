@@ -32,6 +32,12 @@ export {
   type TimestampFormat,
   type TimestampFormats,
 } from "./codec";
+export {
+  convertCell,
+  copyIntoPostgres,
+  normalizeValue,
+  type PostgresCopyOptions,
+} from "./data-copy";
 export { postgresDialect } from "./dialect";
 export { type CheckMessages, mapPostgresError, SQLSTATE } from "./errors";
 export {

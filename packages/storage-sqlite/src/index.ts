@@ -157,6 +157,7 @@ export {
 } from "./boot/open";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
+export { openSqliteCopySource } from "./copy-source";
 export {
   assertNoDeniedTablesSqlite,
   executeSqliteReadOnlyQuery,

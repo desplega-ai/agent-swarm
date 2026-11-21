@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type CopyReport,
   DB_QUERY_DENIED_TABLES,
   type DbClient,
   type PromptTemplateFilters,
@@ -22,6 +23,7 @@ import {
   acquireProcessLock,
   type CheckMessages,
   type ColumnClassification,
+  copyIntoPostgres,
   createPostgresClient,
   createPostgresStorage,
   hasEncryptedSecretRowsPostgres,
@@ -46,6 +48,7 @@ import {
   insertPromptTemplateHistorySync,
   insertPromptTemplateSync,
   listPromptTemplatesSync,
+  openSqliteCopySource,
   openSqliteQueryReader,
   runSqliteBoundedQuery,
   isInTransaction as sqliteIsInTransaction,
@@ -490,3 +493,27 @@ export {
   workflowRetentionCandidatesSql,
   workflowRunRetentionStatements as sqliteWorkflowRunRetentionStatements,
 } from "@desplega/storage-sqlite";
+
+/**
+ * The data copy (decision D11): a SQLite file, opened read-only, into an empty
+ * Postgres database at the same migration head. `src/be/data-copy-command.ts`
+ * is the CLI front end.
+ */
+export async function copySqliteFileToPostgres(options: {
+  sqlitePath: string;
+  postgresUrl: string;
+  embeddingDimensions: number;
+  log?: (line: string) => void;
+}): Promise<CopyReport> {
+  const source = openSqliteCopySource(options.sqlitePath);
+  try {
+    return await copyIntoPostgres(source, {
+      url: options.postgresUrl,
+      migrationsDir: postgresMigrationsDir(),
+      embeddingDimensions: options.embeddingDimensions,
+      log: options.log,
+    });
+  } finally {
+    source.close();
+  }
+}
