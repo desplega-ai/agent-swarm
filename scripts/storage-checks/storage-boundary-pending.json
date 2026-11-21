@@ -425,7 +425,7 @@
   },
   "src/be/savings/rollup.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 17
+    "sites": 2
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",

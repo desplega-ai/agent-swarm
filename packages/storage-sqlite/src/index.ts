@@ -11,6 +11,7 @@ import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteSavingsRepository } from "./repositories/savings";
 import { SqliteSessionsRepository } from "./repositories/sessions";
 
 export {
@@ -48,6 +49,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
       sessions: new SqliteSessionsRepository(executor),
+      savings: new SqliteSavingsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
