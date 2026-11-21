@@ -344,6 +344,18 @@ export type NewChecklistItem = {
   actor: string;
 };
 
+/** A `task_citations` row in API names (`general` 0/1). */
+export type TaskCitationRow = {
+  index: number;
+  kind: string;
+  ref: string;
+  label: string | null;
+  quote: string | null;
+  resolvedUrl: string | null;
+  verified: string;
+  general: number;
+};
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -752,6 +764,63 @@ export interface TasksRepository {
     actor: string,
   ): Promise<void>;
   markChecklistNudged(id: string, taskId: string, now: string): Promise<void>;
+
+  // ---- task_citations / task_attachments ----
+  /** Insert, or replace the citation at `(taskId, index)` (`updated_at` = now). */
+  upsertTaskCitation(
+    taskId: string,
+    citation: Omit<TaskCitationRow, "general"> & { general: boolean },
+  ): Promise<void>;
+  /** The task's citations by index. */
+  listTaskCitations(taskId: string): Promise<TaskCitationRow[]>;
+  /** Citations of the given tasks (a few hundred ids at most), by task id then index. */
+  listTaskCitationsForTasks(
+    taskIds: readonly string[],
+  ): Promise<(TaskCitationRow & { taskId: string })[]>;
+  /** The task's `output`; null for an unknown task. */
+  findTaskOutput(taskId: string): Promise<{ output: string | null } | null>;
+  /** Kind and url of the task's attachments, oldest first (ties: insertion order). */
+  listTaskAttachmentUrls(taskId: string): Promise<{ kind: string; url: string | null }[]>;
+
+  // ---- agent_tasks: runtime pool routing ----
+  /**
+   * Pending tasks waiting on a pool wake, or assigned to an agent of a pool
+   * or with a pool runtime, except human-pinned ones. In no particular order.
+   */
+  listPoolPendingTasks(): Promise<TaskRow[]>;
+  /** Back to `unassigned` while still pending for `agentId`, not waking, not human-pinned. */
+  releasePendingPoolTask(taskId: string, agentId: string, now: string): Promise<number>;
+  /** The agent's pending + in-progress task count, and the pending part. */
+  countAgentOpenTasks(agentId: string): Promise<{ count: number; pending: number }>;
+  countAgentPendingTasks(agentId: string): Promise<number>;
+
+  // ---- deferred_task_waits / deferred_task_wait_members / deferred_event_waits ----
+  /** Pending external event waits of the agent's enabled schedules. */
+  countPendingEventWaitsForAgent(agentId: string): Promise<number>;
+  /** One pending, enabled watcher of the agent that watches any of `taskIds`. */
+  findPendingTaskWaitWatching(
+    agentId: string,
+    taskIds: readonly string[],
+  ): Promise<{ scheduleId: string; parentTaskId: string } | null>;
+  insertDeferredEventWait(row: {
+    scheduleId: string;
+    source: string;
+    event: string;
+    matchKey: string;
+    matchJson: string;
+    userId: string | null;
+  }): Promise<void>;
+  insertDeferredTaskWait(row: {
+    scheduleId: string;
+    eventName: string;
+    mode: string;
+    userId: string | null;
+  }): Promise<void>;
+  insertDeferredTaskWaitMember(
+    scheduleId: string,
+    taskId: string,
+    userId: string | null,
+  ): Promise<void>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -1822,6 +1891,134 @@ export abstract class BaseTasksRepository implements TasksRepository {
     await this.db.run(sql`
       UPDATE checklist_items SET "nudgedAt" = ${now}, "nudgedTaskId" = ${taskId}, "lastUpdatedAt" = ${now}
       WHERE id = ${id}`);
+  }
+
+  // ---- task_citations / task_attachments ----
+
+  async upsertTaskCitation(
+    taskId: string,
+    c: Omit<TaskCitationRow, "general"> & { general: boolean },
+  ): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO task_citations
+      (task_id, citation_index, kind, ref, label, quote, resolved_url, verified, general)
+      VALUES (${taskId}, ${c.index}, ${c.kind}, ${c.ref}, ${c.label}, ${c.quote}, ${c.resolvedUrl},
+        ${c.verified}, ${c.general})
+      ON CONFLICT(task_id, citation_index) DO UPDATE SET
+        kind=excluded.kind, ref=excluded.ref, label=excluded.label, quote=excluded.quote,
+        resolved_url=excluded.resolved_url, verified=excluded.verified, general=excluded.general,
+        updated_at=${nowIso}`);
+  }
+
+  listTaskCitations(taskId: string): Promise<TaskCitationRow[]> {
+    return this.db.query<TaskCitationRow>(sql`
+      SELECT citation_index AS "index", kind, ref, label, quote,
+      resolved_url AS "resolvedUrl", verified, general FROM task_citations
+      WHERE task_id = ${taskId} ORDER BY citation_index`);
+  }
+
+  listTaskCitationsForTasks(
+    taskIds: readonly string[],
+  ): Promise<(TaskCitationRow & { taskId: string })[]> {
+    if (taskIds.length === 0) return Promise.resolve([]);
+    return this.db.query<TaskCitationRow & { taskId: string }>(sql`
+      SELECT task_id AS "taskId", citation_index AS "index", kind, ref, label, quote,
+      resolved_url AS "resolvedUrl", verified, general FROM task_citations
+      WHERE task_id IN (${sqlList(taskIds)}) ORDER BY task_id, citation_index`);
+  }
+
+  findTaskOutput(taskId: string): Promise<{ output: string | null } | null> {
+    return this.db.get<{ output: string | null }>(
+      sql`SELECT output FROM agent_tasks WHERE id = ${taskId}`,
+    );
+  }
+
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listTaskAttachmentUrls(taskId: string): Promise<{ kind: string; url: string | null }[]>;
+
+  // ---- agent_tasks: runtime pool routing ----
+
+  listPoolPendingTasks(): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE status = 'pending'
+        AND (pool_wake_at IS NOT NULL OR "agentId" IN (
+          SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL
+          UNION SELECT agent_id FROM runtime_instances WHERE pool_id IS NOT NULL
+        )) AND COALESCE(routing_reason, '') != 'human_pinned'`);
+  }
+
+  /** SQLite text pinned by an existing test (see the SQLite engine). */
+  abstract releasePendingPoolTask(taskId: string, agentId: string, now: string): Promise<number>;
+
+  async countAgentOpenTasks(agentId: string): Promise<{ count: number; pending: number }> {
+    const row = await this.db.get<{ count: number | string; pending: number | string }>(sql`
+      SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending
+      FROM agent_tasks WHERE "agentId" = ${agentId} AND status IN ('pending', 'in_progress')`);
+    return { count: Number(row?.count ?? 0), pending: Number(row?.pending ?? 0) };
+  }
+
+  async countAgentPendingTasks(agentId: string): Promise<number> {
+    const row = await this.db.get<{ count: number | string }>(sql`
+      SELECT COUNT(*) AS count FROM agent_tasks WHERE "agentId" = ${agentId} AND status = 'pending'`);
+    return Number(row?.count ?? 0);
+  }
+
+  // ---- deferred_task_waits / deferred_task_wait_members / deferred_event_waits ----
+
+  async countPendingEventWaitsForAgent(agentId: string): Promise<number> {
+    const row = await this.db.get<{ n: number | string }>(sql`
+      SELECT COUNT(*) AS n FROM deferred_event_waits w
+      JOIN scheduled_tasks s ON s.id = w."scheduleId"
+      WHERE w.status = 'pending' AND s.enabled = ${true} AND s."targetAgentId" = ${agentId}`);
+    return Number(row?.n ?? 0);
+  }
+
+  findPendingTaskWaitWatching(
+    agentId: string,
+    taskIds: readonly string[],
+  ): Promise<{ scheduleId: string; parentTaskId: string } | null> {
+    if (taskIds.length === 0) return Promise.resolve(null);
+    return this.db.get<{ scheduleId: string; parentTaskId: string }>(sql`
+      SELECT w."scheduleId", s."parentTaskId" FROM deferred_task_waits w
+      JOIN scheduled_tasks s ON s.id = w."scheduleId"
+      JOIN deferred_task_wait_members m ON m."scheduleId" = w."scheduleId"
+      WHERE w.status = 'pending' AND s.enabled = ${true} AND s."targetAgentId" = ${agentId}
+        AND m."taskId" IN (${sqlList(taskIds)})
+      LIMIT 1`);
+  }
+
+  async insertDeferredEventWait(r: {
+    scheduleId: string;
+    source: string;
+    event: string;
+    matchKey: string;
+    matchJson: string;
+    userId: string | null;
+  }): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO deferred_event_waits ("scheduleId", source, event, "matchKey", "matchJson", created_by, updated_by)
+      VALUES (${r.scheduleId}, ${r.source}, ${r.event}, ${r.matchKey}, ${r.matchJson}, ${r.userId}, ${r.userId})`);
+  }
+
+  async insertDeferredTaskWait(r: {
+    scheduleId: string;
+    eventName: string;
+    mode: string;
+    userId: string | null;
+  }): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO deferred_task_waits ("scheduleId", "eventName", mode, created_by, updated_by)
+      VALUES (${r.scheduleId}, ${r.eventName}, ${r.mode}, ${r.userId}, ${r.userId})`);
+  }
+
+  async insertDeferredTaskWaitMember(
+    scheduleId: string,
+    taskId: string,
+    userId: string | null,
+  ): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO deferred_task_wait_members ("scheduleId", "taskId", created_by, updated_by)
+      VALUES (${scheduleId}, ${taskId}, ${userId}, ${userId})`);
   }
 
   // ---- task_idempotency_keys ----

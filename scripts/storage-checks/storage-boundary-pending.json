@@ -81,7 +81,7 @@
   },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
-    "sites": 6
+    "sites": 3
   },
   "src/be/db-queries/tracker.ts": {
     "reason": "M2 move: integrations",
@@ -405,7 +405,7 @@
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
-    "sites": 7
+    "sites": 3
   },
   "src/be/savings/calibrate.ts": {
     "reason": "M2 move: sessions and cost",
@@ -581,7 +581,7 @@
   },
   "src/be/task-citations.ts": {
     "reason": "M2 move: tasks",
-    "sites": 6
+    "sites": 3
   },
   "src/be/task-ui-spec.ts": {
     "reason": "M2 move: tasks",
@@ -762,10 +762,6 @@
   "src/tools/cancel-task.ts": {
     "reason": "M2 move: tasks",
     "sites": 1
-  },
-  "src/tools/defer-task.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 6
   },
   "src/tools/join-swarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

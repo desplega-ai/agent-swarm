@@ -1,6 +1,6 @@
 import { getGitHubHostForSql } from "../../utils/github-host";
 import { extractGitHubPullRequestUrls } from "../../utils/github-pull-request";
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 
 export type TaskShippingEvidenceSource = "attachment" | "output-fallback" | "none";
 
@@ -145,16 +145,11 @@ export function taskShippingEvidenceSql(alias = "t"): {
 export async function getTaskShippingEvidence(
   taskId: string,
 ): Promise<TaskShippingEvidence | null> {
-  const task = await getDbClient().get<{ output: string | null }>(
-    "SELECT output FROM agent_tasks WHERE id = ?",
-    [taskId],
-  );
+  const repo = getStorage().repos.tasks;
+  const task = await repo.findTaskOutput(taskId);
   if (!task) return null;
 
-  const attachments = await getDbClient().query<{ kind: string; url: string | null }>(
-    "SELECT kind, url FROM task_attachments WHERE task_id = ? ORDER BY created_at, rowid",
-    [taskId],
-  );
+  const attachments = await repo.listTaskAttachmentUrls(taskId);
   const attachmentPullRequests = Array.from(
     new Set(
       attachments.flatMap((attachment) =>

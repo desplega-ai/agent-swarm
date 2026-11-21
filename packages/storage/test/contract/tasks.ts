@@ -766,6 +766,121 @@ export function tasksContract(engine: ContractEngine): void {
       });
     });
 
+    test("citations upsert by index and list in index order", async () => {
+      await seedTask(storage, { id: "a" });
+      await seedTask(storage, { id: "b" });
+      const c = {
+        index: 2,
+        kind: "url",
+        ref: "https://x",
+        label: null,
+        quote: null,
+        resolvedUrl: "https://x",
+        verified: "unchecked",
+        general: false,
+      };
+      await repo.upsertTaskCitation("a", c);
+      await repo.upsertTaskCitation("a", { ...c, index: 1, general: true });
+      await repo.upsertTaskCitation("a", { ...c, label: "L" });
+      await repo.upsertTaskCitation("b", { ...c, index: 3 });
+      expect(await repo.listTaskCitations("a")).toEqual([
+        { ...c, index: 1, general: 1 },
+        { ...c, label: "L", general: 0 },
+      ]);
+      expect(
+        (await repo.listTaskCitationsForTasks(["b", "a"])).map((r) => [r.taskId, r.index]),
+      ).toEqual([
+        ["a", 1],
+        ["a", 2],
+        ["b", 3],
+      ]);
+      expect(await repo.listTaskCitationsForTasks([])).toEqual([]);
+    });
+
+    test("shipping evidence reads output and attachments in creation order", async () => {
+      await seedTask(storage, { id: "a", output: "done" });
+      const attach = (id: string, url: string, createdAt: string) =>
+        storage.executor.run(sql`
+          INSERT INTO task_attachments (id, task_id, name, kind, url, created_at)
+          VALUES (${id}, 'a', ${id}, 'url', ${url}, ${createdAt})`);
+      await attach("x2", "https://b", T0);
+      await attach("x1", "https://a", T0);
+      await attach("x0", "https://c", "2026-11-21T09:00:00.000Z");
+      expect(await repo.findTaskOutput("a")).toEqual({ output: "done" });
+      expect(await repo.findTaskOutput("missing")).toBeNull();
+      expect((await repo.listTaskAttachmentUrls("a")).map((r) => r.url)).toEqual([
+        "https://c",
+        "https://b",
+        "https://a",
+      ]);
+    });
+
+    test("pool routing reads and the conditional release", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, "isLead", status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', ${false}, 'idle', ${T0}, ${T0})`);
+      await seedTask(storage, { id: "w", agentId: "ag", pool_wake_at: T0 });
+      await seedTask(storage, { id: "p", agentId: "ag" });
+      await seedTask(storage, { id: "i", agentId: "ag", status: "in_progress" });
+      await seedTask(storage, { id: "h", pool_wake_at: T0, routing_reason: "human_pinned" });
+      expect(ids(await repo.listPoolPendingTasks()).sort()).toEqual(["w"]);
+      expect(await repo.countAgentOpenTasks("ag")).toEqual({ count: 3, pending: 2 });
+      expect(await repo.countAgentOpenTasks("none")).toEqual({ count: 0, pending: 0 });
+      expect(await repo.countAgentPendingTasks("ag")).toBe(2);
+      expect(await repo.releasePendingPoolTask("w", "ag", T1)).toBe(0);
+      expect(await repo.releasePendingPoolTask("p", "other", T1)).toBe(0);
+      expect(await repo.releasePendingPoolTask("p", "ag", T1)).toBe(1);
+      expect(await repo.findTaskById("p")).toMatchObject({
+        status: "unassigned",
+        agentId: null,
+        lastUpdatedAt: T1,
+      });
+    });
+
+    test("deferred waits: admission reads and inserts", async () => {
+      const schedule = (id: string, enabled: boolean) =>
+        storage.executor.run(sql`
+          INSERT INTO scheduled_tasks (id, name, "taskTemplate", "targetAgentId", enabled, "parentTaskId",
+            "scheduleType", "nextRunAt", "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, 't', 'ag', ${enabled}, 'parent', 'one_time', ${T1}, ${T0}, ${T0})`);
+      await seedTask(storage, { id: "parent" });
+      await seedTask(storage, { id: "w1" });
+      await seedTask(storage, { id: "w2" });
+      await schedule("s1", true);
+      await schedule("s2", false);
+      await repo.insertDeferredTaskWait({
+        scheduleId: "s1",
+        eventName: "task.completed",
+        mode: "any",
+        userId: null,
+      });
+      await repo.insertDeferredTaskWaitMember("s1", "w1", null);
+      await repo.insertDeferredTaskWait({
+        scheduleId: "s2",
+        eventName: "task.completed",
+        mode: "any",
+        userId: null,
+      });
+      await repo.insertDeferredTaskWaitMember("s2", "w2", null);
+      expect(await repo.findPendingTaskWaitWatching("ag", ["w2", "w1"])).toEqual({
+        scheduleId: "s1",
+        parentTaskId: "parent",
+      });
+      expect(await repo.findPendingTaskWaitWatching("ag", ["w2"])).toBeNull();
+      expect(await repo.findPendingTaskWaitWatching("other", ["w1"])).toBeNull();
+      expect(await repo.countPendingEventWaitsForAgent("ag")).toBe(0);
+      await schedule("s3", true);
+      await repo.insertDeferredEventWait({
+        scheduleId: "s3",
+        source: "github",
+        event: "pr.merged",
+        matchKey: "k",
+        matchJson: "{}",
+        userId: null,
+      });
+      expect(await repo.countPendingEventWaitsForAgent("ag")).toBe(1);
+    });
+
     test("appendDraftTaskText changes only a draft", async () => {
       await seedTask(storage, { id: "d1", task: "base", status: "draft" });
       await seedTask(storage, { id: "p1", task: "base", status: "pending" });

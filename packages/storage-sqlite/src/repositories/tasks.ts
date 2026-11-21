@@ -532,4 +532,19 @@ export class SqliteTasksRepository extends BaseTasksRepository {
       WHERE kind = 'channel' AND status = 'open' AND scope = ${scope} AND "userId" IS ${userId}
         AND CASE WHEN json_valid(meta) THEN json_extract(meta, '$.adapter') END = ${adapter}`);
   }
+
+  listTaskAttachmentUrls(taskId: string): Promise<{ kind: string; url: string | null }[]> {
+    return this.db.query<{ kind: string; url: string | null }>(sql`
+      SELECT kind, url FROM task_attachments WHERE task_id = ${taskId} ORDER BY created_at, rowid`);
+  }
+
+  async releasePendingPoolTask(taskId: string, agentId: string, now: string): Promise<number> {
+    // The statement head stays as written before the move: the
+    // runtime-pool-routing test intercepts this write by its text.
+    const result = await this.db.run(sql`
+      ${raw("UPDATE agent_tasks SET agentId = NULL")}, status = 'unassigned', "lastUpdatedAt" = ${now}
+      WHERE id = ${taskId} AND status = 'pending' AND "agentId" = ${agentId} AND pool_wake_at IS NULL
+        AND COALESCE(routing_reason, '') != 'human_pinned'`);
+    return result.changes;
+  }
 }
