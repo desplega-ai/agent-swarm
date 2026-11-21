@@ -3855,163 +3855,171 @@ export async function updateAgentProfile(
 ): Promise<Agent | null> {
   const storage = getStorage();
   const agents = storage.repos.agents;
-  return await storage.transaction(async () => {
-    // A local copy: a replayed attempt (decision D6) must start from the request.
-    let updates = requested;
-    // Get current agent state for version comparison
-    const current = (await agents.findAgentById(id)) as AgentRow | null;
-    if (!current) return null;
+  // Conflicts are reported after commit: a replayed attempt (decision D6) finds
+  // them again, and the caller must hear each dropped field once.
+  const outcome = await storage.transaction(async () => {
+    const conflicts: ProfileSyncConflict[] = [];
+    const agent = await (async (): Promise<Agent | null> => {
+      // A local copy: a replayed attempt (decision D6) must start from the request.
+      let updates = requested;
+      // Get current agent state for version comparison
+      const current = (await agents.findAgentById(id)) as AgentRow | null;
+      if (!current) return null;
 
-    const roleViolation = reservedRoleViolation(current.role, updates.role, {
-      allowExtensionRole: guard?.allowExtensionRole,
-    });
-    if (roleViolation) throw new ReservedAgentRoleError(roleViolation);
-
-    // Compare with the old metadata before replacing it. Persist refreshed defaults
-    // atomically so both running workers and restarted workers see matching blobs.
-    const previous = rowToAgent(current);
-    const next = {
-      name: updates.name ?? previous.name,
-      description: updates.description ?? previous.description,
-      role: updates.role ?? previous.role,
-      capabilities: updates.capabilities ?? previous.capabilities,
-    };
-    const metadataChanged =
-      next.name !== previous.name ||
-      next.description !== previous.description ||
-      next.role !== previous.role ||
-      JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
-    if (metadataChanged) {
-      updates = { ...updates };
-      if (
-        updates.identityMd === undefined &&
-        previous.identityMd &&
-        matchesDefaultIdentityMd(previous.identityMd, previous)
-      ) {
-        updates.identityMd = generateDefaultIdentityMd(next);
-      }
-      if (
-        updates.claudeMd === undefined &&
-        previous.claudeMd &&
-        matchesDefaultClaudeMd(previous.claudeMd, previous)
-      ) {
-        updates.claudeMd = generateDefaultClaudeMd(next);
-      }
-    }
-
-    // Compare-and-set. A writer that edits a copy of a field (a session's
-    // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
-    // moved since — a sibling session's sync, an `update-profile` — the copy is
-    // stale and writing it would revert the newer value, so the field is dropped
-    // (no version, no column write). An edit on top of the current value applies,
-    // including a deliberate revert to an earlier version. Without a token the
-    // write is unconditional, as before.
-    //
-    // Runs BEFORE the budget check: a stale copy of an older, longer value must be
-    // dropped, not rejected — a budget rejection throws and would also roll back
-    // the other fields of the same update.
-    const writable = { ...updates };
-    for (const field of VERSIONABLE_FIELDS) {
-      const expectedHash = guard?.expectedHashes?.[field];
-      if (expectedHash === undefined) continue;
-      if (writable[field] === undefined || writable[field] === null) continue;
-
-      const currentHash = computeContentHash(current[field] ?? "");
-      if (currentHash === expectedHash) continue;
-
-      console.warn(
-        `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
-      );
-      delete writable[field];
-      guard?.onConflict?.({ field, expectedHash, currentHash });
-    }
-
-    if (writable.heartbeatMd !== undefined) {
-      validateHeartbeatExpiry(current.heartbeatMd ?? "", writable.heartbeatMd);
-    }
-
-    for (const field of BUDGETED_IDENTITY_FIELDS) {
-      const nextValue = writable[field];
-      if (nextValue === undefined) continue;
-
-      const result = checkIdentityFieldBudget({
-        field,
-        currentValue: current[field] ?? "",
-        nextValue,
+      const roleViolation = reservedRoleViolation(current.role, updates.role, {
+        allowExtensionRole: guard?.allowExtensionRole,
       });
-      if (!result.ok) {
-        throw new IdentityFieldBudgetError(
-          result,
-          computeContentHash(current[field] ?? ""),
-          computeContentHash(nextValue),
+      if (roleViolation) throw new ReservedAgentRoleError(roleViolation);
+
+      // Compare with the old metadata before replacing it. Persist refreshed defaults
+      // atomically so both running workers and restarted workers see matching blobs.
+      const previous = rowToAgent(current);
+      const next = {
+        name: updates.name ?? previous.name,
+        description: updates.description ?? previous.description,
+        role: updates.role ?? previous.role,
+        capabilities: updates.capabilities ?? previous.capabilities,
+      };
+      const metadataChanged =
+        next.name !== previous.name ||
+        next.description !== previous.description ||
+        next.role !== previous.role ||
+        JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
+      if (metadataChanged) {
+        updates = { ...updates };
+        if (
+          updates.identityMd === undefined &&
+          previous.identityMd &&
+          matchesDefaultIdentityMd(previous.identityMd, previous)
+        ) {
+          updates.identityMd = generateDefaultIdentityMd(next);
+        }
+        if (
+          updates.claudeMd === undefined &&
+          previous.claudeMd &&
+          matchesDefaultClaudeMd(previous.claudeMd, previous)
+        ) {
+          updates.claudeMd = generateDefaultClaudeMd(next);
+        }
+      }
+
+      // Compare-and-set. A writer that edits a copy of a field (a session's
+      // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
+      // moved since — a sibling session's sync, an `update-profile` — the copy is
+      // stale and writing it would revert the newer value, so the field is dropped
+      // (no version, no column write). An edit on top of the current value applies,
+      // including a deliberate revert to an earlier version. Without a token the
+      // write is unconditional, as before.
+      //
+      // Runs BEFORE the budget check: a stale copy of an older, longer value must be
+      // dropped, not rejected — a budget rejection throws and would also roll back
+      // the other fields of the same update.
+      const writable = { ...updates };
+      for (const field of VERSIONABLE_FIELDS) {
+        const expectedHash = guard?.expectedHashes?.[field];
+        if (expectedHash === undefined) continue;
+        if (writable[field] === undefined || writable[field] === null) continue;
+
+        const currentHash = computeContentHash(current[field] ?? "");
+        if (currentHash === expectedHash) continue;
+
+        console.warn(
+          `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
         );
+        delete writable[field];
+        conflicts.push({ field, expectedHash, currentHash });
       }
-    }
 
-    if (updates.name !== undefined) {
-      const existingAgent = await agents.findAgentByNameExcept(updates.name, id);
-      if (existingAgent) throw new Error("Agent name already exists");
-    }
+      if (writable.heartbeatMd !== undefined) {
+        validateHeartbeatExpiry(current.heartbeatMd ?? "", writable.heartbeatMd);
+      }
 
-    // Create context versions for changed fields (stale copies already dropped)
-    for (const field of VERSIONABLE_FIELDS) {
-      const newValue = writable[field];
-      if (newValue === undefined || newValue === null) continue;
+      for (const field of BUDGETED_IDENTITY_FIELDS) {
+        const nextValue = writable[field];
+        if (nextValue === undefined) continue;
 
-      const currentValue = current[field] ?? "";
-      const newHash = computeContentHash(newValue);
-      const currentHash = computeContentHash(currentValue);
+        const result = checkIdentityFieldBudget({
+          field,
+          currentValue: current[field] ?? "",
+          nextValue,
+        });
+        if (!result.ok) {
+          throw new IdentityFieldBudgetError(
+            result,
+            computeContentHash(current[field] ?? ""),
+            computeContentHash(nextValue),
+          );
+        }
+      }
 
-      if (newHash === currentHash) continue; // No actual change
+      if (updates.name !== undefined) {
+        const existingAgent = await agents.findAgentByNameExcept(updates.name, id);
+        if (existingAgent) throw new Error("Agent name already exists");
+      }
 
-      const latestVersion = await getLatestContextVersion(id, field);
-      const version = (latestVersion?.version ?? 0) + 1;
+      // Create context versions for changed fields (stale copies already dropped)
+      for (const field of VERSIONABLE_FIELDS) {
+        const newValue = writable[field];
+        if (newValue === undefined || newValue === null) continue;
 
-      await createContextVersion({
-        agentId: id,
-        field,
-        content: newValue,
-        version,
-        changeSource: meta?.changeSource ?? "api",
-        changedByAgentId: meta?.changedByAgentId ?? null,
-        changeReason: meta?.changeReason ?? null,
-        contentHash: newHash,
-        previousVersionId: latestVersion?.id ?? null,
-      });
-    }
+        const currentValue = current[field] ?? "";
+        const newHash = computeContentHash(newValue);
+        const currentHash = computeContentHash(currentValue);
 
-    // Proceed with existing UPDATE logic.
-    //
-    // `avatar` can't use the COALESCE(?, col) pattern the other fields use:
-    // COALESCE can never write NULL back (a bound NULL just falls through to
-    // the existing value), which would make "reset to default avatar"
-    // unimplementable. So it gets its own explicit-set CASE, gated by an
-    // `avatarProvided` flag distinguishing "key absent from updates" (leave
-    // untouched) from "key present with value null" (reset).
-    const avatarProvided = Object.hasOwn(updates, "avatar");
-    const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
-    const slackIconProvided = Object.hasOwn(updates, "slackIcon");
-    const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
+        if (newHash === currentHash) continue; // No actual change
 
-    const now = new Date().toISOString();
-    const row = (await agents.updateAgentProfile(id, {
-      name: updates.name ?? null,
-      description: updates.description ?? null,
-      role: updates.role ?? null,
-      capabilities: updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-      claudeMd: writable.claudeMd ?? null,
-      soulMd: writable.soulMd ?? null,
-      identityMd: writable.identityMd ?? null,
-      setupScript: writable.setupScript ?? null,
-      toolsMd: writable.toolsMd ?? null,
-      heartbeatMd: writable.heartbeatMd ?? null,
-      avatar: { set: avatarProvided, value: avatarJson },
-      slackIcon: { set: slackIconProvided, value: slackIconJson },
-      now,
-    })) as AgentRow | null;
+        const latestVersion = await getLatestContextVersion(id, field);
+        const version = (latestVersion?.version ?? 0) + 1;
 
-    return row ? rowToAgent(row) : null;
+        await createContextVersion({
+          agentId: id,
+          field,
+          content: newValue,
+          version,
+          changeSource: meta?.changeSource ?? "api",
+          changedByAgentId: meta?.changedByAgentId ?? null,
+          changeReason: meta?.changeReason ?? null,
+          contentHash: newHash,
+          previousVersionId: latestVersion?.id ?? null,
+        });
+      }
+
+      // Proceed with existing UPDATE logic.
+      //
+      // `avatar` can't use the COALESCE(?, col) pattern the other fields use:
+      // COALESCE can never write NULL back (a bound NULL just falls through to
+      // the existing value), which would make "reset to default avatar"
+      // unimplementable. So it gets its own explicit-set CASE, gated by an
+      // `avatarProvided` flag distinguishing "key absent from updates" (leave
+      // untouched) from "key present with value null" (reset).
+      const avatarProvided = Object.hasOwn(updates, "avatar");
+      const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
+      const slackIconProvided = Object.hasOwn(updates, "slackIcon");
+      const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
+
+      const now = new Date().toISOString();
+      const row = (await agents.updateAgentProfile(id, {
+        name: updates.name ?? null,
+        description: updates.description ?? null,
+        role: updates.role ?? null,
+        capabilities: updates.capabilities ? JSON.stringify(updates.capabilities) : null,
+        claudeMd: writable.claudeMd ?? null,
+        soulMd: writable.soulMd ?? null,
+        identityMd: writable.identityMd ?? null,
+        setupScript: writable.setupScript ?? null,
+        toolsMd: writable.toolsMd ?? null,
+        heartbeatMd: writable.heartbeatMd ?? null,
+        avatar: { set: avatarProvided, value: avatarJson },
+        slackIcon: { set: slackIconProvided, value: slackIconJson },
+        now,
+      })) as AgentRow | null;
+
+      return row ? rowToAgent(row) : null;
+    })();
+    return { agent, conflicts };
   });
+  for (const conflict of outcome.conflicts) guard?.onConflict?.(conflict);
+  return outcome.agent;
 }
 
 export async function updateAgentName(id: string, newName: string): Promise<Agent | null> {
