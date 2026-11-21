@@ -9,3 +9,10 @@ export {
 } from "./client";
 export { postgresDialect } from "./dialect";
 export { mapPostgresError, SQLSTATE } from "./errors";
+export {
+  loadPostgresMigrations,
+  MIGRATION_LOCK_KEY,
+  type PostgresMigrationOptions,
+  type PostgresMigrationResult,
+  runPostgresMigrations,
+} from "./migrations";
