@@ -4,7 +4,7 @@ import type {
   ScriptCredentialBindingRow,
 } from "@desplega/storage";
 import { z } from "zod";
-import { getDb, getDbClient, upsertSwarmConfig } from "@/be/db";
+import { getDb, upsertSwarmConfig } from "@/be/db";
 import { getAuthorizationById, getOAuthAppById } from "@/be/db-queries/oauth";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
@@ -1229,17 +1229,7 @@ async function deleteManagedConnectionSecret(input: {
   key: string;
 }): Promise<void> {
   const scopeId = input.scope === "global" ? null : input.scopeId;
-  if (scopeId === null) {
-    await getDbClient().run(
-      "DELETE FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-      [input.scope, input.key],
-    );
-  } else {
-    await getDbClient().run(
-      "DELETE FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-      [input.scope, scopeId, input.key],
-    );
-  }
+  await getStorage().repos.config.deleteConfigByScopeKey(input.scope, scopeId, input.key);
 }
 
 /**

@@ -19,10 +19,6 @@
     "reason": "M2 move: tasks",
     "sites": 7
   },
-  "src/be/db-queries/mcp-servers.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 2
-  },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
     "sites": 6
@@ -247,14 +243,6 @@
     "reason": "M2 move: sessions and cost",
     "sites": 2
   },
-  "src/be/primitives/object-embed.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
-  },
-  "src/be/primitives/object-webhooks.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 7
-  },
   "src/be/rbac-roles.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 10
@@ -281,7 +269,7 @@
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
-    "sites": 5
+    "sites": 2
   },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
@@ -474,10 +462,6 @@
   "src/http/savings-calibration.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 1
-  },
-  "src/http/script-connections.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 3
   },
   "src/http/sessions.ts": {
     "reason": "M2 move: sessions and cost",

@@ -1,3 +1,4 @@
+import { agentFsWebhooksContract } from "./agent-fs-webhooks";
 import { agentsContract } from "./agents";
 import { assetsContract } from "./assets";
 import { chatContract } from "./chat";
@@ -46,4 +47,5 @@ export function runStorageContract(engine: ContractEngine): void {
   skillsContract(engine);
   kvContract(engine);
   schedulesContract(engine);
+  agentFsWebhooksContract(engine);
 }

@@ -387,5 +387,26 @@ export function agentsContract(engine: ContractEngine): void {
       );
       expect(row).toEqual({ id: "i1", isActive: 0 });
     });
+
+    test("countActiveMcpServerInstalls counts active installs per server", async () => {
+      for (const id of ["s1", "s2", "s3"]) {
+        await storage.executor.run(sql`
+          INSERT INTO mcp_servers (id, name, scope, transport, "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, 'global', 'http', ${T0}, ${T0})`);
+      }
+      await repo.insertAgent(newAgent({ id: "ma" }));
+      await repo.insertAgent(newAgent({ id: "mb" }));
+      await repo.installMcpServer("i1", "ma", "s2", T0);
+      await repo.installMcpServer("i2", "mb", "s2", T0);
+      await repo.installMcpServer("i3", "ma", "s1", T0);
+      await repo.installMcpServer("i4", "ma", "s3", T0);
+      await storage.executor.run(
+        sql`UPDATE agent_mcp_servers SET "isActive" = ${false} WHERE "mcpServerId" = 's3'`,
+      );
+      expect(await repo.countActiveMcpServerInstalls()).toEqual([
+        { mcpServerId: "s1", installs: 1 },
+        { mcpServerId: "s2", installs: 2 },
+      ]);
+    });
   });
 }

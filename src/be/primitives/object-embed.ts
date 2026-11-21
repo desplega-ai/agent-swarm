@@ -1,7 +1,7 @@
 import { FilesError } from "@/fs/provider";
 import { buildAgentFsFileLink } from "@/utils/constants";
 import { agentFsClientFor } from "../agent-fs-identity";
-import { getDbClient, getSwarmConfigs } from "../db";
+import { getSwarmConfigs } from "../db";
 import { getStorage } from "../storage";
 import { parseScene } from "./boards/elements";
 import {
@@ -78,10 +78,7 @@ const withLink = (row: Row): PrimitiveObject => ({ ...row, link: buildAgentFsFil
 
 /** agent-fs keeps this drive's rows fresh through `file.changed` (object-webhooks.ts). */
 async function driveWatched(orgId: string, driveId: string): Promise<boolean> {
-  const hook = await getDbClient().get<{ status: string }>(
-    "SELECT status FROM agent_fs_object_webhooks WHERE orgId = ? AND driveId = ?",
-    [orgId, driveId],
-  );
+  const hook = await getStorage().repos.agentFsWebhooks.findByDrive(orgId, driveId);
   return hook?.status === "active";
 }
 

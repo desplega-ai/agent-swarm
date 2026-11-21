@@ -1,3 +1,4 @@
+export * from "./agent-fs-webhooks";
 export * from "./agents";
 export * from "./assets";
 export * from "./chat";

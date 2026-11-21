@@ -353,6 +353,8 @@ export interface AgentsRepository {
   listNonExtensionAgentIdsByName(name: string | null, limit: number): Promise<string[]>;
   /** Installs an active skill unless the agent has it already. True when a row was written. */
   installSkillIfAbsent(id: string, agentId: string, skillId: string, now: string): Promise<boolean>;
+  /** Active installs per MCP server id; servers with no active install are absent. Ordered by server id. */
+  countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -838,5 +840,14 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
       VALUES (${id}, ${agentId}, ${skillId}, ${true}, ${now})
       ON CONFLICT ("agentId", "skillId") DO NOTHING`);
     return result.changes > 0;
+  }
+
+  countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]> {
+    return this.db.query<{ mcpServerId: string; installs: number }>(sql`
+      SELECT "mcpServerId", COUNT(*) AS installs
+        FROM agent_mcp_servers
+       WHERE "isActive" = ${true}
+       GROUP BY "mcpServerId"
+       ORDER BY "mcpServerId"`);
   }
 }

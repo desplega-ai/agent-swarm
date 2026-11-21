@@ -6,6 +6,7 @@ import {
   type TransactionOptions,
 } from "@desplega/storage";
 import { sqliteDialect } from "./dialect";
+import { SqliteAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteAssetsRepository } from "./repositories/assets";
 import { SqliteChatRepository } from "./repositories/chat";
@@ -78,6 +79,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
       schedules: new SqliteSchedulesRepository(executor),
+      agentFsWebhooks: new SqliteAgentFsWebhooksRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
