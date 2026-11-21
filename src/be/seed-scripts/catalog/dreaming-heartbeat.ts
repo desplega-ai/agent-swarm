@@ -63,7 +63,7 @@ const rows = (r: any): any[] => {
 let LEAD = "";
 async function resolveLead(ctx: ScriptContext, id: unknown): Promise<string> {
   if (typeof id === "string" && id.trim()) return id.trim();
-  const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE isLead = 1 ORDER BY createdAt ASC LIMIT 1` }));
+  const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE "isLead" = true ORDER BY "createdAt" ASC, id LIMIT 1` }));
   return String(r[0]?.id ?? "");
 }
 
@@ -313,7 +313,20 @@ async function runScript(args: unknown, ctx: ScriptContext) {
   const date = a.date ?? now.toISOString().slice(0, 10);
   const today = new Date(`${date}T00:00:00Z`);
   const errors: string[] = [];
-  const q = async (sql: string, params: unknown[] = []) => rows(await ctx.swarm.db_query({ sql, params }));
+  // db_query runs the engine's own dialect and each response states it (absent = "sqlite"). Placeholders are $n,
+  // numbered in order of first appearance (bun:sqlite binds them so). A statement with no portable text carries one
+  // text per dialect; before the first response, one `SELECT 1` learns the dialect.
+  let dialect: "sqlite" | "postgres" | undefined;
+  const send = async (sql: string, params: unknown[]) => {
+    const res: any = await ctx.swarm.db_query({ sql, params });
+    dialect = (res?.data ?? res)?.dialect === "postgres" ? "postgres" : "sqlite";
+    return res;
+  };
+  const q = async (sql: string | { sqlite: string; postgres: string }, params: unknown[] = []) => {
+    if (typeof sql !== "string" && dialect === undefined) await send("SELECT 1 AS one", []);
+    return rows(await send(typeof sql === "string" ? sql : sql[dialect ?? "sqlite"], params));
+  };
+  const marks = (from: number, count: number) => Array.from({ length: count }, (_, i) => `$${from + i}`).join(", ");
   const kvGet = async (key: string): Promise<any> => {
     const v = (await ctx.swarm.kv_getOrNull({ namespace: NS, key }))?.value;
     return parse(v) ?? v ?? null;
@@ -328,11 +341,11 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       return [];
     }
   };
-  const liveHb = async () => String((await q(`SELECT heartbeatMd FROM agents WHERE id = ?`, [LEAD]))[0]?.heartbeatMd ?? "");
+  const liveHb = async () => String((await q(`SELECT "heartbeatMd" FROM agents WHERE id = $1`, [LEAD]))[0]?.heartbeatMd ?? "");
   const pinsC = async () => (await kvList("pin:C:")).map((e) => String(e.value?.probe ?? "")).filter(Boolean);
   // Every Lead heartbeat that can still run or write: not just in_progress. Fail-closed: a stuck row blocks lane C until cancelled.
   const busyHb = async () =>
-    (await q(`SELECT id, status, createdAt FROM agent_tasks WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status IN (${BUSY.map(() => "?").join(", ")}) ORDER BY createdAt`, [LEAD, ...BUSY])).map((r) => ({
+    (await q(`SELECT id, status, "createdAt" FROM agent_tasks WHERE "agentId" = $1 AND "taskType" = 'heartbeat-checklist' AND status IN (${marks(2, BUSY.length)}) ORDER BY "createdAt", id`, [LEAD, ...BUSY])).map((r) => ({
       id: String(r.id),
       status: String(r.status),
       createdAt: String(r.createdAt),
@@ -451,7 +464,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       const term = new Map<string, any>();
       for (let i = 0; i < ids.length; i += 100) {
         const chunk = ids.slice(i, i + 100);
-        const r = await q(`SELECT id, status, finishedAt FROM agent_tasks WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk);
+        const r = await q(`SELECT id, status, "finishedAt" FROM agent_tasks WHERE id IN (${marks(1, chunk.length)})`, chunk);
         for (const x of r) term.set(x.id, x);
       }
       const isOld = (t: any) => ["completed", "failed", "cancelled"].includes(String(t?.status)) && t?.finishedAt && now.getTime() - Date.parse(t.finishedAt) > 7 * dayMs;
@@ -479,9 +492,22 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const t = pinTitle(it.norm);
         const key = t ? pinKey(t) : it.norm.replace(/^📌[^\w*`]*/u, "").slice(0, 60);
         const refs = refText.filter(([, s]) => s.includes(key)).map(([k]) => k);
-        const sr = await q(`SELECT name, scope FROM scripts WHERE isScratch = 0 AND name NOT GLOB 'dreaming-heartbeat*' AND instr(source, ?) > 0 LIMIT 3`, [key]);
+        // Substring test: instr() on SQLite, strpos() on Postgres. substr() keeps the GLOB prefix test case-sensitive.
+        const sr = await q(
+          {
+            sqlite: `SELECT name, scope FROM scripts WHERE "isScratch" = false AND substr(name, 1, 18) <> 'dreaming-heartbeat' AND instr(source, $1) > 0 ORDER BY name, scope LIMIT 3`,
+            postgres: `SELECT name, scope FROM scripts WHERE "isScratch" = false AND substr(name, 1, 18) <> 'dreaming-heartbeat' AND strpos(source, $1) > 0 ORDER BY name, scope LIMIT 3`,
+          },
+          [key],
+        );
         refs.push(...sr.map((r) => `script:${r.name}/${r.scope}`));
-        const wr = await q(`SELECT id, name FROM workflows WHERE instr(definition, ?) > 0 LIMIT 3`, [key]);
+        const wr = await q(
+          {
+            sqlite: `SELECT id, name FROM workflows WHERE instr(definition, $1) > 0 ORDER BY name, id LIMIT 3`,
+            postgres: `SELECT id, name FROM workflows WHERE strpos(definition, $1) > 0 ORDER BY name, id LIMIT 3`,
+          },
+          [key],
+        );
         refs.push(...wr.map((r) => `workflow:${r.name}/${String(r.id).slice(0, 8)}`));
         pinCandidates.push({ line: it.line, probe: it.norm.slice(0, 80), title: t, key, chars: it.chars, closedHead: !!t && CLOSED_HEAD.test(t), refs, locked: refs.length > 0 });
       }
@@ -515,8 +541,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       const perSection = so.length ? Math.floor(TARGETS.standingOrdersChars / so.length) : 0;
       const sectionsOver = so.filter((s) => s.chars > perSection).map((s) => ({ heading: s.heading, chars: s.chars, target: perSection }));
       // Duplicates with Lead's other fields and the procedures skill (8-word shingles, overlap >= 0.6).
-      const lead = (await q(`SELECT claudeMd, toolsMd, soulMd, identityMd FROM agents WHERE id = ?`, [LEAD]))[0] ?? {};
-      const skillRows = await q(`SELECT id, name, systemDefault, content FROM skills WHERE name IN (?, 'heartbeat-runbook')`, [a.skillName ?? PROCEDURES_SKILL]);
+      const lead = (await q(`SELECT "claudeMd", "toolsMd", "soulMd", "identityMd" FROM agents WHERE id = $1`, [LEAD]))[0] ?? {};
+      const skillRows = await q(`SELECT id, name, "systemDefault", content FROM skills WHERE name IN ($1, 'heartbeat-runbook') ORDER BY name, id`, [a.skillName ?? PROCEDURES_SKILL]);
       const procSkill = skillRows.find((s: any) => s.name === (a.skillName ?? PROCEDURES_SKILL)) ?? null;
       const others: Array<[string, string]> = [
         ["claudeMd", String(lead.claudeMd ?? "")],
@@ -662,7 +688,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       const harvest = (Array.isArray(draft.movedToMemory) ? draft.movedToMemory : []).filter((m: any) => /^[a-z0-9-]{3,90}$/.test(String(m?.name ?? "")) && String(m?.content ?? "").trim());
       const pinMemories: string[] = harvest.map((m: any) => String(m.name));
       const named = [...new Set(removed.map(memKey).filter((k) => k && !pinMemories.includes(k)))];
-      for (const k of named) if ((await q(`SELECT 1 FROM agent_memory WHERE name = ? OR id = ? LIMIT 1`, [k, k])).length) pinMemories.push(k);
+      for (const k of named) if ((await q(`SELECT 1 FROM agent_memory WHERE name = $1 OR id = $2 LIMIT 1`, [k, k])).length) pinMemories.push(k);
       if (next) {
         reasons.push(
           ...checkDraft({
@@ -849,16 +875,16 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // explicit key share it. An auto key (scope/source/id) differs per chunk, so its siblings are the rows of the same
       // store: same name, scope, owner, source and totalChunks, one per chunkIndex, created nearest to this row.
       const docOf = async (id: string) => {
-        const row = (await q(`SELECT id, key, name, scope, source, agentId, totalChunks, content, expiresAt, createdAt FROM agent_memory WHERE id = ? LIMIT 1`, [id]))[0];
+        const row = (await q(`SELECT id, key, name, scope, source, "agentId", "totalChunks", content, "expiresAt", "createdAt" FROM agent_memory WHERE id = $1 LIMIT 1`, [id]))[0];
         if (!row) return null;
         const total = Math.max(1, Number(row.totalChunks ?? 1));
         let parts: any[] = [row];
         if (row.key && row.key !== `${row.scope}/${row.source}/${row.id}`) {
-          parts = await q(`SELECT content, expiresAt FROM agent_memory WHERE key = ? AND scope = ? AND agentId IS ? ORDER BY chunkIndex`, [row.key, row.scope, row.agentId]);
+          parts = await q(`SELECT content, "expiresAt" FROM agent_memory WHERE key = $1 AND scope = $2 AND "agentId" IS NOT DISTINCT FROM $3 ORDER BY "chunkIndex" NULLS FIRST`, [row.key, row.scope, row.agentId]);
         } else if (total > 1) {
           const at = Date.parse(String(row.createdAt));
           const gap = (r: any) => Math.abs(Date.parse(String(r.createdAt)) - at);
-          const rows = await q(`SELECT chunkIndex, content, expiresAt, createdAt FROM agent_memory WHERE name = ? AND scope = ? AND agentId IS ? AND source = ? AND totalChunks = ? AND (key IS NULL OR key = scope || '/' || source || '/' || id)`, [row.name, row.scope, row.agentId, row.source, total]);
+          const rows = await q(`SELECT "chunkIndex", content, "expiresAt", "createdAt" FROM agent_memory WHERE name = $1 AND scope = $2 AND "agentId" IS NOT DISTINCT FROM $3 AND source = $4 AND "totalChunks" = $5 AND (key IS NULL OR key = scope || '/' || source || '/' || id) ORDER BY "chunkIndex", "createdAt", id`, [row.name, row.scope, row.agentId, row.source, total]);
           parts = [];
           for (let i = 0; i < total; i++) {
             const near = rows.filter((r: any) => Number(r.chunkIndex) === i && gap(r) <= 60000).sort((x: any, y: any) => gap(x) - gap(y))[0];
@@ -904,7 +930,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           if (isPin) for (const k of [name, target]) if (k) held.set(k, { id, text: content });
         };
         try {
-          const ex = await q(`SELECT id, key, name, totalChunks, content FROM agent_memory WHERE id = ? OR (name = ? AND chunkIndex = 0) ORDER BY createdAt DESC LIMIT 1`, [target || name, target || name]);
+          const ex = await q(`SELECT id, key, name, "totalChunks", content FROM agent_memory WHERE id = $1 OR (name = $2 AND "chunkIndex" = 0) ORDER BY "createdAt" DESC, id LIMIT 1`, [target || name, target || name]);
           const hit = ex[0];
           if (hit && (isPin || target)) {
             // Only a document that already holds every harvested fact counts; a shared opening is not enough.
@@ -923,7 +949,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
               }
             }
             // A row that may not be edited (or an edit that was refused): keep the text in a sibling that points back.
-            const taken = (await q(`SELECT 1 FROM agent_memory WHERE name = ? LIMIT 1`, [name])).length > 0;
+            const taken = (await q(`SELECT 1 FROM agent_memory WHERE name = $1 LIMIT 1`, [name])).length > 0;
             const sibling = taken ? `${name.slice(0, 80)}-${date.slice(5)}` : name;
             const sid = await storeMemory(sibling, `Addendum to memory "${String(hit.name).slice(0, 120)}" (${hit.id}).\n\n${content}`, pinTags);
             keep(sid, "stored-sibling", { target: String(hit.id), sibling, ...(noEdit ? { editRefused: noEdit } : {}) });
@@ -944,7 +970,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       const durable = new Map<string, string>();
       for (const k of pinNames) {
         const h = held.get(k);
-        const id = h?.id ?? String((await q(`SELECT id FROM agent_memory WHERE id = ? OR (name = ? AND chunkIndex = 0) ORDER BY createdAt DESC LIMIT 1`, [k, k]))[0]?.id ?? "");
+        const id = h?.id ?? String((await q(`SELECT id FROM agent_memory WHERE id = $1 OR (name = $2 AND "chunkIndex" = 0) ORDER BY "createdAt" DESC, id LIMIT 1`, [k, k]))[0]?.id ?? "");
         const doc = id && (h || !failed.has(k)) ? await docOf(id) : null;
         if (!doc || (h ? lacking(doc.chunks, h.text).length > 0 : !doc.complete)) { missingPin.push(k); continue; }
         if (!doc.expiring || durable.has(doc.id)) continue;
@@ -1125,6 +1151,10 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
   const key = `result:${runId}:${RUN_NODE}`;
   const flag = a.loadResult === true ? "loadResult" : "fromRun";
   if (!runId) return { ok: false, [flag]: true, error: `${flag} needs runId` };
+  // db_query runs the engine's own dialect: one SELECT 1 learns it (a response without the field is SQLite). The
+  // step outputs are JSON text on both engines; SQLite reads them with json_extract, Postgres with jsonb operators.
+  const probe: any = await ctx.swarm.db_query({ sql: "SELECT 1 AS one", params: [] });
+  const pg = (probe?.data ?? probe)?.dialect === "postgres";
   const stored: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key }))?.value;
   const have = stored && stored.runId === runId && stored.node === RUN_NODE;
   if (a.loadResult === true) {
@@ -1133,7 +1163,9 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
     // equals the sha256 the Lead step returned, which the engine recorded as the `<node>-lead` step output.
     const lead = rows(
       await ctx.swarm.db_query({
-        sql: `SELECT json_extract(output, '$.taskOutput') o FROM workflow_run_steps WHERE runId = ? AND nodeId = ? AND status = 'completed' ORDER BY startedAt DESC LIMIT 1`,
+        sql: pg
+          ? `SELECT CASE WHEN output IS JSON THEN CAST(output AS jsonb)->>'taskOutput' END o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`
+          : `SELECT json_extract(output, '$.taskOutput') o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`,
         params: [runId, `${RUN_NODE}-lead`],
       }),
     );
@@ -1162,8 +1194,15 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
     if (args[arg] !== undefined) continue;
     const r = rows(
       await ctx.swarm.db_query({
-        sql: `SELECT json_type(output, ?) t, json_extract(output, ?) v FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1`,
-        params: [path, path, runId, nodeId],
+        // Postgres names the JSON types as SQLite's json_type() does (true, false, text, integer, real, ...).
+        sql: pg
+          ? `SELECT CASE jsonb_typeof(x.v) WHEN 'boolean' THEN x.v #>> '{}' WHEN 'string' THEN 'text'
+               WHEN 'number' THEN CASE WHEN (x.v #>> '{}') ~ '^-?[0-9]+$' THEN 'integer' ELSE 'real' END ELSE jsonb_typeof(x.v) END t,
+               x.v #>> '{}' v
+             FROM (SELECT jsonb_path_query_first(CASE WHEN output IS JSON THEN CAST(output AS jsonb) END, CAST($1 AS jsonpath)) v
+               FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3 ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1) x`
+          : `SELECT json_type(output, $1) t, json_extract(output, $1) v FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3 ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`,
+        params: [path, runId, nodeId],
       }),
     );
     if (!r.length) {

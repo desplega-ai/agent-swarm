@@ -131,13 +131,25 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const a = p.data;
   const dryRun = a.dryRun === true || a.dryRun === "true";
   const only = parseOnly(a.onlyAgentIds);
-  const win = `-${a.days} days`;
   const generatedAt = new Date().toISOString();
   const windowStart = new Date(Date.now() - a.days * 86400000).toISOString();
+  // Time cutoffs are computed here and bound as ISO text: the columns they meet store ISO text on SQLite and
+  // timestamptz on Postgres. Placeholders are $n, numbered in order of first appearance (bun:sqlite binds them so).
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
 
-  const q = async (label: string, sql: string, params: unknown[] = []): Promise<any[] | null> => {
+  // db_query runs the engine's own dialect and each response states it (absent = "sqlite"). A statement with no
+  // portable text carries one text per dialect; before the first response, one `SELECT 1` learns the dialect.
+  let dialect: "sqlite" | "postgres" | undefined;
+  const send = async (sql: string, params: unknown[]) => {
+    const res: any = await ctx.swarm.db_query({ sql, params });
+    dialect = (res?.data ?? res)?.dialect === "postgres" ? "postgres" : "sqlite";
+    return res;
+  };
+  type Sql = string | { sqlite: string; postgres: string };
+  const q = async (label: string, sql: Sql, params: unknown[] = []): Promise<any[] | null> => {
     try {
-      return rows(await ctx.swarm.db_query({ sql, params }));
+      if (typeof sql !== "string" && dialect === undefined) await send("SELECT 1 AS one", []);
+      return rows(await send(typeof sql === "string" ? sql : sql[dialect ?? "sqlite"], params));
     } catch (e: any) {
       errors.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`);
       return null;
@@ -145,63 +157,85 @@ export default async function (args: unknown, ctx: ScriptContext) {
   };
 
   // Self-exclusion: every run of THIS workflow, by durable workflowId (survives renames).
-  const SELF = `(SELECT r.id FROM workflow_runs r WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?))`;
+  const SELF = (n: number) =>
+    `(SELECT r.id FROM workflow_runs r WHERE r."workflowId" = (SELECT "workflowId" FROM workflow_runs WHERE id = $${n}))`;
   const selfP = [a.runId ?? ""];
 
   const roster =
     (await q(
       "roster",
-      `SELECT id, name, isLead, soulMd, identityMd, claudeMd, toolsMd, heartbeatMd
-       FROM agents WHERE status IN ('idle','busy') AND name NOT LIKE 'ext:%' ORDER BY isLead DESC, name`,
+      `SELECT id, name, "isLead", "soulMd", "identityMd", "claudeMd", "toolsMd", "heartbeatMd"
+       FROM agents WHERE status IN ('idle','busy') AND name NOT LIKE 'ext:%' ORDER BY "isLead" DESC, name`,
     )) ?? [];
   const stats =
     (await q(
       "taskStats",
-      `SELECT agentId, COUNT(*) total, SUM(status='completed') completed, SUM(status='failed') failed,
-         SUM(status='cancelled') cancelled, SUM(scheduleId IS NOT NULL) fromSchedules
-       FROM agent_tasks WHERE julianday(createdAt) > julianday('now', ?)
-         AND (workflowRunId IS NULL OR workflowRunId NOT IN ${SELF}) GROUP BY agentId`,
-      [win, ...selfP],
+      `SELECT "agentId", COUNT(*) total, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) completed,
+         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed,
+         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) cancelled,
+         SUM(CASE WHEN "scheduleId" IS NOT NULL THEN 1 ELSE 0 END) "fromSchedules"
+       FROM agent_tasks WHERE "createdAt" > $1
+         AND ("workflowRunId" IS NULL OR "workflowRunId" NOT IN ${SELF(2)}) GROUP BY "agentId"`,
+      [windowStart, ...selfP],
     )) ?? [];
   const cost =
     (await q(
       "cost",
-      `SELECT agentId, ROUND(SUM(totalCostUsd), 2) usd FROM session_costs
-       WHERE julianday(createdAt) > julianday('now', ?) GROUP BY agentId`,
-      [win],
+      `SELECT "agentId", ROUND(CAST(SUM("totalCostUsd") AS numeric), 2) usd FROM session_costs
+       WHERE "createdAt" > $1 GROUP BY "agentId"`,
+      [windowStart],
     )) ?? [];
   const recent =
     (await q(
       "recent",
-      `SELECT * FROM (SELECT t.agentId, t.id, t.status, COALESCE(t.title, substr(t.task,1,160)) title,
-         s.name scheduleName, t.failureReason,
-         ROW_NUMBER() OVER (PARTITION BY t.agentId ORDER BY (t.scheduleId IS NULL) DESC, t.createdAt DESC) rn
-       FROM agent_tasks t LEFT JOIN scheduled_tasks s ON s.id = t.scheduleId
-       WHERE julianday(t.createdAt) > julianday('now', ?)
-         AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN ${SELF})) WHERE rn <= 12`,
-      [win, ...selfP],
+      `SELECT * FROM (SELECT t."agentId", t.id, t.status, COALESCE(t.title, substr(t.task,1,160)) title,
+         s.name "scheduleName", t."failureReason",
+         ROW_NUMBER() OVER (PARTITION BY t."agentId" ORDER BY (t."scheduleId" IS NULL) DESC, t."createdAt" DESC, t.id) rn
+       FROM agent_tasks t LEFT JOIN scheduled_tasks s ON s.id = t."scheduleId"
+       WHERE t."createdAt" > $1
+         AND (t."workflowRunId" IS NULL OR t."workflowRunId" NOT IN ${SELF(2)})) x WHERE rn <= 12
+       ORDER BY "agentId" NULLS FIRST, rn`,
+      [windowStart, ...selfP],
     )) ?? [];
   const invokes = await q(
     "skillInvokes",
-    `SELECT agentId, json_extract(data,'$.skillName') name, COUNT(*) n FROM events
-     WHERE event = 'skill.invoke' AND createdAt > strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)
-     GROUP BY agentId, name`,
-    [win],
+    // events.data is JSON text on SQLite and jsonb on Postgres.
+    {
+      sqlite: `SELECT "agentId", json_extract(data,'$.skillName') name, COUNT(*) n FROM events
+     WHERE event = 'skill.invoke' AND "createdAt" > $1
+     GROUP BY "agentId", json_extract(data,'$.skillName')
+     ORDER BY "agentId" NULLS FIRST, name NULLS FIRST`,
+      postgres: `SELECT "agentId", data->>'skillName' AS name, COUNT(*) n FROM events
+     WHERE event = 'skill.invoke' AND "createdAt" > $1
+     GROUP BY "agentId", data->>'skillName'
+     ORDER BY "agentId" NULLS FIRST, name NULLS FIRST`,
+    },
+    [windowStart],
   );
   const installed =
     (await q(
       "installedSkills",
-      `SELECT agentId, COUNT(*) n FROM agent_skills WHERE isActive = 1 GROUP BY agentId`,
+      `SELECT "agentId", COUNT(*) n FROM agent_skills WHERE "isActive" = true GROUP BY "agentId"`,
     )) ?? [];
   const mems =
     (await q(
       "memoriesWritten",
-      `SELECT * FROM (SELECT agentId, id, name, scope,
-         ROW_NUMBER() OVER (PARTITION BY agentId ORDER BY createdAt DESC) rn
-       FROM agent_memory WHERE source = 'manual' AND julianday(createdAt) > julianday('now', ?)
-         AND COALESCE(chunkIndex, 0) = 0
-         AND (tags IS NULL OR tags NOT GLOB '*"dreaming-v2"*')) WHERE rn <= 10`,
-      [win],
+      // tags is JSON text on SQLite (GLOB is case-sensitive) and jsonb on Postgres (its text form keeps "dreaming-v2").
+      {
+        sqlite: `SELECT * FROM (SELECT "agentId", id, name, scope,
+         ROW_NUMBER() OVER (PARTITION BY "agentId" ORDER BY "createdAt" DESC, id) rn
+       FROM agent_memory WHERE source = 'manual' AND "createdAt" > $1
+         AND COALESCE("chunkIndex", 0) = 0
+         AND (tags IS NULL OR tags NOT GLOB '*"dreaming-v2"*')) x WHERE rn <= 10
+       ORDER BY "agentId" NULLS FIRST, rn`,
+        postgres: `SELECT * FROM (SELECT "agentId", id, name, scope,
+         ROW_NUMBER() OVER (PARTITION BY "agentId" ORDER BY "createdAt" DESC, id) rn
+       FROM agent_memory WHERE source = 'manual' AND "createdAt" > $1
+         AND COALESCE("chunkIndex", 0) = 0
+         AND (tags IS NULL OR strpos(CAST(tags AS text), '"dreaming-v2"') = 0)) x WHERE rn <= 10
+       ORDER BY "agentId" NULLS FIRST, rn`,
+      },
+      [windowStart],
     )) ?? [];
 
   const agents: any[] = [];
@@ -277,17 +311,17 @@ export default async function (args: unknown, ctx: ScriptContext) {
   let blockerDigest: any = { state: "missing", name: digestName, createdAt: null, chunks: 0, blockers: [], text: null, taskState: null };
   const dm = await q(
     "blockerDigestMemory",
-    `SELECT id, content, chunkIndex, createdAt FROM agent_memory WHERE name = ? ORDER BY createdAt DESC, chunkIndex ASC LIMIT 40`,
+    `SELECT id, content, "chunkIndex", "createdAt" FROM agent_memory WHERE name = $1 ORDER BY "createdAt" DESC, "chunkIndex" ASC NULLS FIRST LIMIT 40`,
     [digestName],
   );
   // The digest is the seeded daily-blocker-digest schedule; resolve it by name unless an id override is passed.
   const DIGEST = (a.digestScheduleId ?? "").trim() ||
-    String((await q("digestSchedule", `SELECT id FROM scheduled_tasks WHERE name = ? ORDER BY createdAt ASC LIMIT 1`, ["daily-blocker-digest"]))?.[0]?.id ?? "");
+    String((await q("digestSchedule", `SELECT id FROM scheduled_tasks WHERE name = $1 ORDER BY "createdAt" ASC, id LIMIT 1`, ["daily-blocker-digest"]))?.[0]?.id ?? "");
   const dt = !DIGEST ? [] : await q(
     "blockerDigestTask",
-    `SELECT id, status, finishedAt FROM agent_tasks WHERE scheduleId = ? AND julianday(createdAt) > julianday('now', '-1 days')
-     ORDER BY createdAt DESC LIMIT 1`,
-    [DIGEST],
+    `SELECT id, status, "finishedAt" FROM agent_tasks WHERE "scheduleId" = $1 AND "createdAt" > $2
+     ORDER BY "createdAt" DESC, id LIMIT 1`,
+    [DIGEST, daysAgo(1)],
   );
   const taskState = dt?.[0] ? { taskId: dt[0].id, status: dt[0].status, finishedAt: dt[0].finishedAt ?? null } : null;
   if (dm?.length) {
@@ -316,20 +350,27 @@ export default async function (args: unknown, ctx: ScriptContext) {
   let workflowChanges: any = { base: "none", baseRef: null, added: [], removed: [], changed: [] };
   let workflowSnapshot: Record<string, string> = {};
   try {
-    const me = await q("selfRun", `SELECT workflowId, startedAt, triggerType FROM workflow_runs WHERE id = ?`, [a.runId ?? ""]);
+    const me = await q("selfRun", `SELECT "workflowId", "startedAt", "triggerType" FROM workflow_runs WHERE id = $1`, [a.runId ?? ""]);
     const wfId = me?.[0]?.workflowId ?? null;
     if (wfId) {
       const prev = await q(
         "prevRuns",
-        `SELECT id, startedAt FROM workflow_runs WHERE workflowId = ? AND id != ?
-           AND julianday(startedAt) < julianday(?)
-           AND COALESCE(CASE WHEN json_valid(triggerData) THEN json_type(triggerData, '$.dryRun') = 'true'
-             OR json_extract(triggerData, '$.dryRun') = 'true' END, 0) = 0
-         ORDER BY startedAt DESC`,
+        // triggerData is JSON text on SQLite and jsonb on Postgres. Dry = dryRun is true or "true".
+        {
+          sqlite: `SELECT id, "startedAt" FROM workflow_runs WHERE "workflowId" = $1 AND id != $2
+           AND "startedAt" < $3
+           AND COALESCE(CASE WHEN json_valid("triggerData") THEN json_type("triggerData", '$.dryRun') = 'true'
+             OR json_extract("triggerData", '$.dryRun') = 'true' END, 0) = 0
+         ORDER BY "startedAt" DESC, id DESC`,
+          postgres: `SELECT id, "startedAt" FROM workflow_runs WHERE "workflowId" = $1 AND id != $2
+           AND "startedAt" < $3
+           AND NOT COALESCE("triggerData"->'dryRun' = 'true'::jsonb OR "triggerData"->'dryRun' = '"true"'::jsonb, false)
+         ORDER BY "startedAt" DESC, id DESC`,
+        },
         [wfId, a.runId ?? "", me?.[0]?.startedAt],
       );
       night = { number: (prev?.length ?? 0) + 1, previousRunId: prev?.[0]?.id ?? null, previousStartedAt: prev?.[0]?.startedAt ?? null };
-      const cur = await q("workflowDef", `SELECT definition FROM workflows WHERE id = ?`, [wfId]);
+      const cur = await q("workflowDef", `SELECT definition FROM workflows WHERE id = $1`, [wfId]);
       const nodesOf = (d: any): any[] => (Array.isArray(d?.definition?.nodes) ? d.definition.nodes : Array.isArray(d?.nodes) ? d.nodes : []);
       const hashNodes = async (nodes: any[]) => {
         const m: Record<string, string> = {};
@@ -346,7 +387,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
       } else if (night.previousStartedAt) {
         const v = await q(
           "workflowVersionAtPrevRun",
-          `SELECT version, snapshot FROM workflow_versions WHERE workflowId = ? AND julianday(createdAt) > julianday(?) ORDER BY version ASC LIMIT 1`,
+          // workflow_versions.createdAt holds both the ISO and the space format: compare as times on both engines.
+          {
+            sqlite: `SELECT version, snapshot FROM workflow_versions WHERE "workflowId" = $1 AND julianday("createdAt") > julianday($2) ORDER BY version ASC LIMIT 1`,
+            postgres: `SELECT version, snapshot FROM workflow_versions WHERE "workflowId" = $1 AND CAST("createdAt" AS timestamptz) > CAST($2 AS timestamptz) ORDER BY version ASC LIMIT 1`,
+          },
           [wfId, night.previousStartedAt],
         );
         workflowChanges.base = "workflow_versions";
@@ -372,8 +417,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const audit = async (name: string, pick: (o: any) => any) => {
     const c = await q(
       `${name}-latest`,
-      `SELECT output, ROUND((julianday('now') - julianday(startedAt)) * 1440) ageMinutes
-       FROM script_runs WHERE scriptName = ? AND status = 'completed' ORDER BY startedAt DESC LIMIT 1`,
+      // script_runs.startedAt holds both the ISO and the space format (text on both engines).
+      {
+        sqlite: `SELECT output, ROUND((julianday('now') - julianday("startedAt")) * 1440) "ageMinutes"
+       FROM script_runs WHERE "scriptName" = $1 AND status = 'completed' ORDER BY "startedAt" DESC LIMIT 1`,
+        postgres: `SELECT output, ROUND(CAST(EXTRACT(EPOCH FROM statement_timestamp() - CAST("startedAt" AS timestamptz)) / 60 AS numeric)) "ageMinutes"
+       FROM script_runs WHERE "scriptName" = $1 AND status = 'completed' ORDER BY "startedAt" DESC LIMIT 1`,
+      },
       [name],
     );
     if (!c?.length) return { source: "missing" };
@@ -420,20 +470,35 @@ export default async function (args: unknown, ctx: ScriptContext) {
   };
 
   // Skills: catalog counts, 7d usage, 14d never-invoked (enabled only).
-  const sk = await q("skillCounts", `SELECT COUNT(*) total, SUM(isEnabled) enabled, SUM(systemDefault) systemDefault FROM skills`);
+  const sk = await q("skillCounts", `SELECT COUNT(*) total, SUM(CASE WHEN "isEnabled" = true THEN 1 ELSE 0 END) enabled,
+       SUM(CASE WHEN "systemDefault" = true THEN 1 ELSE 0 END) "systemDefault" FROM skills`);
   const inv7 = await q(
     "skillInvoked7d",
-    `SELECT json_extract(data,'$.skillName') name, COUNT(*) n FROM events
-     WHERE event = 'skill.invoke' AND createdAt > strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')
-     GROUP BY name ORDER BY n DESC LIMIT 60`,
+    {
+      sqlite: `SELECT json_extract(data,'$.skillName') name, COUNT(*) n FROM events
+     WHERE event = 'skill.invoke' AND "createdAt" > $1
+     GROUP BY json_extract(data,'$.skillName') ORDER BY n DESC, name ASC NULLS FIRST LIMIT 60`,
+      postgres: `SELECT data->>'skillName' AS name, COUNT(*) n FROM events
+     WHERE event = 'skill.invoke' AND "createdAt" > $1
+     GROUP BY data->>'skillName' ORDER BY n DESC, name ASC NULLS FIRST LIMIT 60`,
+    },
+    [daysAgo(7)],
   );
   const never14 = await q(
     "skillNeverInvoked14d",
-    `SELECT id, name, scope, systemDefault FROM skills WHERE isEnabled = 1 AND name NOT IN (
+    {
+      sqlite: `SELECT id, name, scope, "systemDefault" FROM skills WHERE "isEnabled" = true AND name NOT IN (
        SELECT DISTINCT json_extract(data,'$.skillName') FROM events
-       WHERE event = 'skill.invoke' AND createdAt > strftime('%Y-%m-%dT%H:%M:%fZ','now','-14 days')
+       WHERE event = 'skill.invoke' AND "createdAt" > $1
          AND json_extract(data,'$.skillName') IS NOT NULL)
-     ORDER BY name LIMIT 40`,
+     ORDER BY name, id LIMIT 40`,
+      postgres: `SELECT id, name, scope, "systemDefault" FROM skills WHERE "isEnabled" = true AND name NOT IN (
+       SELECT DISTINCT data->>'skillName' FROM events
+       WHERE event = 'skill.invoke' AND "createdAt" > $1
+         AND data->>'skillName' IS NOT NULL)
+     ORDER BY name, id LIMIT 40`,
+    },
+    [daysAgo(14)],
   );
   const skills = {
     total: Number(sk?.[0]?.total ?? 0),
@@ -451,30 +516,41 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // Memory candidates: manual rows only.
   const dups = await q(
     "memExactDuplicates",
-    `SELECT contentHash, group_concat(id, '|') ids, group_concat(name, '|') names FROM (
-       SELECT contentHash, id, name FROM agent_memory
-       WHERE source = 'manual' AND contentHash IS NOT NULL ORDER BY createdAt ASC)
-     GROUP BY contentHash
-     HAVING COUNT(*) > 1 AND contentHash IN (
-       SELECT contentHash FROM agent_memory WHERE source = 'manual' AND contentHash IS NOT NULL
-       GROUP BY contentHash HAVING MAX(COALESCE(totalChunks, 1)) = 1)
-     LIMIT 20`,
+    {
+      sqlite: `SELECT "contentHash", group_concat(id, '|' ORDER BY "createdAt", id) ids,
+       group_concat(name, '|' ORDER BY "createdAt", id) names
+     FROM agent_memory WHERE source = 'manual' AND "contentHash" IS NOT NULL
+     GROUP BY "contentHash"
+     HAVING COUNT(*) > 1 AND MAX(COALESCE("totalChunks", 1)) = 1
+     ORDER BY "contentHash" LIMIT 20`,
+      postgres: `SELECT "contentHash", string_agg(id, '|' ORDER BY "createdAt", id) ids,
+       string_agg(name, '|' ORDER BY "createdAt", id) names
+     FROM agent_memory WHERE source = 'manual' AND "contentHash" IS NOT NULL
+     GROUP BY "contentHash"
+     HAVING COUNT(*) > 1 AND MAX(COALESCE("totalChunks", 1)) = 1
+     ORDER BY "contentHash" LIMIT 20`,
+    },
   );
   const unhelpful = await q(
     "memUnhelpful",
-    `SELECT id, name, scope, alpha, beta, accessCount FROM agent_memory
-     WHERE source = 'manual' AND beta > alpha + 3 AND accessCount >= 5
-     ORDER BY (beta - alpha) DESC LIMIT 20`,
+    `SELECT id, name, scope, alpha, beta, "accessCount" FROM agent_memory
+     WHERE source = 'manual' AND beta > alpha + 3 AND "accessCount" >= 5
+     ORDER BY (beta - alpha) DESC, id LIMIT 20`,
   );
   const badKeys = await q(
     "memBadKeys",
-    `SELECT id, name FROM agent_memory WHERE source = 'manual'
-       AND julianday(createdAt) > julianday('now', ?)
-       AND instr(name, char(10)) > 0 LIMIT 20`,
+    {
+      sqlite: `SELECT id, name FROM agent_memory WHERE source = 'manual'
+       AND "createdAt" > $1
+       AND instr(name, char(10)) > 0 ORDER BY "createdAt", id LIMIT 20`,
+      postgres: `SELECT id, name FROM agent_memory WHERE source = 'manual'
+       AND "createdAt" > $1
+       AND strpos(name, chr(10)) > 0 ORDER BY "createdAt", id LIMIT 20`,
+    },
     // v6 (2026-10-12): dropped `length(name) > 90`. A name is a title (server max 200) and the only rename
     // path is store-new + delete-old, which loses the id, rating, access count and /longterm key; 617 manual
     // memories had long titles. A newline in a name is the real defect.
-    [win],
+    [windowStart],
   );
   // Correction queue: explicit-self ratings whose note says a manual memory is wrong or stale. One item per memory,
   // oldest unhandled note first. Handled = the memory has a version newer than the rating (edited), or a non-dry
@@ -493,8 +569,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
     text.includes("[REDACTED") || [...text].length !== Number(rawLen ?? 0);
   const corrWf = await q(
     "correctionsWorkflow",
-    `SELECT COALESCE((SELECT workflowId FROM workflow_runs WHERE id = ?),
-       (SELECT id FROM workflows WHERE name = 'dreaming' ORDER BY createdAt ASC LIMIT 1)) wf`,
+    `SELECT COALESCE((SELECT "workflowId" FROM workflow_runs WHERE id = $1),
+       (SELECT id FROM workflows WHERE name = 'dreaming' ORDER BY "createdAt" ASC, id LIMIT 1)) wf`,
     [a.runId ?? ""],
   );
   // The scrubber rewrites a body after the query returns, so a held-out memory is only known here. Page by
@@ -502,9 +578,12 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // longer fill the window and starve the clean corrections behind it night after night.
   const corrPage = (seen: string[]) => q(
     "memCorrections",
-    `WITH syn AS MATERIALIZED (
+    // JSON text on SQLite (json_each, json_extract), jsonb on Postgres: one text per dialect. The Postgres text
+    // reads a malformed taskOutput string as no output, where SQLite fails the query.
+    {
+      sqlite: `WITH syn AS MATERIALIZED (
        SELECT json_extract(s.output, '$.taskOutput') o FROM workflow_run_steps s JOIN workflow_runs r ON r.id = s.runId
-       WHERE r.workflowId = ? AND s.nodeId = 'synthesize' AND s.runId <> ? AND json_valid(s.output)
+       WHERE r.workflowId = $1 AND s.nodeId = 'synthesize' AND s.runId <> $2 AND json_valid(s.output)
          AND COALESCE(CASE WHEN json_valid(r.triggerData) THEN json_type(r.triggerData, '$.dryRun') = 'true'
            OR json_extract(r.triggerData, '$.dryRun') = 'true' END, 0) = 0),
      handled AS MATERIALIZED (
@@ -527,8 +606,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
        SELECT r.ratingId, r.docId memoryId, r.ratedId, r.taskId, r.signal, r.reasoning, r.ratedAt,
          m.name, m.agentId, m.scope, m.version, m.alpha, m.beta, m.createdAt memCreatedAt, m.content, length(m.content) rawLen,
          COALESCE(m.totalChunks, 1) totalChunks,
-         (COALESCE(m.totalChunks, 1) = 1 AND length(m.content) > ?) big,
-         ROW_NUMBER() OVER (PARTITION BY r.docId ORDER BY r.ratedAt DESC) rn,
+         (COALESCE(m.totalChunks, 1) = 1 AND length(m.content) > $3) big,
+         ROW_NUMBER() OVER (PARTITION BY r.docId ORDER BY r.ratedAt DESC, r.ratingId) rn,
          MIN(r.ratedAt) OVER (PARTITION BY r.docId) firstAt
        FROM rated r JOIN agent_memory m ON m.id = r.docId
        WHERE julianday(r.ratedAt) > julianday(COALESCE(
@@ -539,8 +618,54 @@ export default async function (args: unknown, ctx: ScriptContext) {
      FROM (SELECT COUNT(DISTINCT memoryId) backlog, COUNT(DISTINCT CASE WHEN big THEN memoryId END) oversize FROM q) s
      LEFT JOIN (SELECT * FROM q WHERE rn <= 3 AND memoryId IN (
        SELECT memoryId FROM q WHERE rn = 1 AND NOT big
-         AND memoryId NOT IN (SELECT value FROM json_each(?)) ORDER BY firstAt ASC, memoryId LIMIT ?)) f ON 1
+         AND memoryId NOT IN (SELECT value FROM json_each($4)) ORDER BY firstAt ASC, memoryId LIMIT $5)) f ON 1
      ORDER BY f.firstAt ASC, f.memoryId, f.rn`,
+      postgres: `WITH syn AS MATERIALIZED (
+       SELECT CASE WHEN jsonb_typeof(t.o) <> 'string' THEN t.o WHEN (t.o #>> '{}') IS JSON THEN CAST(t.o #>> '{}' AS jsonb) END o
+       FROM (SELECT (CASE WHEN s.output IS JSON THEN CAST(s.output AS jsonb) END)->'taskOutput' o
+         FROM workflow_run_steps s JOIN workflow_runs r ON r.id = s."runId"
+         WHERE r."workflowId" = $1 AND s."nodeId" = 'synthesize' AND s."runId" <> $2 AND s.output IS JSON
+           AND NOT COALESCE(r."triggerData"->'dryRun' = 'true'::jsonb OR r."triggerData"->'dryRun' = '"true"'::jsonb, false)) t),
+     handled AS MATERIALIZED (
+       SELECT j.value->>'item' ref FROM syn
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(syn.o->'rejected') = 'array' THEN syn.o->'rejected' ELSE '[]'::jsonb END) j
+       WHERE jsonb_typeof(j.value) = 'object' AND j.value->>'from' = 'swarm.memory.corrections'
+         AND NOT starts_with(COALESCE(j.value->>'reason', ''), 'cap')
+       UNION
+       SELECT e.value #>> '{}' FROM syn
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(syn.o->'actions') = 'array' THEN syn.o->'actions' ELSE '[]'::jsonb END) x
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(x.value->'evidence') = 'array' THEN x.value->'evidence' ELSE '[]'::jsonb END) e
+       WHERE jsonb_typeof(x.value) = 'object' AND x.value->>'tier' = 'propose' AND jsonb_typeof(e.value) = 'string'
+         AND starts_with(e.value #>> '{}', 'rating:')),
+     rated AS MATERIALIZED (
+       SELECT r.id "ratingId", r."memoryId" "ratedId", r."taskId", r.signal, r.reasoning, r."createdAt" "ratedAt",
+         CASE WHEN COALESCE(c."chunkIndex", 0) = 0 THEN c.id ELSE (
+           SELECT h.id FROM agent_memory h WHERE h.name = c.name AND h."agentId" IS NOT DISTINCT FROM c."agentId" AND h.source = 'manual'
+             AND COALESCE(h."chunkIndex", 0) = 0 AND COALESCE(h."totalChunks", 1) = COALESCE(c."totalChunks", 1)
+             AND date_trunc('minute', h."createdAt" AT TIME ZONE 'UTC') = date_trunc('minute', c."createdAt" AT TIME ZONE 'UTC')
+           ORDER BY h."createdAt", h.id LIMIT 1) END "docId"
+       FROM memory_rating r JOIN agent_memory c ON c.id = r."memoryId"
+       WHERE r.source = 'explicit-self' AND r.signal < 0 AND length(trim(COALESCE(r.reasoning, ''))) > 0
+         AND c.source = 'manual'),
+     q AS MATERIALIZED (
+       SELECT r."ratingId", r."docId" "memoryId", r."ratedId", r."taskId", r.signal, r.reasoning, r."ratedAt",
+         m.name, m."agentId", m.scope, m.version, m.alpha, m.beta, m."createdAt" "memCreatedAt", m.content, length(m.content) "rawLen",
+         COALESCE(m."totalChunks", 1) "totalChunks",
+         (COALESCE(m."totalChunks", 1) = 1 AND length(m.content) > $3) big,
+         ROW_NUMBER() OVER (PARTITION BY r."docId" ORDER BY r."ratedAt" DESC, r."ratingId") rn,
+         MIN(r."ratedAt") OVER (PARTITION BY r."docId") "firstAt"
+       FROM rated r JOIN agent_memory m ON m.id = r."docId"
+       WHERE r."ratedAt" > COALESCE(
+           (SELECT MAX(v."createdAt") FROM agent_memory_version v WHERE v.memory_id = m.id), m."createdAt")
+         AND ('rating:' || r."ratingId") NOT IN (SELECT ref FROM handled WHERE ref IS NOT NULL))
+     -- The counts row survives an empty pick (memoryId NULL), so oversize-only backlogs still report.
+     SELECT f.*, s.backlog, s.oversize
+     FROM (SELECT COUNT(DISTINCT "memoryId") backlog, COUNT(DISTINCT CASE WHEN big THEN "memoryId" END) oversize FROM q) s
+     LEFT JOIN (SELECT * FROM q WHERE rn <= 3 AND "memoryId" IN (
+       SELECT "memoryId" FROM q WHERE rn = 1 AND NOT big
+         AND "memoryId" NOT IN (SELECT jsonb_array_elements_text(CAST(CAST($4 AS text) AS jsonb))) ORDER BY "firstAt" ASC, "memoryId" LIMIT $5)) f ON true
+     ORDER BY f."firstAt" ASC, f."memoryId", f.rn`,
+    },
     [String(corrWf?.[0]?.wf ?? ""), a.runId ?? "", CORR_SINGLE_MAX, JSON.stringify(seen), CAPS.memoryCorrections * 2],
   );
   // Each page adds only unseen memories, so the loop ends when the queue is exhausted. The page guard is a
@@ -582,8 +707,15 @@ export default async function (args: unknown, ctx: ScriptContext) {
           // Same document match as dreaming-apply (name, agent, chunk count), pinned to chunk 0's write minute.
           const parts = await q(
             "memCorrectionChunks",
-            `SELECT content, length(content) rawLen FROM agent_memory WHERE name = ? AND agentId IS ? AND source = 'manual'
-               AND COALESCE(totalChunks, 1) = ? AND substr(createdAt, 1, 16) = substr(?, 1, 16) ORDER BY chunkIndex ASC`,
+            // Same write minute: a text prefix on SQLite, a truncated timestamptz on Postgres.
+            {
+              sqlite: `SELECT content, length(content) "rawLen" FROM agent_memory WHERE name = $1 AND "agentId" IS $2 AND source = 'manual'
+               AND COALESCE("totalChunks", 1) = $3 AND substr("createdAt", 1, 16) = substr($4, 1, 16) ORDER BY "chunkIndex" ASC`,
+              postgres: `SELECT content, length(content) "rawLen" FROM agent_memory WHERE name = $1 AND "agentId" IS NOT DISTINCT FROM $2
+               AND source = 'manual' AND COALESCE("totalChunks", 1) = $3
+               AND date_trunc('minute', "createdAt" AT TIME ZONE 'UTC') = date_trunc('minute', CAST($4 AS timestamptz) AT TIME ZONE 'UTC')
+               ORDER BY "chunkIndex" ASC NULLS FIRST`,
+            },
             [r.name, r.agentId ?? null, totalChunks, r.memCreatedAt],
           );
           if (parts?.length) body = joinChunks(parts.map((x: any) => String(x.content ?? "")));
@@ -628,8 +760,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
   }
   const created = await q(
     "memCreatedInWindow",
-    `SELECT source, COUNT(*) n FROM agent_memory WHERE julianday(createdAt) > julianday('now', ?) GROUP BY source`,
-    [win],
+    `SELECT source, COUNT(*) n FROM agent_memory WHERE "createdAt" > $1 GROUP BY source`,
+    [windowStart],
   );
   const cnt = (s: string) => Number((created ?? []).find((x: any) => x.source === s)?.n ?? 0);
   const memory = {
@@ -664,7 +796,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   if (night.previousRunId) {
     const c = await q(
       "prevRunCost",
-      `SELECT ROUND(SUM(c.totalCostUsd), 2) usd, COUNT(DISTINCT t.id) tasks FROM session_costs c JOIN agent_tasks t ON t.id = c.taskId WHERE t.workflowRunId = ?`,
+      `SELECT ROUND(CAST(SUM(c."totalCostUsd") AS numeric), 2) usd, COUNT(DISTINCT t.id) tasks FROM session_costs c JOIN agent_tasks t ON t.id = c."taskId" WHERE t."workflowRunId" = $1`,
       [night.previousRunId],
     );
     budget.prevRunUsd = c?.[0]?.usd === null || c?.[0]?.usd === undefined ? null : Number(c[0].usd);
@@ -692,7 +824,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const pickId = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   let leadAgentId = pickId(a.leadAgentId);
   if (!leadAgentId) {
-    const lead = await q("lead", `SELECT id FROM agents WHERE isLead = 1 ORDER BY createdAt ASC LIMIT 1`);
+    const lead = await q("lead", `SELECT id FROM agents WHERE "isLead" = true ORDER BY "createdAt" ASC, id LIMIT 1`);
     leadAgentId = String(lead?.[0]?.id ?? "");
   }
   // No lead = nobody may run the Lead-authority steps, so the run goes quiet instead of pooling them.
