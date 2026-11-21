@@ -76,7 +76,7 @@ export const divergenceDbQueryDenial: Scenario = {
       `allowed query answered ${allowed.text.slice(0, 300)}`,
     );
     const byId = await ctx.api("POST", "/api/db-query", {
-      body: { sql: "SELECT id FROM agent_tasks WHERE id = ?", params: [taskId] },
+      body: { sql: "SELECT id FROM agent_tasks WHERE id = $1", params: [taskId] },
     });
     expectStatus(byId, [200], "HTTP db-query with a parameter");
     expect(

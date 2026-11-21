@@ -167,7 +167,10 @@ export async function createPostgresDatabase(stamp: string): Promise<string> {
   const name = `e2e_${stamp.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
   const client = new Bun.SQL({ url: admin, max: 1 });
   try {
-    await client.unsafe(`CREATE DATABASE "${name}"`);
+    // Byte text order and ASCII-only case folding, like SQLite (ledger: C collation and ctype).
+    await client.unsafe(
+      `CREATE DATABASE "${name}" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
+    );
   } finally {
     await client.close();
   }
@@ -176,11 +179,55 @@ export async function createPostgresDatabase(stamp: string): Promise<string> {
   return url.toString();
 }
 
+/** The db-query reader role of a per-run database (decision D10). */
+function readerRoleName(databaseUrl: string): string {
+  return `${decodeURIComponent(new URL(databaseUrl).pathname.slice(1))}_reader`;
+}
+
+/**
+ * Give a per-run database its db-query reader (decision D10), the way the
+ * runbook tells an operator to: apply the migration chain first, then create a
+ * LOGIN role with SELECT on every table except the denied ones. Returns the
+ * `DATABASE_QUERY_URL`. The SUT then finds the chain applied and probes the role.
+ */
+export async function preparePostgresQueryReader(databaseUrl: string): Promise<string> {
+  const { createPostgresClient, runPostgresMigrations } = await import(
+    "../../packages/storage-postgres/src/index"
+  );
+  const { DB_QUERY_DENIED_TABLES } = await import("../../packages/storage/src/index");
+  const setup = createPostgresClient(databaseUrl, { max: 1 });
+  try {
+    await runPostgresMigrations(setup, {
+      migrationsDir: resolve(import.meta.dir, "../../src/be/migrations/postgres"),
+    });
+  } finally {
+    await setup.close();
+  }
+  const role = readerRoleName(databaseUrl);
+  const database = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+  const sql = new Bun.SQL({ url: databaseUrl, max: 1 });
+  try {
+    await sql.unsafe(`CREATE ROLE "${role}" LOGIN`);
+    await sql.unsafe(`GRANT CONNECT ON DATABASE "${database}" TO "${role}"`);
+    await sql.unsafe(`GRANT USAGE ON SCHEMA public TO "${role}"`);
+    await sql.unsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${role}"`);
+    const denied = [...DB_QUERY_DENIED_TABLES].map((t) => `"${t}"`).join(", ");
+    await sql.unsafe(`REVOKE SELECT ON ${denied} FROM "${role}"`);
+  } finally {
+    await sql.close();
+  }
+  const url = new URL(databaseUrl);
+  url.username = role;
+  url.password = "";
+  return url.toString();
+}
+
 export async function dropPostgresDatabase(databaseUrl: string): Promise<void> {
   const name = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
   const client = new Bun.SQL({ url: adminUrl(), max: 1 });
   try {
     await client.unsafe(`DROP DATABASE IF EXISTS "${name.replaceAll('"', '""')}" WITH (FORCE)`);
+    await client.unsafe(`DROP ROLE IF EXISTS "${readerRoleName(databaseUrl).replaceAll('"', '""')}"`);
   } finally {
     await client.close();
   }

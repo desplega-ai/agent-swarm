@@ -6,6 +6,7 @@ import {
   type DbFixture,
   type DbTarget,
   dropPostgresDatabase,
+  preparePostgresQueryReader,
   type Engine,
   loadDbFixture,
   restoreSqliteFixture,
@@ -281,6 +282,7 @@ export async function startSut(
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const databaseUrl = engine === "postgres" ? await createPostgresDatabase(stamp) : undefined;
+  const databaseQueryUrl = databaseUrl ? await preparePostgresQueryReader(databaseUrl) : undefined;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
@@ -299,6 +301,7 @@ export async function startSut(
     AGENT_SWARM_API_KEY: apiKey,
     DATABASE_PATH: dbPath,
     ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
+    ...(databaseQueryUrl ? { DATABASE_QUERY_URL: databaseQueryUrl } : {}),
     // test, not development: the Slack socket-mode guard refuses to connect
     // under development, and every run drives Slack through the mock.
     NODE_ENV: "test",

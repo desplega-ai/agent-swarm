@@ -241,11 +241,20 @@ async function assertSutReplaysTransactions(logPath: string): Promise<void> {
 
 /** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
 function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
+  // The runner applies the migration chain before the SUT starts (the db-query
+  // reader role needs the tables), so a migrated schema proves nothing: the boot
+  // seeds the SUT writes do.
+  let seeded: unknown;
   try {
-    db.get("SELECT 1 FROM _migrations LIMIT 1");
+    seeded = db.get("SELECT 1 AS present FROM seed_state LIMIT 1");
   } catch (error) {
     throw new Error(
-      `--engine ${engine}: the API did not migrate the per-run database (${errorMessage(error)}); it is not using DATABASE_URL`,
+      `--engine ${engine}: the per-run database has no seed_state table (${errorMessage(error)}); the API is not using DATABASE_URL`,
+    );
+  }
+  if (!seeded) {
+    throw new Error(
+      `--engine ${engine}: the API wrote no boot seed into the per-run database; it is not using DATABASE_URL`,
     );
   }
 }
