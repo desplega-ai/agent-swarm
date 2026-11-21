@@ -39,13 +39,14 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|---|
 | 1 | `bun run e2e:strict` (SQLite) | M1 head `c7d63f23e` (15 min 59 s) | **fail, pre-existing cause**: 235 passed, 0 failed, 2 flaky (`model-group-resolution` and `slack-lead-follow-up-card`, both scenarios that exist at the base commit, order below every new scenario; both passed on rerun). Strict gate fails only on the base-commit coverage gap `task-statuses: in_progress`. An earlier M1 run (`493630671`) exited 0 only because a stuck `trigger-chat-relay` task left an `in_progress` row; that flake is fixed in `c7d63f23e`. Open: close the `in_progress` gap honestly (a scenario that ends with a live claimed task) before the final commit. |
 | 8 | no change to base migration files | M0 | pass (no migration touched) |
-| 16 | existing gates | M1 head | pass: `lint`, `lint:slop`, `tsc:check:tsc` (after a type fix in the spike scripts), `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. Not run yet: `test:root -- --parallel=4`, `e2e:ui`. |
+| 16 | existing gates | M1 head | pass: `lint`, `lint:slop`, `tsc:check:tsc` (after a type fix in the spike scripts), `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. `test:root -- --parallel=4`: **fail, pre-existing** (see Failures at the base commit). `e2e:ui`: not run yet. |
 
 Other checks: not run yet. Most of their commands do not exist yet.
 
 ## Failures at the base commit
 
 - `bun run e2e:strict` at the base commit (run 2026-11-20, 16 min 40 s, log kept outside the repo): **exit 1**. 215 scenarios pass, 0 fail, 1 flaky (`model-group-resolution`: first attempt 400 `model-group-unavailable`, passed on rerun). The strict gate fails on coverage only: `state task-statuses: 1 value(s) the suite never produced: in_progress` (task-engine 98.4%). This failure exists before any change on the branch.
+- `bun run test:root -- --parallel=4` at the base commit: exit 1, 22,666-class pass count, about 45 failures in this container (AgentMail webhooks 8, boot retro-sweep 7, worker token 4, user roles 4, realtime transport 7, GitLab event names 2, others). At M1 head (no `src/` change since the base; `git diff 99d7de13a -- src` is empty): 22,666 pass, 39 fail, the same set minus the realtime-transport tests that passed this time, plus two 5 s timeouts (`routing-reason-inventory` passes alone in 4.8 s, so it is a load timeout). The host load average reached 39 on 8 cores during these runs.
 - `bunx biome check scripts/e2e`: `scripts/e2e/scenarios/slack-inbound-gates.ts:13` unused variable `ALICE` at the base commit.
 
 ## M0 results
