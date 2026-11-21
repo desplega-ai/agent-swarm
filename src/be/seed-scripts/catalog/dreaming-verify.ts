@@ -80,17 +80,35 @@ const sha = async (s: string) =>
 
 const rows = (r: any): any[] => {
   const d = r?.data ?? r;
+  if (d?.dialect === "sqlite" || d?.dialect === "postgres") DIALECT = d.dialect;
   if (d?.error) throw new Error(String(d.error));
   if (!Array.isArray(d?.rows)) throw new Error("db_query returned no rows array (throttled?)");
   const c: string[] = d?.columns ?? [];
   return d.rows.map((x: any[]) => Object.fromEntries(c.map((k, i) => [k, x[i]])));
 };
 
+// db_query runs the engine's own SQL dialect and states it on every response (`rows` records it). Portable
+// statements are plain strings; a statement with no portable form carries one text per dialect. Reads that feed a
+// report list carry an ORDER BY: an unordered result comes back in a different order on each engine.
+type Sql = string | { sqlite: string; postgres: string };
+let DIALECT: "sqlite" | "postgres" | undefined;
+async function sqlText(ctx: ScriptContext, sql: Sql): Promise<string> {
+  if (typeof sql === "string") return sql;
+  if (!DIALECT) {
+    rows(await ctx.swarm.db_query({ sql: "SELECT 1 AS one" }));
+    DIALECT ??= "sqlite"; // a response without the field comes from a SQLite-only server
+  }
+  return DIALECT === "postgres" ? sql.postgres : sql.sqlite;
+}
+async function dbRows(ctx: ScriptContext, sql: Sql, params: unknown[] = []): Promise<any[]> {
+  return rows(await ctx.swarm.db_query({ sql: await sqlText(ctx, sql), params }));
+}
+
 // Lead agent id: the `leadAgentId` arg when set (workflow input), else the swarm's lead (agents.isLead = 1).
 let LEAD = "";
 async function resolveLead(ctx: ScriptContext, id: unknown): Promise<string> {
   if (typeof id === "string" && id.trim()) return id.trim();
-  const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE isLead = 1 ORDER BY createdAt ASC LIMIT 1` }));
+  const r = await dbRows(ctx, `SELECT id FROM agents WHERE "isLead" = true ORDER BY "createdAt" ASC LIMIT 1`);
   return String(r[0]?.id ?? "");
 }
 
@@ -103,7 +121,10 @@ function parseObj(v: unknown): any {
   }
   return null;
 }
-const inList = (n: number) => Array.from({ length: n }, () => "?").join(",");
+// `$n` placeholders numbered from `start` (bun:sqlite binds `$n` by first appearance, so keep text order).
+const inList = (n: number, start = 1) => Array.from({ length: n }, (_, i) => `$${start + i}`).join(",");
+// Identifier of a profile column (FIELD values are camelCase: quoted on both engines).
+const col = (name: string) => `"${name}"`;
 
 // Every ctx.swarm response passes the secret scrubber, which rewrites secret-looking `key=value` text to
 // `[REDACTED:<key>]`. Apply's memory pre-images and afterSha hold stored bytes, so current memory content
@@ -277,6 +298,7 @@ function memEditControls() {
 /** Dreaming verify: synthesis claims vs real writes, unclaimed writes, silent refusals, survival, run ledger. */
 export default async function (args: unknown, ctx: ScriptContext) {
   const a: any = args ?? {};
+  DIALECT = undefined;
   LEAD = await resolveLead(ctx, (args as any)?.leadAgentId);
   const errors: string[] = [];
   const dry = a.dryRun === true || a.dryRun === "true";
@@ -296,7 +318,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
     for (const [arg, nodeId, path] of paths) {
       if (a[arg] !== undefined) continue;
       try {
-        const r = rows(await ctx.swarm.db_query({ sql: `SELECT json_extract(output, ?) v FROM workflow_run_steps WHERE runId = ? AND nodeId = ?`, params: [path, runId, nodeId] }));
+        // Postgres reads the same path as a text[] (`$.result.generatedAt` -> `{result,generatedAt}`).
+        const pgPath = `{${path.slice(2).split(".").join(",")}}`;
+        const sql = await sqlText(ctx, {
+          sqlite: `SELECT json_extract(output, $1) v FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3`,
+          postgres: `SELECT CAST(output AS jsonb) #>> CAST($1 AS text[]) AS v FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3`,
+        });
+        const r = rows(await ctx.swarm.db_query({ sql, params: [DIALECT === "postgres" ? pgPath : path, runId, nodeId] }));
         if (r[0]?.v != null) a[arg] = r[0].v;
       } catch (e: any) {
         errors.push(`replay ${arg}: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -309,10 +337,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const sinceMs = Date.parse(since);
   const sinceIso = Number.isFinite(sinceMs) ? new Date(sinceMs).toISOString() : since;
   // Replay ignores writes made after the replayed verify step ran.
-  let untilIso = "9999";
+  // The open bound is a real timestamp: a timestamptz column (Postgres) cannot compare with the text "9999".
+  let untilIso = "9999-12-31T23:59:59.999Z";
   if (replay && runId) {
     try {
-      const v = rows(await ctx.swarm.db_query({ sql: `SELECT startedAt FROM workflow_run_steps WHERE runId = ? AND nodeId = 'verify'`, params: [runId] }));
+      const v = await dbRows(ctx, `SELECT "startedAt" FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = 'verify'`, [runId]);
       if (v[0]?.startedAt) untilIso = String(v[0].startedAt);
     } catch (e: any) {
       errors.push(`replay until: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -326,9 +355,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const hb = parseObj(a.hb);
   const wfSnapshot = parseObj(a.wfSnapshot);
 
-  const q = async (label: string, sql: string, params: unknown[] = []): Promise<any[]> => {
+  const q = async (label: string, sql: Sql, params: unknown[] = []): Promise<any[]> => {
     try {
-      return rows(await ctx.swarm.db_query({ sql, params }));
+      return await dbRows(ctx, sql, params);
     } catch (e: any) {
       errors.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`);
       return [];
@@ -337,7 +366,16 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const legacyRead = (dry || replay) && (a.legacyRead === true || a.legacyRead === "true");
   // Current memory rows with `content` = stored bytes via hex (legacyRead: the scrubbed plain read).
   const readMemory = async (label: string, cols: string, memoryId: unknown) =>
-    (await q(label, `SELECT ${cols}, content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = ?`, [memoryId])).map(
+    (
+      await q(
+        label,
+        {
+          sqlite: `SELECT ${col(cols)}, content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = $1`,
+          postgres: `SELECT ${col(cols)}, content, encode(convert_to(content, 'UTF8'), 'hex') AS hx FROM agent_memory WHERE id = $1`,
+        },
+        [memoryId],
+      )
+    ).map(
       ({ hx, ...r }: any) => ({ ...r, content: legacyRead ? String(r.content ?? "") : decodeHex(hx) }),
     );
   // Memory pre-image value as stored: hex(...) of its kv row, so the bodies in it come back unscrubbed (legacyRead: the
@@ -347,14 +385,30 @@ export default async function (args: unknown, ctx: ScriptContext) {
       const p: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key });
       return parseObj(p?.value) ?? p?.value ?? null;
     }
-    const r = await q(label, `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)`, [NS, key, Date.now()]);
+    const r = await q(
+      label,
+      {
+        sqlite: `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)`,
+        postgres: `SELECT encode(convert_to(value, 'UTF8'), 'hex') AS hx FROM kv_entries WHERE namespace = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)`,
+      },
+      [NS, key, Date.now()],
+    );
     return r.length ? parseObj(decodeHex(r[0].hx)) : null;
   };
   // v11 (2026-10-18): skills.content is hashed from stored bytes too. The plain read is scrubbed, so a skill holding a
   // key=value shape never matched the lane's sha (run 2026-10-18: patch-global-script-safely v3 plain 265b8e05fe52,
   // stored 59e0099389e1, claimed 59e0099389e1).
   const readSkill = async (label: string, cols: string, skillId: unknown) =>
-    (await q(label, `SELECT ${cols}, content, hex(CAST(content AS BLOB)) AS hx FROM skills WHERE id = ?`, [String(skillId ?? "")])).map(
+    (
+      await q(
+        label,
+        {
+          sqlite: `SELECT ${col(cols)}, content, hex(CAST(content AS BLOB)) AS hx FROM skills WHERE id = $1`,
+          postgres: `SELECT ${col(cols)}, content, encode(convert_to(content, 'UTF8'), 'hex') AS hx FROM skills WHERE id = $1`,
+        },
+        [String(skillId ?? "")],
+      )
+    ).map(
       ({ hx, ...r }: any) => ({ ...r, plain: String(r.content ?? ""), content: legacyRead ? String(r.content ?? "") : decodeHex(hx) }),
     );
   // Pre-image body on the same side as readMemory (legacyRead: plain `content` on both sides).
@@ -370,7 +424,17 @@ export default async function (args: unknown, ctx: ScriptContext) {
       const fx = "api" + "_key=sk-" + "fixture-9f8e7d6c5b4a39281706f5e4d3c2b1a0\nsecond line of the memory body";
       const nx = `${fx}\nthird line appended by the edit`;
       const kvValue = JSON.stringify({ rows: [{ content: fx }] });
-      const p = (await q("readControl", `SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx, ? AS nplain, hex(CAST(? AS BLOB)) AS nhx, hex(CAST(? AS BLOB)) AS vhx`, [fx, fx, nx, nx, kvValue]))[0] ?? {};
+      const p =
+        (
+          await q(
+            "readControl",
+            {
+              sqlite: `SELECT $1 AS plain, hex(CAST($1 AS BLOB)) AS hx, $2 AS nplain, hex(CAST($2 AS BLOB)) AS nhx, hex(CAST($3 AS BLOB)) AS vhx`,
+              postgres: `SELECT CAST($1 AS text) AS plain, encode(convert_to($1, 'UTF8'), 'hex') AS hx, CAST($2 AS text) AS nplain, encode(convert_to($2, 'UTF8'), 'hex') AS nhx, encode(convert_to($3, 'UTF8'), 'hex') AS vhx`,
+            },
+            [fx, nx, kvValue],
+          )
+        )[0] ?? {};
       const hexRead = decodeHex(p.hx), plain = String(p.plain ?? "");
       // `row`: the hex kv read; `plainRow`: the same row through the scrubbed kv_get read.
       const row = parseObj(decodeHex(p.vhx))?.rows?.[0] ?? {};
@@ -415,11 +479,22 @@ export default async function (args: unknown, ctx: ScriptContext) {
   if (runId) {
     const gateSteps = await q(
       "laneGates",
-      `SELECT nodeId, status, json_extract(output, '$.port') port,
-         json_array_length(json_extract(output, '$.result.targets')) nTargets
+      {
+        sqlite: `SELECT "nodeId", status, json_extract(output, '$.port') port,
+         json_array_length(json_extract(output, '$.result.targets')) "nTargets"
        FROM workflow_run_steps
-       WHERE runId = ? AND nodeId IN ('synthesize', 'apply', 'skills-gate', 'scriptify-gate', 'trim-plan', 'hb-gate')
-       ORDER BY startedAt`,
+       WHERE "runId" = $1 AND "nodeId" IN ('synthesize', 'apply', 'skills-gate', 'scriptify-gate', 'trim-plan', 'hb-gate')
+       ORDER BY "startedAt"`,
+        // json_array_length: an array's length, 0 for another JSON value, NULL when absent.
+        postgres: `SELECT "nodeId", status, CAST(output AS jsonb) ->> 'port' AS port,
+         CASE
+           WHEN jsonb_typeof(CAST(output AS jsonb) #> '{result,targets}') = 'array' THEN jsonb_array_length(CAST(output AS jsonb) #> '{result,targets}')
+           WHEN jsonb_typeof(CAST(output AS jsonb) #> '{result,targets}') <> 'null' THEN 0
+         END AS "nTargets"
+       FROM workflow_run_steps
+       WHERE "runId" = $1 AND "nodeId" IN ('synthesize', 'apply', 'skills-gate', 'scriptify-gate', 'trim-plan', 'hb-gate')
+       ORDER BY "startedAt"`,
+      },
       [runId],
     );
     const gate = new Map<string, any>();
@@ -451,7 +526,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const confirmed: any[] = [];
 
   // This run's own tasks and the agents that ran them.
-  const runTasks = runId ? await q("runTasks", `SELECT id, agentId, workflowRunStepId FROM agent_tasks WHERE workflowRunId = ?`, [runId]) : [];
+  const runTasks = runId ? await q("runTasks", `SELECT id, "agentId", "workflowRunStepId" FROM agent_tasks WHERE "workflowRunId" = $1`, [runId]) : [];
   const taskIds = runTasks.map((t: any) => t.id);
   const runAgents = [...new Set([LEAD, ...runTasks.map((t: any) => t.agentId)])];
 
@@ -482,7 +557,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
     if (it.kind === "identity") {
       const field = FIELD[it.target?.file] ?? "";
       claimedProfile.add(`${it.target?.agentId}:${field}`);
-      const r = field ? await q("identityClaim", `SELECT ${field} AS body FROM agents WHERE id = ?`, [it.target?.agentId]) : [];
+      const r = field ? await q("identityClaim", `SELECT ${col(field)} AS body FROM agents WHERE id = $1`, [it.target?.agentId]) : [];
       const s = await sha(String(r[0]?.body ?? ""));
       const viaTrim = it.afterSha && s !== it.afterSha ? trimLineage(it.target?.agentId, field, it.afterSha, s, trimApplied) : null;
       if (it.afterSha && s === it.afterSha) confirmed.push({ actionId: it.actionId, lane: "identity" });
@@ -490,14 +565,14 @@ export default async function (args: unknown, ctx: ScriptContext) {
       else concurrentOrMismatch(it, s);
     } else if (it.kind === "memory-store") {
       claimedMemoryNames.add(String(it.target?.name));
-      const r = await q("storeClaim", `SELECT COUNT(*) n FROM agent_memory WHERE name = ?`, [it.target?.name]);
+      const r = await q("storeClaim", `SELECT COUNT(*) n FROM agent_memory WHERE name = $1`, [it.target?.name]);
       if (Number(r[0]?.n) === 1) confirmed.push({ actionId: it.actionId, lane: "memory" });
       else claimMismatch.push({ actionId: it.actionId, lane: "memory", detail: `COUNT(name)=${r[0]?.n}` });
     } else if (it.kind === "memory-rename") {
       claimedMemoryNames.add(String(it.target?.name));
       const ids: string[] = it.target?.memoryIds ?? [];
       ids.forEach((x) => claimedMemoryIds.add(x));
-      const n = await q("renameClaim", `SELECT COUNT(*) n FROM agent_memory WHERE name = ? AND COALESCE(chunkIndex, 0) = 0`, [it.target?.name]);
+      const n = await q("renameClaim", `SELECT COUNT(*) n FROM agent_memory WHERE name = $1 AND COALESCE("chunkIndex", 0) = 0`, [it.target?.name]);
       const o = ids.length ? await q("renameOld", `SELECT COUNT(*) n FROM agent_memory WHERE id IN (${inList(ids.length)})`, ids) : [];
       if (Number(n[0]?.n) === 1 && Number(o[0]?.n ?? 0) === 0) confirmed.push({ actionId: it.actionId, lane: "memory" });
       else claimMismatch.push({ actionId: it.actionId, lane: "memory", detail: `rename: new name rows ${n[0]?.n}, old rows ${o[0]?.n}` });
@@ -533,7 +608,14 @@ export default async function (args: unknown, ctx: ScriptContext) {
             errors.push(`renamePreimage ${rKey}: ${String(e?.message ?? e).slice(0, 200)}`);
           }
           const rRow = Array.isArray(rp?.rows) ? rp.rows.find((x: any) => x?.id === ids[0]) : null;
-          const nr = await q("editRenamed", `SELECT id, content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE name = ? ORDER BY chunkIndex`, [String(ren.target?.name ?? "")]);
+          const nr = await q(
+            "editRenamed",
+            {
+              sqlite: `SELECT id, content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE name = $1 ORDER BY "chunkIndex" NULLS FIRST`,
+              postgres: `SELECT id, content, encode(convert_to(content, 'UTF8'), 'hex') AS hx FROM agent_memory WHERE name = $1 ORDER BY "chunkIndex" NULLS FIRST`,
+            },
+            [String(ren.target?.name ?? "")],
+          );
           if (nr.length && typeof rRow?.content === "string") cur = [{ id: ids[0], content: preOf(rRow) }];
           else if (nr.length === 1) cur = [{ id: nr[0].id, content: legacyRead ? String(nr[0].content ?? "") : decodeHex(nr[0].hx) }];
           if (cur.length) via = ` via rename ${ren.actionId} to ${ren.target?.name} (${nr.map((r: any) => r.id).join(",")})`;
@@ -561,8 +643,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
       confirmed.push({ lane: "trim", agentId: it.agentId, field: it.field, note: "re-applied (trim-apply re-read)" });
       continue;
     }
-    const f = Object.values(FIELD).includes(it.field) ? it.field : "NULL";
-    const r = await q("trimClaim", `SELECT ${f} AS body FROM agents WHERE id = ?`, [it.agentId]);
+    const f = Object.values(FIELD).includes(it.field) ? col(it.field) : "NULL";
+    const r = await q("trimClaim", `SELECT ${f} AS body FROM agents WHERE id = $1`, [it.agentId]);
     const s2 = await sha(String(r[0]?.body ?? ""));
     if (s2 === it.afterSha) confirmed.push({ lane: "trim", agentId: it.agentId, field: it.field });
     else claimMismatch.push({ lane: "trim", agentId: it.agentId, field: it.field, detail: `sha now ${s2.slice(0, 12)}, trim claimed ${String(it.afterSha).slice(0, 12)}` });
@@ -575,11 +657,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
   if (hbWrote) {
     const vs = await q(
       "hbVersions",
-      `SELECT id, contentHash, changeSource, changedByAgentId, createdAt FROM context_versions
-       WHERE agentId = ? AND field = 'heartbeatMd' AND createdAt >= ? AND createdAt <= ? ORDER BY createdAt, version LIMIT 200`,
+      `SELECT id, "contentHash", "changeSource", "changedByAgentId", "createdAt" FROM context_versions
+       WHERE "agentId" = $1 AND field = 'heartbeatMd' AND "createdAt" >= $2 AND "createdAt" <= $3 ORDER BY "createdAt", version LIMIT 200`,
       [LEAD, sinceIso, untilIso],
     );
-    const cur = await q("hbCurrent", `SELECT heartbeatMd AS body FROM agents WHERE id = ?`, [LEAD]);
+    const cur = await q("hbCurrent", `SELECT "heartbeatMd" AS body FROM agents WHERE id = $1`, [LEAD]);
     const curBody = String(cur[0]?.body ?? "");
     hbVerdict = hbLineage(hb, vs.filter((v: any) => v.createdAt <= untilIso), await sha(curBody), curBody.length);
     hbVerdict.explained.forEach((x: string) => hbExplained.add(x));
@@ -595,8 +677,9 @@ export default async function (args: unknown, ctx: ScriptContext) {
   // 2. Unclaimed writes since `since`.
   const cv = await q(
     "profileWrites",
-    `SELECT id, agentId, field, changeSource, changedByAgentId, createdAt FROM context_versions
-     WHERE agentId IN (${inList(runAgents.length)}) AND createdAt >= ?`,
+    `SELECT id, "agentId", field, "changeSource", "changedByAgentId", "createdAt" FROM context_versions
+     WHERE "agentId" IN (${inList(runAgents.length)}) AND "createdAt" >= $${runAgents.length + 1}
+     ORDER BY "createdAt", id`,
     [...runAgents, sinceIso],
   );
   for (const r of cv) {
@@ -621,7 +704,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
   }
   const sk = await q(
     "skillWrites",
-    `SELECT id, name, version, systemDefault, lastUpdatedAt FROM skills WHERE lastUpdatedAt >= ?`,
+    `SELECT id, name, version, "systemDefault", "lastUpdatedAt" FROM skills WHERE "lastUpdatedAt" >= $1 ORDER BY "lastUpdatedAt", id`,
     [sinceIso],
   );
   for (const r of sk) {
@@ -634,13 +717,23 @@ export default async function (args: unknown, ctx: ScriptContext) {
     unclaimed.push(item);
     if (dry) dryRunViolations.push({ kind: "skill-write", ...item });
   }
-  const memTaskClause = taskIds.length ? `OR (sourceTaskId IN (${inList(taskIds.length)}) AND source NOT IN (${inList(AUTO_MEMORY_SOURCES.length)}))` : "";
+  const memTaskClause = taskIds.length
+    ? `OR ("sourceTaskId" IN (${inList(taskIds.length, 2)}) AND source NOT IN (${inList(AUTO_MEMORY_SOURCES.length, 2 + taskIds.length)}))`
+    : "";
+  // tags is JSON text on SQLite (GLOB: case-sensitive) and jsonb on Postgres (LIKE on its text: case-sensitive too).
   const mw = await q(
     "memoryWrites",
-    `SELECT id, name, source, sourceTaskId, createdAt, updatedAt FROM agent_memory
-     WHERE (createdAt >= ? OR updatedAt >= ?)
-       AND ((tags GLOB '*"dreaming-v2"*') ${memTaskClause})`,
-    [sinceIso, sinceIso, ...(taskIds.length ? [...taskIds, ...AUTO_MEMORY_SOURCES] : [])],
+    {
+      sqlite: `SELECT id, name, source, "sourceTaskId", "createdAt", "updatedAt" FROM agent_memory
+     WHERE ("createdAt" >= $1 OR "updatedAt" >= $1)
+       AND ((tags GLOB '*"dreaming-v2"*') ${memTaskClause})
+     ORDER BY "createdAt", id`,
+      postgres: `SELECT id, name, source, "sourceTaskId", "createdAt", "updatedAt" FROM agent_memory
+     WHERE ("createdAt" >= $1 OR "updatedAt" >= $1)
+       AND ((CAST(tags AS text) LIKE '%"dreaming-v2"%') ${memTaskClause})
+     ORDER BY "createdAt", id`,
+    },
+    [sinceIso, ...(taskIds.length ? [...taskIds, ...AUTO_MEMORY_SOURCES] : [])],
   );
   for (const r of mw) {
     if (claimedMemoryIds.has(r.id) || claimedMemoryNames.has(r.name)) continue;
@@ -678,14 +771,27 @@ export default async function (args: unknown, ctx: ScriptContext) {
       // Every trim since the previous run started (its own trim-apply included), oldest first.
       const trims = await q(
         "survivalTrims",
-        `SELECT s.runId, s.startedAt, json_extract(j.value, '$.agentId') agentId, json_extract(j.value, '$.field') field,
-           json_extract(j.value, '$.beforeSha') beforeSha, json_extract(j.value, '$.afterSha') afterSha
-         FROM workflow_runs r JOIN workflow_run_steps s ON s.runId = r.id, json_each(s.output, '$.result.applied') j
-         WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)
-           AND r.startedAt >= (SELECT startedAt FROM workflow_runs WHERE id = ?)
-           AND s.nodeId = 'trim-apply' AND s.status = 'completed'
-         ORDER BY s.startedAt`,
-        [prev, prev],
+        {
+          sqlite: `SELECT s."runId", s."startedAt", json_extract(j.value, '$.agentId') "agentId", json_extract(j.value, '$.field') field,
+           json_extract(j.value, '$.beforeSha') "beforeSha", json_extract(j.value, '$.afterSha') "afterSha"
+         FROM workflow_runs r JOIN workflow_run_steps s ON s."runId" = r.id, json_each(s.output, '$.result.applied') j
+         WHERE r."workflowId" = (SELECT "workflowId" FROM workflow_runs WHERE id = $1)
+           AND r."startedAt" >= (SELECT "startedAt" FROM workflow_runs WHERE id = $1)
+           AND s."nodeId" = 'trim-apply' AND s.status = 'completed'
+         ORDER BY s."startedAt", j.key`,
+          postgres: `SELECT s."runId", s."startedAt", j.value ->> 'agentId' AS "agentId", j.value ->> 'field' AS field,
+           j.value ->> 'beforeSha' AS "beforeSha", j.value ->> 'afterSha' AS "afterSha"
+         FROM workflow_runs r JOIN workflow_run_steps s ON s."runId" = r.id
+         CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(CAST(s.output AS jsonb) #> '{result,applied}') = 'array'
+                THEN CAST(s.output AS jsonb) #> '{result,applied}' ELSE '[]'::jsonb END
+         ) WITH ORDINALITY AS j(value, ord)
+         WHERE r."workflowId" = (SELECT "workflowId" FROM workflow_runs WHERE id = $1)
+           AND r."startedAt" >= (SELECT "startedAt" FROM workflow_runs WHERE id = $1)
+           AND s."nodeId" = 'trim-apply' AND s.status = 'completed'
+         ORDER BY s."startedAt", j.ord`,
+        },
+        [prev],
       );
       const preimage = async (it: any) => {
         if (replay && it.syntheticPreimage) return it.syntheticPreimage;
@@ -698,7 +804,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
         for (const t of trims.filter((x: any) => x.agentId === agentId && x.field === field)) {
           const v = await q(
             "survivalTrimVersions",
-            `SELECT contentHash, content FROM context_versions WHERE agentId = ? AND field = ? AND contentHash IN (?, ?)`,
+            `SELECT "contentHash", content FROM context_versions WHERE "agentId" = $1 AND field = $2 AND "contentHash" IN ($3, $4)`,
             [agentId, field, t.beforeSha, t.afterSha],
           );
           const before = v.find((x: any) => x.contentHash === t.beforeSha);
@@ -714,7 +820,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
         let env: SurvivalEnv = { exists: true, present: false, currentSha: null, preimageSha: null, trimmedBy: null };
         if (it.kind === "identity") {
           const field = FIELD[it.target?.file] ?? "";
-          const r = field ? await q("survivalProfile", `SELECT ${field} AS body FROM agents WHERE id = ?`, [it.target?.agentId]) : [];
+          const r = field ? await q("survivalProfile", `SELECT ${col(field)} AS body FROM agents WHERE id = $1`, [it.target?.agentId]) : [];
           const body = String(r[0]?.body ?? "");
           const present = r.length > 0 && identityPresent(body, it);
           env = { exists: r.length > 0, present, currentSha: await sha(body), preimageSha: null, trimmedBy: null };
@@ -723,7 +829,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
             env.trimmedBy = await findTrim(it, String(it.target?.agentId), field);
           }
         } else if (it.kind === "memory-store") {
-          const r = await q("survivalStore", `SELECT COUNT(*) n FROM agent_memory WHERE name = ?`, [it.target?.name]);
+          const r = await q("survivalStore", `SELECT COUNT(*) n FROM agent_memory WHERE name = $1`, [it.target?.name]);
           env = { ...env, exists: Number(r[0]?.n) > 0, present: Number(r[0]?.n) === 1 };
         } else if (it.kind === "memory-delete") {
           // The preimage of a delete is the rows existing: any of them back is a revert.
@@ -734,7 +840,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
         } else if (it.kind === "memory-rename") {
           // v4 had no branch here, so every rename landed in reverted. Preimage = the old ids existing.
           const ids: string[] = it.target?.memoryIds ?? [];
-          const n = await q("survivalRename", `SELECT COUNT(*) n FROM agent_memory WHERE name = ? AND COALESCE(chunkIndex, 0) = 0`, [it.target?.name]);
+          const n = await q("survivalRename", `SELECT COUNT(*) n FROM agent_memory WHERE name = $1 AND COALESCE("chunkIndex", 0) = 0`, [it.target?.name]);
           const o = ids.length ? await q("survivalRenameOld", `SELECT COUNT(*) n FROM agent_memory WHERE id IN (${inList(ids.length)})`, ids) : [];
           const oldBack = Number(o[0]?.n ?? 0) > 0;
           env = { ...env, exists: Number(n[0]?.n) > 0, present: Number(n[0]?.n) === 1 && !oldBack, currentSha: oldBack ? "old-present" : "old-absent", preimageSha: "old-present" };
@@ -743,7 +849,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
           // v11: renamed in the same run: the edit lives on while the rename's new name does (its own item checks the rows).
           const ren = r.length ? null : renamedBy(String(it.target?.memoryIds?.[0] ?? ""), items);
           if (ren) {
-            const n = await q("survivalEditRenamed", `SELECT COUNT(*) n FROM agent_memory WHERE name = ? AND COALESCE(chunkIndex, 0) = 0`, [ren.target?.name]);
+            const n = await q("survivalEditRenamed", `SELECT COUNT(*) n FROM agent_memory WHERE name = $1 AND COALESCE("chunkIndex", 0) = 0`, [ren.target?.name]);
             env = { ...env, exists: Number(n[0]?.n) > 0, present: Number(n[0]?.n) === 1 };
             const cls = classifySurvival(env);
             if (cls === "survived") out.survived++;
@@ -795,19 +901,29 @@ export default async function (args: unknown, ctx: ScriptContext) {
         // agent_tasks has no workflowRunStepId index: a per-step correlated subquery scanned the whole
         // table once per step (3.2s of a 5.4s run on d28ed434, past 60s under fleet load). Pre-aggregate
         // through idx_agent_tasks_workflow_run instead.
-        `SELECT s.nodeId, s.status, s.startedAt, s.finishedAt,
-           ROUND((julianday(COALESCE(s.finishedAt, 'now')) - julianday(s.startedAt)) * 86400) secs,
-           sc.costUsd
+        {
+          sqlite: `SELECT s."nodeId", s.status, s."startedAt", s."finishedAt",
+           ROUND((julianday(COALESCE(s."finishedAt", 'now')) - julianday(s."startedAt")) * 86400) secs,
+           sc."costUsd"
          FROM workflow_run_steps s
-         LEFT JOIN (SELECT t.workflowRunStepId sid, ROUND(SUM(c.totalCostUsd), 2) costUsd
-                      FROM agent_tasks t JOIN session_costs c ON c.taskId = t.id
-                     WHERE t.workflowRunId = ? GROUP BY t.workflowRunStepId) sc ON sc.sid = s.id
-         WHERE s.runId = ? ORDER BY s.startedAt LIMIT 500`,
-        [runId, runId],
+         LEFT JOIN (SELECT t."workflowRunStepId" sid, ROUND(CAST(SUM(c."totalCostUsd") AS numeric), 2) "costUsd"
+                      FROM agent_tasks t JOIN session_costs c ON c."taskId" = t.id
+                     WHERE t."workflowRunId" = $1 GROUP BY t."workflowRunStepId") sc ON sc.sid = s.id
+         WHERE s."runId" = $1 ORDER BY s."startedAt" LIMIT 500`,
+          postgres: `SELECT s."nodeId", s.status, s."startedAt", s."finishedAt",
+           ROUND(EXTRACT(EPOCH FROM (COALESCE(s."finishedAt", statement_timestamp()) - s."startedAt"))) AS secs,
+           sc."costUsd"
+         FROM workflow_run_steps s
+         LEFT JOIN (SELECT t."workflowRunStepId" sid, ROUND(CAST(SUM(c."totalCostUsd") AS numeric), 2) "costUsd"
+                      FROM agent_tasks t JOIN session_costs c ON c."taskId" = t.id
+                     WHERE t."workflowRunId" = $1 GROUP BY t."workflowRunStepId") sc ON sc.sid = s.id
+         WHERE s."runId" = $1 ORDER BY s."startedAt" LIMIT 500`,
+        },
+        [runId],
       )
     : [];
   const totalCost = runId
-    ? await q("cost", `SELECT ROUND(SUM(c.totalCostUsd), 2) usd FROM session_costs c JOIN agent_tasks t ON t.id = c.taskId WHERE t.workflowRunId = ?`, [runId])
+    ? await q("cost", `SELECT ROUND(CAST(SUM(c."totalCostUsd") AS numeric), 2) usd FROM session_costs c JOIN agent_tasks t ON t.id = c."taskId" WHERE t."workflowRunId" = $1`, [runId])
     : [];
   const actions: any[] = Array.isArray(synth?.actions) ? synth.actions : [];
   const rejected: any[] = Array.isArray(synth?.rejected) ? synth.rejected : [];
