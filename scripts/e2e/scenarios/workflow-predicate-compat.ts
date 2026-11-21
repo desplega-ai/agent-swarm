@@ -202,8 +202,12 @@ const CODE_CASES: CodeCase[] = [
 
 const BASE_TRIGGER = { n: 3, s: "hi", flag: true, arr: [1, 2, { k: "v" }] };
 
+/**
+ * Same JSON value, every key and element compared strictly. Not text equality:
+ * jsonb (Postgres) reorders object keys, accepted by Daniel on 2026-11-21.
+ */
 function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return Bun.deepEquals(a, b, true);
 }
 
 async function runCodeCase(ctx: ScenarioContext, c: CodeCase, index: number): Promise<void> {
