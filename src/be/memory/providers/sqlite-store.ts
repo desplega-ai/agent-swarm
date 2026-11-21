@@ -589,21 +589,20 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
-    const results: AgentMemory[] = [];
-    await getDbClient().transaction(async () => {
+    return await getDbClient().transaction(async () => {
+      const results: AgentMemory[] = [];
       for (const input of inputs) {
         results.push(await this.store(input));
       }
+      return results;
     });
-    return results;
   }
 
   async replaceDocument(
     document: MemoryDocumentRef,
     inputs: MemoryInput[],
   ): Promise<AgentMemory[]> {
-    const results: AgentMemory[] = [];
-    await getDbClient().transaction(async (tx) => {
+    return await getDbClient().transaction(async (tx) => {
       // Only this owner's rows of this source, in this scope, under this key.
       // Another source holding the key is left alone and the insert fails.
       const rows = await tx.query<{ id: string }>(
@@ -617,11 +616,12 @@ export class SqliteMemoryStore implements MemoryStore {
         const placeholders = ids.map(() => "?").join(",");
         await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
       }
+      const results: AgentMemory[] = [];
       for (const input of inputs) {
         results.push(await this.store(input));
       }
+      return results;
     });
-    return results;
   }
 
   async get(id: string): Promise<AgentMemory | null> {
