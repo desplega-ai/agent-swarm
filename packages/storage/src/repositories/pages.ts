@@ -1,4 +1,4 @@
-import { likeAsciiCi } from "../dialect";
+import { jsonText, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlWhere } from "../sql";
 
@@ -177,7 +177,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   insertApp(a: NewApp): Promise<AppRow | null> {
     return this.db.get<AppRow>(sql`
       INSERT INTO apps (id, name, description, definition, created_at, updated_at, "key")
-      VALUES (${a.id}, ${a.name}, ${a.description}, ${a.definition}, ${a.now}, ${a.now}, ${a.key})
+      VALUES (${a.id}, ${a.name}, ${a.description}, ${jsonText(a.definition)}, ${a.now}, ${a.now}, ${a.key})
       RETURNING ${APP_COLUMNS}`);
   }
 
@@ -209,7 +209,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   updateApp(id: string, u: AppUpdate): Promise<AppRow | null> {
     return this.db.get<AppRow>(sql`
       UPDATE apps
-      SET name = ${u.name}, description = ${u.description}, definition = ${u.definition},
+      SET name = ${u.name}, description = ${u.description}, definition = ${jsonText(u.definition)},
         updated_at = ${u.updatedAt}
       WHERE id = ${id}
       RETURNING ${APP_COLUMNS}`);

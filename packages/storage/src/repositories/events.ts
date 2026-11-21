@@ -1,4 +1,4 @@
-import { nowIso } from "../dialect";
+import { jsonText, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlWhere } from "../sql";
 
@@ -62,7 +62,7 @@ export abstract class BaseEventsRepository implements EventsRepository {
         "sessionId", "parentEventId", "numericValue", "durationMs", data, "createdAt")
       VALUES (${row.id}, ${row.category}, ${row.event}, ${row.status}, ${row.source}, ${row.agentId},
         ${row.taskId}, ${row.sessionId}, ${row.parentEventId}, ${row.numericValue}, ${row.durationMs},
-        ${row.data}, ${nowIso})`);
+        ${jsonText(row.data)}, ${nowIso})`);
   }
 
   abstract list(
