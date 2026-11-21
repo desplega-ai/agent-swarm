@@ -255,6 +255,17 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
     return row?.definition ?? null;
   }
 
+  async vecTableSchema(reader?: MemoryReadExecutor): Promise<string | null> {
+    // Migration 369 creates the table; its columns stand for SQLite's CREATE text.
+    const row = await this.via(reader).get<{ definition: string | null }>(sql`
+      SELECT 'TABLE memory_vec (' || string_agg(
+               a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attnum)
+             || ')' AS definition
+        FROM pg_attribute a
+       WHERE a.attrelid = to_regclass('memory_vec') AND a.attnum > 0 AND NOT a.attisdropped`);
+    return row?.definition ?? null;
+  }
+
   async scanFtsBatch(
     _afterRowid: number,
     _limit: number,

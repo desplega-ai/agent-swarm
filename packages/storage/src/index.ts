@@ -26,6 +26,11 @@ export {
   StorageError,
 } from "./errors";
 export { SqlExecutor } from "./executor";
+export type {
+  MemorySearchIndexes,
+  MemoryVecPopulateStats,
+  MemoryVectorsState,
+} from "./memory-indexes";
 export {
   DB_QUERY_DENIED_TABLES,
   type QueryReader,

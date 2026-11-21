@@ -38,6 +38,7 @@ import {
   assertNoDeniedTablesSqlite,
   type BusyRetryOptions,
   createBunSqliteClient,
+  createSqliteMemorySearchReader,
   createSqliteStorage,
   executeSqliteReadOnlyQuery,
   insertPromptTemplateHistorySync,
@@ -49,7 +50,13 @@ import {
   updatePromptTemplateRecordSync,
 } from "@desplega/storage-sqlite";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDb, getDbClient, isPostgresEngine, resolveSqliteVecExtensionPath } from "./db/runtime";
+import {
+  getDb,
+  getDbClient,
+  isPostgresEngine,
+  isSqliteVecAvailable,
+  resolveSqliteVecExtensionPath,
+} from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
 
 export type { BusyRetryOptions };
@@ -98,6 +105,31 @@ export function isInTransaction(): boolean {
   return sqliteIsInTransaction() || isInPostgresTransaction();
 }
 
+/**
+ * The memory search read pool of the SQLite engine: worker threads with their
+ * own read-only connection, so the vec KNN and bm25 statements do not block
+ * the API event loop. One per process; it follows the current handle.
+ */
+const sqliteMemorySearch = createSqliteMemorySearchReader({
+  database: () => getDb(),
+  vecExtensionPath: () => (isSqliteVecAvailable() ? resolveSqliteVecExtensionPath() : undefined),
+  inProcess: () => getDbClient(),
+  inTransaction: () => isInTransaction(),
+});
+
+/** The SQLite memory search reader (the object the SQLite storage hands the memory store). */
+export const memorySearchReader = sqliteMemorySearch.reader;
+
+/** Pool state for tests and diagnostics; null while no pool is running. */
+export function memorySearchReaderStats() {
+  return sqliteMemorySearch.stats();
+}
+
+/** Test-only: stop the pool; `inProcess` forces every read onto the main connection. */
+export function __resetMemorySearchReaderForTests(options: { inProcess?: boolean } = {}) {
+  return sqliteMemorySearch.reset(options);
+}
+
 export function createStorage(
   client: DbClient,
   options: { vectorSearch: boolean; queryReader?: QueryReader | null },
@@ -108,7 +140,11 @@ export function createStorage(
       queryReader: options.queryReader ?? null,
     });
   }
-  return createSqliteStorage(client, options);
+  return createSqliteStorage(client, {
+    vectorSearch: options.vectorSearch,
+    database: () => getDb(),
+    memorySearchReader,
+  });
 }
 
 // ---- Engine selection (Postgres brief D1) ----
@@ -365,6 +401,7 @@ export {
   resetDbQueryWorkerPoolForTests,
   retentionSweepStatements,
   runSqliteMigrations,
+  SEARCH_READ_WORKERS,
   SqliteQuerySpawnUnavailableError,
   storeEncryptedOAuthSecrets,
   USER_REFERENCE_COLUMNS_SQL,

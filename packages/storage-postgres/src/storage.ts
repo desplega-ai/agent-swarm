@@ -7,6 +7,7 @@ import {
   type TransactionOptions,
 } from "@desplega/storage";
 import { postgresDialect } from "./dialect";
+import { PostgresMemoryIndexes } from "./memory-indexes";
 import { PostgresAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import { PostgresAgentsRepository } from "./repositories/agents";
 import { PostgresAssetsRepository } from "./repositories/assets";
@@ -54,12 +55,14 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     dbQuery: options.queryReader !== null,
     dbQueryDialect: "postgres",
   };
+  const memory = new PostgresMemoryRepository(executor);
   return {
     dialect: postgresDialect,
     capabilities,
     executor,
     client,
     ...(options.queryReader ? { queryReader: options.queryReader } : {}),
+    memoryIndexes: new PostgresMemoryIndexes(memory, options.vectorSearch),
     repos: {
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),
@@ -82,7 +85,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
       skills: new PostgresSkillsRepository(executor),
       kv: new PostgresKvRepository(executor),
       tasks: new PostgresTasksRepository(executor),
-      memory: new PostgresMemoryRepository(executor),
+      memory,
       schedules: new PostgresSchedulesRepository(executor),
       agentFsWebhooks: new PostgresAgentFsWebhooksRepository(executor),
       improvements: new PostgresImprovementsRepository(executor),

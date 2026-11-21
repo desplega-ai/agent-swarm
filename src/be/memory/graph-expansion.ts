@@ -22,7 +22,7 @@ import type { MemoryGraphNeighborRow } from "@desplega/storage";
 import { getStorage } from "@/be/storage";
 import type { AgentMemorySource } from "@/types";
 import { isGraphExpansionEnabled } from "./constants";
-import { rowToCandidate } from "./providers/sqlite-store";
+import { rowToCandidate } from "./providers/storage-store";
 import { computeScore } from "./reranker";
 import type { MemoryCandidate } from "./types";
 

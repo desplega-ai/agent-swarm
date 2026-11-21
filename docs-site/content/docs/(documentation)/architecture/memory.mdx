@@ -253,7 +253,7 @@ src/be/memory/
 ├── index.ts              # Singleton getters
 └── providers/
     ├── openai-embedding.ts   # OpenAI text-embedding-3-small
-    └── sqlite-store.ts       # SQLite + sqlite-vec KNN search
+    └── storage-store.ts      # The memory store on either engine (SQLite: FTS5 + sqlite-vec, Postgres: tsvector + pgvector)
 ```
 
 The provider interfaces make it straightforward to add alternative implementations (e.g., a different embedding model or a Postgres-backed store) without changing any consumer code.

@@ -2,6 +2,7 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { MemorySearchIndexes } from "./memory-indexes";
 import type { QueryReader } from "./query-reader";
 import type { AgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import type { AgentsRepository } from "./repositories/agents";
@@ -90,6 +91,8 @@ export interface Storage {
    * `dbQuery` capability. SQLite opens its read-only handle itself.
    */
   readonly queryReader?: QueryReader;
+  /** The memory full-text and vector indexes, and the engine's off-loop memory search reader. */
+  readonly memoryIndexes: MemorySearchIndexes;
   /**
    * Run `fn` atomically. Repository calls inside it join the transaction. The
    * callback may run more than once (decision D6): side effects go in
