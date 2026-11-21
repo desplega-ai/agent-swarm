@@ -415,7 +415,8 @@ export async function copyIntoPostgres(
         for (const name of seeded) {
           if (targets.has(name)) await conn.unsafe(`DELETE FROM ${quote(name)}`);
         }
-        await conn.unsafe("DELETE FROM memory_vec");
+        const vectorTable = targets.has("memory_vec");
+        if (vectorTable) await conn.unsafe("DELETE FROM memory_vec");
 
         const checksums = new Map<string, TableChecksum>();
         let vectors = 0;
@@ -423,7 +424,7 @@ export async function copyIntoPostgres(
           const target = targets.get(table.name) as TargetTable;
           const sum = await copyTable(conn, source, table, target, options, problem, log);
           checksums.set(table.name, sum.checksum);
-          if (table.name === "agent_memory") {
+          if (table.name === "agent_memory" && vectorTable) {
             vectors = await insertVectors(conn, sum.embeddings, options.embeddingDimensions);
           }
         }
@@ -432,11 +433,13 @@ export async function copyIntoPostgres(
           await conn.unsafe("ROLLBACK");
           return report;
         }
-        report.rebuilt.push({
-          table: "memory_vec",
-          rows: vectors,
-          reason: `vectors of the agent_memory embeddings with ${options.embeddingDimensions} dimensions`,
-        });
+        if (vectorTable) {
+          report.rebuilt.push({
+            table: "memory_vec",
+            rows: vectors,
+            reason: `vectors of the agent_memory embeddings with ${options.embeddingDimensions} dimensions`,
+          });
+        }
 
         // Run the deferred foreign key checks now: a violation fails here, and
         // ALTER TABLE refuses a table with pending trigger events.
