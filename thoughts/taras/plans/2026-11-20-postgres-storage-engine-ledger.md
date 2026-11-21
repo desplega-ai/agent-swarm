@@ -19,7 +19,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
 | M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
 | M6 Data copy | done (part 9): `agent-swarm db-copy`, CLI and check-20 scenario `data-copy`, base-db fixture boots on Postgres through the copy (check 10), 4 contract tests | `f0480cc9a` |
-| M7 Delivery | not started | |
+| M7 Delivery | in progress (part 9): CI, chart, compose, docs, runbook, replica blockers done; PR not opened (STOP-ASK on unkeyed task creation retries; `github-emulate-flows` intermittent on Postgres) | `52bf8352c` |
 
 ## Swarm adaptations (from the dispatching task, they win over the brief)
 
@@ -456,6 +456,26 @@ Postgres defects found by the full 4-shard strict runs and fixed (each with the 
 - Unique violation on an expression index mapped to garbage text; it now gives SQLite's `UNIQUE constraint failed: index '<name>'` (`packages/storage-postgres/src/errors.ts`, contract test in `client.test.ts`). Failed: `divergence-error-mapping`.
 
 Scenario edits (section 10, SQL portability and helper use, no assertion change): `platform-chat-sdk-rocketchat` (GLOB to a `substr` prefix test), `platform-webhooks` and `slack-thread-one-card` (lines from main: `?` placeholders with a params array that `ctx.db.get` ignores, and unquoted camelCase; now the `sql` tag with quoted identifiers; on SQLite they had run with unbound parameters).
+
+## Part 9 final check runs (head `52bf8352c`)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | strict suite on SQLite (4 shards + strict merge) | **pass**: merge exit 0, 240 passed, 0 failed, 2 flaky (`extensions` timeout under load, `model-group-resolution`, flaky at the base) |
+| 2 | strict suite on Postgres (4 shards + strict merge) | **fail**: 240 passed, 1 failed, 1 flaky. `github-emulate-flows` failed both attempts ("no task for the maintainer's comment 2"); it passes alone 3 of 3 and passed in the full run at `0145bc54c`; it also failed once in a part 6 run. The rerun API log shows webhook 401s (signature) around a SUT restart. Cause not found. |
+| 3 | same scenario list | **pass** by construction: one list, no engine branch; `data-copy` runs in every run |
+| 4 | `--tx-replay` on Postgres (4 shards + strict merge) | **pass** at `0145bc54c`: merge exit 0, 238 passed, 4 flaky (`workflow-predicate-compat`, fixed since: jsonb key order; `knowledge-apps-large-model` timeout; `model-group-resolution`; `stress-task-finish` one ECONNRESET) |
+| 5 | divergence scenarios on Postgres | **pass** in the Postgres run (flow `storage-engine-parity` passes) |
+| 6 | no new coverage exclusion | **pass**: the manifest diff since the base adds a flow and quotes two identifiers, no exclusion |
+| 7, 9, 11 to 15 | parity, migration conflicts, dep-graph, boundary, portability, triggers, tx-callbacks | **pass** |
+| 16 | existing gates | `lint`, `lint:slop`, `tsc:check:tsc`, db boundary, async seam, floating promises, promise sinks, audit columns, unit-test allowlist: **pass**. `test:root -- --parallel=4`: exit 1, 23,118 pass / 27 fail: 19 fail at the base (AgentMail 8, realtime transport 7, GitLab event names 2, Slack reload 1, initTelemetry 1), 8 are load timeouts (load average 46) whose 6 files pass alone 30/30, plus one hook timeout. `e2e:ui`: not run. |
+| 17 | `docs:openapi` | **pass**: no diff; against main it adds only `dialect` |
+| 18 | `test:storage` | **pass**: SQLite 398/0, Postgres 452/0 |
+| 19, 20 | data copy | **pass** (M6) |
+| 21 | bench report | report written (`bun run e2e:bench --engine postgres --only stress-poll-claim,divergence-concurrent-schedule-claim,stress-task-finish`, seeded 300 agents / 60,000 tasks); 1,840 transactions, 190 retried, 0 exhausted. **New site above 5%: unkeyed task creation `src/http/tasks.ts:1388`, 35 of 60, 58.3%** (first measured now: `stress-task-finish` joined the bench). STOP-ASK. Accepted exceptions this run: schedule run-now 90.1%, KV 90.0%, keyed task creation 90.0%, keyed workflow 90.0%, agent registration 71.8% (was 59.3%). Report: agent-fs `shared/swarm-postgres/bench-2026-11-21-part9.md`. |
+| 22 | stress scenarios | **pass**: 0 exhausted retries, 0 5xx |
+| 23 to 25 | CI, docs, replica blockers | **done** (M7) |
+| 26 | PR | not opened: waiting on the STOP-ASK |
 
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
