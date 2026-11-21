@@ -2025,8 +2025,19 @@ export async function handleTasks(
     ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
       !("alreadyFinished" in r && r.alreadyFinished);
 
+    // Decision D7 opt-down: on Postgres this transaction runs at READ COMMITTED.
+    // Reason: under SERIALIZABLE, 72% of finishes retried in stress-poll-claim on
+    // a seeded database (ledger part 7), from predicate reads of agent_tasks
+    // (capacity count, dependents). Locks that keep the old invariants, taken in
+    // the poll write pass order (agent, then task): the caller's agent row (its
+    // capacity count and status write run one at a time, and never beside its
+    // own poll claim), then the task row (one finish per task; the terminal
+    // guard and every status write read the locked row). Each status write also
+    // keeps its `status NOT IN terminal` guard. Scenario: stress-task-finish.
     const result = await getStorage().transaction(
       async (): Promise<FinishTaskTransactionResult> => {
+        await getStorage().repos.agents.lockAgent(myAgentId);
+        await getStorage().repos.tasks.lockTask(parsed.params.id);
         const task = await getTaskById(parsed.params.id);
 
         if (!task) {
@@ -2106,6 +2117,7 @@ export async function handleTasks(
 
         return { task: updatedTask, wasPaused };
       },
+      { isolation: "read committed" },
     );
 
     if (hasFinishError(result)) {

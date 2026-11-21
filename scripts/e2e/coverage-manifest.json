@@ -234,6 +234,7 @@
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
+        "stress-task-finish",
         "divergence-retention",
         "divergence-db-query-denial",
         "divergence-list-order",
