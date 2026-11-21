@@ -123,6 +123,7 @@
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:agents-md-size": "bash scripts/check-agents-md-size.sh",
     "check:codex-default-model": "bash scripts/check-codex-default-model.sh",
+    "check:harness-native-tools": "bun scripts/check-harness-native-tools.ts",
     "check:test-spawn-sync": "bash scripts/check-test-spawn-sync.sh",
     "check:dep-graph": "depcruise src packages/model-routing packages/agent-swarm-sdk --config .dependency-cruiser.cjs",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",

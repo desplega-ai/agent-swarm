@@ -1010,6 +1010,8 @@ export interface EvalRunRow {
   rerunOf?: string | null;
   /** Opt-in api extension installed in each attempt's sandbox API; null = none. */
   apiExtension?: ApiExtensionPlan | null;
+  /** Extra env merged into every worker of every attempt (`run --worker-env`); null = none. */
+  workerEnv?: Record<string, string> | null;
   /** When the run's Slack summary was posted; null until then (dedupe for resume). */
   summaryPostedAt?: string | null;
   /** Times boot resumed the run after a restart cut it (capped by MAX_AUTO_RESUMES). */

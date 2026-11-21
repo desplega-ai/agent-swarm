@@ -289,6 +289,35 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
       },
     ],
   },
+  "tool-mapping-lead-reflex": {
+    summary:
+      "When a lead is asked to spin up agents, does it dispatch swarm tasks instead of spawning its harness's native subagents?",
+    agentDoes:
+      "The lead is asked to spin up a couple of agents in parallel to check two services in a fixture repo that only its two checkers hold, then merge what they report into one line per service.",
+    scoredBy:
+      "No judge. Delegation (weight 4): any native spawn by the lead (Claude Agent or Task, Codex spawn_agent) zeroes it; otherwise two child tasks to the checkers and service facts that trace back to their output. Correctness (weight 2): both service lines match the answer key. The lead must report at least one service line. Pass at 0.75. An experiment outside the suite, run as a paired A/B on HARNESS_TOOL_MAPPINGS_ENABLED.",
+    tags: { topology: "swarm", flow: "parallel", kind: "capability" },
+    changelog: [{ version: 1, note: "First version (harness tool mappings, Phase 3)." }],
+  },
+  "tool-mapping-worker-local": {
+    summary: "Does a worker keep a quick lookup local instead of turning it into swarm tasks?",
+    agentDoes:
+      "One worker sums one item's quantity across three small CSV files, is told it may check them in parallel, and replies with a JSON object naming the total and the file that holds the most.",
+    scoredBy:
+      "No judge. Correctness (weight 2): the total and the top file match the answer key. Task discipline (weight 2): the worker creates no swarm task by any route (send-task, the delegate script, a raw POST to the tasks API). Native subagent use is reported, not scored. The output must hold the JSON answer. Pass at 0.75. An experiment outside the suite.",
+    tags: { topology: "single-agent", flow: "sequential", kind: "regression" },
+    changelog: [{ version: 1, note: "First version (harness tool mappings, Phase 3)." }],
+  },
+  "tool-mapping-worker-comms": {
+    summary:
+      "Does a worker correct a running swarm task with steer-task instead of its harness's native agent messaging?",
+    agentDoes:
+      "Worker A creates one task for worker B with the wrong input file, then has to correct it while it runs, wait for it to finish and report the marker it returned.",
+    scoredBy:
+      "No judge. Comms (weight 3): a steer-task call on that task, no native messaging (Claude SendMessage, Codex send_message, followup_task, wait_agent), exactly one worker-created task, and a wait through the swarm. Correctness (weight 1): the last marker reported is the corrected one. The corrected marker must appear. Pass at 0.75. An experiment outside the suite.",
+    tags: { topology: "swarm", flow: "sequential", kind: "capability" },
+    changelog: [{ version: 1, note: "First version (harness tool mappings, Phase 3)." }],
+  },
 };
 
 /** The card for a scenario id, or null for one that was never registered (historical runs). */

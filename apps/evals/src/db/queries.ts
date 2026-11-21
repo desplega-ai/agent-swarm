@@ -29,6 +29,7 @@ function rowToRun(r: Row): EvalRunRow {
     judgeModel: (r.judge_model as string) ?? null,
     efforts: parseJsonColumn<Record<string, ReasoningEffortLevel>>(r.efforts_json),
     apiExtension: parseJsonColumn<ApiExtensionPlan>(r.api_extension_json),
+    workerEnv: parseJsonColumn<Record<string, string>>(r.worker_env_json),
     maxMeteredUsd: r.max_metered_usd == null ? null : Number(r.max_metered_usd),
     preset: (r.preset as string) ?? null,
     rerunOf: (r.rerun_of as string) ?? null,
@@ -124,6 +125,8 @@ export async function createRun(
     maxMeteredUsd?: number;
     /** Opt-in api extension installed in each attempt's sandbox API. */
     apiExtension?: ApiExtensionPlan;
+    /** Extra env merged into every worker (`run --worker-env`). */
+    workerEnv?: Record<string, string>;
     /** Preset the run was started from (POST /api/runs `preset`); scheduled presets get a summary. */
     preset?: string;
     /** The scheduled run this run is an automatic rerun of. */
@@ -132,8 +135,8 @@ export async function createRun(
 ): Promise<void> {
   await db.execute({
     sql: `INSERT INTO eval_runs
-            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd, preset, rerun_of, api_extension_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd, preset, rerun_of, api_extension_json, worker_env_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -147,6 +150,7 @@ export async function createRun(
       run.preset ?? null,
       run.rerunOf ?? null,
       run.apiExtension ? JSON.stringify(run.apiExtension) : null,
+      run.workerEnv && Object.keys(run.workerEnv).length > 0 ? JSON.stringify(run.workerEnv) : null,
     ],
   });
 }

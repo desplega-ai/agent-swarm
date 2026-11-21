@@ -39,6 +39,19 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
 };
 
 /**
+ * Experiment scenarios: registered and runnable by id (`run --scenarios <id>`),
+ * versioned and hash-pinned like the rest, but outside the manifest. So they
+ * record no suite version and never join a preset, the nightly canary, the
+ * weekly matrix or a snapshot. The tool-mapping set serves one paired A/B run
+ * (`run --worker-env HARNESS_TOOL_MAPPINGS_ENABLED=...`).
+ */
+export const EXPERIMENT_SCENARIO_IDS: readonly string[] = [
+  "tool-mapping-lead-reflex",
+  "tool-mapping-worker-local",
+  "tool-mapping-worker-comms",
+];
+
+/**
  * Held-out scenarios (plan Q7). They stay in the manifest, run in the weekly
  * matrix and are scored like the rest, but `publish` never writes them into a
  * snapshot, so a config tuned to the public scenarios shows up as a gap between

@@ -15,7 +15,7 @@ import {
   listRuns,
   resetErrorAttempts,
 } from "./db/queries.ts";
-import { loadRegistry } from "./registry.ts";
+import { loadRegistry, parseWorkerEnvFlags } from "./registry.ts";
 import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
 import { assertRunConfigsResolve, ensureRunConfigPins } from "./runner/run-configs.ts";
@@ -93,6 +93,9 @@ Options:
   --api-extension-config <json>  extension config merged over the bundle's, e.g. '{"mode":"enforce"}'
   --api-config-from-env <A,B>    env vars copied into the sandbox API as global config rows
                          (never to workers), e.g. the decision-model credential the extension reads
+  --worker-env <K=V>     env merged into every worker of every attempt, repeatable; recorded
+                         on the run (e.g. HARNESS_TOOL_MAPPINGS_ENABLED=true for an A/B arm).
+                         Boot-path keys (API_KEY, AGENT_ROLE, MODEL_OVERRIDE, ...) are refused
   --concurrency <n>      parallel attempts, one sandbox stack each (default 2)
   --max-retries <n>      retries per errored attempt (default 1)
   --judge-model <id>     OpenRouter judge model override
@@ -165,6 +168,7 @@ async function cmdRun(argv: string[]): Promise<void> {
       configs: { type: "string" },
       preset: { type: "string", multiple: true },
       effort: { type: "string", multiple: true },
+      "worker-env": { type: "string", multiple: true },
       "api-extension": { type: "string" },
       "api-extension-config": { type: "string" },
       "api-config-from-env": { type: "string" },
@@ -213,6 +217,7 @@ async function cmdRun(argv: string[]): Promise<void> {
   }
 
   const apiExtension = await planApiExtension(values);
+  const workerEnv = parseWorkerEnvFlags(values["worker-env"] ?? []);
   await assertRunConfigsResolve(registry, scenarioIds, configIds);
   const efforts = planRunEfforts({
     registry,
@@ -234,11 +239,17 @@ async function cmdRun(argv: string[]): Promise<void> {
     efforts,
     maxMeteredUsd,
     ...(apiExtension ? { apiExtension } : {}),
+    workerEnv,
   });
   await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
   console.log(
     `created ${runId}: ${scenarioIds.length} scenario(s) x ${configIds.length} config(s) x ${attemptsPerCell} attempt(s)` +
-      (maxMeteredUsd !== undefined ? `, metered cost cap $${maxMeteredUsd.toFixed(2)}` : ""),
+      (maxMeteredUsd !== undefined ? `, metered cost cap $${maxMeteredUsd.toFixed(2)}` : "") +
+      (Object.keys(workerEnv).length > 0
+        ? `, worker env ${Object.entries(workerEnv)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")}`
+        : ""),
   );
   const controller = installSignalHandlers();
   await executeRun({
@@ -302,6 +313,13 @@ async function cmdShow(argv: string[]): Promise<void> {
   const summary = summarizeRun(run, attempts);
 
   console.log(`\n${run.id} [${run.status}] mean±CI @n=${run.attemptsPerCell}`);
+  if (run.workerEnv) {
+    console.log(
+      `worker env: ${Object.entries(run.workerEnv)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" ")}`,
+    );
+  }
   // A config run at a reasoning effort reads `claude-opus@high` in the header.
   const columnLabel = (configId: string) =>
     run.efforts?.[configId] ? `${configId}@${run.efforts[configId]}` : configId;

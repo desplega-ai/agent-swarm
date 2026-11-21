@@ -334,6 +334,20 @@ function codexToolFromItem(
     }
     case "web_search":
       return { toolName: "WebSearch", input: { query: item.query } };
+    case "unknown": {
+      // The app-server transport passes items it does not normalize through as
+      // `{type:"unknown", originalType, value}`. Its collab calls carry a camelCase
+      // `tool` (`spawnAgent`); snake_case it to the model-facing name (`spawn_agent`).
+      const value = asObject(item.value);
+      if (item.originalType !== "collabAgentToolCall" || typeof value?.tool !== "string") {
+        return undefined;
+      }
+      return {
+        toolName: value.tool.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
+        input: { prompt: value.prompt, receiver_thread_ids: value.receiverThreadIds },
+        isError: value.status === "failed",
+      };
+    }
     default:
       return undefined;
   }

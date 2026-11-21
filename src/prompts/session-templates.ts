@@ -28,6 +28,7 @@
  * Variables use {{double-brace}} syntax for the interpolation engine.
  */
 
+import { NATIVE_TOOL_MAP } from "./harness-native-tools";
 import { registerTemplate } from "./registry";
 
 // ============================================================================
@@ -556,6 +557,51 @@ registerTemplate({
   variables: [],
   category: "system",
 });
+
+// Native multi-agent tool mappings (HARNESS_TOOL_MAPPINGS_ENABLED). A lead's
+// native spawn and comms tools map onto swarm tools; a worker keeps them for
+// its own local subagents. Names come from harness-native-tools.ts, which
+// `bun run check:harness-native-tools` checks against the pinned harnesses.
+const { claude: claudeTools, codex: codexTools } = NATIVE_TOOL_MAP;
+const toolMappingHeader = "\n## Native tools in this swarm\n\n";
+const toolMappingWait =
+  "`defer-task` with `wakeOn`, or the `wait-for-task` script for a short wait";
+const toolMappingLeadIntro =
+  "have swarm equivalents. Work for another agent goes through the swarm:";
+const toolMappingWorkerTail = `Keep using them for local sub-work. \`send-task\` is for work another swarm agent must do.
+To message a swarm task you created, use \`steer-task\`. To wait on one, use the \`wait-for-task\` script or \`defer-task\` with \`wakeOn\`, never a sleep loop.
+`;
+
+const toolMappingBodies: Record<string, string> = {
+  "claude.lead": `${toolMappingHeader}Your native multi-agent tools ${toolMappingLeadIntro}
+- \`${claudeTools.spawn}\` → \`send-task\`. Swarm tasks already run in the background.
+- \`${claudeTools.list}\` → \`get-swarm\`.
+- \`${claudeTools.message}\` to a running task → \`steer-task\`. A follow-up on a finished task → \`send-task\` with \`parentTaskId\`.
+- \`${claudeTools.stop}\` → \`cancel-task\`.
+- Waiting on a result → ${toolMappingWait}.
+Use native \`${claudeTools.spawn}\` only for a quick read-only lookup inside this turn.
+`,
+  "codex.lead": `${toolMappingHeader}Your \`collaboration\` tools ${toolMappingLeadIntro}
+- \`${codexTools.spawn}\` → \`send-task\`. Swarm tasks already run in the background.
+- \`${codexTools.list}\` → \`get-swarm\`.
+- \`${codexTools.message}\` → \`steer-task\`. \`${codexTools.interrupt}\` → \`steer-task\` with \`mode:"steer"\`, or \`cancel-task\`.
+- \`${codexTools.followup}\` → \`send-task\` with \`parentTaskId\`.
+- \`${codexTools.wait}\` → ${toolMappingWait}.
+Use native \`${codexTools.spawn}\` only for a quick read-only lookup inside this turn.
+`,
+  "claude.worker": `${toolMappingHeader}\`${claudeTools.spawn}\`, \`${claudeTools.message}\` and \`${claudeTools.list}\` reach only your own local subagents. ${toolMappingWorkerTail}`,
+  "codex.worker": `${toolMappingHeader}\`${codexTools.spawn}\`, \`${codexTools.message}\`, \`${codexTools.wait}\` and the other \`collaboration\` tools reach only your own local sub-agents. ${toolMappingWorkerTail}`,
+};
+
+for (const [key, defaultBody] of Object.entries(toolMappingBodies)) {
+  registerTemplate({
+    eventType: `system.agent.tool_mapping.${key}`,
+    header: "",
+    defaultBody,
+    variables: [],
+    category: "system",
+  });
+}
 
 registerTemplate({
   eventType: "system.agent.tools_skills",

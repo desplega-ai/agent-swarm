@@ -12,6 +12,9 @@ import {
 import { fixture as realDiffAgentFs } from "./real-diff-agent-fs.ts";
 import { fixture as scriptAuthoring } from "./script-authoring.ts";
 import { fixture as sqlAudit } from "./sql-audit.ts";
+import { fixture as toolMappingLeadReflex } from "./tool-mapping-lead-reflex.ts";
+import { fixture as toolMappingWorkerComms } from "./tool-mapping-worker-comms.ts";
+import { fixture as toolMappingWorkerLocal } from "./tool-mapping-worker-local.ts";
 import { fixture as toolRouting } from "./tool-routing.ts";
 import { fixture as workerRecovery, soloFixture as workerRecoverySolo } from "./worker-recovery.ts";
 import { fixture as workflowAuthoring } from "./workflow-authoring.ts";
@@ -39,4 +42,7 @@ export const GRADER_FIXTURES: Readonly<Record<string, GraderFixture>> = {
   "human-in-loop-solo": humanInLoopSolo,
   "real-diff-agent-fs": realDiffAgentFs,
   "docs-suggestion": docsSuggestion,
+  "tool-mapping-lead-reflex": toolMappingLeadReflex,
+  "tool-mapping-worker-local": toolMappingWorkerLocal,
+  "tool-mapping-worker-comms": toolMappingWorkerComms,
 };

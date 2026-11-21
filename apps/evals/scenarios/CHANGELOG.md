@@ -29,6 +29,11 @@ content hash of each version is pinned in `scenario-hashes.ts`;
   suite, run and scored, but `publish` never writes them into a snapshot.
   Changing the held-out set changes what a snapshot covers: treat it as MAJOR.
 
+- **Experiment scenarios** (`EXPERIMENT_SCENARIO_IDS` in `suite.ts`) are
+  registered, versioned and hash-pinned, but stay out of the manifest: they
+  record no suite version and join no preset, canary, matrix or snapshot. Run
+  them by id.
+
 `1.0` is the suite Phase 10 publishes; until then it stays open and Phases 7-8
 add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 
@@ -56,6 +61,14 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.
+
+## Experiments (outside the suite)
+
+| Scenario | Version | Notes |
+| --- | --- | --- |
+| tool-mapping-lead-reflex | 1 | Lead + 2 checkers; "spin up a couple of agents" brief, a native spawn zeroes delegation (harness tool mappings, Phase 3). |
+| tool-mapping-worker-local | 1 | One worker, three-file lookup; any swarm task it creates fails task discipline (harness tool mappings, Phase 3). |
+| tool-mapping-worker-comms | 1 | Two workers; A corrects its running task on B with steer-task, no native messaging (harness tool mappings, Phase 3). |
 
 ## Changes
 

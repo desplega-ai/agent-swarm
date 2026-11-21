@@ -826,6 +826,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "HARNESS_TOOL_MAPPINGS_ENABLED",
+        label: "Native tool mappings",
+        description:
+          "Add a prompt section to Claude and Codex sessions that maps native multi-agent tools onto swarm tools. Leads map spawn, list, message and wait onto send-task, get-swarm, steer-task and defer-task. Workers keep native subagents local. Applies to sessions that start after the change.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
         key: "TASK_TOOL_MANIFESTS",
         label: "Task tool manifests",
         description:

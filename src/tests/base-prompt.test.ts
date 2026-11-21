@@ -50,6 +50,7 @@ const ENV_KEYS = [
   "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
   "UI_SPEC_ENABLED",
+  "HARNESS_TOOL_MAPPINGS_ENABLED",
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>(
@@ -898,6 +899,97 @@ Swarm tools are already in your tool list.
     delete process.env.UI_SPEC_ENABLED;
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toBe(FLAG_OFF_PROMPT);
+  });
+});
+
+describe("getBasePrompt: native tool mappings section", () => {
+  const HEADER = "## Native tools in this swarm";
+  const mappingSection = (prompt: string): string => {
+    const start = prompt.indexOf(HEADER);
+    const end = prompt.indexOf("\n## ", start + HEADER.length);
+    return prompt.slice(start, end);
+  };
+
+  test.each([
+    [
+      "claude",
+      "lead",
+      [
+        "`Agent` → `send-task`",
+        "`ListAgents` → `get-swarm`",
+        "`TaskStop` → `cancel-task`",
+        "Use native `Agent` only",
+      ],
+    ],
+    [
+      "claude",
+      "worker",
+      [
+        "`Agent`, `SendMessage` and `ListAgents` reach only your own local subagents",
+        "`steer-task`",
+      ],
+    ],
+    [
+      "codex",
+      "lead",
+      [
+        "`spawn_agent` → `send-task`",
+        "`list_agents` → `get-swarm`",
+        "`followup_task` → `send-task`",
+        "Use native `spawn_agent` only",
+      ],
+    ],
+    ["codex", "worker", ["`spawn_agent`, `send_message`, `wait_agent`", "`steer-task`"]],
+  ] as const)("%s %s gets its mapping when the flag is on", async (provider, role, expected) => {
+    process.env.HARNESS_TOOL_MAPPINGS_ENABLED = "true";
+    const result = await getBasePrompt({ ...minimalArgs, role, provider, traits: localTraits });
+    const section = mappingSection(result);
+    for (const text of expected) expect(section).toContain(text);
+    // About 150 tokens.
+    expect(section.length).toBeLessThanOrEqual(600);
+    if (role === "worker") expect(section).not.toContain("→");
+  });
+
+  test.each([
+    "pi",
+    "claude-managed",
+    "opencode",
+  ])("%s gets no mapping with the flag on", async (provider) => {
+    process.env.HARNESS_TOOL_MAPPINGS_ENABLED = "true";
+    const traits = provider === "claude-managed" ? managedTraits : localTraits;
+    for (const role of ["lead", "worker"]) {
+      const result = await getBasePrompt({ ...minimalArgs, role, provider, traits });
+      expect(result).not.toContain(HEADER);
+    }
+  });
+
+  test("scripts-only mode drops the mapping", async () => {
+    process.env.HARNESS_TOOL_MAPPINGS_ENABLED = "true";
+    process.env.SCRIPTS_ONLY_MCP = "true";
+    const result = await getBasePrompt({ ...minimalArgs, provider: "claude", traits: localTraits });
+    expect(result).not.toContain(HEADER);
+  });
+
+  test("flag off leaves every provider and role without it", async () => {
+    for (const provider of ["claude", "codex"]) {
+      for (const role of ["lead", "worker"]) {
+        const result = await getBasePrompt({ ...minimalArgs, role, provider, traits: localTraits });
+        expect(result).not.toContain(HEADER);
+      }
+    }
+  });
+
+  test("the section is reported as its own composition part", async () => {
+    process.env.HARNESS_TOOL_MAPPINGS_ENABLED = "true";
+    const { prompt, parts } = await getBasePromptWithParts({
+      ...minimalArgs,
+      role: "lead",
+      provider: "codex",
+      traits: localTraits,
+    });
+    const part = parts.find((p) => p.id === "system.agent.tool_mapping.codex.lead");
+    expect(part?.chars).toBeGreaterThan(0);
+    expect(parts.reduce((sum, p) => sum + p.chars, 0)).toBe(prompt.length);
   });
 });
 

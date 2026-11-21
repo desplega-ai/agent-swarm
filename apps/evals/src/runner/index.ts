@@ -1133,6 +1133,8 @@ async function runAttemptOnce(opts: {
   judgeModel: string | null;
   /** Opt-in api extension installed in the sandbox API (the run's option). */
   apiExtension?: ApiExtensionPlan | null;
+  /** The run's `--worker-env` pairs. */
+  workerEnv?: Record<string, string> | null;
   /** Cancel signal — checked at every phase boundary and inside every polling await. */
   signal?: AbortSignal;
   log: (msg: string) => void;
@@ -1188,6 +1190,7 @@ async function runAttemptOnce(opts: {
       swarmSlug: `evals-${attempt.runId}`,
       preBootSql,
       ...(opts.apiExtension ? { apiExtension: opts.apiExtension } : {}),
+      ...(opts.workerEnv ? { workerEnv: opts.workerEnv } : {}),
       timeoutSec,
       signal,
       log: (msg) => log(`[boot] ${msg}`),
@@ -2183,6 +2186,7 @@ export async function runAttemptWithRetry(opts: {
   maxRetries: number;
   judgeModel: string | null;
   apiExtension?: ApiExtensionPlan | null;
+  workerEnv?: Record<string, string> | null;
   signal?: AbortSignal;
   log: (msg: string) => void;
   /** Test seam: the single-try executor. */
@@ -2216,6 +2220,7 @@ export async function runAttemptWithRetry(opts: {
         configs: registry.configs,
         judgeModel: opts.judgeModel,
         apiExtension: opts.apiExtension,
+        workerEnv: opts.workerEnv,
         signal: opts.signal,
         // Raw log — runAttemptOnce wraps it once for the live registry itself.
         log: opts.log,
@@ -2445,6 +2450,7 @@ export async function executeRun(opts: {
         maxRetries: opts.maxRetries ?? DEFAULT_MAX_RETRIES,
         judgeModel: run.judgeModel,
         apiExtension: run.apiExtension,
+        workerEnv: run.workerEnv,
         signal,
         log: (msg) =>
           baseLog(`[${attempt.scenarioId} × ${attempt.configId} #${attempt.attemptIndex}] ${msg}`),

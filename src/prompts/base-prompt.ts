@@ -6,7 +6,8 @@
  *   A-D, F, G  composite session template (role + persona, contract, workspace,
  *              memory, communication, secrets) from session-templates.ts
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
- *   H          deployment-gated notes: slack, use-case channel thread (lead), steering
+ *   H          deployment-gated notes: slack, use-case channel thread (lead), steering,
+ *              rich cards, native tool mappings (claude and codex)
  *   I          tools and skills (harness tool discovery, skills, MCP server names)
  *   J          agent notes: CLAUDE.md, only when edited
  *
@@ -105,6 +106,15 @@ function toolDiscoveryEvent(provider: string, hasToolSearch: boolean): string {
         ? "system.agent.tool_discovery.search"
         : "system.agent.tool_discovery.direct";
   }
+}
+
+/**
+ * Template event for the native multi-agent tool mapping, or null for a
+ * harness without one. claude-managed is its own provider and gets none.
+ */
+function toolMappingEvent(provider: string, role: string): string | null {
+  if (provider !== "claude" && provider !== "codex") return null;
+  return `system.agent.tool_mapping.${provider}.${role === "lead" ? "lead" : "worker"}`;
 }
 
 export function areSlackPromptToolsEnabled(
@@ -351,6 +361,19 @@ export const getBasePromptWithParts = async (
     const uiSpecResult = await resolveTemplateAsync("system.agent.ui_spec", {});
     prompt += uiSpecResult.text;
     section("system.agent.ui_spec", grown());
+  }
+
+  // Native multi-agent tool mappings. Same call-time flag read as above.
+  const toolMapping = toolMappingEvent(provider, role);
+  if (
+    hasMcp &&
+    !scriptsOnlyMode &&
+    toolMapping &&
+    isEnvFlagEnabled("HARNESS_TOOL_MAPPINGS_ENABLED", false)
+  ) {
+    const toolMappingResult = await resolveTemplateAsync(toolMapping, {});
+    prompt += toolMappingResult.text;
+    section(toolMapping, grown());
   }
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.

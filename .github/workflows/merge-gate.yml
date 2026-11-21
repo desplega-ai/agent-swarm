@@ -422,6 +422,10 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # Fails a harness bump that renames a native tool the tool-mapping prompt names.
+      - name: Check harness native tool names
+        run: bun run check:harness-native-tools
+
       - name: Check test spawnSync boundary
         id: test-spawn-sync-boundary
         run: |

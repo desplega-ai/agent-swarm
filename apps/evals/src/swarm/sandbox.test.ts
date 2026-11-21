@@ -115,6 +115,25 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
     expect(env.DESPLEGA_TELEMETRY_ENV).toBe("test");
   });
 
+  test("the run's --worker-env wins over config and spec env, but never the telemetry pin", () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
+    const env = workerRuntimeEnv({
+      swarmKey: "k",
+      apiUrl: "https://api.example",
+      agentId: "agent-1",
+      config: {
+        id: "claude-haiku",
+        provider: "claude",
+        model: "haiku",
+        env: { HARNESS_TOOL_MAPPINGS_ENABLED: "false" },
+      },
+      spec: { env: { HARNESS_TOOL_MAPPINGS_ENABLED: "false" } },
+      runEnv: { HARNESS_TOOL_MAPPINGS_ENABLED: "true", DESPLEGA_TELEMETRY_ENV: "production" },
+    });
+    expect(env.HARNESS_TOOL_MAPPINGS_ENABLED).toBe("true");
+    expect(env.DESPLEGA_TELEMETRY_ENV).toBe("test");
+  });
+
   test("identity envs map from the typed spec fields (TEMPLATE_ID / AGENT_NAME / SYSTEM_PROMPT)", () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({

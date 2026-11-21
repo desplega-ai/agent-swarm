@@ -54,4 +54,7 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
     { version: 2, hash: "32d131bdab3b2e4b" },
     { version: 3, hash: "338f0dc6a6a519bf" },
   ],
+  "tool-mapping-lead-reflex": [{ version: 1, hash: "4c8d846a7636b69b" }],
+  "tool-mapping-worker-local": [{ version: 1, hash: "9e0e6cb0c6b9ec55" }],
+  "tool-mapping-worker-comms": [{ version: 1, hash: "4b87140a140158ae" }],
 };
