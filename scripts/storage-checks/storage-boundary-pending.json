@@ -99,10 +99,6 @@
     "reason": "M2 move: every domain (see the domain map in the ledger)",
     "sites": 397
   },
-  "src/be/db/agents.ts": {
-    "reason": "M2 move: agents",
-    "sites": 3
-  },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 6
@@ -674,10 +670,6 @@
   "src/http/db-query-shared.ts": {
     "reason": "M2 move: own database handle (M4 steps 4 and 5)",
     "sites": 2
-  },
-  "src/http/inbox-state.ts": {
-    "reason": "M2 move: messaging",
-    "sites": 1
   },
   "src/http/memory.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

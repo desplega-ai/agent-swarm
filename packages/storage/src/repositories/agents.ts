@@ -328,6 +328,15 @@ export interface AgentsRepository {
   /** Sets `lastHeartbeatAt`; with `onlyBefore`, only when the stored value is older. */
   heartbeatActiveSession(taskId: string, now: string, onlyBefore?: string): Promise<number>;
   setActiveSessionProviderSessionId(taskId: string, providerSessionId: string): Promise<number>;
+
+  // ---- capacity and activity (reads of agent_tasks keyed by agent) ----
+  /** Tasks in one of the agent's slots: its in-progress tasks and the offers it is reviewing. */
+  countActiveTasks(agentId: string): Promise<number>;
+  /**
+   * Tasks created per UTC day (`YYYY-MM-DD`) on or after `sinceDay`, oldest
+   * first. Days with no task are absent.
+   */
+  dailyTaskCounts(agentId: string, sinceDay: string): Promise<{ date: string; count: number }[]>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -365,6 +374,20 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   protected notExtensionAgent(): SqlQuery {
     return notExtension;
   }
+
+  async countActiveTasks(agentId: string): Promise<number> {
+    const row = await this.db.get<{ count: number | string }>(sql`
+      SELECT COUNT(*) AS count FROM agent_tasks
+      WHERE ("agentId" = ${agentId} AND status = 'in_progress')
+         OR ("offeredTo" = ${agentId} AND status = 'reviewing')`);
+    return Number(row?.count ?? 0);
+  }
+
+  /** The day of a timestamp column differs per engine (text on SQLite). */
+  abstract dailyTaskCounts(
+    agentId: string,
+    sinceDay: string,
+  ): Promise<{ date: string; count: number }[]>;
 
   async countAgentsByStatus(): Promise<{ status: string; count: number }[]> {
     const rows = await this.db.query<{ status: string; count: number | string }>(sql`

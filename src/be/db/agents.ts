@@ -14,7 +14,6 @@ import type {
 import { AgentAvatarSchema, AgentSlackIconSchema } from "../../types";
 import { isEnvFlagEnabled } from "../../utils/env-flag";
 import { getStorage } from "../storage";
-import { getDbClient } from "./runtime";
 
 const agentsRepo = () => getStorage().repos.agents;
 
@@ -516,13 +515,7 @@ export async function deleteAgent(id: string): Promise<boolean> {
  * that created it, which would otherwise consume the lead's own capacity.
  */
 export async function getActiveTaskCount(agentId: string): Promise<number> {
-  const result = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-     WHERE (agentId = ? AND status = 'in_progress')
-        OR (offeredTo = ? AND status = 'reviewing')`,
-    [agentId, agentId],
-  );
-  return result?.count ?? 0;
+  return agentsRepo().countActiveTasks(agentId);
 }
 
 /**
@@ -668,12 +661,5 @@ export async function getAgentDailyTaskCounts(
   days: number,
 ): Promise<{ date: string; count: number }[]> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  return getDbClient().query<{ date: string; count: number }>(
-    `SELECT substr(createdAt, 1, 10) AS date, COUNT(*) AS count
-       FROM agent_tasks
-      WHERE agentId = ? AND createdAt >= ?
-      GROUP BY date
-      ORDER BY date`,
-    [agentId, since],
-  );
+  return agentsRepo().dailyTaskCounts(agentId, since);
 }
