@@ -1,4 +1,4 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 export type SwarmSkillNameResolution =
   | { kind: "found"; skillId: string }
@@ -19,10 +19,7 @@ export async function resolveSwarmSkillByName(
   name: string,
   callerAgentId?: string,
 ): Promise<SwarmSkillNameResolution> {
-  const rows = await getDbClient().query<{ id: string; ownerAgentId: string | null }>(
-    "SELECT id, ownerAgentId FROM skills WHERE name = ? AND scope = 'swarm' ORDER BY createdAt, id",
-    [name],
-  );
+  const rows = await getStorage().repos.skills.listSwarmSkillsByName(name);
 
   const ownerless = rows.find((row) => !row.ownerAgentId);
   if (ownerless) return { kind: "found", skillId: ownerless.id };

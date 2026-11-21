@@ -5,3 +5,4 @@ export * from "./models";
 export * from "./pages";
 export * from "./runtime-pools";
 export * from "./scripts";
+export * from "./skills";

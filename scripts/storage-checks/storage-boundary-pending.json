@@ -147,18 +147,6 @@
     "reason": "M2 move: sessions and cost",
     "sites": 2
   },
-  "src/be/db/skill-audit.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
-  "src/be/db/skill-name-resolution.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
-  "src/be/db/skill-search.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
   "src/be/db/slack-card-groups.ts": {
     "reason": "M2 move: integrations",
     "sites": 6
@@ -519,10 +507,6 @@
     "reason": "M2 move: seeded db-query scripts (M4 step 4)",
     "sites": 2
   },
-  "src/be/seed-skills/index.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
   "src/be/session-shares.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 9
@@ -533,11 +517,7 @@
   },
   "src/be/skill-invocations.ts": {
     "reason": "M2 move: skills",
-    "sites": 5
-  },
-  "src/be/skill-usage.ts": {
-    "reason": "M2 move: skills",
-    "sites": 15
+    "sites": 1
   },
   "src/be/steering.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

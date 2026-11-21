@@ -1,4 +1,4 @@
-import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 /**
  * Read-only skill usage analytics over `skill_invocations` (written by
@@ -16,22 +16,6 @@ const WINDOW_DAYS: Record<SkillUsageWindow, number | null> = { "7d": 7, "30d": 3
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 25;
 
-/**
- * Tasks a worker actually started: the denominator for task adoption. A task
- * counts when its status is only reachable after starting, when a harness
- * session ran for it, or when `agent_log` recorded it entering `in_progress`.
- * The last two keep a task cancelled or failed mid-run, and leave out one that
- * was terminalized while still pending (`failPendingResumeIfUnclaimed`).
- */
-const STARTED_TASK_SQL = `(t.status IN ('in_progress', 'paused', 'completed')
-  OR t.claudeSessionId IS NOT NULL
-  OR EXISTS (
-    SELECT 1 FROM agent_log l
-     WHERE l.taskId = t.id
-       AND l.eventType IN ('task_status_change', 'task_claimed')
-       AND l.newValue = 'in_progress'
-  ))`;
-
 /** The `all` summary scans the whole history, so it is reused for a while. */
 const ALL_WINDOW_CACHE_MS = 5 * 60 * 1000;
 const allWindowCache = new Map<number, { at: number; summary: Promise<SkillUsageSummary> }>();
@@ -39,12 +23,6 @@ const allWindowCache = new Map<number, { at: number; summary: Promise<SkillUsage
 export function skillUsageWindowStart(window: SkillUsageWindow, now = Date.now()): string | null {
   const days = WINDOW_DAYS[window];
   return days === null ? null : new Date(now - days * DAY_MS).toISOString();
-}
-
-/** SQLite date modifier, e.g. `+120 minutes`. The offset is clamped to real zones. */
-function dayModifier(tzOffsetMinutes: number): string {
-  const minutes = Math.max(-14 * 60, Math.min(14 * 60, Math.trunc(tzOffsetMinutes)));
-  return `${minutes >= 0 ? "+" : ""}${minutes} minutes`;
 }
 
 export interface SkillUsageDailyRow {
@@ -147,28 +125,6 @@ export interface SkillUsageDetail {
   recent: SkillUsageRecentRow[];
 }
 
-/**
- * The window predicate. A finite window is a plain range on `createdAt`, so
- * SQLite can SEARCH `idx_skill_invocations_created` (or a composite index
- * ending in `createdAt`). `all` has no predicate at all. A nullable
- * `(? IS NULL OR ...)` form would force a full SCAN for every window.
- */
-function sinceFilter(since: string | null): { sql: string; args: string[] } {
-  return since === null ? { sql: "1", args: [] } : { sql: "si.createdAt >= ?", args: [since] };
-}
-
-/**
- * Swarm-wide aggregates pin the time index for a finite window. Without it the
- * planner may pick `idx_skill_invocations_skill_time` to serve a GROUP BY, or
- * `idx_skill_invocations_agent_time` for `agentId IS NOT NULL`, and walk the
- * whole history.
- */
-function invocationsFrom(since: string | null): string {
-  return since === null
-    ? "skill_invocations si"
-    : "skill_invocations si INDEXED BY idx_skill_invocations_created";
-}
-
 export function getSkillUsageSummary(
   window: SkillUsageWindow,
   tzOffsetMinutes = 0,
@@ -196,72 +152,14 @@ async function computeSkillUsageSummary(
   tzOffsetMinutes: number,
   now: number,
 ): Promise<SkillUsageSummary> {
-  const db = getDbClient();
+  const skills = getStorage().repos.skills;
   const since = skillUsageWindowStart(window, now);
-  const { sql: sinceSql, args: sinceArgs } = sinceFilter(since);
-  const fromSql = invocationsFrom(since);
 
-  const totals = await db.get<{
-    invocations: number;
-    distinctSkills: number;
-    distinctAgents: number;
-    distinctTasks: number;
-    unresolved: number | null;
-    tokens: number | null;
-  }>(
-    `SELECT COUNT(*) AS invocations,
-            COUNT(DISTINCT si.skillName) AS distinctSkills,
-            COUNT(DISTINCT si.agentId) AS distinctAgents,
-            COUNT(DISTINCT si.taskId) AS distinctTasks,
-            SUM(CASE WHEN si.skillId IS NULL THEN 1 ELSE 0 END) AS unresolved,
-            SUM(si.tokenCount) AS tokens
-       FROM ${fromSql}
-      WHERE ${sinceSql}`,
-    sinceArgs,
-  );
-
-  const first = await db.get<{ trackingSince: string | null }>(
-    "SELECT MIN(createdAt) AS trackingSince FROM skill_invocations",
-  );
-  const trackingSince = first?.trackingSince ?? null;
-
-  const daily = await db.query<SkillUsageDailyRow>(
-    `SELECT date(si.createdAt, ?) AS date,
-            COUNT(*) AS invocations,
-            COUNT(DISTINCT si.skillName) AS skills,
-            COUNT(DISTINCT si.taskId) AS tasks
-       FROM ${fromSql}
-      WHERE ${sinceSql}
-      GROUP BY 1
-      ORDER BY 1`,
-    [dayModifier(tzOffsetMinutes), ...sinceArgs],
-  );
-
-  const byHarness = await db.query<SkillUsageCountRow>(
-    `SELECT COALESCE(si.harness, 'unknown') AS key, COUNT(*) AS invocations
-       FROM ${fromSql}
-      WHERE ${sinceSql}
-      GROUP BY 1
-      ORDER BY 2 DESC, 1`,
-    sinceArgs,
-  );
-
-  // A resolved row groups by skill id (its current name wins); an unresolved
-  // one groups by the reported name.
-  const bySkill = await db.query<SkillUsageBySkillRow>(
-    `SELECT si.skillId AS skillId,
-            COALESCE(MAX(s.name), MAX(si.skillName), 'unknown') AS skillName,
-            COUNT(*) AS invocations,
-            COUNT(DISTINCT si.agentId) AS agents,
-            COALESCE(SUM(si.tokenCount), 0) AS tokens,
-            MAX(si.createdAt) AS lastInvokedAt
-       FROM ${fromSql}
-       LEFT JOIN skills s ON s.id = si.skillId
-      WHERE ${sinceSql}
-      GROUP BY si.skillId, CASE WHEN si.skillId IS NULL THEN si.skillName END
-      ORDER BY invocations DESC, skillName`,
-    sinceArgs,
-  );
+  const totals = await skills.usageTotals(since);
+  const trackingSince = await skills.firstInvocationAt();
+  const daily = await skills.usageDaily(since, tzOffsetMinutes);
+  const byHarness = await skills.usageByHarness(since);
+  const bySkill = await skills.usageBySkill(since);
 
   // Task adoption counts only tasks created after tracking began, so a window
   // reaching past the first recorded invocation is not deflated by tasks that
@@ -271,76 +169,13 @@ async function computeSkillUsageSummary(
   const adoption =
     adoptionSince === null
       ? { tasks: 0, tasksWithSkill: 0 }
-      : await db.get<{ tasks: number; tasksWithSkill: number | null }>(
-          `SELECT COUNT(*) AS tasks,
-                  SUM(CASE WHEN t.id IN (
-                        SELECT taskId FROM skill_invocations
-                         WHERE taskId IS NOT NULL AND createdAt >= ?
-                      ) THEN 1 ELSE 0 END) AS tasksWithSkill
-             FROM agent_tasks t
-            WHERE t.createdAt >= ? AND ${STARTED_TASK_SQL}`,
-          [adoptionSince, adoptionSince],
-        );
+      : await skills.taskAdoption(adoptionSince);
 
   // Installed = what getAgentSkills returns: active explicit installs plus
   // every enabled system-default or swarm-scope skill, deduplicated by name.
   // Agents that are offline and used nothing in the window are left out.
-  const agentRows = await db.query<
-    Omit<SkillUsageAgentRow, "isLead"> & { isLead: number; agentName: string }
-  >(
-    `WITH installed AS (
-       SELECT x.agentId AS agentId, s.name AS name
-         FROM agent_skills x
-         JOIN skills s ON s.id = x.skillId AND s.isEnabled = 1
-        WHERE x.isActive = 1
-       UNION
-       SELECT a.id AS agentId, s.name AS name
-         FROM agents a
-         JOIN skills s ON s.isEnabled = 1 AND (s.systemDefault = 1 OR s.scope = 'swarm')
-     ),
-     used AS (
-       SELECT si.agentId AS agentId, si.skillName AS name,
-              COUNT(*) AS n, MAX(si.createdAt) AS last
-         FROM ${fromSql}
-        WHERE si.agentId IS NOT NULL AND si.skillName IS NOT NULL AND ${sinceSql}
-        GROUP BY si.agentId, si.skillName
-     )
-     SELECT a.id AS agentId,
-            a.name AS agentName,
-            a.isLead AS isLead,
-            (SELECT COUNT(*) FROM installed i WHERE i.agentId = a.id) AS installed,
-            (SELECT COUNT(*) FROM installed i
-               JOIN used u ON u.agentId = i.agentId AND u.name = i.name
-              WHERE i.agentId = a.id) AS installedUsed,
-            (SELECT COUNT(*) FROM used u WHERE u.agentId = a.id) AS skillsUsed,
-            (SELECT COALESCE(SUM(u.n), 0) FROM used u WHERE u.agentId = a.id) AS invocations,
-            (SELECT MAX(u.last) FROM used u WHERE u.agentId = a.id) AS lastInvokedAt
-       FROM agents a
-      WHERE a.status != 'offline' OR EXISTS (SELECT 1 FROM used u WHERE u.agentId = a.id)
-      ORDER BY invocations DESC, a.name`,
-    sinceArgs,
-  );
-
-  const unusedRows = await db.query<
-    Omit<SkillUsageUnusedRow, "systemDefault" | "installedEverywhere"> & {
-      systemDefault: number;
-      installedEverywhere: number;
-    }
-  >(
-    `SELECT s.id, s.name, s.scope, s.type, s.systemDefault,
-            CASE WHEN s.systemDefault = 1 OR s.scope = 'swarm' THEN 1 ELSE 0 END AS installedEverywhere,
-            (SELECT COUNT(*) FROM agent_skills x WHERE x.skillId = s.id AND x.isActive = 1) AS installedAgents,
-            s.invocationCount, s.lastInvokedAt
-       FROM skills s
-      WHERE s.isEnabled = 1
-        AND (s.systemDefault = 1 OR s.scope = 'swarm'
-             OR EXISTS (SELECT 1 FROM agent_skills x WHERE x.skillId = s.id AND x.isActive = 1))
-        AND NOT EXISTS (
-          SELECT 1 FROM skill_invocations si WHERE si.skillId = s.id AND ${sinceSql}
-        )
-      ORDER BY s.name`,
-    sinceArgs,
-  );
+  const agentRows = await skills.usageByAgent(since);
+  const unusedRows = await skills.unusedSkills(since);
 
   return {
     window,
@@ -378,74 +213,15 @@ export async function getSkillUsageDetail(
   tzOffsetMinutes = 0,
   now = Date.now(),
 ): Promise<SkillUsageDetail> {
-  const db = getDbClient();
+  const skills = getStorage().repos.skills;
   const since = skillUsageWindowStart(window, now);
-  const filter = sinceFilter(since);
-  const args = [skillId, ...filter.args];
-  const where = `si.skillId = ? AND ${filter.sql}`;
 
-  const totals = await db.get<{
-    invocations: number;
-    distinctAgents: number;
-    distinctTasks: number;
-    tokens: number | null;
-  }>(
-    `SELECT COUNT(*) AS invocations,
-            COUNT(DISTINCT si.agentId) AS distinctAgents,
-            COUNT(DISTINCT si.taskId) AS distinctTasks,
-            SUM(si.tokenCount) AS tokens
-       FROM skill_invocations si
-      WHERE ${where}`,
-    args,
-  );
-
-  const daily = await db.query<SkillUsageDailyRow>(
-    `SELECT date(si.createdAt, ?) AS date,
-            COUNT(*) AS invocations,
-            COUNT(DISTINCT si.skillName) AS skills,
-            COUNT(DISTINCT si.taskId) AS tasks
-       FROM skill_invocations si
-      WHERE ${where}
-      GROUP BY 1
-      ORDER BY 1`,
-    [dayModifier(tzOffsetMinutes), ...args],
-  );
-
-  const byAgent = await db.query<SkillUsageDetail["byAgent"][number]>(
-    `SELECT si.agentId AS agentId, MAX(a.name) AS agentName,
-            COUNT(*) AS invocations, MAX(si.createdAt) AS lastInvokedAt
-       FROM skill_invocations si
-       LEFT JOIN agents a ON a.id = si.agentId
-      WHERE ${where} AND si.agentId IS NOT NULL
-      GROUP BY si.agentId
-      ORDER BY invocations DESC, agentName`,
-    args,
-  );
-
-  const countBy = (column: "harness" | "via") =>
-    db.query<SkillUsageCountRow>(
-      `SELECT COALESCE(si.${column}, 'unknown') AS key, COUNT(*) AS invocations
-         FROM skill_invocations si
-        WHERE ${where}
-        GROUP BY 1
-        ORDER BY 2 DESC, 1`,
-      args,
-    );
-  const byHarness = await countBy("harness");
-  const byVia = await countBy("via");
-
-  const recent = await db.query<SkillUsageRecentRow>(
-    `SELECT si.id, si.agentId, a.name AS agentName, si.taskId,
-            COALESCE(NULLIF(t.title, ''), substr(t.task, 1, 160)) AS taskTitle,
-            si.harness, si.via, si.skillVersion, si.tokenCount, si.createdAt
-       FROM skill_invocations si
-       LEFT JOIN agents a ON a.id = si.agentId
-       LEFT JOIN agent_tasks t ON t.id = si.taskId
-      WHERE ${where}
-      ORDER BY si.createdAt DESC
-      LIMIT ${RECENT_LIMIT}`,
-    args,
-  );
+  const totals = await skills.detailTotals(skillId, since);
+  const daily = await skills.detailDaily(skillId, since, tzOffsetMinutes);
+  const byAgent = await skills.detailByAgent(skillId, since);
+  const byHarness = await skills.detailCountBy(skillId, since, "harness");
+  const byVia = await skills.detailCountBy(skillId, since, "via");
+  const recent = await skills.detailRecent(skillId, since, RECENT_LIMIT);
 
   return {
     skillId,

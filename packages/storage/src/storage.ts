@@ -9,6 +9,7 @@ import type { ModelsRepository } from "./repositories/models";
 import type { PagesRepository } from "./repositories/pages";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { ScriptsRepository } from "./repositories/scripts";
+import type { SkillsRepository } from "./repositories/skills";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
@@ -19,6 +20,7 @@ export type Repositories = {
   agents: AgentsRepository;
   scripts: ScriptsRepository;
   pages: PagesRepository;
+  skills: SkillsRepository;
 };
 
 /**
