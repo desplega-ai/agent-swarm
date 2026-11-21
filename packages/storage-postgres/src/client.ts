@@ -71,6 +71,11 @@ export type PostgresClientOptions = {
    * Without it every timestamp reads as ISO text with milliseconds and `Z`.
    */
   timestampFormats?: TimestampFormats;
+  /**
+   * Return rows as the driver gives them, with no read codec. Only for tools
+   * that inspect the Postgres catalog itself (check:schema-parity).
+   */
+  rawValues?: boolean;
   /** Called once per retried attempt, with the SQLSTATE that caused it (bench, diagnostics). */
   onRetry?: (sqlstate: string, attempt: number) => void;
 };
@@ -165,6 +170,7 @@ export class PostgresClient implements DbClient {
   }
 
   private decode(rows: PgResult, columns = rows.statement?.columns): Record<string, unknown>[] {
+    if (this.options.rawValues === true) return [...rows] as Record<string, unknown>[];
     return decodeRows(rows, columns, this.options.timestampFormats ?? null);
   }
 

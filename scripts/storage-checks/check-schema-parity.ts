@@ -801,7 +801,7 @@ export async function runSchemaParity(): Promise<{
   sqlite.close();
 
   const scratch = await createScratch(adminUrl);
-  const pgClient = createPostgresClient(scratch.url, { max: 2 });
+  const pgClient = createPostgresClient(scratch.url, { max: 2, rawValues: true });
   let diffs: Diff[];
   try {
     await runPostgresMigrations(pgClient, {
