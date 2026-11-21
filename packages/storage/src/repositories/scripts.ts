@@ -474,6 +474,9 @@ export interface ScriptsRepository {
   /** Non-scratch scripts whose embedding is not `bytes` long. Same order as `listEmbeddedScripts`. */
   listScriptsWithEmbeddingSizeNot(bytes: number): Promise<ScriptRow[]>;
   countEmbeddingsWithSizeNot(bytes: number): Promise<number>;
+  /** Non-scratch scripts whose id sorts after `afterId`, by id, at most `limit` (the re-embed cursor). */
+  listNonScratchScriptsAfter(afterId: string, limit: number): Promise<ScriptRow[]>;
+  deleteScriptEmbedding(scriptId: string): Promise<void>;
 
   // ---- script_apis ----
   insertScriptApi(api: NewScriptApi): Promise<ScriptApiRow | null>;
@@ -811,6 +814,16 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       sql`SELECT COUNT(*) AS count FROM script_embeddings WHERE length(embedding) != ${bytes}`,
     );
     return Number(row?.count ?? 0);
+  }
+
+  listNonScratchScriptsAfter(afterId: string, limit: number): Promise<ScriptRow[]> {
+    return this.db.query<ScriptRow>(sql`
+      SELECT * FROM scripts WHERE "isScratch" = ${false} AND id > ${afterId}
+      ORDER BY id ASC LIMIT ${limit}`);
+  }
+
+  async deleteScriptEmbedding(scriptId: string): Promise<void> {
+    await this.db.run(sql`DELETE FROM script_embeddings WHERE "scriptId" = ${scriptId}`);
   }
 
   // ---- script_apis ----

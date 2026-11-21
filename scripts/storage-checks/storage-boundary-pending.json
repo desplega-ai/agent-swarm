@@ -7,22 +7,6 @@
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 5
   },
-  "src/be/memory/embedding-space.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 3
-  },
-  "src/be/memory/providers/sqlite-store.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 18
-  },
-  "src/be/memory/search-read-worker.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 2
-  },
-  "src/be/memory/search-reader.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 2
-  },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
@@ -30,13 +14,5 @@
   "src/be/storage.ts": {
     "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
     "sites": 1
-  },
-  "src/http/db-query-bounded.ts": {
-    "reason": "M2 move: own database handle (M4 steps 4 and 5)",
-    "sites": 3
-  },
-  "src/http/db-query-shared.ts": {
-    "reason": "M2 move: own database handle (M4 steps 4 and 5)",
-    "sites": 2
   }
 }

@@ -26,9 +26,9 @@ export function resetEmbeddingProvider(): void {
 
 export function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
-    const { SqliteMemoryStore } =
-      require("./providers/sqlite-store") as typeof import("./providers/sqlite-store");
-    memoryStore = new SqliteMemoryStore();
+    const { StorageMemoryStore } =
+      require("./providers/storage-store") as typeof import("./providers/storage-store");
+    memoryStore = new StorageMemoryStore();
   }
   return memoryStore;
 }

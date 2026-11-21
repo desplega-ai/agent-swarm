@@ -1344,7 +1344,7 @@ export async function handleMemory(
     const parsed = await memoryHealth.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    memoryHealth.respond(res, 200, getMemoryStore().getHealth());
+    memoryHealth.respond(res, 200, await getMemoryStore().getHealth());
     return true;
   }
 

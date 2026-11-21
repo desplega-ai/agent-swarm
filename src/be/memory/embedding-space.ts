@@ -45,7 +45,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { getDbClient } from "@/be/db";
 import { getStorage } from "@/be/storage";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import {
@@ -216,17 +215,17 @@ async function reembedScripts(
   type ScriptRow = import("../scripts/boot-reembed").ScriptRow;
   type ScriptEmbedding = import("../scripts/embeddings").ScriptEmbedding;
 
-  const client = getDbClient();
+  const storage = getStorage();
   const provider = embeddingProvider();
   const cursorKey = embeddingSpaceCursorKey("scripts");
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
   let cursor = (await readState(cursorKey)) ?? "";
 
   for (;;) {
-    const rows = await client.query<ScriptRow>(
-      "SELECT * FROM scripts WHERE isScratch = 0 AND id > ? ORDER BY id ASC LIMIT ?",
-      [cursor, batchSize],
-    );
+    const rows = (await storage.repos.scripts.listNonScratchScriptsAfter(
+      cursor,
+      batchSize,
+    )) as ScriptRow[];
     if (rows.length === 0) return true;
     if (getEmbeddingProvider() !== memoryProvider) return false;
 
@@ -247,7 +246,7 @@ async function reembedScripts(
     // Vectors and cursor commit together, so a crash never leaves a new
     // vector behind a cursor that still points before it.
     const lastId = rows[rows.length - 1]!.id;
-    const batch = await client.transaction(async () => {
+    const batch = await storage.transaction(async () => {
       const tally = { done: 0, failed: 0 };
       for (const { id, result } of embedded) {
         if (result) {
@@ -256,7 +255,7 @@ async function reembedScripts(
         } else {
           // Rejected input: its old vector is in the old space. The missing-
           // embedding backfill retries it.
-          await client.run("DELETE FROM script_embeddings WHERE scriptId = ?", [id]);
+          await storage.repos.scripts.deleteScriptEmbedding(id);
           tally.failed++;
         }
       }

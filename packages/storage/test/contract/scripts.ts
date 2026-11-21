@@ -308,6 +308,33 @@ export function scriptsContract(engine: ContractEngine): void {
       ]);
     });
 
+    test("the re-embed cursor reads non-scratch scripts by id after the cursor", async () => {
+      for (const id of ["c3", "c1", "c4", "c2"]) {
+        await repo.insertScript(newScript({ id, isScratch: id === "c2" }));
+      }
+      expect((await repo.listNonScratchScriptsAfter("", 2)).map((row) => row.id)).toEqual([
+        "c1",
+        "c3",
+      ]);
+      expect((await repo.listNonScratchScriptsAfter("c3", 10)).map((row) => row.id)).toEqual([
+        "c4",
+      ]);
+      const vec = new Uint8Array(4).fill(1);
+      for (const id of ["c1", "c3"]) {
+        await repo.upsertScriptEmbedding({
+          scriptId: id,
+          embedding: vec,
+          embeddingModel: "m",
+          embeddedText: "t",
+          embeddedAt: T0,
+        });
+      }
+      await repo.deleteScriptEmbedding("c1");
+      await repo.deleteScriptEmbedding("missing");
+      expect((await repo.listScriptsMissingEmbedding()).map((row) => row.id)).toContain("c1");
+      expect((await repo.listScriptsMissingEmbedding()).map((row) => row.id)).not.toContain("c3");
+    });
+
     test("script APIs: insert shape, newest first with insertion ties, partial update", async () => {
       await repo.insertScript(newScript({ id: "s1" }));
       const api = (id: string, now: string, token: string | null) =>

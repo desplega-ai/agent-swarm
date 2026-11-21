@@ -581,6 +581,8 @@ export function memoryContract(engine: ContractEngine): void {
 
     test("vector parity: k-NN order, the k-then-filter width, the engine-scored arm and health", async () => {
       await engine.prepareMemorySearch(storage, 4);
+      // The vector table exists once the engine's search indexes do (SQLite: run time, Postgres: migration 369).
+      expect(await repo.vecTableSchema()).toContain("memory_vec");
       const corpus: [string, number[], string][] = [
         ["v3", [0.5, 0.5, 0, 0], AGENT],
         ["v1", [1, 0, 0, 0], AGENT],

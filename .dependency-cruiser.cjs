@@ -30,8 +30,6 @@ const PENDING_SQLITE_IMPORTERS = [
   "^src/be/asset-key-audit\\.ts$", // synchronous boot audit; M2 step 7
   "^src/be/connection-bindings-blob-migration\\.ts$", // boot-time data migration; M2 step 7
   "^src/be/oauth-encryption-backfill\\.ts$", // boot-time backfill; M2 step 7
-  "^src/http/db-query-shared\\.ts$", // db-query read-only handle; moves in M4 step 4 (D10)
-  "^src/be/memory/search-read-worker\\.ts$", // memory search worker handle; moves in M4 step 5
 ];
 
 module.exports = {

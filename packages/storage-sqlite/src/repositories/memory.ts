@@ -160,6 +160,13 @@ export class SqliteMemoryRepository extends BaseMemoryRepository {
     return row?.sql ?? null;
   }
 
+  async vecTableSchema(reader?: MemoryReadExecutor): Promise<string | null> {
+    const row = await this.via(reader).get<{ sql: string | null }>(
+      sql`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec'`,
+    );
+    return row?.sql ?? null;
+  }
+
   scanFtsBatch(
     afterRowid: number,
     limit: number,

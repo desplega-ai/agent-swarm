@@ -454,6 +454,11 @@ export interface MemoryRepository {
    */
   ftsTableSchema(): Promise<string | null>;
   /**
+   * The definition of the vector table `memory_vec` (the vec0 CREATE text on
+   * SQLite, its columns on Postgres), or null when it does not exist.
+   */
+  vecTableSchema(reader?: MemoryReadExecutor): Promise<string | null>;
+  /**
    * One batch of index rows after `afterRowid`, index order. Orphan: its memory
    * is gone. An index with no rows of its own (Postgres: an expression index on
    * agent_memory) returns none, and the FTS row writes below are no-ops there.
@@ -1034,6 +1039,7 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
   // ---- run-time search indexes ----
 
   abstract ftsTableSchema(): Promise<string | null>;
+  abstract vecTableSchema(reader?: MemoryReadExecutor): Promise<string | null>;
   abstract scanFtsBatch(
     afterRowid: number,
     limit: number,

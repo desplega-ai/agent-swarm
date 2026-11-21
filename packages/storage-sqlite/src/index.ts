@@ -1,11 +1,14 @@
+import type { Database } from "bun:sqlite";
 import {
   type Capabilities,
   type DbClient,
+  type MemoryReadExecutor,
   SqlExecutor,
   type Storage,
   type TransactionOptions,
 } from "@desplega/storage";
 import { sqliteDialect } from "./dialect";
+import { SqliteMemoryIndexes } from "./memory/indexes";
 import { SqliteAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteAssetsRepository } from "./repositories/assets";
@@ -49,7 +52,20 @@ export { sqliteDialect } from "./dialect";
 export type SqliteStorageOptions = {
   /** sqlite-vec loaded into the connection. */
   vectorSearch: boolean;
+  /**
+   * The raw handle behind `client`, for the run-time memory indexes
+   * (`memory_fts`, `memory_vec`). Without it those indexes throw when used.
+   */
+  database?: () => Database;
+  /** The off-loop memory search reader (createSqliteMemorySearchReader). */
+  memorySearchReader?: MemoryReadExecutor;
 };
+
+function noRawHandle(): Database {
+  throw new Error(
+    "[storage-sqlite] the memory indexes need the raw handle: pass `database` to createSqliteStorage",
+  );
+}
 
 /** Assemble the SQLite engine over an existing bun:sqlite client. */
 export function createSqliteStorage(client: DbClient, options: SqliteStorageOptions): Storage {
@@ -65,6 +81,11 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     capabilities,
     executor,
     client,
+    memoryIndexes: new SqliteMemoryIndexes({
+      database: options.database ?? noRawHandle,
+      vectorSearch: options.vectorSearch,
+      searchReader: options.memorySearchReader,
+    }),
     repos: {
       extensions: new SqliteExtensionsRepository(executor),
       models: new SqliteModelsRepository(executor),
@@ -129,6 +150,23 @@ export {
 } from "./boot/open";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
+export {
+  assertNoDeniedTablesSqlite,
+  executeSqliteReadOnlyQuery,
+  getDbQueryWorkerPidsForTests,
+  isReportableTimeout,
+  openSqliteQueryReader,
+  resetDbQueryWorkerPoolForTests,
+  runSqliteBoundedQuery,
+  type SqliteBoundedQuery,
+  SqliteQuerySpawnUnavailableError,
+} from "./db-query";
+export {
+  createSqliteMemorySearchReader,
+  SEARCH_READ_WORKERS,
+  type SqliteMemorySearchReader,
+  type SqliteMemorySearchReaderDeps,
+} from "./memory/search-reader";
 export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";
 export { KEY_WINDOW_USAGE_SQL } from "./repositories/key-window-usage";
 export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "./repositories/memory";
