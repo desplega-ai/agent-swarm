@@ -7,6 +7,7 @@ import type {
 } from "@desplega/storage";
 import {
   BaseScriptsRepository,
+  jsonText,
   type ScriptApiRow,
   type ScriptCredentialBindingRow,
   type ScriptEmbeddingCandidateRow,
@@ -14,7 +15,6 @@ import {
   type ScriptSearchScope,
   sql,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
 
 /** The embedding columns as NULL, for a script row read without its embedding. */
 const NO_EMBEDDING = sql`NULL AS "scriptId", NULL AS embedding, NULL AS "embeddingModel", NULL AS "embeddedText", NULL AS "embeddedAt"`;
@@ -84,18 +84,36 @@ export class PostgresScriptsRepository extends BaseScriptsRepository {
     limit: number,
     offset: number,
   ): Promise<ScriptRunListRow[]> {
-    return notOnPostgresYet("PostgresScriptsRepository.listScriptRuns");
+    return this.db.query<ScriptRunListRow>(sql`
+      SELECT id, "agentId", "scriptName", kind, status, pid, "startedAt", "finishedAt", error,
+        last_heartbeat_at, "idempotencyKey", "requestedByUserId", "objectScriptId", "objectId",
+        "objectMethod"
+      FROM script_runs${this.scriptRunWhere(f)}
+      ORDER BY "startedAt" DESC, "_rowid" DESC
+      LIMIT ${limit} OFFSET ${offset}`);
   }
 
   listActiveScriptRuns(): Promise<ScriptRunRow[]> {
-    return notOnPostgresYet("PostgresScriptsRepository.listActiveScriptRuns");
+    return this.db.query<ScriptRunRow>(
+      sql`${this.scriptRunSelect} WHERE r.status IN ('running', 'paused') ORDER BY r."_rowid"`,
+    );
   }
 
-  insertScriptRunJournalStep(row: NewScriptRunJournalStep): Promise<void> {
-    return notOnPostgresYet("PostgresScriptsRepository.insertScriptRunJournalStep");
+  async insertScriptRunJournalStep(r: NewScriptRunJournalStep): Promise<void> {
+    // SQLite stamps datetime('now') (whole seconds) for startedAt (its DEFAULT)
+    // and completedAt; truncating keeps the same instants and the same ties.
+    await this.db.run(sql`
+      INSERT INTO script_run_journal
+        (id, "runId", "stepKey", "stepType", config, status, result, error, "durationMs",
+         "startedAt", "completedAt")
+      VALUES (${r.id}, ${r.runId}, ${r.stepKey}, ${r.stepType}, ${jsonText(r.config)}, ${r.status},
+        ${r.result}, ${r.error}, ${r.durationMs}, date_trunc('second', statement_timestamp()),
+        date_trunc('second', statement_timestamp()))
+      ON CONFLICT DO NOTHING`);
   }
 
   listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalRow[]> {
-    return notOnPostgresYet("PostgresScriptsRepository.listScriptRunJournalSteps");
+    return this.db.query<ScriptRunJournalRow>(sql`
+      SELECT * FROM script_run_journal WHERE "runId" = ${runId} ORDER BY "startedAt" ASC, "_rowid" ASC`);
   }
 }
