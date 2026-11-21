@@ -22,8 +22,6 @@ export type SlackOutcomeGroupHost = {
   contextKey: string;
   permalink: string | null;
   conclusionKind: string | null;
-  /** When the card last changed: its delivery, or the newest merge into it. */
-  lastSectionAt: string;
   /** Task ids merged into the card, oldest first. */
   mergedTaskIds: string[];
 };
@@ -35,17 +33,14 @@ type HostRow = {
   context_key: string;
   permalink: string | null;
   conclusion_kind: string | null;
-  finalized_at: string;
 };
 
-async function mergedTaskIds(hostId: string): Promise<{ taskId: string; createdAt: string }[]> {
+async function mergedTaskIds(hostId: string): Promise<string[]> {
   const rows = await getStorage().repos.slack.listMergedOutcomeTasks(hostId);
-  return rows.map((row) => ({ taskId: row.task_id, createdAt: row.created_at }));
+  return rows.map((row) => row.task_id);
 }
 
 async function toHost(row: HostRow): Promise<SlackOutcomeGroupHost> {
-  const merged = await mergedTaskIds(row.id);
-  const newestMerge = merged.at(-1)?.createdAt;
   return {
     id: row.id,
     ts: row.ts,
@@ -53,8 +48,7 @@ async function toHost(row: HostRow): Promise<SlackOutcomeGroupHost> {
     contextKey: row.context_key,
     permalink: row.permalink,
     conclusionKind: row.conclusion_kind,
-    lastSectionAt: newestMerge && newestMerge > row.finalized_at ? newestMerge : row.finalized_at,
-    mergedTaskIds: merged.map((entry) => entry.taskId),
+    mergedTaskIds: await mergedTaskIds(row.id),
   };
 }
 

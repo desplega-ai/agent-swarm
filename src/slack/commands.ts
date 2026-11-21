@@ -2,7 +2,11 @@ import type { App } from "@slack/bolt";
 import { getAllAgents, getAllTasks } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
+import { isUserAllowed, LOOKUP_USER_TEAM } from "./handlers";
+import { ignoreSlackInbound } from "./inbound-dispatch";
 import { isSlackLeaveThreadDisabled } from "./left-threads";
+
+const STATUS_NOT_ALLOWED_REPLY = "Only users this swarm allows can see its status.";
 
 export function registerCommandHandler(app: App): void {
   app.command("/agent-swarm-status", async ({ ack, respond, command, client }) => {
@@ -13,6 +17,13 @@ export function registerCommandHandler(app: App): void {
       console.log(`[Slack] Refusing /agent-swarm-status in external channel ${command.channel_id}`);
       await respond({ response_type: "ephemeral", text: EXTERNAL_CHANNEL_BLOCKED_REPLY });
       return;
+    }
+
+    // Same SLACK_ALLOWED_* sender gate as the message handler: the reply lists task summaries.
+    if (!(await isUserAllowed(client, command.user_id, LOOKUP_USER_TEAM))) {
+      console.log(`[Slack] Refusing /agent-swarm-status for unauthorized user ${command.user_id}`);
+      await respond({ response_type: "ephemeral", text: STATUS_NOT_ALLOWED_REPLY });
+      return ignoreSlackInbound("unauthorized_user");
     }
 
     const agents = await getAllAgents();

@@ -28,7 +28,10 @@ const ENV_KEYS = [
   "AZURE_DEVOPS_ORG_URL",
   "AZURE_DEVOPS_BOT_ID",
   "AZURE_DEVOPS_DISABLE",
+  "AZURE_DEVOPS_ALLOWED_ACTORS",
 ] as const;
+// The fixture PR author and commenter; mentions need a known or allowed actor.
+const FIXTURE_ACTOR = "fabrikamfiber4@hotmail.com";
 
 function clearEnv() {
   for (const key of ENV_KEYS) delete process.env[key];
@@ -91,6 +94,10 @@ afterAll(async () => {
       await unlink(`${TEST_DB_PATH}${suffix}`);
     } catch {}
   }
+});
+
+beforeEach(() => {
+  process.env.AZURE_DEVOPS_ALLOWED_ACTORS = FIXTURE_ACTOR;
 });
 
 afterEach(() => {
@@ -297,7 +304,8 @@ describe("identity resolution", () => {
     expect(task?.requestedByUserId).toBe(known.id);
   });
 
-  test("an email uniqueName creates and links a user", async () => {
+  test("an allowed email uniqueName creates and links a user", async () => {
+    process.env.AZURE_DEVOPS_ALLOWED_ACTORS = "new@fabrikam.example";
     expect(await findUserByExternalId("azure-devops", "new@fabrikam.example")).toBeNull();
 
     const result = await handlePullRequestCreated(
@@ -309,12 +317,11 @@ describe("identity resolution", () => {
     expect(task?.requestedByUserId).toBe(linked!.id);
   });
 
-  test("a non-email uniqueName is recorded as unmapped", async () => {
+  test("an unknown uniqueName is recorded as unmapped and creates no task", async () => {
     const result = await handlePullRequestCreated(
       makeCreatedEvent(303, `@<${BOT_ID}> review`, { uniqueName: "FABRIKAM\\jamal" }),
     );
-    const task = await getTaskById(result.taskId!);
-    expect(task?.requestedByUserId).toBeFalsy();
+    expect(result.created).toBe(false);
 
     const meta = await getKv(UNMAPPED_NS, "FABRIKAM\\jamal:meta");
     expect((meta?.value as Record<string, unknown>).sampleEventType).toBe("pull_request");

@@ -129,6 +129,17 @@ function citationMarker(
   return format === "slack" ? `<${destination}|[${index}]>` : `[[${index}]](${destination})`;
 }
 
+/** The http(s) links of the citations that render, in index order. */
+export function taskCitationUrls(citations: readonly TaskCitation[]): string[] {
+  return citations
+    .filter(isRenderableCitation)
+    .sort((a, b) => a.index - b.index)
+    .flatMap((citation) => {
+      const url = citation.resolvedUrl ? citationHttpUrl(citation.resolvedUrl) : null;
+      return url ? [url] : [];
+    });
+}
+
 export interface TaskCitationSourceGroup {
   heading: "Sources" | "General sources";
   /** One rendered `[N] label` entry per citation, in index order. */

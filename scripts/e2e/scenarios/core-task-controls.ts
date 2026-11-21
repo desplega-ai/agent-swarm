@@ -44,6 +44,24 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
   );
   response = await ctx.api("PUT", `/api/tasks/${taskId}/session`, {
     body: {
+      claudeSessionId: `claude-${ctx.nonce}`,
+      harnessVariantMeta: {
+        observedModel: "claude-sonnet-fixture",
+        observedReasoningEffort: "low",
+      },
+    },
+  });
+  expectStatus(response, [200], "save observed request settings");
+  const saved = await readTask(ctx, taskId);
+  const observed = asRecord(saved.harnessVariantMeta);
+  expect(
+    saved.resolvedEffort === "high" &&
+      observed.observedModel === "claude-sonnet-fixture" &&
+      observed.observedReasoningEffort === "low",
+    "task detail lost the configured effort or the observed request settings",
+  );
+  response = await ctx.api("PUT", `/api/tasks/${taskId}/session`, {
+    body: {
       claudeSessionId: `devin-${ctx.nonce}`,
       provider: "devin",
       providerMeta: { sessionUrl: "https://example.com/session/1" },

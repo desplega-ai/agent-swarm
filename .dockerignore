@@ -83,3 +83,7 @@ apps/ui/dist/
 apps/ui/test-results/
 apps/ui/**/.env
 apps/ui/**/.env.*
+
+# The npm SDK (@desplega.ai/agent-swarm-sdk) is published by publish-sdk.yml and
+# never ships in an image. No Dockerfile copies it; this keeps a future COPY packages/ honest.
+packages/agent-swarm-sdk/

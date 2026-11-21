@@ -101,6 +101,14 @@ module.exports = {
       from: { path: "^packages/model-routing/" },
       to: { path: "^src/|^bun:sqlite$|^(node:)?fs(/promises)?$" },
     },
+    {
+      name: "no-sdk-imports-server",
+      comment:
+        "packages/agent-swarm-sdk is published to npm and talks to the swarm only over HTTP: no imports from src/ or other workspace packages, no Bun or Node built-ins in its runtime code.",
+      severity: "error",
+      from: { path: "^packages/agent-swarm-sdk/src/" },
+      to: { path: "^src/|^packages/(?!agent-swarm-sdk/)|^bun:|^node:" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

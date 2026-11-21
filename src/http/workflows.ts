@@ -72,7 +72,7 @@ import {
   replayAcceptedOperation,
 } from "./idempotency-key";
 import { route } from "./route-def";
-import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
+import { jsonError, parseBody, readWebhookBody, triggerSchemaErrorResponse } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
@@ -553,6 +553,7 @@ const webhookTriggerRoute = route({
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
+    413: { description: "Body exceeds 5 MiB" },
   },
   rbac: {
     ungated:
@@ -625,11 +626,8 @@ export async function handleWorkflows(
     const workflowId = pathSegments[2]!;
 
     // Read raw body for HMAC verification
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     let result: Awaited<ReturnType<typeof handleWebhookTrigger>>;
     try {

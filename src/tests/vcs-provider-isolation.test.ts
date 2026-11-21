@@ -28,10 +28,13 @@ beforeAll(async () => {
     isLead: true,
   });
   process.env.BITBUCKET_BOT_ACCOUNT_ID = "557058:00000000-0000-4000-8000-0000000000b0";
+  // The fixture PR author is unlinked; mentions need a linked or allowed sender.
+  process.env.BITBUCKET_ALLOWED_SENDERS = "557058:11111111-1111-4111-8111-111111111111";
 });
 afterAll(async () => {
   closeDb();
   delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
+  delete process.env.BITBUCKET_ALLOWED_SENDERS;
   resetBitbucketDedup();
   for (const suffix of ["", "-wal", "-shm"]) await unlink(DB + suffix).catch(() => {});
 });

@@ -136,3 +136,93 @@ describe("latest model source across the initial, result and final reports", () 
     ]);
   });
 });
+
+test("Claude saves the latest main request settings after the session init write", async () => {
+  const sessionId = crypto.randomUUID();
+  const taskId = crypto.randomUUID();
+  const request = {
+    type: "api-request",
+    sessionId,
+    querySource: "sdk",
+    params: {
+      model: "observed-model",
+      output_config: { effort: "high" },
+      messages: ["private prompt"],
+    },
+  };
+  await Bun.write(
+    `${directory}/projects/test/${sessionId}.jsonl`,
+    [
+      { ...request, params: { model: "earlier-model" } },
+      request,
+      { ...request, agentId: "child", params: { model: "child-model" } },
+      { ...request, querySource: "summary", params: { model: "summary-model" } },
+    ]
+      .map((row) => JSON.stringify(row))
+      .concat('{"type":"api-request"')
+      .join("\n"),
+  );
+
+  const metadata: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+    if (path === "/api/config/resolved") {
+      return Response.json({
+        configs: [
+          { key: "CLAUDE_CONFIG_DIR", value: directory },
+          { key: "CLAUDE_BINARY", value: process.execPath },
+        ],
+      });
+    }
+    if (path === `/api/tasks/${taskId}/session` && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      if (body.provider) await Bun.sleep(15);
+      metadata.push(body.harnessVariantMeta);
+    }
+    return Response.json({ configs: [], enabled: false });
+  }) as typeof fetch;
+  const adapter = {
+    name: "claude",
+    traits: {},
+    async createSession() {
+      return {
+        sessionId,
+        onEvent(listener: (event: ProviderEvent) => void) {
+          listener({
+            type: "session_init",
+            sessionId,
+            provider: "claude",
+            harnessVariantMeta: { version: "test" },
+          });
+        },
+        async waitForCompletion() {
+          return { sessionId, exitCode: 0, isError: false };
+        },
+        async abort() {},
+      };
+    },
+  } as unknown as Parameters<typeof spawnProviderProcess>[0];
+  const running = await spawnProviderProcess(
+    adapter,
+    {
+      prompt: "hello",
+      systemPrompt: "",
+      logFile: `${directory}/session.jsonl`,
+      role: "worker",
+      apiUrl: "http://runner.invalid",
+      apiKey: "fixture",
+      agentId: crypto.randomUUID(),
+      runnerSessionId: crypto.randomUUID(),
+      iteration: 1,
+      taskId,
+      harnessProvider: "claude",
+      cwd: directory,
+    },
+    directory,
+  );
+  await running.promise;
+  expect(metadata).toEqual([
+    { version: "test" },
+    { version: "test", observedModel: "observed-model", observedReasoningEffort: "high" },
+  ]);
+});

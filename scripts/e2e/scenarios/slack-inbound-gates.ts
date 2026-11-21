@@ -38,10 +38,10 @@ async function taskStatus(ctx: ScenarioContext, taskId: string): Promise<unknown
 
 /**
  * Slack input that reaches agents passes the same sender checks on every path.
- * SLACK_ALLOWED_USER_IDS applies after a config reload, to channel mentions and to
- * Assistant threads. The Cancel button acts only for an allowed user in the task's own
- * channel. slack-post and slack-start-thread refuse blocks that use the action ids of
- * the swarm's own buttons.
+ * SLACK_ALLOWED_USER_IDS applies after a config reload, to channel mentions, to
+ * Assistant threads and to /agent-swarm-status. The Cancel button acts only for an
+ * allowed user in the task's own channel. slack-post and slack-start-thread refuse
+ * blocks that use the action ids of the swarm's own buttons.
  */
 export const slackInboundGates: Scenario = {
   name: "slack-inbound-gates",
@@ -89,6 +89,28 @@ export const slackInboundGates: Scenario = {
         slackAbsenceWindowMs(ctx),
       );
       expect(!leaked, "A user outside SLACK_ALLOWED_USER_IDS created a Slack task after reload");
+
+      // ── /agent-swarm-status lists agents and task summaries: allowed users only ──
+      const statusFor = async (user: string): Promise<string> => {
+        const seen = ctx.slack.ephemeralMessages().length;
+        await ctx.slack.slashCommand({ command: "/agent-swarm-status", user, channel: "general" });
+        let reply = "";
+        await pollUntil(() => {
+          reply = JSON.stringify(ctx.slack.ephemeralMessages().slice(seen));
+          return reply !== "[]";
+        }, 15_000);
+        return reply;
+      };
+      const aliceStatus = await statusFor("alice");
+      expect(
+        !aliceStatus.includes("Agent Swarm Status") && aliceStatus.includes("Only users"),
+        `/agent-swarm-status answered a user outside the allowlist: ${aliceStatus}`,
+      );
+      const bobStatus = await statusFor("bob");
+      expect(
+        bobStatus.includes("Agent Swarm Status"),
+        `/agent-swarm-status did not answer its allowed user: ${bobStatus}`,
+      );
 
       // ── Cancel button ────────────────────────────────────────────────────────
       // A user outside the allowlist, in the task's channel.

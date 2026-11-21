@@ -405,6 +405,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
 | `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
+| `GITLAB_ALLOWED_SENDERS` | Comma-separated GitLab usernames allowed to trigger mention tasks without a linked swarm user |
 | `GITLAB_EMAIL` | Git commit email for GitLab repos (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_NAME` | Git commit name for GitLab repos (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
@@ -417,7 +418,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
-| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
+| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger pull request and Azure Boards work item tasks without a linked swarm user |
 | `AZURE_DEVOPS_WORKITEM_STATE_STARTED` | Work item state to set when its swarm task starts (process-specific, e.g. `Doing`); unset = no change |
 | `AZURE_DEVOPS_WORKITEM_STATE_DONE` | Work item state to set when its swarm task completes (e.g. `Done`); unset = no change |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
@@ -435,6 +436,7 @@ Bitbucket Cloud only. See [Bitbucket Integration](/docs/integrations/bitbucket).
 | `BITBUCKET_TOKEN` | Atlassian API token of the bot service account (recommended) or a workspace access token. API server: REST calls and the bot identity lookup (`GET /2.0/user`). Workers: git clone and push (username `x-token-auth`) and REST calls for PR linking |
 | `BITBUCKET_BOT_ACCOUNT_ID` | Atlassian `account_id` of the bot (e.g. `557058:<uuid>`) for `@{<account_id>}` mentions (default: resolved from `BITBUCKET_TOKEN` via `GET /2.0/user`; set it with a workspace access token) |
 | `BITBUCKET_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `BITBUCKET_ALLOWED_SENDERS` | Comma-separated Atlassian `account_id` values allowed to trigger mention and reviewer tasks without a linked swarm user |
 | `BITBUCKET_EMAIL` | Git commit email for Bitbucket commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
 | `BITBUCKET_NAME` | Git commit name for Bitbucket commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
 | `BITBUCKET_DISABLE` | Set to `true` to disable the Bitbucket integration |
@@ -492,6 +494,8 @@ A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integratio
 | `LINEAR_CLIENT_SECRET` | OAuth app client secret (shown once on creation) |
 | `LINEAR_REDIRECT_URI` | OAuth callback URL (e.g., `http://localhost:3013/api/trackers/linear/callback`) |
 | `LINEAR_SIGNING_SECRET` | Webhook signing secret from Linear app settings |
+| `LINEAR_URL` | Linear web base override (default `https://linear.app`), used by the E2E emulator. Deployment env only |
+| `LINEAR_API_URL` | Linear API base override (default `https://api.linear.app`), used by the E2E emulator. The API base receives the client secret and tokens. Deployment env only |
 | `LINEAR_ALLOWED_STATES` | CSV of `WorkflowState.type` values that trigger task creation. Default: `unstarted,started,completed,canceled` (i.e. skip Backlog & Triage). Set to empty to lock down everything but the label override. See [Linear integration → State gate](/docs/integrations/linear#state-gate). |
 | `LINEAR_SWARM_READY_LABEL` | Label name (case-insensitive) that bypasses the state gate. Default: `swarm-ready`. |
 

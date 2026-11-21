@@ -719,6 +719,7 @@ When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `
 Production Codex sessions start a fresh `codex app-server` inside the existing isolated per-task runner. The parent adapter and task runner keep their JSONL control channel open. The task runner uses JSON-RPC with the app-server.
 
 - Session system instructions go in `thread/start.developerInstructions`. Never inject them into the task repository's `AGENTS.md` or `CLAUDE.md`. Before startup, `recoverLegacyCodexAgentsMd` strips stale blocks and restores swapped symlinks from older versions' out-of-repo records, preserving in-tree edits without reading or writing out-of-tree targets. New sessions leave repository instruction files and symlinks unchanged.
+- Codex supplies built-in web search terms on `item/completed`. The tool-loop guard compares the completed query and any additional queries in the batch. Other tools enter the guard on `item/started`.
 - `steer` sends native `turn/steer`. Codex adds the input to the active turn.
 - `queue` stores the message in the adapter. Delivery succeeds only after Codex accepts the next native turn.
 - If the session ends before that turn starts, delivery fails and the pending message remains eligible for follow-up promotion.
@@ -782,6 +783,8 @@ When unset, every adapter behaves exactly as it does today — no fleet-wide def
 | `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless — operators setting higher effort pay for reasoning tokens (visible in `reasoning_output_tokens` cost telemetry) but get no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (internal numeric translation — not a user-facing knob), or `effort` for `max`. `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (noop) — Opencode has no explicit off switch. |
+
+The Codex session child receives the selected model's catalog row from the worker. It sends a supported effort in the thread configuration and on every `turn/start`. The session log reports a rejected effort or a different thread default. On the task, `harnessVariantMeta.observedModel` and `observedReasoningEffort` record what `thread/start` returned. For Claude Code, the worker reads these fields from the last main-thread `api-request` in the session transcript when available.
 
 The adapter's actually-applied level flows back through `ProviderResult.appliedReasoningEffort` (`null` on a capability-rejected noop) into `agents.cred_status.latestModel.reasoningEffort`, surfaced in the dashboard's runtime editor, the `HarnessCell` tooltip, and the agents-list Model column (`[|||]`-style badge, more bars = higher effort).
 

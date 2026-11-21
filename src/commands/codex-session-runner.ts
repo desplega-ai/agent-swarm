@@ -16,21 +16,15 @@
  *   {"kind":"steering-result", "id": <requestId>, "delivery": <SteerDeliveryResult>}
  */
 
-import { createInProcessCodexSession } from "../providers/codex-adapter";
+import { type CodexSubprocessInput, createInProcessCodexSession } from "../providers/codex-adapter";
 import type {
   ProviderEvent,
   ProviderResult,
-  ProviderSessionConfig,
   SteerDelivery,
   SteerDeliveryResult,
 } from "../providers/types";
+import { setRuntimeModelCatalog } from "../utils/runtime-model-catalog";
 import { scrubSecrets } from "../utils/secret-scrubber";
-
-interface CodexSubprocessInput {
-  config: ProviderSessionConfig;
-  skillsDir?: string;
-  parentOtelEnv?: Record<string, string>;
-}
 
 async function* readStdinLines(): AsyncGenerator<string> {
   const decoder = new TextDecoder();
@@ -94,6 +88,7 @@ async function runCodexSessionRunnerInner(): Promise<void> {
 
   let session: Awaited<ReturnType<typeof createInProcessCodexSession>>;
   try {
+    if (input.modelCatalog) setRuntimeModelCatalog(input.modelCatalog);
     session = await createInProcessCodexSession(input.config, {
       skillsDir: input.skillsDir,
     });

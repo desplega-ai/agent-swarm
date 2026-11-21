@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.14.1",
+    "version": "2.14.2",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -69058,6 +69058,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Jira webhook handler not configured",
             "content": {
@@ -69634,6 +69644,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74348,6 +74368,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "GitHub integration not configured",
             "content": {
@@ -74625,6 +74655,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "AgentMail integration not configured or inbound archive unavailable",
             "content": {
@@ -74680,6 +74720,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -77408,6 +77458,16 @@
           },
           "404": {
             "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {

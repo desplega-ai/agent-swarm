@@ -37,6 +37,7 @@ import {
 } from "../providers/codex-models";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure";
+import { makeFakeAppServer } from "./fixtures/codex-app-server-client";
 import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-render";
 
 /**
@@ -166,39 +167,6 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
   };
   fixtureLogs.add(config.logFile);
   return config;
-}
-
-function makeFakeAppServer(
-  handleRequest: (
-    method: string,
-    params: unknown,
-    emit: (method: string, params?: unknown) => void,
-  ) => unknown | Promise<unknown>,
-) {
-  const listeners = new Set<(notification: { method: string; params?: unknown }) => void>();
-  const closeListeners = new Set<(error: Error) => void>();
-  const emit = (method: string, params?: unknown) => {
-    for (const listener of listeners) listener({ method, params });
-  };
-  return {
-    client: {
-      request: <T>(method: string, params?: unknown) =>
-        Promise.resolve(handleRequest(method, params, emit)) as Promise<T>,
-      onNotification(listener: (notification: { method: string; params?: unknown }) => void) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      onClose(listener: (error: Error) => void) {
-        closeListeners.add(listener);
-        return () => closeListeners.delete(listener);
-      },
-      async close() {},
-    },
-    emit,
-    fail(error: Error) {
-      for (const listener of closeListeners) listener(error);
-    },
-  };
 }
 
 // Cost JSON (minus durationMs) the pre-split adapter (origin/main 97deb6c6)
@@ -1945,12 +1913,17 @@ describe("buildCodexConfig", () => {
 
   test("reasoningEffort: 'xhigh' on gpt-5.1-codex (non-max) is rejected — noop, no model_reasoning_effort key", async () => {
     globalThis.fetch = stubFetch({ servers: [] });
+    const events: ProviderEvent[] = [];
     const merged = await buildCodexConfig(
       cfg({ reasoningEffort: "xhigh" }),
       "gpt-5.1-codex",
-      () => {},
+      (event) => events.push(event),
     );
     expect(merged.model_reasoning_effort).toBeUndefined();
+    expect(events).toContainEqual({
+      type: "raw_stderr",
+      content: expect.stringContaining("Cannot apply reasoning effort xhigh to gpt-5.1-codex"),
+    });
   });
 
   test("undefined reasoningEffort leaves config unchanged (no model_reasoning_effort key)", async () => {

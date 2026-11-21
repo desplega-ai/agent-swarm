@@ -16,7 +16,12 @@ import { requestSecretReadScope } from "../config";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { refuseAgentTokenWithout } from "../request-principal";
 import { route } from "../route-def";
-import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
+import {
+  allowedCredentialRedirect,
+  deriveApiBaseUrl,
+  parseQueryParams,
+  readWebhookBody,
+} from "../utils";
 import {
   ensureTrackerAuthorizeAdmin,
   TrackerAuthorizeQuerySchema,
@@ -172,6 +177,7 @@ const jiraWebhook = route({
   responses: {
     200: { description: "Event accepted", schema: JiraWebhookEventResultSchema },
     401: { description: "Invalid URL token" },
+    413: { description: "Body exceeds 5 MiB" },
     503: { description: "Jira webhook handler not configured" },
   },
   rbac: { ungated: "inbound Jira webhook: the URL token is the credential, no bearer principal" },
@@ -417,11 +423,8 @@ export async function handleJiraTracker(
     // Read raw body using the same chunk-assembly pattern as
     // src/http/trackers/linear.ts:166-171 — we don't trust the framework to
     // hand us a parsed body for webhook routes.
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     const result = await handleJiraWebhook(parsed.params.token, rawBody);
 

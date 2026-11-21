@@ -2,6 +2,7 @@ import { existsSync, constants as fsConstants } from "node:fs";
 import { chown, lstat, mkdir, open, rm, symlink } from "node:fs/promises";
 import { tmpdir as osTmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { startSpan } from "../../otel";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -327,9 +328,9 @@ function spawnHarness(spec: HarnessSpec, tmpdir: string): HarnessProcess {
  * Warm harness pool. A harness spends most of a short run loading its own
  * modules (ctx, SDK, zod) before it reads the config payload from stdin, and
  * none of that depends on the run. So after each spawn the executor starts
- * one spare harness with the same spec in a fresh run dir; it loads and then
- * blocks on stdin. The next run with that spec writes its args and source
- * into the spare's run dir and sends the payload, skipping spawn and module
+ * spare harnesses (up to WARM_DEPTH) with the same spec in fresh run dirs; each loads and then
+ * blocks on stdin. The next run with that spec takes one, writes its args and
+ * source into the spare's run dir and sends the payload, skipping spawn and module
  * load. The script itself still runs once per call, in its own process, with
  * the same env, limits and identity, so outputs and side effects are those of
  * a cold run. A spare holds no credentials (they arrive on stdin), is
@@ -353,10 +354,14 @@ interface WarmHarness {
   idleTimer: ReturnType<typeof setTimeout>;
 }
 
-const WARM_IDLE_MS = 30_000;
+// Depth > 1 because callers (app sync passes, scheduled scripts) fire bursts of
+// runs of one spec: with a single spare, every run after the first waits on a
+// cold spawn. Each idle spare costs one loaded bun process.
+const WARM_DEPTH = 3;
+const WARM_IDLE_MS = 90_000;
 const MAX_WARM_SPECS = 4;
-const warmHarnesses = new Map<string, WarmHarness>();
-const warmingSpecs = new Set<string>();
+const warmHarnesses = new Map<string, WarmHarness[]>();
+const warmingSpecs = new Map<string, number>();
 
 function harnessSpecKey(spec: HarnessSpec): string {
   return JSON.stringify([
@@ -382,30 +387,49 @@ function harnessAlive(proc: HarnessProcess): boolean {
 
 function discardWarmHarness(entry: WarmHarness): void {
   clearTimeout(entry.idleTimer);
-  if (warmHarnesses.get(entry.key) === entry) warmHarnesses.delete(entry.key);
+  const pool = warmHarnesses.get(entry.key);
+  if (pool) {
+    const rest = pool.filter((e) => e !== entry);
+    if (rest.length > 0) warmHarnesses.set(entry.key, rest);
+    else warmHarnesses.delete(entry.key);
+  }
   void terminateProcessGroup(entry.proc.pid)
     .catch(() => {})
     .finally(() => rm(entry.tmpdir, { recursive: true, force: true }).catch(() => {}));
 }
 
-/** Removes and returns the spare for `key` when it is still waiting on stdin. */
+/** Removes and returns a spare for `key` that is still waiting on stdin. */
 function takeWarmHarness(key: string): WarmHarness | undefined {
-  const entry = warmHarnesses.get(key);
-  if (!entry) return undefined;
-  warmHarnesses.delete(key);
-  clearTimeout(entry.idleTimer);
-  if (!harnessAlive(entry.proc)) {
-    discardWarmHarness(entry);
-    return undefined;
+  for (const entry of warmHarnesses.get(key) ?? []) {
+    if (!harnessAlive(entry.proc)) {
+      discardWarmHarness(entry);
+      continue;
+    }
+    // Remove it from the pool before anything awaits: two runs must not share a spare.
+    const rest = (warmHarnesses.get(key) ?? []).filter((e) => e !== entry);
+    if (rest.length > 0) warmHarnesses.set(key, rest);
+    else warmHarnesses.delete(key);
+    clearTimeout(entry.idleTimer);
+    entry.proc.ref();
+    return entry;
   }
-  entry.proc.ref();
-  return entry;
+  return undefined;
+}
+
+/** Test hook: pids of the idle spares across all specs. */
+export function warmPoolPids(): number[] {
+  return [...warmHarnesses.values()].flat().map((e) => e.proc.pid);
+}
+
+/** Tops the pool for `key` up to WARM_DEPTH, counting spares still starting. */
+function startWarmHarnesses(key: string, spec: HarnessSpec): void {
+  const missing = WARM_DEPTH - (warmHarnesses.get(key)?.length ?? 0) - (warmingSpecs.get(key) ?? 0);
+  for (let i = 0; i < missing; i++) void startWarmHarness(key, spec);
 }
 
 async function startWarmHarness(key: string, spec: HarnessSpec): Promise<void> {
   if (process.platform === "win32") return;
-  if (warmHarnesses.has(key) || warmingSpecs.has(key)) return;
-  warmingSpecs.add(key);
+  warmingSpecs.set(key, (warmingSpecs.get(key) ?? 0) + 1);
   const tmpdir = `${spec.baseTmpDir}/swarm-script-${crypto.randomUUID()}`;
   let started = false;
   try {
@@ -413,7 +437,7 @@ async function startWarmHarness(key: string, spec: HarnessSpec): Promise<void> {
     // above): no chown here.
     await mkdir(tmpdir, { recursive: true, mode: 0o755 });
     await linkOrWriteBareImportShims(spec.baseTmpDir, tmpdir);
-    if (warmHarnesses.has(key)) return;
+    if ((warmHarnesses.get(key)?.length ?? 0) >= WARM_DEPTH) return;
     const proc = spawnHarness(spec, tmpdir);
     // A spare must not keep the API (or a CLI / test process) alive.
     proc.unref();
@@ -425,21 +449,22 @@ async function startWarmHarness(key: string, spec: HarnessSpec): Promise<void> {
       idleTimer: setTimeout(() => discardWarmHarness(entry), WARM_IDLE_MS),
     };
     entry.idleTimer.unref?.();
-    if (warmHarnesses.size >= MAX_WARM_SPECS) {
-      const oldest = warmHarnesses.values().next().value;
-      if (oldest) discardWarmHarness(oldest);
+    if (!warmHarnesses.has(key) && warmHarnesses.size >= MAX_WARM_SPECS) {
+      for (const oldest of warmHarnesses.values().next().value ?? []) discardWarmHarness(oldest);
     }
-    warmHarnesses.set(key, entry);
+    warmHarnesses.set(key, [...(warmHarnesses.get(key) ?? []), entry]);
     void proc.exited.then(
       () => {
-        if (warmHarnesses.get(key) === entry) discardWarmHarness(entry);
+        if (warmHarnesses.get(key)?.includes(entry)) discardWarmHarness(entry);
       },
       () => {},
     );
   } catch {
     // Best-effort: the next run spawns cold.
   } finally {
-    warmingSpecs.delete(key);
+    const pending = (warmingSpecs.get(key) ?? 1) - 1;
+    if (pending > 0) warmingSpecs.set(key, pending);
+    else warmingSpecs.delete(key);
     if (!started) await rm(tmpdir, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -491,6 +516,14 @@ export class NativeScriptExecutor implements ScriptExecutor {
     // A taken spare is this run's process from here on: an abort or error
     // below terminates it and removes its run dir like a cold child's.
     if (warm) proc = warm.proc;
+    // Per-phase spans (no-ops when OTel is off): they split a run's latency into
+    // setup (spare take, file writes), the script itself, and result reads.
+    const spanAttrs = { warm: Boolean(warm) };
+    let phase = startSpan("script.pre", spanAttrs);
+    const nextPhase = (name: string) => {
+      phase.end();
+      phase = startSpan(name, spanAttrs);
+    };
 
     try {
       // Listen before the first await: an abort during the file writes below
@@ -530,8 +563,9 @@ export class NativeScriptExecutor implements ScriptExecutor {
       const child = proc ?? spawnHarness(spec, tmpdir);
       proc = child;
       // Load the next run's harness while this one runs.
-      void startWarmHarness(specKey, spec);
+      startWarmHarnesses(specKey, spec);
 
+      nextPhase("script.run");
       child.stdin.write(JSON.stringify(input.configPayload));
       child.stdin.end();
 
@@ -540,6 +574,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         readStreamCapped(child.stderr, input.resources.maxStdoutBytes),
         child.exited.catch(() => (timedOut ? 124 : 1)),
       ]).finally(() => clearTimeout(timeout));
+      nextPhase("script.finish");
       // The child owns the run dir: read its files only through the checked reader.
       const runDirCheck: RunDirFileCheck = {
         // ulimit -f already bounds what the child can write.
@@ -587,6 +622,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         error: timedOut ? "timeout" : killed ? "killed" : "executor_error",
       };
     } finally {
+      phase.end();
       removeAbortListener?.();
       if (proc) await terminateProcessGroup(proc.pid);
       await rm(tmpdir, { recursive: true, force: true });

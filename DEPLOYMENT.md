@@ -279,13 +279,13 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.329)
+# Override the pinned Claude Code version (default: 2.1.330)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.329`
+- `CLAUDE_CODE_VERSION=2.1.330`
 - `PI_CODING_AGENT_VERSION=1.6.0`
 - `CODEX_VERSION=0.171.0`
 - `OPENCODE_VERSION=2.3.2` (installs `@opencode/cli` and `@opencode/sdk`)
@@ -548,7 +548,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.36. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.37. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
