@@ -219,11 +219,13 @@ export interface SkillsRepository {
   findOwnerlessSkillId(name: string, scope: string): Promise<string | null>;
   /**
    * Enabled skills ranked by full-text score (exact name first, then score,
-   * then name). `match` is the engine's match expression; `columns` a trusted
-   * select list over `skills` written by code.
+   * then name). `terms` are the search words, OR-ed: each term is one phrase
+   * (letters, digits, `_` and `-`), and each engine builds its own query from
+   * them, so no term can inject query syntax. `columns` is a trusted select
+   * list over `skills` written by code. No terms: no rows.
    */
   searchRankedSkills<T>(
-    match: string,
+    terms: readonly string[],
     exactName: string,
     limit: number,
     columns: string,
@@ -389,9 +391,9 @@ export abstract class BaseSkillsRepository implements SkillsRepository {
     return row ? row.id : null;
   }
 
-  /** Engine full-text search (SQLite FTS5 MATCH and bm25). */
+  /** Engine full-text search (SQLite FTS5 MATCH and bm25, Postgres tsvector and ts_rank). */
   abstract searchRankedSkills<T>(
-    match: string,
+    terms: readonly string[],
     exactName: string,
     limit: number,
     columns: string,

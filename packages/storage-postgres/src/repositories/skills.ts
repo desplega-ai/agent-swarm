@@ -1,5 +1,6 @@
 import {
   BaseSkillsRepository,
+  jsonText,
   type NewSkillInvocation,
   type SkillUsageAgentStatsRow,
   type SkillUsageDayRow,
@@ -10,7 +11,26 @@ import {
   SqlQuery,
   sql,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+
+// The skills_fts expression of migration 368 (index skills_fts_search), word
+// for word: the planner uses the index only for an equal expression. The
+// tsvector weights stand for the bm25 column weights (name A, description B,
+// content C); the meta vector is skills_meta_fts (name and description only).
+export const SKILL_VECTOR = sql`(setweight(to_tsvector('english', fts_words(skills.name)), 'A')
+  || setweight(to_tsvector('english', fts_words(skills.description)), 'B')
+  || setweight(to_tsvector('english', fts_words(skills.content)), 'C'))`;
+const SKILL_META_VECTOR = sql`(setweight(to_tsvector('english', fts_words(skills.name)), 'A')
+  || setweight(to_tsvector('english', fts_words(skills.description)), 'B'))`;
+// ts_rank weights in {D, C, B, A} order: the bm25 weights 0, 1, 2, 3 over 3.
+const RANK_WEIGHTS = "'{0, 0.333333, 0.666667, 1}'::float4[]";
+// The SQLite skills repository's multiple of the name + description score.
+const META_SCORE_MULTIPLE = 3;
+const raw = (text: string) => new SqlQuery([text], []);
+
+/** The phrase text `p` with each lexeme limited to one tsvector weight. */
+function perWeight(weight: "A" | "B" | "C"): SqlQuery {
+  return raw(`regexp_replace(p, '''([^'']+)''', '''\\1'':${weight}', 'g')`);
+}
 
 /** The window predicate: a plain range on `createdAt`, none for `all`. */
 function sinceFilter(since: string | null): SqlQuery {
@@ -27,14 +47,45 @@ function localDay(tzOffsetMinutes: number): SqlQuery {
 }
 
 export class PostgresSkillsRepository extends BaseSkillsRepository {
-  // Full-text search (FTS5 skills_fts / skills_meta_fts with bm25) is milestone M4.
+  /**
+   * The SQLite ranking on tsvector: exact name first, then the skills_fts
+   * score (name 3, description 2, content 1) plus META_SCORE_MULTIPLE times
+   * the name + description score, then the name. ts_rank grows with the match
+   * where bm25 shrinks, so the score sorts descending. Each term is a phrase.
+   */
   searchRankedSkills<T>(
-    _match: string,
-    _exactName: string,
-    _limit: number,
-    _columns: string,
+    terms: readonly string[],
+    exactName: string,
+    limit: number,
+    columns: string,
   ): Promise<T[]> {
-    return notOnPostgresYet("PostgresSkillsRepository.searchRankedSkills");
+    if (terms.length === 0) return Promise.resolve([]);
+    // `columns` is a select list written by code (src/be/db.ts), never input.
+    const selectList = new SqlQuery([columns], []);
+    // One phrase per term, OR-ed. The vector joins the columns end to end, so a
+    // phrase could run from one column into the next, where FTS5 matches a
+    // phrase within one column only. So a phrase matches with all its words in
+    // weight A, or all in B, or all in C. A lexeme holds no quote (the
+    // apostrophe is a separator in fts_words). A term of only stopwords drops.
+    return this.db.query<T>(sql`
+      WITH phrases AS (
+        SELECT CAST(phraseto_tsquery('english', fts_words(j.term)) AS text) AS p
+        FROM jsonb_array_elements_text(${jsonText(JSON.stringify(terms))}) AS j(term)
+      ),
+      q AS (
+        SELECT CAST(COALESCE(string_agg(
+          '(' || ${perWeight("A")} || ') | (' || ${perWeight("B")} || ') | (' || ${perWeight("C")} || ')',
+          ' | '), '') AS tsquery) AS fts_query
+        FROM phrases WHERE p <> ''
+      )
+      SELECT ${selectList} FROM skills CROSS JOIN q
+      WHERE skills."isEnabled" = ${true}
+        AND (${SKILL_VECTOR} @@ q.fts_query OR lower(skills.name) = lower(${exactName}))
+      ORDER BY lower(skills.name) = lower(${exactName}) DESC,
+        ts_rank(${raw(RANK_WEIGHTS)}, ${SKILL_VECTOR}, q.fts_query, 1)
+          + ${raw(String(META_SCORE_MULTIPLE))} * ts_rank(${raw(RANK_WEIGHTS)}, ${SKILL_META_VECTOR}, q.fts_query, 1) DESC,
+        skills.name COLLATE "C" ASC
+      LIMIT ${limit}`);
   }
 
   async insertSkillInvocation(i: NewSkillInvocation): Promise<boolean> {

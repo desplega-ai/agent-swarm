@@ -121,14 +121,92 @@ export function skillsContract(engine: ContractEngine): void {
       await skill({ id: "s2", name: "deploy", description: "the deploy runbook" });
       await skill({ id: "s3", name: "notes", description: "unrelated" });
       const ids = (rows: { id: string }[]) => rows.map((row) => row.id);
-      expect(ids(await repo.searchRankedSkills('"deploy"', "deploy", 10, "skills.id"))).toEqual([
+      expect(ids(await repo.searchRankedSkills(["deploy"], "deploy", 10, "skills.id"))).toEqual([
         "s2",
         "s1",
       ]);
-      expect(ids(await repo.searchRankedSkills('"deploy"', "deploy", 1, "skills.id"))).toEqual([
+      expect(ids(await repo.searchRankedSkills(["deploy"], "deploy", 1, "skills.id"))).toEqual([
         "s2",
       ]);
-      expect(await repo.searchRankedSkills('"zzz"', "zzz", 10, "skills.id")).toEqual([]);
+      expect(await repo.searchRankedSkills(["zzz"], "zzz", 10, "skills.id")).toEqual([]);
+    });
+
+    test("ranked search: weights, OR of terms, phrases, stems, disabled skills", async () => {
+      const filler = "lorem ipsum dolor sit amet consectetur adipiscing elit ".repeat(20);
+      await skill({
+        id: "k1",
+        name: "release-notes",
+        description: "writes the changelog",
+        content: "steps for shipping",
+      });
+      await skill({ id: "k2", name: "shipper", description: "ships builds", content: "a train" });
+      await skill({
+        id: "k3",
+        name: "misc",
+        description: "other",
+        content: `${filler} release ${filler} release`,
+      });
+      await skill({ id: "k4", name: "release-guard", description: "guard", content: "release" });
+      await storage.executor.run(sql`UPDATE skills SET "isEnabled" = ${false} WHERE id = ${"k4"}`);
+      await skill({ id: "k5", name: "notes", description: "release notes archive", content: "x" });
+      const ids = async (terms: string[], exact = terms.join(" ")) =>
+        (await repo.searchRankedSkills<{ id: string }>(terms, exact, 10, "skills.id")).map(
+          (row) => row.id,
+        );
+      const sorted = (list: string[]) => [...list].sort();
+
+      // A name hit beats a description hit, which beats a body hit.
+      const release = await ids(["release"]);
+      expect(sorted(release)).toEqual(["k1", "k3", "k5"]);
+      expect(release[0]).toBe("k1");
+      expect(release.at(-1)).toBe("k3");
+      // Terms are OR-ed.
+      expect(sorted(await ids(["changelog", "builds"]))).toEqual(["k1", "k2"]);
+      // A term with a hyphen is a phrase: its words in order, in one column.
+      expect(sorted(await ids(["release-notes"]))).toEqual(["k1", "k5"]);
+      expect(await ids(["notes-release"])).toEqual([]);
+      // Stems: "shipping" and "ships" share one.
+      expect(sorted(await ids(["shipping"]))).toEqual(["k1", "k2"]);
+      // A disabled skill never matches, not even by its exact name.
+      expect(await ids(["guard"])).toEqual([]);
+      expect(await ids(["release-guard"])).toEqual([]);
+    });
+
+    test("ranked search: the divergence corpus (same set and top hit on every engine)", async () => {
+      // scripts/e2e/scenarios/divergence-fulltext-search.ts, with a fixed nonce.
+      const w = (stem: string) => `${stem}x7f3a9c`;
+      const [A, B, C, D] = [w("zephyr"), w("quokka"), w("marlin"), w("tundra")];
+      const filler =
+        "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore";
+      const corpus: Record<string, { description: string; body: string }> = {
+        d1: { description: `${A} ${B} handbook`, body: `Use ${A} carefully.` },
+        d2: { description: `${B} reference`, body: `${filler} ${A} ${filler}` },
+        d3: { description: `${C} notes`, body: `${A} ${C}` },
+        d4: { description: `${D} ${B} guide`, body: "Nothing else here." },
+        d5: { description: "plain words only", body: `${C} ${C} ${C}` },
+      };
+      for (const [id, spec] of Object.entries(corpus)) {
+        const name = `div-fts-7f3a9c-${id}`;
+        await skill({
+          id,
+          name,
+          description: spec.description,
+          content: `---\nname: ${name}\ndescription: ${spec.description}\n---\n\n${spec.body}\n`,
+        });
+      }
+      const search = async (terms: string[], exact: string) =>
+        (await repo.searchRankedSkills<{ id: string }>(terms, exact, 10, "skills.id")).map(
+          (row) => row.id,
+        );
+      const a = await search([A], A);
+      expect([...a].sort()).toEqual(["d1", "d2", "d3"]);
+      expect(a[0]).toBe("d1");
+      const bd = await search([B, D], `${B} ${D}`);
+      expect([...bd].sort()).toEqual(["d1", "d2", "d4"]);
+      expect(bd[0]).toBe("d4");
+      const exact = "DIV-FTS-7F3A9C-D5";
+      expect(await search([exact], exact)).toEqual(["d5"]);
+      expect(await search([A.slice(0, -3)], A.slice(0, -3))).toEqual([]);
     });
 
     test("usage analytics: totals, local days, harness and skill groups, agents, unused", async () => {

@@ -7,7 +7,8 @@ import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 // group ports the assertions of its black-box scenario
 // (scripts/e2e/scenarios/trigger-<group>.ts) and also drives the triggers that
 // no API path reaches (thoughts/taras/research/2026-11-20-trigger-groups.md).
-// The FTS sync group is milestone M4: its target tables are not in the baseline.
+// The FTS sync group has no port: Postgres full-text search uses expression
+// indexes (migration 368, test/fulltext.test.ts), which need no trigger.
 
 const CHAIN_DIR = join(import.meta.dir, "..", "..", "..", "src", "be", "migrations", "postgres");
 
