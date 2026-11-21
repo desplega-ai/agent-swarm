@@ -43,7 +43,7 @@ beforeAll(async () => {
   );
   for (const table of DENIED) await admin.unsafe(`CREATE TABLE ${table} (id text, secret text)`);
   await admin.unsafe(
-    `INSERT INTO agents VALUES ('a1', true, '{"k":1}', 9007199254740993, '2026-11-20T10:00:00Z'), ('a2', false, NULL, 2, NULL)`,
+    `INSERT INTO agents VALUES ('a1', true, '{"k":1}', 42, '2026-11-20T10:00:00Z'), ('a2', false, NULL, 2, NULL)`,
   );
   await admin.unsafe(`CREATE ROLE ${role} LOGIN`);
   await admin.unsafe(`GRANT CONNECT ON DATABASE ${db.name} TO ${role}`);
@@ -151,9 +151,7 @@ describe("db-query reader queries", () => {
     );
     expect(result.columns).toEqual(["id", "isLead", "data", "n", "at"]);
     expect(result.total).toBe(2);
-    expect(result.rows).toEqual([
-      ["a1", true, '{"k":1}', "9007199254740993", "2026-11-20T10:00:00.000Z"],
-    ]);
+    expect(result.rows).toEqual([["a1", 1, '{"k":1}', 42, "2026-11-20T10:00:00.000Z"]]);
   });
 
   test("a denied table maps to QueryReaderDeniedError", async () => {

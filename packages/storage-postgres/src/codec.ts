@@ -177,3 +177,22 @@ export async function loadTimestampFormats(
   );
   return formats;
 }
+
+/**
+ * Decode positional rows (`.values()`): the same rules as {@link decodeRows},
+ * for a result whose column names may repeat (user SQL in `db-query`).
+ * A `_rowid` column stays: the user named it.
+ */
+export function decodeValueRows(
+  rows: readonly unknown[][],
+  columns: readonly ResultColumn[],
+  formats: TimestampFormats | null,
+): unknown[][] {
+  const decoders = columns.map((column) => decoderFor(column, formats));
+  return rows.map((row) =>
+    row.map((value, index) => {
+      const decoder = decoders[index];
+      return decoder ? decoder(value) : value;
+    }),
+  );
+}

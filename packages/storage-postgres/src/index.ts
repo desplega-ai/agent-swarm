@@ -22,6 +22,7 @@ export {
   ClassifiedTimestampFormats,
   type ColumnClassification,
   decodeRows,
+  decodeValueRows,
   formatTimestamp,
   loadTimestampFormats,
   OID,

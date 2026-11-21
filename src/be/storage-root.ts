@@ -31,6 +31,7 @@ import {
   PostgresClient,
   type PostgresSealedColumn,
   runPostgresMigrations,
+  type TimestampFormats,
 } from "@desplega/storage-postgres";
 import {
   type BusyRetryOptions,
@@ -163,13 +164,16 @@ export type PostgresEngine = {
  * that fails the probe, leaves the `dbQuery` capability off. Runs after the
  * migrations, so the probe sees the denied tables.
  */
-async function openQueryReader(queryUrl: string | undefined): Promise<QueryReader | null> {
+async function openQueryReader(
+  queryUrl: string | undefined,
+  timestampFormats: TimestampFormats,
+): Promise<QueryReader | null> {
   const url = queryUrl?.trim();
   if (!url) {
     console.log("[db] db-query is off: DATABASE_QUERY_URL is not set (decision D10)");
     return null;
   }
-  const result = await openPostgresQueryReader(url, [...DB_QUERY_DENIED_TABLES]);
+  const result = await openPostgresQueryReader(url, [...DB_QUERY_DENIED_TABLES], timestampFormats);
   if (!result.ok) {
     console.warn(
       scrubSecrets(
@@ -218,7 +222,7 @@ export async function openPostgresEngine(
       timestampFormats,
       txReplay,
     });
-    const queryReader = await openQueryReader(queryUrl);
+    const queryReader = await openQueryReader(queryUrl, timestampFormats);
     console.log(
       `[db] Postgres engine ready (pgvector ${vectorSearch ? "present" : "absent"}${createdThisBoot ? ", new database" : ""})`,
     );

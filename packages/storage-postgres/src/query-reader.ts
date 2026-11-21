@@ -6,6 +6,7 @@ import {
   QueryReaderTimeoutError,
 } from "@desplega/storage";
 import { SQL } from "bun";
+import { decodeValueRows, type ResultColumn, type TimestampFormats } from "./codec";
 
 /**
  * The `db-query` connection of the Postgres engine (decision D10).
@@ -25,9 +26,6 @@ const SQLSTATE_QUERY_CANCELED = "57014";
 const CURSOR = "swarm_db_query";
 /** Small: the bounded SQLite path also caps concurrent db-query runs (3 by default). */
 const READER_POOL_MAX = 4;
-
-const OID_INT8 = 20;
-const OID_NUMERIC = 1700;
 
 type PgError = { errno?: string; message?: string };
 
@@ -52,6 +50,7 @@ export type QueryReaderProbeResult =
 export async function openPostgresQueryReader(
   url: string,
   deniedTables: readonly string[],
+  timestampFormats: TimestampFormats | null = null,
 ): Promise<QueryReaderProbeResult> {
   const pool = new SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
   try {
@@ -61,7 +60,11 @@ export async function openPostgresQueryReader(
       return { ok: false, reason };
     }
     const [who] = (await pool.unsafe("SELECT current_user AS role")) as { role: string }[];
-    return { ok: true, reader: new PostgresQueryReader(pool), role: who?.role ?? "?" };
+    return {
+      ok: true,
+      reader: new PostgresQueryReader(pool, timestampFormats),
+      role: who?.role ?? "?",
+    };
   } catch (err) {
     await pool.close().catch(() => undefined);
     return { ok: false, reason: `cannot connect: ${pgError(err).message ?? String(err)}` };
@@ -213,25 +216,11 @@ function deniedTablesOf(message: string): string[] {
   return match?.[1] ? [match[1].replace(/^"|"$/g, "")] : [];
 }
 
-type ResultColumn = { name: string; type: number };
-
-function normalize(value: unknown, type: number | undefined): unknown {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) return value.toISOString();
-  if ((type === OID_INT8 || type === OID_NUMERIC) && typeof value === "string") {
-    const n = Number(value);
-    return type === OID_INT8 && !Number.isSafeInteger(n) ? value : n;
-  }
-  if (typeof value === "bigint")
-    return Number.isSafeInteger(Number(value)) ? Number(value) : value.toString();
-  if (value instanceof Uint8Array) return value;
-  // jsonb, json and arrays: the text form, as SQLite returns stored JSON text.
-  if (typeof value === "object") return JSON.stringify(value);
-  return value;
-}
-
 class PostgresQueryReader implements QueryReader {
-  constructor(private readonly pool: SQL) {}
+  constructor(
+    private readonly pool: SQL,
+    private readonly timestampFormats: TimestampFormats | null,
+  ) {}
 
   async run(
     sql: string,
@@ -262,9 +251,8 @@ class PostgresQueryReader implements QueryReader {
           const moved = await tx.unsafe(`MOVE FORWARD ALL FROM ${CURSOR}`);
           total += (moved as unknown as { count?: number }).count ?? 0;
         }
-        const rows = (fetched as unknown[][]).map((row) =>
-          row.map((value, index) => normalize(value, columns[index]?.type)),
-        );
+        // The read codec (D8): values in the SQLite shape, as the repositories return them.
+        const rows = decodeValueRows(fetched as unknown[][], columns, this.timestampFormats);
         return {
           columns: columns.map((column) => column.name),
           rows,
