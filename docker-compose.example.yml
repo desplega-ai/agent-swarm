@@ -126,7 +126,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.18.36
+    image: ghcr.io/desplega-ai/agent-fs:0.18.37
     platform: linux/amd64
     pull_policy: always
     depends_on:
