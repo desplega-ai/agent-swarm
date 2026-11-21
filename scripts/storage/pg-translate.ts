@@ -262,8 +262,11 @@ function translateCall(
       return `strpos(${sqls.join(", ")})`;
     case "json_valid":
       if (sqls.length !== 1) fail(where, "json_valid arity");
-      // A jsonb value is valid JSON by construction.
-      return argClass(0) === "jsonb" ? `(${sqls[0]} IS NOT NULL)` : `(${sqls[0]} IS JSON)`;
+      // A jsonb value is valid JSON by construction. json_valid(NULL) is NULL on
+      // SQLite; `x IS NOT NULL OR NULL` keeps that (NULL for NULL, else true).
+      return argClass(0) === "jsonb"
+        ? `(${sqls[0]} IS NOT NULL OR NULL::boolean)`
+        : `(${sqls[0]} IS JSON)`;
     case "json_type": {
       if (sqls.length !== 1) fail(where, "json_type with a path");
       // Only `json_type(x) = 'array' | 'object'`: those names match on both engines.

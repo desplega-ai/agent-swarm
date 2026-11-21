@@ -1439,8 +1439,8 @@ CREATE TABLE "routing_decisions" (
   "created_by" text,
   "updated_by" text,
   PRIMARY KEY ("task_id"),
-  CHECK (("worker_statuses" IS NOT NULL) AND jsonb_typeof("worker_statuses") = 'array'),
-  CHECK (("continuity_candidates" IS NOT NULL) AND jsonb_typeof("continuity_candidates") = 'object')
+  CHECK (("worker_statuses" IS NOT NULL OR NULL::boolean) AND jsonb_typeof("worker_statuses") = 'array'),
+  CHECK (("continuity_candidates" IS NOT NULL OR NULL::boolean) AND jsonb_typeof("continuity_candidates") = 'object')
 );
 
 CREATE TABLE "runtime_cache_releases" (
@@ -1458,7 +1458,7 @@ CREATE TABLE "runtime_cache_releases" (
   "updated_by" text,
   PRIMARY KEY ("id"),
   UNIQUE ("controller_id", "owner_id", "cache_key"),
-  CHECK (("runtime_ids" IS NOT NULL) AND jsonb_typeof("runtime_ids") = 'array'),
+  CHECK (("runtime_ids" IS NOT NULL OR NULL::boolean) AND jsonb_typeof("runtime_ids") = 'array'),
   CHECK ("state" IN ('pending', 'deleting'))
 );
 
@@ -1541,8 +1541,8 @@ CREATE TABLE "runtime_pools" (
   UNIQUE ("name"),
   CHECK ("lifecycle" IN ('idle', 'per-task')),
   CHECK ("delivery" IN ('poll', 'push')),
-  CHECK ("cache" IS NULL OR ("cache" IS NOT NULL)),
-  CHECK ("workspace" IS NULL OR ("workspace" IS NOT NULL))
+  CHECK ("cache" IS NULL OR ("cache" IS NOT NULL OR NULL::boolean)),
+  CHECK ("workspace" IS NULL OR ("workspace" IS NOT NULL OR NULL::boolean))
 );
 
 CREATE TABLE "scheduled_tasks" (
@@ -2999,7 +2999,7 @@ CREATE INDEX "idx_wrs_idempotencyKey" ON "workflow_run_steps" ("idempotencyKey")
 CREATE INDEX "idx_wrs_runId" ON "workflow_run_steps" ("runId");
 CREATE INDEX "idx_wrs_runId_status" ON "workflow_run_steps" ("runId", "status");
 CREATE INDEX "idx_wrs_status" ON "workflow_run_steps" ("status");
-CREATE INDEX "idx_workflow_runs_context_requester" ON "workflow_runs" ((CASE WHEN ("context" IS NOT NULL) THEN ("context" #>> '{swarm,requestedByUserId}') END)) WHERE CASE WHEN ("context" IS NOT NULL) THEN ("context" #>> '{swarm,requestedByUserId}') END IS NOT NULL;
+CREATE INDEX "idx_workflow_runs_context_requester" ON "workflow_runs" ((CASE WHEN ("context" IS NOT NULL OR NULL::boolean) THEN ("context" #>> '{swarm,requestedByUserId}') END)) WHERE CASE WHEN ("context" IS NOT NULL OR NULL::boolean) THEN ("context" #>> '{swarm,requestedByUserId}') END IS NOT NULL;
 CREATE INDEX "idx_workflow_runs_created_by" ON "workflow_runs" ("created_by") WHERE "created_by" IS NOT NULL;
 CREATE INDEX "idx_workflow_runs_definitionHash" ON "workflow_runs" ("definitionHash") WHERE "definitionHash" IS NOT NULL;
 CREATE UNIQUE INDEX "idx_workflow_runs_parentStep_attempt" ON "workflow_runs" ("parentStepId", "parentStepAttempt") WHERE "parentStepId" IS NOT NULL;
