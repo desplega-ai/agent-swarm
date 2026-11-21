@@ -108,6 +108,7 @@
     "mono:lint": "turbo run lint",
     "mono:dev": "turbo run dev",
     "test:root": "bash scripts/run-bun-tests.sh",
+    "test:storage": "bun test packages/storage-sqlite/test",
     "e2e": "bun scripts/e2e/run.ts",
     "e2e:strict": "bun scripts/e2e/run.ts --strict",
     "e2e:bench": "bun scripts/e2e/bench.ts",
