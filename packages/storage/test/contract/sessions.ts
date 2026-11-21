@@ -259,6 +259,29 @@ export function sessionsContract(engine: ContractEngine): void {
       ]);
     });
 
+    test("summary drift reports text, number and timestamp fields from a since bound", async () => {
+      await insertTask("root");
+      await insertTask("child", { parentTaskId: "root" });
+      await storage.executor.run(sql`
+        UPDATE session_summaries SET "lastActivityAt" = '2026-11-22T00:00:00.000Z', "openTaskCount" = 5,
+          "latestStatus" = 'completed'
+        WHERE "rootId" = 'root'`);
+      expect(
+        await repo.findSessionSummaryDrift("2026-11-01T00:00:00.000Z", ["completed", "failed"]),
+      ).toEqual([
+        {
+          rootId: "root",
+          field: "lastActivityAt",
+          expected: "2026-11-21T10:00:00.000Z",
+          stored: "2026-11-22T00:00:00.000Z",
+        },
+        { rootId: "root", field: "openTasks", expected: 2, stored: 5 },
+      ]);
+      expect(
+        await repo.findSessionSummaryDrift("2026-11-23T00:00:00.000Z", ["completed", "failed"]),
+      ).toEqual([]);
+    });
+
     test("budgets upsert, list by key, delete", async () => {
       await repo.upsertBudget("global", "global", 5, 1000);
       await repo.upsertBudget("agent", "b", 1, 1000);
@@ -305,6 +328,15 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(
         await repo.insertBudgetRefusalNotification({ ...base, task_id: "t0", createdAt: 7 }),
       ).toBe(1);
+      // INSERT OR IGNORE also skips a row that fails the cause CHECK.
+      expect(
+        await repo.insertBudgetRefusalNotification({
+          ...base,
+          cause: "bogus",
+          task_id: "t9",
+          createdAt: 5,
+        }),
+      ).toBe(0);
       expect(await repo.findBudgetRefusalNotification("t1", "2026-11-21")).toMatchObject({
         task_id: "t1",
         createdAt: 5,
