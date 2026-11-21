@@ -132,7 +132,7 @@
     "check:schema-parity": "bun scripts/storage-checks/check-schema-parity.ts",
     "check:no-new-triggers": "bun scripts/storage-checks/check-no-new-triggers.ts",
     "storage:baseline": "bun scripts/storage/generate-postgres-baseline.ts",
-    "check:dep-graph": "depcruise src packages/model-routing packages/storage packages/storage-sqlite packages/storage-postgres --config .dependency-cruiser.cjs",
+    "check:dep-graph": "depcruise src packages/model-routing packages/storage packages/storage-sqlite packages/storage-postgres --config .dependency-cruiser.cjs && bun scripts/storage-checks/check-driver-imports.ts",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
     "check:rbac-coverage": "bun scripts/check-rbac-coverage.ts",

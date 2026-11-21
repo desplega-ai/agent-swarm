@@ -58,7 +58,7 @@ module.exports = {
     {
       name: "postgres-driver-only-in-postgres-package",
       comment:
-        "A Postgres driver module is imported only by packages/storage-postgres (Postgres brief D4). Bun.SQL is a global; check:storage-boundary covers its use.",
+        "A Postgres driver module is imported only by packages/storage-postgres (Postgres brief D4). Bun.SQL (a named export of the bun module and a global) is invisible to this graph: scripts/storage-checks/check-driver-imports.ts, run by check:dep-graph, rejects it.",
       severity: "error",
       from: { path: "^(src|packages)/", pathNot: ["^packages/storage-postgres/"] },
       to: { path: "^(postgres|pg)$|node_modules/(postgres|pg)/" },
