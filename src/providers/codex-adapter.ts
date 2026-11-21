@@ -1059,7 +1059,7 @@ export class CodexSession implements ProviderSession {
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
-  private hasExternalListener = false;
+  private readonly swarmEventHandler?: (event: ProviderEvent) => void;
   private readonly logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   private readonly startedAt = Date.now();
   private readonly completionPromise: Promise<ProviderResult>;
@@ -1141,15 +1141,13 @@ export class CodexSession implements ProviderSession {
     // `runSession` (the runner-side polling at `runner.ts:2812-2841` is the
     // backstop). Skipped when there's no task or API context to talk to.
     if (config.taskId && config.apiUrl && config.apiKey) {
-      this.listeners.push(
-        createCodexSwarmEventHandler({
-          apiUrl: config.apiUrl,
-          apiKey: config.apiKey,
-          agentId: config.agentId,
-          taskId: config.taskId,
-          abortRef: this.abortRef,
-        }),
-      );
+      this.swarmEventHandler = createCodexSwarmEventHandler({
+        apiUrl: config.apiUrl,
+        apiKey: config.apiKey,
+        agentId: config.agentId,
+        taskId: config.taskId,
+        abortRef: this.abortRef,
+      });
     }
 
     // Replay any events that fired before the session was constructed
@@ -1171,7 +1169,6 @@ export class CodexSession implements ProviderSession {
   }
 
   onEvent(listener: (event: ProviderEvent) => void): void {
-    this.hasExternalListener = true;
     this.listeners.push(listener);
     // Flush any events that fired before a listener was attached.
     for (const event of this.eventQueue) {
@@ -1232,9 +1229,11 @@ export class CodexSession implements ProviderSession {
     } catch {
       // Log writer failure must not break the event stream.
     }
-    // The internal swarm hooks subscribe during construction. Keep startup
-    // events for the runner until its own listener attaches.
-    if (!this.hasExternalListener) this.eventQueue.push(scrubbed);
+    this.swarmEventHandler?.(scrubbed);
+    if (this.listeners.length === 0) {
+      this.eventQueue.push(scrubbed);
+      return;
+    }
     for (const listener of this.listeners) {
       try {
         listener(scrubbed);

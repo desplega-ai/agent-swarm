@@ -170,12 +170,15 @@ test(
       expect(thread.config.model_reasoning_effort).toBe("max");
       expect(turn.effort).toBe("max");
       expect(result.appliedReasoningEffort).toBe("max");
-      expect(events.find((e) => e.type === "session_init")).toMatchObject({
-        harnessVariantMeta: {
-          observedModel: "thread-model-fixture",
-          observedReasoningEffort: "low",
+      expect(events.filter((e) => e.type === "session_init")).toMatchObject([
+        {
+          sessionId: "thread-1",
+          harnessVariantMeta: {
+            observedModel: "thread-model-fixture",
+            observedReasoningEffort: "low",
+          },
         },
-      });
+      ]);
       expect(
         events.some(
           (e) => e.type === "raw_stderr" && e.content.includes("low") && e.content.includes("max"),
