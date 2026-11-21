@@ -264,6 +264,12 @@ import {
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
+import {
+  newPromptTemplateRows,
+  type PromptTemplateUpsert,
+  resetPromptTemplateRows,
+  rowToPromptTemplate,
+} from "./db/prompt-templates";
 import { getDb, getDbClient } from "./db/runtime";
 import { storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
@@ -7109,20 +7115,6 @@ export async function getMetricVersion(
 // Prompt Template Operations
 // ============================================================================
 
-type PromptTemplateRow = {
-  id: string;
-  eventType: string;
-  scope: string;
-  scopeId: string | null;
-  state: string;
-  body: string;
-  isDefault: number; // SQLite boolean
-  version: number;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
 type PromptTemplateHistoryRow = {
   id: string;
   templateId: string;
@@ -7133,22 +7125,6 @@ type PromptTemplateHistoryRow = {
   changedAt: string;
   changeReason: string | null;
 };
-
-function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
-  return {
-    id: row.id,
-    eventType: row.eventType,
-    scope: row.scope as "global" | "agent" | "repo",
-    scopeId: row.scopeId ?? null,
-    state: row.state as "enabled" | "default_prompt_fallback" | "skip_event",
-    body: row.body,
-    isDefault: row.isDefault === 1,
-    version: row.version,
-    createdBy: row.createdBy ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
 
 function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTemplateHistory {
   return {
@@ -7165,44 +7141,15 @@ function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTempla
 
 /**
  * List prompt templates with optional filters.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function getPromptTemplates(filters?: {
+export async function getPromptTemplates(filters?: {
   eventType?: string;
   scope?: string;
   scopeId?: string;
   isDefault?: boolean;
-}): PromptTemplate[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.eventType) {
-    conditions.push("eventType = ?");
-    params.push(filters.eventType);
-  }
-  if (filters?.scope) {
-    conditions.push("scope = ?");
-    params.push(filters.scope);
-  }
-  if (filters?.scopeId) {
-    conditions.push("scopeId = ?");
-    params.push(filters.scopeId);
-  }
-  if (filters?.isDefault !== undefined) {
-    conditions.push("isDefault = ?");
-    params.push(filters.isDefault ? 1 : 0);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
-
-  return getDb()
-    .prepare<PromptTemplateRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToPromptTemplate);
+}): Promise<PromptTemplate[]> {
+  const rows = await getStorage().repos.promptTemplates.listPromptTemplates(filters ?? {});
+  return rows.map(rowToPromptTemplate);
 }
 
 /**
@@ -7216,128 +7163,57 @@ export async function getPromptTemplateById(id: string): Promise<PromptTemplate 
 /**
  * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
  * Creates a history entry on both insert and update.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function upsertPromptTemplate(data: {
-  eventType: string;
-  scope: "global" | "agent" | "repo";
-  scopeId?: string | null;
-  state?: "enabled" | "default_prompt_fallback" | "skip_event";
-  body: string;
-  createdBy?: string | null;
-  changedBy?: string | null;
-  changeReason?: string | null;
-  isDefault?: boolean;
-}): PromptTemplate {
+export async function upsertPromptTemplate(data: PromptTemplateUpsert): Promise<PromptTemplate> {
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
   const state = data.state ?? "enabled";
-  const createdBy = data.createdBy ?? data.changedBy ?? null;
   const changedBy = data.changedBy ?? data.createdBy ?? null;
   const changeReason = data.changeReason ?? null;
 
-  // Manual check for existing entry because SQLite's UNIQUE constraint
-  // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
-  const existing =
-    scopeId === null
-      ? getDb()
-          .prepare<PromptTemplateRow, [string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(data.eventType, data.scope)
-      : getDb()
-          .prepare<PromptTemplateRow, [string, string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
-          )
-          .get(data.eventType, data.scope, scopeId);
+  // One transaction around the existence check and both writes: the
+  // synchronous version ran them without yielding the event loop.
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    // Manual check for existing entry because SQLite's UNIQUE constraint
+    // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
+    const existing = await templates.findPromptTemplateAtScope(data.eventType, data.scope, scopeId);
 
-  let row: PromptTemplateRow | null;
+    if (existing) {
+      // If upserting at global scope and existing record has isDefault=true, flip it to false
+      const newIsDefault =
+        data.scope === "global" && existing.isDefault === 1 ? false : existing.isDefault === 1;
+      const newVersion = existing.version + 1;
 
-  if (existing) {
-    // If upserting at global scope and existing record has isDefault=true, flip it to false
-    const newIsDefault =
-      data.scope === "global" && existing.isDefault === 1 ? 0 : existing.isDefault;
-    const newVersion = existing.version + 1;
+      const updated = await templates.updatePromptTemplateRecord(existing.id, {
+        body: data.body,
+        state,
+        isDefault: newIsDefault,
+        version: newVersion,
+        updatedAt: now,
+      });
 
-    row = getDb()
-      .prepare<PromptTemplateRow, [string, string, number, number, string, string]>(
-        `UPDATE prompt_templates SET body = ?, state = ?, isDefault = ?, version = ?, updatedAt = ?
-         WHERE id = ? RETURNING *`,
-      )
-      .get(data.body, state, newIsDefault, newVersion, now, existing.id);
-
-    // Create history entry for the update
-    getDb()
-      .prepare(
-        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        crypto.randomUUID(),
-        existing.id,
-        newVersion,
-        data.body,
+      // Create history entry for the update
+      await templates.insertPromptTemplateHistory({
+        id: crypto.randomUUID(),
+        templateId: existing.id,
+        version: newVersion,
+        body: data.body,
         state,
         changedBy,
-        now,
+        changedAt: now,
         changeReason,
-      );
-  } else {
-    const id = crypto.randomUUID();
-    row = getDb()
-      .prepare<
-        PromptTemplateRow,
-        [
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          string,
-          number,
-          number,
-          string | null,
-          string,
-          string,
-        ]
-      >(
-        `INSERT INTO prompt_templates (id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      )
-      .get(
-        id,
-        data.eventType,
-        data.scope,
-        scopeId,
-        state,
-        data.body,
-        data.isDefault ? 1 : 0,
-        1,
-        createdBy,
-        now,
-        now,
-      );
+      });
+      return updated;
+    }
 
+    const created = newPromptTemplateRows(data, scopeId, now);
+    const inserted = await templates.insertPromptTemplate(created.row);
     // Create history entry for the insert
-    getDb()
-      .prepare(
-        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        crypto.randomUUID(),
-        id,
-        1,
-        data.body,
-        state,
-        changedBy,
-        now,
-        changeReason ?? "Initial creation",
-      );
-  }
+    await templates.insertPromptTemplateHistory(created.history);
+    return inserted;
+  });
 
   if (!row) throw new Error("Failed to upsert prompt template");
   return rowToPromptTemplate(row);
@@ -7363,46 +7239,27 @@ export async function deletePromptTemplate(id: string): Promise<boolean> {
 /**
  * Reset a prompt template to its default state.
  * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+export async function resetPromptTemplateToDefault(
+  id: string,
+  defaultBody: string,
+): Promise<PromptTemplate> {
   const now = new Date().toISOString();
-  const existing = getDb()
-    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
-    .get(id);
+  // One transaction: the synchronous version read and wrote without yielding.
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    const existing = await templates.findPromptTemplate(id);
+    if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-  if (!existing) throw new Error(`Prompt template ${id} not found`);
+    const reset = resetPromptTemplateRows(id, existing.version, defaultBody, now);
+    const updated = await templates.updatePromptTemplateRecord(id, reset.update);
+    if (!updated) throw new Error("Failed to reset prompt template to default");
 
-  const newVersion = existing.version + 1;
-
-  const row = getDb()
-    .prepare<PromptTemplateRow, [string, number, string, string]>(
-      `UPDATE prompt_templates SET body = ?, state = 'enabled', isDefault = 1, version = ?, updatedAt = ?
-       WHERE id = ? RETURNING *`,
-    )
-    .get(defaultBody, newVersion, now, id);
-
-  if (!row) throw new Error("Failed to reset prompt template to default");
-
-  // Create history entry
-  getDb()
-    .prepare(
-      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      crypto.randomUUID(),
-      id,
-      newVersion,
-      defaultBody,
-      "enabled",
-      null,
-      now,
-      "Reset to default",
-    );
+    // Create history entry
+    await templates.insertPromptTemplateHistory(reset.history);
+    return updated;
+  });
 
   return rowToPromptTemplate(row);
 }
@@ -7431,49 +7288,18 @@ export async function getPromptTemplateHistory(
  *   - 'enabled': return the template
  *   - 'skip_event': return { skip: true }
  *   - 'default_prompt_fallback': continue to next scope level
- *
- * DEFERRED (boot-path rule): injected as `src/prompts/resolver.ts`'s
- * `dbResolverFn` via `configureDbResolver` (called from `initDb`'s body) and
- * invoked synchronously, on every render, by that module's still-sync
- * `resolveTemplate()` / `resolveTemplateViaDb()` / `expandTemplateRefs()` —
- * a public API used pervasively across GitHub/GitLab/Linear/Jira/Slack/
- * agentmail handlers, heartbeat, and workflows. Converting this function
- * would force `resolveTemplate()` itself async, cascading into dozens of
- * unrelated call sites outside this batch's blast radius. Stays on the raw
- * sync handle; `resolveTemplateAsync()` already exists as the async path for
- * callers that need one.
  */
-export function resolvePromptTemplate(
+export async function resolvePromptTemplate(
   eventType: string,
   agentId?: string,
   repoId?: string,
-): { template: PromptTemplate } | { skip: true } | null {
-  // Helper to look up a template at a specific scope
-  const lookupAtScope = (
-    et: string,
-    scope: "global" | "agent" | "repo",
-    scopeId: string | null,
-  ): PromptTemplateRow | undefined => {
-    if (scopeId === null) {
-      return (
-        getDb()
-          .prepare<PromptTemplateRow, [string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(et, scope) ?? undefined
-      );
-    }
-    return (
-      getDb()
-        .prepare<PromptTemplateRow, [string, string, string]>(
-          "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
-        )
-        .get(et, scope, scopeId) ?? undefined
-    );
-  };
+): Promise<{ template: PromptTemplate } | { skip: true } | null> {
+  const templates = getStorage().repos.promptTemplates;
 
   // Try resolution at the scope chain for a given eventType string
-  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+  const tryResolve = async (
+    et: string,
+  ): Promise<{ template: PromptTemplate } | { skip: true } | "continue"> => {
     // Build scope chain: agent → repo → global
     const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
     if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
@@ -7481,7 +7307,7 @@ export function resolvePromptTemplate(
     scopeChain.push({ scope: "global", scopeId: null });
 
     for (const { scope, scopeId } of scopeChain) {
-      const row = lookupAtScope(et, scope, scopeId);
+      const row = await templates.findPromptTemplateAtScope(et, scope, scopeId);
       if (!row) continue;
 
       if (row.state === "enabled") {
@@ -7497,7 +7323,7 @@ export function resolvePromptTemplate(
   };
 
   // Pass 1: exact match
-  const exactResult = tryResolve(eventType);
+  const exactResult = await tryResolve(eventType);
   if (exactResult !== "continue") return exactResult;
 
   // Pass 2: wildcard matching
@@ -7509,7 +7335,7 @@ export function resolvePromptTemplate(
   }
 
   for (const wildcard of wildcards) {
-    const wildcardResult = tryResolve(wildcard);
+    const wildcardResult = await tryResolve(wildcard);
     if (wildcardResult !== "continue") return wildcardResult;
   }
 

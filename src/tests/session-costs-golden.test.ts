@@ -82,7 +82,7 @@ let agentId: string;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  seedPricingFromModelsDev({ quiet: true });
+  await seedPricingFromModelsDev({ quiet: true });
   agentId = (await createAgent({ name: "session-cost-golden", isLead: false, status: "idle" })).id;
   server = createTestServer(API_KEY);
   port = await listenOnFreePort(server);

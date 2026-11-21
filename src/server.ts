@@ -444,13 +444,13 @@ export async function createServer(
 
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0). This runs
-  // once per database handle, not once per MCP session: the seed is a
-  // synchronous 8.6 MB parse plus a write transaction, and createServer() runs
+  // once per database handle, not once per MCP session: the seed is an
+  // 8.6 MB parse plus a write transaction, and createServer() runs
   // on every `POST /mcp` session init. The HTTP boot path seeds first, so
   // sessions normally skip it; standalone callers (stdio, tests) seed here.
   // See src/be/seed-pricing.ts for the projection logic and the
   // manual-override constants for runtime-fee / ACU pricing.
-  ensurePricingSeeded();
+  await ensurePricingSeeded();
   startPricingRefreshLoop();
   try {
     await ensureModelProfilesSeeded();
@@ -479,7 +479,7 @@ export async function createServer(
     },
     {
       ...(opts.preloadedTools?.length
-        ? { instructions: resolveTemplate("system.agent.tool_preload", {}).text }
+        ? { instructions: (await resolveTemplate("system.agent.tool_preload", {})).text }
         : {}),
       capabilities: {
         logging: {},

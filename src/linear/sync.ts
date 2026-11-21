@@ -620,7 +620,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const requestSection = buildSessionRequestSection(event, actorName);
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
   const templateName = existing ? "linear.issue.reassigned" : "linear.issue.assigned";
-  const templateResult = resolveTemplate(templateName, {
+  const templateResult = await resolveTemplate(templateName, {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,
@@ -916,7 +916,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     promptedSampleContext,
   );
 
-  const followupResult = resolveTemplate("linear.issue.followup", {
+  const followupResult = await resolveTemplate("linear.issue.followup", {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,

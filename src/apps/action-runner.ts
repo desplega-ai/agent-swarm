@@ -136,7 +136,7 @@ export async function runAppAction({
   }
 
   const lead = action.agentId ? null : await getLeadAgent();
-  const taskPrompt = resolveTemplate("task.app.action", {
+  const taskPrompt = await resolveTemplate("task.app.action", {
     prompt: action.prompt,
     app_id: app.id,
     action_name: name,

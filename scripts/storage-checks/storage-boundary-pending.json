@@ -1,19 +1,11 @@
 {
-  "src/be/boot-seeds.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 1
-  },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 19
+    "sites": 7
   },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 5
-  },
-  "src/be/key-window-usage.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
   },
   "src/be/memory/embedding-space.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
@@ -38,10 +30,6 @@
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
-  },
-  "src/be/seed-pricing.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
   },
   "src/be/seed-scripts/catalog/boot-triage.inline.ts": {
     "reason": "M2 move: seeded db-query scripts (M4 step 4)",

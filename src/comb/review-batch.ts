@@ -458,7 +458,7 @@ async function renderTaskText(
     const comment = (thread as AgentFsCommentThread).comment;
     const path = combPath(comment.path);
     const quote = comment.quote?.exact ?? comment.quotedContent;
-    const block = resolveTemplate("comb.review.comment", {
+    const block = await resolveTemplate("comb.review.comment", {
       comment_id: comment.id,
       author: comment.authorDisplayName
         ? `${oneLine(comment.authorDisplayName)} (agent-fs user ${comment.author})`
@@ -474,7 +474,7 @@ async function renderTaskText(
     blocks.push(block.text);
   }
   const scopePath = combPath(input.scopePath);
-  const batch = resolveTemplate("comb.review.batch", {
+  const batch = await resolveTemplate("comb.review.batch", {
     comment_count: reads.length,
     scope_path: scopePath,
     scope_url: combUrl(input, scopePath),

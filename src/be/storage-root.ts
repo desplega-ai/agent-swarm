@@ -3,14 +3,27 @@
  * package (check:dep-graph). Everything else in `src/` imports the contracts
  * package `@desplega/storage` and asks `getStorage()` for repositories.
  */
-import type { DbClient, StatementObserver, Storage } from "@desplega/storage";
+import type {
+  DbClient,
+  PromptTemplateFilters,
+  PromptTemplateHistoryRow,
+  PromptTemplateRecordUpdate,
+  PromptTemplateRow,
+  StatementObserver,
+  Storage,
+} from "@desplega/storage";
 import {
   type BusyRetryOptions,
   createBunSqliteClient,
   createSqliteStorage,
+  insertPromptTemplateHistorySync,
+  insertPromptTemplateSync,
+  listPromptTemplatesSync,
   isInTransaction as sqliteIsInTransaction,
+  updatePromptTemplateRecordSync,
 } from "@desplega/storage-sqlite";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { getDb } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
 
 export type { BusyRetryOptions };
@@ -63,10 +76,36 @@ export function createStorage(client: DbClient, options: { vectorSearch: boolean
   return createSqliteStorage(client, options);
 }
 
+/**
+ * The live engine handle. Its identity changes when the database is closed
+ * and opened again, so once-per-database guards key on it (src/be/boot-seeds.ts).
+ * SQLite: the current bun:sqlite Database.
+ */
+export function currentEngineHandle(): object {
+  return getDb();
+}
+
+/**
+ * The default prompt-template seed's statements on the synchronous SQLite
+ * start path (it runs inside initDb, over the handle being opened).
+ */
+export const promptTemplateSqliteStart = {
+  list: (filters: PromptTemplateFilters): PromptTemplateRow[] =>
+    listPromptTemplatesSync(getDb(), filters),
+  insert: (row: PromptTemplateRow): PromptTemplateRow | null =>
+    insertPromptTemplateSync(getDb(), row),
+  updateRecord: (id: string, c: PromptTemplateRecordUpdate): PromptTemplateRow | null =>
+    updatePromptTemplateRecordSync(getDb(), id, c),
+  insertHistory: (row: PromptTemplateHistoryRow): void =>
+    insertPromptTemplateHistorySync(getDb(), row),
+};
+
 // SQLite boot (the synchronous start path of the SQLite engine).
 // The memory full-text backfill statements, for the query-plan test.
 // Retention statement texts, for the query-plan tests (src/be/db-retention.ts,
 // src/be/db/workflow-run-retention.ts re-export them under their old names).
+// The credential window usage statement text, for its query-plan test
+// (src/be/key-window-usage.ts re-exports it under the same name).
 // User-reference statement texts, for the user-delete query-plan test
 // (src/be/db/user-references.ts re-exports them under their old names).
 export {
@@ -81,6 +120,7 @@ export {
   findDefaultOAuthAuthorization,
   hasEncryptedSecretRows,
   isEmptySqliteDatabase,
+  KEY_WINDOW_USAGE_SQL,
   type LegacyCredentialBinding,
   listCredentialBindingBlobs,
   listPlaintextOAuthSecrets,

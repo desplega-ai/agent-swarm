@@ -260,6 +260,28 @@ export type BudgetRefusalNotificationRow = {
 
 export type NewBudgetRefusalNotification = Omit<BudgetRefusalNotificationRow, "follow_up_task_id">;
 
+/** The most rows `listKeyWindowUsageRows` reads before it stops (it returns one more). */
+export const KEY_WINDOW_USAGE_MAX_ROWS = 100_000;
+
+/** One session of a credential window usage read (see `listKeyWindowUsageRows`). */
+export type KeyWindowUsageRow = {
+  taskId: string | null;
+  credentialKeyType: string | null;
+  credentialKeySuffix: string | null;
+  harness: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningOutputTokens: number;
+  thinkingTokens: number;
+  model: string;
+  modelBreakdown: string | null;
+  isError: number;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
 export type PricingRowDb = {
   provider: string;
   model: string;
@@ -536,6 +558,18 @@ export interface SessionsRepository {
   dailySpendGlobal(dateUtc: string): Promise<number>;
   /** Sum of `totalCostUsd` of sessions whose task the user requested, on a UTC day. */
   dailySpendForUser(userId: string, dateUtc: string): Promise<number>;
+  /**
+   * The sessions of the given credentials in [start, through): the receipt rows
+   * created in the range, the older rows of tasks completed in the range, and
+   * one marker row (credential null) per harness session without a credential.
+   * At most `KEY_WINDOW_USAGE_MAX_ROWS + 1` rows; the caller rejects more.
+   * Unordered: the caller groups and sorts what it needs.
+   */
+  listKeyWindowUsageRows(
+    credentials: { keyType: string; keySuffix: string }[],
+    start: string,
+    through: string,
+  ): Promise<KeyWindowUsageRow[]>;
 
   // ---- request_composition ----
   countRequestCompositionsByTask(taskId: string): Promise<number>;
@@ -619,6 +653,16 @@ export interface SessionsRepository {
   ): Promise<PricingRowDb | null>;
   /** Plain insert: a primary key collision throws. */
   insertPricingRow(row: PricingRowDb): Promise<void>;
+  /**
+   * Inserts one boot-seed rate at `effective_from` 0 (createdAt and
+   * lastUpdatedAt 0); a row already there is kept. Returns true when inserted.
+   */
+  insertPricingSeedRow(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    pricePerMillionUsd: number,
+  ): Promise<boolean>;
   /** Keeps the newest `keepLatest` rows of each triple; returns the rows deleted. */
   prunePricingHistory(keepLatest: number): Promise<number>;
   deletePricingRow(
@@ -942,6 +986,11 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   abstract dailySpendForAgent(agentId: string, dateUtc: string): Promise<number>;
   abstract dailySpendGlobal(dateUtc: string): Promise<number>;
   abstract dailySpendForUser(userId: string, dateUtc: string): Promise<number>;
+  abstract listKeyWindowUsageRows(
+    credentials: { keyType: string; keySuffix: string }[],
+    start: string,
+    through: string,
+  ): Promise<KeyWindowUsageRow[]>;
 
   // ---- request_composition ----
 
@@ -1080,6 +1129,12 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
 
   /** `INSERT OR IGNORE` also ignores CHECK and NOT NULL failures: kept per engine. */
   abstract insertBudgetRefusalNotification(row: NewBudgetRefusalNotification): Promise<number>;
+  abstract insertPricingSeedRow(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    pricePerMillionUsd: number,
+  ): Promise<boolean>;
 
   findBudgetRefusalNotification(
     taskId: string,

@@ -318,7 +318,7 @@ export async function handlePullRequestCreated(body: unknown): Promise<HandlerRe
     const templateId = mentioned
       ? "bitbucket.pull_request.opened"
       : "bitbucket.pull_request.review_requested";
-    const result = resolveTemplate(templateId, {
+    const result = await resolveTemplate(templateId, {
       pr_id: pr.id,
       pr_title: pr.title,
       repo,
@@ -385,7 +385,7 @@ export async function handlePullRequestCommentCreated(body: unknown): Promise<Ha
       ? `File: ${comment.inline.path}${line != null ? `:${line}` : ""}\n`
       : "";
 
-    const result = resolveTemplate("bitbucket.comment.mentioned", {
+    const result = await resolveTemplate("bitbucket.comment.mentioned", {
       pr_id: pr.id,
       pr_title: pr.title,
       username: await renderBitbucketIdentity(author),

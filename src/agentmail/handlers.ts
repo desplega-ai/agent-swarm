@@ -39,7 +39,7 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
     if (items.length === 0) return;
     const first = items[0]!;
     const combinedPreview = items.map((m) => m.preview).join("\n---\n");
-    const followupResult = resolveTemplate("agentmail.email.followup", {
+    const followupResult = await resolveTemplate("agentmail.email.followup", {
       from: first.from,
       subject: first.subject,
       inbox_id: first.inboxId,
@@ -258,7 +258,7 @@ export async function handleMessageReceived(
     }
 
     // Create a follow-up task with parentTaskId to continue the session
-    const followupResult = resolveTemplate("agentmail.email.followup", {
+    const followupResult = await resolveTemplate("agentmail.email.followup", {
       from: senderDisplay,
       subject,
       inbox_id,
@@ -302,7 +302,7 @@ export async function handleMessageReceived(
     if (agent) {
       if (agent.isLead) {
         // Route to lead as task
-        const leadResult = resolveTemplate("agentmail.email.mapped_lead", {
+        const leadResult = await resolveTemplate("agentmail.email.mapped_lead", {
           from: senderDisplay,
           subject,
           inbox_id,
@@ -339,7 +339,7 @@ export async function handleMessageReceived(
       }
 
       // Route to worker as task
-      const workerResult = resolveTemplate("agentmail.email.mapped_worker", {
+      const workerResult = await resolveTemplate("agentmail.email.mapped_worker", {
         from: senderDisplay,
         subject,
         inbox_id,
@@ -378,7 +378,7 @@ export async function handleMessageReceived(
   // No mapping found - route to lead as task
   const lead = await findLeadAgent();
   if (lead) {
-    const unmappedResult = resolveTemplate("agentmail.email.unmapped", {
+    const unmappedResult = await resolveTemplate("agentmail.email.unmapped", {
       from: senderDisplay,
       subject,
       inbox_id,
@@ -415,7 +415,7 @@ export async function handleMessageReceived(
   }
 
   // No lead available - create unassigned task
-  const noAgentResult = resolveTemplate("agentmail.email.no_agent", {
+  const noAgentResult = await resolveTemplate("agentmail.email.no_agent", {
     from: senderDisplay,
     subject,
     inbox_id,

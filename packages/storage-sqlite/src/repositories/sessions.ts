@@ -3,6 +3,7 @@ import {
   type BudgetRefusalNotificationRow,
   EMPTY,
   type KeyCostSummaryRow,
+  type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
   type RequestCompositionRow,
   type SessionCostAgentSummaryRow,
@@ -32,6 +33,7 @@ import {
   sqlWhere,
   type TaskAncestorRow,
 } from "@desplega/storage";
+import { keyWindowUsageQuery } from "./key-window-usage";
 import {
   legacySessionSummarySql,
   SESSION_ROOTS,
@@ -306,6 +308,14 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     return row?.total ?? 0;
   }
 
+  listKeyWindowUsageRows(
+    credentials: { keyType: string; keySuffix: string }[],
+    start: string,
+    through: string,
+  ): Promise<KeyWindowUsageRow[]> {
+    return this.db.query<KeyWindowUsageRow>(keyWindowUsageQuery(credentials, start, through));
+  }
+
   async dailySpendForUser(userId: string, dateUtc: string): Promise<number> {
     const row = await this.db.get<SumRow>(sql`
       SELECT COALESCE(SUM(sc."totalCostUsd"), 0) AS total
@@ -419,6 +429,19 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
   }
 
   // ---- budget_refusal_notifications ----
+
+  async insertPricingSeedRow(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    pricePerMillionUsd: number,
+  ): Promise<boolean> {
+    const result = await this.db.run(sql`
+      INSERT OR IGNORE INTO pricing
+        (provider, model, token_class, effective_from, price_per_million_usd, "createdAt", "lastUpdatedAt")
+      VALUES (${provider}, ${model}, ${tokenClass}, 0, ${pricePerMillionUsd}, 0, 0)`);
+    return result.changes > 0;
+  }
 
   async insertBudgetRefusalNotification(row: NewBudgetRefusalNotification): Promise<number> {
     const result = await this.db.run(sql`

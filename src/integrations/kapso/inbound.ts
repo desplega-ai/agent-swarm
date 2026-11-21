@@ -48,15 +48,17 @@ async function buildTaskDescription(payload: KapsoWebhookPayload): Promise<strin
   const contactDisplay = externalId
     ? renderIdentity(await resolveKapsoIdentity(externalId))
     : "(unknown user)";
-  return resolveTemplate("kapso.message.received", {
-    conversation_id: conversation.id ?? "unknown",
-    inbound_wamid: message.id ?? "unknown",
-    sender_phone: message.from ?? conversation.phone_number ?? "unknown",
-    contact_name: contactDisplay,
-    phone_number_id: payload.phone_number_id ?? "unknown",
-    test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
-    message_text: extractText(message),
-  }).text;
+  return (
+    await resolveTemplate("kapso.message.received", {
+      conversation_id: conversation.id ?? "unknown",
+      inbound_wamid: message.id ?? "unknown",
+      sender_phone: message.from ?? conversation.phone_number ?? "unknown",
+      contact_name: contactDisplay,
+      phone_number_id: payload.phone_number_id ?? "unknown",
+      test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
+      message_text: extractText(message),
+    })
+  ).text;
 }
 
 function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
