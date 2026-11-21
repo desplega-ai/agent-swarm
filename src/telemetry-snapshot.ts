@@ -79,7 +79,7 @@ export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot>
         WHERE requestedByUserId IS NOT NULL AND createdAt >= ?`,
       [since],
     ),
-    count(`SELECT COUNT(*) AS n FROM agents`),
+    getStorage().repos.agents.countAllAgents(),
   ]);
   return {
     users_total: usersTotal,

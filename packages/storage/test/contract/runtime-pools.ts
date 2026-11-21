@@ -873,5 +873,15 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       await repo.markControllerDisconnected("rc", T0);
       expect(await row()).toMatchObject({ status: "offline", last_seen_at: T0, updated_at: T0 });
     });
+
+    test("setRuntimeTask sets task_id only on the agent's own runtime", async () => {
+      await agent("a1");
+      await agent("a2");
+      await runtime("rt", "a1");
+      await repo.setRuntimeTask("rt", "a2", "t-x");
+      expect(await runtimeRow("rt")).toMatchObject({ task_id: null });
+      await repo.setRuntimeTask("rt", "a1", "t-1");
+      expect(await runtimeRow("rt")).toMatchObject({ task_id: "t-1" });
+    });
   });
 }

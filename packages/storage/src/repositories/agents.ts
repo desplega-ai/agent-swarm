@@ -367,6 +367,8 @@ export interface AgentsRepository {
   >;
   /** Every agent row, extension identities included. */
   countAllAgents(): Promise<number>;
+  /** Agents that are not extension identities. */
+  countNonExtensionAgents(): Promise<number>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -892,5 +894,12 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   async countAllAgents(): Promise<number> {
     const row = await this.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM agents`);
     return row?.n ?? 0;
+  }
+
+  async countNonExtensionAgents(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM agents WHERE ${notExtension}`,
+    );
+    return row?.count ?? 0;
   }
 }

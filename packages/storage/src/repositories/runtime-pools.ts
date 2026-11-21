@@ -488,6 +488,8 @@ export interface RuntimePoolsRepository {
   touchControllerSeen(id: string, now: string): Promise<void>;
   /** Marks the controller offline, whatever its status, with updated_at and last_seen_at. */
   markControllerDisconnected(id: string, now: string): Promise<void>;
+  /** Sets the runtime's current task id (scoped to its agent). */
+  setRuntimeTask(runtimeId: string, agentId: string, taskId: string): Promise<void>;
 }
 
 const CONTROLLER_COLUMNS = sql`id, name, kind, placement, config, secret_config AS "secretConfig",
@@ -1233,6 +1235,12 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
     await this.db.run(sql`
       UPDATE runtime_controllers SET status = 'offline', updated_at = ${now}, last_seen_at = ${now}
        WHERE id = ${id}`);
+  }
+
+  async setRuntimeTask(runtimeId: string, agentId: string, taskId: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_instances SET task_id = ${taskId}
+       WHERE id = ${runtimeId} AND agent_id = ${agentId}`);
   }
 }
 

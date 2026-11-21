@@ -437,5 +437,13 @@ export function agentsContract(engine: ContractEngine): void {
       ]);
       expect(await repo.countAllAgents()).toBe(3);
     });
+
+    test("countNonExtensionAgents skips extension identities", async () => {
+      await repo.insertAgent(newAgent({ id: "c1" }));
+      await repo.insertAgent(newAgent({ id: "c2" }));
+      await storage.executor.run(sql`UPDATE agents SET role = 'extension' WHERE id = 'c2'`);
+      expect(await repo.countNonExtensionAgents()).toBe(1);
+      expect(await repo.countAllAgents()).toBe(2);
+    });
   });
 }
