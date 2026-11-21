@@ -1,0 +1,188 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { isConstraintViolation } from "@desplega/storage";
+import { createPostgresClient, type PostgresClient } from "../src";
+import { createScratchDatabase, type ScratchDatabase } from "./scratch";
+
+// The driver seam on Postgres: pool, pinned transactions, savepoints, the
+// D6 retry and hook rules, the tx-replay mode, and the typed errors.
+
+let scratch: ScratchDatabase;
+let client: PostgresClient;
+
+beforeAll(async () => {
+  scratch = await createScratchDatabase("client");
+  client = createPostgresClient(scratch.url, { max: 4 });
+  await client.run(
+    `CREATE TABLE t (id text PRIMARY KEY, "camelCol" text NOT NULL, n integer CHECK (n >= 0))`,
+  );
+  await client.run(`CREATE TABLE c (id text PRIMARY KEY, "tId" text REFERENCES t(id))`);
+});
+
+afterAll(async () => {
+  await client.close();
+  await scratch.drop();
+});
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe("postgres client", () => {
+  test("run counts changed rows; get returns the first row or null", async () => {
+    expect(
+      (
+        await client.run(`INSERT INTO t VALUES ($1, $2, $3), ($4, $5, $6)`, [
+          "a",
+          "A",
+          1,
+          "b",
+          "B",
+          2,
+        ])
+      ).changes,
+    ).toBe(2);
+    expect(await client.get(`SELECT "camelCol" FROM t WHERE id = $1`, ["a"])).toEqual({
+      camelCol: "A",
+    });
+    expect(await client.get(`SELECT * FROM t WHERE id = $1`, ["zz"])).toBeNull();
+    expect((await client.run(`UPDATE t SET n = n + 1`)).changes).toBe(2);
+  });
+
+  test("a transaction pins one connection; client calls inside join it", async () => {
+    const pids = await client.transaction(async () => {
+      const a = await client.get<{ p: number }>(`SELECT pg_backend_pid() AS p`);
+      await Promise.all([client.query(`SELECT 1`), client.query(`SELECT 2`)]);
+      const b = await client.get<{ p: number }>(`SELECT pg_backend_pid() AS p`);
+      return [a?.p, b?.p];
+    });
+    expect(pids[0]).toBe(pids[1]);
+  });
+
+  test("a nested transaction is a savepoint: its failure keeps the outer one usable", async () => {
+    await client.transaction(async () => {
+      await client.run(`INSERT INTO t VALUES ('s1', 'x', 0)`);
+      let caught: unknown;
+      try {
+        await client.transaction(async () => {
+          await client.run(`INSERT INTO t VALUES ('s1', 'dup', 0)`);
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(isConstraintViolation(caught, "unique")).toBe(true);
+      await client.run(`INSERT INTO t VALUES ('s2', 'y', 0)`);
+    });
+    const rows = await client.query<{ id: string }>(
+      `SELECT id FROM t WHERE id IN ('s1', 's2') ORDER BY id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(["s1", "s2"]);
+  });
+
+  test("constraint errors carry the SQLite text and code", async () => {
+    const errorOf = async (text: string) => {
+      try {
+        await client.run(text);
+      } catch (err) {
+        return err as Error & { code?: string; kind?: string };
+      }
+      throw new Error("no error");
+    };
+    const unique = await errorOf(`INSERT INTO t VALUES ('a', 'again', 0)`);
+    expect(unique.message).toBe("UNIQUE constraint failed: t.id");
+    expect(unique.code).toBe("SQLITE_CONSTRAINT_UNIQUE");
+    const fk = await errorOf(`INSERT INTO c VALUES ('c1', 'nope')`);
+    expect(fk.message).toBe("FOREIGN KEY constraint failed");
+    expect(isConstraintViolation(fk, "foreignKey")).toBe(true);
+    const notNull = await errorOf(`INSERT INTO t (id) VALUES ('nn')`);
+    expect(notNull.message).toBe("NOT NULL constraint failed: t.camelCol");
+    const check = await errorOf(`INSERT INTO t VALUES ('ck', 'x', -1)`);
+    expect(isConstraintViolation(check, "check")).toBe(true);
+  });
+
+  test("afterCommit runs after COMMIT; a rolled-back transaction runs only its rollback hooks", async () => {
+    const seen: string[] = [];
+    await client.transaction(async () => {
+      client.afterCommit(() => {
+        seen.push("commit");
+      });
+      client.afterRollback(() => seen.push("rollback"));
+      client.onAttemptRollback(() => seen.push("attempt"));
+    });
+    await tick();
+    expect(seen).toEqual(["commit"]);
+
+    seen.length = 0;
+    await expect(
+      client.transaction(async () => {
+        client.afterCommit(() => {
+          seen.push("commit");
+        });
+        client.afterRollback(() => seen.push("rollback"));
+        client.onAttemptRollback(() => seen.push("attempt"));
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await tick();
+    expect(seen).toEqual(["attempt", "rollback"]);
+  });
+
+  test("a serialization failure retries the whole callback; failed attempts' hooks are discarded", async () => {
+    await client.run(`INSERT INTO t VALUES ('ctr', 'x', 0)`);
+    const commits: number[] = [];
+    let attempts = 0;
+    let attemptRollbacks = 0;
+    const bump = (label: number) =>
+      client.transaction(async () => {
+        attempts++;
+        client.onAttemptRollback(() => attemptRollbacks++);
+        const row = await client.get<{ n: number }>(`SELECT n FROM t WHERE id = 'ctr'`);
+        await Bun.sleep(30);
+        await client.run(`UPDATE t SET n = $1 WHERE id = 'ctr'`, [(row?.n ?? 0) + 1]);
+        client.afterCommit(() => {
+          commits.push(label);
+        });
+      });
+    const before = client.retriedAttempts;
+    await Promise.all([bump(1), bump(2), bump(3)]);
+    await tick();
+    expect((await client.get<{ n: number }>(`SELECT n FROM t WHERE id = 'ctr'`))?.n).toBe(3);
+    expect(commits.sort()).toEqual([1, 2, 3]);
+    expect(client.retriedAttempts).toBeGreaterThan(before);
+    expect(attempts).toBe(3 + (client.retriedAttempts - before));
+    expect(attemptRollbacks).toBe(client.retriedAttempts - before);
+  });
+
+  test("tx-replay runs each outermost callback twice and keeps only the second run", async () => {
+    const replay = createPostgresClient(scratch.url, { max: 2, txReplay: true });
+    try {
+      let runs = 0;
+      const seen: string[] = [];
+      const value = await replay.transaction(async () => {
+        runs++;
+        await replay.run(`INSERT INTO t VALUES ($1, 'r', 0)`, [`replay-${runs}`]);
+        replay.afterCommit(() => {
+          seen.push(`commit-${runs}`);
+        });
+        replay.onAttemptRollback(() => seen.push("attempt"));
+        return runs;
+      });
+      await tick();
+      expect(runs).toBe(2);
+      expect(value).toBe(2);
+      expect(seen).toEqual(["attempt", "commit-2"]);
+      const rows = await replay.query<{ id: string }>(
+        `SELECT id FROM t WHERE id LIKE 'replay-%' ORDER BY id`,
+      );
+      expect(rows.map((r) => r.id)).toEqual(["replay-2"]);
+      expect(replay.replayedTransactions).toBe(1);
+    } finally {
+      await replay.close();
+    }
+  });
+
+  test("a read-only transaction rejects writes", async () => {
+    await expect(
+      client.transaction(async () => client.run(`INSERT INTO t VALUES ('ro', 'x', 0)`), {
+        readOnly: true,
+      }),
+    ).rejects.toThrow(/read-only transaction/);
+  });
+});

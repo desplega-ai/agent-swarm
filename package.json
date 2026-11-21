@@ -128,7 +128,7 @@
     "check:storage-boundary": "bun scripts/storage-checks/check-storage-boundary.ts",
     "check:sql-portability": "bun scripts/storage-checks/check-sql-portability.ts",
     "check:tx-callbacks": "bun scripts/storage-checks/check-tx-callbacks.ts",
-    "check:dep-graph": "depcruise src packages/model-routing packages/storage packages/storage-sqlite --config .dependency-cruiser.cjs",
+    "check:dep-graph": "depcruise src packages/model-routing packages/storage packages/storage-sqlite packages/storage-postgres --config .dependency-cruiser.cjs",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
     "check:rbac-coverage": "bun scripts/check-rbac-coverage.ts",

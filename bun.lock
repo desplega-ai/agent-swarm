@@ -251,6 +251,17 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/storage-postgres": {
+      "name": "@desplega/storage-postgres",
+      "version": "0.1.0",
+      "dependencies": {
+        "@desplega/storage": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
     "packages/storage-sqlite": {
       "name": "@desplega/storage-sqlite",
       "version": "0.1.0",
@@ -505,6 +516,8 @@
     "@desplega/model-routing": ["@desplega/model-routing@workspace:packages/model-routing"],
 
     "@desplega/storage": ["@desplega/storage@workspace:packages/storage"],
+
+    "@desplega/storage-postgres": ["@desplega/storage-postgres@workspace:packages/storage-postgres"],
 
     "@desplega/storage-sqlite": ["@desplega/storage-sqlite@workspace:packages/storage-sqlite"],
 
