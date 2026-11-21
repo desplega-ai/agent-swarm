@@ -367,14 +367,6 @@
     "reason": "M2 move: memory (M2, engine search parts M4)",
     "sites": 7
   },
-  "src/be/migrations/runner.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 12
-  },
-  "src/be/migrations/script-run-sources.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 4
-  },
   "src/be/model-catalog-store.ts": {
     "reason": "M2 move: models",
     "sites": 2

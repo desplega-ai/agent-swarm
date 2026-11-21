@@ -62,3 +62,11 @@ export function isInTransaction(): boolean {
 export function createStorage(client: DbClient, options: { vectorSearch: boolean }): Storage {
   return createSqliteStorage(client, options);
 }
+
+// SQLite boot (the synchronous start path of the SQLite engine).
+export {
+  assertNotEmptySqliteDatabase,
+  assertScriptRunSourceSchema,
+  backfillScriptRunSources,
+  runSqliteMigrations,
+} from "@desplega/storage-sqlite";

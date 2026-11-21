@@ -55,3 +55,9 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     inTransaction: () => client.inTransaction(),
   };
 }
+export {
+  assertNotEmptySqliteDatabase,
+  runSqliteMigrations,
+  type SqliteMigrationOptions,
+} from "./boot/migrations";
+export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
