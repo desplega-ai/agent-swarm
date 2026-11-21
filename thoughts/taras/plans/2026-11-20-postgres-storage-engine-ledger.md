@@ -37,7 +37,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 
 | # | Check | Last run | Result |
 |---|---|---|---|
-| 1 | `bun run e2e:strict` (SQLite) | M1 head `493630671` (15 min 34 s) | exit 0: 235 passed, 0 failed, 2 flaky (`model-group-resolution`, pre-existing; `trigger-chat-relay`, new, under investigation). The base-commit coverage gap (`in_progress`) is closed by the new scenarios. |
+| 1 | `bun run e2e:strict` (SQLite) | M1 head `c7d63f23e` (15 min 59 s) | **fail, pre-existing cause**: 235 passed, 0 failed, 2 flaky (`model-group-resolution` and `slack-lead-follow-up-card`, both scenarios that exist at the base commit, order below every new scenario; both passed on rerun). Strict gate fails only on the base-commit coverage gap `task-statuses: in_progress`. An earlier M1 run (`493630671`) exited 0 only because a stuck `trigger-chat-relay` task left an `in_progress` row; that flake is fixed in `c7d63f23e`. Open: close the `in_progress` gap honestly (a scenario that ends with a live claimed task) before the final commit. |
 | 8 | no change to base migration files | M0 | pass (no migration touched) |
 | 16 | existing gates | M1 head | pass: `lint`, `lint:slop`, `tsc:check:tsc` (after a type fix in the spike scripts), `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. Not run yet: `test:root -- --parallel=4`, `e2e:ui`. |
 
@@ -208,6 +208,9 @@ Not covered by M1 scenarios: age-based deletion in retention (the API cannot bac
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
+
+- Check 1 at the base commit and at M1 head: the strict gate needs an `in_progress` task row at the end of the run. Crash recovery reroutes the claimed tasks of earlier scenarios, so none survive. Fix in M2: add a parity scenario whose worker keeps a heartbeat and a claimed task until the run ends, or document a reasoned exclusion (an exclusion needs Taras-level care under section 10).
+- `slack-lead-follow-up-card` flaked once in four full runs on this host (load average up to 39 during the runs). Watch it in CI.
 
 - Size: 1,480 call sites and 2,454 statement strings. One session per milestone is not enough for M2 to M4.
 - jsonb string binding (spike finding above).
