@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -349,8 +350,8 @@ export abstract class BaseUsersRepository implements UsersRepository {
         id, name, email, role, notes, "emailAliases", "preferredChannel", timezone,
         metadata, "dailyBudgetUsd", status, avatar, "createdAt", "lastUpdatedAt"
       ) VALUES (
-        ${u.id}, ${u.name}, ${u.email}, ${u.role}, ${u.notes}, ${u.emailAliases}, ${u.preferredChannel}, ${u.timezone},
-        ${u.metadata}, ${u.dailyBudgetUsd}, ${u.status}, ${u.avatar}, ${u.now}, ${u.now}
+        ${u.id}, ${u.name}, ${u.email}, ${u.role}, ${u.notes}, ${jsonText(u.emailAliases)}, ${u.preferredChannel}, ${u.timezone},
+        ${jsonText(u.metadata)}, ${u.dailyBudgetUsd}, ${u.status}, ${u.avatar}, ${u.now}, ${u.now}
       ) RETURNING *`);
   }
 
@@ -360,11 +361,11 @@ export abstract class BaseUsersRepository implements UsersRepository {
     if (u.email !== undefined) sets.push(sql`email = ${u.email}`);
     if (u.role !== undefined) sets.push(sql`role = ${u.role}`);
     if (u.notes !== undefined) sets.push(sql`notes = ${u.notes}`);
-    if (u.emailAliases !== undefined) sets.push(sql`"emailAliases" = ${u.emailAliases}`);
+    if (u.emailAliases !== undefined) sets.push(sql`"emailAliases" = ${jsonText(u.emailAliases)}`);
     if (u.preferredChannel !== undefined)
       sets.push(sql`"preferredChannel" = ${u.preferredChannel}`);
     if (u.timezone !== undefined) sets.push(sql`timezone = ${u.timezone}`);
-    if (u.metadata !== undefined) sets.push(sql`metadata = ${u.metadata}`);
+    if (u.metadata !== undefined) sets.push(sql`metadata = ${jsonText(u.metadata)}`);
     if (u.dailyBudgetUsd !== undefined) sets.push(sql`"dailyBudgetUsd" = ${u.dailyBudgetUsd}`);
     if (u.status !== undefined) sets.push(sql`status = ${u.status}`);
     if (u.avatar !== undefined) sets.push(sql`avatar = ${u.avatar}`);
@@ -490,7 +491,7 @@ export abstract class BaseUsersRepository implements UsersRepository {
   async insertIdentityEvent(e: IdentityEventRow): Promise<void> {
     await this.db.run(sql`
       INSERT INTO user_identity_events (id, "userId", "eventType", actor, "beforeJson", "afterJson", "createdAt")
-      VALUES (${e.id}, ${e.userId}, ${e.eventType}, ${e.actor}, ${e.beforeJson}, ${e.afterJson}, ${e.createdAt})`);
+      VALUES (${e.id}, ${e.userId}, ${e.eventType}, ${e.actor}, ${jsonText(e.beforeJson)}, ${jsonText(e.afterJson)}, ${e.createdAt})`);
   }
 
   /** The newest-insert tiebreak differs per engine (SQLite `rowid`). */
@@ -637,7 +638,7 @@ export abstract class BaseUsersRepository implements UsersRepository {
 
   async saveMergeJobProgress(id: string, phase: string, progress: string): Promise<void> {
     await this.db.run(
-      sql`UPDATE user_merge_jobs SET phase = ${phase}, progress = ${progress} WHERE id = ${id}`,
+      sql`UPDATE user_merge_jobs SET phase = ${phase}, progress = ${jsonText(progress)} WHERE id = ${id}`,
     );
   }
 
@@ -656,7 +657,7 @@ export abstract class BaseUsersRepository implements UsersRepository {
   async markMergeJobDone(id: string, phase: string, progress: string, now: string): Promise<void> {
     await this.db.run(sql`
       UPDATE user_merge_jobs
-      SET status = 'done', phase = ${phase}, progress = ${progress}, error = NULL, "finishedAt" = ${now}
+      SET status = 'done', phase = ${phase}, progress = ${jsonText(progress)}, error = NULL, "finishedAt" = ${now}
       WHERE id = ${id}`);
   }
 
