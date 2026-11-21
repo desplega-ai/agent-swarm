@@ -143,6 +143,12 @@ export type HeadTable = {
   columns: HeadColumn[];
   /** Integer primary key that aliases the rowid (gets an identity on Postgres). */
   rowidAlias: string | null;
+  /**
+   * A rowid table with no INTEGER PRIMARY KEY alias. On Postgres it gets the
+   * surrogate column `_rowid` (identity, unique index `<table>__rowid_key`):
+   * code orders by rowid and the API exposes it (lead decision, M3).
+   */
+  surrogateRowid: boolean;
   uniques: string[][];
   checks: string[];
   foreignKeys: HeadForeignKey[];
@@ -288,6 +294,7 @@ function introspectTable(db: Database, name: string, sql: string, master: Master
     sql,
     columns,
     rowidAlias,
+    surrogateRowid: rowidAlias === null && !/WITHOUT\s+ROWID/i.test(sql),
     uniques,
     checks: extractChecks(sql),
     foreignKeys,
@@ -475,7 +482,15 @@ export type SeedTable = {
   rows: SeedValue[][];
   /** Columns whose value differs between two chain runs (clock or random). */
   volatile: string[];
+  /** The SQLite rowid of each row, for a table with a surrogate `_rowid`; else null. */
+  rowids: number[] | null;
 };
+
+/** Name of the Postgres surrogate for SQLite's rowid, and of its unique index. */
+export const ROWID_COLUMN = "_rowid";
+export function rowidIndexName(table: string): string {
+  return `${table}__rowid_key`;
+}
 
 /** Rows the chain inserts into an empty database, in rowid (insertion) order. */
 export function readSeeds(db: Database, schema: HeadSchema): SeedTable[] {
@@ -483,8 +498,9 @@ export function readSeeds(db: Database, schema: HeadSchema): SeedTable[] {
   for (const t of schema.tables) {
     const hasRowid = !/WITHOUT\s+ROWID/i.test(t.sql);
     const order = hasRowid ? " ORDER BY rowid" : "";
+    const select = t.surrogateRowid ? `rowid AS "__sqlite_rowid", *` : "*";
     const rows = db
-      .query<Record<string, SeedValue>, []>(`SELECT * FROM ${q(t.name)}${order}`)
+      .query<Record<string, SeedValue>, []>(`SELECT ${select} FROM ${q(t.name)}${order}`)
       .all();
     if (rows.length === 0) continue;
     const columns = t.columns.map((c) => c.name);
@@ -493,6 +509,7 @@ export function readSeeds(db: Database, schema: HeadSchema): SeedTable[] {
       columns,
       rows: rows.map((r) => columns.map((c) => r[c] ?? null)),
       volatile: [],
+      rowids: t.surrogateRowid ? rows.map((r) => Number(r.__sqlite_rowid)) : null,
     });
   }
   return out;
@@ -529,6 +546,9 @@ export async function readSeedsWithVolatility(): Promise<{
       });
     });
     s.volatile = s.columns.filter((c) => volatile.has(c));
+    if (JSON.stringify(s.rowids) !== JSON.stringify(other.rowids)) {
+      throw new Error(`seeded rowids of ${s.table} differ between two chain runs`);
+    }
   }
   return { db, schema, seeds };
 }
