@@ -443,15 +443,16 @@ export function seedPricingFromModelsDev(opts?: { quiet?: boolean }): {
      VALUES (?, ?, ?, 0, ?, 0, 0)`,
   );
 
-  let inserted = 0;
   const tx = db.transaction((rows: PricingSeedRow[]) => {
+    let count = 0;
     for (const row of rows) {
       const result = insert.run(row.provider, row.model, row.tokenClass, row.pricePerMillionUsd);
-      if (result.changes > 0) inserted += 1;
+      if (result.changes > 0) count += 1;
     }
+    return count;
   });
   // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
-  tx.immediate(allRows);
+  const inserted = tx.immediate(allRows);
 
   if (!opts?.quiet) {
     console.log(

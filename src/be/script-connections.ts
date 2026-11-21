@@ -1848,7 +1848,9 @@ export async function upsertScriptConnection(data: {
   const oldDerivedSecretKey = derivedInlineSecretKey(existingConnection);
   const newReferencedConfigKey =
     derived?.configKey ?? explicitBinding?.configKey ?? sqlDsnKey ?? null;
-  let supersededSecretDeleted = false;
+  const supersededSecretDeleted = Boolean(
+    oldDerivedSecretKey && oldDerivedSecretKey !== newReferencedConfigKey,
+  );
 
   // Connection row and its auto-managed binding form a reference cycle
   // (connection.credential_binding_id ↔ binding.managed_by_connection_id).
@@ -1867,13 +1869,12 @@ export async function upsertScriptConnection(data: {
       // Skip when the connection's binding still references that same key (same
       // slug + still inline, or a metadata-only rename that kept it) — it is not
       // orphaned. The old row lives under the EXISTING connection's scope.
-      if (oldDerivedSecretKey && oldDerivedSecretKey !== newReferencedConfigKey) {
+      if (supersededSecretDeleted && oldDerivedSecretKey) {
         await deleteManagedConnectionSecret({
           scope: existingConnection?.scope ?? scope,
           scopeId: existingConnection?.scopeId ?? scopeId,
           key: oldDerivedSecretKey,
         });
-        supersededSecretDeleted = true;
       }
 
       let credentialBindingId: string | null;
