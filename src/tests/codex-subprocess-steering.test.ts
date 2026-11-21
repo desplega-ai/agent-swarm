@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CodexAdapter } from "../providers/codex-adapter";
-import type { ProviderSession } from "../providers/types";
+import type { ProviderEvent, ProviderSession } from "../providers/types";
+import {
+  resetRuntimeModelCatalogForTests,
+  setRuntimeModelCatalog,
+} from "../utils/runtime-model-catalog";
 import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const originalArgv = process.env.AGENT_SWARM_CODEX_RUNNER_ARGV;
@@ -107,3 +114,80 @@ describe("Codex subprocess control channel", () => {
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
 });
+
+test(
+  "isolated Codex session forwards live-only effort and records the thread settings",
+  async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-live-effort-"));
+    const model = "gpt-live-catalog-fixture";
+    const requests = join(home, "requests.jsonl");
+    const events: ProviderEvent[] = [];
+    try {
+      setRuntimeModelCatalog({
+        openai: {
+          models: {
+            [model]: {
+              reasoning: true,
+              reasoning_options: [{ type: "effort", values: ["low", "max"] }],
+            },
+          },
+        },
+      });
+      process.env.AGENT_SWARM_CODEX_RUNNER_ARGV = JSON.stringify([
+        process.execPath,
+        "-e",
+        'import { runCodexSessionRunner } from "./src/commands/codex-session-runner"; await runCodexSessionRunner();',
+      ]);
+      const session = await new CodexAdapter().createSession({
+        agentId: crypto.randomUUID(),
+        taskId: crypto.randomUUID(),
+        apiUrl: "http://localhost:0",
+        apiKey: "fixture",
+        role: "worker",
+        model,
+        reasoningEffort: "max",
+        prompt: "hello",
+        systemPrompt: "",
+        cwd: home,
+        logFile: join(home, "session.log"),
+        env: {
+          CODEX_HOME: home,
+          HOME: home,
+          CODEX_PATH_OVERRIDE: join(import.meta.dir, "fixtures/fake-codex-app-server.ts"),
+          CODEX_GATEWAY_BASE_URL: "http://127.0.0.1:9/v1",
+          CODEX_GATEWAY_API_KEY: "fixture",
+          FAKE_CODEX_REQUESTS: requests,
+        },
+      });
+      sessions.push(session);
+      session.onEvent((event) => events.push(event));
+      const result = await session.waitForCompletion();
+      expect(result.exitCode).toBe(0);
+      const [thread, turn] = (await Bun.file(requests).text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(thread.config.model_reasoning_effort).toBe("max");
+      expect(turn.effort).toBe("max");
+      expect(result.appliedReasoningEffort).toBe("max");
+      expect(events.filter((e) => e.type === "session_init")).toMatchObject([
+        {
+          sessionId: "thread-1",
+          harnessVariantMeta: {
+            observedModel: "thread-model-fixture",
+            observedReasoningEffort: "low",
+          },
+        },
+      ]);
+      expect(
+        events.some(
+          (e) => e.type === "raw_stderr" && e.content.includes("low") && e.content.includes("max"),
+        ),
+      ).toBe(true);
+    } finally {
+      resetRuntimeModelCatalogForTests();
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);

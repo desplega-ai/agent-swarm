@@ -783,6 +783,8 @@ When unset, every adapter behaves exactly as it does today — no fleet-wide def
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (internal numeric translation — not a user-facing knob), or `effort` for `max`. `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (noop) — Opencode has no explicit off switch. |
 
+The Codex session child receives the selected model's catalog row from the worker. It sends a supported effort in the thread configuration and on every `turn/start`. The session log reports a rejected effort or a different thread default. On the task, `harnessVariantMeta.observedModel` and `observedReasoningEffort` record what `thread/start` returned. For Claude Code, the worker reads these fields from the last main-thread `api-request` in the session transcript when available.
+
 The adapter's actually-applied level flows back through `ProviderResult.appliedReasoningEffort` (`null` on a capability-rejected noop) into `agents.cred_status.latestModel.reasoningEffort`, surfaced in the dashboard's runtime editor, the `HarnessCell` tooltip, and the agents-list Model column (`[|||]`-style badge, more bars = higher effort).
 
 Refs: [reasoning-effort runtime control research](../thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md).
