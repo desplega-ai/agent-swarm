@@ -15,6 +15,7 @@ export {
   loadTimestampFormats,
   OID,
   type ResultColumn,
+  ROWID_COLUMN,
   type TimestampFormat,
   type TimestampFormats,
 } from "./codec";

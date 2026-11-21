@@ -11,7 +11,13 @@
  * - json, jsonb -> JSON text (key order is jsonb's, accepted by D8)
  * - timestamptz -> the text format the SQLite column stores
  *   (`iso-ms-z`: 2026-11-20T10:00:00.000Z, `space`: 2026-11-20 10:00:00)
+ * - a result column named `_rowid` is dropped: it is the Postgres stand-in
+ *   for SQLite's hidden rowid, which `SELECT *` never returns on SQLite. A
+ *   repository that needs the value selects it under another name.
  */
+
+/** The insertion-order surrogate column (see the schema notes). */
+export const ROWID_COLUMN = "_rowid";
 
 export type TimestampFormat = "iso-ms-z" | "space";
 
@@ -83,13 +89,19 @@ export function decodeRows(
   if (!columns || columns.length === 0 || rows.length === 0)
     return rows as Record<string, unknown>[];
   const decoders: [string, Decoder][] = [];
+  let dropRowid = false;
   for (const column of columns) {
+    if (column.name === ROWID_COLUMN) {
+      dropRowid = true;
+      continue;
+    }
     const decoder = decoderFor(column, formats);
     if (decoder) decoders.push([column.name, decoder]);
   }
-  if (decoders.length === 0) return rows as Record<string, unknown>[];
+  if (decoders.length === 0 && !dropRowid) return rows as Record<string, unknown>[];
   return rows.map((row) => {
     const out: Record<string, unknown> = { ...row };
+    if (dropRowid) delete out[ROWID_COLUMN];
     for (const [name, decode] of decoders) out[name] = decode(row[name]);
     return out;
   });
