@@ -1,8 +1,9 @@
-import { type AutomationPreflightRowText, BaseSchedulesRepository } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import { type AutomationPreflightRowText, BaseSchedulesRepository, sql } from "@desplega/storage";
 
 export class PostgresSchedulesRepository extends BaseSchedulesRepository {
   listEnabledPreflightRows(): Promise<AutomationPreflightRowText[]> {
-    return notOnPostgresYet("PostgresSchedulesRepository.listEnabledPreflightRows");
+    return this.db.query<AutomationPreflightRowText>(sql`
+      SELECT id, name, 'schedule' AS kind, params, "requiredParams", requires
+        FROM scheduled_tasks WHERE enabled = ${true} ORDER BY "_rowid"`);
   }
 }

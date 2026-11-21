@@ -127,6 +127,32 @@ export function savingsContract(engine: ContractEngine): void {
       expect(await count("automation_savings_daily")).toBe(0);
     });
 
+    test("replaceScriptBucket resets the columns it does not name (INSERT OR REPLACE)", async () => {
+      const script = (runs: number) => ({
+        day: "2026-11-20",
+        jobId: "s",
+        jobKey: "s",
+        jobName: "s",
+        subKind: "",
+        runs,
+        countedRuns: runs,
+        effectRuns: 0,
+        opsSum: 0,
+        computeSecs: 0,
+        modelVersion: 1,
+        computedAt: "2026-11-21T10:00:00.000Z",
+      });
+      await repo.replaceScriptBucket(script(1));
+      await storage.executor.run(
+        sql`UPDATE automation_savings_daily SET "agentUsd" = 2.5, "eventRuns" = 3 WHERE "jobId" = 's'`,
+      );
+      await repo.replaceScriptBucket(script(4));
+      expect(
+        await storage.executor.get(sql`
+          SELECT runs, "agentUsd", "eventRuns" FROM automation_savings_daily WHERE "jobId" = 's'`),
+      ).toEqual({ runs: 4, agentUsd: 0, eventRuns: 0 });
+    });
+
     test("countWorkflowRunsSince counts runs started at or after the bound", async () => {
       expect(await repo.countWorkflowRunsSince("w1", "2026-11-20T00:00:00.000Z")).toBe(0);
     });
