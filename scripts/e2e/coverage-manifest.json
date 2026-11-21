@@ -437,8 +437,8 @@
       "scenarios": ["platform-oauth-locks"]
     },
     "page-publishing": {
-      "description": "create page, serve public/authed/password, version history, feedback task, delete",
-      "scenarios": ["knowledge-pages"]
+      "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
+      "scenarios": ["knowledge-pages", "knowledge-page-dashboard-user"]
     },
     "org-design-system": {
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
