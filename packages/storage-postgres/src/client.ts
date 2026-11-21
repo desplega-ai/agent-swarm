@@ -7,6 +7,7 @@ import {
   type StatementObserver,
   type TransactionOptions,
 } from "@desplega/storage";
+import { decodeRows, type ResultColumn, type TimestampFormats } from "./codec";
 import { mapPostgresError, SQLSTATE } from "./errors";
 
 /**
@@ -38,7 +39,10 @@ type PoolHandle = SqlHandle & {
   reserve(): Promise<SqlHandle & { release(): void }>;
   close(opts?: { timeout?: number }): Promise<void>;
 };
-type PgResult = Record<string, unknown>[] & { count?: number | null };
+type PgResult = Record<string, unknown>[] & {
+  count?: number | null;
+  statement?: { columns?: ResultColumn[] };
+};
 
 export type PostgresRetryOptions = {
   /** Attempts in total, the first one included. */
@@ -62,8 +66,11 @@ export type PostgresClientOptions = {
   /** Roll back the first attempt of each outermost transaction (decision D6 proof). */
   txReplay?: boolean;
   observer?: StatementObserver;
-  /** Converts each driver row to the SQLite value shape (decision D8). Identity by default. */
-  decodeRow?: (row: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * Text formats of timestamptz columns for the read codec (decision D8).
+   * Without it every timestamp reads as ISO text with milliseconds and `Z`.
+   */
+  timestampFormats?: TimestampFormats;
   /** Called once per retried attempt, with the SQLSTATE that caused it (bench, diagnostics). */
   onRetry?: (sqlstate: string, attempt: number) => void;
 };
@@ -121,14 +128,12 @@ export class PostgresClient implements DbClient {
   replayedTransactions = 0;
   private savepointCounter = 0;
   private readonly retry: PostgresRetryOptions;
-  private readonly decodeRow: (row: Record<string, unknown>) => Record<string, unknown>;
 
   constructor(
     readonly pool: PoolHandle,
     private readonly options: PostgresClientOptions = {},
   ) {
     this.retry = options.retry ?? DEFAULT_POSTGRES_RETRY;
-    this.decodeRow = options.decodeRow ?? ((row) => row);
   }
 
   private handle(): SqlHandle {
@@ -149,13 +154,18 @@ export class PostgresClient implements DbClient {
 
   async query<T>(text: string, params?: DbParam[]): Promise<T[]> {
     const rows = await this.execute(text, params);
-    return rows.map((row) => this.decodeRow(row)) as T[];
+    return this.decode(rows) as T[];
   }
 
   async get<T>(text: string, params?: DbParam[]): Promise<T | null> {
     const rows = await this.execute(text, params);
-    const first = rows[0];
-    return first === undefined ? null : (this.decodeRow(first) as T);
+    if (rows.length === 0) return null;
+    return (this.decode(rows.slice(0, 1) as PgResult, rows.statement?.columns)[0] ??
+      null) as T | null;
+  }
+
+  private decode(rows: PgResult, columns = rows.statement?.columns): Record<string, unknown>[] {
+    return decodeRows(rows, columns, this.options.timestampFormats ?? null);
   }
 
   async run(text: string, params?: DbParam[]): Promise<{ changes: number }> {

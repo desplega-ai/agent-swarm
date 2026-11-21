@@ -1,0 +1,130 @@
+/**
+ * Read codec (decision D8): driver rows become rows in the SQLite value shape,
+ * so repositories, the `rowTo*` mappers and the API stay byte-equal on both
+ * engines.
+ *
+ * Driven by the result's column metadata (type OID, table OID, attnum), never
+ * by the value: a text column that holds digits stays text.
+ *
+ * - boolean -> 1 / 0
+ * - int8, numeric -> number (bun:sqlite returns INTEGER as a JS number too)
+ * - json, jsonb -> JSON text (key order is jsonb's, accepted by D8)
+ * - timestamptz -> the text format the SQLite column stores
+ *   (`iso-ms-z`: 2026-11-20T10:00:00.000Z, `space`: 2026-11-20 10:00:00)
+ */
+
+export type TimestampFormat = "iso-ms-z" | "space";
+
+export type ResultColumn = { name: string; type: number; table: number; number: number };
+
+/** Where the codec finds the SQLite text format of a timestamptz column. */
+export interface TimestampFormats {
+  /** By source column (table OID + attnum), for a selected table column. */
+  byAttribute(tableOid: number, attnum: number): TimestampFormat | undefined;
+  /** By result name, for an expression; undefined when the name is ambiguous or unknown. */
+  byName(name: string): TimestampFormat | undefined;
+}
+
+export const OID = {
+  bool: 16,
+  bytea: 17,
+  int8: 20,
+  int2: 21,
+  int4: 23,
+  text: 25,
+  json: 114,
+  float4: 700,
+  float8: 701,
+  timestamp: 1114,
+  timestamptz: 1184,
+  numeric: 1700,
+  jsonb: 3802,
+} as const;
+
+/** `iso-ms-z` unless a lookup says otherwise: the app writes `toISOString()` text by default. */
+const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "iso-ms-z";
+
+export function formatTimestamp(value: Date, format: TimestampFormat): string {
+  const iso = value.toISOString();
+  return format === "space" ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}` : iso;
+}
+
+type Decoder = (value: unknown) => unknown;
+
+function decoderFor(column: ResultColumn, formats: TimestampFormats | null): Decoder | null {
+  switch (column.type) {
+    case OID.bool:
+      return (v) => (v === null || v === undefined ? v : v ? 1 : 0);
+    case OID.int8:
+    case OID.numeric:
+      return (v) => (v === null || v === undefined ? v : typeof v === "number" ? v : Number(v));
+    case OID.json:
+    case OID.jsonb:
+      return (v) => (v === null || v === undefined ? v : JSON.stringify(v));
+    case OID.timestamptz:
+    case OID.timestamp: {
+      const format =
+        (column.table !== 0 ? formats?.byAttribute(column.table, column.number) : undefined) ??
+        formats?.byName(column.name) ??
+        DEFAULT_TIMESTAMP_FORMAT;
+      return (v) => (v instanceof Date ? formatTimestamp(v, format) : v);
+    }
+    default:
+      return null;
+  }
+}
+
+/** Decode result rows in place of a copy; columns without a decoder pass through. */
+export function decodeRows(
+  rows: readonly Record<string, unknown>[],
+  columns: readonly ResultColumn[] | undefined,
+  formats: TimestampFormats | null,
+): Record<string, unknown>[] {
+  if (!columns || columns.length === 0 || rows.length === 0)
+    return rows as Record<string, unknown>[];
+  const decoders: [string, Decoder][] = [];
+  for (const column of columns) {
+    const decoder = decoderFor(column, formats);
+    if (decoder) decoders.push([column.name, decoder]);
+  }
+  if (decoders.length === 0) return rows as Record<string, unknown>[];
+  return rows.map((row) => {
+    const out: Record<string, unknown> = { ...row };
+    for (const [name, decode] of decoders) out[name] = decode(row[name]);
+    return out;
+  });
+}
+
+/**
+ * Timestamp formats from the column classification (`table.column -> format`),
+ * resolved to OIDs once per database.
+ */
+export class ClassifiedTimestampFormats implements TimestampFormats {
+  private readonly byAttr = new Map<string, TimestampFormat>();
+  private readonly names = new Map<string, TimestampFormat | null>();
+
+  constructor(entries: readonly { table: string; column: string; format: TimestampFormat }[]) {
+    for (const entry of entries) {
+      const known = this.names.get(entry.column);
+      // A name that two tables store in different formats is ambiguous.
+      this.names.set(
+        entry.column,
+        known === undefined || known === entry.format ? entry.format : null,
+      );
+    }
+  }
+
+  /** Bind the classification to this database's OIDs. */
+  resolve(rows: readonly { oid: number; attnum: number; format: TimestampFormat }[]): void {
+    this.byAttr.clear();
+    for (const row of rows) this.byAttr.set(`${row.oid}:${row.attnum}`, row.format);
+  }
+
+  byAttribute(tableOid: number, attnum: number): TimestampFormat | undefined {
+    return this.byAttr.get(`${tableOid}:${attnum}`);
+  }
+
+  byName(name: string): TimestampFormat | undefined {
+    return this.names.get(name) ?? undefined;
+  }
+}

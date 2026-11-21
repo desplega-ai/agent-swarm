@@ -7,5 +7,14 @@ export {
   type PostgresClientOptions,
   type PostgresRetryOptions,
 } from "./client";
+export {
+  ClassifiedTimestampFormats,
+  decodeRows,
+  formatTimestamp,
+  OID,
+  type ResultColumn,
+  type TimestampFormat,
+  type TimestampFormats,
+} from "./codec";
 export { postgresDialect } from "./dialect";
 export { mapPostgresError, SQLSTATE } from "./errors";
