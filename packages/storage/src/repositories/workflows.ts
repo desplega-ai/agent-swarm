@@ -769,6 +769,15 @@ export interface WorkflowsRepository {
   }): Promise<void>;
   /** Completed runs across every workflow. */
   countCompletedRunsAll(): Promise<number>;
+
+  // ---- approval_requests: Slack threads waiting on a person ----
+  /** Distinct Slack threads with an unexpired pending request raised by one of their tasks. In no particular order. */
+  listSlackThreadsAwaitingHuman(): Promise<{ channelId: string; threadTs: string }[]>;
+  isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean>;
+  /** Workflow count and enabled count. */
+  countWorkflows(): Promise<{ total: number; enabled: number | null } | null>;
+  /** Replaces a run's sealed replay context. */
+  setRunContextReplay(runId: string, contextReplay: string): Promise<void>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1754,5 +1763,43 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
       sql`SELECT COUNT(*) AS count FROM workflow_runs WHERE status = 'completed'`,
     );
     return row?.count ?? 0;
+  }
+
+  // ---- approval_requests: Slack threads waiting on a person ----
+
+  listSlackThreadsAwaitingHuman(): Promise<{ channelId: string; threadTs: string }[]> {
+    return this.db.query<{ channelId: string; threadTs: string }>(sql`
+      SELECT DISTINCT task."slackChannelId" AS "channelId", task."slackThreadTs" AS "threadTs"
+      FROM approval_requests request
+      JOIN agent_tasks task ON task.id = request."sourceTaskId"
+      WHERE request.status = 'pending'
+        AND (request."expiresAt" IS NULL OR request."expiresAt" > ${nowIso})
+        AND task."slackChannelId" IS NOT NULL
+        AND task."slackThreadTs" IS NOT NULL`);
+  }
+
+  async isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean> {
+    const row = await this.db.get<{ waiting: number }>(sql`
+      SELECT 1 AS waiting
+      FROM approval_requests request
+      JOIN agent_tasks task ON task.id = request."sourceTaskId"
+      WHERE request.status = 'pending'
+        AND (request."expiresAt" IS NULL OR request."expiresAt" > ${nowIso})
+        AND task."slackChannelId" = ${channelId}
+        AND task."slackThreadTs" = ${threadTs}
+      LIMIT 1`);
+    return !!row;
+  }
+
+  countWorkflows(): Promise<{ total: number; enabled: number | null } | null> {
+    return this.db.get(sql`
+      SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = ${true} THEN 1 ELSE 0 END) AS enabled
+      FROM workflows`);
+  }
+
+  async setRunContextReplay(runId: string, contextReplay: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE workflow_runs SET context_replay = ${contextReplay} WHERE id = ${runId}`,
+    );
   }
 }

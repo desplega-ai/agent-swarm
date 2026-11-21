@@ -21,12 +21,7 @@ import type {
   ModelCatalogRow,
 } from "@desplega/storage";
 import { type RuntimeCatalog, setRuntimeModelCatalog } from "../utils/runtime-model-catalog";
-import {
-  getActivePricingRow,
-  getDbClient,
-  type InsertPricingRowInput,
-  insertPricingRow,
-} from "./db";
+import { getActivePricingRow, type InsertPricingRowInput, insertPricingRow } from "./db";
 import {
   CATALOG_PROVIDER_IDS,
   type CatalogModel,
@@ -411,9 +406,13 @@ export async function applyOverlayPricingRows(now = Date.now()): Promise<number>
         if (!overlayOwned.has(tripleKey(row))) continue;
         if (existing.pricePerMillionUsd === row.pricePerMillionUsd) continue;
         if (existing.effectiveFrom === now) {
-          await getDbClient().run(
-            "UPDATE pricing SET price_per_million_usd = ?, lastUpdatedAt = ? WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
-            [row.pricePerMillionUsd, now, row.provider, row.model, row.tokenClass, now],
+          await getStorage().repos.sessions.updatePricingPrice(
+            row.provider,
+            row.model,
+            row.tokenClass,
+            now,
+            row.pricePerMillionUsd,
+            now,
           );
           inserted += 1;
           continue;

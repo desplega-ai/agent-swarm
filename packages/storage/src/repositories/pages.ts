@@ -1,6 +1,6 @@
 import { jsonText, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlJoin, sqlWhere } from "../sql";
 
 /**
  * Domain: pages, metrics, apps (`apps`, `user_favorites` of apps,
@@ -69,6 +69,85 @@ export type PrimitiveObjectFilter = {
   kind?: string;
   prefix?: string;
 };
+
+/** One `app_versions` / `page_versions` / `metric_versions` row (`snapshot` as JSON text). */
+export type AppVersionRow = {
+  id: string;
+  appId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+export type PageVersionRow = Omit<AppVersionRow, "appId"> & { pageId: string };
+export type MetricVersionRow = Omit<AppVersionRow, "appId"> & { metricId: string };
+
+/** One `pages` row. */
+export type PageRow = {
+  id: string;
+  key: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  contentType: string;
+  authMode: string;
+  passwordHash: string | null;
+  body: string;
+  needsCredentials: string | null;
+  createdAt: string;
+  updatedAt: string;
+  view_count: number;
+  theme: string | null;
+  theme_tokens: string | null;
+  design_version: number;
+};
+
+export type NewPageRow = Omit<PageRow, "createdAt" | "updatedAt" | "view_count">;
+
+/** Columns a page update may set. */
+export type PageColumnUpdate = Partial<
+  Pick<
+    PageRow,
+    | "key"
+    | "title"
+    | "description"
+    | "contentType"
+    | "authMode"
+    | "passwordHash"
+    | "body"
+    | "needsCredentials"
+    | "slug"
+    | "theme"
+    | "theme_tokens"
+    | "design_version"
+  >
+>;
+
+/** Page list filters. `keyPattern` and `searchPattern` are LIKE patterns with `\` escapes. */
+export type PageFilter = {
+  agentId?: string;
+  key?: string;
+  keyPattern?: string;
+  /** Matches title, slug or description. */
+  searchPattern?: string;
+};
+
+/** One `metrics` row (`definition` as JSON text). */
+export type MetricRow = {
+  id: string;
+  agentId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  definition: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MetricColumnUpdate = Partial<
+  Pick<MetricRow, "title" | "description" | "definition" | "slug">
+>;
 
 export interface PagesRepository {
   // ---- apps ----
@@ -153,6 +232,54 @@ export interface PagesRepository {
     fileVersion: number,
     now: string,
   ): Promise<number>;
+  // ---- app_versions ----
+  insertAppVersion(row: AppVersionRow): Promise<AppVersionRow | null>;
+  /** Newest version first, then insertion order (newest first). */
+  listAppVersions(appId: string): Promise<AppVersionRow[]>;
+  findAppVersion(appId: string, version: number): Promise<AppVersionRow | null>;
+
+  // ---- pages ----
+  insertPage(row: NewPageRow): Promise<PageRow | null>;
+  findPage(id: string): Promise<PageRow | null>;
+  findPageBySlug(agentId: string, slug: string): Promise<PageRow | null>;
+  /** The most recently updated page with the slug (insertion order breaks ties, newest first). */
+  findLatestPageBySlug(slug: string): Promise<PageRow | null>;
+  /** Newest `updatedAt` first, then insertion order (oldest first). */
+  listPages(f: PageFilter, limit: number, offset: number): Promise<PageRow[]>;
+  countPages(f: PageFilter): Promise<number>;
+  /** Sets the given columns and `updatedAt`. */
+  updatePage(id: string, update: PageColumnUpdate, updatedAt: string): Promise<PageRow | null>;
+  /** Deletes the page, its favorites and its `task:page:<id>` kv namespace. Returns the page change count. */
+  deletePageCascade(id: string): Promise<number>;
+  incrementPageViewCount(id: string): Promise<number>;
+
+  // ---- page_versions ----
+  insertPageVersion(row: Omit<PageVersionRow, "id" | "createdAt">): Promise<PageVersionRow | null>;
+  /** Newest version first, then insertion order (newest first). */
+  listPageVersions(pageId: string): Promise<PageVersionRow[]>;
+  findPageVersion(pageId: string, version: number): Promise<PageVersionRow | null>;
+
+  // ---- metrics ----
+  insertMetric(row: Omit<MetricRow, "id" | "createdAt" | "updatedAt">): Promise<MetricRow | null>;
+  findMetric(id: string): Promise<MetricRow | null>;
+  findMetricBySlug(agentId: string, slug: string): Promise<MetricRow | null>;
+  /** Newest `updatedAt` first, then insertion order (newest first); optionally one agent's. */
+  listMetrics(agentId: string | null, limit: number, offset: number): Promise<MetricRow[]>;
+  countMetrics(agentId: string | null): Promise<number>;
+  updateMetric(
+    id: string,
+    update: MetricColumnUpdate,
+    updatedAt: string,
+  ): Promise<MetricRow | null>;
+  deleteMetric(id: string): Promise<number>;
+
+  // ---- metric_versions ----
+  insertMetricVersion(
+    row: Omit<MetricVersionRow, "id" | "createdAt">,
+  ): Promise<MetricVersionRow | null>;
+  /** Newest version first, then insertion order (newest first). */
+  listMetricVersions(metricId: string): Promise<MetricVersionRow[]>;
+  findMetricVersion(metricId: string, version: number): Promise<MetricVersionRow | null>;
 }
 
 const APP_COLUMNS = sql`id, name, description, definition, created_at, updated_at`;
@@ -403,5 +530,208 @@ export abstract class BasePagesRepository implements PagesRepository {
         UPDATE primitive_objects SET "deletedAt" = ${now}, "updatedAt" = ${now}
         WHERE id = ${id} AND path = ${path} AND "fileVersion" = ${fileVersion} AND "deletedAt" IS NULL`)
     ).changes;
+  }
+
+  /** The insertion-order column (SQLite `rowid`), for ORDER BY tiebreaks only. */
+  protected abstract insertionOrder(): SqlQuery;
+
+  // ---- app_versions ----
+
+  insertAppVersion(r: AppVersionRow): Promise<AppVersionRow | null> {
+    return this.db.get<AppVersionRow>(sql`
+      INSERT INTO app_versions (id, "appId", version, snapshot, "changedByAgentId", "createdAt")
+      VALUES (${r.id}, ${r.appId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}, ${r.createdAt})
+      RETURNING *`);
+  }
+
+  listAppVersions(appId: string): Promise<AppVersionRow[]> {
+    return this.db.query<AppVersionRow>(sql`
+      SELECT * FROM app_versions WHERE "appId" = ${appId}
+      ORDER BY version DESC, ${this.insertionOrder()} DESC`);
+  }
+
+  findAppVersion(appId: string, version: number): Promise<AppVersionRow | null> {
+    return this.db.get<AppVersionRow>(sql`
+      SELECT * FROM app_versions WHERE "appId" = ${appId} AND version = ${version}`);
+  }
+
+  // ---- pages ----
+
+  insertPage(r: NewPageRow): Promise<PageRow | null> {
+    return this.db.get<PageRow>(sql`
+      INSERT INTO pages (id, "key", "agentId", slug, title, description, "contentType", "authMode",
+        "passwordHash", body, "needsCredentials", theme, theme_tokens, design_version)
+      VALUES (${r.id}, ${r.key}, ${r.agentId}, ${r.slug}, ${r.title}, ${r.description},
+        ${r.contentType}, ${r.authMode}, ${r.passwordHash}, ${r.body}, ${r.needsCredentials},
+        ${r.theme}, ${r.theme_tokens}, ${r.design_version})
+      RETURNING *`);
+  }
+
+  findPage(id: string): Promise<PageRow | null> {
+    return this.db.get<PageRow>(sql`SELECT * FROM pages WHERE id = ${id}`);
+  }
+
+  findPageBySlug(agentId: string, slug: string): Promise<PageRow | null> {
+    return this.db.get<PageRow>(
+      sql`SELECT * FROM pages WHERE "agentId" = ${agentId} AND slug = ${slug}`,
+    );
+  }
+
+  findLatestPageBySlug(slug: string): Promise<PageRow | null> {
+    return this.db.get<PageRow>(sql`
+      SELECT * FROM pages WHERE slug = ${slug}
+      ORDER BY "updatedAt" DESC, ${this.insertionOrder()} DESC LIMIT 1`);
+  }
+
+  private pageWhere(f: PageFilter): SqlQuery {
+    const c: SqlQuery[] = [];
+    if (f.agentId !== undefined) c.push(sql`"agentId" = ${f.agentId}`);
+    if (f.key) c.push(sql`"key" = ${f.key}`);
+    else if (f.keyPattern) c.push(sql`${likeAsciiCi(sql`"key"`, sql`${f.keyPattern}`, "\\")}`);
+    if (f.searchPattern) {
+      const p = sql`${f.searchPattern}`;
+      c.push(sql`(${likeAsciiCi(sql`title`, p, "\\")} OR ${likeAsciiCi(sql`slug`, p, "\\")}
+        OR ${likeAsciiCi(sql`description`, p, "\\")})`);
+    }
+    return sqlWhere(c);
+  }
+
+  listPages(f: PageFilter, limit: number, offset: number): Promise<PageRow[]> {
+    return this.db.query<PageRow>(sql`
+      SELECT * FROM pages${this.pageWhere(f)}
+      ORDER BY "updatedAt" DESC, ${this.insertionOrder()} ASC LIMIT ${limit} OFFSET ${offset}`);
+  }
+
+  async countPages(f: PageFilter): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM pages${this.pageWhere(f)}`,
+    );
+    return row?.count ?? 0;
+  }
+
+  updatePage(id: string, u: PageColumnUpdate, updatedAt: string): Promise<PageRow | null> {
+    const sets: SqlQuery[] = [];
+    if (u.key !== undefined) sets.push(sql`"key" = ${u.key}`);
+    if (u.title !== undefined) sets.push(sql`title = ${u.title}`);
+    if (u.description !== undefined) sets.push(sql`description = ${u.description}`);
+    if (u.contentType !== undefined) sets.push(sql`"contentType" = ${u.contentType}`);
+    if (u.authMode !== undefined) sets.push(sql`"authMode" = ${u.authMode}`);
+    if (u.passwordHash !== undefined) sets.push(sql`"passwordHash" = ${u.passwordHash}`);
+    if (u.body !== undefined) sets.push(sql`body = ${u.body}`);
+    if (u.needsCredentials !== undefined)
+      sets.push(sql`"needsCredentials" = ${u.needsCredentials}`);
+    if (u.slug !== undefined) sets.push(sql`slug = ${u.slug}`);
+    if (u.theme !== undefined) sets.push(sql`theme = ${u.theme}`);
+    if (u.theme_tokens !== undefined) sets.push(sql`theme_tokens = ${u.theme_tokens}`);
+    if (u.design_version !== undefined) sets.push(sql`design_version = ${u.design_version}`);
+    sets.push(sql`"updatedAt" = ${updatedAt}`);
+    return this.db.get<PageRow>(
+      sql`UPDATE pages SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id} RETURNING *`,
+    );
+  }
+
+  async deletePageCascade(id: string): Promise<number> {
+    await this.db.run(
+      sql`DELETE FROM user_favorites WHERE "itemType" = 'page' AND "itemId" = ${id}`,
+    );
+    await this.db.run(sql`DELETE FROM kv_entries WHERE namespace = ${`task:page:${id}`}`);
+    // ON DELETE CASCADE on page_versions."pageId" handles history cleanup.
+    return (await this.db.run(sql`DELETE FROM pages WHERE id = ${id}`)).changes;
+  }
+
+  async incrementPageViewCount(id: string): Promise<number> {
+    const result = await this.db.run(
+      sql`UPDATE pages SET view_count = view_count + 1 WHERE id = ${id}`,
+    );
+    return result.changes;
+  }
+
+  // ---- page_versions ----
+
+  insertPageVersion(r: Omit<PageVersionRow, "id" | "createdAt">): Promise<PageVersionRow | null> {
+    return this.db.get<PageVersionRow>(sql`
+      INSERT INTO page_versions ("pageId", version, snapshot, "changedByAgentId")
+      VALUES (${r.pageId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}) RETURNING *`);
+  }
+
+  listPageVersions(pageId: string): Promise<PageVersionRow[]> {
+    return this.db.query<PageVersionRow>(sql`
+      SELECT * FROM page_versions WHERE "pageId" = ${pageId}
+      ORDER BY version DESC, ${this.insertionOrder()} DESC`);
+  }
+
+  findPageVersion(pageId: string, version: number): Promise<PageVersionRow | null> {
+    return this.db.get<PageVersionRow>(sql`
+      SELECT * FROM page_versions WHERE "pageId" = ${pageId} AND version = ${version}`);
+  }
+
+  // ---- metrics ----
+
+  insertMetric(r: Omit<MetricRow, "id" | "createdAt" | "updatedAt">): Promise<MetricRow | null> {
+    return this.db.get<MetricRow>(sql`
+      INSERT INTO metrics ("agentId", slug, title, description, definition)
+      VALUES (${r.agentId}, ${r.slug}, ${r.title}, ${r.description}, ${r.definition}) RETURNING *`);
+  }
+
+  findMetric(id: string): Promise<MetricRow | null> {
+    return this.db.get<MetricRow>(sql`SELECT * FROM metrics WHERE id = ${id}`);
+  }
+
+  findMetricBySlug(agentId: string, slug: string): Promise<MetricRow | null> {
+    return this.db.get<MetricRow>(
+      sql`SELECT * FROM metrics WHERE "agentId" = ${agentId} AND slug = ${slug}`,
+    );
+  }
+
+  listMetrics(agentId: string | null, limit: number, offset: number): Promise<MetricRow[]> {
+    const where = agentId === null ? EMPTY : sql` WHERE "agentId" = ${agentId}`;
+    return this.db.query<MetricRow>(sql`
+      SELECT * FROM metrics${where}
+      ORDER BY "updatedAt" DESC, ${this.insertionOrder()} DESC LIMIT ${limit} OFFSET ${offset}`);
+  }
+
+  async countMetrics(agentId: string | null): Promise<number> {
+    const where = agentId === null ? EMPTY : sql` WHERE "agentId" = ${agentId}`;
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM metrics${where}`,
+    );
+    return row?.count ?? 0;
+  }
+
+  updateMetric(id: string, u: MetricColumnUpdate, updatedAt: string): Promise<MetricRow | null> {
+    const sets: SqlQuery[] = [];
+    if (u.title !== undefined) sets.push(sql`title = ${u.title}`);
+    if (u.description !== undefined) sets.push(sql`description = ${u.description}`);
+    if (u.definition !== undefined) sets.push(sql`definition = ${u.definition}`);
+    if (u.slug !== undefined) sets.push(sql`slug = ${u.slug}`);
+    sets.push(sql`"updatedAt" = ${updatedAt}`);
+    return this.db.get<MetricRow>(
+      sql`UPDATE metrics SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id} RETURNING *`,
+    );
+  }
+
+  async deleteMetric(id: string): Promise<number> {
+    return (await this.db.run(sql`DELETE FROM metrics WHERE id = ${id}`)).changes;
+  }
+
+  // ---- metric_versions ----
+
+  insertMetricVersion(
+    r: Omit<MetricVersionRow, "id" | "createdAt">,
+  ): Promise<MetricVersionRow | null> {
+    return this.db.get<MetricVersionRow>(sql`
+      INSERT INTO metric_versions ("metricId", version, snapshot, "changedByAgentId")
+      VALUES (${r.metricId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}) RETURNING *`);
+  }
+
+  listMetricVersions(metricId: string): Promise<MetricVersionRow[]> {
+    return this.db.query<MetricVersionRow>(sql`
+      SELECT * FROM metric_versions WHERE "metricId" = ${metricId}
+      ORDER BY version DESC, ${this.insertionOrder()} DESC`);
+  }
+
+  findMetricVersion(metricId: string, version: number): Promise<MetricVersionRow | null> {
+    return this.db.get<MetricVersionRow>(sql`
+      SELECT * FROM metric_versions WHERE "metricId" = ${metricId} AND version = ${version}`);
   }
 }

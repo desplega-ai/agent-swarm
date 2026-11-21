@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type NewSessionCost, type SessionsRepository, type Storage, sql } from "../../src";
+import {
+  type NewSessionCost,
+  type SessionSummarySpec,
+  type SessionsRepository,
+  type SessionTreeRules,
+  type Storage,
+  sql,
+} from "../../src";
 import type { ContractEngine } from "./env";
 
 const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -385,6 +392,12 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(await repo.findActivePricingRow("contract", "m", "input", 50)).toBeNull();
       expect(await repo.deletePricingRow("contract", "m", "input", 100)).toBe(1);
       expect(await repo.deletePricingRow("contract", "m", "input", 100)).toBe(0);
+      await repo.updatePricingPrice("contract", "m", "input", 200, 7, 500);
+      expect(await repo.findActivePricingRow("contract", "m", "input", 250)).toMatchObject({
+        price_per_million_usd: 7,
+        lastUpdatedAt: 500,
+        createdAt: 1,
+      });
     });
 
     test("findActiveSessionIdentity reads the active session by runner or row id", async () => {
@@ -625,6 +638,423 @@ export function sessionsContract(engine: ContractEngine): void {
         ["a", 3],
       ]);
       expect(rows[0]).toMatchObject({ task: "t", status: "pending" });
+    });
+
+    // ---- session tree, moves, labels, tokens ----
+
+    const RULES: SessionTreeRules = {
+      sourceRanges: [{ source: "slack", lo: "shared/slack/", hi: "shared/slack0" }],
+      nestedThreadMinRoots: 2,
+      terminalStatuses: ["completed", "failed", "cancelled"],
+      agentTaskSources: ["mcp", "system", "schedule", "workflow"],
+      machineSources: ["workflow", "schedule", "system"],
+      humanSystemTaskTypes: ["kapso-inbound"],
+    };
+    const NOW = "2026-11-21T12:00:00.000Z";
+    const insertRoot = (
+      id: string,
+      key: string,
+      opts: {
+        requestedByUserId?: string | null;
+        createdAt?: string;
+        title?: string;
+        task?: string;
+      } = {},
+    ) =>
+      storage.executor.run(sql`
+        INSERT INTO agent_tasks (id, task, title, status, "createdAt", "lastUpdatedAt", "key", "requestedByUserId", source)
+        VALUES (${id}, ${opts.task ?? "t"}, ${opts.title ?? null}, 'pending', ${opts.createdAt ?? "2026-11-21T10:00:00.000Z"},
+          ${opts.createdAt ?? "2026-11-21T10:00:00.000Z"}, ${key}, ${opts.requestedByUserId ?? null}, 'ui')`);
+    const summary = (
+      userId: string | null,
+      root: SessionSummarySpec["root"] = {},
+    ): SessionSummarySpec => ({
+      root,
+      viewerUserId: userId,
+      read: userId
+        ? {
+            now: NOW,
+            unreadSince: "2026-11-14T12:00:00.000Z",
+            quietBefore: "2026-11-20T12:00:00.000Z",
+            inbox: {
+              ranges: RULES.sourceRanges,
+              noGroup: [
+                { lo: "shared/", hi: "shared0", scan: true, start: 8, leafPatterns: ["task:?*/"] },
+              ],
+            },
+          }
+        : undefined,
+    });
+
+    test("session tree: summaries, counts, thread roots, read state and triage upsert", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'U'), ('u2', 'V')`);
+      await insertRoot("r1", "shared/slack/c1/thread:1.2/", { requestedByUserId: "u1" });
+      await insertRoot("r2", "shared/slack/c1/thread:1.2/", { requestedByUserId: "u2" });
+      await insertRoot("r3", "shared/other/");
+      const ids = async (spec: SessionSummarySpec) =>
+        (
+          await storage.executor.query<{ root_id: string }>(
+            sql`SELECT root_id FROM (${repo.sessionSummarySql(RULES, spec)}) q ORDER BY root_id`,
+          )
+        ).map((row) => row.root_id);
+      expect(await ids(summary(null))).toEqual(["r1", "r2", "r3"]);
+      expect(
+        await ids(summary(null, { keyRange: { lo: "shared/slack/", hi: "shared/slack0" } })),
+      ).toEqual(["r1", "r2"]);
+      expect(await ids(summary(null, { rootIds: [] }))).toEqual([]);
+      expect(await ids(summary("u1", { viewer: { userId: "u1", scope: "mine" } }))).toEqual(["r1"]);
+      const count = await storage.executor.get<{ count: number }>(
+        repo.sessionCountSql(RULES, summary(null, { sources: ["ui"] }), false),
+      );
+      expect(Number(count?.count)).toBe(3);
+      expect(await repo.listThreadRootCounts(RULES)).toEqual([
+        { key: "shared/slack/c1/thread:1.2/", threadRoots: 2 },
+      ]);
+      expect(await repo.findTaskThreadRoots(RULES, "r1")).toBe(2);
+      expect(await repo.findTaskThreadRoots(RULES, "r3")).toBe(0);
+      expect(await repo.findTaskThreadRoots(RULES, "missing")).toBeNull();
+      expect(await repo.findSessionReadState(RULES, summary("u1", { rootId: "r1" }))).toEqual({
+        readState: "unread",
+        lastActivityAt: "2026-11-21T10:00:00.000Z",
+      });
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r1" }))).toBe(false);
+
+      const write = {
+        userId: "u1",
+        status: "done" as const,
+        doneAt: NOW,
+        readAt: null,
+        now: NOW,
+      };
+      expect(
+        await repo.triageSessionList(RULES, summary("u1", { rootIds: ["r1", "r3"] }), write),
+      ).toBe(2);
+      // A second write updates the rows (sticky readAt, kept lastReadAt).
+      expect(
+        await repo.triageSessionList(RULES, summary("u1", { rootIds: ["r1"] }), {
+          ...write,
+          status: "open",
+          doneAt: null,
+          readAt: NOW,
+          lastReadAt: { kind: "value", value: "1970-01-01T00:00:00.000Z" },
+        }),
+      ).toBe(1);
+      const rows = await storage.executor.query<Record<string, unknown>>(sql`
+        SELECT "itemId", status, "doneAt", "readAt", "lastReadAt" FROM inbox_item_state ORDER BY "itemId"`);
+      expect(rows).toEqual([
+        {
+          itemId: "r1",
+          status: "open",
+          doneAt: null,
+          readAt: NOW,
+          lastReadAt: "1970-01-01T00:00:00.000Z",
+        },
+        { itemId: "r3", status: "done", doneAt: NOW, readAt: null, lastReadAt: null },
+      ]);
+      // Read once the viewer's cursor passes the chain's last activity.
+      await repo.triageSessionList(RULES, summary("u1", { rootIds: ["r1"] }), {
+        ...write,
+        status: "open",
+        doneAt: null,
+        readAt: NOW,
+        lastReadAt: { kind: "value", value: NOW },
+      });
+      expect(await repo.findSessionReadState(RULES, summary("u1", { rootId: "r1" }))).toMatchObject(
+        {
+          readState: "read",
+        },
+      );
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r1" }))).toBe(true);
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r3" }))).toBe(false);
+
+      const tree = await repo.listSessionTreeRows(RULES, summary("u1"), {
+        mine: false,
+        userId: "u1",
+      });
+      expect(
+        tree
+          .map((row) => [row.root_id, row.defaultVisible, row.needsYou, row.scheduleId])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      ).toEqual([
+        ["r1", 1, 0, null],
+        ["r2", 1, 0, null],
+        ["r3", 0, 0, null],
+      ]);
+    });
+
+    test("session page members, shares and thread labels", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'U')`);
+      await insertRoot("r1", "shared/k/", {
+        requestedByUserId: "u1",
+        createdAt: "2026-11-21T09:00:00.000Z",
+        task: "ask\n<thread_context>\nold\n</thread_context>\nnow",
+      });
+      await insertRoot("r2", "shared/k/", {
+        title: "  Later  ",
+        createdAt: "2026-11-21T09:30:00.000Z",
+      });
+      await insertRoot("r3", "shared/j/", { title: "   ", task: "plain" });
+      const members = await repo.listSessionPageMembers(["r1", "r2"]);
+      expect(members.map((row) => [row.root_id, row.id, row.name])).toEqual([
+        ["r2", null, null],
+        ["r1", "u1", "U"],
+      ]);
+      await repo.insertShare({
+        id: "sh2",
+        rootTaskId: "r1",
+        userId: null,
+        access: "read",
+        createdAt: "2026-11-21T10:00:00.000Z",
+        actor: null,
+      });
+      await repo.insertShare({
+        id: "sh1",
+        rootTaskId: "r1",
+        userId: "u1",
+        access: "write",
+        createdAt: "2026-11-21T10:00:00.000Z",
+        actor: null,
+      });
+      expect(
+        (await repo.listSessionPageShares(["r1"])).map((row) => [row.id, row.name, row.access]),
+      ).toEqual([
+        ["u1", "U", "write"],
+        [null, null, "read"],
+      ]);
+      const labels = await repo.listThreadLabels(["r1", "r2", "r3"], 400);
+      expect(labels.sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: "shared/j/", title: null, prompt: "plain" },
+        { key: "shared/k/", title: null, prompt: "ask\n\nnow" },
+      ]);
+    });
+
+    test("source backfill roots: default-key Slack and chat-sdk roots after the cursor, by id, limited", async () => {
+      const root = (
+        id: string,
+        key: string,
+        f: {
+          parent?: string;
+          channel?: string;
+          thread?: string;
+          context?: string;
+        } = {},
+      ) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "key", "parentTaskId",
+            "slackChannelId", "slackThreadTs", "contextKey")
+          VALUES (${id}, 't', 'pending', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z', ${key},
+            ${f.parent ?? null}, ${f.channel ?? null}, ${f.thread ?? null}, ${f.context ?? null})`);
+      await root("b-slack", "shared/", { channel: "C1", thread: "1.2" });
+      await root("A-chat", "shared/task:a-chat/", { context: "task:chat-sdk:x" });
+      await root("c-moved", "shared/research/", { channel: "C1", thread: "1.2" });
+      await root("d-nothread", "shared/", { channel: "C1" });
+      await root("e-other", "shared/", { context: "task:other:x" });
+      await root("f-child", "shared/", { parent: "b-slack", channel: "C1", thread: "1.2" });
+      await root("g-slack", "shared/task:g-slack/", { channel: "C2", thread: "3.4" });
+      const ids = async (after: string, limit: number) =>
+        (await repo.listSourceBackfillRoots(after, limit)).map((row) => row.id);
+      expect(await ids("", 10)).toEqual(["A-chat", "b-slack", "g-slack"]);
+      expect(await ids("", 2)).toEqual(["A-chat", "b-slack"]);
+      expect(await ids("b-slack", 10)).toEqual(["g-slack"]);
+      expect((await repo.listSourceBackfillRoots("", 1))[0]).toEqual({
+        id: "A-chat",
+        slackChannelId: null,
+        slackThreadTs: null,
+        contextKey: "task:chat-sdk:x",
+      });
+    });
+
+    test("session moves: keys, prefix roots, chains, favorites", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'U'), ('u2', 'V')`);
+      await insertRoot("b", "shared/g/");
+      await insertRoot("a", "shared/g/x/", { requestedByUserId: "u1" });
+      await insertRoot("c", "shared/h/");
+      await insertTask("a-child", { parentTaskId: "a" });
+      await insertTask("a-grandchild", { parentTaskId: "a-child" });
+      const range = { lo: "shared/g/", hi: "shared/g0" };
+      expect(await repo.listPrefixRoots({ range, limit: 10, offset: 0 })).toEqual([
+        { id: "a", key: "shared/g/x/" },
+        { id: "b", key: "shared/g/" },
+      ]);
+      expect(await repo.listPrefixRoots({ range, limit: 1, offset: 1 })).toEqual([
+        { id: "b", key: "shared/g/" },
+      ]);
+      expect(await repo.listPrefixRoots({ range, userId: null, limit: 10, offset: 0 })).toEqual([]);
+      expect(
+        (await repo.listPrefixRoots({ range, userId: "u1", limit: 10, offset: 0 })).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["a"]);
+      await repo.insertShare({
+        id: "s1",
+        rootTaskId: "a",
+        userId: null,
+        access: "read",
+        createdAt: NOW,
+        actor: null,
+      });
+      expect(await repo.listVisiblePrefixRoots(range, { userId: "u2", scope: "shared" })).toEqual([
+        { id: "a" },
+      ]);
+      expect(await repo.listVisiblePrefixRoots(range, { userId: "u1", scope: "shared" })).toEqual(
+        [],
+      );
+      await repo.setTaskKey("b", "shared/moved/", "u1");
+      expect(await repo.findTaskKeyAndParent("b")).toEqual({
+        key: "shared/moved/",
+        parentTaskId: null,
+      });
+      expect(await repo.findTaskKeyAndParent("a-child")).toEqual({
+        key: "shared/",
+        parentTaskId: "a",
+      });
+      expect(await repo.findTaskKeyAndParent("missing")).toBeNull();
+      const updated = await storage.executor.get<{ lastUpdatedAt: string; updated_by: string }>(
+        sql`SELECT "lastUpdatedAt", updated_by FROM agent_tasks WHERE id = 'b'`,
+      );
+      expect(updated).toEqual({ lastUpdatedAt: "2026-11-21T10:00:00.000Z", updated_by: "u1" });
+      expect((await repo.listChainTaskIds("a")).sort()).toEqual(["a", "a-child", "a-grandchild"]);
+
+      const fav = (id: string, scope: string, itemId: string) =>
+        storage.executor.run(sql`
+          INSERT INTO user_favorites (id, "favoriteScope", "itemType", "itemId") VALUES (${id}, ${scope}, 'key', ${itemId})`);
+      await fav("f1", "p1", "shared/g/");
+      await fav("f2", "p1", "shared/n/");
+      await fav("f3", "p2", "shared/g/x/");
+      await fav("f4", "p3", "shared/g/");
+      await repo.moveKeyFavorites(range, "shared/n/", "p1");
+      expect(
+        await storage.executor.query(sql`SELECT id, "itemId" FROM user_favorites ORDER BY id`),
+      ).toEqual([
+        // p1 already starred the new key: the old row goes.
+        { id: "f2", itemId: "shared/n/" },
+        { id: "f3", itemId: "shared/g/x/" },
+        { id: "f4", itemId: "shared/g/" },
+      ]);
+      await repo.moveKeyFavorites(range, "shared/n/");
+      expect(
+        await storage.executor.query(sql`SELECT id, "itemId" FROM user_favorites ORDER BY id`),
+      ).toEqual([
+        { id: "f2", itemId: "shared/n/" },
+        { id: "f3", itemId: "shared/n/x/" },
+        { id: "f4", itemId: "shared/n/" },
+      ]);
+    });
+
+    test("session labels: live kv values and resource names", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at) VALUES
+          ('session-labels', 'k1', 'one', 'string', NULL, 1, 1),
+          ('session-labels', 'k2', 'two', 'string', 5000, 1, 1),
+          ('session-labels', 'k3', 'three', 'string', 1000, 1, 1),
+          ('other', 'k1', 'x', 'string', NULL, 1, 1)`);
+      const live = await repo.listLiveKvValues("session-labels", ["k1", "k2", "k3", "k4"], 2000);
+      expect(live.sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: "k1", value: "one" },
+        { key: "k2", value: "two" },
+      ]);
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, triggers, enabled, "createdAt", "lastUpdatedAt") VALUES
+          ('ABC', '  Named  ', '{"nodes":[]}', '[]', ${true}, ${NOW}, ${NOW}),
+          ('def', '', '{"nodes":[]}', '[]', ${true}, ${NOW}, ${NOW})`);
+      const names = await repo.listResourceNames("workflow", ["ABC", "def", "zzz"]);
+      expect(names.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "abc", name: "Named" },
+        { id: "def", name: null },
+      ]);
+    });
+
+    test("session tokens: mint, bindings, revocation, rotation and lookup", async () => {
+      const base = {
+        tokenPreview: "prev",
+        agentId: "a1",
+        taskId: null,
+        runtimeId: null,
+        parentRuntimeId: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        createdAt: NOW,
+        controllerId: null,
+        parentTokenId: null,
+        scriptRun: false,
+      };
+      const mint = (id: string, extra: Partial<typeof base> = {}) =>
+        repo.insertSessionToken({ ...base, id, tokenHash: `h-${id}`, ...extra });
+      await mint("agent");
+      await mint("script", { scriptRun: true });
+      await mint("rt", { runtimeId: "run1" });
+      await mint("child", { taskId: "t1", parentTokenId: "agent" });
+      await mint("rtchild", { taskId: "t1", parentRuntimeId: "run1" });
+      await mint("old", { expiresAt: "2000-01-01T00:00:00.000Z" });
+
+      expect(await repo.findSessionTokenScriptRun("script")).toBe(1);
+      expect(await repo.findSessionTokenScriptRun("agent")).toBe(0);
+      expect(await repo.findSessionTokenScriptRun("missing")).toBeNull();
+      expect(await repo.findLiveParentTokenExpiry("agent", "a1", null, NOW)).toBe(base.expiresAt);
+      expect(await repo.findLiveParentTokenExpiry("script", "a1", null, NOW)).toBeNull();
+      expect(await repo.findLiveParentTokenExpiry("rt", "a1", "run1", NOW)).toBe(base.expiresAt);
+      expect(await repo.findLiveParentTokenExpiry("rt", "a1", null, NOW)).toBeNull();
+      expect(await repo.findLiveParentTokenExpiry("old", "a1", null, NOW)).toBeNull();
+      expect((await repo.listActiveAgentTokenIds("a1", NOW)).sort()).toEqual(["agent"]);
+      expect(await repo.findSessionTokenRuntime("rt")).toEqual({ runtimeId: "run1" });
+      expect(await repo.findSessionTokenRuntime("missing")).toBeNull();
+      expect(await repo.listChildSessionTokenIds(["agent", "rt"])).toEqual(["child"]);
+      expect((await repo.listRuntimeSessionTokenIds("run1")).sort()).toEqual(["rt", "rtchild"]);
+
+      await repo.setSessionTokenProvenance("script", {
+        sourceStepId: "step",
+        sourceScriptRunId: "run",
+        objectChain: '["a"]',
+        depth: 2,
+      });
+      const found = await repo.findSessionTokenByHash("h-script");
+      expect(found).toMatchObject({
+        id: "script",
+        agentId: "a1",
+        controllerId: null,
+        placement: null,
+        revokedAt: null,
+        sourceStepId: "step",
+        sourceScriptRunId: "run",
+        objectChain: '["a"]',
+        depth: 2,
+      });
+      expect(await repo.findSessionTokenByHash("nope")).toBeNull();
+      await repo.touchSessionToken("agent", NOW);
+      expect(
+        await storage.executor.get(sql`SELECT "lastUsedAt" FROM session_tokens WHERE id = 'agent'`),
+      ).toEqual({ lastUsedAt: NOW });
+
+      // Rotation cuts only later expiries.
+      await repo.expireSessionTokensWithChildren(["agent"], "2050-01-01T00:00:00.000Z");
+      await repo.expireSessionTokensWithChildren(["old"], "2050-01-01T00:00:00.000Z");
+      const expiry = async (id: string) =>
+        (
+          await storage.executor.get<{ expiresAt: string }>(
+            sql`SELECT "expiresAt" FROM session_tokens WHERE id = ${id}`,
+          )
+        )?.expiresAt;
+      expect(await expiry("agent")).toBe("2050-01-01T00:00:00.000Z");
+      expect(await expiry("child")).toBe("2050-01-01T00:00:00.000Z");
+      expect(await expiry("old")).toBe("2000-01-01T00:00:00.000Z");
+
+      // Revocation keeps the first revokedAt.
+      await repo.revokeSessionTokens(["child"], "2026-11-21T12:00:01.000Z");
+      await repo.revokeSessionTokens(["child", "agent"], "2026-11-21T12:00:02.000Z");
+      await repo.revokeRuntimeSessionTokens("run1", "2026-11-21T12:00:03.000Z");
+      expect(
+        await storage.executor.query(
+          sql`SELECT id, "revokedAt" FROM session_tokens WHERE "revokedAt" IS NOT NULL ORDER BY id`,
+        ),
+      ).toEqual([
+        { id: "agent", revokedAt: "2026-11-21T12:00:02.000Z" },
+        { id: "child", revokedAt: "2026-11-21T12:00:01.000Z" },
+        { id: "rt", revokedAt: "2026-11-21T12:00:03.000Z" },
+        { id: "rtchild", revokedAt: "2026-11-21T12:00:03.000Z" },
+      ]);
+      expect((await repo.listUnrevokedAgentSessionTokenIds("a1")).sort()).toEqual([
+        "old",
+        "script",
+      ]);
     });
   });
 }

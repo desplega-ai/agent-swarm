@@ -40,7 +40,6 @@ import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { getStorage } from "../../storage";
 import { getAgentById } from "../agents";
-import { getDbClient } from "../runtime";
 
 type TaskReadDependencies = {
   checkDependencies: (taskId: string) => Promise<{ ready: boolean; blockedBy: string[] }>;
@@ -470,11 +469,7 @@ export async function getTaskLineage(
   let truncated = top.hops === maxAncestors && top.parentTaskId !== null;
 
   const descendants = async (startId: string) =>
-    (await repo.listTaskDescendants(
-      startId,
-      maxDepth,
-      maxNodes + 1,
-    )) as unknown as TaskLineageRow[];
+    (await repo.listTaskDescendants(startId, maxDepth, maxNodes + 1)) as TaskLineageRow[];
 
   const byId = new Map<string, TaskLineageNode>();
   const add = (rows: TaskLineageRow[]) => {
@@ -490,7 +485,7 @@ export async function getTaskLineage(
   // The path root → task is always present, even past the depth or node cap.
   const missing = path.map((row) => row.id).filter((id) => !byId.has(id));
   if (missing.length > 0) {
-    add((await repo.listTaskLineageRows(missing)) as unknown as TaskLineageRow[]);
+    add((await repo.listTaskLineageRows(missing)) as TaskLineageRow[]);
   }
 
   // The caps cut the walk at many points (depth, node count, either walk), so
@@ -786,7 +781,7 @@ export async function getAllTasks(
   );
 
   if (fields === "timeline") {
-    return (rows as unknown as AgentTaskTimelineRow[]).map(rowToAgentTaskTimelineItem);
+    return (rows as AgentTaskTimelineRow[]).map(rowToAgentTaskTimelineItem);
   }
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
@@ -804,12 +799,12 @@ export async function getAllTasks(
   };
 
   if (fields === "slim") {
-    let tasks = (rows as unknown as AgentTaskSummaryRow[]).map(rowToAgentTaskSummary);
+    let tasks = (rows as AgentTaskSummaryRow[]).map(rowToAgentTaskSummary);
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }
 
-  let tasks = (rows as unknown as AgentTaskRow[]).map(rowToAgentTask);
+  let tasks = (rows as AgentTaskRow[]).map(rowToAgentTask);
   if (filters?.readyOnly) tasks = await filterReady(tasks);
   return tasks;
 }
@@ -866,61 +861,25 @@ export async function getCompletedSlackTasks(): Promise<AgentTask[]> {
  * terminal status transition, so a process restart cannot lose the send.
  */
 export async function getPendingSlackRelayTasks(): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT task.* FROM slack_relay_obligations obligation
-       JOIN agent_tasks task ON task.id = obligation.task_id
-       WHERE obligation.delivered_at IS NULL
-       AND task.status IN ('completed', 'failed', 'cancelled')
-       ORDER BY obligation.last_attempt_at IS NOT NULL,
-                obligation.last_attempt_at ASC,
-                obligation.created_at ASC
-       LIMIT 200`,
-  );
-  return rows.map(rowToAgentTask);
+  return (await getStorage().repos.messaging.listPendingSlackRelayTasks()).map(toTask);
 }
 
 /** Rotate attempted rows behind fresh obligations so poison rows cannot starve the queue. */
 export async function markSlackRelayAttempted(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    `UPDATE slack_relay_obligations
-       SET attempt_count = attempt_count + 1,
-           last_attempt_at = ?,
-           updated_at = ?
-       WHERE task_id = ? AND delivered_at IS NULL`,
-    [now, now, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.markSlackRelayAttempted(taskId, now)) > 0;
 }
 
 /** Mark a relay obligation delivered only after Slack accepted the final result. */
 export async function markSlackRelayDelivered(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    `UPDATE slack_relay_obligations
-       SET delivered_at = ?, updated_at = ?
-       WHERE task_id = ? AND delivered_at IS NULL`,
-    [now, now, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.markSlackRelayDelivered(taskId, now)) > 0;
 }
 
 /** Discharge obligations already fulfilled by renderer v2's durable outcome record. */
 export async function markFinalizedSlackRelaysDelivered(): Promise<number> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    `UPDATE slack_relay_obligations AS obligation
-       SET delivered_at = ?, updated_at = ?
-       WHERE obligation.delivered_at IS NULL
-       AND EXISTS (
-         SELECT 1 FROM slack_messages message
-         WHERE message.kind = 'outcome'
-         AND message.task_id = obligation.task_id
-         AND message.finalized_at IS NOT NULL
-       )`,
-    [now, now],
-  );
-  return result.changes;
+  return await getStorage().repos.messaging.markFinalizedSlackRelaysDelivered(now);
 }
 
 /** Pending Chat SDK relay row: the terminal task plus its obligation bookkeeping. */
@@ -929,17 +888,6 @@ export interface PendingChatRelay {
   createdAt: string;
   lastError: string | null;
 }
-
-/**
- * Backoff gate for a chat relay obligation: eligible when never attempted, or
- * when `min(3 s * 2^attempt_count, 10 min)` passed since `last_attempt_at`.
- * `attempt_count >= 8` is already past the cap (3 s * 2^8 = 768 s). The one
- * parameter is the reference time as ISO text.
- */
-const CHAT_RELAY_ELIGIBLE_SQL = `(obligation.last_attempt_at IS NULL
-         OR (julianday(?) - julianday(obligation.last_attempt_at)) * 86400000.0 >=
-            CASE WHEN obligation.attempt_count >= 8 THEN 600000
-                 ELSE 3000 * (1 << obligation.attempt_count) END)`;
 
 /**
  * Terminal chat tasks whose relay obligation is pending, out of backoff at
@@ -956,39 +904,15 @@ export async function getPendingChatRelayTasks(
   limit = 200,
   adapters: readonly string[] = [],
 ): Promise<PendingChatRelay[]> {
-  if (adapters.length === 0) return [];
-  for (const adapter of adapters) {
-    if (!/^[a-z]+$/.test(adapter)) throw new Error(`invalid chat adapter name: ${adapter}`);
-  }
-  const adapterFilter = adapters.map(() => "task.contextKey GLOB ?").join(" OR ");
-  const rows = await getDbClient().query<
-    AgentTaskRow & {
-      relay_created_at: string;
-      relay_last_error: string | null;
-    }
-  >(
-    `SELECT task.*,
-            obligation.created_at AS relay_created_at,
-            obligation.last_error AS relay_last_error
-       FROM chat_relay_obligations obligation
-       JOIN agent_tasks task ON task.id = obligation.task_id
-       WHERE obligation.delivered_at IS NULL
-       AND obligation.given_up_at IS NULL
-       AND task.status IN ('completed', 'failed', 'cancelled')
-       AND (${adapterFilter})
-       AND ${CHAT_RELAY_ELIGIBLE_SQL}
-       ORDER BY obligation.last_attempt_at IS NOT NULL,
-                obligation.last_attempt_at ASC,
-                obligation.created_at ASC
-       LIMIT ?`,
-    [
-      ...adapters.map((adapter) => `task:chat-sdk:${adapter}:*`),
-      new Date(now).toISOString(),
-      limit,
-    ],
+  // Backoff: eligible when never attempted, or when `min(3 s * 2^attempt_count,
+  // 10 min)` passed since the last attempt. Adapter names are lowercase letters.
+  const rows = await getStorage().repos.messaging.listPendingChatRelayTasks(
+    new Date(now).toISOString(),
+    limit,
+    adapters,
   );
   return rows.map((row) => ({
-    task: rowToAgentTask(row),
+    task: toTask(row),
     createdAt: row.relay_created_at,
     lastError: row.relay_last_error,
   }));
@@ -1001,13 +925,11 @@ export async function getPendingChatRelayTasks(
 export async function giveUpStaleChatRelays(now: number, olderThanMs: number): Promise<number> {
   const at = new Date(now).toISOString();
   const cutoff = new Date(now - olderThanMs).toISOString();
-  const result = await getDbClient().run(
-    `UPDATE chat_relay_obligations
-       SET given_up_at = ?, last_error = 'gave up: older than 24h', updated_at = ?
-       WHERE delivered_at IS NULL AND given_up_at IS NULL AND created_at < ?`,
-    [at, at, cutoff],
+  return await getStorage().repos.messaging.giveUpChatRelaysCreatedBefore(
+    cutoff,
+    at,
+    "gave up: older than 24h",
   );
-  return result.changes;
 }
 
 /**
@@ -1020,18 +942,7 @@ export async function markChatRelayAttempted(
   now: number = Date.now(),
 ): Promise<boolean> {
   const at = new Date(now).toISOString();
-  const result = await getDbClient().run(
-    `UPDATE chat_relay_obligations AS obligation
-       SET attempt_count = attempt_count + 1,
-           last_attempt_at = ?,
-           updated_at = ?
-       WHERE task_id = ?
-       AND delivered_at IS NULL
-       AND given_up_at IS NULL
-       AND ${CHAT_RELAY_ELIGIBLE_SQL}`,
-    [at, at, taskId, at],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.markChatRelayAttempted(taskId, at)) > 0;
 }
 
 /** Record why the last chat relay attempt failed. The text is scrubbed before it is stored. */
@@ -1040,13 +951,10 @@ export async function recordChatRelayError(
   error: string,
   now: number = Date.now(),
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    `UPDATE chat_relay_obligations
-       SET last_error = ?, updated_at = ?
-       WHERE task_id = ? AND delivered_at IS NULL`,
-    [scrubSecrets(error), new Date(now).toISOString(), taskId],
+  const at = new Date(now).toISOString();
+  return (
+    (await getStorage().repos.messaging.recordChatRelayError(taskId, scrubSecrets(error), at)) > 0
   );
-  return result.changes > 0;
 }
 
 /** Mark a chat relay obligation delivered after the platform accepted every chunk. Idempotent. */
@@ -1055,13 +963,7 @@ export async function markChatRelayDelivered(
   now: number = Date.now(),
 ): Promise<boolean> {
   const at = new Date(now).toISOString();
-  const result = await getDbClient().run(
-    `UPDATE chat_relay_obligations
-       SET delivered_at = ?, updated_at = ?
-       WHERE task_id = ? AND delivered_at IS NULL`,
-    [at, at, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.markChatRelayDelivered(taskId, at)) > 0;
 }
 
 /** Stop retrying a chat relay obligation. The reason is scrubbed before it is stored. */
@@ -1071,13 +973,9 @@ export async function markChatRelayGivenUp(
   now: number = Date.now(),
 ): Promise<boolean> {
   const at = new Date(now).toISOString();
-  const result = await getDbClient().run(
-    `UPDATE chat_relay_obligations
-       SET given_up_at = ?, last_error = ?, updated_at = ?
-       WHERE task_id = ? AND delivered_at IS NULL AND given_up_at IS NULL`,
-    [at, scrubSecrets(error), at, taskId],
+  return (
+    (await getStorage().repos.messaging.markChatRelayGivenUp(taskId, scrubSecrets(error), at)) > 0
   );
-  return result.changes > 0;
 }
 
 /**
@@ -1137,45 +1035,10 @@ export async function getSlackTasksMissingTree(
   const since = new Date(
     (options.now ?? new Date()).getTime() - SLACK_MISSING_TREE_WINDOW_MS,
   ).toISOString();
-  const scope = thread
-    ? {
-        index: "idx_agent_tasks_slack_thread_cover",
-        sql: "AND task.slackChannelId = ? AND task.slackThreadTs = ?",
-        params: [thread.channelId, thread.threadTs],
-      }
-    : {
-        index: "idx_agent_tasks_slack_last_updated",
-        sql: "AND task.lastUpdatedAt >= ?",
-        params: [since],
-      };
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT task.* FROM slack_render_v2_state state
-       CROSS JOIN agent_tasks task INDEXED BY ${scope.index}
-       WHERE state.id = 1
-       AND task.source = 'slack'
-       AND task.slackChannelId IS NOT NULL
-       AND task.slackThreadTs IS NOT NULL
-       ${scope.sql}
-       AND task.createdAt >= state.activated_at
-       AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
-       AND NOT EXISTS (
-         SELECT 1 FROM agent_tasks earlier
-         WHERE earlier.source = 'slack'
-         AND earlier.slackChannelId = task.slackChannelId
-         AND earlier.slackThreadTs = task.slackThreadTs
-         AND earlier.createdAt < state.activated_at
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM slack_messages tree
-         WHERE tree.kind = 'tree'
-         AND tree.channel_id = task.slackChannelId
-         AND tree.thread_ts = task.slackThreadTs
-       )
-       ORDER BY task.lastUpdatedAt DESC
-       LIMIT 200`,
-    scope.params,
+  const rows = await getStorage().repos.slack.listSlackTasksMissingTree(
+    thread ? { thread } : { since },
   );
-  return rows.map(rowToAgentTask);
+  return rows.map(toTask);
 }
 
 /**

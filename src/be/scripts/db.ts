@@ -59,7 +59,7 @@ function normalizeScopeId(scope: ScriptScope, scopeId?: string | null): string |
 
 function rowToScript(row: ScriptRow): ScriptRecord {
   return {
-    ...(row as unknown as ScriptRecord),
+    ...row,
     scopeId: row.scopeId ?? null,
     isScratch: row.isScratch === 1,
     typeChecked: row.typeChecked === 1,
@@ -68,7 +68,7 @@ function rowToScript(row: ScriptRow): ScriptRecord {
     updatedByAgentId: row.updatedByAgentId ?? null,
     createdBy: row.created_by ?? null,
     updatedBy: row.updated_by ?? null,
-  };
+  } as ScriptRecord;
 }
 
 function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {

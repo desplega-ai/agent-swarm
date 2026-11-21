@@ -1,6 +1,7 @@
 import {
   BaseRuntimePoolsRepository,
   type ControllerRuntimeRow,
+  EMPTY,
   type RemoteControllerRow,
   RUNTIME_TASKLESS_TRIGGERS,
   type RuntimeCacheReleaseRow,
@@ -130,6 +131,28 @@ export class SqliteRuntimePoolsRepository extends BaseRuntimePoolsRepository {
       SELECT id, agent_id FROM runtime_instances
        WHERE status = 'active' AND last_seen_at < ${cutoff} AND pool_id IS NULL
        ORDER BY rowid`);
+  }
+
+  listEligibleRuntimeSlots(
+    seenSince: string,
+    agentId?: string,
+  ): Promise<{ agent_id: string; free_slots: number }[]> {
+    return this.db.query<{ agent_id: string; free_slots: number }>(sql`
+      SELECT r.agent_id, SUM(MAX(0, r.reported_slots - MAX(
+         (SELECT COUNT(*) FROM active_sessions WHERE "runtimeInstanceId" = r.id),
+         CASE WHEN t.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END
+       ))) AS free_slots
+       FROM runtime_instances r JOIN agents a ON a.id = r.agent_id
+       LEFT JOIN runtime_pools p ON p.id = a.runtime_pool_id
+       LEFT JOIN agent_tasks t ON t.id = r.task_id
+       WHERE r.status = 'active' AND r.draining = 0
+         AND (r.credential_ready IS NULL OR r.credential_ready = 1)
+         AND r.last_seen_at >= ${seenSince}
+         AND (a.runtime_pool_id IS NULL OR p.enabled = 1)
+         AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
+           OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped'))
+         ${agentId ? sql`AND r.agent_id = ${agentId}` : EMPTY}
+       GROUP BY r.agent_id`);
   }
 
   listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]> {

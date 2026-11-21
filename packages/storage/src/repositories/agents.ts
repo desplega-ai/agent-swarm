@@ -1,6 +1,7 @@
 import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { readableSessionSql } from "./tasks";
 
 /**
  * Domain: agents (`agents`, `agent_log`, `agent_history`, `agent_mcp_servers`,
@@ -255,6 +256,23 @@ export interface AgentsRepository {
   listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
   /** Entries of one event type, newest first (ties: insertion order). */
   listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+  /** True when the task has an entry of `eventType`. */
+  hasTaskLogEvent(taskId: string, eventType: string): Promise<boolean>;
+  /**
+   * The task's newest entry of `eventType` by `createdAt` (a tie picks the
+   * row the engine meets first).
+   */
+  findLatestTaskLog(
+    taskId: string,
+    eventType: string,
+  ): Promise<{ id: string; metadata: string | null } | null>;
+  /** Replaces an entry's metadata. Returns the changed count. */
+  setLogMetadata(id: string, metadata: string): Promise<number>;
+  /**
+   * Status changes and claims from `pending`/`unassigned` to `in_progress`
+   * logged at or after `since`.
+   */
+  countRecentQueuePickups(since: string): Promise<number>;
 
   // ---- services ----
   insertService(
@@ -369,6 +387,35 @@ export interface AgentsRepository {
   countAllAgents(): Promise<number>;
   /** Agents that are not extension identities. */
   countNonExtensionAgents(): Promise<number>;
+  // ---- agent_log: agent and global feeds ----
+  /** One agent's log, newest first, then insertion order (newest first). */
+  listLogsByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<AgentLogRow[]>;
+  /**
+   * The log, newest first, then insertion order (newest first). With `limit`,
+   * agent status changes are left out.
+   */
+  listAllLogs(
+    limit: number | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<AgentLogRow[]>;
+
+  // ---- active_sessions ----
+  /** Newest `startedAt` first, then insertion order (newest first). */
+  listActiveSessions(
+    agentId: string | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<ActiveSessionRow[]>;
+  countActiveSessions(): Promise<number>;
+
+  // ---- agents: counts ----
+  /** Idle non-lead agents, in insertion order. */
+  listIdleWorkers(): Promise<AgentRow[]>;
+  /** Non-offline leads and workers active in the last `minutes` (database clock). */
+  countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null>;
+  /** Idle or busy leads and workers, extensions left out. */
+  countReadyAgents(): Promise<{ leads: number | null; workers: number | null } | null>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -582,6 +629,34 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   abstract listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
   abstract listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+
+  async hasTaskLogEvent(taskId: string, eventType: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_log WHERE "taskId" = ${taskId} AND "eventType" = ${eventType} LIMIT 1`);
+    return row != null;
+  }
+
+  findLatestTaskLog(
+    taskId: string,
+    eventType: string,
+  ): Promise<{ id: string; metadata: string | null } | null> {
+    return this.db.get(sql`
+      SELECT id, metadata
+        FROM agent_log
+       WHERE "taskId" = ${taskId} AND "eventType" = ${eventType}
+       ORDER BY "createdAt" DESC
+       LIMIT 1`);
+  }
+
+  async setLogMetadata(id: string, metadata: string): Promise<number> {
+    const result = await this.db.run(
+      sql`UPDATE agent_log SET metadata = ${metadata} WHERE id = ${id}`,
+    );
+    return result.changes;
+  }
+
+  /** Keeps the SQLite index hint (unary `+`) that the query plan depends on. */
+  abstract countRecentQueuePickups(since: string): Promise<number>;
 
   // ---- services ----
 
@@ -902,5 +977,80 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
       sql`SELECT COUNT(*) AS count FROM agents WHERE ${notExtension}`,
     );
     return row?.count ?? 0;
+  }
+
+  // ---- agent_log: agent and global feeds ----
+
+  protected abstract logOrder(): SqlQuery;
+
+  listLogsByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<AgentLogRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_log."taskId"`, { nullable: true })}`
+      : EMPTY;
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log WHERE "agentId" = ${agentId}${readable}
+      ORDER BY "createdAt" DESC, ${this.logOrder()} DESC`);
+  }
+
+  listAllLogs(
+    limit: number | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<AgentLogRow[]> {
+    const conditions: SqlQuery[] = [];
+    if (limit) conditions.push(sql`"eventType" != 'agent_status_change'`);
+    if (readableBy) {
+      conditions.push(
+        readableSessionSql(readableBy.userId, sql`agent_log."taskId"`, { nullable: true }),
+      );
+    }
+    const cap = limit ? sql` LIMIT ${limit}` : EMPTY;
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log${sqlWhere(conditions)}
+      ORDER BY "createdAt" DESC, ${this.logOrder()} DESC${cap}`);
+  }
+
+  // ---- active_sessions ----
+
+  listActiveSessions(
+    agentId: string | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<ActiveSessionRow[]> {
+    const conditions: SqlQuery[] = [];
+    if (agentId) conditions.push(sql`"agentId" = ${agentId}`);
+    if (readableBy) {
+      conditions.push(
+        readableSessionSql(readableBy.userId, sql`active_sessions."taskId"`, { nullable: true }),
+      );
+    }
+    return this.db.query<ActiveSessionRow>(sql`
+      SELECT * FROM active_sessions${sqlWhere(conditions)}
+      ORDER BY "startedAt" DESC, ${this.logOrder()} DESC`);
+  }
+
+  async countActiveSessions(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM active_sessions`,
+    );
+    return row?.count ?? 0;
+  }
+
+  // ---- agents: counts ----
+
+  listIdleWorkers(): Promise<AgentRow[]> {
+    return this.db.query<AgentRow>(sql`
+      SELECT * FROM agents WHERE status = 'idle' AND "isLead" = ${false}
+      ORDER BY ${this.logOrder()}`);
+  }
+
+  abstract countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null>;
+
+  countReadyAgents(): Promise<{ leads: number | null; workers: number | null } | null> {
+    return this.db.get(sql`
+      SELECT SUM(CASE WHEN "isLead" = ${true} THEN 1 ELSE 0 END) AS leads,
+        SUM(CASE WHEN "isLead" = ${false} THEN 1 ELSE 0 END) AS workers
+      FROM agents
+      WHERE status IN ('idle', 'busy') AND ${this.notExtensionAgent()}`);
   }
 }

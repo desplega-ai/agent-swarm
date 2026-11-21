@@ -4,8 +4,7 @@ import { isRbacEnabled } from "../rbac";
 import type { ChecklistItem } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getAutomationSetupStates, setupIntegrationFlags } from "./automation-preflight";
-import { getDbClient } from "./db";
-import { sessionSummaryQuery } from "./db/session-tree";
+import { hasReadSession } from "./db/session-tree";
 import { hasOAuthTokens } from "./db-queries/oauth";
 import { getUserGrant } from "./rbac-roles";
 import { getStorage } from "./storage";
@@ -107,9 +106,7 @@ async function seedChecklist(userId: string | null): Promise<void> {
 
 /** Stored rows plus any default not stored yet, in list order. */
 async function checklistRows(userId: string | null): Promise<ChecklistRow[]> {
-  const rows = (await getStorage().repos.tasks.listChecklistRows(
-    userId,
-  )) as unknown as ChecklistRow[];
+  const rows = (await getStorage().repos.tasks.listChecklistRows(userId)) as ChecklistRow[];
   const stored = new Set(rows.map((row) => row.id));
   const all = [...rows, ...defaultRows(userId).filter((row) => !stored.has(row.id))];
   // Same order as `ORDER BY sortOrder, createdAt, id`.
@@ -137,25 +134,10 @@ async function getUseCaseSignal(userId: string | null): Promise<boolean> {
   // Apps have keys but no creator column. See .non-audit-tables.
   // Bound the check to the user's 100 most recently created group keys.
   // The SQL LIMIT bounds the distinct keys read before the group-key filter.
-  const keys = await getDbClient().query<{ key: string }>(
-    `SELECT "key", MAX(createdAt) AS newest FROM (
-       SELECT "key", createdAt FROM scheduled_tasks WHERE created_by = ?
-       UNION ALL SELECT "key", createdAt FROM pages WHERE created_by = ?
-       UNION ALL SELECT "key", createdAt FROM workflows WHERE created_by = ?
-     ) GROUP BY "key" ORDER BY newest DESC, "key" LIMIT 500`,
-    [userId, userId, userId],
-  );
-  const groups = keys
-    .map(({ key }) => key)
-    .filter(isGroupKey)
-    .slice(0, 100);
+  const keys = await getStorage().repos.assets.listUserCreatedKeys(userId, 500);
+  const groups = keys.filter(isGroupKey).slice(0, 100);
   if (groups.length === 0) return false;
-  const query = sessionSummaryQuery({ keyPrefixes: groups, viewer: { userId, scope: "all" } });
-  const read = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found FROM (${query.sql}) WHERE readState = 'read' LIMIT 1`,
-    query.params,
-  );
-  return read !== null;
+  return hasReadSession({ keyPrefixes: groups, viewer: { userId, scope: "all" } });
 }
 
 /** Each signal is computed at most once per call, and only when a row needs it. */
@@ -250,7 +232,7 @@ export async function mutateChecklist(
     const row =
       action.action === "add"
         ? action
-        : ((await repo.findChecklistItem(id)) as unknown as ChecklistRow | null);
+        : ((await repo.findChecklistItem(id)) as ChecklistRow | null);
     if (!row) throw new ChecklistError("Checklist item not found", 404);
     if (row.scope === "swarm" && !actor.canEditSwarm) {
       throw new ChecklistError("Swarm checklist items require config.write.any", 403);

@@ -18,10 +18,13 @@ import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteMemoryRepository } from "./repositories/memory";
+import { SqliteMessagingRepository } from "./repositories/messaging";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
+import { SqlitePromptTemplatesRepository } from "./repositories/prompt-templates";
 import { SqliteRbacRepository } from "./repositories/rbac";
+import { SqliteRetentionRepository } from "./repositories/retention";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteSavingsRepository } from "./repositories/savings";
 import { SqliteSchedulesRepository } from "./repositories/schedules";
@@ -90,6 +93,9 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       improvements: new SqliteImprovementsRepository(executor),
       sessions: new SqliteSessionsRepository(executor),
       savings: new SqliteSavingsRepository(executor),
+      retention: new SqliteRetentionRepository(executor),
+      messaging: new SqliteMessagingRepository(executor),
+      promptTemplates: new SqlitePromptTemplatesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
@@ -125,3 +131,18 @@ export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/sc
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
 export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";
 export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "./repositories/memory";
+export {
+  type RetentionSweepStatements,
+  retentionSweepStatements,
+  workflowRetentionCandidatesSql,
+  workflowRunRetentionStatements,
+} from "./repositories/retention";
+export {
+  quoteSqlIdentifier,
+  USER_REFERENCE_COLUMNS_SQL,
+  userReferenceRewriteSql,
+  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
+  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
+} from "./repositories/user-references";

@@ -58,7 +58,7 @@ import {
   parseModelTier,
   type ReasoningEffort,
 } from "../types";
-import { createLogEntry, getDbClient } from "./db";
+import { createLogEntry } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
@@ -798,16 +798,12 @@ export async function recordClaimModelResolution(
       );
       // Profiles never fail fast on the CLI check (only a raw task pin does), so this is a resolution.
       const resolution = "unsupported" in checked ? picked.resolution : checked;
-      await getDbClient().run(
-        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-        [
-          resolution.resolvedModel,
-          resolution.modelSource,
-          resolution.modelAlias,
-          picked.profile.name,
-          task.id,
-        ],
-      );
+      await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+        resolvedModel: resolution.resolvedModel,
+        modelSource: resolution.modelSource,
+        modelAlias: resolution.modelAlias,
+        resolvedProfile: picked.profile.name,
+      });
       return {
         resolvedModel: resolution.resolvedModel,
         modelSource: resolution.modelSource,
@@ -845,16 +841,12 @@ export async function recordClaimModelResolution(
     );
     // A profile source never fails fast on the CLI check, as for a task's own profile.
     const resolution = "unsupported" in checked ? alias.resolution : checked;
-    await getDbClient().run(
-      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-      [
-        resolution.resolvedModel,
-        resolution.modelSource,
-        resolution.modelAlias,
-        alias.profile.name,
-        task.id,
-      ],
-    );
+    await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+      resolvedModel: resolution.resolvedModel,
+      modelSource: resolution.modelSource,
+      modelAlias: resolution.modelAlias,
+      resolvedProfile: alias.profile.name,
+    });
     return {
       resolvedModel: resolution.resolvedModel,
       modelSource: resolution.modelSource,
@@ -868,12 +860,7 @@ export async function recordClaimModelResolution(
   if (!resolved) {
     // A re-claimed row keeps the claim record of its previous run; drop it so
     // the trigger and the row do not replay that run's model.
-    await getDbClient().run(
-      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL, resolvedProfile = NULL
-         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL
-           OR resolvedProfile IS NOT NULL)`,
-      [task.id],
-    );
+    await getStorage().repos.tasks.clearTaskModelResolution(task.id);
     return {};
   }
   if ("harnessMismatch" in resolved) return { modelUnsupported: resolved.harnessMismatch };
@@ -886,10 +873,12 @@ export async function recordClaimModelResolution(
     return { modelUnsupported: checked.unsupported };
   }
   const resolution = checked;
-  await getDbClient().run(
-    "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = NULL WHERE id = ?",
-    [resolution.resolvedModel, resolution.modelSource, resolution.modelAlias, task.id],
-  );
+  await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+    resolvedModel: resolution.resolvedModel,
+    modelSource: resolution.modelSource,
+    modelAlias: resolution.modelAlias,
+    resolvedProfile: null,
+  });
   return resolution.modelAlias
     ? resolution
     : { resolvedModel: resolution.resolvedModel, modelSource: resolution.modelSource };

@@ -1,7 +1,5 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
-import { readableSessionCondition } from "./db/tasks/read";
 import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
 import { getStorage } from "./storage";
@@ -88,8 +86,8 @@ async function insertEvent(id: string, input: CreateEventInput): Promise<void> {
     data: input.data ? serializeEventData(input.data) : null,
   });
   // `skill.invoke` also feeds the per-skill counter and invocation history
-  // (skills domain, still on the client; inside a transaction it joins it).
-  await recordSkillInvocation(getDbClient(), input, id);
+  // (skills repository; inside a transaction it joins it).
+  await recordSkillInvocation(input, id);
 }
 
 export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> {
@@ -209,86 +207,9 @@ export async function getEventsFiltered(filters: {
   /** Only events outside sessions this user may not read; `userId: null` is a guest. */
   readableBy?: { userId: string | null };
 }): Promise<SwarmEvent[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters.readableBy) {
-    const readable = readableSessionCondition(filters.readableBy.userId, "events.taskId", {
-      nullable: true,
-    });
-    conditions.push(readable.sql);
-    params.push(...readable.params);
-  }
-
-  if (filters.category) {
-    conditions.push("category = ?");
-    params.push(filters.category);
-  }
-  if (filters.event) {
-    conditions.push("event = ?");
-    params.push(filters.event);
-  }
-  if (filters.events && filters.events.length > 0) {
-    conditions.push(`event IN (${filters.events.map(() => "?").join(", ")})`);
-    params.push(...filters.events);
-  }
-  if (filters.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters.source) {
-    conditions.push("source = ?");
-    params.push(filters.source);
-  }
-  if (filters.agentId) {
-    conditions.push("agentId = ?");
-    params.push(filters.agentId);
-  }
-  if (filters.taskId) {
-    conditions.push("taskId = ?");
-    params.push(filters.taskId);
-  }
-  if (filters.sessionId) {
-    conditions.push("sessionId = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.dataField) {
-    conditions.push("json_extract(data, '$.field') = ?");
-    params.push(filters.dataField);
-  }
-  if (filters.since) {
-    conditions.push("createdAt >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    conditions.push("createdAt <= ?");
-    params.push(filters.until);
-  }
-
-  const limit = filters.limit ?? 100;
-
-  if (filters.latestPerDataField) {
-    const lookups: string[] = [];
-    const lookupParams: (string | number)[] = [];
-    for (const event of filters.latestPerDataField.events) {
-      for (const field of filters.latestPerDataField.dataFields) {
-        const where = [...conditions, "event = ?", "json_extract(data, '$.field') = ?"];
-        lookups.push(
-          `SELECT * FROM (SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY createdAt DESC LIMIT 1)`,
-        );
-        lookupParams.push(...params, event, field);
-      }
-    }
-    if (lookups.length === 0) return [];
-    const sql = `${lookups.join(" UNION ALL ")} ORDER BY createdAt DESC LIMIT ?`;
-    const rows = await getDbClient().query<EventRow>(sql, [...lookupParams, limit]);
-    return rows.map(rowToSwarmEvent);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  params.push(limit);
-
-  const sql = `SELECT * FROM events ${where} ORDER BY createdAt DESC LIMIT ?`;
-  const rows = await getDbClient().query<EventRow>(sql, params);
+  const rows = await getStorage().repos.events.listFiltered({
+    ...filters,
+    limit: filters.limit ?? 100,
+  });
   return rows.map(rowToSwarmEvent);
 }

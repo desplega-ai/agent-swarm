@@ -1,6 +1,6 @@
 import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: scripts (`scripts`, `script_versions`, `script_embeddings`,
@@ -282,6 +282,130 @@ export type ScriptConnectionWrite = {
   now: string;
 };
 
+/** One `script_runs` row; reads add the stored `script_run_sources` text as `storedSource`. */
+export type ScriptRunRow = {
+  objectScriptId: string | null;
+  objectId: string | null;
+  objectMethod: string | null;
+  id: string;
+  agentId: string;
+  scriptName: string | null;
+  source: string;
+  storedSource?: string | null;
+  args: string;
+  kind: string;
+  status: string;
+  pid: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  output: string | null;
+  error: string | null;
+  last_heartbeat_at: string | null;
+  idempotencyKey: string | null;
+  requestedByUserId: string | null;
+  sourceTaskId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+/** The list columns of a run (no source, args or output). */
+export type ScriptRunListRow = Pick<
+  ScriptRunRow,
+  | "id"
+  | "agentId"
+  | "scriptName"
+  | "kind"
+  | "status"
+  | "pid"
+  | "startedAt"
+  | "finishedAt"
+  | "error"
+  | "last_heartbeat_at"
+  | "idempotencyKey"
+  | "requestedByUserId"
+  | "objectScriptId"
+  | "objectId"
+  | "objectMethod"
+>;
+
+/** Equality filters shared by the run list and count. */
+export type ScriptRunListFilter = {
+  status?: string;
+  agentId?: string;
+  scriptName?: string;
+  objectScriptId?: string;
+  objectId?: string;
+};
+
+export type NewScriptRunRow = {
+  id: string;
+  agentId: string;
+  scriptName: string | null;
+  sourceHash: string;
+  args: string;
+  idempotencyKey: string | null;
+  requestedByUserId: string | null;
+  sourceTaskId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  startedAt: string;
+};
+
+export type NewInlineScriptRunRow = {
+  id: string;
+  agentId: string;
+  scriptName: string | null;
+  sourceHash: string;
+  args: string;
+  status: string;
+  output: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string;
+  requestedByUserId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  apiEndpointId: string | null;
+  sourceStepId: string | null;
+  parentScriptRunId: string | null;
+  objectScriptId: string | null;
+  objectId: string | null;
+  objectMethod: string | null;
+};
+
+/** Columns a run update may set; an `undefined` value leaves the column alone. */
+export type ScriptRunColumnUpdate = {
+  status?: string;
+  pid?: number | null;
+  finishedAt?: string | null;
+  output?: string | null;
+  error?: string | null;
+  last_heartbeat_at?: string | null;
+  updated_by?: string | null;
+};
+
+/** One `script_run_journal` row. */
+export type ScriptRunJournalRow = {
+  id: string;
+  runId: string;
+  stepKey: string;
+  stepType: string;
+  config: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+export type NewScriptRunJournalStep = Pick<
+  ScriptRunJournalRow,
+  "id" | "runId" | "stepKey" | "stepType" | "config" | "status" | "result" | "error" | "durationMs"
+>;
+
 export interface ScriptsRepository {
   // ---- scripts ----
   insertScript(script: NewScript): Promise<ScriptRow | null>;
@@ -433,6 +557,40 @@ export interface ScriptsRepository {
    * connection and its managed binding reference each other).
    */
   deferForeignKeys(): Promise<void>;
+  // ---- script_runs ----
+  /** The run with its stored source. */
+  findScriptRun(id: string): Promise<ScriptRunRow | null>;
+  findScriptRunByIdempotencyKey(idempotencyKey: string): Promise<ScriptRunRow | null>;
+  insertScriptRun(row: NewScriptRunRow): Promise<ScriptRunRow | null>;
+  insertInlineScriptRun(row: NewInlineScriptRunRow): Promise<ScriptRunRow | null>;
+  /** Newest `startedAt` first, then insertion order (newest first). */
+  listScriptRuns(
+    f: ScriptRunListFilter,
+    limit: number,
+    offset: number,
+  ): Promise<ScriptRunListRow[]>;
+  countScriptRuns(f: ScriptRunListFilter): Promise<number>;
+  countActiveScriptRuns(): Promise<number>;
+  /**
+   * Sets the given columns. `guard` re-checks the status: `not-terminal` or
+   * `running`. Returns the change count (0 when nothing to set).
+   */
+  updateScriptRun(
+    id: string,
+    update: ScriptRunColumnUpdate,
+    guard?: "not-terminal" | "running",
+  ): Promise<number>;
+  /** Running and paused runs with their stored source, in insertion order. */
+  listActiveScriptRuns(): Promise<ScriptRunRow[]>;
+
+  // ---- script_run_journal ----
+  findScriptRunJournalStep(runId: string, stepKey: string): Promise<ScriptRunJournalRow | null>;
+  /** Inserts the step unless (runId, stepKey) exists; `completedAt` takes the database clock. */
+  insertScriptRunJournalStep(row: NewScriptRunJournalStep): Promise<void>;
+  /** By `startedAt`, then insertion order. */
+  listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalRow[]>;
+  /** Steps of the run, optionally of one step type. */
+  countScriptRunJournalSteps(runId: string, stepType?: string): Promise<number>;
 }
 
 function searchScope(scope: ScriptSearchScope, alias: SqlQuery): SqlQuery {
@@ -899,4 +1057,121 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
 
   /** Engine-specific statement (SQLite `PRAGMA defer_foreign_keys`). */
   abstract deferForeignKeys(): Promise<void>;
+
+  // ---- script_runs ----
+
+  /** Runs with their stored source: legacy inline text stays readable during the backfill. */
+  protected readonly scriptRunSelect = sql`SELECT r.*, s.source AS "storedSource" FROM script_runs r
+    LEFT JOIN script_run_sources s ON s.hash = r."sourceHash"`;
+
+  findScriptRun(id: string): Promise<ScriptRunRow | null> {
+    return this.db.get<ScriptRunRow>(sql`${this.scriptRunSelect} WHERE r.id = ${id}`);
+  }
+
+  findScriptRunByIdempotencyKey(idempotencyKey: string): Promise<ScriptRunRow | null> {
+    return this.db.get<ScriptRunRow>(
+      sql`${this.scriptRunSelect} WHERE r."idempotencyKey" = ${idempotencyKey}`,
+    );
+  }
+
+  insertScriptRun(r: NewScriptRunRow): Promise<ScriptRunRow | null> {
+    return this.db.get<ScriptRunRow>(sql`
+      INSERT INTO script_runs
+        (id, "agentId", "scriptName", source, "sourceHash", args, "idempotencyKey",
+         "requestedByUserId", "sourceTaskId", created_by, updated_by, "startedAt")
+      VALUES (${r.id}, ${r.agentId}, ${r.scriptName}, '', ${r.sourceHash}, ${r.args},
+        ${r.idempotencyKey}, ${r.requestedByUserId}, ${r.sourceTaskId}, ${r.created_by},
+        ${r.updated_by}, ${r.startedAt})
+      RETURNING *`);
+  }
+
+  insertInlineScriptRun(r: NewInlineScriptRunRow): Promise<ScriptRunRow | null> {
+    return this.db.get<ScriptRunRow>(sql`
+      INSERT INTO script_runs
+        (id, "agentId", "scriptName", source, "sourceHash", args, kind, status, output, error,
+         "startedAt", "finishedAt", "requestedByUserId", created_by, updated_by, "apiEndpointId",
+         "sourceStepId", "parentScriptRunId", "objectScriptId", "objectId", "objectMethod")
+      VALUES (${r.id}, ${r.agentId}, ${r.scriptName}, '', ${r.sourceHash}, ${r.args}, 'inline',
+        ${r.status}, ${r.output}, ${r.error}, ${r.startedAt}, ${r.finishedAt}, ${r.requestedByUserId},
+        ${r.created_by}, ${r.updated_by}, ${r.apiEndpointId}, ${r.sourceStepId},
+        ${r.parentScriptRunId}, ${r.objectScriptId}, ${r.objectId}, ${r.objectMethod})
+      RETURNING *`);
+  }
+
+  protected scriptRunWhere(f: ScriptRunListFilter): SqlQuery {
+    const conditions: SqlQuery[] = [];
+    if (f.status) conditions.push(sql`status = ${f.status}`);
+    if (f.agentId) conditions.push(sql`"agentId" = ${f.agentId}`);
+    if (f.scriptName) conditions.push(sql`"scriptName" = ${f.scriptName}`);
+    if (f.objectScriptId) conditions.push(sql`"objectScriptId" = ${f.objectScriptId}`);
+    if (f.objectId) conditions.push(sql`"objectId" = ${f.objectId}`);
+    return sqlWhere(conditions);
+  }
+
+  abstract listScriptRuns(
+    f: ScriptRunListFilter,
+    limit: number,
+    offset: number,
+  ): Promise<ScriptRunListRow[]>;
+
+  async countScriptRuns(f: ScriptRunListFilter): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM script_runs${this.scriptRunWhere(f)}`,
+    );
+    return row?.count ?? 0;
+  }
+
+  async countActiveScriptRuns(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')`,
+    );
+    return row?.count ?? 0;
+  }
+
+  async updateScriptRun(
+    id: string,
+    u: ScriptRunColumnUpdate,
+    guard?: "not-terminal" | "running",
+  ): Promise<number> {
+    const sets: SqlQuery[] = [];
+    if (u.status !== undefined) sets.push(sql`status = ${u.status}`);
+    if (u.pid !== undefined) sets.push(sql`pid = ${u.pid}`);
+    if (u.finishedAt !== undefined) sets.push(sql`"finishedAt" = ${u.finishedAt}`);
+    if (u.output !== undefined) sets.push(sql`output = ${u.output}`);
+    if (u.error !== undefined) sets.push(sql`error = ${u.error}`);
+    if (u.last_heartbeat_at !== undefined)
+      sets.push(sql`last_heartbeat_at = ${u.last_heartbeat_at}`);
+    if (u.updated_by !== undefined) sets.push(sql`updated_by = ${u.updated_by}`);
+    if (sets.length === 0) return 0;
+    const guardSql =
+      guard === "not-terminal"
+        ? sql` AND status NOT IN ('completed', 'failed', 'cancelled', 'aborted_limit')`
+        : guard === "running"
+          ? sql` AND status = 'running'`
+          : EMPTY;
+    const result = await this.db.run(
+      sql`UPDATE script_runs SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id}${guardSql}`,
+    );
+    return result.changes;
+  }
+
+  abstract listActiveScriptRuns(): Promise<ScriptRunRow[]>;
+
+  // ---- script_run_journal ----
+
+  findScriptRunJournalStep(runId: string, stepKey: string): Promise<ScriptRunJournalRow | null> {
+    return this.db.get<ScriptRunJournalRow>(sql`
+      SELECT * FROM script_run_journal WHERE "runId" = ${runId} AND "stepKey" = ${stepKey}`);
+  }
+
+  abstract insertScriptRunJournalStep(row: NewScriptRunJournalStep): Promise<void>;
+
+  abstract listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalRow[]>;
+
+  async countScriptRunJournalSteps(runId: string, stepType?: string): Promise<number> {
+    const byType = stepType === undefined ? EMPTY : sql` AND "stepType" = ${stepType}`;
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM script_run_journal WHERE "runId" = ${runId}${byType}`);
+    return row?.count ?? 0;
+  }
 }

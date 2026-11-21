@@ -1,3 +1,10 @@
+import type {
+  NewScriptRunJournalStep,
+  ScriptRunJournalRow,
+  ScriptRunListFilter,
+  ScriptRunListRow,
+  ScriptRunRow,
+} from "@desplega/storage";
 import {
   BaseScriptsRepository,
   type ScriptApiRow,
@@ -7,6 +14,7 @@ import {
   type ScriptSearchScope,
   sql,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 /** The embedding columns as NULL, for a script row read without its embedding. */
 const NO_EMBEDDING = sql`NULL AS "scriptId", NULL AS embedding, NULL AS "embeddingModel", NULL AS "embeddedText", NULL AS "embeddedAt"`;
@@ -69,5 +77,25 @@ export class PostgresScriptsRepository extends BaseScriptsRepository {
     // Defers the DEFERRABLE constraints to commit, as SQLite's PRAGMA defers
     // every foreign key for the current transaction.
     await this.db.run(sql`SET CONSTRAINTS ALL DEFERRED`);
+  }
+
+  listScriptRuns(
+    f: ScriptRunListFilter,
+    limit: number,
+    offset: number,
+  ): Promise<ScriptRunListRow[]> {
+    return notOnPostgresYet("PostgresScriptsRepository.listScriptRuns");
+  }
+
+  listActiveScriptRuns(): Promise<ScriptRunRow[]> {
+    return notOnPostgresYet("PostgresScriptsRepository.listActiveScriptRuns");
+  }
+
+  insertScriptRunJournalStep(row: NewScriptRunJournalStep): Promise<void> {
+    return notOnPostgresYet("PostgresScriptsRepository.insertScriptRunJournalStep");
+  }
+
+  listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalRow[]> {
+    return notOnPostgresYet("PostgresScriptsRepository.listScriptRunJournalSteps");
   }
 }

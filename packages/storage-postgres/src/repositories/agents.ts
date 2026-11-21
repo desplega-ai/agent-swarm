@@ -10,6 +10,7 @@ import {
   sqlIdent,
   sqlJoin,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 /** The `agents` columns in table order, without the `_rowid` surrogate. */
 const AGENT_COLUMNS = sql`
@@ -155,5 +156,19 @@ export class PostgresAgentsRepository extends BaseAgentsRepository {
       sql`SELECT name FROM agents ORDER BY "_rowid"`,
     );
     return rows.map((row) => row.name);
+  }
+
+  countRecentQueuePickups(since: string): Promise<number> {
+    return notOnPostgresYet("PostgresAgentsRepository.countRecentQueuePickups");
+  }
+
+  protected logOrder(): SqlQuery {
+    return notOnPostgresYet("PostgresAgentsRepository.logOrder");
+  }
+
+  countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null> {
+    return notOnPostgresYet("PostgresAgentsRepository.countLiveAgents");
   }
 }

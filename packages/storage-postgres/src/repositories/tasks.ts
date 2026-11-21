@@ -19,6 +19,7 @@ import {
   type TaskListPage,
   type TaskRow,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 /** Raw SQL text written by this file (never input). */
 const raw = (text: string) => new SqlQuery([text], []);
@@ -523,5 +524,76 @@ export class PostgresTasksRepository extends BaseTasksRepository {
           SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
         )`);
     });
+  }
+
+  listGeneratedUrlAttachments(
+    taskId: string,
+    capabilityKey: string,
+    source: string,
+  ): Promise<{ id: string; name: string; url: string }[]> {
+    return notOnPostgresYet("PostgresTasksRepository.listGeneratedUrlAttachments");
+  }
+
+  listRoutingWorkerStatuses(
+    openStatuses: readonly string[],
+  ): Promise<
+    { agentId: string; status: string; activeTaskCount: number; openTaskCount: number }[]
+  > {
+    return notOnPostgresYet("PostgresTasksRepository.listRoutingWorkerStatuses");
+  }
+
+  listDependentTasks(parentId: string): Promise<TaskRow[]> {
+    return notOnPostgresYet("PostgresTasksRepository.listDependentTasks");
+  }
+
+  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
+    return notOnPostgresYet("PostgresTasksRepository.listStalledInProgressTasks");
+  }
+
+  countTasksCreatedLastDay(): Promise<number> {
+    return notOnPostgresYet("PostgresTasksRepository.countTasksCreatedLastDay");
+  }
+
+  listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
+    return notOnPostgresYet("PostgresTasksRepository.listRootTaskChain");
+  }
+
+  repointTaskDependency(
+    taskId: string,
+    status: string,
+    fromTaskId: string,
+    dependsOnJson: string,
+  ): Promise<boolean> {
+    return notOnPostgresYet("PostgresTasksRepository.repointTaskDependency");
+  }
+
+  findOpenHeartbeatChecklistTask(
+    agentId: string,
+    openStatuses: readonly string[],
+  ): Promise<string | null> {
+    return notOnPostgresYet("PostgresTasksRepository.findOpenHeartbeatChecklistTask");
+  }
+
+  countInProgressAmong(taskIds: readonly string[]): Promise<number> {
+    return notOnPostgresYet("PostgresTasksRepository.countInProgressAmong");
+  }
+
+  queueStallOldest(): Promise<{
+    claimableCount: number;
+    oldestTaskId: string | null;
+    oldestClaimableAt: string | null;
+  } | null> {
+    return notOnPostgresYet("PostgresTasksRepository.queueStallOldest");
+  }
+
+  listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]> {
+    return notOnPostgresYet("PostgresTasksRepository.listDependedOnTaskIds");
+  }
+
+  shippingEvidenceSql(
+    alias: string,
+    host: string,
+  ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery } {
+    return notOnPostgresYet("PostgresTasksRepository.shippingEvidenceSql");
   }
 }

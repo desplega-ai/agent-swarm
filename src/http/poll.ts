@@ -14,7 +14,6 @@ import {
   claimTask,
   getAgentById,
   getAllChannelActivityCursors,
-  getDbClient,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getTaskAttachments,
@@ -354,10 +353,7 @@ export async function handlePoll(
     if (!isMultiRuntimeEnabled() || !runtimeInstanceId) return;
     await getStorage().repos.runtimePools.setRuntimeTask(runtimeInstanceId, myAgentId!, taskId);
     if (isRuntimePoolsEnabled()) {
-      await getDbClient().run(
-        "UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ? AND agentId = ?",
-        [runtimeInstanceId, taskId, myAgentId!],
-      );
+      await getStorage().repos.tasks.setTaskRuntimeInstance(taskId, myAgentId!, runtimeInstanceId);
     }
   };
   // Handle cursor commit endpoint

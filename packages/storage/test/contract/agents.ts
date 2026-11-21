@@ -445,5 +445,84 @@ export function agentsContract(engine: ContractEngine): void {
       expect(await repo.countNonExtensionAgents()).toBe(1);
       expect(await repo.countAllAgents()).toBe(2);
     });
+
+    test("agent log feeds, active sessions, live and ready agent counts", async () => {
+      const agent = (id: string, isLead: boolean, status: string, lastActivityAt: string | null) =>
+        storage.executor.run(sql`
+          INSERT INTO agents (id, name, "isLead", status, "lastActivityAt", "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, ${isLead}, ${status}, ${lastActivityAt}, '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      const now = new Date().toISOString();
+      await agent("lead", true, "idle", now);
+      await agent("w1", false, "idle", now);
+      await agent("w2", false, "busy", "2020-01-01T00:00:00.000Z");
+      await agent("w3", false, "offline", now);
+      expect(await repo.countLiveAgents(5)).toEqual({ leads_alive: 1, workers_alive: 1 });
+      expect(await repo.countReadyAgents()).toEqual({ leads: 1, workers: 2 });
+      expect((await repo.listIdleWorkers()).map((a) => a.id)).toEqual(["w1"]);
+      const log = (id: string, eventType: string, agentId: string) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_log (id, "eventType", "agentId", "createdAt")
+          VALUES (${id}, ${eventType}, ${agentId}, '2026-11-21T10:00:00.000Z')`);
+      await log("l1", "task_created", "w1");
+      await log("l2", "agent_status_change", "w1");
+      await log("l3", "task_created", "w2");
+      expect((await repo.listLogsByAgent("w1")).map((l) => l.id)).toEqual(["l2", "l1"]);
+      expect((await repo.listLogsByAgent("w1", { userId: null })).map((l) => l.id)).toEqual([
+        "l2",
+        "l1",
+      ]);
+      expect((await repo.listAllLogs(10)).map((l) => l.id)).toEqual(["l3", "l1"]);
+      expect((await repo.listAllLogs(undefined)).map((l) => l.id)).toEqual(["l3", "l2", "l1"]);
+      const before = await repo.countActiveSessions();
+      for (const id of ["s1", "s2"]) {
+        await storage.executor.run(sql`
+          INSERT INTO active_sessions (id, "agentId", "triggerType", "startedAt", "lastHeartbeatAt")
+          VALUES (${id}, 'w1', 'poll', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      }
+      expect(await repo.countActiveSessions()).toBe(before + 2);
+      expect((await repo.listActiveSessions("w1")).map((s) => s.id)).toEqual(["s2", "s1"]);
+      expect((await repo.listActiveSessions(undefined, { userId: null })).map((s) => s.id)).toEqual(
+        ["s2", "s1"],
+      );
+    });
+
+    test("task log lookups: event exists, latest entry, metadata, queue pickups", async () => {
+      const log = (id: string, taskId: string, eventType: string, createdAt: string, extra = {}) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_log (id, "eventType", "taskId", "oldValue", "newValue", metadata, "createdAt")
+          VALUES (${id}, ${eventType}, ${taskId}, ${(extra as { oldValue?: string }).oldValue ?? null},
+            ${(extra as { newValue?: string }).newValue ?? null}, ${'{"a":1}'}, ${createdAt})`);
+      expect(await repo.hasTaskLogEvent("t1", "task_superseded")).toBe(false);
+      await log("l1", "t1", "task_superseded", T0);
+      await log("l2", "t1", "task_superseded", T1);
+      await log("l3", "t2", "task_superseded", T1);
+      expect(await repo.hasTaskLogEvent("t1", "task_superseded")).toBe(true);
+      expect(await repo.hasTaskLogEvent("t1", "other")).toBe(false);
+      expect(await repo.findLatestTaskLog("t1", "task_superseded")).toEqual({
+        id: "l2",
+        metadata: '{"a":1}',
+      });
+      expect(await repo.findLatestTaskLog("t9", "task_superseded")).toBeNull();
+      expect(await repo.setLogMetadata("l2", '{"b":2}')).toBe(1);
+      expect(await repo.setLogMetadata("missing", "{}")).toBe(0);
+      expect(await repo.findLatestTaskLog("t1", "task_superseded")).toEqual({
+        id: "l2",
+        metadata: '{"b":2}',
+      });
+      const pick = { oldValue: "pending", newValue: "in_progress" };
+      await log("p1", "t1", "task_status_change", T1, pick);
+      await log("p2", "t1", "task_claimed", T1, {
+        oldValue: "unassigned",
+        newValue: "in_progress",
+      });
+      await log("p3", "t1", "task_claimed", T0, pick);
+      await log("p4", "t1", "task_status_change", T1, {
+        oldValue: "paused",
+        newValue: "in_progress",
+      });
+      await log("p5", "t1", "task_created", T1, pick);
+      expect(await repo.countRecentQueuePickups(T1)).toBe(2);
+      expect(await repo.countRecentQueuePickups(T0)).toBe(3);
+    });
   });
 }

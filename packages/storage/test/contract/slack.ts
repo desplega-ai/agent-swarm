@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { type NewSlackInboundReceipt, type SlackRepository, type Storage, sql } from "../../src";
 import type { ContractEngine } from "./env";
+import { seedTask } from "./tasks";
 
 const T0 = "2026-11-21T10:00:00.000Z";
 const T1 = "2026-11-21T11:00:00.000Z";
@@ -370,6 +371,129 @@ export function slackContract(engine: ContractEngine): void {
       expect(await repo.threadHasOutcomeWork({ channelId: "C2", threadTs: "1.0" }, window)).toBe(
         false,
       );
+    });
+
+    test("render v2 state activates once; delegation fills in once", async () => {
+      await storage.executor.run(sql`DELETE FROM slack_render_v2_state`);
+      expect(await repo.getRenderV2State()).toBeNull();
+      await repo.ensureDelegationActivation(T0);
+      await repo.ensureRenderV2Activation(T1);
+      await repo.ensureDelegationActivation(T1);
+      expect(await repo.getRenderV2State()).toEqual({
+        activated_at: T0,
+        delegation_activated_at: T0,
+      });
+    });
+
+    test("slack message rows: record merges, reserve, bind, update, deliveries", async () => {
+      const rec = (extra: Record<string, unknown> = {}) =>
+        repo.recordSlackMessage({
+          id: "m1",
+          context_key: "ctx",
+          channel_id: "C",
+          thread_ts: "1.0",
+          ts: "1.1",
+          kind: "agent",
+          task_id: null,
+          permalink: null,
+          finalized_at: null,
+          stream_chunks_appended: 3,
+          conclusion_kind: null,
+          now: T0,
+          actor: null,
+          ...extra,
+        });
+      expect(await rec({ permalink: "p" })).toMatchObject({
+        id: "m1",
+        permalink: "p",
+        stream_chunks_appended: 3,
+      });
+      expect(await rec({ id: "m2", stream_chunks_appended: 1, now: T1 })).toMatchObject({
+        id: "m1",
+        permalink: "p",
+        stream_chunks_appended: 3,
+        updated_at: T1,
+      });
+      expect((await repo.findSlackMessageByChannelTs("C", "1.1"))?.id).toBe("m1");
+      const reserve = (id: string, ts: string) =>
+        repo.reserveSlackMessage({
+          id,
+          context_key: "ctx",
+          channel_id: "C",
+          thread_ts: "1.0",
+          ts,
+          kind: "tree",
+          task_id: null,
+          now: T0,
+          actor: null,
+        });
+      expect((await reserve("t1", "pending:t1"))?.ts).toBe("pending:t1");
+      expect(await reserve("t2", "pending:t2")).toBeNull();
+      expect((await repo.findSlackTreeByThread("C", "1.0"))?.id).toBe("t1");
+      expect((await repo.findSlackTreeByContextKey("ctx"))?.id).toBe("t1");
+      const bound = await repo.bindSlackMessageTimestamp("t1", "2.0", 4, T1);
+      expect([bound?.ts, bound?.stream_chunks_appended, bound?.updated_at]).toEqual(["2.0", 4, T1]);
+      expect(await repo.bindSlackMessageTimestamp("t1", "3.0", 0, T1)).toBeNull();
+      expect((await repo.markSlackTreeRendered("t1", T0))?.updated_at).toBe(T0);
+      expect(await repo.markSlackTreeRendered("m1", T0)).toBeNull();
+      const kept = await repo.updateSlackMessageRecord("m1", {
+        permalink: null,
+        finalize: true,
+        streamChunksAppended: null,
+        conclusionKind: "complete",
+        touch: false,
+        actor: "u",
+        now: T1,
+      });
+      expect([
+        kept?.permalink,
+        kept?.finalized_at,
+        kept?.conclusion_kind,
+        kept?.updated_at,
+      ]).toEqual(["p", T1, "complete", T1]);
+      await seedTask(storage, { id: "task1" });
+      await rec({ id: "o1", ts: "5.0", kind: "outcome", task_id: "task1" });
+      expect((await repo.findSlackOutcomeByTask("task1"))?.id).toBe("o1");
+      expect(
+        (await repo.noteSlackOutcomeDeliveryFailure("task1", "e1", T1))?.delivery_attempts,
+      ).toBe(1);
+      expect((await repo.abandonSlackOutcomeDelivery("task1", "e2", T1))?.delivery_last_error).toBe(
+        "e2",
+      );
+      expect(await repo.abandonSlackOutcomeDelivery("task1", "e3", T1)).toBeNull();
+      expect(await repo.noteSlackOutcomeDeliveryFailure("task1", "e4", T1)).toBeNull();
+      await repo.markSlackDeferralResolved("o1", T1, true);
+      const o = await repo.findSlackOutcomeByTask("task1");
+      expect([o?.deferral_resolved_at, o?.deferral_abandoned_at]).toEqual([T1, T1]);
+      expect(await repo.listResolvableDeferralOutcomes(10)).toEqual([]);
+      expect(await repo.deleteSlackMessage("o1")).toBe(1);
+    });
+
+    test("Slack tasks missing a tree: thread scope and the updated-since sweep", async () => {
+      await storage.executor.run(sql`DELETE FROM slack_render_v2_state`);
+      await repo.ensureRenderV2Activation(T0);
+      const task = (id: string, extra: Record<string, string>) =>
+        seedTask(storage, {
+          id,
+          source: "slack",
+          slackChannelId: "C",
+          slackThreadTs: "1.0",
+          createdAt: T1,
+          ...extra,
+        });
+      await task("a", { lastUpdatedAt: T1 });
+      await task("b", { lastUpdatedAt: T2 });
+      await task("c", { slackThreadTs: "2.0", lastUpdatedAt: T2, status: "backlog" });
+      const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+      expect(ids(await repo.listSlackTasksMissingTree({ since: T0 }))).toEqual(["b", "a"]);
+      expect(ids(await repo.listSlackTasksMissingTree({ since: T2 }))).toEqual(["b"]);
+      expect(
+        ids(await repo.listSlackTasksMissingTree({ thread: { channelId: "C", threadTs: "1.0" } })),
+      ).toEqual(["b", "a"]);
+      await storage.executor.run(sql`
+        INSERT INTO slack_messages (id, context_key, channel_id, thread_ts, ts, kind, created_at, updated_at)
+        VALUES ('tree', 'k', 'C', '1.0', '1.5', 'tree', ${T1}, ${T1})`);
+      expect(await repo.listSlackTasksMissingTree({ since: T0 })).toEqual([]);
     });
   });
 }

@@ -1,3 +1,4 @@
+import type { UserReferenceColumn } from "@desplega/storage";
 import {
   BaseUsersRepository,
   type IdentityEventRow,
@@ -8,6 +9,7 @@ import {
   type UserRow,
   type UserTokenSummaryRow,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 // "_rowid" is the SQLite rowid: insertion order.
 export class PostgresUsersRepository extends BaseUsersRepository {
@@ -145,5 +147,37 @@ export class PostgresUsersRepository extends BaseUsersRepository {
     return this.db.query<UserFavoriteRow>(
       sql`SELECT * FROM user_favorites${this.favoriteFilters(opts)} ORDER BY "lastUpdatedAt" DESC, ${tiebreak}`,
     );
+  }
+
+  listUserReferenceColumns(): Promise<UserReferenceColumn[]> {
+    return notOnPostgresYet("PostgresUsersRepository.listUserReferenceColumns");
+  }
+
+  rewriteUserReferenceColumn(
+    reference: UserReferenceColumn,
+    userId: string,
+    replacementUserId: string | null,
+    limit?: number,
+  ): Promise<number> {
+    return notOnPostgresYet("PostgresUsersRepository.rewriteUserReferenceColumn");
+  }
+
+  listWorkflowRunIdsRequestedBy(userId: string, limit?: number): Promise<string[]> {
+    return notOnPostgresYet("PostgresUsersRepository.listWorkflowRunIdsRequestedBy");
+  }
+
+  listSealedWorkflowContextsRequestedBy(
+    runIds: string[],
+    userId: string,
+  ): Promise<{ id: string; context_replay: string }[]> {
+    return notOnPostgresYet("PostgresUsersRepository.listSealedWorkflowContextsRequestedBy");
+  }
+
+  rewriteWorkflowRunContextRequester(
+    runIds: string[],
+    userId: string,
+    replacementUserId: string | null,
+  ): Promise<number> {
+    return notOnPostgresYet("PostgresUsersRepository.rewriteWorkflowRunContextRequester");
   }
 }

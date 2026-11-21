@@ -168,4 +168,8 @@ export class PostgresSkillsRepository extends BaseSkillsRepository {
        GROUP BY 1
        ORDER BY 1`);
   }
+
+  protected insertionOrder(): SqlQuery {
+    return notOnPostgresYet("PostgresSkillsRepository.insertionOrder");
+  }
 }

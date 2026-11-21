@@ -9,6 +9,7 @@ import {
   sql,
   sqlList,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 /**
  * `resources` (TEXT holding a JSON object) has the number `value` under `key`,
@@ -151,5 +152,12 @@ export class PostgresRuntimePoolsRepository extends BaseRuntimePoolsRepository {
     return this.db.query<RuntimeInstanceRow>(
       sql`SELECT * FROM runtime_instances WHERE pool_id = ${poolId} ORDER BY created_at, "_rowid"`,
     );
+  }
+
+  listEligibleRuntimeSlots(
+    seenSince: string,
+    agentId?: string,
+  ): Promise<{ agent_id: string; free_slots: number }[]> {
+    return notOnPostgresYet("PostgresRuntimePoolsRepository.listEligibleRuntimeSlots");
   }
 }

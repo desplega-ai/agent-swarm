@@ -5,6 +5,7 @@ import {
   BaseAgentsRepository,
   type ContextVersionRow,
   type ServiceRow,
+  SqlQuery,
   sql,
   sqlIdent,
   sqlJoin,
@@ -12,6 +13,23 @@ import {
 } from "@desplega/storage";
 
 export class SqliteAgentsRepository extends BaseAgentsRepository {
+  protected logOrder(): SqlQuery {
+    return new SqlQuery(["rowid"], []);
+  }
+
+  countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null> {
+    return this.db.get(sql`
+      SELECT
+        SUM(CASE WHEN "isLead" = 1 THEN 1 ELSE 0 END) AS leads_alive,
+        SUM(CASE WHEN "isLead" = 0 THEN 1 ELSE 0 END) AS workers_alive
+      FROM agents
+      WHERE "lastActivityAt" IS NOT NULL
+        AND "lastActivityAt" >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ${minutes} || ' minutes')
+        AND status != 'offline'`);
+  }
+
   listAgents(opts: { includeExtensions: boolean }): Promise<AgentRow[]> {
     return this.db.query<AgentRow>(
       opts.includeExtensions
@@ -91,6 +109,21 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
     return this.db.query<AgentLogRow>(sql`
       SELECT * FROM agent_log WHERE "eventType" = ${eventType}
       ORDER BY "createdAt" DESC, rowid ASC`);
+  }
+
+  async countRecentQueuePickups(since: string): Promise<number> {
+    // Unary + keeps eventType off idx_agent_log_eventType, so the short
+    // createdAt window drives through idx_agent_log_createdAt instead of every
+    // status-change row ever logged. The hint stays unquoted: the query-audit
+    // plan test reverts it by text.
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+        FROM agent_log
+       WHERE ${new SqlQuery(["+eventType"], [])} IN ('task_status_change', 'task_claimed')
+         AND "oldValue" IN ('pending', 'unassigned')
+         AND "newValue" = 'in_progress'
+         AND "createdAt" >= ${since}`);
+    return row?.count ?? 0;
   }
 
   listServices(filters: {

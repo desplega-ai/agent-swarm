@@ -1,9 +1,28 @@
+import type {
+  SavingsAgentSpendRow,
+  SavingsBucketSize,
+  SavingsCalibrationSessionRow,
+  SavingsDayCountRow,
+  SavingsDispatchStepRow,
+  SavingsEffectStepRow,
+  SavingsOwnedTaskRow,
+  SavingsReader,
+  SavingsScriptEffectRow,
+  SavingsScriptLinkRow,
+  SavingsScriptRunRow,
+  SavingsSpan,
+  SavingsStepFactRow,
+  SavingsTaskTreeRow,
+  SavingsTriggerRow,
+  SavingsWorkflowLinkRow,
+} from "@desplega/storage";
 import {
   BaseSavingsRepository,
   type SavingsLinkRow,
   type SavingsScriptBucket,
   sql,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 // SQLite's INSERT OR REPLACE deletes the conflicting row and inserts a new
 // one: every column the statement does not name goes back to its default and
@@ -37,5 +56,152 @@ export class PostgresSavingsRepository extends BaseSavingsRepository {
         n = excluded.n, "actualUsd" = excluded."actualUsd", "keptUsd" = excluded."keptUsd",
         "modelVersion" = excluded."modelVersion", "computedAt" = excluded."computedAt",
         "_rowid" = DEFAULT`);
+  }
+
+  listScriptAwaitCounts(
+    names: string[],
+    reader?: SavingsReader,
+  ): Promise<{ name: string; aw: number }[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listScriptAwaitCounts");
+  }
+
+  listDispatchingScripts(names: string[], reader?: SavingsReader): Promise<string[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listDispatchingScripts");
+  }
+
+  countWorkflowRunsInSpan(
+    workflowId: string,
+    span: SavingsSpan,
+    reader?: SavingsReader,
+  ): Promise<number> {
+    return notOnPostgresYet("PostgresSavingsRepository.countWorkflowRunsInSpan");
+  }
+
+  workflowRunsByTrigger(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<SavingsTriggerRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowRunsByTrigger");
+  }
+
+  workflowScheduledEffectRuns(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<SavingsDayCountRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowScheduledEffectRuns");
+  }
+
+  workflowStepFacts(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<SavingsStepFactRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowStepFacts");
+  }
+
+  workflowAgentSpend(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<SavingsAgentSpendRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowAgentSpend");
+  }
+
+  workflowFollowupSpend(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<{ d: string; fup: number | null }[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowFollowupSpend");
+  }
+
+  workflowEffectSteps(
+    workflowId: string,
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    reader?: SavingsReader,
+  ): Promise<SavingsEffectStepRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.workflowEffectSteps");
+  }
+
+  scriptRunsByName(
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    filter: { scriptName?: string; inlineName: string },
+    reader?: SavingsReader,
+  ): Promise<SavingsScriptRunRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.scriptRunsByName");
+  }
+
+  scriptEffectRuns(
+    span: SavingsSpan,
+    bucket: SavingsBucketSize,
+    filter: { scriptName?: string; inlineName: string },
+    dispatchers: string[],
+    reader?: SavingsReader,
+  ): Promise<SavingsScriptEffectRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.scriptEffectRuns");
+  }
+
+  subWorkflowLinks(span: SavingsSpan, reader?: SavingsReader): Promise<SavingsWorkflowLinkRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.subWorkflowLinks");
+  }
+
+  stampedWorkflowLinks(
+    span: SavingsSpan,
+    reader?: SavingsReader,
+  ): Promise<SavingsWorkflowLinkRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.stampedWorkflowLinks");
+  }
+
+  stampedScriptLinks(
+    span: SavingsSpan,
+    inlineName: string,
+    reader?: SavingsReader,
+  ): Promise<SavingsScriptLinkRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.stampedScriptLinks");
+  }
+
+  listStepTasks(span: SavingsSpan, reader?: SavingsReader): Promise<SavingsOwnedTaskRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listStepTasks");
+  }
+
+  listNodeTasks(span: SavingsSpan, reader?: SavingsReader): Promise<SavingsOwnedTaskRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listNodeTasks");
+  }
+
+  listTaskTrees(
+    roots: string[],
+    maxDepth: number,
+    reader?: SavingsReader,
+  ): Promise<SavingsTaskTreeRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listTaskTrees");
+  }
+
+  listDispatchSteps(
+    workflowId: string,
+    span: SavingsSpan,
+    nodeIds: string[],
+    reader?: SavingsReader,
+  ): Promise<SavingsDispatchStepRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listDispatchSteps");
+  }
+
+  listCalibrationSessions(
+    model: string,
+    span: SavingsSpan,
+    maxTurns: number,
+    after: string,
+    limit: number,
+    reader: SavingsReader,
+  ): Promise<SavingsCalibrationSessionRow[]> {
+    return notOnPostgresYet("PostgresSavingsRepository.listCalibrationSessions");
   }
 }

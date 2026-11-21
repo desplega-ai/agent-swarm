@@ -1,3 +1,15 @@
+import type {
+  SessionKeyRange,
+  SessionListTriageWrite,
+  SessionPageMemberRow,
+  SessionRootFilterSpec,
+  SessionSummarySpec,
+  SessionThreadLabelRow,
+  SessionTreeRow,
+  SessionTreeRules,
+  SessionViewerSpec,
+  SourceBackfillRootRow,
+} from "@desplega/storage";
 import {
   BaseSessionsRepository,
   type BudgetRefusalNotificationRow,
@@ -22,6 +34,7 @@ import {
   sqlWhere,
   type TaskAncestorRow,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 type SumRow = { total: number };
 
@@ -439,5 +452,71 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
       SELECT task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd,
              global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, "createdAt"
         FROM budget_refusal_notifications ORDER BY "createdAt" DESC, "_rowid" ASC LIMIT ${limit}`);
+  }
+
+  sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.sessionThreadRootsSql");
+  }
+
+  sessionRootFilterSql(rules: SessionTreeRules, spec: SessionRootFilterSpec): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.sessionRootFilterSql");
+  }
+
+  sessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.sessionSummarySql");
+  }
+
+  legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.legacySessionSummarySql");
+  }
+
+  sessionCountSql(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.sessionCountSql");
+  }
+
+  protected threadRootCountsSql(rules: SessionTreeRules): SqlQuery {
+    return notOnPostgresYet("PostgresSessionsRepository.threadRootCountsSql");
+  }
+
+  listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listSessionPageMembers");
+  }
+
+  listSessionTreeRows(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    visibleRule: { mine: boolean; userId: string | null; readAll?: boolean } | null,
+  ): Promise<SessionTreeRow[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listSessionTreeRows");
+  }
+
+  listThreadLabels(
+    rootIds: readonly string[],
+    promptChars: number,
+  ): Promise<SessionThreadLabelRow[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listThreadLabels");
+  }
+
+  triageSessionList(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    write: SessionListTriageWrite,
+  ): Promise<number> {
+    return notOnPostgresYet("PostgresSessionsRepository.triageSessionList");
+  }
+
+  moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void> {
+    return notOnPostgresYet("PostgresSessionsRepository.moveKeyFavorites");
+  }
+
+  listVisiblePrefixRoots(
+    range: SessionKeyRange,
+    viewer: SessionViewerSpec,
+  ): Promise<{ id: string }[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listVisiblePrefixRoots");
+  }
+
+  listSourceBackfillRoots(afterId: string, limit: number): Promise<SourceBackfillRootRow[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listSourceBackfillRoots");
   }
 }

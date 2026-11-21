@@ -1,3 +1,4 @@
+import type { TaskRow } from "@desplega/storage";
 import {
   BaseSlackRepository,
   EMPTY,
@@ -12,6 +13,7 @@ import {
   type SqlQuery,
   sql,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 /**
  * True when the tree sweep has render work for `tree` (aliases `tree` and
@@ -253,5 +255,17 @@ export class PostgresSlackRepository extends BaseSlackRepository {
       ${TREE_NEEDS_RENDER} AS eligible
       FROM candidates tree, slack_render_v2_state state WHERE state.id = 1 ORDER BY tree.id`);
     }
+  }
+
+  listResolvableDeferralOutcomes(
+    limit: number,
+  ): Promise<(SlackMessageRow & { wake_task_id: string })[]> {
+    return notOnPostgresYet("PostgresSlackRepository.listResolvableDeferralOutcomes");
+  }
+
+  listSlackTasksMissingTree(
+    scope: { thread: SlackThreadRef } | { since: string },
+  ): Promise<TaskRow[]> {
+    return notOnPostgresYet("PostgresSlackRepository.listSlackTasksMissingTree");
   }
 }

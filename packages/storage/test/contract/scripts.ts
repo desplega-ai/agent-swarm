@@ -444,5 +444,110 @@ export function scriptsContract(engine: ContractEngine): void {
       await repo.deleteConnection("c1");
       expect(await repo.findConnectionById("c1")).toBeNull();
     });
+
+    test("script runs: stored source, list order and filters, guarded updates", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', 'idle', ${T0}, ${T0})`);
+      await repo.storeScriptRunSource("h1", "console.log(1)");
+      const base = {
+        agentId: "ag",
+        scriptName: "s",
+        sourceHash: "h1",
+        args: "{}",
+        idempotencyKey: null,
+        requestedByUserId: null,
+        sourceTaskId: null,
+        created_by: null,
+        updated_by: null,
+        startedAt: T0,
+      };
+      const r1 = await repo.insertScriptRun({ ...base, id: "r1", idempotencyKey: "k1" });
+      expect(r1).toMatchObject({ id: "r1", source: "", status: "running", kind: "workflow" });
+      await repo.insertScriptRun({ ...base, id: "r2" });
+      await repo.insertInlineScriptRun({
+        id: "r3",
+        agentId: "ag",
+        scriptName: "other",
+        sourceHash: "h1",
+        args: "{}",
+        status: "completed",
+        output: "1",
+        error: null,
+        startedAt: T1,
+        finishedAt: T1,
+        requestedByUserId: null,
+        created_by: null,
+        updated_by: null,
+        apiEndpointId: null,
+        sourceStepId: null,
+        parentScriptRunId: null,
+        objectScriptId: null,
+        objectId: null,
+        objectMethod: null,
+      });
+      expect((await repo.findScriptRun("r1"))?.storedSource).toBe("console.log(1)");
+      expect((await repo.findScriptRunByIdempotencyKey("k1"))?.id).toBe("r1");
+      expect((await repo.listScriptRuns({}, 10, 0)).map((r) => r.id)).toEqual(["r3", "r2", "r1"]);
+      expect((await repo.listScriptRuns({ scriptName: "s" }, 1, 1)).map((r) => r.id)).toEqual([
+        "r1",
+      ]);
+      expect(await repo.countScriptRuns({ status: "completed" })).toBe(1);
+      expect(await repo.countActiveScriptRuns()).toBe(2);
+      expect((await repo.listActiveScriptRuns()).map((r) => r.id)).toEqual(["r1", "r2"]);
+      expect(await repo.updateScriptRun("r1", {})).toBe(0);
+      expect(await repo.updateScriptRun("r3", { status: "failed" }, "not-terminal")).toBe(0);
+      expect(await repo.updateScriptRun("r1", { status: "paused" }, "running")).toBe(1);
+      expect(await repo.updateScriptRun("r1", { status: "failed" }, "running")).toBe(0);
+      expect(
+        await repo.updateScriptRun(
+          "r1",
+          { status: "completed", output: null, pid: 3 },
+          "not-terminal",
+        ),
+      ).toBe(1);
+      expect((await repo.findScriptRun("r1"))?.pid).toBe(3);
+    });
+
+    test("script run journal: insert once per step, order, counts", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', 'idle', ${T0}, ${T0})`);
+      await repo.storeScriptRunSource("h1", "x");
+      await repo.insertScriptRun({
+        id: "r1",
+        agentId: "ag",
+        scriptName: null,
+        sourceHash: "h1",
+        args: "{}",
+        idempotencyKey: null,
+        requestedByUserId: null,
+        sourceTaskId: null,
+        created_by: null,
+        updated_by: null,
+        startedAt: T0,
+      });
+      const step = (id: string, stepKey: string, stepType: string) => ({
+        id,
+        runId: "r1",
+        stepKey,
+        stepType,
+        config: "{}",
+        status: "completed",
+        result: null,
+        error: null,
+        durationMs: 5,
+      });
+      await repo.insertScriptRunJournalStep(step("j1", "a", "agent-task"));
+      await repo.insertScriptRunJournalStep(step("j2", "b", "fetch"));
+      await repo.insertScriptRunJournalStep(step("j3", "a", "fetch"));
+      expect((await repo.listScriptRunJournalSteps("r1")).map((r) => r.id)).toEqual(["j1", "j2"]);
+      expect((await repo.findScriptRunJournalStep("r1", "a"))?.stepType).toBe("agent-task");
+      expect((await repo.findScriptRunJournalStep("r1", "a"))?.completedAt).toMatch(
+        /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/,
+      );
+      expect(await repo.countScriptRunJournalSteps("r1")).toBe(2);
+      expect(await repo.countScriptRunJournalSteps("r1", "agent-task")).toBe(1);
+    });
   });
 }

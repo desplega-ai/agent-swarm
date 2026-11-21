@@ -10,6 +10,7 @@ import {
   type SlackThreadRef,
   type SqlQuery,
   sql,
+  type TaskRow,
 } from "@desplega/storage";
 
 /**
@@ -249,5 +250,81 @@ export class SqliteSlackRepository extends BaseSlackRepository {
       ${TREE_NEEDS_RENDER} AS eligible
       FROM candidates tree, slack_render_v2_state state WHERE state.id = 1 ORDER BY tree.id`);
     }
+  }
+
+  listResolvableDeferralOutcomes(
+    limit: number,
+  ): Promise<(SlackMessageRow & { wake_task_id: string })[]> {
+    // CROSS JOIN and `+wake."taskType"` pin the join order to the small chain:
+    // without them the planner drives the outer join from every terminal task.
+    // The anchor drives from the partial index idx_agent_tasks_deferred.
+    return this.db.query<SlackMessageRow & { wake_task_id: string }>(sql`
+      WITH RECURSIVE chain(card_id, task_id) AS (
+        SELECT card.id, deferred.id FROM agent_tasks deferred
+        CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+        WHERE deferred."deferredAt" IS NOT NULL
+          AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
+          AND card.ts NOT LIKE 'pending:%'
+        UNION
+        SELECT chain.card_id, wake.id FROM chain
+        CROSS JOIN agent_tasks parent ON parent.id = chain.task_id AND parent."deferredAt" IS NOT NULL
+        CROSS JOIN agent_tasks wake ON wake."parentTaskId" = parent.id AND +wake."taskType" = 'deferred'
+      )
+      SELECT card.*, wake.id AS wake_task_id
+      FROM chain
+      CROSS JOIN slack_messages card ON card.id = chain.card_id
+      CROSS JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
+      WHERE card.kind = 'outcome'
+        AND card.finalized_at IS NOT NULL
+        AND card.deferral_resolved_at IS NULL
+        AND card.ts NOT LIKE 'pending:%'
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks child
+          WHERE child."parentTaskId" = wake.id AND +child."taskType" = 'deferred'
+        )
+        AND (wake."deferredAt" IS NULL OR wake."finishedAt" > card.updated_at)
+        AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
+      ORDER BY wake."finishedAt" ASC, card.rowid ASC, wake.rowid ASC
+      LIMIT ${limit}`);
+  }
+
+  listSlackTasksMissingTree(
+    scope: { thread: SlackThreadRef } | { since: string },
+  ): Promise<TaskRow[]> {
+    // INDEXED BY: without ANALYZE statistics the planner otherwise picks a wider
+    // index. The thread form seeks idx_agent_tasks_slack_thread_cover; the sweep
+    // ranges over idx_agent_tasks_slack_last_updated, which also serves the order.
+    const scoped =
+      "thread" in scope
+        ? sql`agent_tasks task INDEXED BY idx_agent_tasks_slack_thread_cover
+          WHERE state.id = 1
+            AND task."slackChannelId" = ${scope.thread.channelId}
+            AND task."slackThreadTs" = ${scope.thread.threadTs}`
+        : sql`agent_tasks task INDEXED BY idx_agent_tasks_slack_last_updated
+          WHERE state.id = 1
+            AND task."lastUpdatedAt" >= ${scope.since}`;
+    return this.db.query<TaskRow>(sql`
+      SELECT task.* FROM slack_render_v2_state state
+      CROSS JOIN ${scoped}
+        AND task.source = 'slack'
+        AND task."slackChannelId" IS NOT NULL
+        AND task."slackThreadTs" IS NOT NULL
+        AND task."createdAt" >= state.activated_at
+        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks earlier
+          WHERE earlier.source = 'slack'
+            AND earlier."slackChannelId" = task."slackChannelId"
+            AND earlier."slackThreadTs" = task."slackThreadTs"
+            AND earlier."createdAt" < state.activated_at
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM slack_messages tree
+          WHERE tree.kind = 'tree'
+            AND tree.channel_id = task."slackChannelId"
+            AND tree.thread_ts = task."slackThreadTs"
+        )
+      ORDER BY task."lastUpdatedAt" DESC
+      LIMIT 200`);
   }
 }

@@ -1,3 +1,4 @@
+import type { EventListFilters } from "@desplega/storage";
 import {
   BaseEventsRepository,
   type EventColumn,
@@ -7,6 +8,7 @@ import {
   sql,
   sqlIdent,
 } from "@desplega/storage";
+import { notOnPostgresYet } from "./not-yet";
 
 export class PostgresEventsRepository extends BaseEventsRepository {
   list(limit: number, filter?: { column: EventColumn; value: string }): Promise<EventRow[]> {
@@ -27,5 +29,9 @@ export class PostgresEventsRepository extends BaseEventsRepository {
     return this.db.query<EventCount>(sql`
       SELECT event, COUNT(*) AS count FROM events${this.countFilters(filters)}
       GROUP BY event ORDER BY count DESC, event ASC`);
+  }
+
+  listFiltered(filters: EventListFilters): Promise<EventRow[]> {
+    return notOnPostgresYet("PostgresEventsRepository.listFiltered");
   }
 }

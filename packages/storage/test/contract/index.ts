@@ -11,10 +11,13 @@ import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
 import { memoryContract } from "./memory";
+import { messagingContract } from "./messaging";
 import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
+import { promptTemplatesContract } from "./prompt-templates";
 import { rbacContract } from "./rbac";
+import { retentionContract } from "./retention";
 import { runtimePoolsContract } from "./runtime-pools";
 import { savingsContract } from "./savings";
 import { schedulesContract } from "./schedules";
@@ -24,6 +27,7 @@ import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
 import { tasksContract } from "./tasks";
 import { trackersContract } from "./trackers";
+import { userReferencesContract } from "./user-references";
 import { usersContract } from "./users";
 import { workflowsContract } from "./workflows";
 
@@ -58,4 +62,8 @@ export function runStorageContract(engine: ContractEngine): void {
   improvementsContract(engine);
   sessionsContract(engine);
   savingsContract(engine);
+  retentionContract(engine);
+  userReferencesContract(engine);
+  messagingContract(engine);
+  promptTemplatesContract(engine);
 }

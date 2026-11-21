@@ -25,7 +25,6 @@ import { getStorage } from "../../storage";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { publishWorkerNudge } from "../../worker-nudges";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
-import { getDbClient } from "../runtime";
 import { dropSessionDescendants } from "../session-summaries";
 import {
   classifyTaskHumanFree,
@@ -1092,14 +1091,8 @@ export async function backfillSupersedeTaskResumeTaskId(
     await settleSupersededTaskDependents(taskId, resumeTaskId);
   }
 
-  const row = await getDbClient().get<{ id: string; metadata: string | null }>(
-    `SELECT id, metadata
-       FROM agent_log
-       WHERE taskId = ? AND eventType = 'task_superseded'
-       ORDER BY createdAt DESC
-       LIMIT 1`,
-    [taskId],
-  );
+  const agents = getStorage().repos.agents;
+  const row = await agents.findLatestTaskLog(taskId, "task_superseded");
   if (!row) return false;
 
   let metadata: Record<string, unknown> = {};
@@ -1112,11 +1105,7 @@ export async function backfillSupersedeTaskResumeTaskId(
   }
   metadata.resumeTaskId = resumeTaskId;
 
-  const result = await getDbClient().run("UPDATE agent_log SET metadata = ? WHERE id = ?", [
-    JSON.stringify(metadata),
-    row.id,
-  ]);
-  return result.changes > 0;
+  return (await agents.setLogMetadata(row.id, JSON.stringify(metadata))) > 0;
 }
 
 /**

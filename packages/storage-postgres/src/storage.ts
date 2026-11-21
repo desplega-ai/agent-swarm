@@ -18,10 +18,13 @@ import { PostgresKvRepository } from "./repositories/kv";
 import { PostgresMaintenanceRepository } from "./repositories/maintenance";
 import { PostgresMcpServersRepository } from "./repositories/mcp-servers";
 import { PostgresMemoryRepository } from "./repositories/memory";
+import { PostgresMessagingRepository } from "./repositories/messaging";
 import { PostgresModelsRepository } from "./repositories/models";
 import { PostgresOAuthRepository } from "./repositories/oauth";
 import { PostgresPagesRepository } from "./repositories/pages";
+import { PostgresPromptTemplatesRepository } from "./repositories/prompt-templates";
 import { PostgresRbacRepository } from "./repositories/rbac";
+import { PostgresRetentionRepository } from "./repositories/retention";
 import { PostgresRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { PostgresSavingsRepository } from "./repositories/savings";
 import { PostgresSchedulesRepository } from "./repositories/schedules";
@@ -83,6 +86,9 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
       improvements: new PostgresImprovementsRepository(executor),
       sessions: new PostgresSessionsRepository(executor),
       savings: new PostgresSavingsRepository(executor),
+      retention: new PostgresRetentionRepository(executor),
+      messaging: new PostgresMessagingRepository(executor),
+      promptTemplates: new PostgresPromptTemplatesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
