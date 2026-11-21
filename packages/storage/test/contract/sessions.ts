@@ -550,5 +550,49 @@ export function sessionsContract(engine: ContractEngine): void {
         await repo.dashboardCost("2026-11-20T10:30:00.000Z", "2026-11-01T00:00:00.000Z"),
       ).toEqual({ costToday: 2, costMtd: 4 });
     });
+
+    test("reassignLogsToTask moves a runner session's lines to the task", async () => {
+      const log = (id: string, taskId: string | null, sessionId: string) =>
+        repo.insertLog({
+          id,
+          taskId,
+          sessionId,
+          iteration: 0,
+          cli: "claude",
+          content: "x",
+          lineNumber: 0,
+          reasoningChars: null,
+          reasoningKind: null,
+        });
+      await log("l1", "runner", "s1");
+      await log("l2", "real", "s1");
+      await log("l3", null, "s1");
+      await log("l4", "runner", "s2");
+      expect(await repo.reassignLogsToTask("s1", "real")).toBe(1);
+      expect((await repo.listLogsByTask("real")).map((r) => r.id)).toEqual(["l1", "l2"]);
+      expect(await repo.reassignLogsToTask("s1", "real")).toBe(0);
+    });
+
+    test("listChainWithCosts walks the chain oldest first with cost sums and insert-order ties", async () => {
+      await insertAgent("a1");
+      await insertTask("root");
+      await insertTask("b", { parentTaskId: "root" });
+      await insertTask("a", { parentTaskId: "root" });
+      await insertTask("other");
+      await storage.executor.run(
+        sql`UPDATE agent_tasks SET "createdAt" = '2026-11-21T09:00:00.000Z' WHERE id = 'root'`,
+      );
+      await repo.insertSessionCost(newCost({ id: "c1", taskId: "a", totalCostUsd: 1 }));
+      await repo.insertSessionCost(
+        newCost({ id: "c2", taskId: "a", sessionId: "s2", totalCostUsd: 2 }),
+      );
+      const rows = await repo.listChainWithCosts("root");
+      expect(rows.map((r) => [r.id, r.totalCostUsd])).toEqual([
+        ["root", null],
+        ["b", null],
+        ["a", 3],
+      ]);
+      expect(rows[0]).toMatchObject({ task: "t", status: "pending" });
+    });
   });
 }

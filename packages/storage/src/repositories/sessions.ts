@@ -286,6 +286,16 @@ export interface SessionsRepository {
     since: string,
   ): Promise<{ id: string; lineNumber: number; messageId: string | null }[]>;
   markLogReasoningUpdate(id: string): Promise<void>;
+  /** Points a runner session's lines at `taskId`; lines with no task stay. Returns rows changed. */
+  reassignLogsToTask(sessionId: string, taskId: string): Promise<number>;
+  /**
+   * Every task of the chain rooted at `rootTaskId` (whole `agent_tasks` rows)
+   * with the sum of its session costs as `totalCostUsd`, oldest first; ties
+   * in insert order.
+   */
+  listChainWithCosts(
+    rootTaskId: string,
+  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]>;
   /** A task's lines in insert order; with `limit`, only the newest `limit` lines (still oldest first). */
   listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;
   /** One iteration's lines in insert order. */
@@ -456,6 +466,17 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   async markLogReasoningUpdate(id: string): Promise<void> {
     await this.db.run(sql`UPDATE session_logs SET "reasoningKind" = 'update' WHERE id = ${id}`);
   }
+
+  async reassignLogsToTask(sessionId: string, taskId: string): Promise<number> {
+    const result = await this.db.run(sql`
+      UPDATE session_logs SET "taskId" = ${taskId} WHERE "sessionId" = ${sessionId} AND "taskId" != ${taskId}`);
+    return result.changes;
+  }
+
+  /** Insert order and the join-order hint are engine-specific. */
+  abstract listChainWithCosts(
+    rootTaskId: string,
+  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]>;
 
   /** Insert order needs the engine's insert sequence. */
   abstract listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;

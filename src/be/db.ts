@@ -6954,11 +6954,7 @@ export async function reassociateSessionLogs(
   runnerSessionId: string,
   realTaskId: string,
 ): Promise<number> {
-  const result = await getDbClient().run(
-    "UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?",
-    [realTaskId, runnerSessionId, realTaskId],
-  );
-  return result.changes;
+  return getStorage().repos.sessions.reassignLogsToTask(runnerSessionId, realTaskId);
 }
 
 // ============================================================================
@@ -12536,20 +12532,9 @@ export async function listTaskTemplates(opts?: {
  * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `WITH RECURSIVE chain(id) AS (
-         SELECT id FROM agent_tasks WHERE id = ?
-         UNION ALL
-         SELECT t.id FROM agent_tasks t
-         JOIN chain c ON t.parentTaskId = c.id
-       )
-       SELECT t.*,
-         (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
-       FROM chain
-       CROSS JOIN agent_tasks t ON t.id = chain.id
-       ORDER BY t.createdAt, t.rowid`,
-    [rootTaskId],
-  );
+  const rows = (await getStorage().repos.sessions.listChainWithCosts(
+    rootTaskId,
+  )) as unknown as AgentTaskRow[];
   return rows.map(rowToAgentTask);
 }
 

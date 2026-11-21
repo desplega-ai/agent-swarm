@@ -102,6 +102,26 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     );
   }
 
+  listChainWithCosts(
+    rootTaskId: string,
+  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]> {
+    // rowid breaks createdAt ties as idx_agent_tasks_created did. CROSS JOIN
+    // keeps the chain as the outer loop: with a plain JOIN, SQLite scanned all
+    // of agent_tasks to skip the sort.
+    return this.db.query(sql`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
+        UNION ALL
+        SELECT t.id FROM agent_tasks t
+        JOIN chain c ON t."parentTaskId" = c.id
+      )
+      SELECT t.*,
+        (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
+      FROM chain
+      CROSS JOIN agent_tasks t ON t.id = chain.id
+      ORDER BY t."createdAt", t.rowid`);
+  }
+
   listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]> {
     return this.db.query<SessionLogRow>(sql`
       SELECT * FROM session_logs WHERE "sessionId" = ${sessionId} AND iteration = ${iteration}
