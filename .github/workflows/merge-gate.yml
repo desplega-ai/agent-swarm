@@ -105,13 +105,13 @@ jobs:
           # load-bearing for this job since the workspace migration. The Dockerfiles
           # feed the Bun version-pin check (check:bun-version); Dockerfile.worker and
           # packages/ui-e2e/package.json feed the Playwright pin check.
-          LINT=$(match '^(src/|packages/(model-catalog|model-routing)/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|oxlint\.config\.ts$|tools/oxlint/|\.dependency-cruiser\.cjs$|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|Dockerfile\.ui$|scripts/check-bun-version\.ts$|packages/ui-e2e/package\.json$|scripts/check-playwright-version\.ts$|\.text-columns\.json$|scripts/check-text-columns\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
+          LINT=$(match '^(src/|packages/(model-catalog|model-routing|agent-swarm-sdk)/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|oxlint\.config\.ts$|tools/oxlint/|\.dependency-cruiser\.cjs$|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|Dockerfile\.ui$|scripts/check-bun-version\.ts$|packages/ui-e2e/package\.json$|scripts/check-playwright-version\.ts$|\.text-columns\.json$|scripts/check-text-columns\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
           # apps/ui/src/: the root run also globs apps/ui/**/*.test.tsx, so a ui-only
           # change can break it (a new `@/` import the root runner cannot resolve).
-          TEST=$(match '^(src/|packages/(model-catalog|model-routing)/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
+          TEST=$(match '^(src/|packages/(model-catalog|model-routing|agent-swarm-sdk)/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
@@ -139,7 +139,7 @@ jobs:
           SCRIPT_TYPES=$(match '^(src/|packages/|package\.json$|bun\.lock$|bunfig\.toml$|tsconfig\.json$|scripts/(bundle-(script|extension)-types\.ts|check-script-types-freshness\.sh)$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
-          OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
+          OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|packages/agent-swarm-sdk/|docs-site/content/docs/api-reference/|package\.json$)')
 
           VENDORED_OPENAPI=$(match '^(vendored-openapi/|src/be/vendored-openapi\.ts$|src/be/script-connections\.ts$|src/http/script-connections\.ts$|src/tools/script-connections/|scripts/(check|refresh)-vendored-openapi\.ts$|scripts/vendored-openapi-utils\.ts$|package\.json$)')
 
@@ -317,6 +317,13 @@ jobs:
 
       - name: Run TypeScript type check (bun check)
         run: bun run tsc:check
+
+      # agent-swarm-sdk is not imported by src/, so the root tsc does not cover it.
+      - name: Type check and build agent-swarm-sdk
+        working-directory: packages/agent-swarm-sdk
+        run: |
+          bun run tsc
+          bun run build
 
       - name: Check extension catalog and manifest schema freshness
         # Also templates/import/*.schema.json, generated from src/be/import/schema.ts.
@@ -1340,6 +1347,14 @@ jobs:
             exit 1
           fi
           echo "API reference docs are up to date."
+      - name: Check agent-swarm-sdk types for drift
+        run: |
+          if [ -n "$(git diff --name-only packages/agent-swarm-sdk/src/openapi.gen.ts)" ]; then
+            echo "::error::agent-swarm-sdk types are out of date! Run 'bun run docs:openapi' and commit the changes."
+            git diff --stat packages/agent-swarm-sdk/src/openapi.gen.ts
+            exit 1
+          fi
+          echo "agent-swarm-sdk types are up to date."
       - name: Check for raw matchRoute usage
         run: |
           UNREGISTERED=$(grep -rn "matchRoute(" src/http/ --include="*.ts" | grep -v "route-def.ts" | grep -v "utils.ts" || true)
