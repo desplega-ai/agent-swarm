@@ -228,6 +228,9 @@ function emitForeignKeys(schema: HeadSchema, t: HeadTable): string[] {
     const upd = fkAction(fk.onUpdate, where);
     if (del) sql += ` ON DELETE ${del}`;
     if (upd) sql += ` ON UPDATE ${upd}`;
+    // Checked per statement, like SQLite; DEFERRABLE so a transaction can defer
+    // them to COMMIT, as SQLite's `PRAGMA defer_foreign_keys` defers every key.
+    sql += " DEFERRABLE INITIALLY IMMEDIATE";
     return `${sql};`;
   });
 }

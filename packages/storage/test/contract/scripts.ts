@@ -439,6 +439,18 @@ export function scriptsContract(engine: ContractEngine): void {
         );
       });
       expect((await repo.findManagedCredentialBinding("c1"))?.id).toBe("mb");
+      // Deferred keys: the managed binding may name a connection inserted later in the transaction.
+      await storage.transaction(async () => {
+        await repo.deferForeignKeys();
+        await repo.insertCredentialBinding(
+          "mb-later",
+          bindingWrite({ managedByConnectionId: "c-later", source: "connection" }),
+        );
+        await repo.insertConnection("c-later", connectionWrite({ slug: "later" }));
+      });
+      expect((await repo.findManagedCredentialBinding("c-later"))?.id).toBe("mb-later");
+      await repo.deleteManagedCredentialBindings("c-later");
+      await repo.deleteConnection("c-later");
       await repo.deleteManagedCredentialBindings("c1");
       expect(await repo.findManagedCredentialBinding("c1")).toBeNull();
       await repo.deleteConnection("c1");
