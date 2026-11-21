@@ -174,9 +174,11 @@ async function findSlackTask(ctx: ScenarioContext, ts: string, exclude: string[]
 /** Slack obligations and the thread tree, through the Slack mock. */
 async function slackRelay(ctx: ScenarioContext): Promise<void> {
   await ensureRenderV2(ctx);
-  // Sorts before every other lead, so the mention routes here.
+  // The mention routes to the first lead by name that is not offline. Earlier scenarios
+  // leave idle "00-core-lead-*" leads with backlog behind, so this lead must sort before
+  // them and register as idle, or the mention lands on a lead that cannot claim it.
   const leadResponse = await ctx.api("POST", "/api/agents", {
-    body: { name: `00-trg-relay-lead-${ctx.nonce}`, isLead: true },
+    body: { name: `00-00-trg-relay-lead-${ctx.nonce}`, isLead: true, status: "idle" },
   });
   expectStatus(leadResponse, [201], "register a lead");
   const leadId = asString(asRecord(leadResponse.json).id, "lead id");
@@ -189,6 +191,10 @@ async function slackRelay(ctx: ScenarioContext): Promise<void> {
     const first = await findSlackTask(ctx, message.ts);
     const firstId = String(first.id);
     const owner = typeof first.agentId === "string" ? first.agentId : leadId;
+    expect(
+      owner === leadId,
+      `the mention routed to lead ${owner}, not this scenario's lead ${leadId}`,
+    );
     expect(!slackObligation(ctx, firstId), "an open Slack task owes no relay");
     await claimNext(ctx, owner, firstId);
     await finish(ctx, owner, firstId, `slack relay output ${ctx.nonce}`);
