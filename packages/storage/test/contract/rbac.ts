@@ -3,6 +3,9 @@ import { type RbacRepository, type Storage, sql, type UsersRepository } from "..
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
+// roles.createdAt holds DEFAULT CURRENT_TIMESTAMP text (no writer sets it): the
+// fixture stores that format, so the round trip is exact on both engines.
+const ROLE_T0 = "2026-11-21 10:00:00";
 
 // Migration 109 seeds `rbac-role-admin` (grant-all) and `rbac-role-requester`,
 // and its trigger attaches the admin role to every new user.
@@ -34,7 +37,7 @@ export function rbacContract(engine: ContractEngine): void {
     const addRole = async (id: string, name: string, verbs: string[], grantsAll = false) => {
       await storage.executor.run(sql`
         INSERT INTO roles (id, name, description, "isBuiltin", "grantsAll", "createdAt")
-        VALUES (${id}, ${name}, ${null}, ${false}, ${grantsAll}, ${T0})`);
+        VALUES (${id}, ${name}, ${null}, ${false}, ${grantsAll}, ${ROLE_T0})`);
       for (const verb of verbs) {
         await storage.executor.run(
           sql`INSERT INTO role_permissions ("roleId", verb) VALUES (${id}, ${verb})`,
@@ -67,7 +70,7 @@ export function rbacContract(engine: ContractEngine): void {
         description: null,
         isBuiltin: 0,
         grantsAll: 0,
-        createdAt: T0,
+        createdAt: ROLE_T0,
       });
       const perms = (await repo.listRolePermissions()).filter((p) => p.roleId === "r-z");
       expect(perms).toEqual([
