@@ -101,7 +101,7 @@
   },
   "src/be/db/agents.ts": {
     "reason": "M2 move: agents",
-    "sites": 22
+    "sites": 3
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
