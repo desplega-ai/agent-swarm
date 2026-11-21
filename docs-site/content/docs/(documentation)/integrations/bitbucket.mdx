@@ -31,7 +31,7 @@ The scope names come from Atlassian's documentation. If token creation shows dif
 
 **App passwords are not supported.** Atlassian removed them.
 
-As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot access only to repositories where you accept that.
+A mention, or adding the bot as a reviewer, creates a task only when the person who did it is a linked swarm user, or their Atlassian `account_id` is listed in `BITBUCKET_ALLOWED_SENDERS` (comma-separated). Events from anyone else are dropped and logged, and the account shows up in the unmapped-identity list for triage. Link it on the People page to let it trigger the swarm.
 
 ## 2. Configure the swarm
 
@@ -50,6 +50,9 @@ BITBUCKET_BOT_ACCOUNT_ID=557058:00000000-0000-0000-0000-000000000000
 
 # Optional: name for plain-text @mentions (default: agent-swarm-bot)
 BITBUCKET_BOT_NAME=agent-swarm-bot
+
+# Optional: account ids (comma-separated) allowed to trigger tasks without a linked swarm user
+BITBUCKET_ALLOWED_SENDERS=557058:11111111-1111-1111-1111-111111111111
 
 # Optional: git commit identity for Bitbucket repos
 BITBUCKET_EMAIL=agent-swarm-bot@your-company.com

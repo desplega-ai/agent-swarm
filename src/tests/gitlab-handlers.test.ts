@@ -152,6 +152,8 @@ beforeAll(async () => {
     await unlink(TEST_DB_PATH);
   } catch {}
   initDb(TEST_DB_PATH);
+  // Mentions need a linked or allowed sender; these fixture senders are unlinked.
+  process.env.GITLAB_ALLOWED_SENDERS = "testuser,inlineuser,noteghost";
 
   await createAgent({
     id: "lead-gl-001",
@@ -162,6 +164,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.GITLAB_ALLOWED_SENDERS;
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -1059,7 +1062,7 @@ describe("identity resolution — MR handler", () => {
     expect(await getUnmappedCount("inlineuser")).toBe(0);
   });
 
-  test("unknown user WITHOUT email → unmapped kv rows, requestedByUserId undefined", async () => {
+  test("unknown user WITHOUT email → unmapped kv rows, no task", async () => {
     const event = makeMREvent({
       user: { id: 13, name: "Ghost", username: "ghostuser", avatar_url: "" },
       object_attributes: {
@@ -1078,10 +1081,7 @@ describe("identity resolution — MR handler", () => {
     });
 
     const result = await handleMergeRequest(event);
-    expect(result.created).toBe(true);
-
-    const task = await getTaskById(result.taskId!);
-    expect(task?.requestedByUserId).toBeFalsy();
+    expect(result.created).toBe(false);
 
     const meta = await getUnmappedMeta("ghostuser");
     expect(meta).not.toBeNull();
@@ -1141,7 +1141,7 @@ describe("identity resolution — MR handler", () => {
     });
 
     const result = await handleMergeRequest(event);
-    expect(result.created).toBe(true);
+    expect(result.created).toBe(false);
 
     // No auto-link should have occurred — no `user_external_ids` row for 'emptyemail'.
     expect(await findUserByExternalId("gitlab", "emptyemail")).toBeNull();
@@ -1157,7 +1157,7 @@ describe("identity resolution — Issue handler", () => {
     await clearUnmapped("issueghost");
   });
 
-  test("unknown user WITHOUT email → unmapped entry tagged 'issue'", async () => {
+  test("unknown user WITHOUT email → unmapped entry tagged 'issue', no task", async () => {
     const event = makeIssueEvent({
       user: { id: 21, name: "Issue Ghost", username: "issueghost", avatar_url: "" },
       object_attributes: {
@@ -1173,10 +1173,7 @@ describe("identity resolution — Issue handler", () => {
     });
 
     const result = await handleIssue(event);
-    expect(result.created).toBe(true);
-
-    const task = await getTaskById(result.taskId!);
-    expect(task?.requestedByUserId).toBeFalsy();
+    expect(result.created).toBe(false);
 
     const meta = await getUnmappedMeta("issueghost");
     expect(meta).not.toBeNull();

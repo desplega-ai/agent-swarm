@@ -88,10 +88,13 @@ afterAll(async () => {
 
 beforeEach(() => {
   process.env.BITBUCKET_BOT_ACCOUNT_ID = BOT_ACCOUNT_ID;
+  // The fixture sender is unlinked; mentions need a linked or allowed sender.
+  process.env.BITBUCKET_ALLOWED_SENDERS = HUMAN_ACCOUNT_ID;
 });
 
 afterEach(() => {
   delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
+  delete process.env.BITBUCKET_ALLOWED_SENDERS;
   resetBitbucket();
   resetBitbucketBotCache();
   resetBitbucketDedup();
