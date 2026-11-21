@@ -101,6 +101,83 @@ export type SessionCostFilter = {
   limit: number;
 };
 
+/** Filter of the cost summary reads. Dates are inclusive bounds on `createdAt`. */
+export type SessionCostSummaryFilter = {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+  /** Spend of one requester, or spend with no human requester. */
+  user?: { kind: "user"; userId: string } | { kind: "unattributed" };
+  /** Credential types billed as a flat subscription. Never empty. */
+  subscriptionKeyTypes: readonly string[];
+};
+
+export type SessionCostTotalsRow = {
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalDurationMs: number;
+  totalSessions: number;
+  attributedCostUsd: number;
+  attributableCostUsd: number;
+  excludedCostUsd: number;
+  excludedTaskCount: number;
+  subscriptionCostUsd: number;
+  credentialUnattributedCostUsd: number;
+  credentialUnattributedSessions: number;
+};
+
+export type SessionCostDailySummaryRow = {
+  date: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  subscriptionCostUsd: number;
+  credentialUnattributedCostUsd: number;
+  credentialUnattributedSessions: number;
+};
+
+export type SessionCostAgentSummaryRow = {
+  agentId: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  durationMs: number;
+};
+
+export type SessionCostUserSummaryRow = {
+  userId: string | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  tasks: number;
+  durationMs: number;
+};
+
+export type SessionCostCredentialSummaryRow = {
+  keyType: string | null;
+  keySuffix: string | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  firstSessionAt: string;
+  lastSessionAt: string;
+};
+
+export type KeyCostSummaryRow = {
+  keyType: string;
+  keySuffix: string;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  taskCount: number;
+};
+
 // ---- request_composition ----
 
 export type RequestCompositionRow = {
@@ -234,6 +311,26 @@ export interface SessionsRepository {
   listSessionCostsByAgent(agentId: string, limit: number): Promise<SessionCostRow[]>;
   /** Newest first; ties newest insert first. Dates are inclusive bounds on `createdAt`. */
   listSessionCosts(filter: SessionCostFilter): Promise<SessionCostRow[]>;
+  // Cost summaries. A session's credential is its own; rows recorded before
+  // migration 307 fall back to their task's credential.
+  costSummaryTotals(filter: SessionCostSummaryFilter): Promise<SessionCostTotalsRow | null>;
+  /** Per UTC day, oldest first. */
+  costSummaryDaily(filter: SessionCostSummaryFilter): Promise<SessionCostDailySummaryRow[]>;
+  /** Per agent, highest cost first; ties by agent id. */
+  costSummaryByAgent(filter: SessionCostSummaryFilter): Promise<SessionCostAgentSummaryRow[]>;
+  /** Per requester (null: no human requester), highest cost first; ties by user id, null first. */
+  costSummaryByUser(filter: SessionCostSummaryFilter): Promise<SessionCostUserSummaryRow[]>;
+  /** Per credential, highest cost first; ties by key type, then suffix, null first. */
+  costSummaryByCredential(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostCredentialSummaryRow[]>;
+  /** Spend per known credential, by key type then suffix. */
+  keyCostSummary(keyType?: string): Promise<KeyCostSummaryRow[]>;
+  /** Spend since `startOfDay`, and since `startOfMonth`. */
+  dashboardCost(
+    startOfDay: string,
+    startOfMonth: string,
+  ): Promise<{ costToday: number; costMtd: number } | null>;
   /** Sum of `totalCostUsd` of an agent's sessions on a UTC day (`YYYY-MM-DD`). */
   dailySpendForAgent(agentId: string, dateUtc: string): Promise<number>;
   /** Sum of `totalCostUsd` of every session on a UTC day (`YYYY-MM-DD`). */
@@ -419,6 +516,36 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
       filter.startDate ? sql`"createdAt" >= ${filter.startDate}` : sql``,
       filter.endDate ? sql`"createdAt" <= ${filter.endDate}` : sql``,
     ]);
+  }
+
+  /** Index hints, the UTC day and the migration-307 fallback are engine-specific. */
+  abstract costSummaryTotals(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostTotalsRow | null>;
+  abstract costSummaryDaily(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostDailySummaryRow[]>;
+  abstract costSummaryByAgent(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostAgentSummaryRow[]>;
+  abstract costSummaryByUser(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostUserSummaryRow[]>;
+  abstract costSummaryByCredential(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostCredentialSummaryRow[]>;
+  abstract keyCostSummary(keyType?: string): Promise<KeyCostSummaryRow[]>;
+
+  dashboardCost(
+    startOfDay: string,
+    startOfMonth: string,
+  ): Promise<{ costToday: number; costMtd: number } | null> {
+    return this.db.get(sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN "createdAt" >= ${startOfDay} THEN "totalCostUsd" ELSE 0 END), 0) AS "costToday",
+        COALESCE(SUM("totalCostUsd"), 0) AS "costMtd"
+      FROM session_costs
+      WHERE "createdAt" >= ${startOfMonth}`);
   }
 
   /** The UTC day of a timestamp column is engine-specific. */

@@ -1,6 +1,4 @@
 import {
-  CREDENTIAL_SUFFIX_SQL,
-  CREDENTIAL_TYPE_SQL,
   type CreateSessionCostInput,
   insertSessionCost,
   rowToSessionCost,
@@ -19,6 +17,7 @@ import type {
   BudgetRefusalNotificationRow as BudgetRefusalNotificationRowDb,
   BudgetRow as BudgetRowDb,
   PricingRowDb,
+  SessionCostSummaryFilter,
   SessionLogRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
@@ -4823,8 +4822,6 @@ export async function deleteServicesByAgentId(agentId: string): Promise<number> 
 // Session Log Operations (raw CLI output)
 // ============================================================================
 
-const sessionsRepo = () => getStorage().repos.sessions;
-
 function rowToSessionLog(row: SessionLogRow): SessionLog {
   return {
     id: row.id,
@@ -4873,13 +4870,16 @@ export async function createSessionLogs(logs: {
       // lineNumber continues from the newest stored row instead of restarting
       // at the POST's index. Rows written here are monotonic in insert order,
       // so this equals MAX + 1 for them.
-      const last = await sessionsRepo().lastLogLineNumber(logs.sessionId, logs.iteration);
+      const last = await getStorage().repos.sessions.lastLogLineNumber(
+        logs.sessionId,
+        logs.iteration,
+      );
       let lineNumber = last !== null ? last + 1 : 0;
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
       for (const [index, { content, reasoning }] of batch.entries()) {
-        await sessionsRepo().insertLog({
+        await getStorage().repos.sessions.insertLog({
           id: crypto.randomUUID(),
           taskId: logs.taskId ?? null,
           sessionId: logs.sessionId,
@@ -4922,7 +4922,7 @@ export async function getSessionLogsByTaskId(
   taskId: string,
   limit?: number,
 ): Promise<SessionLog[]> {
-  const rows = await sessionsRepo().listLogsByTask(taskId, limit);
+  const rows = await getStorage().repos.sessions.listLogsByTask(taskId, limit);
   return rows.map(rowToSessionLog);
 }
 
@@ -4930,7 +4930,7 @@ export async function getSessionLogsBySession(
   sessionId: string,
   iteration: number,
 ): Promise<SessionLog[]> {
-  const rows = await sessionsRepo().listLogsBySession(sessionId, iteration);
+  const rows = await getStorage().repos.sessions.listLogsBySession(sessionId, iteration);
   return rows.map(rowToSessionLog);
 }
 
@@ -4943,7 +4943,7 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
 }
 
 export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
-  const rows = await sessionsRepo().listSessionCostsByTask(taskId, limit);
+  const rows = await getStorage().repos.sessions.listSessionCostsByTask(taskId, limit);
   return rows.map(rowToSessionCost);
 }
 
@@ -4951,12 +4951,12 @@ export async function getSessionCostsByAgentId(
   agentId: string,
   limit = 100,
 ): Promise<SessionCost[]> {
-  const rows = await sessionsRepo().listSessionCostsByAgent(agentId, limit);
+  const rows = await getStorage().repos.sessions.listSessionCostsByAgent(agentId, limit);
   return rows.map(rowToSessionCost);
 }
 
 export async function getAllSessionCosts(limit = 100): Promise<SessionCost[]> {
-  const rows = await sessionsRepo().listSessionCosts({ limit });
+  const rows = await getStorage().repos.sessions.listSessionCosts({ limit });
   return rows.map(rowToSessionCost);
 }
 
@@ -4968,7 +4968,7 @@ export async function getSessionCostsFiltered(opts: {
   endDate?: string;
   limit?: number;
 }): Promise<SessionCost[]> {
-  const rows = await sessionsRepo().listSessionCosts({
+  const rows = await getStorage().repos.sessions.listSessionCosts({
     agentId: opts.agentId,
     startDate: opts.startDate,
     endDate: opts.endDate,
@@ -5080,13 +5080,6 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
-/**
- * True for a session whose task is structurally human-free (`isHumanFree`, set
- * when the task is created; rule in `src/be/db/tasks/human-free.ts`). A session
- * with no task row is not human-free.
- */
-const HUMAN_FREE_SQL = "(COALESCE(t.isHumanFree, 0) = 1)";
-
 export async function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
@@ -5103,84 +5096,20 @@ export async function getSessionCostSummary(opts: {
 }> {
   // `session_costs` deliberately carries no `userId` column — a task can be
   // re-attributed after the fact, so the human requester is resolved by joining
-  // through the task (same shape as `getDailySpendForUser`). Every column is
-  // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  // INDEXED BY: without ANALYZE statistics (production has none) the planner
-  // probes tasks through the primary key and reads each full row, which follows
-  // the task's overflow pages. The covering index answers the same probe from
-  // the index alone (migration 182).
-  const from =
-    "FROM session_costs sc LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId";
-  // Only a user filter reads the task, and the join adds no rows (task id is unique).
-  const agentFrom = opts.userId === undefined ? "FROM session_costs sc" : from;
-
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (opts.startDate) {
-    conditions.push("sc.createdAt >= ?");
-    params.push(opts.startDate);
-  }
-  if (opts.endDate) {
-    conditions.push("sc.createdAt <= ?");
-    params.push(opts.endDate);
-  }
-  if (opts.agentId) {
-    conditions.push("sc.agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts.userId === UNATTRIBUTED_USER_ID) {
-    conditions.push(`(t.requestedByUserId IS NULL OR ${HUMAN_FREE_SQL})`);
-  } else if (opts.userId) {
-    conditions.push(`(t.requestedByUserId = ? AND NOT ${HUMAN_FREE_SQL})`);
-    params.push(opts.userId);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const subscriptionSql = `${CREDENTIAL_TYPE_SQL} IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
-
-  // Totals
-  type TotalsRow = {
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalCacheReadTokens: number;
-    totalCacheWriteTokens: number;
-    totalDurationMs: number;
-    totalSessions: number;
-    attributedCostUsd: number;
-    attributableCostUsd: number;
-    excludedCostUsd: number;
-    excludedTaskCount: number;
-    subscriptionCostUsd: number;
-    credentialUnattributedCostUsd: number;
-    credentialUnattributedSessions: number;
+  // through the task (same shape as `getDailySpendForUser`).
+  const filter: SessionCostSummaryFilter = {
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    agentId: opts.agentId,
+    user:
+      opts.userId === UNATTRIBUTED_USER_ID
+        ? { kind: "unattributed" }
+        : opts.userId
+          ? { kind: "user", userId: opts.userId }
+          : undefined,
+    subscriptionKeyTypes: SUBSCRIPTION_KEY_TYPES,
   };
-
-  const totalsRow = await getDbClient().get<TotalsRow>(
-    `SELECT
-        COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
-        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
-        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
-        COALESCE(SUM(sc.cacheReadTokens), 0) as totalCacheReadTokens,
-        COALESCE(SUM(sc.cacheWriteTokens), 0) as totalCacheWriteTokens,
-        COALESCE(SUM(sc.durationMs), 0) as totalDurationMs,
-        COUNT(*) as totalSessions,
-        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL AND NOT ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as attributedCostUsd,
-        COALESCE(SUM(CASE WHEN NOT ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as attributableCostUsd,
-        COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
-        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
-        COALESCE(SUM(CASE WHEN ${subscriptionSql}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
-        COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
-          THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-        COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
-      ${from} ${where}`,
-    params,
-  );
+  const totalsRow = await getStorage().repos.sessions.costSummaryTotals(filter);
 
   const totals: SessionCostSummaryTotals = totalsRow
     ? {
@@ -5210,99 +5139,25 @@ export async function getSessionCostSummary(opts: {
   const groupBy = opts.groupBy ?? "both";
   let daily: SessionCostDailyRow[] = [];
   if (groupBy === "day" || groupBy === "both") {
-    daily = await getDbClient().query<{
-      date: string;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      sessions: number;
-      subscriptionCostUsd: number;
-      credentialUnattributedCostUsd: number;
-      credentialUnattributedSessions: number;
-    }>(
-      `SELECT
-          DATE(sc.createdAt) as date,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
-            as subscriptionCostUsd,
-          COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
-            THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-          COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
-        ${from} ${where}
-        GROUP BY DATE(sc.createdAt)
-        ORDER BY date ASC`,
-      params,
-    );
+    daily = await getStorage().repos.sessions.costSummaryDaily(filter);
   }
 
   // Per-agent breakdown
   let byAgent: SessionCostByAgentRow[] = [];
   if (groupBy === "agent" || groupBy === "both") {
-    byAgent = await getDbClient().query<{
-      agentId: string;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      sessions: number;
-      durationMs: number;
-    }>(
-      `SELECT
-          sc.agentId as agentId,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${agentFrom} ${where}
-        GROUP BY sc.agentId
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    byAgent = await getStorage().repos.sessions.costSummaryByAgent(filter);
   }
 
   // Per-requester breakdown. Structurally-human-free work is assigned to the
   // autonomous bucket even if a stale requester id survives on the task.
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
-    byUser = await getDbClient().query<SessionCostByUserRow>(
-      `SELECT
-          CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(DISTINCT sc.taskId) as tasks,
-          COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${from} ${where}
-        GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    byUser = await getStorage().repos.sessions.costSummaryByUser(filter);
   }
 
   let byCredential: SessionCostByCredentialRow[] = [];
   if (groupBy === "both") {
-    type CredentialRow = Omit<
-      SessionCostByCredentialRow,
-      "name" | "subscription" | "plan" | "planSource"
-    >;
-    const rows = await getDbClient().query<CredentialRow>(
-      `SELECT
-          ${CREDENTIAL_TYPE_SQL} as keyType,
-          ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          MIN(sc.createdAt) as firstSessionAt,
-          MAX(sc.createdAt) as lastSessionAt
-        ${from} ${where}
-        GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    const rows = await getStorage().repos.sessions.costSummaryByCredential(filter);
     const labels = await getCredentialLabels();
     byCredential = rows.map((row) => {
       const label =
@@ -5576,15 +5431,7 @@ export async function getDashboardCostSummary(): Promise<DashboardCostSummary> {
   const startOfMonthUtc = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   ).toISOString();
-  type CostRow = { costToday: number; costMtd: number };
-  const row = await getDbClient().get<CostRow>(
-    `SELECT
-        COALESCE(SUM(CASE WHEN createdAt >= ? THEN totalCostUsd ELSE 0 END), 0) as costToday,
-        COALESCE(SUM(totalCostUsd), 0) as costMtd
-      FROM session_costs
-      WHERE createdAt >= ?`,
-    [startOfDayUtc, startOfMonthUtc],
-  );
+  const row = await getStorage().repos.sessions.dashboardCost(startOfDayUtc, startOfMonthUtc);
 
   return row ?? { costToday: 0, costMtd: 0 };
 }
@@ -12068,29 +11915,7 @@ export interface KeyCostSummary {
  * Aggregate cost data using immutable session credentials (legacy rows: the task's).
  */
 export async function getKeyCostSummary(keyType?: string): Promise<KeyCostSummary[]> {
-  const conditions = [`${CREDENTIAL_SUFFIX_SQL} IS NOT NULL`];
-  const params: string[] = [];
-
-  if (keyType) {
-    conditions.push(`${CREDENTIAL_TYPE_SQL} = ?`);
-    params.push(keyType);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDbClient().query<KeyCostSummary>(
-    `SELECT
-        ${CREDENTIAL_TYPE_SQL} as keyType,
-        ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
-        COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
-        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
-        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
-        COUNT(DISTINCT sc.taskId) as taskCount
-      FROM session_costs sc
-      LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId
-      ${where}
-      GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}`,
-    params,
-  );
+  return getStorage().repos.sessions.keyCostSummary(keyType);
 }
 
 // ============================================================================
@@ -12858,7 +12683,7 @@ function rowToBudgetRefusalNotification(
  * exists — callers treat that as "unlimited / no budget configured".
  */
 export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Budget | null> {
-  const row = await sessionsRepo().findBudget(scope, scopeId);
+  const row = await getStorage().repos.sessions.findBudget(scope, scopeId);
   return row ? rowToBudget(row) : null;
 }
 
@@ -12867,7 +12692,7 @@ export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Bu
  * Order is `(scope, scope_id)` for stable output across calls.
  */
 export async function getBudgets(): Promise<Budget[]> {
-  const rows = await sessionsRepo().listBudgets();
+  const rows = await getStorage().repos.sessions.listBudgets();
   return rows.map(rowToBudget);
 }
 
@@ -12882,7 +12707,7 @@ export async function upsertBudget(
   dailyBudgetUsd: number,
 ): Promise<Budget> {
   const now = Date.now();
-  await sessionsRepo().upsertBudget(scope, scopeId, dailyBudgetUsd, now);
+  await getStorage().repos.sessions.upsertBudget(scope, scopeId, dailyBudgetUsd, now);
 
   const updated = await getBudget(scope, scopeId);
   if (!updated) {
@@ -12898,7 +12723,7 @@ export async function upsertBudget(
  * if `(scope, scopeId)` did not exist.
  */
 export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise<boolean> {
-  return (await sessionsRepo().deleteBudget(scope, scopeId)) > 0;
+  return (await getStorage().repos.sessions.deleteBudget(scope, scopeId)) > 0;
 }
 
 // ============================================================================
@@ -12926,7 +12751,7 @@ function rowToPricingRow(row: PricingRowDb): PricingRow {
 
 /** Phase 6: list every pricing row, latest-effective first. */
 export async function getAllPricingRows(): Promise<PricingRow[]> {
-  const rows = await sessionsRepo().listPricingRows();
+  const rows = await getStorage().repos.sessions.listPricingRows();
   return rows.map(rowToPricingRow);
 }
 
@@ -12939,7 +12764,7 @@ export async function getPricingRows(
   model: string,
   tokenClass: PricingTokenClass,
 ): Promise<PricingRow[]> {
-  const rows = await sessionsRepo().listPricingRowsFor(provider, model, tokenClass);
+  const rows = await getStorage().repos.sessions.listPricingRowsFor(provider, model, tokenClass);
   return rows.map(rowToPricingRow);
 }
 
@@ -12955,7 +12780,12 @@ export async function getActivePricingRow(
   tokenClass: PricingTokenClass,
   atEpochMs: number,
 ): Promise<PricingRow | null> {
-  const row = await sessionsRepo().findActivePricingRow(provider, model, tokenClass, atEpochMs);
+  const row = await getStorage().repos.sessions.findActivePricingRow(
+    provider,
+    model,
+    tokenClass,
+    atEpochMs,
+  );
   return row ? rowToPricingRow(row) : null;
 }
 
@@ -12974,7 +12804,7 @@ export interface InsertPricingRowInput {
  */
 export async function insertPricingRow(input: InsertPricingRowInput): Promise<PricingRow> {
   const now = Date.now();
-  await sessionsRepo().insertPricingRow({
+  await getStorage().repos.sessions.insertPricingRow({
     provider: input.provider,
     model: input.model,
     token_class: input.tokenClass,
@@ -13005,7 +12835,14 @@ export async function deletePricingRow(
   tokenClass: PricingTokenClass,
   effectiveFrom: number,
 ): Promise<boolean> {
-  return (await sessionsRepo().deletePricingRow(provider, model, tokenClass, effectiveFrom)) > 0;
+  return (
+    (await getStorage().repos.sessions.deletePricingRow(
+      provider,
+      model,
+      tokenClass,
+      effectiveFrom,
+    )) > 0
+  );
 }
 
 /**
@@ -13022,7 +12859,7 @@ export async function deletePricingRow(
  * in the test suite).
  */
 export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
-  return sessionsRepo().dailySpendForAgent(agentId, dateUtc);
+  return getStorage().repos.sessions.dailySpendForAgent(agentId, dateUtc);
 }
 
 /**
@@ -13038,7 +12875,7 @@ export async function getDailySpendForAgent(agentId: string, dateUtc: string): P
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
 export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
-  return sessionsRepo().dailySpendGlobal(dateUtc);
+  return getStorage().repos.sessions.dailySpendGlobal(dateUtc);
 }
 
 /**
@@ -13048,7 +12885,7 @@ export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
 export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
-  return sessionsRepo().dailySpendForUser(userId, dateUtc);
+  return getStorage().repos.sessions.dailySpendForUser(userId, dateUtc);
 }
 
 export interface RecordBudgetRefusalNotificationInput {
@@ -13078,7 +12915,7 @@ export async function recordBudgetRefusalNotification(
   row: BudgetRefusalNotification;
 }> {
   const now = Date.now();
-  const inserted = await sessionsRepo().insertBudgetRefusalNotification({
+  const inserted = await getStorage().repos.sessions.insertBudgetRefusalNotification({
     task_id: input.taskId,
     date: input.date,
     agent_id: input.agentId,
@@ -13092,7 +12929,10 @@ export async function recordBudgetRefusalNotification(
     createdAt: now,
   });
 
-  const existing = await sessionsRepo().findBudgetRefusalNotification(input.taskId, input.date);
+  const existing = await getStorage().repos.sessions.findBudgetRefusalNotification(
+    input.taskId,
+    input.date,
+  );
 
   if (!existing) {
     // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
@@ -13115,7 +12955,7 @@ export async function getBudgetRefusalNotification(
   taskId: string,
   date: string,
 ): Promise<BudgetRefusalNotification | null> {
-  const row = await sessionsRepo().findBudgetRefusalNotification(taskId, date);
+  const row = await getStorage().repos.sessions.findBudgetRefusalNotification(taskId, date);
   return row ? rowToBudgetRefusalNotification(row) : null;
 }
 
@@ -13127,7 +12967,7 @@ export async function getBudgetRefusalNotification(
 export async function getRecentBudgetRefusalNotifications(
   limit = 50,
 ): Promise<BudgetRefusalNotification[]> {
-  const rows = await sessionsRepo().listRecentBudgetRefusalNotifications(limit);
+  const rows = await getStorage().repos.sessions.listRecentBudgetRefusalNotifications(limit);
   return rows.map(rowToBudgetRefusalNotification);
 }
 
@@ -13139,7 +12979,7 @@ export async function hasBudgetRefusalNotificationToday(
   taskId: string,
   date: string,
 ): Promise<boolean> {
-  return sessionsRepo().hasBudgetRefusalNotification(taskId, date);
+  return getStorage().repos.sessions.hasBudgetRefusalNotification(taskId, date);
 }
 
 /**
@@ -13156,7 +12996,7 @@ export async function setBudgetRefusalFollowUpTaskId(
   date: string,
   followUpTaskId: string,
 ): Promise<void> {
-  await sessionsRepo().setBudgetRefusalFollowUpTaskId(taskId, date, followUpTaskId);
+  await getStorage().repos.sessions.setBudgetRefusalFollowUpTaskId(taskId, date, followUpTaskId);
 }
 
 // ============================================================================

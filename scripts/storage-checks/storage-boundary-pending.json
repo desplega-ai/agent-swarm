@@ -97,7 +97,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 370
+    "sites": 368
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -138,10 +138,6 @@
   "src/be/db/script-runs.ts": {
     "reason": "M2 move: scripts",
     "sites": 4
-  },
-  "src/be/db/session-costs.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 1
   },
   "src/be/db/session-labels.ts": {
     "reason": "M2 move: sessions and cost",

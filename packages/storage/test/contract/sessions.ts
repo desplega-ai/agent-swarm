@@ -452,5 +452,103 @@ export function sessionsContract(engine: ContractEngine): void {
       ).toEqual([300, 200]);
       expect((await repo.listPricingRowsFor("contract", "m", "output")).length).toBe(1);
     });
+
+    test("cost summaries: credential fallback, user filters, grouped orders with ties", async () => {
+      // The migration runner owns `_migrations`; the contract template applies the SQL files only.
+      await storage.executor.run(sql`
+        CREATE TABLE IF NOT EXISTS _migrations (
+          version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL, checksum TEXT NOT NULL)`);
+      await storage.executor.run(sql`
+        INSERT INTO _migrations (version, name, applied_at, checksum)
+        VALUES (307, 'session_credentials', '2026-11-01T00:00:00.000Z', 'x')`);
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'u')`);
+      await insertAgent("a1");
+      await insertAgent("a2");
+      await insertTask("t1", { requestedByUserId: "u1" });
+      await storage.executor.run(sql`
+        UPDATE agent_tasks SET "credentialKeyType" = 'CODEX_OAUTH', "credentialKeySuffix" = 'old1' WHERE id = 't1'`);
+      await insertTask("t2");
+      // Legacy row (before 307, no credential): falls back to the task's credential.
+      await repo.insertSessionCost(newCost({ id: "c1", taskId: "t1", totalCostUsd: 2 }));
+      await setCostCreatedAt("c1", "2026-10-30T10:00:00.000Z");
+      // New row with its own credential.
+      await repo.insertSessionCost(
+        newCost({
+          id: "c2",
+          taskId: "t2",
+          agentId: "a2",
+          totalCostUsd: 2,
+          credentialKeyType: "ANTHROPIC_API_KEY",
+          credentialKeySuffix: "k2",
+        }),
+      );
+      await setCostCreatedAt("c2", "2026-11-20T10:00:00.000Z");
+      // New row without a credential: unattributed.
+      await repo.insertSessionCost(newCost({ id: "c3", totalCostUsd: 1 }));
+      await setCostCreatedAt("c3", "2026-11-20T11:00:00.000Z");
+      const filter = { subscriptionKeyTypes: ["CODEX_OAUTH"] };
+      expect(await repo.costSummaryTotals(filter)).toMatchObject({
+        totalCostUsd: 5,
+        totalSessions: 3,
+        attributedCostUsd: 2,
+        attributableCostUsd: 5,
+        excludedCostUsd: 0,
+        subscriptionCostUsd: 2,
+        credentialUnattributedCostUsd: 1,
+        credentialUnattributedSessions: 1,
+      });
+      expect(
+        (await repo.costSummaryDaily(filter)).map((r) => [r.date, r.costUsd, r.sessions]),
+      ).toEqual([
+        ["2026-10-30", 2, 1],
+        ["2026-11-20", 3, 2],
+      ]);
+      // a1 and a2 tie at 3 vs 2: a1 first; the tie order is the agent id.
+      await repo.insertSessionCost(newCost({ id: "c4", agentId: "a2", totalCostUsd: 1 }));
+      await setCostCreatedAt("c4", "2026-11-20T12:00:00.000Z");
+      expect((await repo.costSummaryByAgent(filter)).map((r) => [r.agentId, r.costUsd])).toEqual([
+        ["a1", 3],
+        ["a2", 3],
+      ]);
+      expect((await repo.costSummaryByUser(filter)).map((r) => [r.userId, r.costUsd])).toEqual([
+        [null, 4],
+        ["u1", 2],
+      ]);
+      expect(
+        (await repo.costSummaryByCredential(filter)).map((r) => [
+          r.keyType,
+          r.keySuffix,
+          r.costUsd,
+        ]),
+      ).toEqual([
+        [null, null, 2],
+        ["ANTHROPIC_API_KEY", "k2", 2],
+        ["CODEX_OAUTH", "old1", 2],
+      ]);
+      expect(
+        (await repo.costSummaryTotals({ ...filter, user: { kind: "user", userId: "u1" } }))
+          ?.totalCostUsd,
+      ).toBe(2);
+      expect(
+        (await repo.costSummaryByAgent({ ...filter, user: { kind: "unattributed" } })).map(
+          (r) => r.agentId,
+        ),
+      ).toEqual(["a2", "a1"]);
+      expect(
+        (await repo.keyCostSummary()).map((r) => [
+          r.keyType,
+          r.keySuffix,
+          r.totalCost,
+          r.taskCount,
+        ]),
+      ).toEqual([
+        ["ANTHROPIC_API_KEY", "k2", 2, 1],
+        ["CODEX_OAUTH", "old1", 2, 1],
+      ]);
+      expect((await repo.keyCostSummary("CODEX_OAUTH")).length).toBe(1);
+      expect(
+        await repo.dashboardCost("2026-11-20T10:30:00.000Z", "2026-11-01T00:00:00.000Z"),
+      ).toEqual({ costToday: 2, costMtd: 4 });
+    });
   });
 }

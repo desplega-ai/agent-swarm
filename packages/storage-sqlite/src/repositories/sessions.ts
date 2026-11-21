@@ -1,19 +1,65 @@
 import {
   BaseSessionsRepository,
   type BudgetRefusalNotificationRow,
+  EMPTY,
+  type KeyCostSummaryRow,
   type NewBudgetRefusalNotification,
   type RequestCompositionRow,
+  type SessionCostAgentSummaryRow,
+  type SessionCostCredentialSummaryRow,
+  type SessionCostDailySummaryRow,
   type SessionCostFilter,
   type SessionCostRow,
+  type SessionCostSummaryFilter,
+  type SessionCostTotalsRow,
+  type SessionCostUserSummaryRow,
   type SessionLogRow,
   type SessionShareRow,
   type SessionSummaryDriftRow,
+  type SqlQuery,
   sql,
   sqlList,
+  sqlWhere,
   type TaskAncestorRow,
 } from "@desplega/storage";
 
 type SumRow = { total: number };
+
+/**
+ * Sessions recorded before migration 307 carry no credential of their own.
+ * Those legacy rows fall back to their task's credential, as usage read it
+ * before 307. Newer rows keep their own, null included. Needs `t` joined.
+ */
+const LEGACY_CREDENTIAL = sql`(sc."credentialKeyType" IS NULL AND sc."createdAt" < (SELECT applied_at FROM _migrations WHERE version = 307))`;
+const CREDENTIAL_TYPE = sql`CASE WHEN ${LEGACY_CREDENTIAL} THEN t."credentialKeyType" ELSE sc."credentialKeyType" END`;
+const CREDENTIAL_SUFFIX = sql`CASE WHEN ${LEGACY_CREDENTIAL} THEN t."credentialKeySuffix" ELSE sc."credentialKeySuffix" END`;
+/**
+ * True for a session whose task is structurally human-free. A session with no
+ * task row is not human-free.
+ */
+const HUMAN_FREE = sql`(COALESCE(t."isHumanFree", 0) = 1)`;
+// INDEXED BY: without ANALYZE statistics (production has none) the planner
+// probes tasks through the primary key and reads each full row, which follows
+// the task's overflow pages. The covering index answers the same probe from
+// the index alone (migration 182).
+const COST_FROM = sql`FROM session_costs sc LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc."taskId"`;
+
+function costWhere(filter: SessionCostSummaryFilter): SqlQuery {
+  const user = filter.user;
+  return sqlWhere([
+    filter.startDate ? sql`sc."createdAt" >= ${filter.startDate}` : EMPTY,
+    filter.endDate ? sql`sc."createdAt" <= ${filter.endDate}` : EMPTY,
+    filter.agentId ? sql`sc."agentId" = ${filter.agentId}` : EMPTY,
+    user?.kind === "unattributed"
+      ? sql`(t."requestedByUserId" IS NULL OR ${HUMAN_FREE})`
+      : user?.kind === "user"
+        ? sql`(t."requestedByUserId" = ${user.userId} AND NOT ${HUMAN_FREE})`
+        : EMPTY,
+  ]);
+}
+
+const subscription = (filter: SessionCostSummaryFilter) =>
+  sql`${CREDENTIAL_TYPE} IN (${sqlList(filter.subscriptionKeyTypes)})`;
 
 export class SqliteSessionsRepository extends BaseSessionsRepository {
   // ---- session_logs ----
@@ -83,6 +129,123 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     return this.db.query<SessionCostRow>(sql`
       SELECT * FROM session_costs${this.sessionCostFilter(filter)}
       ORDER BY "createdAt" DESC, rowid DESC LIMIT ${filter.limit}`);
+  }
+
+  // ---- cost summaries ----
+  // Every column is `sc.`-qualified because `createdAt`/`agentId` exist on
+  // both sides. The tiebreakers spell out today's order: grouped rows come out
+  // in group-key order and the sort keeps ties in that order.
+
+  costSummaryTotals(filter: SessionCostSummaryFilter): Promise<SessionCostTotalsRow | null> {
+    return this.db.get<SessionCostTotalsRow>(sql`
+      SELECT
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "totalCostUsd",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "totalInputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "totalOutputTokens",
+        COALESCE(SUM(sc."cacheReadTokens"), 0) AS "totalCacheReadTokens",
+        COALESCE(SUM(sc."cacheWriteTokens"), 0) AS "totalCacheWriteTokens",
+        COALESCE(SUM(sc."durationMs"), 0) AS "totalDurationMs",
+        COUNT(*) AS "totalSessions",
+        COALESCE(SUM(CASE WHEN t."requestedByUserId" IS NOT NULL AND NOT ${HUMAN_FREE}
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "attributedCostUsd",
+        COALESCE(SUM(CASE WHEN NOT ${HUMAN_FREE}
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "attributableCostUsd",
+        COALESCE(SUM(CASE WHEN ${HUMAN_FREE}
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "excludedCostUsd",
+        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE} THEN t.id END) AS "excludedTaskCount",
+        COALESCE(SUM(CASE WHEN ${subscription(filter)}
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "subscriptionCostUsd",
+        COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE} IS NULL
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "credentialUnattributedCostUsd",
+        COUNT(CASE WHEN ${CREDENTIAL_TYPE} IS NULL THEN 1 END) AS "credentialUnattributedSessions"
+      ${COST_FROM}${costWhere(filter)}`);
+  }
+
+  costSummaryDaily(filter: SessionCostSummaryFilter): Promise<SessionCostDailySummaryRow[]> {
+    return this.db.query<SessionCostDailySummaryRow>(sql`
+      SELECT
+        DATE(sc."createdAt") AS date,
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "costUsd",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "inputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "outputTokens",
+        COUNT(*) AS sessions,
+        COALESCE(SUM(CASE WHEN ${subscription(filter)} THEN sc."totalCostUsd" ELSE 0 END), 0)
+          AS "subscriptionCostUsd",
+        COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE} IS NULL
+          THEN sc."totalCostUsd" ELSE 0 END), 0) AS "credentialUnattributedCostUsd",
+        COUNT(CASE WHEN ${CREDENTIAL_TYPE} IS NULL THEN 1 END) AS "credentialUnattributedSessions"
+      ${COST_FROM}${costWhere(filter)}
+      GROUP BY DATE(sc."createdAt")
+      ORDER BY date ASC`);
+  }
+
+  costSummaryByAgent(filter: SessionCostSummaryFilter): Promise<SessionCostAgentSummaryRow[]> {
+    // Only a user filter reads the task, and the join adds no rows (task id is unique).
+    const from = filter.user === undefined ? sql`FROM session_costs sc` : COST_FROM;
+    return this.db.query<SessionCostAgentSummaryRow>(sql`
+      SELECT
+        sc."agentId" AS "agentId",
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "costUsd",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "inputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "outputTokens",
+        COUNT(*) AS sessions,
+        COALESCE(SUM(sc."durationMs"), 0) AS "durationMs"
+      ${from}${costWhere(filter)}
+      GROUP BY sc."agentId"
+      ORDER BY "costUsd" DESC, sc."agentId"`);
+  }
+
+  costSummaryByUser(filter: SessionCostSummaryFilter): Promise<SessionCostUserSummaryRow[]> {
+    // Structurally-human-free work goes to the autonomous bucket even if a
+    // stale requester id survives on the task.
+    const user = sql`CASE WHEN ${HUMAN_FREE} THEN NULL ELSE t."requestedByUserId" END`;
+    return this.db.query<SessionCostUserSummaryRow>(sql`
+      SELECT
+        ${user} AS "userId",
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "costUsd",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "inputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "outputTokens",
+        COUNT(DISTINCT sc."taskId") AS tasks,
+        COALESCE(SUM(sc."durationMs"), 0) AS "durationMs"
+      ${COST_FROM}${costWhere(filter)}
+      GROUP BY ${user}
+      ORDER BY "costUsd" DESC, "userId"`);
+  }
+
+  costSummaryByCredential(
+    filter: SessionCostSummaryFilter,
+  ): Promise<SessionCostCredentialSummaryRow[]> {
+    return this.db.query<SessionCostCredentialSummaryRow>(sql`
+      SELECT
+        ${CREDENTIAL_TYPE} AS "keyType",
+        ${CREDENTIAL_SUFFIX} AS "keySuffix",
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "costUsd",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "inputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "outputTokens",
+        COUNT(*) AS sessions,
+        MIN(sc."createdAt") AS "firstSessionAt",
+        MAX(sc."createdAt") AS "lastSessionAt"
+      ${COST_FROM}${costWhere(filter)}
+      GROUP BY ${CREDENTIAL_TYPE}, ${CREDENTIAL_SUFFIX}
+      ORDER BY "costUsd" DESC, "keyType", "keySuffix"`);
+  }
+
+  keyCostSummary(keyType?: string): Promise<KeyCostSummaryRow[]> {
+    const where = sqlWhere([
+      sql`${CREDENTIAL_SUFFIX} IS NOT NULL`,
+      keyType ? sql`${CREDENTIAL_TYPE} = ${keyType}` : EMPTY,
+    ]);
+    return this.db.query<KeyCostSummaryRow>(sql`
+      SELECT
+        ${CREDENTIAL_TYPE} AS "keyType",
+        ${CREDENTIAL_SUFFIX} AS "keySuffix",
+        COALESCE(SUM(sc."totalCostUsd"), 0) AS "totalCost",
+        COALESCE(SUM(sc."inputTokens"), 0) AS "totalInputTokens",
+        COALESCE(SUM(sc."outputTokens"), 0) AS "totalOutputTokens",
+        COUNT(DISTINCT sc."taskId") AS "taskCount"
+      ${COST_FROM}${where}
+      GROUP BY ${CREDENTIAL_TYPE}, ${CREDENTIAL_SUFFIX}
+      ORDER BY "keyType", "keySuffix"`);
   }
 
   // `createdAt` is ISO text: the left-anchored substr keeps the
