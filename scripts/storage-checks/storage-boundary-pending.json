@@ -33,7 +33,7 @@
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 4
+    "sites": 2
   },
   "src/be/db/request-composition.ts": {
     "reason": "M2 move: sessions and cost",
@@ -414,10 +414,6 @@
   "src/http/budgets.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 1
-  },
-  "src/http/controllers-connect.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 7
   },
   "src/http/core.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

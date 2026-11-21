@@ -1,7 +1,6 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { type WebSocket, WebSocketServer } from "ws";
-import { getDbClient } from "../be/db";
 import { ensureRuntimeOwnerId, reconcileRemoteProvisions } from "../be/runtime-pools/controllers";
 import { getRuntimeController } from "../be/runtime-pools/db";
 import {
@@ -11,6 +10,7 @@ import {
   removeRemoteController,
 } from "../be/runtime-pools/remote-controller";
 import { reconcileControllerOrphans } from "../be/runtime-pools/supervisor";
+import { getStorage } from "../be/storage";
 import {
   CONTROLLER_PING_INTERVAL_MS,
   CONTROLLER_PROTOCOL_VERSION,
@@ -85,10 +85,11 @@ export function attachControllerTransport(
       console.error("[runtime-controller]", scrubSecrets(String(error)));
     const closeOnError = (error: unknown) => {
       const detail = scrubSecrets(String(error));
-      void getDbClient()
-        .run(
-          "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, status = CASE WHEN status = 'online' THEN status ELSE 'offline' END WHERE id = ?",
-          [detail, new Date().toISOString(), auth.controllerId],
+      void getStorage()
+        .repos.runtimePools.recordControllerConnectionError(
+          auth.controllerId,
+          detail,
+          new Date().toISOString(),
         )
         .catch(reportError)
         .finally(() =>
@@ -115,9 +116,7 @@ export function attachControllerTransport(
         throw new ControllerAuthError("Controller identity or kind does not match");
       }
       if (closed) return;
-      await getDbClient().run("UPDATE runtime_controllers SET status = 'unknown' WHERE id = ?", [
-        row.id,
-      ]);
+      await getStorage().repos.runtimePools.setControllerStatusOnly(row.id, "unknown");
       if (closed) return;
       session = new RemoteController(
         row.id,
@@ -130,9 +129,10 @@ export function attachControllerTransport(
       await reconcileHandles(session);
       await checkAuth();
       if (closed || remoteControllerSession(row.id) !== session) return;
-      await getDbClient().run(
-        "UPDATE runtime_controllers SET status = 'online', last_seen_at = ?, updated_at = ?, last_error = NULL, last_error_at = NULL WHERE id = ?",
-        [new Date().toISOString(), new Date().toISOString(), row.id],
+      await getStorage().repos.runtimePools.markControllerOnline(
+        row.id,
+        new Date().toISOString(),
+        new Date().toISOString(),
       );
       online = true;
     };
@@ -164,10 +164,10 @@ export function attachControllerTransport(
       void (async () => {
         await checkAuth();
         if (online && session && remoteControllerSession(auth.controllerId) === session)
-          await getDbClient().run("UPDATE runtime_controllers SET last_seen_at = ? WHERE id = ?", [
-            new Date().toISOString(),
+          await getStorage().repos.runtimePools.touchControllerSeen(
             auth.controllerId,
-          ]);
+            new Date().toISOString(),
+          );
       })().catch(closeOnError);
     }, CONTROLLER_PING_INTERVAL_MS);
     timer.unref();
@@ -178,14 +178,12 @@ export function attachControllerTransport(
       session?.disconnect("Controller disconnected");
       if (!session || !removeRemoteController(session)) return;
       const disconnectedAt = new Date().toISOString();
-      void getDbClient()
-        .run(
-          online
-            ? "UPDATE runtime_controllers SET status = 'offline', updated_at = ?, last_seen_at = ? WHERE id = ?"
-            : "UPDATE runtime_controllers SET status = 'offline' WHERE id = ?",
-          online ? [disconnectedAt, disconnectedAt, auth.controllerId] : [auth.controllerId],
-        )
-        .catch(reportError);
+      const runtimePools = getStorage().repos.runtimePools;
+      void (
+        online
+          ? runtimePools.markControllerDisconnected(auth.controllerId, disconnectedAt)
+          : runtimePools.setControllerStatusOnly(auth.controllerId, "offline")
+      ).catch(reportError);
     });
     ws.send(
       JSON.stringify({

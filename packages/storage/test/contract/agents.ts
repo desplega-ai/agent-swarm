@@ -414,5 +414,16 @@ export function agentsContract(engine: ContractEngine): void {
       await repo.insertAgent(newAgent({ id: "n1", name: "amy" }));
       expect(await repo.listAgentNames()).toEqual(["zed", "amy"]);
     });
+
+    test("firstAgentCreatedAt returns the earliest createdAt", async () => {
+      expect(await repo.firstAgentCreatedAt()).toBeNull();
+      await repo.insertAgent(newAgent({ id: "f1" }));
+      await repo.insertAgent(newAgent({ id: "f2" }));
+      await storage.executor.run(sql`UPDATE agents SET "createdAt" = ${T1} WHERE id = 'f1'`);
+      await storage.executor.run(
+        sql`UPDATE agents SET "createdAt" = ${"2000-01-01T00:00:00.000Z"} WHERE id = 'f2'`,
+      );
+      expect(await repo.firstAgentCreatedAt()).toBe("2000-01-01T00:00:00.000Z");
+    });
   });
 }

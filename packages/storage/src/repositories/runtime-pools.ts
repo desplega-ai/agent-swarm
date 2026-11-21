@@ -476,6 +476,18 @@ export interface RuntimePoolsRepository {
   pruneStaleRuntimes(cutoff: string): Promise<number>;
   /** Rows of the pool, ordered by created_at, then insertion order. */
   listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+
+  // --- remote controller connection (src/http/controllers-connect.ts) ---
+  /** Stores the connection error; an `online` controller stays online, any other goes offline. */
+  recordControllerConnectionError(id: string, error: string, now: string): Promise<void>;
+  /** Sets only the status column (updated_at unchanged). */
+  setControllerStatusOnly(id: string, status: string): Promise<void>;
+  /** Marks the controller online, seen at `seenAt`, and clears its last error. */
+  markControllerOnline(id: string, seenAt: string, updatedAt: string): Promise<void>;
+  /** Sets only last_seen_at. */
+  touchControllerSeen(id: string, now: string): Promise<void>;
+  /** Marks the controller offline, whatever its status, with updated_at and last_seen_at. */
+  markControllerDisconnected(id: string, now: string): Promise<void>;
 }
 
 const CONTROLLER_COLUMNS = sql`id, name, kind, placement, config, secret_config AS "secretConfig",
@@ -1190,6 +1202,38 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
 
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
   abstract listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+
+  // --- remote controller connection ---
+
+  async recordControllerConnectionError(id: string, error: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers
+         SET last_error = ${error}, last_error_at = ${now},
+             status = CASE WHEN status = 'online' THEN status ELSE 'offline' END
+       WHERE id = ${id}`);
+  }
+
+  async setControllerStatusOnly(id: string, status: string): Promise<void> {
+    await this.db.run(sql`UPDATE runtime_controllers SET status = ${status} WHERE id = ${id}`);
+  }
+
+  async markControllerOnline(id: string, seenAt: string, updatedAt: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers
+         SET status = 'online', last_seen_at = ${seenAt}, updated_at = ${updatedAt},
+             last_error = NULL, last_error_at = NULL
+       WHERE id = ${id}`);
+  }
+
+  async touchControllerSeen(id: string, now: string): Promise<void> {
+    await this.db.run(sql`UPDATE runtime_controllers SET last_seen_at = ${now} WHERE id = ${id}`);
+  }
+
+  async markControllerDisconnected(id: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers SET status = 'offline', updated_at = ${now}, last_seen_at = ${now}
+       WHERE id = ${id}`);
+  }
 }
 
 /** The task-session triggers that run without a task, for engine overrides. */

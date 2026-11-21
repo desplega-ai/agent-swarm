@@ -357,6 +357,8 @@ export interface AgentsRepository {
   countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]>;
   /** Every agent name (extension rows too). Insertion order. */
   listAgentNames(): Promise<(string | null)[]>;
+  /** The earliest agent `createdAt`, or null with no agent. */
+  firstAgentCreatedAt(): Promise<string | null>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -855,4 +857,11 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   /** Insertion order differs per engine (SQLite `rowid`). */
   abstract listAgentNames(): Promise<(string | null)[]>;
+
+  async firstAgentCreatedAt(): Promise<string | null> {
+    const row = await this.db.get<{ first: string | null }>(
+      sql`SELECT MIN("createdAt") AS first FROM agents`,
+    );
+    return row?.first ?? null;
+  }
 }

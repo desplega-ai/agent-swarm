@@ -845,5 +845,33 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       );
       expect(left.map((r) => r.id)).toEqual(["fresh", "pool-active", "prov"]);
     });
+
+    test("remote controller connection status writes", async () => {
+      await controller("rc", "remote");
+      const row = () =>
+        storage.executor.get<Record<string, unknown>>(
+          sql`SELECT status, last_error, last_error_at, last_seen_at, updated_at FROM runtime_controllers WHERE id = 'rc'`,
+        );
+      const before = await row();
+      await repo.setControllerStatusOnly("rc", "unknown");
+      expect(await row()).toMatchObject({ status: "unknown", updated_at: before?.updated_at });
+      await repo.recordControllerConnectionError("rc", "e1", T0);
+      expect(await row()).toMatchObject({ status: "offline", last_error: "e1", last_error_at: T0 });
+      await repo.markControllerOnline("rc", T1, T2);
+      expect(await row()).toMatchObject({
+        status: "online",
+        last_seen_at: T1,
+        updated_at: T2,
+        last_error: null,
+        last_error_at: null,
+      });
+      // An online controller keeps its status on an error.
+      await repo.recordControllerConnectionError("rc", "e2", T1);
+      expect(await row()).toMatchObject({ status: "online", last_error: "e2" });
+      await repo.touchControllerSeen("rc", T2);
+      expect(await row()).toMatchObject({ last_seen_at: T2, updated_at: T2 });
+      await repo.markControllerDisconnected("rc", T0);
+      expect(await row()).toMatchObject({ status: "offline", last_seen_at: T0, updated_at: T0 });
+    });
   });
 }

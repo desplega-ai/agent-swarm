@@ -767,6 +767,8 @@ export interface WorkflowsRepository {
     createdBy: string | null;
     now: string;
   }): Promise<void>;
+  /** Completed runs across every workflow. */
+  countCompletedRunsAll(): Promise<number>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1742,5 +1744,12 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
          "startedAt", "lastUpdatedAt", "finishedAt")
       VALUES (${r.id}, ${r.workflowId}, 'failed', ${r.triggerType}, ${r.triggerData}, ${r.error},
         ${r.createdBy}, ${r.now}, ${r.now}, ${r.now})`);
+  }
+
+  async countCompletedRunsAll(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM workflow_runs WHERE status = 'completed'`,
+    );
+    return row?.count ?? 0;
   }
 }

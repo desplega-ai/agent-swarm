@@ -1212,5 +1212,15 @@ export function workflowsContract(engine: ContractEngine): void {
       ).toBe(false);
       expect(await repo.hasOtherSetupFailureRun("wf-b", "x", start, end)).toBe(false);
     });
+
+    test("countCompletedRunsAll counts completed runs of every workflow", async () => {
+      expect(await repo.countCompletedRunsAll()).toBe(0);
+      await workflow("wa");
+      await workflow("wb");
+      await run("r1", { workflowId: "wa", status: "completed" });
+      await run("r2", { workflowId: "wb", status: "completed" });
+      await run("r3", { workflowId: "wb", status: "failed" });
+      expect(await repo.countCompletedRunsAll()).toBe(2);
+    });
   });
 }

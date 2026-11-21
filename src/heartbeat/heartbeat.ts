@@ -63,6 +63,7 @@ import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { carryUnhandledSteering, promotePendingSteeringForTask } from "../be/steering";
+import { getStorage } from "../be/storage";
 import type { HeartbeatAction, HeartbeatClassification } from "../extensions/contract";
 import { dispatchPre, extensionIdForAgent } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
@@ -1321,7 +1322,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
     //    cancel so the pin is retried next sweep instead of being stranded.
     let escalation: { decisionTaskId: string } | null = null;
     try {
-      escalation = await getDbClient().transaction(async () => {
+      escalation = await getStorage().transaction(async () => {
         const terminalized = await failPendingResumeIfUnclaimed(
           resume.id,
           "cancelled",
