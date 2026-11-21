@@ -12,8 +12,8 @@ import {
   registerWorker,
 } from "./slack-helpers";
 
-// A Lead follow-up that finishes soon after the Lead's previous card in the
-// same thread merges into that card (one chat.update, no new message), so the
+// A Lead follow-up that finishes after the Lead's previous card in the
+// same thread, with nothing posted in between, merges into that card (one chat.update, no new message), so the
 // thread reads as one answer and sends one notification. A later message in
 // the thread, or a failed follow-up, keeps the follow-up a separate card.
 //
@@ -33,6 +33,7 @@ type DelegatedAsk = {
   threadTs: string;
   askTaskId: string;
   askOutput: string;
+  childId: string;
   followUpId: string;
 };
 
@@ -84,7 +85,7 @@ async function delegatedAsk(
   });
   const followUpId = await findWorkerFollowUp(ctx, leadId, childId);
   await claim(ctx, leadId, followUpId);
-  return { leadId, threadTs: message.ts, askTaskId, askOutput, followUpId };
+  return { leadId, threadTs: message.ts, askTaskId, askOutput, childId, followUpId };
 }
 
 /** Waits until the follow-up's outcome row is finalized, and returns it. */
@@ -107,7 +108,8 @@ export const slackFollowUpCardMerge: Scenario = {
     const workerId = await registerWorker(ctx, "e2e-specialist-card-merge");
 
     // 1. The follow-up merges into the ask's card: same Slack message, both
-    // answers in order, one footer with both task links.
+    // answers in order, one footer that links the ask and the worker task
+    // the follow-up reviews.
     const merged = await delegatedAsk(ctx, workerId, "merged");
     const hostRow = outcomeRow(ctx, merged.askTaskId);
     if (!hostRow) throw new Error(`The ask ${merged.askTaskId} has no outcome row`);
@@ -134,8 +136,9 @@ export const slackFollowUpCardMerge: Scenario = {
     );
     expect(
       hostBody.includes(merged.askTaskId.slice(0, 8)) &&
-        hostBody.includes(merged.followUpId.slice(0, 8)),
-      "The merged card's footer does not link both tasks",
+        hostBody.includes(merged.childId.slice(0, 8)) &&
+        hostBody.includes("e2e-specialist-card-merge → "),
+      "The merged card's footer does not link the ask and the worker's task",
     );
     const postedForFollowUp = [
       ...ctx.slack.apiCalls("chat.startStream"),

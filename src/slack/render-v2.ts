@@ -1206,22 +1206,35 @@ const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
 /** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
 const SLACK_ANCESTOR_WALK_LIMIT = 50;
 
-/** True when `task`'s parent chain holds a task a person started in Slack. */
-async function hasSlackAskAncestor(
+/** The nearest task in `task`'s parent chain a person started in Slack, or undefined. */
+async function slackAskAncestorId(
   task: AgentTask,
   threadTasks: readonly AgentTask[],
-): Promise<boolean> {
+): Promise<string | undefined> {
   const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
   const seen = new Set<string>([task.id]);
   let parentId = task.parentTaskId;
   while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
     seen.add(parentId);
     const parent = byId.get(parentId) ?? (await getTaskById(parentId));
-    if (!parent) return false;
-    if (parent.source === "slack") return true;
+    if (!parent) return undefined;
+    if (parent.source === "slack") return parent.id;
     parentId = parent.parentTaskId;
   }
-  return false;
+  return undefined;
+}
+
+/** The Slack ask a task answers: itself when a person started it in Slack, else its nearest such ancestor. */
+async function slackAskOf(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<string | undefined> {
+  return task.source === "slack" ? task.id : await slackAskAncestorId(task, threadTasks);
+}
+
+/** True for a Lead review task the engine created (a worker completion or a session resume). */
+function isLeadFollowUpTask(task: AgentTask): boolean {
+  return task.source === "system" && SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "");
 }
 
 /**
@@ -1246,7 +1259,7 @@ async function classifyLeadFollowUp(
   ) {
     return "none";
   }
-  return (await hasSlackAskAncestor(task, threadTasks)) ? "eligible" : "orphan";
+  return (await slackAskAncestorId(task, threadTasks)) ? "eligible" : "orphan";
 }
 
 /**
@@ -1685,17 +1698,55 @@ async function slackTeamId(client: WebClient): Promise<string | undefined> {
 }
 
 /**
+ * The worker task a Lead follow-up reports on, with its agent's name. Undefined
+ * for any other task, and when the reviewed task is the Lead's own.
+ */
+async function reviewedWorkerTask(
+  task: AgentTask,
+  tasks: readonly AgentTask[],
+): Promise<{ task: AgentTask; agentName: string } | undefined> {
+  if (task.source !== "system" || task.taskType !== "follow-up" || !task.parentTaskId) {
+    return undefined;
+  }
+  const parentId = task.parentTaskId;
+  const reviewed =
+    tasks.find((candidate) => candidate.id === parentId) ?? (await getTaskById(parentId));
+  const agent = reviewed?.agentId ? await getAgentById(reviewed.agentId) : undefined;
+  return reviewed && agent && !agent.isLead ? { task: reviewed, agentName: agent.name } : undefined;
+}
+
+/**
  * The caption line under an outcome card: `duration · who · task link`. A
- * merged card passes all its tasks: `who` counts the workers under any of
- * them, and the line lists every task link.
+ * merged card passes all its tasks: the duration spans them, `who` counts the
+ * workers under any of them, and the line lists every task link. A Lead
+ * follow-up stands for the worker task it reviews, so the line shows the
+ * work: `19m · Coder → Lead · <worker task>`, not the Lead's review time.
+ * Empty when SLACK_REPLY_FOOTER_ENABLED is off.
  */
 async function outcomeFooter(
   members: readonly AgentTask[],
   tasks: AgentTask[],
-  duration: string,
 ): Promise<unknown[]> {
   const task = members[0];
   if (!task || !isSlackReplyFooterEnabled()) return [];
+  const now = new Date();
+  const reviewed = await Promise.all(members.map((member) => reviewedWorkerTask(member, tasks)));
+  const subjects = members.map((member, index) => reviewed[index]?.task ?? member);
+  const duration = formatV2Duration(
+    new Date(Math.min(...subjects.map((subject) => Date.parse(subject.createdAt)))),
+    new Date(Math.max(...subjects.map((subject) => terminalEnd(subject, now).getTime()))),
+  );
+  const workerNames = [
+    ...new Set(reviewed.map((entry) => entry?.agentName).filter((name): name is string => !!name)),
+  ];
+  if (workerNames.length > 0) {
+    const leadName = task.agentId ? (await getAgentById(task.agentId))?.name : undefined;
+    const who = [workerNames.join(", "), leadName].filter(Boolean).join(" → ");
+    const links = [...new Set(subjects.map((subject) => getTaskLink(subject.id)))].join(", ");
+    return [
+      { type: "context", elements: [{ type: "mrkdwn", text: [duration, who, links].join(" · ") }] },
+    ];
+  }
   const memberIds = new Set(members.map((member) => member.id));
   const descendants = [
     ...new Map(
@@ -1731,6 +1782,19 @@ async function outcomeFooter(
   return [{ type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] }];
 }
 
+/**
+ * The outcome card footer for `task`, for a message posted outside the
+ * render loop (a Sessions reply), so every message in a thread carries the
+ * same line. Empty when SLACK_REPLY_FOOTER_ENABLED is off.
+ */
+export async function slackOutcomeFooter(task: AgentTask): Promise<unknown[]> {
+  if (!task.slackChannelId || !task.slackThreadTs || !isSlackReplyFooterEnabled()) return [];
+  return await outcomeFooter(
+    [task],
+    await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs),
+  );
+}
+
 export async function streamOutcomeCard(
   task: AgentTask,
   options?: {
@@ -1753,7 +1817,6 @@ export async function streamOutcomeCard(
   if (existing && isSettledSlackMessage(existing)) return existing?.finalizedAt ? existing : null;
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
-  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is
@@ -1766,7 +1829,7 @@ export async function streamOutcomeCard(
   // part of the streamed text, so notifications carry the answer alone.
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter([task], tasks, duration)),
+    ...(await outcomeFooter([task], tasks)),
   ];
   // The task's own card goes first in the blocks, under the answer. The
   // streamed text stays the answer alone.
@@ -1953,13 +2016,12 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   }
   // A merged row whose host card is gone has no Slack message to edit.
   if (isMergedSlackMessageTs(card.ts)) return false;
-  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const content = await outcomeContent(task, task.slackReplySent);
   const presentation = await outcomePresentation(task, content);
   if (!presentation) return false;
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter([task], tasks, duration)),
+    ...(await outcomeFooter([task], tasks)),
   ];
   const uiSpec = await outcomeUiSpec(task);
   await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
@@ -1974,11 +2036,6 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   });
   return true;
 }
-
-/** How long after a card's last change a Lead follow-up may still merge into it. */
-const SLACK_CARD_MERGE_WINDOW_MS = 2 * 60_000;
-/** Most task answers one merged card shows. */
-const SLACK_CARD_GROUP_MAX_SECTIONS = 5;
 
 /** True when Slack timestamp `a` is later than `b`. Avoids float rounding of the microseconds. */
 function isSlackTsAfter(a: string, b: string): boolean {
@@ -2022,18 +2079,24 @@ async function outcomeGroupMembers(
 }
 
 /**
- * The text and blocks of a merged card: each task's answer, in order and
- * separated by a blank line, then each task's captions, then one footer for
- * all of them. A card from a script action (ui spec) shows its fallback text.
- * Null when the text does not fit one markdown block.
+ * The text and blocks of a merged card: the answers it shows, in order and
+ * separated by a blank line, then their captions, then one footer for every
+ * task in the card. A newer Lead follow-up supersedes an older one, so the
+ * card shows the ask's own answer (when the card started with it) and the
+ * newest follow-up only. A card from a script action (ui spec) shows its
+ * fallback text. Null when the text does not fit one markdown block.
  */
 async function renderOutcomeGroup(
   members: readonly AgentTask[],
   tasks: AgentTask[],
 ): Promise<{ text: string; blocks: unknown[] } | null> {
+  const newestFollowUp = members.findLast(isLeadFollowUpTask);
+  const shown = members.filter(
+    (member) => !isLeadFollowUpTask(member) || member === newestFollowUp,
+  );
   const sections: string[] = [];
   const captions: unknown[] = [];
-  for (const member of members) {
+  for (const member of shown) {
     const slackReplySent = (await getTaskById(member.id))?.slackReplySent ?? member.slackReplySent;
     const content = await outcomeContent(member, slackReplySent);
     const presentation = await outcomePresentation(member, content);
@@ -2043,14 +2106,7 @@ async function renderOutcomeGroup(
   }
   const text = sections.join("\n\n");
   if (!text || text.length > MAX_OUTCOME_MARKDOWN_LENGTH) return null;
-  const now = new Date();
-  const start = Math.min(...members.map((member) => Date.parse(member.createdAt)));
-  const end = Math.max(...members.map((member) => terminalEnd(member, now).getTime()));
-  const footer = await outcomeFooter(
-    members,
-    tasks,
-    formatV2Duration(new Date(start), new Date(end)),
-  );
+  const footer = await outcomeFooter(members, tasks);
   return { text, blocks: [{ type: "markdown", text }, ...captions, ...footer] };
 }
 
@@ -2075,14 +2131,16 @@ async function updateOutcomeGroupCard(
 
 /**
  * Merges a Lead follow-up's answer into the previous card in the thread, so
- * back-to-back results read as one message and send one notification. The
- * edit sends no notification, so the merge is only allowed when all of these
- * are true:
+ * one ask keeps one live card: the newest follow-up replaces the older one's
+ * answer (see renderOutcomeGroup), however long the worker took. The edit
+ * sends no notification, so the merge is only allowed when all of these are
+ * true:
  * - the task is a completed Lead follow-up or resume that did not defer,
  * - the newest card in the thread is from the same agent, completed, not a
  *   deferral, conclusion or delegation child card,
- * - that card changed at most SLACK_CARD_MERGE_WINDOW_MS ago,
- * - no message (a person's or a bot's) came after that card,
+ * - both answer the same Slack ask,
+ * - no message (a person's or a bot's) came after that card, so the card is
+ *   still the last thing in the thread,
  * - neither task has a ui-spec card, and the merged text fits one card.
  *
  * Returns false, with nothing changed, when the merge does not apply or the
@@ -2107,8 +2165,6 @@ async function mergeLeadFollowUpCard(
   try {
     const host = await getLatestSlackOutcomeGroupHost(channelId, threadTs);
     if (!host || host.conclusionKind) return false;
-    if (host.mergedTaskIds.length + 2 > SLACK_CARD_GROUP_MAX_SECTIONS) return false;
-    if (Date.now() - Date.parse(host.lastSectionAt) > SLACK_CARD_MERGE_WINDOW_MS) return false;
     const existing = await outcomeGroupMembers(host, tasks);
     const hostTask = existing[0];
     if (
@@ -2124,6 +2180,8 @@ async function mergeLeadFollowUpCard(
     ) {
       return false;
     }
+    const ask = await slackAskOf(task, tasks);
+    if (!ask || ask !== (await slackAskOf(hostTask, tasks))) return false;
     if (await slackThreadHasMessageAfter(app.client, channelId, threadTs, host.ts)) return false;
     group = host;
     members = [...existing, task];

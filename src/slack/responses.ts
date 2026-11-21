@@ -16,7 +16,6 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
-import { isSlackReplyFooterEnabled } from "./config";
 import { completedStatusIcon, iconPrefix } from "./reaction-shortcode";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
@@ -117,12 +116,15 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
 }
 
 /**
- * Posts a completed task's output as a plain agent message, the shape a
- * `slack-reply` produces: the output, then a small `<agent> · <task>` footer.
+ * Posts a completed task's output as a plain agent message: the output, then
+ * `footer` (the outcome card footer, empty when the footer setting is off).
  * Used when the agent answered somewhere else (a Sessions follow-up) and the
  * thread should read as if it had replied in Slack. Marks `slackReplySent`.
  */
-export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
+export async function sendTaskOutputAsReply(
+  task: AgentTask,
+  footer: readonly unknown[],
+): Promise<boolean> {
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId) return false;
 
@@ -140,10 +142,6 @@ export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
     markdownToSlack(output) +
     formatAttachmentsBlockForSlack(await getSlackOutputAttachments(task.id));
   const sections = splitSlackSectionText(body);
-  const footer = {
-    type: "context",
-    elements: [{ type: "mrkdwn", text: `${agent.name} · ${getTaskLink(task.id)}` }],
-  };
 
   try {
     for (let i = 0; i < sections.length; i += MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE) {
@@ -157,7 +155,7 @@ export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
         icon: getAgentSlackIcon(agent),
         blocks: [
           ...batch.map((chunk) => ({ type: "section", text: { type: "mrkdwn", text: chunk } })),
-          ...(isLast && isSlackReplyFooterEnabled() ? [footer] : []),
+          ...(isLast ? footer : []),
         ],
       });
     }
