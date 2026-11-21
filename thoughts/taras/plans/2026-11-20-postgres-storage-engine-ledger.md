@@ -15,7 +15,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
-| M3 Postgres engine | in progress (part 5): repositories, codec, baseline, triggers, runner, checks 7, 9, 14, 18 done; the API start on Postgres (D1, D16) in progress | |
+| M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | steps 1 and 2 done (part 5, full text and vector search in the repositories); steps 3 to 5 not started | |
 | M5 Contract on Postgres | not started | |
 | M6 Data copy | not started | |
@@ -298,7 +298,9 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - `bun run test:storage` now runs the contract suite on SQLite and then on Postgres (`test:storage:postgres`, needs `STORAGE_TEST_POSTGRES_URL`). Part 5 result after the M4 search merges: SQLite 396 pass / 0 fail, Postgres 431 pass / 0 fail.
 - `check:schema-parity` broke when the read codec landed (every index read `unique=0` instead of `unique=false`). Fix: a `rawValues` client option, used only by catalog tools. Result: 0 unexplained, 164 allowlisted.
 - Base-class SQL changed for Postgres, identical on SQLite (bun:sqlite binds `true`/`false` as 1/0; `CAST(text AS text)` is a no-op): `listAgentSkills` binds the flag in its UNION; the agent-token check compares `"scriptRun"` to `${false}`; task attachments write `capabilities` through `jsonText`; `listStalePinnedResumes` casts `tags` to text before LIKE.
-- Not yet: the API start on Postgres (engine selection D1, the async Postgres start, the D16 guard). In progress on branch `m3/pg-start`.
+- API start on Postgres (part 6, merged from `m3/pg-start`, head `7b5952e21`). Proof on an empty C-collation database: `DATABASE_URL=postgres://...` selects Postgres, the chain applies 367, 368 and 369, `GET /health` 200, `POST /api/tasks` 201 and `GET /api/tasks` returns the row, no SQLite file is written. `db-query` answers a clear error (no `dbQuery` capability yet, M4 step 4). D16: a second API on the same database exits 1 after 10 s with `another API process holds this Postgres database (session advisory lock ...)`.
+- Defect found at the merge: the root `package.json` did not list `@desplega/storage-postgres`, so `tsc:check:tsc` failed (bun resolved it at run time). Both Dockerfiles also missed the three storage packages, which a frozen install needs. Fixed in `7b5952e21`. Docker is not in this container: the image build is not verified here; CI builds it.
+- Gates at `7b5952e21`: `tsc:check:tsc`, `lint`, `check-db-boundary.sh`, `check-async-db-seam.sh` pass; `test:storage` SQLite 396/0, Postgres 431/0.
 
 ### Contract-test fixture edits (section 10 record)
 
