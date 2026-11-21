@@ -52,12 +52,6 @@ export function rowToWorkflowRun(
   });
 }
 
-// Everything but `context`. `triggerData` stays: it is small, and stored
-// scripts read it off list rows (dedupe by trigger, failure reports). The
-// parent link and attempt stay so a list row identifies a child's invocation.
-export const WORKFLOW_RUN_SUMMARY_COLUMNS =
-  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt, parentStepId, parentStepAttempt";
-
 /** `view` picks the `output` copy, as in `rowToWorkflowRun`. */
 export function rowToWorkflowRunStep(
   row: WorkflowRunStepRow,

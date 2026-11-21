@@ -285,9 +285,6 @@ import {
   isTerminalWorkflowRunStatus,
   rowToWorkflowRun,
   rowToWorkflowRunStep,
-  WORKFLOW_RUN_SUMMARY_COLUMNS,
-  type WorkflowRunRow,
-  type WorkflowRunStepRow,
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
@@ -7379,6 +7376,12 @@ export async function getRecentFailedCount(hours: number = 24): Promise<number> 
 // Workflow CRUD
 // ============================================================================
 
+type WorkflowsRepo = ReturnType<typeof getStorage>["repos"]["workflows"];
+type WorkflowColumnUpdate = Parameters<WorkflowsRepo["updateWorkflowColumns"]>[1];
+type WorkflowRunColumnUpdate = Parameters<WorkflowsRepo["updateRunColumns"]>[1];
+type WorkflowRunStepColumnUpdate = Parameters<WorkflowsRepo["updateStepColumns"]>[1];
+type WorkflowVersionRow = NonNullable<Awaited<ReturnType<WorkflowsRepo["getVersion"]>>>;
+
 export async function createWorkflow(
   data: {
     key?: string;
@@ -7402,36 +7405,30 @@ export async function createWorkflow(
   source?: "api" | "mcp",
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, updatedByAgentId, created_by, updated_by, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
-      data.name,
-      data.description ?? null,
-      JSON.stringify(data.definition),
-      JSON.stringify(data.triggers ?? []),
-      data.cooldown ? JSON.stringify(data.cooldown) : null,
-      data.input ? JSON.stringify(data.input) : null,
-      data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
-      JSON.stringify(data.params ?? {}),
-      JSON.stringify(data.requiredParams ?? []),
-      JSON.stringify(data.requires ?? []),
-      data.dir ?? null,
-      data.vcsRepo ?? null,
-      data.createdByAgentId ?? null,
-      data.createdByAgentId ?? null,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-      data.enabled === false ? 0 : 1,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertWorkflow({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
+    name: data.name,
+    description: data.description ?? null,
+    definition: JSON.stringify(data.definition),
+    triggers: JSON.stringify(data.triggers ?? []),
+    cooldown: data.cooldown ? JSON.stringify(data.cooldown) : null,
+    input: data.input ? JSON.stringify(data.input) : null,
+    triggerSchema: data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+    params: JSON.stringify(data.params ?? {}),
+    requiredParams: JSON.stringify(data.requiredParams ?? []),
+    requires: JSON.stringify(data.requires ?? []),
+    dir: data.dir ?? null,
+    vcsRepo: data.vcsRepo ?? null,
+    createdByAgentId: data.createdByAgentId ?? null,
+    createdBy: data.createdBy ?? null,
+    enabled: data.enabled !== false,
+  });
   if (!row) throw new Error("Failed to create workflow");
   const workflow = rowToWorkflow(row);
   // afterCommit: a caller's transaction that rolls back must not report the workflow.
   const requestUserId = getCurrentRequestUserId();
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     telemetry.workflow(
       "created",
       {
@@ -7446,7 +7443,7 @@ export async function createWorkflow(
 }
 
 export async function getWorkflow(id: string): Promise<Workflow | null> {
-  const row = await getDbClient().get<WorkflowRow>("SELECT * FROM workflows WHERE id = ?", [id]);
+  const row = await getStorage().repos.workflows.findWorkflowById(id);
   return row ? rowToWorkflow(row) : null;
 }
 
@@ -7503,51 +7500,16 @@ export async function listWorkflows(
   filters?: WorkflowFilters,
   opts?: { slim?: boolean },
 ): Promise<Workflow[] | WorkflowSummary[]> {
-  let query = "SELECT * FROM workflows WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (filters?.enabled !== undefined) {
-    query += " AND enabled = ?";
-    params.push(filters.enabled ? 1 : 0);
-  }
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  if (filters?.lastRunStatus !== undefined) {
-    query +=
-      " AND (SELECT status FROM workflow_runs WHERE workflowId = workflows.id ORDER BY startedAt DESC LIMIT 1) = ?";
-    params.push(filters.lastRunStatus);
-  }
-  if (filters?.consecutiveErrorsMin !== undefined) {
-    query += ` AND (
-      SELECT COUNT(*)
-      FROM workflow_runs wr
-      WHERE wr.workflowId = workflows.id
-        AND wr.status = 'failed'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM workflow_runs newer_non_failed
-          WHERE newer_non_failed.workflowId = wr.workflowId
-            AND newer_non_failed.status != 'failed'
-            AND newer_non_failed.startedAt > wr.startedAt
-        )
-    ) >= ?`;
-    params.push(filters.consecutiveErrorsMin);
-  }
-  if (filters?.q) {
-    const pattern = `%${literalPrefixPattern(filters.q)}`;
-    query += ` AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR "key" LIKE ? ESCAPE '\\')`;
-    params.push(pattern, pattern, pattern);
-  }
-  query += " ORDER BY lastUpdatedAt DESC";
-  if (filters?.limit !== undefined) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-  const rows = await getDbClient().query<WorkflowRow>(query, params);
+  const rows = await getStorage().repos.workflows.listWorkflows({
+    enabled: filters?.enabled,
+    key: filters?.key ? normalizeAssetKey(filters.key) : undefined,
+    keyPattern:
+      !filters?.key && filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : undefined,
+    lastRunStatus: filters?.lastRunStatus,
+    consecutiveErrorsMin: filters?.consecutiveErrorsMin,
+    textPattern: filters?.q ? `%${literalPrefixPattern(filters.q)}` : undefined,
+    limit: filters?.limit,
+  });
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
 
@@ -7576,79 +7538,34 @@ export async function updateWorkflow(
     updatedByAgentId?: string | null;
   },
 ): Promise<Workflow | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-  if (data.name !== undefined) {
-    updates.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description);
-  }
-  if (data.enabled !== undefined) {
-    updates.push("enabled = ?");
-    params.push(data.enabled ? 1 : 0);
-  }
-  if (data.definition !== undefined) {
-    updates.push("definition = ?");
-    params.push(JSON.stringify(data.definition));
-  }
-  if (data.triggers !== undefined) {
-    updates.push("triggers = ?");
-    params.push(JSON.stringify(data.triggers));
-  }
+  const update: WorkflowColumnUpdate = {};
+  if (data.key !== undefined) update.key = normalizeAssetKey(data.key);
+  if (data.name !== undefined) update.name = data.name;
+  if (data.description !== undefined) update.description = data.description;
+  if (data.enabled !== undefined) update.enabled = data.enabled;
+  if (data.definition !== undefined) update.definition = JSON.stringify(data.definition);
+  if (data.triggers !== undefined) update.triggers = JSON.stringify(data.triggers);
   if (data.cooldown !== undefined) {
-    updates.push("cooldown = ?");
-    params.push(data.cooldown ? JSON.stringify(data.cooldown) : null);
+    update.cooldown = data.cooldown ? JSON.stringify(data.cooldown) : null;
   }
-  if (data.input !== undefined) {
-    updates.push("input = ?");
-    params.push(data.input ? JSON.stringify(data.input) : null);
-  }
+  if (data.input !== undefined) update.input = data.input ? JSON.stringify(data.input) : null;
   if (data.triggerSchema !== undefined) {
-    updates.push("triggerSchema = ?");
-    params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+    update.triggerSchema = data.triggerSchema ? JSON.stringify(data.triggerSchema) : null;
   }
-  if (data.params !== undefined) {
-    updates.push("params = ?");
-    params.push(JSON.stringify(data.params));
-  }
+  if (data.params !== undefined) update.params = JSON.stringify(data.params);
   if (data.requiredParams !== undefined) {
-    updates.push("requiredParams = ?");
-    params.push(JSON.stringify(data.requiredParams));
+    update.requiredParams = JSON.stringify(data.requiredParams);
   }
-  if (data.requires !== undefined) {
-    updates.push("requires = ?");
-    params.push(JSON.stringify(data.requires));
-  }
-  if (data.dir !== undefined) {
-    updates.push("dir = ?");
-    params.push(data.dir ?? null);
-  }
-  if (data.vcsRepo !== undefined) {
-    updates.push("vcs_repo = ?");
-    params.push(data.vcsRepo ?? null);
-  }
-  if (data.updatedBy !== undefined) {
-    updates.push("updated_by = ?");
-    params.push(data.updatedBy);
-  }
-  if (data.updatedByAgentId !== undefined) {
-    updates.push("updatedByAgentId = ?");
-    params.push(data.updatedByAgentId);
-  }
-  if (updates.length === 0) return await getWorkflow(id);
-  updates.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<WorkflowRow>(
-    `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  if (data.requires !== undefined) update.requires = JSON.stringify(data.requires);
+  if (data.dir !== undefined) update.dir = data.dir ?? null;
+  if (data.vcsRepo !== undefined) update.vcsRepo = data.vcsRepo ?? null;
+  if (data.updatedBy !== undefined) update.updatedBy = data.updatedBy;
+  if (data.updatedByAgentId !== undefined) update.updatedByAgentId = data.updatedByAgentId;
+  if (Object.keys(update).length === 0) return await getWorkflow(id);
+  const row = await getStorage().repos.workflows.updateWorkflowColumns(
+    id,
+    update,
+    new Date().toISOString(),
   );
   return row ? rowToWorkflow(row) : null;
 }
@@ -7656,7 +7573,7 @@ export async function updateWorkflow(
 export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promise<boolean> {
   // One transaction: the stored human-free flags must never lag the deleted runs
   // (a scheduled workflow root is human-free only while its run row exists).
-  return await getDbClient().transaction(() => deleteWorkflowRows(id, source));
+  return await getStorage().transaction(() => deleteWorkflowRows(id, source));
 }
 
 async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
@@ -7675,30 +7592,23 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   );
   // 2. Fail the parent steps of child runs about to go, then delete steps
   await wakeParentsOfDeletedRuns(id);
-  await client.run(
-    `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-    [id],
-  );
+  const workflows = getStorage().repos.workflows;
+  await workflows.deleteStepsOfWorkflow(id);
   // 3. Delete runs (they reference workflow)
-  const definitionHashes = await client.query<{ definitionHash: string }>(
-    `SELECT DISTINCT definitionHash FROM workflow_runs
-      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
-    [id],
-  );
-  await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
-  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
+  const definitionHashes = await workflows.listRunDefinitionHashesOfWorkflow(id);
+  await workflows.deleteRunsOfWorkflow(id);
+  await deleteOrphanedRunDefinitions(definitionHashes);
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
   await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
   // 5. Keep Idempotency-Keys that created or triggered it taken, without the stored response
   await tombstoneWorkflowIdempotencyKeys(id);
   // 6. Delete workflow
-  const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
-  const deleted = result.changes > 0;
+  const deleted = (await workflows.deleteWorkflow(id)) > 0;
   if (deleted) {
     // afterCommit: a caller's transaction that rolls back must not report the delete.
     const requestUserId = getCurrentRequestUserId();
-    getDbClient().afterCommit(() =>
+    getStorage().afterCommit(() =>
       telemetry.workflow(
         "deleted",
         { workflowId: id, ...(source ? { via: source } : {}) },
@@ -7714,13 +7624,7 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
  * Uses SQLite JSON functions to query into the triggers JSON array.
  */
 export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Workflow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
-       WHERE w.enabled = 1
-         AND json_extract(t.value, '$.type') = 'schedule'
-         AND json_extract(t.value, '$.scheduleId') = ?`,
-    [scheduleId],
-  );
+  const rows = await getStorage().repos.workflows.listEnabledByScheduleId(scheduleId);
   return rows.map(rowToWorkflow);
 }
 
@@ -7745,30 +7649,28 @@ export async function createWorkflowRun(data: {
   principal?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId, principal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      data.id,
-      data.workflowId,
-      data.triggerType ?? "manual",
-      now,
-      data.triggerData ? scrubJsonValue(data.triggerData) : null,
-      data.createdBy ?? null,
-      data.parentStepId ?? null,
-      data.parentStepAttempt ?? 0,
-      data.triggeredByAgentId ?? null,
-      data.definitionHash ?? null,
-      // The script step whose run token started this run (trigger-workflow is
-      // a manual or api trigger). A sub-workflow child is linked by
-      // parentStepId instead, and an event or schedule run is never the
-      // script's, even when it starts inside that script's request.
+  const row = await getStorage().repos.workflows.insertRun({
+    id: data.id,
+    workflowId: data.workflowId,
+    triggerType: data.triggerType ?? "manual",
+    startedAt: now,
+    triggerData: data.triggerData ? scrubJsonValue(data.triggerData) : null,
+    createdBy: data.createdBy ?? null,
+    parentStepId: data.parentStepId ?? null,
+    parentStepAttempt: data.parentStepAttempt ?? 0,
+    triggeredByAgentId: data.triggeredByAgentId ?? null,
+    definitionHash: data.definitionHash ?? null,
+    // The script step whose run token started this run (trigger-workflow is
+    // a manual or api trigger). A sub-workflow child is linked by
+    // parentStepId instead, and an event or schedule run is never the
+    // script's, even when it starts inside that script's request.
+    sourceStepId:
       data.parentStepId ||
       (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
         ? null
         : (getCurrentRunProvenance()?.sourceStepId ?? null),
-      data.principal ?? null,
-    ],
-  );
+    principal: data.principal ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -7777,9 +7679,7 @@ export async function getWorkflowRun(
   id: string,
   view: WorkflowPayloadView = "replay",
 ): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>("SELECT * FROM workflow_runs WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.workflows.findRunById(id);
   return row ? rowToWorkflowRun(row, view) : null;
 }
 
@@ -7793,7 +7693,7 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   // async hook is passed directly (no detached void-IIFE) so a rejected read
   // (e.g. DB closed mid-shutdown) is contained by the scheduler instead of
   // crashing the process as an unhandled rejection.
-  getDbClient().afterCommit(async () => {
+  getStorage().afterCommit(async () => {
     const latest = await getWorkflowRun(run.id);
     if (!latest || latest.status !== status) return;
     const steps = await getWorkflowRunStepsByRunId(run.id);
@@ -7815,53 +7715,34 @@ export async function updateWorkflowRun(
     finishedAt?: string;
   },
 ): Promise<WorkflowRun | null> {
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
-  if (data.status !== undefined) {
-    updates.push("status = ?");
-    params.push(data.status);
-  }
+  const workflows = getStorage().repos.workflows;
+  const columns: WorkflowRunColumnUpdate = {};
+  if (data.status !== undefined) columns.status = data.status;
   if (data.context !== undefined) {
     // Resume/retry/recovery rebuild the live ctx (resolved `secret.*` inputs
     // included, which are never re-resolved) from the sealed exact copy; the
     // scrubbed column serves display and SQL filters.
-    updates.push("context = ?", "context_replay = ?");
-    params.push(scrubJsonValue(data.context), sealJson(data.context));
+    columns.context = scrubJsonValue(data.context);
+    columns.context_replay = sealJson(data.context);
   }
   if (data.error !== undefined) {
-    updates.push("error = ?");
-    params.push(data.error === null ? null : scrubSecrets(data.error));
+    columns.error = data.error === null ? null : scrubSecrets(data.error);
   }
-  if (data.finishedAt !== undefined) {
-    updates.push("finishedAt = ?");
-    params.push(data.finishedAt);
-  }
-  if (updates.length === 0) {
-    const row = await getDbClient().get<WorkflowRunRow>(
-      "SELECT * FROM workflow_runs WHERE id = ?",
-      [id],
-    );
+  if (data.finishedAt !== undefined) columns.finishedAt = data.finishedAt;
+  if (Object.keys(columns).length === 0) {
+    const row = await workflows.findRunById(id);
     return row ? rowToWorkflowRun(row) : null;
   }
-  updates.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const update = () =>
-    getDbClient().get<WorkflowRunRow>(
-      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-      params,
-    );
+  const now = new Date().toISOString();
+  const update = () => workflows.updateRunColumns(id, columns, now);
   const endsRun = data.status !== undefined && isTerminalWorkflowRunStatus(data.status);
   // A run that ends reads the status it replaces in the same transaction, so
   // only a change out of a live status announces the end: a later terminal
   // write, same status or not, does not announce it again.
   const [previousStatus, row] = endsRun
-    ? await getDbClient().transaction(async () => {
-        const previous = await getDbClient().get<{ status: WorkflowRunStatus }>(
-          "SELECT status FROM workflow_runs WHERE id = ?",
-          [id],
-        );
-        return [previous?.status, await update()] as const;
+    ? await getStorage().transaction(async () => {
+        const previous = (await workflows.getRunStatus(id)) as WorkflowRunStatus | null;
+        return [previous ?? undefined, await update()] as const;
       })
     : [undefined, await update()];
   if (!row) return null;
@@ -7902,29 +7783,12 @@ export async function listWorkflowRuns(
   workflowId: string,
   options: WorkflowRunListOptions = {},
 ): Promise<WorkflowRun[]> {
-  const conditions = ["workflowId = ?"];
-  const params: Array<string | number> = [workflowId];
-  if (options.status) {
-    conditions.push("status = ?");
-    params.push(options.status);
-  }
-
-  let pagination = "";
-  if (options.limit !== undefined) {
-    pagination = " LIMIT ? OFFSET ?";
-    params.push(options.limit, options.offset ?? 0);
-  } else if (options.offset !== undefined) {
-    pagination = " LIMIT -1 OFFSET ?";
-    params.push(options.offset);
-  }
-
-  const columns = options.includeContext ? "*" : WORKFLOW_RUN_SUMMARY_COLUMNS;
-  const rows = await getDbClient().query<WorkflowRunRow>(
-    `SELECT ${columns} FROM workflow_runs
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY startedAt DESC, id DESC${pagination}`,
-    params,
-  );
+  const rows = await getStorage().repos.workflows.listRuns(workflowId, {
+    status: options.status,
+    limit: options.limit,
+    offset: options.offset,
+    includeContext: options.includeContext === true,
+  });
   // List rows are display-only (runs API, list-workflow-runs tool).
   return rows.map((row) => rowToWorkflowRun(row, "display"));
 }
@@ -7933,17 +7797,7 @@ export async function countWorkflowRuns(
   workflowId: string,
   options: Pick<WorkflowRunListOptions, "status"> = {},
 ): Promise<number> {
-  const conditions = ["workflowId = ?"];
-  const params: string[] = [workflowId];
-  if (options.status) {
-    conditions.push("status = ?");
-    params.push(options.status);
-  }
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM workflow_runs WHERE ${conditions.join(" AND ")}`,
-    params,
-  );
-  return row?.count ?? 0;
+  return getStorage().repos.workflows.countRuns(workflowId, options.status || undefined);
 }
 
 export async function listWorkflowRunsPage(
@@ -7980,28 +7834,21 @@ export async function createWorkflowRunStep(data: {
   idempotencyKey?: string;
 }): Promise<WorkflowRunStep> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
-       VALUES (?, ?, ?, ?, 'running', ?, ?, ?) RETURNING *`,
-    [
-      data.id,
-      data.runId,
-      data.nodeId,
-      data.nodeType,
-      now,
-      data.input ? scrubJsonValue(data.input) : null,
-      data.idempotencyKey ?? null,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertRunningStep({
+    id: data.id,
+    runId: data.runId,
+    nodeId: data.nodeId,
+    nodeType: data.nodeType,
+    startedAt: now,
+    input: data.input ? scrubJsonValue(data.input) : null,
+    idempotencyKey: data.idempotencyKey ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow run step");
   return rowToWorkflowRunStep(row);
 }
 
 export async function getWorkflowRunStep(id: string): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.workflows.findStepById(id);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8020,62 +7867,29 @@ export async function updateWorkflowRunStep(
     nextPort?: string;
   },
 ): Promise<WorkflowRunStep | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.status !== undefined) {
-    updates.push("status = ?");
-    params.push(data.status);
-  }
+  const workflows = getStorage().repos.workflows;
+  const columns: WorkflowRunStepColumnUpdate = {};
+  if (data.status !== undefined) columns.status = data.status;
   if (data.output !== undefined) {
     // Scrubbed for display; dedup, convergence and recovery replay the sealed
     // exact copy into downstream nodes.
-    updates.push("output = ?", "output_replay = ?");
-    params.push(scrubJsonValue(data.output), sealJson(data.output));
+    columns.output = scrubJsonValue(data.output);
+    columns.output_replay = sealJson(data.output);
   }
   if (data.error !== undefined) {
-    updates.push("error = ?");
-    params.push(data.error === null ? null : scrubSecrets(data.error));
+    columns.error = data.error === null ? null : scrubSecrets(data.error);
   }
-  if (data.finishedAt !== undefined) {
-    updates.push("finishedAt = ?");
-    params.push(data.finishedAt);
-  }
-  if (data.retryCount !== undefined) {
-    updates.push("retryCount = ?");
-    params.push(data.retryCount);
-  }
-  if (data.maxRetries !== undefined) {
-    updates.push("maxRetries = ?");
-    params.push(data.maxRetries);
-  }
-  if (data.nextRetryAt !== undefined) {
-    updates.push("nextRetryAt = ?");
-    params.push(data.nextRetryAt);
-  }
-  if (data.idempotencyKey !== undefined) {
-    updates.push("idempotencyKey = ?");
-    params.push(data.idempotencyKey);
-  }
-  if (data.diagnostics !== undefined) {
-    updates.push("diagnostics = ?");
-    params.push(scrubSecrets(data.diagnostics));
-  }
-  if (data.nextPort !== undefined) {
-    updates.push("nextPort = ?");
-    params.push(data.nextPort);
-  }
-  if (updates.length === 0) {
-    const row = await getDbClient().get<WorkflowRunStepRow>(
-      "SELECT * FROM workflow_run_steps WHERE id = ?",
-      [id],
-    );
-    return row ? rowToWorkflowRunStep(row) : null;
-  }
-  params.push(id);
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  if (data.finishedAt !== undefined) columns.finishedAt = data.finishedAt;
+  if (data.retryCount !== undefined) columns.retryCount = data.retryCount;
+  if (data.maxRetries !== undefined) columns.maxRetries = data.maxRetries;
+  if (data.nextRetryAt !== undefined) columns.nextRetryAt = data.nextRetryAt;
+  if (data.idempotencyKey !== undefined) columns.idempotencyKey = data.idempotencyKey;
+  if (data.diagnostics !== undefined) columns.diagnostics = scrubSecrets(data.diagnostics);
+  if (data.nextPort !== undefined) columns.nextPort = data.nextPort;
+  const row =
+    Object.keys(columns).length === 0
+      ? await workflows.findStepById(id)
+      : await workflows.updateStepColumns(id, columns);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8083,10 +7897,7 @@ export async function getWorkflowRunStepsByRunId(
   runId: string,
   view: WorkflowPayloadView = "replay",
 ): Promise<WorkflowRunStep[]> {
-  const rows = await getDbClient().query<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC, rowid ASC",
-    [runId],
-  );
+  const rows = await getStorage().repos.workflows.listSteps(runId);
   return rows.map((row) => rowToWorkflowRunStep(row, view));
 }
 
@@ -8103,73 +7914,29 @@ export interface StuckWorkflowRun {
 }
 
 export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
-  // CROSS JOIN fixes the join order: the few waiting steps drive, and each
-  // one seeks its task through idx_agent_tasks_workflowRunStepId, so `output`
-  // is read only for matched tasks. Driving from agent_tasks by status reads
-  // nearly every finished task.
-  return getDbClient().query<StuckWorkflowRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        at.id as taskId,
-        at.status as taskStatus,
-        at.output as taskOutput,
-        wr.workflowId
-      FROM workflow_run_steps wrs
-      CROSS JOIN workflow_runs wr ON wr.id = wrs.runId
-      CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
-      WHERE wrs.status = 'waiting'
-        AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
-      ORDER BY at.createdAt ASC, at.rowid ASC`,
-  );
+  return getStorage().repos.workflows.listStuckRuns();
 }
 
 // --- New Workflow Query Functions ---
 
 export async function getLastSuccessfulRun(workflowId: string): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
-       WHERE workflowId = ? AND status = 'completed'
-       ORDER BY finishedAt DESC LIMIT 1`,
-    [workflowId],
-  );
+  const row = await getStorage().repos.workflows.lastSuccessfulRun(workflowId);
   return row ? rowToWorkflowRun(row) : null;
 }
 
 export async function getLastRunStart(workflowId: string): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
-       WHERE workflowId = ? AND status NOT IN ('skipped')
-       ORDER BY startedAt DESC LIMIT 1`,
-    [workflowId],
-  );
+  const row = await getStorage().repos.workflows.lastRunStart(workflowId);
   return row ? rowToWorkflowRun(row) : null;
 }
 
 export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT s.* FROM workflow_run_steps s
-       JOIN workflow_runs r ON r.id = s.runId
-       WHERE s.status = 'failed'
-         AND s.nextRetryAt IS NOT NULL
-         AND s.nextRetryAt <= ?
-         AND r.status IN ('running', 'waiting', 'failed')
-       ORDER BY s.nextRetryAt ASC`,
-    [now],
-  );
+  const rows = await getStorage().repos.workflows.listDueRetrySteps(now);
   return rows.map((row) => rowToWorkflowRunStep(row));
 }
 
 export async function getCompletedStepNodeIds(runId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ nodeId: string }>(
-    `SELECT nodeId FROM workflow_run_steps
-       WHERE runId = ? AND status = 'completed'`,
-    [runId],
-  );
-  return rows.map((r) => r.nodeId);
+  return getStorage().repos.workflows.listCompletedStepNodeIds(runId);
 }
 
 export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
@@ -8185,29 +7952,19 @@ export async function detachTaskFromWorkflowRunStep(taskId: string): Promise<voi
 }
 
 export async function getStepByIdempotencyKey(key: string): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
-    [key],
-  );
+  const row = await getStorage().repos.workflows.findStepByIdempotencyKey(key);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
 export async function getStepCountForNode(runId: string, nodeId: string): Promise<number> {
-  const row = await getDbClient().get<{ cnt: number }>(
-    "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
-    [runId, nodeId],
-  );
-  return row?.cnt ?? 0;
+  return getStorage().repos.workflows.countStepsForNode(runId, nodeId);
 }
 
 export async function getLatestStepForNode(
   runId: string,
   nodeId: string,
 ): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC, rowid DESC LIMIT 1",
-    [runId, nodeId],
-  );
+  const row = await getStorage().repos.workflows.latestStepForNode(runId, nodeId);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8223,35 +7980,16 @@ export async function getCurrentStepForNode(
   nodeId: string,
   predecessorIds: string[],
 ): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY rowid DESC LIMIT 1",
-    [runId, nodeId],
-  );
+  const workflows = getStorage().repos.workflows;
+  const row = await workflows.lastInsertedStepForNode(runId, nodeId);
   if (!row || !["running", "waiting", "completed"].includes(row.status)) return null;
   if (predecessorIds.length > 0) {
-    const newer = await getDbClient().get<{ found: number }>(
-      `SELECT 1 AS found FROM workflow_run_steps
-         WHERE runId = ? AND status = 'completed'
-           AND nodeId IN (${predecessorIds.map(() => "?").join(", ")})
-           AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ?)
-         LIMIT 1`,
-      [runId, ...predecessorIds, row.id],
-    );
-    if (newer) return null;
+    if (await workflows.hasCompletedStepInsertedAfter(runId, predecessorIds, row.id)) return null;
   }
   return rowToWorkflowRunStep(row);
 }
 
 // --- Workflow Version History ---
-
-type WorkflowVersionRow = {
-  id: string;
-  workflowId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
   return {
@@ -8271,26 +8009,19 @@ export async function createWorkflowVersion(data: {
   changedByAgentId?: string;
 }): Promise<WorkflowVersion> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<WorkflowVersionRow>(
-    `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.workflowId,
-      data.version,
-      JSON.stringify(data.snapshot),
-      data.changedByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertVersion({
+    id,
+    workflowId: data.workflowId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow version");
   return rowToWorkflowVersion(row);
 }
 
 export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
-  const rows = await getDbClient().query<WorkflowVersionRow>(
-    "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
-    [workflowId],
-  );
+  const rows = await getStorage().repos.workflows.listVersions(workflowId);
   return rows.map(rowToWorkflowVersion);
 }
 
@@ -8298,10 +8029,7 @@ export async function getWorkflowVersion(
   workflowId: string,
   version: number,
 ): Promise<WorkflowVersion | null> {
-  const row = await getDbClient().get<WorkflowVersionRow>(
-    "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
-    [workflowId, version],
-  );
+  const row = await getStorage().repos.workflows.getVersion(workflowId, version);
   return row ? rowToWorkflowVersion(row) : null;
 }
 

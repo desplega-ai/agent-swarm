@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type Storage, sql, type WorkflowsRepository } from "../../src";
+import { type NewWorkflow, type Storage, sql, type WorkflowsRepository } from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
@@ -489,6 +489,350 @@ export function workflowsContract(engine: ContractEngine): void {
       const rows = await repo.listEnabledByEventName("e1");
       expect(rows.map((r) => r.id)).toEqual(["w-tie-b", "w-tie-a", "w-old", "w-twice"]);
       expect(rows[0]).toMatchObject({ enabled: 1, definition: '{"nodes":[]}' });
+    });
+
+    const newWorkflow = (id: string, o: Partial<NewWorkflow> = {}): NewWorkflow => ({
+      id,
+      key: "shared/",
+      name: id,
+      description: null,
+      definition: '{"nodes":[]}',
+      triggers: "[]",
+      cooldown: null,
+      input: null,
+      triggerSchema: null,
+      params: "{}",
+      requiredParams: "[]",
+      requires: "[]",
+      dir: null,
+      vcsRepo: null,
+      createdByAgentId: "agent-a",
+      createdBy: null,
+      enabled: true,
+      ...o,
+    });
+
+    test("insertWorkflow returns the stored shape; updates set columns and lastUpdatedAt", async () => {
+      const row = await repo.insertWorkflow(newWorkflow("w1", { enabled: false, dir: "/d" }));
+      expect(row).toMatchObject({
+        id: "w1",
+        key: "shared/",
+        enabled: 0,
+        dir: "/d",
+        vcs_repo: null,
+        createdByAgentId: "agent-a",
+        updatedByAgentId: "agent-a",
+        params: "{}",
+      });
+      expect(await repo.findWorkflowById("w1")).toEqual(row);
+      expect(await repo.findWorkflowById("missing")).toBeNull();
+      const updated = await repo.updateWorkflowColumns(
+        "w1",
+        { enabled: true, cooldown: null, vcsRepo: "org/repo", updatedByAgentId: null },
+        T2,
+      );
+      expect(updated).toMatchObject({
+        enabled: 1,
+        cooldown: null,
+        vcs_repo: "org/repo",
+        updatedByAgentId: null,
+        lastUpdatedAt: T2,
+        name: "w1",
+      });
+      expect(await repo.updateWorkflowColumns("missing", { name: "x" }, T2)).toBeNull();
+    });
+
+    test("listWorkflows filters and orders newest first, ties in insertion order", async () => {
+      await workflow("b", { lastUpdatedAt: T1 });
+      await workflow("a", { lastUpdatedAt: T1 });
+      await workflow("old", { lastUpdatedAt: T0, enabled: false });
+      await storage.executor.run(
+        sql`UPDATE workflows SET "key" = 'shared/team/', description = 'Hello World' WHERE id = 'a'`,
+      );
+      expect((await repo.listWorkflows({})).map((r) => r.id)).toEqual(["b", "a", "old"]);
+      expect((await repo.listWorkflows({ enabled: false })).map((r) => r.id)).toEqual(["old"]);
+      expect((await repo.listWorkflows({ key: "shared/team/" })).map((r) => r.id)).toEqual(["a"]);
+      expect((await repo.listWorkflows({ keyPattern: "SHARED/TEAM/%" })).map((r) => r.id)).toEqual([
+        "a",
+      ]);
+      expect((await repo.listWorkflows({ textPattern: "%world%" })).map((r) => r.id)).toEqual([
+        "a",
+      ]);
+      expect((await repo.listWorkflows({ textPattern: "%10\\%%" })).map((r) => r.id)).toEqual([]);
+      expect((await repo.listWorkflows({ limit: 1 })).map((r) => r.id)).toEqual(["b"]);
+
+      await run("r1", { workflowId: "b", status: "failed" });
+      await storage.executor.run(sql`UPDATE workflow_runs SET "startedAt" = ${T1} WHERE id = 'r1'`);
+      await run("r2", { workflowId: "b", status: "failed" });
+      await run("r3", { workflowId: "a", status: "completed" });
+      await storage.executor.run(sql`UPDATE workflow_runs SET "startedAt" = ${T2} WHERE id = 'r3'`);
+      await run("r4", { workflowId: "a", status: "failed" });
+      expect((await repo.listWorkflows({ lastRunStatus: "failed" })).map((r) => r.id)).toEqual([
+        "b",
+      ]);
+      expect((await repo.listWorkflows({ consecutiveErrorsMin: 2 })).map((r) => r.id)).toEqual([
+        "b",
+      ]);
+      expect((await repo.listWorkflows({ consecutiveErrorsMin: 1 })).map((r) => r.id)).toEqual([
+        "b",
+      ]);
+    });
+
+    test("listEnabledByScheduleId lists one row per matching trigger in insertion order", async () => {
+      const sched = (ids: string[]) =>
+        JSON.stringify(ids.map((scheduleId) => ({ type: "schedule", scheduleId })));
+      await workflow("w-b", { triggers: sched(["s1", "s1"]), lastUpdatedAt: T2 });
+      await workflow("w-a", { triggers: sched(["s1"]), lastUpdatedAt: T0 });
+      await workflow("w-off", { triggers: sched(["s1"]), enabled: false });
+      await workflow("w-other", { triggers: sched(["s2"]) });
+      expect((await repo.listEnabledByScheduleId("s1")).map((r) => r.id)).toEqual([
+        "w-b",
+        "w-b",
+        "w-a",
+      ]);
+    });
+
+    test("workflow delete helpers remove steps, runs and the workflow", async () => {
+      await workflow("w1");
+      await workflow("w2");
+      await repo.insertRunDefinition("hb", "{}", T0);
+      await repo.insertRunDefinition("ha", "{}", T0);
+      await run("r1", { workflowId: "w1", definitionHash: "hb" });
+      await run("r2", { workflowId: "w1", definitionHash: "ha" });
+      await run("r3", { workflowId: "w1", definitionHash: "hb" });
+      await run("r4", { workflowId: "w2" });
+      await step("s1", "r1");
+      await step("s4", "r4");
+      expect(await repo.listRunDefinitionHashesOfWorkflow("w1")).toEqual(["ha", "hb"]);
+      await repo.deleteStepsOfWorkflow("w1");
+      expect(await stepRow("s1")).toBeNull();
+      expect(await stepRow("s4")).not.toBeNull();
+      await repo.deleteRunsOfWorkflow("w1");
+      expect(await runRow("r1")).toBeNull();
+      expect(await runRow("r4")).not.toBeNull();
+      await storage.executor.run(sql`DELETE FROM workflow_run_steps WHERE "runId" = 'r4'`);
+      await storage.executor.run(sql`DELETE FROM workflow_runs WHERE id = 'r4'`);
+      expect(await repo.deleteWorkflow("w2")).toBe(1);
+      expect(await repo.deleteWorkflow("w2")).toBe(0);
+    });
+
+    test("run rows: insert, update, list pages, counts, latest", async () => {
+      await workflow("w1");
+      const row = await repo.insertRun({
+        id: "r1",
+        workflowId: "w1",
+        triggerType: "api",
+        startedAt: T0,
+        triggerData: '{"t":1}',
+        createdBy: null,
+        parentStepId: null,
+        parentStepAttempt: 0,
+        triggeredByAgentId: "agent-1",
+        definitionHash: null,
+        sourceStepId: "step-x",
+        principal: null,
+      });
+      expect(row).toMatchObject({
+        id: "r1",
+        status: "running",
+        triggerType: "api",
+        context: null,
+        finishedAt: null,
+        parentStepAttempt: 0,
+      });
+      expect(await repo.findRunById("r1")).toEqual(row);
+      const updated = await repo.updateRunColumns(
+        "r1",
+        {
+          status: "completed",
+          context: "{}",
+          context_replay: "sealed",
+          finishedAt: T2,
+          error: null,
+        },
+        T2,
+      );
+      expect(updated).toMatchObject({
+        status: "completed",
+        context: "{}",
+        context_replay: "sealed",
+        finishedAt: T2,
+        lastUpdatedAt: T2,
+      });
+
+      for (const [id, startedAt, status] of [
+        ["r2", T1, "failed"],
+        ["r4", T1, "completed"],
+        ["r3", T1, "completed"],
+        ["r5", T2, "skipped"],
+      ] as const) {
+        await run(id, { status });
+        await storage.executor.run(
+          sql`UPDATE workflow_runs SET "startedAt" = ${startedAt}, "finishedAt" = ${startedAt} WHERE id = ${id}`,
+        );
+      }
+      const all = await repo.listRuns("w1", { includeContext: false });
+      expect(all.map((r) => r.id)).toEqual(["r5", "r4", "r3", "r2", "r1"]);
+      expect(all[0]).not.toHaveProperty("context");
+      expect((await repo.listRuns("w1", { includeContext: true }))[0]).toHaveProperty("context");
+      expect(
+        (await repo.listRuns("w1", { limit: 2, offset: 1, includeContext: false })).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["r4", "r3"]);
+      expect(
+        (await repo.listRuns("w1", { offset: 3, includeContext: false })).map((r) => r.id),
+      ).toEqual(["r2", "r1"]);
+      expect(
+        (await repo.listRuns("w1", { status: "completed", includeContext: false })).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["r4", "r3", "r1"]);
+      expect(await repo.countRuns("w1")).toBe(5);
+      expect(await repo.countRuns("w1", "completed")).toBe(3);
+      expect((await repo.lastSuccessfulRun("w1"))?.id).toBe("r1");
+      expect((await repo.lastRunStart("w1"))?.status).not.toBe("skipped");
+      expect(await repo.lastSuccessfulRun("missing")).toBeNull();
+    });
+
+    test("listStuckRuns: waiting steps of waiting runs whose task ended, by task creation", async () => {
+      await workflow("w1");
+      await run("r1", { status: "waiting" });
+      await run("r2", { status: "running" });
+      await step("s1", "r1", { status: "waiting" });
+      await step("s2", "r1", { status: "waiting" });
+      await step("s3", "r2", { status: "waiting" });
+      const task = (id: string, stepId: string, status: string, createdAt: string) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "workflowRunStepId", output)
+          VALUES (${id}, 't', ${status}, ${createdAt}, ${createdAt}, ${stepId}, 'out')`);
+      await task("t2", "s2", "completed", T1);
+      await task("t1", "s1", "failed", T1);
+      await task("t0", "s1", "in_progress", T0);
+      await task("t3", "s3", "completed", T0);
+      expect(await repo.listStuckRuns()).toEqual([
+        {
+          runId: "r1",
+          stepId: "s2",
+          nodeId: "s2",
+          taskId: "t2",
+          taskStatus: "completed",
+          taskOutput: "out",
+          workflowId: "w1",
+        },
+        {
+          runId: "r1",
+          stepId: "s1",
+          nodeId: "s1",
+          taskId: "t1",
+          taskStatus: "failed",
+          taskOutput: "out",
+          workflowId: "w1",
+        },
+      ]);
+    });
+
+    test("step rows: insert, update, ordered reads", async () => {
+      await workflow("w1");
+      await run("r1");
+      const inserted = await repo.insertRunningStep({
+        id: "s1",
+        runId: "r1",
+        nodeId: "n1",
+        nodeType: "agent-task",
+        startedAt: T1,
+        input: null,
+        idempotencyKey: "k1",
+      });
+      expect(inserted).toMatchObject({
+        id: "s1",
+        status: "running",
+        input: null,
+        output: null,
+        retryCount: 0,
+        maxRetries: 0,
+        nextRetryAt: null,
+      });
+      expect(await repo.findStepById("s1")).toEqual(inserted);
+      expect(await repo.findStepByIdempotencyKey("k1")).toEqual(inserted);
+      expect(await repo.findStepByIdempotencyKey("none")).toBeNull();
+      const updated = await repo.updateStepColumns("s1", {
+        status: "failed",
+        output: "{}",
+        output_replay: "sealed",
+        retryCount: 2,
+        nextRetryAt: T1,
+        error: "boom",
+        nextPort: "error",
+      });
+      expect(updated).toMatchObject({
+        status: "failed",
+        output: "{}",
+        output_replay: "sealed",
+        retryCount: 2,
+        nextRetryAt: T1,
+        error: "boom",
+        nextPort: "error",
+      });
+      expect(await repo.updateStepColumns("missing", { status: "failed" })).toBeNull();
+
+      await step("s3", "r1", { nodeId: "n1", startedAt: T1, status: "completed" });
+      await step("s2", "r1", { nodeId: "n2", startedAt: T0, status: "completed" });
+      await step("s4", "r1", { nodeId: "n1", startedAt: T0, status: "completed" });
+      expect((await repo.listSteps("r1")).map((r) => r.id)).toEqual(["s2", "s4", "s1", "s3"]);
+      expect((await repo.listSteps("r1"))[0]).toHaveProperty("input");
+      expect(await repo.listCompletedStepNodeIds("r1")).toEqual(["n1", "n2", "n1"]);
+      expect((await repo.latestStepForNode("r1", "n1"))?.id).toBe("s3");
+      expect((await repo.lastInsertedStepForNode("r1", "n1"))?.id).toBe("s4");
+      expect(await repo.latestStepForNode("r1", "none")).toBeNull();
+      expect(await repo.hasCompletedStepInsertedAfter("r1", ["n2"], "s3")).toBe(true);
+      expect(await repo.hasCompletedStepInsertedAfter("r1", ["n2"], "s2")).toBe(false);
+      expect(await repo.hasCompletedStepInsertedAfter("r1", ["n1", "n9"], "s2")).toBe(true);
+    });
+
+    test("listDueRetrySteps: due retries of retryable runs, by nextRetryAt then insertion", async () => {
+      await workflow("w1");
+      await run("r1", { status: "failed" });
+      await run("r2", { status: "cancelled" });
+      await step("late", "r1", { status: "failed", nextRetryAt: T2 });
+      await step("b", "r1", { status: "failed", nextRetryAt: T1 });
+      await step("a", "r1", { status: "failed", nextRetryAt: T1 });
+      await step("first", "r1", { status: "failed", nextRetryAt: T0 });
+      await step("dead", "r2", { status: "failed", nextRetryAt: T0 });
+      await step("none", "r1", { status: "failed" });
+      expect((await repo.listDueRetrySteps(T1)).map((r) => r.id)).toEqual(["first", "b", "a"]);
+    });
+
+    test("versions: unique per workflow, newest first", async () => {
+      await workflow("w1");
+      const v1 = await repo.insertVersion({
+        id: "v1",
+        workflowId: "w1",
+        version: 1,
+        snapshot: '{"name":"a"}',
+        changedByAgentId: null,
+      });
+      expect(v1).toMatchObject({ id: "v1", version: 1, snapshot: '{"name":"a"}' });
+      expect(typeof v1?.createdAt).toBe("string");
+      await repo.insertVersion({
+        id: "v2",
+        workflowId: "w1",
+        version: 2,
+        snapshot: "{}",
+        changedByAgentId: "agent-1",
+      });
+      expect((await repo.listVersions("w1")).map((v) => v.version)).toEqual([2, 1]);
+      expect((await repo.getVersion("w1", 2))?.changedByAgentId).toBe("agent-1");
+      expect(await repo.getVersion("w1", 3)).toBeNull();
+      await expect(
+        repo.insertVersion({
+          id: "v3",
+          workflowId: "w1",
+          version: 2,
+          snapshot: "{}",
+          changedByAgentId: null,
+        }),
+      ).rejects.toThrow();
     });
   });
 }

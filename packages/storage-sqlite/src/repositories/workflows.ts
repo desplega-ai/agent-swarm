@@ -1,5 +1,7 @@
 import {
   BaseWorkflowsRepository,
+  type SqlQuery,
+  type StuckWorkflowRunRow,
   sql,
   sqlList,
   WORKFLOW_RUN_STEP_SLIM_COLUMNS,
@@ -90,5 +92,58 @@ export class SqliteWorkflowsRepository extends BaseWorkflowsRepository {
          AND s.status IN ('pending', 'running')
          AND instr(s."nodeId", '#') > 1
        ORDER BY s.status, s.rowid`);
+  }
+  protected insertionOrder(alias?: SqlQuery): SqlQuery {
+    return alias ? sql`${alias}.rowid` : sql`rowid`;
+  }
+
+  protected offsetWithoutLimit(offset: number): SqlQuery {
+    return sql`LIMIT -1 OFFSET ${offset}`;
+  }
+
+  listEnabledByScheduleId(scheduleId: string): Promise<WorkflowRow[]> {
+    return this.db.query<WorkflowRow>(sql`
+      SELECT w.* FROM workflows w, json_each(w.triggers) AS t
+       WHERE w.enabled = 1
+         AND json_extract(t.value, '$.type') = 'schedule'
+         AND json_extract(t.value, '$.scheduleId') = ${scheduleId}
+       ORDER BY w.rowid, t.key`);
+  }
+
+  listStuckRuns(): Promise<StuckWorkflowRunRow[]> {
+    // CROSS JOIN fixes the join order: the few waiting steps drive, and each
+    // one seeks its task through idx_agent_tasks_workflowRunStepId, so `output`
+    // is read only for matched tasks. Driving from agent_tasks by status reads
+    // nearly every finished task.
+    return this.db.query<StuckWorkflowRunRow>(sql`
+      SELECT
+          wr.id as "runId",
+          wrs.id as "stepId",
+          wrs."nodeId",
+          at.id as "taskId",
+          at.status as "taskStatus",
+          at.output as "taskOutput",
+          wr."workflowId"
+        FROM workflow_run_steps wrs
+        CROSS JOIN workflow_runs wr ON wr.id = wrs."runId"
+        CROSS JOIN agent_tasks at ON at."workflowRunStepId" = wrs.id
+        WHERE wrs.status = 'waiting'
+          AND wr.status = 'waiting'
+          AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
+        ORDER BY at."createdAt" ASC, at.rowid ASC`);
+  }
+
+  async hasCompletedStepInsertedAfter(
+    runId: string,
+    nodeIds: readonly string[],
+    afterStepId: string,
+  ): Promise<boolean> {
+    const row = await this.db.get(sql`
+      SELECT 1 AS found FROM workflow_run_steps
+       WHERE "runId" = ${runId} AND status = 'completed'
+         AND "nodeId" IN (${sqlList(nodeIds)})
+         AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ${afterStepId})
+       LIMIT 1`);
+    return row != null;
   }
 }
