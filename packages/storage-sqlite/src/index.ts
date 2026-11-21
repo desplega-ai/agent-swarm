@@ -7,6 +7,7 @@ import {
 } from "@desplega/storage";
 import { sqliteDialect } from "./dialect";
 import { SqliteAgentsRepository } from "./repositories/agents";
+import { SqliteAssetsRepository } from "./repositories/assets";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
@@ -48,6 +49,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
       maintenance: new SqliteMaintenanceRepository(executor),
+      assets: new SqliteAssetsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
@@ -81,3 +83,4 @@ export {
 } from "./boot/open";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
+export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";

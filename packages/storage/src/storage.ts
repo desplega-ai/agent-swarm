@@ -3,6 +3,7 @@ import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
+import type { AssetsRepository } from "./repositories/assets";
 import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { MaintenanceRepository } from "./repositories/maintenance";
@@ -17,6 +18,7 @@ export type Repositories = {
   config: ConfigRepository;
   agents: AgentsRepository;
   maintenance: MaintenanceRepository;
+  assets: AssetsRepository;
 };
 
 /**

@@ -3,13 +3,11 @@ import { z } from "zod";
 import { getApp } from "../apps/store";
 import { normalizeAssetKey } from "../assets/key";
 import { sourceMoveError, sourceOfKey } from "../assets/source-key";
-import { auditAssetKeys } from "../be/asset-key-audit";
+import { auditAssetKeysAsync } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   AssetKeyMovesBlockedError,
-  getDb,
-  getDbClient,
   getRootTaskChain,
   getTaskById,
   listAssetSummaries,
@@ -18,6 +16,7 @@ import {
 } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSessionRoot } from "../be/session-shares";
+import { getStorage } from "../be/storage";
 import { can, type RbacResource } from "../rbac";
 import {
   type AssetEntityType,
@@ -245,12 +244,9 @@ export async function handleAssets(
     const parsed = await keyAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
-    // auditAssetKeys stays sync (shared with the boot audit); run it inside a
-    // client transaction so the read cannot observe another request's
-    // uncommitted writes on the shared connection.
-    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
-      readOnly: true,
-    });
+    // One read-only transaction: the audit sees one snapshot and never another
+    // request's uncommitted writes on the shared connection.
+    const audit = await getStorage().transaction(() => auditAssetKeysAsync(), { readOnly: true });
     keyAuditRoute.respond(res, 200, audit);
     return true;
   }

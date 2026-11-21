@@ -1,4 +1,5 @@
 import { agentsContract } from "./agents";
+import { assetsContract } from "./assets";
 import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { extensionsContract } from "./extensions";
@@ -16,4 +17,5 @@ export function runStorageContract(engine: ContractEngine): void {
   configContract(engine);
   agentsContract(engine);
   maintenanceContract(engine);
+  assetsContract(engine);
 }

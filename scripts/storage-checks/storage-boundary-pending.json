@@ -35,10 +35,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/be/asset-key-audit.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 10
-  },
   "src/be/automation-preflight.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 7
@@ -618,10 +614,6 @@
   "src/http/approval-requests.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
-  },
-  "src/http/assets.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 2
   },
   "src/http/budgets.ts": {
     "reason": "M2 move: sessions and cost",
