@@ -1,6 +1,7 @@
 import {
   type Capabilities,
   type DbClient,
+  type QueryReader,
   SqlExecutor,
   type Storage,
   type TransactionOptions,
@@ -40,8 +41,8 @@ import { PostgresWorkflowsRepository } from "./repositories/workflows";
 export type PostgresStorageOptions = {
   /** pgvector is installed in the database. */
   vectorSearch: boolean;
-  /** `DATABASE_QUERY_URL` passed its restricted-role probe (decision D10). */
-  dbQuery: boolean;
+  /** The `DATABASE_QUERY_URL` reader, when its restricted-role probe passed (decision D10). */
+  queryReader: QueryReader | null;
 };
 
 /** Assemble the Postgres engine over an open Postgres client. */
@@ -50,7 +51,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
   const capabilities: Capabilities = {
     fullTextSearch: true,
     vectorSearch: options.vectorSearch,
-    dbQuery: options.dbQuery,
+    dbQuery: options.queryReader !== null,
     dbQueryDialect: "postgres",
   };
   return {
@@ -58,6 +59,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     capabilities,
     executor,
     client,
+    ...(options.queryReader ? { queryReader: options.queryReader } : {}),
     repos: {
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),

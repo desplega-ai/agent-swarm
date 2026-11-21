@@ -6,14 +6,16 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  DbClient,
-  PromptTemplateFilters,
-  PromptTemplateHistoryRow,
-  PromptTemplateRecordUpdate,
-  PromptTemplateRow,
-  StatementObserver,
-  Storage,
+import {
+  DB_QUERY_DENIED_TABLES,
+  type DbClient,
+  type PromptTemplateFilters,
+  type PromptTemplateHistoryRow,
+  type PromptTemplateRecordUpdate,
+  type PromptTemplateRow,
+  type QueryReader,
+  type StatementObserver,
+  type Storage,
 } from "@desplega/storage";
 import {
   acquireProcessLock,
@@ -25,6 +27,7 @@ import {
   isEmptyPostgresDatabase,
   isInPostgresTransaction,
   loadTimestampFormats,
+  openPostgresQueryReader,
   PostgresClient,
   type PostgresSealedColumn,
   runPostgresMigrations,
@@ -89,10 +92,15 @@ export function isInTransaction(): boolean {
   return sqliteIsInTransaction() || isInPostgresTransaction();
 }
 
-export function createStorage(client: DbClient, options: { vectorSearch: boolean }): Storage {
+export function createStorage(
+  client: DbClient,
+  options: { vectorSearch: boolean; queryReader?: QueryReader | null },
+): Storage {
   if (client instanceof PostgresClient) {
-    // dbQuery stays off until the restricted-role connection of decision D10 exists.
-    return createPostgresStorage(client, { vectorSearch: options.vectorSearch, dbQuery: false });
+    return createPostgresStorage(client, {
+      vectorSearch: options.vectorSearch,
+      queryReader: options.queryReader ?? null,
+    });
   }
   return createSqliteStorage(client, options);
 }
@@ -141,6 +149,8 @@ export type PostgresEngine = {
   vectorSearch: boolean;
   /** The database held no table before this start. */
   createdThisBoot: boolean;
+  /** The `db-query` reader of `DATABASE_QUERY_URL` (decision D10), or null: no `dbQuery` capability. */
+  queryReader: QueryReader | null;
   hasEncryptedSecretRows(
     sealedColumns: readonly PostgresSealedColumn[],
     sealedPrefix: string,
@@ -149,11 +159,38 @@ export type PostgresEngine = {
 };
 
 /**
+ * Open the `db-query` reader (decision D10). No `DATABASE_QUERY_URL`, or a role
+ * that fails the probe, leaves the `dbQuery` capability off. Runs after the
+ * migrations, so the probe sees the denied tables.
+ */
+async function openQueryReader(queryUrl: string | undefined): Promise<QueryReader | null> {
+  const url = queryUrl?.trim();
+  if (!url) {
+    console.log("[db] db-query is off: DATABASE_QUERY_URL is not set (decision D10)");
+    return null;
+  }
+  const result = await openPostgresQueryReader(url, [...DB_QUERY_DENIED_TABLES]);
+  if (!result.ok) {
+    console.warn(
+      scrubSecrets(
+        `[db] db-query is off: the DATABASE_QUERY_URL role failed its probe: ${result.reason} (DATABASE_QUERY_URL=${url})`,
+      ),
+    );
+    return null;
+  }
+  console.log(scrubSecrets(`[db] db-query reader ready (role ${result.role})`));
+  return result.reader;
+}
+
+/**
  * Open the Postgres engine: take the one-process lock (D16), run the Postgres
  * migration chain (D12), bind the timestamp formats of the read codec to this
  * database (D8), then open the pool (SERIALIZABLE with retry, D6).
  */
-export async function openPostgresEngine(url: string): Promise<PostgresEngine> {
+export async function openPostgresEngine(
+  url: string,
+  queryUrl: string | undefined = undefined,
+): Promise<PostgresEngine> {
   console.log(`[db] Postgres engine selected (DATABASE_URL=${scrubSecrets(url)})`);
   const migrationsDir = postgresMigrationsDir();
   const lock = await acquireProcessLock(url, { waitMs: PROCESS_LOCK_WAIT_MS });
@@ -181,6 +218,7 @@ export async function openPostgresEngine(url: string): Promise<PostgresEngine> {
       timestampFormats,
       txReplay,
     });
+    const queryReader = await openQueryReader(queryUrl);
     console.log(
       `[db] Postgres engine ready (pgvector ${vectorSearch ? "present" : "absent"}${createdThisBoot ? ", new database" : ""})`,
     );
@@ -188,10 +226,12 @@ export async function openPostgresEngine(url: string): Promise<PostgresEngine> {
       client,
       vectorSearch,
       createdThisBoot,
+      queryReader,
       hasEncryptedSecretRows: (sealedColumns, sealedPrefix) =>
         hasEncryptedSecretRowsPostgres(client, sealedColumns, sealedPrefix),
       async close() {
         try {
+          await queryReader?.close().catch(() => undefined);
           await client.close();
         } finally {
           await lock.release();

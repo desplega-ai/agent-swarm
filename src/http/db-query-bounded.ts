@@ -174,7 +174,7 @@ const { Database } = require("bun:sqlite");
  */
 let activeBoundedQueryCount = 0;
 
-function acquireBoundedQuerySlot(): void {
+export function acquireBoundedQuerySlot(): void {
   const cap = getDbQueryConcurrencyCap();
   if (activeBoundedQueryCount >= cap) {
     throw new DbQueryConcurrencyCapError(
@@ -184,7 +184,7 @@ function acquireBoundedQuerySlot(): void {
   activeBoundedQueryCount++;
 }
 
-function releaseBoundedQuerySlot(): void {
+export function releaseBoundedQuerySlot(): void {
   activeBoundedQueryCount--;
 }
 
@@ -247,7 +247,7 @@ function buildPayload(
   };
 }
 
-function timeoutError(budgetMs: number): DbQueryTimeoutError {
+export function timeoutError(budgetMs: number): DbQueryTimeoutError {
   return new DbQueryTimeoutError(
     `Query exceeded the ${budgetMs}ms budget and was terminated. Filter on an indexed column and add a LIMIT. Aggregates such as COUNT(*), SUM(...) or typeof() over session_logs, agent_log, events or task_context_snapshots read every row in range and cannot be made cheap by chunking on rowid.`,
   );

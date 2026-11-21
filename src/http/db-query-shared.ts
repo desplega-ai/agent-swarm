@@ -10,6 +10,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { DB_QUERY_DENIED_TABLES } from "@desplega/storage";
 import { getDb, resolveSqliteVecExtensionPath } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 
@@ -65,15 +66,7 @@ export function assertSingleStatement(sql: string): void {
  * subquery, join or covering index). `swarm_config` stays readable: its
  * secret values are ciphertext and agents query its non-secret keys.
  */
-export const DB_QUERY_DENIED_TABLES: ReadonlySet<string> = new Set([
-  "oauth_authorizations",
-  "oauth_apps",
-  "oauth_pending",
-  "user_tokens",
-  "session_tokens",
-  "script_apis",
-  "codex_oauth_device_flows",
-]);
+export { DB_QUERY_DENIED_TABLES };
 
 /** Thrown when a query would read a table in {@link DB_QUERY_DENIED_TABLES}. */
 export class DbQueryDeniedTableError extends Error {

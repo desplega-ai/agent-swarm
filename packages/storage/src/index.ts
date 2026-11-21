@@ -26,6 +26,14 @@ export {
   StorageError,
 } from "./errors";
 export { SqlExecutor } from "./executor";
+export {
+  DB_QUERY_DENIED_TABLES,
+  type QueryReader,
+  QueryReaderDeniedError,
+  type QueryReaderOptions,
+  type QueryReaderResult,
+  QueryReaderTimeoutError,
+} from "./query-reader";
 export * from "./repositories";
 export {
   type DialectFragment,

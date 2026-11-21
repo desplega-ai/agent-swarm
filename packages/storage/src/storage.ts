@@ -2,6 +2,7 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { QueryReader } from "./query-reader";
 import type { AgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import type { AgentsRepository } from "./repositories/agents";
 import type { AssetsRepository } from "./repositories/assets";
@@ -83,6 +84,12 @@ export interface Storage {
    * storage packages.
    */
   readonly client: DbClient;
+  /**
+   * The read-only connection of `db-query` (decision D10), when the engine has
+   * one apart from its own handle. Set exactly when the Postgres engine has the
+   * `dbQuery` capability. SQLite opens its read-only handle itself.
+   */
+  readonly queryReader?: QueryReader;
   /**
    * Run `fn` atomically. Repository calls inside it join the transaction. The
    * callback may run more than once (decision D6): side effects go in

@@ -1,11 +1,22 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type QueryReader,
+  QueryReaderDeniedError,
+  QueryReaderTimeoutError,
+} from "@desplega/storage";
 import { z } from "zod";
 import { getStorage } from "../be/storage";
 import { createSweepScrubber, scrubObject } from "../utils/secret-scrubber";
-import { executeReadOnlyQueryBounded } from "./db-query-bounded";
+import {
+  acquireBoundedQuerySlot,
+  executeReadOnlyQueryBounded,
+  releaseBoundedQuerySlot,
+  timeoutError,
+} from "./db-query-bounded";
 import {
   assertSingleStatement,
   DbQueryConcurrencyCapError,
+  DbQueryDeniedTableError,
   type DbQueryResult,
   DbQueryTimeoutError,
   executeReadOnlyQuery,
@@ -66,7 +77,7 @@ export function assertSelectOnlyQuery(sql: string): void {
 export class DbQueryUnavailableError extends Error {
   constructor() {
     super(
-      "db-query is not available on this storage engine (Postgres): it needs a restricted read-only query connection, which this API does not have yet",
+      "db-query is not available on this storage engine (Postgres): set DATABASE_QUERY_URL to a restricted read-only role that passes the start probe (see runbooks/postgres.md)",
     );
     this.name = "DbQueryUnavailableError";
   }
@@ -90,8 +101,11 @@ export async function executeReadOnlyQueryGated(
   maxRows?: number,
 ): Promise<DbQueryResponse> {
   assertDbQueryAvailable();
+  const reader = getStorage().queryReader;
   let result: DbQueryResult;
-  if (isDbQueryBoundedEnabled()) {
+  if (reader) {
+    result = await runOnQueryReader(reader, sql, params, budgetMs, maxRows);
+  } else if (isDbQueryBoundedEnabled()) {
     result = await executeReadOnlyQueryBounded(sql, params, budgetMs, maxRows);
   } else {
     warnDbQueryBoundedDisabledOnce();
@@ -103,6 +117,47 @@ export async function executeReadOnlyQueryGated(
     truncated: maxRows !== undefined && result.total > maxRows,
     rowLimit: maxRows ?? null,
   };
+}
+
+/**
+ * Run user SQL on the engine's own `db-query` reader (Postgres, decision D10):
+ * the native dialect, a READ ONLY transaction with a statement timeout, under a
+ * role that cannot read the denied tables. Shares the concurrency cap of the
+ * bounded SQLite path.
+ */
+async function runOnQueryReader(
+  reader: QueryReader,
+  sql: string,
+  params: unknown[],
+  budgetMs: number,
+  maxRows?: number,
+): Promise<DbQueryResult> {
+  assertSingleStatement(sql);
+  acquireBoundedQuerySlot();
+  try {
+    return await reader.run(stripTrailingSemicolon(sql), params, { budgetMs, maxRows });
+  } catch (err) {
+    if (err instanceof QueryReaderDeniedError) throw new DbQueryDeniedTableError(err.tables);
+    if (err instanceof QueryReaderTimeoutError) throw timeoutError(budgetMs);
+    throw err;
+  } finally {
+    releaseBoundedQuerySlot();
+  }
+}
+
+/**
+ * The metrics path: the synchronous SQLite reader as before, or the engine's
+ * `db-query` reader (with the HTTP budget) when the engine has one.
+ */
+export async function executeReadOnlyQueryNative(
+  sql: string,
+  params: unknown[] = [],
+  maxRows?: number,
+): Promise<DbQueryResult> {
+  assertDbQueryAvailable();
+  const reader = getStorage().queryReader;
+  if (reader) return runOnQueryReader(reader, sql, params, getDbQueryHttpBudgetMs(), maxRows);
+  return executeReadOnlyQuery(sql, params, maxRows);
 }
 
 const dbQueryRoute = route({

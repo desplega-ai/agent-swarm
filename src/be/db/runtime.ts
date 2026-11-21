@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import type { QueryReader } from "@desplega/storage";
 import { configureDbResolver } from "../../prompts/resolver";
 import { VersionableFieldSchema } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
@@ -59,6 +60,11 @@ export function wasDbCreatedThisBoot(): boolean {
 
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
+}
+
+/** The `db-query` reader of the Postgres engine (decision D10), or null. */
+export function getPostgresQueryReader(): QueryReader | null {
+  return postgres?.queryReader ?? null;
 }
 
 /** Vector search capability of the active engine: sqlite-vec loaded, or pgvector present. */
@@ -366,7 +372,7 @@ export function startPostgres(): Promise<void> {
 }
 
 async function bootPostgres(url: string): Promise<PostgresEngine> {
-  const engine = await openPostgresEngine(url);
+  const engine = await openPostgresEngine(url, process.env.DATABASE_QUERY_URL);
   postgres = engine;
   try {
     const { resolvePromptTemplate } = require("../db") as typeof import("../db");

@@ -1,4 +1,15 @@
 export {
+  acquireProcessLock,
+  hasEncryptedSecretRowsPostgres,
+  hasPgvector,
+  isEmptyPostgresDatabase,
+  type PostgresSealedColumn,
+  PROCESS_LOCK_KEY,
+  type ProcessLock,
+  ProcessLockHeldError,
+  type ProcessLockOptions,
+} from "./boot";
+export {
   createPostgresClient,
   DEFAULT_POSTGRES_RETRY,
   isInPostgresTransaction,
@@ -28,15 +39,5 @@ export {
   type PostgresMigrationResult,
   runPostgresMigrations,
 } from "./migrations";
+export { openPostgresQueryReader, type QueryReaderProbeResult } from "./query-reader";
 export { createPostgresStorage, type PostgresStorageOptions } from "./storage";
-export {
-  acquireProcessLock,
-  hasEncryptedSecretRowsPostgres,
-  hasPgvector,
-  isEmptyPostgresDatabase,
-  PROCESS_LOCK_KEY,
-  type PostgresSealedColumn,
-  type ProcessLock,
-  ProcessLockHeldError,
-  type ProcessLockOptions,
-} from "./boot";

@@ -25,7 +25,7 @@ import {
   MetricWidgetSchema,
 } from "../types";
 import { scrubObject } from "../utils/secret-scrubber";
-import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
+import { assertSelectOnlyQuery, executeReadOnlyQueryNative } from "./db-query";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -62,10 +62,14 @@ function validateMetricDefinition(definition: unknown) {
   return parsed;
 }
 
-function resolveVariableOptionValues(variable: MetricVariable) {
+async function resolveVariableOptionValues(variable: MetricVariable) {
   if (!variable.optionsQuery) return variable.options ?? [];
   assertSelectOnlyQuery(variable.optionsQuery.sql);
-  const result = executeReadOnlyQuery(variable.optionsQuery.sql, [], HARD_METRIC_MAX_ROWS);
+  const result = await executeReadOnlyQueryNative(
+    variable.optionsQuery.sql,
+    [],
+    HARD_METRIC_MAX_ROWS,
+  );
   return result.rows.map((row) => {
     const record = Object.fromEntries(
       result.columns.map((column, index) => [column, row[index] as MetricParam]),
@@ -80,18 +84,20 @@ function resolveVariableOptionValues(variable: MetricVariable) {
   });
 }
 
-function resolveVariableOptions(metric: Metric) {
+async function resolveVariableOptions(metric: Metric) {
   const optionsByKey: Record<string, Array<{ label: string; value: MetricParam }>> = {};
-  const variables = (metric.definition.variables ?? []).map((variable) => {
+  const variables: MetricVariable[] = [];
+  for (const variable of metric.definition.variables ?? []) {
     if (!variable.optionsQuery) {
-      return variable;
+      variables.push(variable);
+      continue;
     }
-    const options = resolveVariableOptionValues(variable);
+    const options = await resolveVariableOptionValues(variable);
     optionsByKey[variable.key] = options;
     // Options are query output, like widget rows: the response gets a scrubbed copy.
     // `optionsByKey` keeps the raw values for validation and parameter binding.
-    return { ...variable, options: scrubObject(options) };
-  });
+    variables.push({ ...variable, options: scrubObject(options) });
+  }
   return { variables, optionsByKey };
 }
 
@@ -152,11 +158,11 @@ function resolveWidgetParams(
   });
 }
 
-function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricParam>) {
+async function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricParam>) {
   assertSelectOnlyQuery(widget.query.sql);
   const requestedRows = widget.query.maxRows ?? DEFAULT_METRIC_MAX_ROWS;
   const maxRows = Math.min(requestedRows, HARD_METRIC_MAX_ROWS);
-  const result = executeReadOnlyQuery(
+  const result = await executeReadOnlyQueryNative(
     widget.query.sql,
     resolveWidgetParams(widget, variables),
     maxRows,
@@ -177,10 +183,13 @@ function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricP
   };
 }
 
-function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
-  const resolved = resolveVariableOptions(metric);
+async function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
+  const resolved = await resolveVariableOptions(metric);
   const variables = resolveMetricVariables(metric, providedVariables, resolved.optionsByKey);
-  const widgets = metric.definition.widgets.map((widget) => runMetricWidget(widget, variables));
+  const widgets: Awaited<ReturnType<typeof runMetricWidget>>[] = [];
+  for (const widget of metric.definition.widgets) {
+    widgets.push(await runMetricWidget(widget, variables));
+  }
   return {
     metric: {
       ...metric,
@@ -476,7 +485,7 @@ export async function handleMetrics(
       return true;
     }
     try {
-      runMetricRoute.respond(res, 200, runMetric(metric, parsed.body?.variables ?? {}));
+      runMetricRoute.respond(res, 200, await runMetric(metric, parsed.body?.variables ?? {}));
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
     }
