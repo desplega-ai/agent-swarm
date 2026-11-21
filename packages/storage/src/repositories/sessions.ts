@@ -848,10 +848,10 @@ const RESOURCE_NAMES: Record<SessionResourceKind, { table: string; column: strin
 };
 
 /**
- * An agent (worker) token: bound to its agent and nothing else. `scriptRun = 0`
+ * An agent (worker) token: bound to its agent and nothing else. A false `scriptRun`
  * leaves out a script run's ephemeral token (same all-null binding shape).
  */
-const AGENT_TOKEN_BINDING = sql`"taskId" IS NULL AND "runtimeId" IS NULL AND "controllerId" IS NULL AND "parentRuntimeId" IS NULL AND "scriptRun" = 0`;
+const AGENT_TOKEN_BINDING = sql`"taskId" IS NULL AND "runtimeId" IS NULL AND "controllerId" IS NULL AND "parentRuntimeId" IS NULL AND "scriptRun" = ${false}`;
 
 const PRICING_COLUMNS = sql`provider, model, token_class, effective_from, price_per_million_usd, "createdAt", "lastUpdatedAt"`;
 const COMPOSITION_COLUMNS = sql`id, "taskId", "agentId", "sessionId", seq, provider, model, source, parts, "staticEstTokens", "tokenRatio", "createdAt"`;
