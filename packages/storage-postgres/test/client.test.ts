@@ -119,6 +119,13 @@ describe("postgres client", () => {
     expect(notNull.message).toBe("NOT NULL constraint failed: t.camelCol");
     const check = await errorOf(`INSERT INTO t VALUES ('ck', 'x', -1)`);
     expect(isConstraintViolation(check, "check")).toBe(true);
+    // A unique index on an expression: SQLite names the index, not the columns.
+    await client.run(`CREATE TABLE ux (name text, owner text)`);
+    await client.run(`CREATE UNIQUE INDEX ux_name_owner ON ux (name, COALESCE(owner, ''))`);
+    await client.run(`INSERT INTO ux VALUES ('n', NULL)`);
+    const expression = await errorOf(`INSERT INTO ux VALUES ('n', NULL)`);
+    expect(expression.message).toBe("UNIQUE constraint failed: index 'ux_name_owner'");
+    expect(expression.code).toBe("SQLITE_CONSTRAINT_UNIQUE");
   });
 
   test("afterCommit runs after COMMIT; a rolled-back transaction runs only its rollback hooks", async () => {

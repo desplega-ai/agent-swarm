@@ -52,6 +52,15 @@ function sqliteEquivalent(
   const table = pg.table ?? "";
   switch (kind) {
     case "unique": {
+      // SQLite names an index on expressions instead of its columns:
+      // `UNIQUE constraint failed: index 'idx_skills_name_scope'`.
+      const key = pg.detail?.match(/^Key \((.+?)\)=/)?.[1] ?? "";
+      if (key.includes("(") && pg.constraint) {
+        return {
+          message: `UNIQUE constraint failed: index '${pg.constraint}'`,
+          code: "SQLITE_CONSTRAINT_UNIQUE",
+        };
+      }
       const columns = keyColumns(pg.detail).map((column) => `${table}.${column}`);
       const suffix = columns.length > 0 ? columns.join(", ") : (pg.constraint ?? table);
       return { message: `UNIQUE constraint failed: ${suffix}`, code: "SQLITE_CONSTRAINT_UNIQUE" };

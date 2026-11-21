@@ -695,15 +695,12 @@ export async function handlePoll(
               return ok;
             };
             // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
-            const unassignedIds = await getUnassignedTaskIdsForAgent(
-              myAgentId,
-              5,
-              async (task) =>
-                (await poolTaskRunsOnHarness(task, harness)) &&
-                (task.profile
-                  ? await passesProfileCheck(task.profile, task.vcsRepo)
-                  : !task.modelGroup || (await passesGroupCheck(task.modelGroup, task.vcsRepo))),
-            );
+            const runsHere = async (task: AgentTask) =>
+              (await poolTaskRunsOnHarness(task, harness)) &&
+              (task.profile
+                ? await passesProfileCheck(task.profile, task.vcsRepo)
+                : !task.modelGroup || (await passesGroupCheck(task.modelGroup, task.vcsRepo)));
+            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5, runsHere);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
@@ -765,7 +762,25 @@ export async function handlePoll(
                 };
               }
             }
-            for (const candidateId of unassignedIds) {
+            // Decision D7: on Postgres this write pass runs at READ COMMITTED, so
+            // concurrent polls can claim every candidate of this list first. Then
+            // read the pool again (the SERIALIZABLE retry did the same), so a free
+            // task does not wait for the next poll. On SQLite the first claim wins:
+            // one writer, so the list never goes stale.
+            const tried = new Set<string>();
+            const candidates = async function* () {
+              let batch = unassignedIds;
+              for (let round = 0; batch.length > 0 && round < 5; round++) {
+                for (const id of batch) {
+                  tried.add(id);
+                  yield id;
+                }
+                batch = (await getUnassignedTaskIdsForAgent(myAgentId, 5, runsHere)).filter(
+                  (id) => !tried.has(id),
+                );
+              }
+            };
+            for await (const candidateId of candidates()) {
               const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
                 await recordRuntimeTask(claimed.id);
