@@ -17,7 +17,7 @@
   },
   "src/be/checklist.ts": {
     "reason": "M2 move: tasks",
-    "sites": 7
+    "sites": 3
   },
   "src/be/db-queries/mcp-servers.ts": {
     "reason": "M2 move: integrations",
@@ -25,7 +25,7 @@
   },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
-    "sites": 6
+    "sites": 3
   },
   "src/be/db-retention-defaults.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -95,33 +95,13 @@
     "reason": "M2 move: integrations",
     "sites": 2
   },
-  "src/be/db/task-idempotency.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
-  },
-  "src/be/db/tasks/draft-text.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 2
-  },
-  "src/be/db/tasks/human-free.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 14
-  },
   "src/be/db/tasks/read.ts": {
     "reason": "M2 move: tasks",
-    "sites": 57
-  },
-  "src/be/db/tasks/search-index.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 10
-  },
-  "src/be/db/tasks/slack-fold.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
+    "sites": 11
   },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",
-    "sites": 35
+    "sites": 3
   },
   "src/be/db/user-references.ts": {
     "reason": "M2 move: users and RBAC",
@@ -285,7 +265,7 @@
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
-    "sites": 7
+    "sites": 3
   },
   "src/be/savings/calibrate.ts": {
     "reason": "M2 move: sessions and cost",
@@ -425,11 +405,11 @@
   },
   "src/be/task-citations.ts": {
     "reason": "M2 move: tasks",
-    "sites": 6
+    "sites": 3
   },
   "src/be/task-ui-spec.ts": {
     "reason": "M2 move: tasks",
-    "sites": 11
+    "sites": 2
   },
   "src/be/telemetry-ingest-anchor.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -515,10 +495,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
   },
-  "src/http/tasks.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 1
-  },
   "src/http/used-by.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
@@ -529,15 +505,7 @@
   },
   "src/scheduler/deferred-task-waits.ts": {
     "reason": "M2 move: schedules",
-    "sites": 11
-  },
-  "src/scheduler/schedule-task.ts": {
-    "reason": "M2 move: schedules",
     "sites": 2
-  },
-  "src/tasks/follow-up-gate.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 1
   },
   "src/telemetry-snapshot.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -547,36 +515,16 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
   },
-  "src/tools/cancel-task.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 1
-  },
-  "src/tools/defer-task.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 6
-  },
   "src/tools/join-swarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/poll-task.ts": {
-    "reason": "M2 move: tasks",
     "sites": 1
   },
   "src/tools/prompt-templates/set.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/tools/send-task.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 1
-  },
   "src/tools/store-progress.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/task-action.ts": {
-    "reason": "M2 move: tasks",
     "sites": 1
   },
   "src/tools/utils.ts": {

@@ -16,6 +16,7 @@ import { runtimePoolsContract } from "./runtime-pools";
 import { scriptsContract } from "./scripts";
 import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
+import { tasksContract } from "./tasks";
 import { trackersContract } from "./trackers";
 import { usersContract } from "./users";
 import { workflowsContract } from "./workflows";
@@ -44,4 +45,5 @@ export function runStorageContract(engine: ContractEngine): void {
   pagesContract(engine);
   skillsContract(engine);
   kvContract(engine);
+  tasksContract(engine);
 }

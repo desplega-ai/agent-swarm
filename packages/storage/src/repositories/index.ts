@@ -15,6 +15,7 @@ export * from "./runtime-pools";
 export * from "./scripts";
 export * from "./skills";
 export * from "./slack";
+export * from "./tasks";
 export * from "./trackers";
 export * from "./users";
 export * from "./workflows";

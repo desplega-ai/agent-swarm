@@ -23,6 +23,7 @@ import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteScriptsRepository } from "./repositories/scripts";
 import { SqliteSkillsRepository } from "./repositories/skills";
 import { SqliteSlackRepository } from "./repositories/slack";
+import { SqliteTasksRepository } from "./repositories/tasks";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
 import { SqliteWorkflowsRepository } from "./repositories/workflows";
@@ -76,6 +77,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       pages: new SqlitePagesRepository(executor),
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
+      tasks: new SqliteTasksRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

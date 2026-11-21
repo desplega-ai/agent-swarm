@@ -5,6 +5,7 @@ import { getGitHubLinkConfig } from "../utils/github-host";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { citationHttpUrl, type TaskCitation } from "../utils/task-citations";
 import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 export const MAX_TASK_CITATIONS = 50;
 
@@ -121,36 +122,24 @@ export async function upsertTaskCitations(
         verified = "unchecked";
       }
     }
-    await db.run(
-      `INSERT INTO task_citations
-      (task_id, citation_index, kind, ref, label, quote, resolved_url, verified, general)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(task_id, citation_index) DO UPDATE SET
-        kind=excluded.kind, ref=excluded.ref, label=excluded.label, quote=excluded.quote,
-        resolved_url=excluded.resolved_url, verified=excluded.verified, general=excluded.general,
-        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-      [
-        taskId,
-        citation.index,
-        citation.kind,
-        citation.ref,
-        citation.label ?? null,
-        citation.quote ?? null,
-        buildCitationUrl(citation),
-        verified,
-        citation.general ? 1 : 0,
-      ],
-    );
+    await getStorage().repos.tasks.upsertTaskCitation(taskId, {
+      index: citation.index,
+      kind: citation.kind,
+      ref: citation.ref,
+      label: citation.label ?? null,
+      quote: citation.quote ?? null,
+      resolvedUrl: buildCitationUrl(citation),
+      verified,
+      general: !!citation.general,
+    });
   }
 }
 
 export async function getTaskCitations(taskId: string): Promise<TaskCitation[]> {
-  const rows = await getDbClient().query<Omit<TaskCitation, "general"> & { general: number }>(
-    `SELECT citation_index AS "index", kind, ref, label, quote,
-    resolved_url AS resolvedUrl, verified, general FROM task_citations
-    WHERE task_id = ? ORDER BY citation_index`,
-    [taskId],
-  );
+  const rows = (await getStorage().repos.tasks.listTaskCitations(taskId)) as (Omit<
+    TaskCitation,
+    "general"
+  > & { general: number })[];
   return rows.map((row) => ({ ...row, general: row.general === 1 }));
 }
 
@@ -168,14 +157,10 @@ export async function getTaskCitationsForTasks(
   const byTask = new Map<string, TaskCitation[]>(ids.map((id) => [id, []]));
   for (let i = 0; i < ids.length; i += TASK_ID_CHUNK) {
     const chunk = ids.slice(i, i + TASK_ID_CHUNK);
-    const rows = await getDbClient().query<
-      Omit<TaskCitation, "general"> & { general: number; taskId: string }
-    >(
-      `SELECT task_id AS taskId, citation_index AS "index", kind, ref, label, quote,
-      resolved_url AS resolvedUrl, verified, general FROM task_citations
-      WHERE task_id IN (${chunk.map(() => "?").join(",")}) ORDER BY task_id, citation_index`,
-      chunk,
-    );
+    const rows = (await getStorage().repos.tasks.listTaskCitationsForTasks(chunk)) as (Omit<
+      TaskCitation,
+      "general"
+    > & { general: number; taskId: string })[];
     for (const { taskId, ...row } of rows) {
       byTask.get(taskId)?.push({ ...row, general: row.general === 1 });
     }

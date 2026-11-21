@@ -19,6 +19,7 @@ import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { ScriptsRepository } from "./repositories/scripts";
 import type { SkillsRepository } from "./repositories/skills";
 import type { SlackRepository } from "./repositories/slack";
+import type { TasksRepository } from "./repositories/tasks";
 import type { TrackersRepository } from "./repositories/trackers";
 import type { UsersRepository } from "./repositories/users";
 import type { WorkflowsRepository } from "./repositories/workflows";
@@ -45,6 +46,7 @@ export type Repositories = {
   pages: PagesRepository;
   skills: SkillsRepository;
   kv: KvRepository;
+  tasks: TasksRepository;
 };
 
 /**
