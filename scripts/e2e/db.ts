@@ -227,6 +227,10 @@ export async function preparePostgresQueryReader(databaseUrl: string): Promise<s
   const database = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
   const sql = new Bun.SQL({ url: databaseUrl, max: 1 });
   try {
+    // Bench only: `E2E_POSTGRES_SEED_SQL` names a SQL file that seeds the database
+    // before the API boots (for example scripts/e2e/fixtures/postgres-bench-seed.sql).
+    const seedFile = process.env.E2E_POSTGRES_SEED_SQL;
+    if (seedFile) await sql.unsafe(await Bun.file(seedFile).text());
     await sql.unsafe(`CREATE ROLE "${role}" LOGIN`);
     await sql.unsafe(`GRANT CONNECT ON DATABASE "${database}" TO "${role}"`);
     await sql.unsafe(`GRANT USAGE ON SCHEMA public TO "${role}"`);
