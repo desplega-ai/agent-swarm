@@ -18,7 +18,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
 | M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
-| M6 Data copy | not started | |
+| M6 Data copy | done (part 9): `agent-swarm db-copy`, CLI and check-20 scenario `data-copy`, base-db fixture boots on Postgres through the copy (check 10), 4 contract tests | `f0480cc9a` |
 | M7 Delivery | not started | |
 
 ## Swarm adaptations (from the dispatching task, they win over the brief)
@@ -56,7 +56,10 @@ Last updated part 6 (head `61477a358`).
 | 17 | `bun run docs:openapi` | part 6 | diff adds only `dialect` on the db-query response (an engine field) |
 | 18 | `bun run test:storage` | part 7, head `243a93a9e` | **pass**: SQLite 398/0, Postgres 448/0 (new: isolation test) |
 | 21, 22 | bench report; stress scenarios | part 8, head `74403ae87` | **pass**: seeded bench writes p95 per route group and retry rate per site; `stress-poll-claim` and `stress-task-finish` show 0 exhausted retries and 0 5xx on Postgres. Sites above 5%: see D7 section. |
-| 19, 20, 23 to 26 | data copy, CI, docs, replica blockers, PR | | not done (M6, M7). |
+| 10 | base-commit SQLite file starts on the branch | part 9, head `f0480cc9a` | **pass on both engines** (`upgrade-base-db`; on Postgres through db-copy) |
+| 19 | CLI copy command | part 9, head `f0480cc9a` | **pass**: `agent-swarm db-copy`; manual copy of a booted SQLite file: 140 tables, 15,310 rows, every count and checksum equal; `packages/storage-postgres/test/data-copy.test.ts` 4/4 |
+| 20 | copy scenario with GET comparison | part 9, head `c9121c554` | **pass** (`data-copy`, `--only`, on both engine runs) |
+| 23 to 26 | CI, docs, replica blockers, PR | | not done (M7). |
 
 ## Failures at the base commit
 
@@ -413,6 +416,32 @@ Accepted exceptions (Daniel, 2026-11-21, part 9; no code change on these paths):
 
 With these and the keyed-creation exception, the retry-rate part of check 21 passes with recorded exceptions.
 
+## M6 results (part 9)
+
+Command: `agent-swarm db-copy --from <sqlite file> --to <postgres url> [--json <report>]` (defaults `DATABASE_PATH`, `DATABASE_URL`). Code: `packages/storage-sqlite/src/copy-source.ts` (read-only source), `packages/storage-postgres/src/data-copy.ts` (target), contract types in `packages/storage/src/data-copy.ts`, wiring in the composition root, CLI front end `src/be/data-copy-command.ts`.
+
+D11 steps, as built:
+
+1. The SQLite file opens with `readonly: true` and `PRAGMA query_only`. Integers read as bigint; text reads as its bytes (`CAST(x AS BLOB)`), so invalid UTF-8 is visible.
+2. A target with rows is refused. Exception: tables the Postgres chain itself inserts into (`pricing`, `roles`, `task_templates` and four more); the copy replaces their rows with the source's. A target with no table gets the chain first. A source or target at another migration head is refused with the runbook step (start this build on the SQLite file once, stop, copy). The copy also takes the one-process lock (D16), so it refuses a database an API runs on.
+3. `ALTER TABLE ... DISABLE TRIGGER USER` on each table with a user trigger, inside the copy transaction; `ENABLE` after `SET CONSTRAINTS ALL IMMEDIATE` (ALTER TABLE refuses pending trigger events). Foreign keys are deferred during the copy and checked before COMMIT.
+4. Conversion by the target column type (`format_type`/`typname`): boolean from 0/1, bigint, float, jsonb, timestamptz (both SQLite text formats; text with no zone is UTC), bytea, text. Every parameter binds as `$n::text::<type>` (a direct string bind into jsonb stores a JSON string, found by the checksum on the first run).
+5. Refused values are reported per table, column and row (NUL in text or JSON, invalid UTF-8, invalid timestamp, flag not 0/1, invalid JSON, NULL in NOT NULL, unknown type). Any refusal rolls back the whole copy: nothing is written. Decision inside my authority: no "replace and continue" mode; the operator fixes source rows first (runbook).
+6. Full text needs no rebuild (expression GIN indexes, migration 368/369). `memory_vec` is rebuilt from the copied `agent_memory.embedding` values with `EMBEDDING_DIMENSIONS` floats. FTS5 and sqlite-vec virtual and shadow tables are skipped by name (`agent_tasks_fts_state` is data and is copied).
+7. Each identity column restarts past its highest copied value (`setval`). `rowid` goes into `_rowid`.
+8. Per table: row count and an order-free checksum (sorted SHA-1 of each row's normalized values: booleans t/f, integers as bigint text, floats by value, JSON canonical with sorted keys, timestamps as epoch ms, bytea as hex). The target side reads Postgres text forms and normalizes the same way.
+9. Exit 1 on any refusal, refused target, constraint failure or count/checksum difference; exit 2 on bad arguments.
+
+Encrypted secrets copy as ciphertext; the target API needs the same encryption key file (the scenario proves a secret decrypts on the copy).
+
+Proof:
+- Manual: a SQLite file from a booted API, 140 tables, 15,310 rows, every count and checksum equal; a second copy into it refused (rows); a file with a NUL, invalid UTF-8 and an invalid timestamp refused with the three rows named, nothing written.
+- `packages/storage-postgres/test/data-copy.test.ts` (4 tests, in `test:storage`): every type, rowid, seeded-row replacement, sequence restart, trigger back on; 7 refusal kinds; a foreign key failure rolls back; occupied target and migration-head refusals.
+- Scenario `data-copy` (check 20, new, order 9010): fills a source API (agent, 3 tasks with Unicode, tags, schedule, plain and secret config, KV JSON, memory, page), copies, boots a Postgres API on the copy and compares 9 GET routes by strict deep-equal plus the KV value text; writes a new task on the copy; a second copy while the target API runs exits 1. The only normalization: each API's own origin in links (a page `api_url`) becomes a placeholder, because the two APIs listen on different ports.
+- `upgrade-base-db` (check 10) on Postgres: the harness boots this build on the fixture file (SQLite chain upgrade), stops it, runs db-copy into the SUT database, boots the SUT with the fixture key. Passes on both engines.
+
+Decision inside my authority: `data-copy` needs `E2E_POSTGRES_URL` in every run, including the SQLite run, so the scenario list stays the same on both engines (check 3). CI gives the SQLite e2e job a Postgres service too (M7).
+
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
 Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metadata) and `platform-users` (the `profile_changed` event's before/after) failed on JSON text. Daniel chose (a), `accept_reorder`: keep `jsonb` and accept reordered keys. The two scenarios now compare the parsed value with a strict deep-equal (`Bun.deepEquals(..., true)`); every key and value is still asserted. Recorded under "Deviations" and "Edited scenarios". `kv_entries.value` is text and keeps its byte-order assertion.
@@ -483,6 +512,8 @@ See "M1 results / Edited scenarios".
 - `divergence-db-query-denial` (part 6): the parameterized query binds with `$1` instead of `?` (both dialects accept `$1`; SQL portability, no assertion change).
 
 ## New scenarios after M1
+
+- `data-copy` (part 9, order 9010): check 20.
 
 - `stress-task-finish` (part 8, order 9444, flow `storage-engine-parity`): concurrent finishes; guards the D7 locks of task finish.
 - `task-live-claim` (part 4, order 9990, runs last): a worker claims a task and keeps a heartbeating session on it, so the strict gate's `task-statuses` surface sees `in_progress`. Closes the base-commit coverage gap without an exclusion.
