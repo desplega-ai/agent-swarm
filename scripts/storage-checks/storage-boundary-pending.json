@@ -233,7 +233,7 @@
   },
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 22
+    "sites": 2
   },
   "src/be/onboarding.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

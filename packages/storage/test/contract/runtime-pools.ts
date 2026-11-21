@@ -677,5 +677,173 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       expect(await repo.hasSeedMarker("maintenance", "k")).toBe(true);
       expect(await repo.hasSeedMarker("other", "k")).toBe(false);
     });
+
+    test("runtime lifecycle: register refreshes only the owner's row; provisioning insert and slots", async () => {
+      await agent("a1");
+      await agent("a2");
+      const first = await repo.upsertActiveRuntime({
+        id: "r1",
+        agentId: "a1",
+        reportedSlots: 2,
+        metadata: '{"v":1}',
+      });
+      expect(first).toMatchObject({
+        id: "r1",
+        agent_id: "a1",
+        status: "active",
+        reported_slots: 2,
+        metadata: '{"v":1}',
+        pool_id: null,
+        draining: 0,
+        credential_ready: null,
+      });
+      expect(first?.last_seen_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      // Same agent: refreshed, a null metadata keeps the stored one.
+      const again = await repo.upsertActiveRuntime({
+        id: "r1",
+        agentId: "a1",
+        reportedSlots: 3,
+        metadata: null,
+      });
+      expect(again).toMatchObject({ reported_slots: 3, metadata: '{"v":1}' });
+      // Another agent: no row written.
+      expect(
+        await repo.upsertActiveRuntime({
+          id: "r1",
+          agentId: "a2",
+          reportedSlots: 1,
+          metadata: null,
+        }),
+      ).toBeNull();
+      expect(await repo.findRuntimeInstance("r1")).toMatchObject({ agent_id: "a1" });
+      expect(await repo.findRuntimeInstance("missing")).toBeNull();
+
+      await controller("c1");
+      await repo.insertPool(newPool({ id: "p1" }));
+      const prov = await repo.insertProvisioningRuntime({
+        id: "r2",
+        agentId: "a1",
+        poolId: "p1",
+        controllerId: "c1",
+        reportedSlots: 1,
+        workspaceSlot: 1,
+        now: T0,
+      });
+      expect(prov).toMatchObject({
+        status: "provisioning",
+        pool_id: "p1",
+        controller_id: "c1",
+        provision_requested_at: T0,
+        workspace_slot: 1,
+      });
+      expect(await repo.isProvisioningRuntimeOf("r2", "a1")).toBe(true);
+      expect(await repo.isProvisioningRuntimeOf("r2", "a2")).toBe(false);
+      expect(await repo.isProvisioningRuntimeOf("r1", "a1")).toBe(false);
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET workspace_slot = 0 WHERE id = 'r1'`,
+      );
+      expect(await repo.listWorkspaceSlotsInUse("a1")).toEqual([0, 1]);
+      await repo.overwriteProvisionError("r2", "e1");
+      await repo.overwriteProvisionError("r2", "e2");
+      expect(await repo.findRuntimeInstance("r2")).toMatchObject({ provision_error: "e2" });
+      expect(await repo.markRuntimeOffline("r2", "a2")).toBeNull();
+      expect(await repo.markRuntimeOffline("r2", "a1")).toMatchObject({ status: "offline" });
+      expect(await repo.listWorkspaceSlotsInUse("a1")).toEqual([0]);
+
+      await storage.executor.run(sql`
+        UPDATE runtime_pools SET consecutive_failures = 3, circuit_open_until = ${T1} WHERE id = 'p1'`);
+      await repo.resetPoolCircuit("p1");
+      expect(await repo.findPool("p1")).toMatchObject({
+        consecutiveFailures: 0,
+        circuitOpenUntil: null,
+      });
+    });
+
+    test("runtime liveness: touch, credential readiness, counts and listings", async () => {
+      await agent("a1");
+      await agent("a2");
+      await runtime("r1", "a1");
+      await runtime("r0", "a1");
+      await runtime("r2", "a2");
+      await runtime("off", "a1", { status: "offline" });
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET last_seen_at = ${T1}, created_at = ${T0}`,
+      );
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET last_seen_at = ${T0} WHERE id = 'r2'`,
+      );
+
+      expect(await repo.countLiveRuntimes("a1", T1)).toBe(2);
+      expect(await repo.countLiveRuntimes("a2", T1)).toBe(0);
+      expect(await repo.listAgentIdsWithLiveRuntime(T0)).toEqual(["a1", "a2"]);
+      expect(await repo.listAgentIdsWithLiveRuntime(T1)).toEqual(["a1"]);
+      const listed = await repo.listRuntimesForAgent("a1", T1);
+      expect(listed.map((r) => [r.id, r.is_live])).toEqual([
+        ["off", 0],
+        ["r0", 1],
+        ["r1", 1],
+      ]);
+
+      expect(await repo.isLiveConfirmedRuntime("r1", "a1", T1)).toBe(true);
+      expect(await repo.isLiveConfirmedRuntime("r1", "a2", T1)).toBe(false);
+      expect(await repo.isLiveConfirmedRuntime("r2", "a2", T1)).toBe(false);
+      // A workspace runtime without a verified handle is not confirmed.
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET workspace_slot = 0 WHERE id = 'r0'`,
+      );
+      expect(await repo.isLiveConfirmedRuntime("r0", "a1", T1)).toBe(false);
+      expect(await repo.touchLiveRuntime("r0", "a1", T1)).toBe(false);
+      expect(await repo.touchLiveRuntime("r1", "a1", T1)).toBe(true);
+      expect((await repo.findRuntimeInstance("r1"))?.last_seen_at).not.toBe(T1);
+      expect(await repo.touchLiveRuntime("r2", "a2", T1)).toBe(false);
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET last_seen_at = ${T1} WHERE id = 'r1'`,
+      );
+
+      expect(await repo.hasReadyLiveRuntime("a1", T1)).toBe(true);
+      expect(await repo.setRuntimeCredentialReady("r1", "a1", false, T1)).toBe(true);
+      expect(await repo.setRuntimeCredentialReady("r0", "a1", false, T1)).toBe(true);
+      expect(await repo.findRuntimeInstance("r1")).toMatchObject({ credential_ready: 0 });
+      expect(await repo.hasReadyLiveRuntime("a1", T1)).toBe(false);
+      expect(await repo.setRuntimeCredentialReady("r1", "a1", true, T1)).toBe(true);
+      expect(await repo.findRuntimeInstance("r1")).toMatchObject({ credential_ready: 1 });
+      expect(await repo.hasReadyLiveRuntime("a1", T1)).toBe(true);
+      expect(await repo.setRuntimeCredentialReady("r2", "a2", true, T1)).toBe(false);
+    });
+
+    test("runtime sweep: stale non-pool rows in insertion order, prune keeps provisioning and live pool rows", async () => {
+      await agent("a1");
+      await controller("c1");
+      await repo.insertPool(newPool({ id: "p1" }));
+      await runtime("s2", "a1");
+      await runtime("s1", "a1");
+      await runtime("pool-active", "a1", { poolId: "p1", controllerId: "c1" });
+      await runtime("pool-off", "a1", { poolId: "p1", controllerId: "c1", status: "offline" });
+      await runtime("prov", "a1", { poolId: "p1", controllerId: "c1", status: "provisioning" });
+      await runtime("fresh", "a1");
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET last_seen_at = ${T0}, created_at = ${T1}`,
+      );
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET last_seen_at = ${T2} WHERE id = 'fresh'`,
+      );
+      await storage.executor.run(
+        sql`UPDATE runtime_instances SET created_at = ${T0} WHERE id = 'pool-off'`,
+      );
+      expect(await repo.listStaleUnpooledRuntimes(T1)).toEqual([
+        { id: "s2", agent_id: "a1" },
+        { id: "s1", agent_id: "a1" },
+      ]);
+      expect((await repo.listRuntimesForPool("p1")).map((r) => r.id)).toEqual([
+        "pool-off",
+        "pool-active",
+        "prov",
+      ]);
+      expect(await repo.pruneStaleRuntimes(T1)).toBe(3);
+      const left = await storage.executor.query<{ id: string }>(
+        sql`SELECT id FROM runtime_instances ORDER BY id`,
+      );
+      expect(left.map((r) => r.id)).toEqual(["fresh", "pool-active", "prov"]);
+    });
   });
 }
