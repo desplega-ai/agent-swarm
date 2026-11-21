@@ -35,15 +35,27 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 
 ## Section 3 checks
 
+Last updated part 6 (head `61477a358`).
+
 | # | Check | Last run | Result |
 |---|---|---|---|
-| 1 | `bun run e2e:strict` (SQLite) | M2 head `7599d6cd2`, part 5 | **pass** (exit 0): 238 passed, 0 failed, 1 flaky (`model-group-resolution`, flaky at the base commit too). Coverage 100% on every axis, `task-statuses` 10/10. Same result with `--tx-replay` (exit 0, 238 passed, same flaky). |
-| 8 | no change to base migration files | M0 | pass (no migration touched) |
-| 16 | existing gates | M2 head, part 5 | pass: `lint`, `lint:slop`, `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh` (after one allowlist line, see below), `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. `test:root -- --parallel=4` (head `8f135b9d7`): exit 1, 22,999 pass / 57 fail; 44 of the 57 are in the base-commit failure set; of the other 13, 6 were a real regression (fixed in `f3ce45ec5`, see Part 5) and 7 pass when rerun alone (load: `routing-reason-inventory` 5 s timeout, `savings-rollup` SQLite busy, `db-query` bounded heartbeat rate, `gate fuzz`, Slack config reload). `e2e:ui`: see Part 5. |
-| 11 | `bun run check:dep-graph` rejects a driver import | part 6, head after `d3c939a92` | **pass**: clean tree exit 0 (0 errors, warnings only). Planted and reverted: `import { Database } from "bun:sqlite"` in `src/be/` and in `packages/storage-postgres/src/` (2 errors `sqlite-driver-only-in-sqlite-package`, exit 1); `import postgres from "postgres"` in `src/be/` (error `postgres-driver-only-in-postgres-package`); `import { SQL } from "bun"` and `Bun.SQL` in `src/be/` (exit 1, from `check-driver-imports.ts`). Before part 6 the `Bun.SQL` plant passed: depcruise sees the module `bun`, not the name `SQL`, and `check:storage-boundary` did not cover it despite the rule comment. Fix: `scripts/storage-checks/check-driver-imports.ts`, run by `check:dep-graph` after depcruise. |
-| 8 (M2) | no change to base migration files | M2 head, part 5 | pass: `git diff 99d7de13a -- 'src/be/migrations/*.sql'` is empty |
-
-Other checks: not run yet. Most of their commands do not exist yet.
+| 1 | `bun run e2e:strict` (SQLite) | part 6, head `f1e1b2275` | **pass** (exit 0): 236 passed, 0 failed, 2 flaky (`slack-lead-follow-up-card`, `model-group-resolution`, both flaky before this work). `task-statuses` 10/10. |
+| 2 | `bun run e2e:strict --engine postgres` | part 6, heads `a94edbdad` and `16631956a` | **fail / incomplete**: both runs hit the run timeout (50 and 65 min). Run 2: 196 passed, 54 failed attempts. Fixed groups re-pass with `--only`. Open: JSON key order (decision needed), retry rates (D7 decision). |
+| 3, 4, 5 | same scenario list, `--tx-replay` on Postgres, divergence scenarios on Postgres | | not run on Postgres yet (5 of the 11 divergence scenarios pass on Postgres with `--only`; `divergence-values` fails on JSON key order) |
+| 6 | no new coverage exclusion | | not checked yet |
+| 7 | `bun run check:schema-parity` | part 6, head `16631956a` | **pass**: 0 unexplained, 164 allowlisted |
+| 8 | no change to base migration files | part 6, head `61477a358` | **pass**: `git diff --name-status 99d7de13a -- 'src/be/migrations/*.sql'` lists 6 added files, 0 modified, deleted or renamed |
+| 9 | `scripts/check-migration-conflicts.sh` with the Postgres chain | part 5 | pass (not re-run in part 6) |
+| 10 | base-commit SQLite file starts on the branch | M1 scenario | passes in check 1 |
+| 11 | `bun run check:dep-graph` rejects a driver import | part 6 | **pass**: planted `bun:sqlite` (in `src/` and in the Postgres package), `postgres`, `import { SQL } from "bun"` and `Bun.SQL` each fail it (exit 1); clean tree exit 0. Before part 6 a planted `Bun.SQL` passed; `check-driver-imports.ts` closes that. |
+| 12 | `bun run check:storage-boundary` | part 6, head `14f212978` | **pass**: 0 pending sites. Permanent entries with reasons: composition root, `sql-connections.ts`, `db/runtime.ts`, `storage.ts`, `scripts/typecheck.ts`, and the seeded-scripts directory (needs review). |
+| 13 | `bun run check:sql-portability` | part 6 | **pass** (2,753 templates) |
+| 14 | `bun run check:no-new-triggers` | part 6 | **pass** |
+| 15 | `bun run check:tx-callbacks` | part 6 | **pass** |
+| 16 | existing gates | part 6 | `lint`, `lint:slop`, `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`: pass. `test:root -- --parallel=4` (head `f1e1b2275`): exit 1, 23,077 pass / 22 fail. 2 were branch regressions, fixed in `61477a358` (package-publish: the CLI bundle imported `bun`; the routingAffinity inventory count). The other 20 fail at the base commit or are listed there: AgentMail webhooks 8, realtime transport 7, GitLab event names 2, Slack config reload 1 (load), `initTelemetry` activation funnel 1 (fails alone at the base commit, `pg-base` worktree, part 6). `e2e:ui`: not re-run in part 6. |
+| 17 | `bun run docs:openapi` | part 6 | diff adds only `dialect` on the db-query response (an engine field) |
+| 18 | `bun run test:storage` | part 6, head `14f212978` | **pass**: SQLite 398/0, Postgres 447/0 |
+| 19 to 26 | data copy, bench report, stress, CI, docs, replica blockers, PR | | not done (M6, M7). Bench and stress tooling exist (M5). |
 
 ## Failures at the base commit
 
@@ -423,6 +435,8 @@ See "M1 results / Edited scenarios".
 - `task-live-claim` (part 4, order 9990, runs last): a worker claims a task and keeps a heartbeating session on it, so the strict gate's `task-statuses` surface sees `in_progress`. Closes the base-commit coverage gap without an exclusion.
 
 ## Edited unit tests (D5 import or SQL-text only)
+
+- Part 6: `db-task-read-contract` and `db-task-write-contract` facade manifests list the 4 exports the Postgres start added to `db.ts`; `routing-affinity-inventory` counts the insert-row `routingAffinity` field (2, was 1); `seed-scripts` and `heartbeat-jev-gate` pinned SQL text follows the ported scripts; memory tests `await getHealth()`.
 
 - `src/tests/skill-usage-cohorts.test.ts`: the query-plan exemption matches `MIN("createdAt")` (identifier now quoted per D8).
 - `src/tests/claude-managed-adapter.test.ts` (part 5, timing only): the fake event stream waits 20 ms before each event. With the resolver async through storage, the in-process note render takes a few async reads; back-to-back fake events settled the session first. No assertion changed.
