@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { ensureModelProfilesSeeded, ensurePricingSeeded, ensureRbacSeeded } from "./be/boot-seeds";
-import { initDb } from "./be/db";
+import { initDb, isPostgresEngine, startPostgres } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
@@ -440,7 +440,9 @@ export async function createServer(
 
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-  initDb(process.env.DATABASE_PATH);
+  // DATABASE_URL with a postgres:// scheme selects the Postgres engine instead (async start).
+  if (isPostgresEngine()) await startPostgres();
+  else initDb(process.env.DATABASE_PATH);
 
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0). This runs

@@ -1,0 +1,131 @@
+import type { DbClient } from "@desplega/storage";
+
+/**
+ * Start-time statements of the Postgres engine (the API start in
+ * `src/be/db/runtime.ts` reaches them through the composition root).
+ */
+
+/** A column whose values may be sealed (encrypted JSON that starts with a prefix). */
+export type PostgresSealedColumn = { table: string; column: string };
+
+const PLAIN_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The read codec turns a boolean into 0/1 (the SQLite value shape). */
+function truthy(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
+function quoteIdent(name: string): string {
+  if (!PLAIN_IDENT.test(name)) throw new Error(`Not a plain identifier: ${name}`);
+  return `"${name}"`;
+}
+
+/** True when the current schema holds no table or view: this start creates the database. */
+export async function isEmptyPostgresDatabase(client: DbClient): Promise<boolean> {
+  const row = await client.get<{ present: number | boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'v', 'p', 'm')
+     ) AS present`,
+  );
+  return !truthy(row?.present);
+}
+
+/** True when the pgvector extension is installed in this database. */
+export async function hasPgvector(client: DbClient): Promise<boolean> {
+  const row = await client.get<{ present: number | boolean }>(
+    `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector') AS present`,
+  );
+  return truthy(row?.present);
+}
+
+/**
+ * True when any secret config row, OAuth app secret, OAuth token set, or sealed
+ * replay value is stored encrypted. The API then must reuse its key. The same
+ * rule as the SQLite probe (`packages/storage-sqlite/src/boot/secrets-probe.ts`).
+ */
+export async function hasEncryptedSecretRowsPostgres(
+  client: DbClient,
+  sealedColumns: readonly PostgresSealedColumn[],
+  sealedPrefix: string,
+): Promise<boolean> {
+  const arms = sealedColumns.map(
+    ({ table, column }) =>
+      `UNION ALL SELECT 1 FROM ${quoteIdent(table)} WHERE left(${quoteIdent(column)}, $1) = $2`,
+  );
+  const row = await client.get<{ present: number | boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM swarm_config WHERE "isSecret" AND encrypted
+       UNION ALL
+       SELECT 1 FROM oauth_apps
+         WHERE "clientSecretEncrypted" AND "clientSecret" IS NOT NULL
+       UNION ALL
+       SELECT 1 FROM oauth_authorizations WHERE "tokensEncrypted"
+       ${arms.join("\n       ")}
+     ) AS present`,
+    [sealedPrefix.length, sealedPrefix],
+  );
+  return truthy(row?.present);
+}
+
+/** Key of the session advisory lock one API process holds for its whole life (decision D16). */
+export const PROCESS_LOCK_KEY = 7_365_420_302n;
+
+export type ProcessLockOptions = {
+  /** How long a second process waits for the lock before it gives up. */
+  waitMs: number;
+  /** Delay between two attempts. */
+  pollMs?: number;
+};
+
+export type ProcessLock = { release(): Promise<void> };
+
+/** Thrown when another API process holds the one-process lock of this database. */
+export class ProcessLockHeldError extends Error {
+  constructor(waitedMs: number) {
+    super(
+      `[storage] another API process holds this Postgres database (session advisory lock ${PROCESS_LOCK_KEY}). ` +
+        `Waited ${Math.round(waitedMs / 1000)} s. One API process per database: stop the other process first.`,
+    );
+    this.name = "ProcessLockHeldError";
+  }
+}
+
+/**
+ * The one-process guard (decision D16): a session advisory lock on a dedicated
+ * connection, held until `release()` or until the process exits. A second
+ * process polls for `waitMs`, then fails with `ProcessLockHeldError`.
+ */
+export async function acquireProcessLock(
+  url: string,
+  options: ProcessLockOptions,
+): Promise<ProcessLock> {
+  const pollMs = options.pollMs ?? 500;
+  // A dedicated one-connection pool: the lock lives as long as this session.
+  const conn = new Bun.SQL({ url, max: 1, idleTimeout: 0, maxLifetime: 0 });
+  const started = Date.now();
+  try {
+    for (;;) {
+      const rows = (await conn.unsafe("SELECT pg_try_advisory_lock($1) AS locked", [
+        PROCESS_LOCK_KEY,
+      ])) as { locked: boolean }[];
+      if (rows[0]?.locked === true) break;
+      const waited = Date.now() - started;
+      if (waited >= options.waitMs) throw new ProcessLockHeldError(waited);
+      await Bun.sleep(Math.min(pollMs, options.waitMs - waited));
+    }
+  } catch (err) {
+    await conn.close({ timeout: 1 }).catch(() => {});
+    throw err;
+  }
+  let released = false;
+  return {
+    async release() {
+      if (released) return;
+      released = true;
+      await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
+      await conn.close({ timeout: 1 }).catch(() => {});
+    },
+  };
+}

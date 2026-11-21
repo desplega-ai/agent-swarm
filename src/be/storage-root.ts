@@ -3,6 +3,9 @@
  * package (check:dep-graph). Everything else in `src/` imports the contracts
  * package `@desplega/storage` and asks `getStorage()` for repositories.
  */
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   DbClient,
   PromptTemplateFilters,
@@ -12,6 +15,20 @@ import type {
   StatementObserver,
   Storage,
 } from "@desplega/storage";
+import {
+  acquireProcessLock,
+  type ColumnClassification,
+  createPostgresClient,
+  createPostgresStorage,
+  hasEncryptedSecretRowsPostgres,
+  hasPgvector,
+  isEmptyPostgresDatabase,
+  isInPostgresTransaction,
+  loadTimestampFormats,
+  PostgresClient,
+  type PostgresSealedColumn,
+  runPostgresMigrations,
+} from "@desplega/storage-postgres";
 import {
   type BusyRetryOptions,
   createBunSqliteClient,
@@ -23,7 +40,7 @@ import {
   updatePromptTemplateRecordSync,
 } from "@desplega/storage-sqlite";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDb } from "./db/runtime";
+import { getDb, getDbClient, isPostgresEngine } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
 
 export type { BusyRetryOptions };
@@ -69,20 +86,131 @@ export function createSqliteClient(
 }
 
 export function isInTransaction(): boolean {
-  return sqliteIsInTransaction();
+  return sqliteIsInTransaction() || isInPostgresTransaction();
 }
 
 export function createStorage(client: DbClient, options: { vectorSearch: boolean }): Storage {
+  if (client instanceof PostgresClient) {
+    // dbQuery stays off until the restricted-role connection of decision D10 exists.
+    return createPostgresStorage(client, { vectorSearch: options.vectorSearch, dbQuery: false });
+  }
   return createSqliteStorage(client, options);
+}
+
+// ---- Engine selection (Postgres brief D1) ----
+
+export type StorageEngine = "sqlite" | "postgres";
+
+const POSTGRES_URL = /^postgres(ql)?:\/\//i;
+
+/**
+ * `DATABASE_URL` with a `postgres://` or `postgresql://` scheme selects
+ * Postgres. No `DATABASE_URL` (or another scheme) selects SQLite at
+ * `DATABASE_PATH`. `DATABASE_URL` is a reserved key: only the deployment env sets it.
+ */
+export function selectStorageEngine(env: NodeJS.ProcessEnv = process.env): StorageEngine {
+  const url = env.DATABASE_URL?.trim();
+  return url && POSTGRES_URL.test(url) ? "postgres" : "sqlite";
+}
+
+/** A `DATABASE_URL` that is set but selects no engine (logged by the SQLite start). */
+export function ignoredDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const url = env.DATABASE_URL?.trim();
+  return url && !POSTGRES_URL.test(url) ? scrubSecrets(url) : null;
+}
+
+// ---- Postgres start (the engine-specific part; src/be/db/runtime.ts runs the seeds) ----
+
+/** How long a second API process waits for the one-process lock (decision D16). */
+const PROCESS_LOCK_WAIT_MS = 10_000;
+const POSTGRES_POOL_MAX = 10;
+
+/** Directory of the Postgres migration chain. */
+function postgresMigrationsDir(): string {
+  if (import.meta.dir.startsWith("/$bunfs/")) {
+    throw new Error(
+      "[db] the Postgres engine cannot run from a compiled binary yet: the Postgres migration chain is not shipped with it",
+    );
+  }
+  return join(import.meta.dir, "migrations", "postgres");
+}
+
+export type PostgresEngine = {
+  client: DbClient;
+  /** pgvector is installed. */
+  vectorSearch: boolean;
+  /** The database held no table before this start. */
+  createdThisBoot: boolean;
+  hasEncryptedSecretRows(
+    sealedColumns: readonly PostgresSealedColumn[],
+    sealedPrefix: string,
+  ): Promise<boolean>;
+  close(): Promise<void>;
+};
+
+/**
+ * Open the Postgres engine: take the one-process lock (D16), run the Postgres
+ * migration chain (D12), bind the timestamp formats of the read codec to this
+ * database (D8), then open the pool (SERIALIZABLE with retry, D6).
+ */
+export async function openPostgresEngine(url: string): Promise<PostgresEngine> {
+  console.log(`[db] Postgres engine selected (DATABASE_URL=${scrubSecrets(url)})`);
+  const migrationsDir = postgresMigrationsDir();
+  const lock = await acquireProcessLock(url, { waitMs: PROCESS_LOCK_WAIT_MS });
+  try {
+    const setup = createPostgresClient(url, { max: 1 });
+    let createdThisBoot: boolean;
+    let vectorSearch: boolean;
+    let timestampFormats: Awaited<ReturnType<typeof loadTimestampFormats>>;
+    try {
+      createdThisBoot = await isEmptyPostgresDatabase(setup);
+      await runPostgresMigrations(setup, { migrationsDir });
+      const classification = JSON.parse(
+        readFileSync(join(migrationsDir, "column-types.json"), "utf8"),
+      ) as ColumnClassification;
+      timestampFormats = await loadTimestampFormats(setup, classification);
+      vectorSearch = await hasPgvector(setup);
+    } finally {
+      await setup.close();
+    }
+    // Test-only switch set by `bun run e2e --tx-replay` (Postgres brief D6).
+    const txReplay = process.env.STORAGE_TX_REPLAY === "1";
+    if (txReplay) console.log(TX_REPLAY_BANNER);
+    const client = createPostgresClient(url, {
+      max: POSTGRES_POOL_MAX,
+      timestampFormats,
+      txReplay,
+    });
+    console.log(
+      `[db] Postgres engine ready (pgvector ${vectorSearch ? "present" : "absent"}${createdThisBoot ? ", new database" : ""})`,
+    );
+    return {
+      client,
+      vectorSearch,
+      createdThisBoot,
+      hasEncryptedSecretRows: (sealedColumns, sealedPrefix) =>
+        hasEncryptedSecretRowsPostgres(client, sealedColumns, sealedPrefix),
+      async close() {
+        try {
+          await client.close();
+        } finally {
+          await lock.release();
+        }
+      },
+    };
+  } catch (err) {
+    await lock.release();
+    throw err;
+  }
 }
 
 /**
  * The live engine handle. Its identity changes when the database is closed
  * and opened again, so once-per-database guards key on it (src/be/boot-seeds.ts).
- * SQLite: the current bun:sqlite Database.
+ * SQLite: the current bun:sqlite Database. Postgres: the engine client.
  */
 export function currentEngineHandle(): object {
-  return getDb();
+  return isPostgresEngine() ? getDbClient() : getDb();
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { Storage } from "@desplega/storage";
-import { getDbClient, isSqliteVecAvailable } from "./db/runtime";
+import { getDbClient, isVectorSearchAvailable } from "./db/runtime";
 import { createStorage } from "./storage-root";
 
 let storage: Storage | null = null;
@@ -11,7 +11,7 @@ let storageKey: { client: unknown; vectorSearch: boolean } | null = null;
  */
 export function getStorage(): Storage {
   const client = getDbClient();
-  const vectorSearch = isSqliteVecAvailable();
+  const vectorSearch = isVectorSearchAvailable();
   if (!storage || storageKey?.client !== client || storageKey.vectorSearch !== vectorSearch) {
     storage = createStorage(client, { vectorSearch });
     storageKey = { client, vectorSearch };

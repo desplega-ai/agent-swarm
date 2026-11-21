@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "../be/storage";
 import { createSweepScrubber, scrubObject } from "../utils/secret-scrubber";
 import { executeReadOnlyQueryBounded } from "./db-query-bounded";
 import {
@@ -61,6 +62,20 @@ export function assertSelectOnlyQuery(sql: string): void {
   }
 }
 
+/** The engine has no db-query connection (Postgres without decision D10's restricted role). */
+export class DbQueryUnavailableError extends Error {
+  constructor() {
+    super(
+      "db-query is not available on this storage engine (Postgres): it needs a restricted read-only query connection, which this API does not have yet",
+    );
+    this.name = "DbQueryUnavailableError";
+  }
+}
+
+function assertDbQueryAvailable(): void {
+  if (!getStorage().capabilities.dbQuery) throw new DbQueryUnavailableError();
+}
+
 /**
  * Gate in front of the bounded executor (Fix 1). `DB_QUERY_BOUNDED_ENABLED`
  * (default on) picks the path: enabled runs the bounded child-process
@@ -74,6 +89,7 @@ export async function executeReadOnlyQueryGated(
   budgetMs: number,
   maxRows?: number,
 ): Promise<DbQueryResponse> {
+  assertDbQueryAvailable();
   let result: DbQueryResult;
   if (isDbQueryBoundedEnabled()) {
     result = await executeReadOnlyQueryBounded(sql, params, budgetMs, maxRows);

@@ -3039,17 +3039,17 @@ export abstract class BaseTasksRepository implements TasksRepository {
         "lastUpdatedAt", created_by, updated_by, "isHumanFree", "sourceStepId", "sourceScriptRunId"
       ) VALUES (
         ${r.id}, ${r.key}, ${r.agentId}, ${r.creatorAgentId}, ${r.task}, ${r.status}, ${r.source},
-        ${r.routing_reason}, ${r.routing_source}, ${r.routing_note}, ${r.taskType}, ${r.tags},
-        ${r.priority}, ${r.dependsOn}, ${r.offeredTo}, ${r.offeredAt},
+        ${r.routing_reason}, ${r.routing_source}, ${r.routing_note}, ${r.taskType}, ${jsonText(r.tags)},
+        ${r.priority}, ${jsonText(r.dependsOn)}, ${r.offeredTo}, ${r.offeredAt},
         ${r.slackChannelId}, ${r.slackThreadTs}, ${r.slackTriggerMessageTs}, ${r.slackUserId},
-        ${r.slackParticipants},
+        ${jsonText(r.slackParticipants)},
         ${r.vcsProvider}, ${r.vcsRepo}, ${r.vcsEventType}, ${r.vcsNumber}, ${r.vcsCommentId},
         ${r.vcsAuthor}, ${r.vcsUrl}, ${r.vcsInstallationId}, ${r.vcsNodeId},
         ${r.agentmailInboxId}, ${r.agentmailMessageId}, ${r.agentmailThreadId},
         ${r.mentionMessageId}, ${r.mentionChannelId}, ${r.dir}, ${r.parentTaskId},
         ${r.dispatchedByTaskId}, ${r.model}, ${r.modelTier}, ${r.effort}, ${r.profile},
-        ${r.modelGroup}, ${r.fallbackHops}, ${r.scheduleId},
-        ${r.workflowRunId}, ${r.workflowRunStepId}, ${r.outputSchema}, ${r.followUpConfig},
+        ${r.modelGroup}, ${jsonText(r.fallbackHops)}, ${r.scheduleId},
+        ${r.workflowRunId}, ${r.workflowRunStepId}, ${jsonText(r.outputSchema)}, ${jsonText(r.followUpConfig)},
         ${r.requestedByUserId}, ${r.requestedByUserIdInherited}, ${r.contextKey},
         ${r.routingAffinity}, ${r.swarmVersion}, ${r.createdAt}, ${r.lastUpdatedAt},
         ${r.created_by}, ${r.updated_by}, ${r.isHumanFree}, ${r.sourceStepId}, ${r.sourceScriptRunId}
@@ -3061,8 +3061,8 @@ export abstract class BaseTasksRepository implements TasksRepository {
       INSERT INTO routing_decisions (
         task_id, selected_agent_id, captured_at, worker_statuses,
         continuity_candidates, created_by, updated_by
-      ) VALUES (${r.task_id}, ${r.selected_agent_id}, ${r.captured_at}, ${r.worker_statuses},
-        ${r.continuity_candidates}, ${r.created_by}, ${r.updated_by})`);
+      ) VALUES (${r.task_id}, ${r.selected_agent_id}, ${r.captured_at}, ${jsonText(r.worker_statuses)},
+        ${jsonText(r.continuity_candidates)}, ${r.created_by}, ${r.updated_by})`);
   }
 
   claimUnassignedTask(taskId: string, agentId: string, now: string): Promise<TaskRow | null> {

@@ -6,8 +6,11 @@ import { getStorage } from "../storage";
 import { getTaskById } from "./tasks/read";
 
 type SessionMoveDependencies = {
-  /** The sync boot audit (`auditAssetKeys`) over the raw handle, which only db.ts may use. */
-  auditAssetKeys: () => AssetKeyAuditResult;
+  /**
+   * The asset key audit. SQLite: the sync boot audit (`auditAssetKeys`) over the
+   * raw handle, which only db.ts may use. Postgres: the repository audit.
+   */
+  auditAssetKeys: () => AssetKeyAuditResult | Promise<AssetKeyAuditResult>;
   insertAssetKeyHistory: (input: {
     entityType: AssetEntityType;
     entityId: string;

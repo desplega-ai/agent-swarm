@@ -29,3 +29,14 @@ export {
   runPostgresMigrations,
 } from "./migrations";
 export { createPostgresStorage, type PostgresStorageOptions } from "./storage";
+export {
+  acquireProcessLock,
+  hasEncryptedSecretRowsPostgres,
+  hasPgvector,
+  isEmptyPostgresDatabase,
+  PROCESS_LOCK_KEY,
+  type PostgresSealedColumn,
+  type ProcessLock,
+  ProcessLockHeldError,
+  type ProcessLockOptions,
+} from "./boot";
