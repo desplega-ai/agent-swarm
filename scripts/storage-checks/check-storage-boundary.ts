@@ -28,6 +28,15 @@ const PERMANENT: Record<string, string> = {
     "user-configured external databases for scripts (ctx.sql); never the swarm database",
 };
 
+/** Directories whose SQL text is not storage access. Reason on each line. */
+const PERMANENT_DIRS: Record<string, string> = {
+  "src/be/seed-scripts/catalog/":
+    "seeded scripts: read-only user SQL sent to db_query (decision D10), which runs it under the restricted reader in the engine's own dialect; each statement is portable or carries one text per dialect",
+};
+
+const isPermanent = (file: string): boolean =>
+  Boolean(PERMANENT[file]) || Object.keys(PERMANENT_DIRS).some((dir) => file.startsWith(dir));
+
 type Pending = Record<string, { reason: string; sites: number }>;
 
 const DRIVER_SEAM = /^(DbClient|DbExecutor|getDbClient|getDb|createBunSqliteClient)$/;
@@ -101,7 +110,7 @@ const next: Pending = {};
 let pendingSites = 0;
 
 for (const file of files) {
-  if (PERMANENT[file]) continue;
+  if (isPermanent(file)) continue;
   const hits = scanFile(file);
   if (hits.length === 0) continue;
   const entry = init ? { reason: domainOf(file), sites: hits.length } : pending[file];
