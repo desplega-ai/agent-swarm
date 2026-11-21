@@ -14,7 +14,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
-| M2 Storage packages on SQLite | in progress: packages, checks 11/12/13/15, test:storage and --tx-replay done; replay-unsafe callbacks fixed; domain moves at 218 files / 1,906 sites pending | see git log |
+| M2 Storage packages on SQLite | in progress: packages, checks 11/12/13/15, test:storage done; strict suite with --tx-replay passes except the pre-existing `in_progress` gap; domain moves at 218 files / 1,906 sites pending | see git log |
 | M3 Postgres engine | not started | |
 | M4 Engine-specific domains | not started | |
 | M5 Contract on Postgres | not started | |
@@ -248,6 +248,8 @@ Run 1 (head `a7d0a8482`, `bun run e2e:strict --tx-replay`): exit 1. 231 passed, 
 - `workflow-agent-task-crash-window`: `claimStep` (passed by name, so check 15 missed it) kept its executing-step mark across attempts; recovery read it as another walker's claim. Fixed with `onAttemptRollback`; check 15 now also scans a callback passed by name.
 
 The other strict-gate errors of run 1 (11 routes, 17 MCP tools, 2 exclusions covered anyway) came from the failed scenarios, plus the pre-existing `in_progress` gap.
+
+Run 2 (head `96c910d92`, `bun run e2e:strict --tx-replay`, log kept outside the repo): exit 1. 236 passed, 0 failed, 1 flaky (`model-group-resolution`, pre-existing, passed on rerun). The strict gate fails only on the pre-existing coverage gap `task-statuses: in_progress`, the same failure as the base commit. The runner confirmed the replay banner.
 
 ### Replay-unsafe callbacks found and fixed (M2 step 6)
 
