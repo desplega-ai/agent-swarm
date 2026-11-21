@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlList } from "../sql";
 
@@ -554,13 +554,13 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
   async insertController(c: NewRuntimeController): Promise<void> {
     await this.db.run(sql`
       INSERT INTO runtime_controllers (id, name, kind, placement, config, secret_config, created_by, updated_by)
-      VALUES (${c.id}, ${c.name}, ${c.kind}, ${c.placement}, ${c.configJson}, ${c.secretConfig}, ${c.actor}, ${c.actor})`);
+      VALUES (${c.id}, ${c.name}, ${c.kind}, ${c.placement}, ${jsonText(c.configJson)}, ${c.secretConfig}, ${c.actor}, ${c.actor})`);
   }
 
   async updateController(id: string, u: RuntimeControllerUpdate): Promise<void> {
     await this.db.run(sql`
       UPDATE runtime_controllers SET name = ${u.name}, kind = ${u.kind}, placement = ${u.placement},
-        config = ${u.configJson}, secret_config = ${u.secretConfig},
+        config = ${jsonText(u.configJson)}, secret_config = ${u.secretConfig},
         updated_by = COALESCE(${u.actor}, updated_by), updated_at = ${u.now}
       WHERE id = ${id}`);
   }
@@ -642,20 +642,20 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
       INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes,
         slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, cache, workspace,
         ttl_sec, enabled, created_by, updated_by)
-      VALUES (${p.id}, ${p.name}, ${p.kind}, ${p.placementsJson}, ${p.image}, ${p.lifecycle},
+      VALUES (${p.id}, ${p.name}, ${p.kind}, ${jsonText(p.placementsJson)}, ${p.image}, ${p.lifecycle},
         ${p.idleMinutes}, ${p.slotsPerRuntime}, ${p.maxRuntimes}, ${p.minRuntimes}, ${p.delivery},
-        ${p.envJson}, ${p.resourcesJson}, ${p.cacheJson}, ${p.workspaceJson}, ${p.ttlSec},
+        ${jsonText(p.envJson)}, ${p.resourcesJson}, ${jsonText(p.cacheJson)}, ${jsonText(p.workspaceJson)}, ${p.ttlSec},
         ${p.enabled}, ${p.actor}, ${p.actor})`);
   }
 
   async updatePool(id: string, u: RuntimePoolUpdate): Promise<void> {
     await this.db.run(sql`
-      UPDATE runtime_pools SET name = ${u.name}, kind = ${u.kind}, placements = ${u.placementsJson},
+      UPDATE runtime_pools SET name = ${u.name}, kind = ${u.kind}, placements = ${jsonText(u.placementsJson)},
         image = ${u.image}, resolved_image = ${u.resolvedImage}, lifecycle = ${u.lifecycle},
         idle_minutes = ${u.idleMinutes}, slots_per_runtime = ${u.slotsPerRuntime},
         max_runtimes = ${u.maxRuntimes}, min_runtimes = ${u.minRuntimes}, delivery = ${u.delivery},
-        env = ${u.envJson}, resources = ${u.resourcesJson}, cache = ${u.cacheJson},
-        workspace = ${u.workspaceJson}, ttl_sec = ${u.ttlSec}, enabled = ${u.enabled},
+        env = ${jsonText(u.envJson)}, resources = ${u.resourcesJson}, cache = ${jsonText(u.cacheJson)},
+        workspace = ${jsonText(u.workspaceJson)}, ttl_sec = ${u.ttlSec}, enabled = ${u.enabled},
         updated_by = COALESCE(${u.actor}, updated_by), updated_at = ${u.now}
       WHERE id = ${id}`);
   }
@@ -711,7 +711,7 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
     await this.db.run(sql`
       INSERT INTO runtime_cache_releases
         (id, pool_id, controller_id, owner_id, cache_key, runtime_ids, created_by, updated_by)
-      VALUES (${r.id}, ${r.poolId}, ${r.controllerId}, ${r.ownerId}, ${r.cacheKey}, ${r.runtimeIdsJson},
+      VALUES (${r.id}, ${r.poolId}, ${r.controllerId}, ${r.ownerId}, ${r.cacheKey}, ${jsonText(r.runtimeIdsJson)},
         ${r.actor}, ${r.actor})
       ON CONFLICT (controller_id, owner_id, cache_key) DO NOTHING`);
   }
@@ -943,12 +943,14 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
   abstract listPendingWork<T>(agentId: string): Promise<T[]>;
 
   async countUnreadMentionChannels(agentId: string): Promise<number> {
+    // mentions is a JSON array (jsonb on Postgres): the match runs on its text
+    // form, where each id stays a quoted JSON string on both engines.
     const pattern = `%"${agentId}"%`;
     const row = await this.db.get<{ count: number }>(sql`
       SELECT COUNT(DISTINCT m."channelId") AS count FROM channel_messages m
       JOIN channels c ON c.id = m."channelId"
       LEFT JOIN channel_read_state s ON s."channelId" = m."channelId" AND s."agentId" = ${agentId}
-      WHERE ${likeAsciiCi(sql`m.mentions`, sql`${pattern}`)} AND s.processing_since IS NULL
+      WHERE ${likeAsciiCi(sql`CAST(m.mentions AS TEXT)`, sql`${pattern}`)} AND s.processing_since IS NULL
         AND (s."lastReadAt" IS NULL OR m."createdAt" > s."lastReadAt")`);
     return Number(row?.count ?? 0);
   }
@@ -1077,7 +1079,7 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
   }): Promise<RuntimeInstanceRow | null> {
     return this.db.get<RuntimeInstanceRow>(sql`
       INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
-      VALUES (${r.id}, ${r.agentId}, 'active', ${r.reportedSlots}, ${r.metadata})
+      VALUES (${r.id}, ${r.agentId}, 'active', ${r.reportedSlots}, ${jsonText(r.metadata)})
       ON CONFLICT (id) DO UPDATE SET
         status = 'active',
         reported_slots = excluded.reported_slots,

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type NewRuntimePool, type RuntimePoolsRepository, type Storage, sql } from "../../src";
+import {
+  jsonText,
+  type NewRuntimePool,
+  type RuntimePoolsRepository,
+  type Storage,
+  sql,
+} from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
@@ -596,7 +602,7 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       const message = (id: string, channelId: string, mentions: string, createdAt = T1) =>
         storage.executor.run(sql`
           INSERT INTO channel_messages (id, "channelId", content, mentions, "createdAt")
-          VALUES (${id}, ${channelId}, 'hi', ${mentions}, ${createdAt})`);
+          VALUES (${id}, ${channelId}, 'hi', ${jsonText(mentions)}, ${createdAt})`);
       await channel("ch1");
       await channel("ch2");
       await channel("ch3");
