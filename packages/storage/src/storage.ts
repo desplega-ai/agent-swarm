@@ -6,6 +6,7 @@ import type { AgentsRepository } from "./repositories/agents";
 import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { ModelsRepository } from "./repositories/models";
+import type { PagesRepository } from "./repositories/pages";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { ScriptsRepository } from "./repositories/scripts";
 
@@ -17,6 +18,7 @@ export type Repositories = {
   config: ConfigRepository;
   agents: AgentsRepository;
   scripts: ScriptsRepository;
+  pages: PagesRepository;
 };
 
 /**

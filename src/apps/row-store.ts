@@ -1,6 +1,7 @@
 import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
+import { getStorage } from "../be/storage";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -242,19 +243,13 @@ async function writeRow(
 }
 
 async function appExists(appId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ present: number }>(
-    "SELECT 1 AS present FROM apps WHERE id = ?",
-    [appId],
-  );
-  return row !== null;
+  return getStorage().repos.pages.appExists(appId);
 }
 
 async function currentModelDefinition(appId: string, model: string): Promise<ModelDef | null> {
-  const row = await getDbClient().get<{ definition: string }>(
-    "SELECT definition FROM apps WHERE id = ?",
-    [appId],
-  );
-  if (!row) return null;
+  const definitionJson = await getStorage().repos.pages.getAppDefinition(appId);
+  if (definitionJson === null) return null;
+  const row = { definition: definitionJson };
   try {
     const definition = AppDefinitionSchema.safeParse(
       upgradeAppDefinition(JSON.parse(row.definition)),

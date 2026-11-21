@@ -2,7 +2,7 @@ import { type FileScope, FilesError, normalizeStoredKey } from "@/fs/provider";
 import { buildAgentFsFileLink } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { agentFsClientFor } from "../agent-fs-identity";
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 import { emptySheet } from "./sheets/format";
 
 /**
@@ -144,39 +144,27 @@ async function saveRow(
   opts: { onlyNewer?: boolean } = {},
 ): Promise<ObjectRow> {
   const now = new Date().toISOString();
-  return getDbClient().transaction(async (tx) => {
-    await tx.run(
-      "DELETE FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ? AND id <> ?",
-      [row.orgId, row.driveId, row.path, row.id],
-    );
-    await tx.run(
-      `INSERT INTO primitive_objects
-         (id, kind, orgId, driveId, path, title, fileVersion, ownerAgentId, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         kind = excluded.kind, orgId = excluded.orgId, driveId = excluded.driveId,
-         path = excluded.path, title = COALESCE(excluded.title, primitive_objects.title),
-         fileVersion = excluded.fileVersion, deletedAt = NULL, updatedAt = excluded.updatedAt
-       WHERE ? = 0 OR primitive_objects.path <> excluded.path
-         OR primitive_objects.fileVersion IS NULL
-         OR primitive_objects.fileVersion < excluded.fileVersion`,
-      [
-        row.id,
-        row.kind,
-        row.orgId,
-        row.driveId,
-        row.path,
+  const storage = getStorage();
+  const objects = storage.repos.pages;
+  return storage.transaction(async () => {
+    await objects.deleteObjectAtPathExcept(row.orgId, row.driveId, row.path, row.id);
+    await objects.upsertObject(
+      {
+        id: row.id,
+        kind: row.kind,
+        orgId: row.orgId,
+        driveId: row.driveId,
+        path: row.path,
         // The only writer of `title` (.text-columns.json: scrubbed).
-        row.title === null ? null : scrubSecrets(row.title),
-        row.fileVersion,
-        row.ownerAgentId,
+        title: row.title === null ? null : scrubSecrets(row.title),
+        fileVersion: row.fileVersion,
+        ownerAgentId: row.ownerAgentId,
         now,
-        now,
-        // Concurrent events for one path: an older read must not overwrite a newer one.
-        opts.onlyNewer ? 1 : 0,
-      ],
+      },
+      // Concurrent events for one path: an older read must not overwrite a newer one.
+      Boolean(opts.onlyNewer),
     );
-    const saved = await tx.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [row.id]);
+    const saved = await objects.findObjectById(row.id);
     if (!saved) throw new Error(`primitive object ${row.id} vanished after save`);
     return saved;
   });
@@ -246,13 +234,11 @@ export async function getObject(input: {
   if (!input.id && !input.path) throw new ObjectsError("pass `id` or `path`");
   const { provider, orgId, driveId, scope } = await clientFor(input.agentId);
   const row = input.id
-    ? await getDbClient().get<ObjectRow>(
-        "SELECT * FROM primitive_objects WHERE id = ? AND orgId = ? AND driveId = ?",
-        [input.id, orgId, driveId],
-      )
-    : await getDbClient().get<ObjectRow>(
-        "SELECT * FROM primitive_objects WHERE path = ? AND orgId = ? AND driveId = ?",
-        [normalizePath(input.path ?? ""), orgId, driveId],
+    ? await getStorage().repos.pages.findObjectOnDrive(input.id, orgId, driveId)
+    : await getStorage().repos.pages.findObjectByPath(
+        orgId,
+        driveId,
+        normalizePath(input.path ?? ""),
       );
   if (!row) {
     throw new ObjectsError(
@@ -289,10 +275,7 @@ export async function getObject(input: {
 
 /** Record the file version a content write produced (board and sheet services). */
 export async function recordObjectVersion(id: string, fileVersion: number | null): Promise<void> {
-  await getDbClient().run(
-    "UPDATE primitive_objects SET fileVersion = ?, updatedAt = ? WHERE id = ?",
-    [fileVersion, new Date().toISOString(), id],
-  );
+  await getStorage().repos.pages.setObjectFileVersion(id, fileVersion, new Date().toISOString());
 }
 
 export async function listObjects(input: {
@@ -304,29 +287,18 @@ export async function listObjects(input: {
 }): Promise<{ objects: PrimitiveObject[]; total: number }> {
   if (input.kind) kindFor(input.kind);
   const { orgId, driveId } = await clientFor(input.agentId);
-  const where = ["orgId = ?", "driveId = ?", "deletedAt IS NULL"];
-  const params: string[] = [orgId, driveId];
-  if (input.kind) {
-    where.push("kind = ?");
-    params.push(input.kind);
-  }
-  if (input.prefix) {
-    // instr, not LIKE: a path may hold % or _.
-    where.push("instr(path, ?) = 1");
-    params.push(input.prefix.replace(/^\/+/, ""));
-  }
+  const filter = {
+    orgId,
+    driveId,
+    kind: input.kind || undefined,
+    prefix: input.prefix ? input.prefix.replace(/^\/+/, "") : undefined,
+  };
   const limit = Math.min(Math.max(input.limit ?? 50, 1), MAX_LIST_LIMIT);
   const offset = Math.max(input.offset ?? 0, 0);
-  const db = getDbClient();
-  const rows = await db.query<ObjectRow>(
-    `SELECT * FROM primitive_objects WHERE ${where.join(" AND ")} ORDER BY updatedAt DESC, id LIMIT ? OFFSET ?`,
-    [...params, limit, offset],
-  );
-  const count = await db.get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM primitive_objects WHERE ${where.join(" AND ")}`,
-    params,
-  );
-  return { objects: rows.map(withLink), total: count?.n ?? 0 };
+  const objects = getStorage().repos.pages;
+  const rows = await objects.listObjects(filter, limit, offset);
+  const total = await objects.countObjects(filter);
+  return { objects: rows.map(withLink), total };
 }
 
 export type ReindexReport = {
@@ -391,7 +363,7 @@ async function reindexDrive(
   limits: ReindexLimits,
   { prefix, dryRun }: { prefix: string; dryRun: boolean },
 ): Promise<ReindexReport> {
-  const db = getDbClient();
+  const objects = getStorage().repos.pages;
   const report: ReindexReport = {
     scanned: 0,
     unchanged: 0,
@@ -429,10 +401,7 @@ async function reindexDrive(
         cut("time");
         break;
       }
-      const atPath = await db.get<ObjectRow>(
-        "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
-        [orgId, driveId, path],
-      );
+      const atPath = await objects.findObjectByPath(orgId, driveId, path);
       if (atPath && !atPath.deletedAt && atPath.fileVersion !== null) {
         let current: number | null = null;
         try {
@@ -475,7 +444,7 @@ async function reindexDrive(
 
       let id = kind.readId(json);
       if (id) {
-        const byId = await db.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
+        const byId = await objects.findObjectById(id);
         const otherDrive = byId && (byId.orgId !== orgId || byId.driveId !== driveId);
         const copied = byId && byId.path !== path && onDrive.has(byId.path);
         const claimedElsewhere = claimed.has(id) && claimed.get(id) !== path;
@@ -528,11 +497,8 @@ async function reindexDrive(
     }
 
     if (!report.truncated) {
-      const rows = await db.query<{ path: string }>(
-        "SELECT path FROM primitive_objects WHERE orgId = ? AND driveId = ? AND kind = ? ORDER BY path",
-        [orgId, driveId, kindName],
-      );
-      report.missing.push(...rows.map((r) => r.path).filter((p) => inScope(p) && !onDrive.has(p)));
+      const paths = await objects.listObjectPaths(orgId, driveId, kindName);
+      report.missing.push(...paths.filter((p) => inScope(p) && !onDrive.has(p)));
     }
   }
   return report;
@@ -596,13 +562,10 @@ export async function applyFileChange(
   const [kindName, kind] =
     Object.entries(PRIMITIVE_KINDS).find(([, k]) => path.endsWith(k.suffix)) ?? [];
   if (!kindName || !kind) return { action: "ignored", path, reason: "not an object path" };
-  const db = getDbClient();
+  const objects = getStorage().repos.pages;
   const { orgId, driveId, version } = change;
   const now = new Date().toISOString();
-  const atPath = await db.get<ObjectRow>(
-    "SELECT * FROM primitive_objects WHERE orgId = ? AND driveId = ? AND path = ?",
-    [orgId, driveId, path],
-  );
+  const atPath = await objects.findObjectByPath(orgId, driveId, path);
   const stale = (row: ObjectRow) => row.fileVersion !== null && version <= row.fileVersion;
 
   if (change.operation === "delete") {
@@ -610,11 +573,7 @@ export async function applyFileChange(
     if (stale(atPath)) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     // agent-fs delivers a batch concurrently, so the version check lives in the UPDATE.
     // Versions count per path: a row that moved meanwhile is not this event's.
-    const { changes } = await db.run(
-      `UPDATE primitive_objects SET deletedAt = ?, fileVersion = ?, updatedAt = ?
-       WHERE id = ? AND path = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
-      [now, version, now, atPath.id, path, version],
-    );
+    const changes = await objects.tombstoneObjectIfOlder(atPath.id, path, version, now);
     if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     return { action: "tombstoned", path, id: atPath.id };
   }
@@ -629,12 +588,7 @@ export async function applyFileChange(
     const read = file.fileVersion ?? version;
     // A read older than the event is not the content the event announced.
     const owned = embedded === atPath.id && read >= version;
-    const { changes } = await db.run(
-      `UPDATE primitive_objects
-         SET deletedAt = NULL, updatedAt = ?, fileVersion = CASE WHEN ? THEN ? ELSE fileVersion END
-       WHERE id = ? AND path = ? AND (fileVersion IS NULL OR fileVersion < ?)`,
-      [now, owned ? 1 : 0, read, atPath.id, path, version],
-    );
+    const changes = await objects.reviveObjectIfOlder(atPath.id, path, version, owned, read, now);
     if (changes === 0) return { action: "ignored", path, id: atPath.id, reason: "stale event" };
     if (owned) return { action: "updated", path, id: atPath.id };
     return {
@@ -655,7 +609,7 @@ export async function applyFileChange(
   const { json, fileVersion } = file;
   const id = kind.readId(json);
   if (!id) return { action: "ignored", path, reason: "no embedded id; object-reindex adopts it" };
-  const byId = await db.get<ObjectRow>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
+  const byId = await objects.findObjectById(id);
   if (byId && (byId.orgId !== orgId || byId.driveId !== driveId)) {
     return { action: "ignored", path, id, reason: "the id belongs to another drive" };
   }
@@ -696,11 +650,7 @@ export async function applyFileChange(
     // add a per-path delete marker if agent-fs read failures show up here.
   }
   if (present) return { action, path, id };
-  const { changes } = await db.run(
-    `UPDATE primitive_objects SET deletedAt = ?, updatedAt = ?
-     WHERE id = ? AND path = ? AND fileVersion = ? AND deletedAt IS NULL`,
-    [now, now, id, path, savedVersion],
-  );
+  const changes = await objects.tombstoneObjectAtVersion(id, path, savedVersion, now);
   if (changes === 0) return { action, path, id };
   return { action: "tombstoned", path, id, reason: "the file was deleted while it was saved" };
 }

@@ -10,6 +10,7 @@ import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteModelsRepository } from "./repositories/models";
+import { SqlitePagesRepository } from "./repositories/pages";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteScriptsRepository } from "./repositories/scripts";
 
@@ -48,6 +49,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
       scripts: new SqliteScriptsRepository(executor),
+      pages: new SqlitePagesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

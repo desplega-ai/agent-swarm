@@ -1,27 +1,11 @@
 {
   "src/apps/row-store.ts": {
     "reason": "M2 move: pages, metrics, apps",
-    "sites": 7
-  },
-  "src/apps/schema-migrate.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
-  },
-  "src/apps/store.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 8
-  },
-  "src/apps/sync.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 1
+    "sites": 5
   },
   "src/apps/user-config.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 3
-  },
-  "src/apps/version.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
   },
   "src/azure-devops/outbound.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -122,10 +106,6 @@
   "src/be/db/model-profiles.ts": {
     "reason": "M2 move: models",
     "sites": 6
-  },
-  "src/be/db/page-versions.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
   },
   "src/be/db/request-composition.ts": {
     "reason": "M2 move: sessions and cost",
@@ -397,19 +377,11 @@
   },
   "src/be/primitives/object-embed.ts": {
     "reason": "M2 move: pages, metrics, apps",
-    "sites": 4
+    "sites": 2
   },
   "src/be/primitives/object-webhooks.ts": {
     "reason": "M2 move: pages, metrics, apps",
-    "sites": 8
-  },
-  "src/be/primitives/objects.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 17
-  },
-  "src/be/primitives/sheets/service.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 1
+    "sites": 7
   },
   "src/be/rbac-audit.ts": {
     "reason": "M2 move: users and RBAC",
