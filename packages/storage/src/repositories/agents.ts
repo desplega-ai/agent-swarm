@@ -1,6 +1,6 @@
-import { nowIso } from "../dialect";
+import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlIdent, sqlJoin, sqlList } from "../sql";
+import { type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: agents (`agents`, `agent_log`, `agent_history`, `agent_mcp_servers`,
@@ -126,6 +126,59 @@ export type NewActiveSession = {
   now: string;
 };
 
+export type AgentLogRow = {
+  id: string;
+  eventType: string;
+  agentId: string | null;
+  taskId: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  metadata: string | null;
+  createdAt: string;
+};
+
+export type NewAgentLog = Omit<AgentLogRow, "createdAt">;
+
+export type ServiceRow = {
+  id: string;
+  agentId: string;
+  name: string;
+  port: number;
+  description: string | null;
+  url: string | null;
+  healthCheckPath: string | null;
+  status: "starting" | "healthy" | "unhealthy" | "stopped";
+  script: string;
+  cwd: string | null;
+  interpreter: string | null;
+  args: string | null;
+  env: string | null;
+  metadata: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+/** The definition columns of a service (insert and upsert). */
+export type ServiceDefinition = {
+  port: number;
+  description: string | null;
+  url: string | null;
+  healthCheckPath: string | null;
+  script: string;
+  cwd: string | null;
+  interpreter: string | null;
+  args: string | null;
+  env: string | null;
+  metadata: string;
+};
+
+export type AgentInstallRow = {
+  id: string;
+  agentId: string;
+  isActive: number;
+  installedAt: string;
+};
+
 /** Counts of the rows that refuse an agent delete, by blocker code. */
 export type AgentDeleteBlockerCounts = {
   open_tasks: number;
@@ -192,6 +245,62 @@ export interface AgentsRepository {
   // ---- agent_skills / agent_mcp_servers (install rows only) ----
   deleteAgentSkills(agentId: string): Promise<void>;
   deleteAgentMcpServers(agentId: string): Promise<void>;
+
+  // ---- agent_log ----
+  /** Inserts the entry with `createdAt` = now. */
+  insertLog(entry: NewAgentLog): Promise<AgentLogRow | null>;
+  /** The task's entries, newest first (ties: insertion order); at most `limit`. */
+  listLogsByTask(taskId: string, limit: number): Promise<AgentLogRow[]>;
+  /** The task's entries, oldest first (ties: insertion order); optionally one event type. */
+  listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
+  /** Entries of one event type, newest first (ties: insertion order). */
+  listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+
+  // ---- services ----
+  insertService(
+    s: ServiceDefinition & { id: string; agentId: string; name: string; now: string },
+  ): Promise<ServiceRow | null>;
+  findServiceById(id: string): Promise<ServiceRow | null>;
+  findServiceByAgentAndName(agentId: string, name: string): Promise<ServiceRow | null>;
+  /** The agent's services by name (unique per agent). */
+  listServicesByAgent(agentId: string): Promise<ServiceRow[]>;
+  /**
+   * Services matching the filters (`nameLike` is a substring, ASCII case
+   * folded). Ordered healthy, starting, unhealthy, stopped; then name; then
+   * insertion order.
+   */
+  listServices(filters: {
+    agentId?: string;
+    nameLike?: string;
+    status?: string;
+  }): Promise<ServiceRow[]>;
+  setServiceStatus(id: string, status: string, now: string): Promise<ServiceRow | null>;
+  updateServiceDefinition(
+    id: string,
+    d: ServiceDefinition,
+    now: string,
+  ): Promise<ServiceRow | null>;
+  deleteService(id: string): Promise<number>;
+  deleteServicesByAgent(agentId: string): Promise<number>;
+
+  // ---- agent_skills / agent_mcp_servers installs ----
+  /** Insert, or re-activate the `(agentId, skillId)` row. */
+  installSkill(
+    id: string,
+    agentId: string,
+    skillId: string,
+    now: string,
+  ): Promise<(AgentInstallRow & { skillId: string }) | null>;
+  uninstallSkill(agentId: string, skillId: string): Promise<number>;
+  setSkillActive(agentId: string, skillId: string, isActive: boolean): Promise<number>;
+  /** Insert, or re-activate the `(agentId, mcpServerId)` row. */
+  installMcpServer(
+    id: string,
+    agentId: string,
+    mcpServerId: string,
+    now: string,
+  ): Promise<(AgentInstallRow & { mcpServerId: string }) | null>;
+  uninstallMcpServer(agentId: string, mcpServerId: string): Promise<number>;
 
   // ---- context_versions ----
   insertContextVersion(row: ContextVersionRow): Promise<ContextVersionRow | null>;
@@ -400,6 +509,153 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   async deleteAgentMcpServers(agentId: string): Promise<void> {
     await this.db.run(sql`DELETE FROM agent_mcp_servers WHERE "agentId" = ${agentId}`);
+  }
+
+  // ---- agent_log ----
+
+  insertLog(e: NewAgentLog): Promise<AgentLogRow | null> {
+    return this.db.get<AgentLogRow>(sql`
+      INSERT INTO agent_log (id, "eventType", "agentId", "taskId", "oldValue", "newValue", metadata, "createdAt")
+      VALUES (${e.id}, ${e.eventType}, ${e.agentId}, ${e.taskId}, ${e.oldValue}, ${e.newValue}, ${e.metadata}, ${nowIso})
+      RETURNING *`);
+  }
+
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listLogsByTask(taskId: string, limit: number): Promise<AgentLogRow[]>;
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+
+  // ---- services ----
+
+  insertService(
+    s: ServiceDefinition & { id: string; agentId: string; name: string; now: string },
+  ): Promise<ServiceRow | null> {
+    return this.db.get<ServiceRow>(sql`
+      INSERT INTO services (
+        id, "agentId", name, port, description, url, "healthCheckPath", status, script, cwd,
+        interpreter, args, env, metadata, "createdAt", "lastUpdatedAt"
+      ) VALUES (
+        ${s.id}, ${s.agentId}, ${s.name}, ${s.port}, ${s.description}, ${s.url}, ${s.healthCheckPath}, 'starting',
+        ${s.script}, ${s.cwd}, ${s.interpreter}, ${s.args}, ${s.env}, ${s.metadata}, ${s.now}, ${s.now}
+      ) RETURNING *`);
+  }
+
+  findServiceById(id: string): Promise<ServiceRow | null> {
+    return this.db.get<ServiceRow>(sql`SELECT * FROM services WHERE id = ${id}`);
+  }
+
+  findServiceByAgentAndName(agentId: string, name: string): Promise<ServiceRow | null> {
+    return this.db.get<ServiceRow>(
+      sql`SELECT * FROM services WHERE "agentId" = ${agentId} AND name = ${name}`,
+    );
+  }
+
+  listServicesByAgent(agentId: string): Promise<ServiceRow[]> {
+    return this.db.query<ServiceRow>(
+      sql`SELECT * FROM services WHERE "agentId" = ${agentId} ORDER BY name`,
+    );
+  }
+
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listServices(filters: {
+    agentId?: string;
+    nameLike?: string;
+    status?: string;
+  }): Promise<ServiceRow[]>;
+
+  protected serviceFilters(filters: {
+    agentId?: string;
+    nameLike?: string;
+    status?: string;
+  }): SqlQuery {
+    const conditions: SqlQuery[] = [];
+    if (filters.agentId) conditions.push(sql`"agentId" = ${filters.agentId}`);
+    if (filters.nameLike) {
+      conditions.push(sql`${likeAsciiCi(sql`name`, sql`${`%${filters.nameLike}%`}`)}`);
+    }
+    if (filters.status) conditions.push(sql`status = ${filters.status}`);
+    return sqlWhere(conditions);
+  }
+
+  setServiceStatus(id: string, status: string, now: string): Promise<ServiceRow | null> {
+    return this.db.get<ServiceRow>(
+      sql`UPDATE services SET status = ${status}, "lastUpdatedAt" = ${now} WHERE id = ${id} RETURNING *`,
+    );
+  }
+
+  updateServiceDefinition(
+    id: string,
+    d: ServiceDefinition,
+    now: string,
+  ): Promise<ServiceRow | null> {
+    return this.db.get<ServiceRow>(sql`
+      UPDATE services SET
+        port = ${d.port}, description = ${d.description}, url = ${d.url}, "healthCheckPath" = ${d.healthCheckPath},
+        script = ${d.script}, cwd = ${d.cwd}, interpreter = ${d.interpreter}, args = ${d.args}, env = ${d.env},
+        metadata = ${d.metadata}, "lastUpdatedAt" = ${now}
+      WHERE id = ${id} RETURNING *`);
+  }
+
+  async deleteService(id: string): Promise<number> {
+    return (await this.db.run(sql`DELETE FROM services WHERE id = ${id}`)).changes;
+  }
+
+  async deleteServicesByAgent(agentId: string): Promise<number> {
+    return (await this.db.run(sql`DELETE FROM services WHERE "agentId" = ${agentId}`)).changes;
+  }
+
+  // ---- agent_skills / agent_mcp_servers installs ----
+
+  installSkill(
+    id: string,
+    agentId: string,
+    skillId: string,
+    now: string,
+  ): Promise<(AgentInstallRow & { skillId: string }) | null> {
+    return this.db.get(sql`
+      INSERT INTO agent_skills (id, "agentId", "skillId", "isActive", "installedAt")
+      VALUES (${id}, ${agentId}, ${skillId}, ${true}, ${now})
+      ON CONFLICT ("agentId", "skillId") DO UPDATE SET "isActive" = ${true}
+      RETURNING *`);
+  }
+
+  async uninstallSkill(agentId: string, skillId: string): Promise<number> {
+    return (
+      await this.db.run(
+        sql`DELETE FROM agent_skills WHERE "agentId" = ${agentId} AND "skillId" = ${skillId}`,
+      )
+    ).changes;
+  }
+
+  async setSkillActive(agentId: string, skillId: string, isActive: boolean): Promise<number> {
+    return (
+      await this.db.run(
+        sql`UPDATE agent_skills SET "isActive" = ${isActive} WHERE "agentId" = ${agentId} AND "skillId" = ${skillId}`,
+      )
+    ).changes;
+  }
+
+  installMcpServer(
+    id: string,
+    agentId: string,
+    mcpServerId: string,
+    now: string,
+  ): Promise<(AgentInstallRow & { mcpServerId: string }) | null> {
+    return this.db.get(sql`
+      INSERT INTO agent_mcp_servers (id, "agentId", "mcpServerId", "isActive", "installedAt")
+      VALUES (${id}, ${agentId}, ${mcpServerId}, ${true}, ${now})
+      ON CONFLICT ("agentId", "mcpServerId") DO UPDATE SET "isActive" = ${true}
+      RETURNING *`);
+  }
+
+  async uninstallMcpServer(agentId: string, mcpServerId: string): Promise<number> {
+    return (
+      await this.db.run(
+        sql`DELETE FROM agent_mcp_servers WHERE "agentId" = ${agentId} AND "mcpServerId" = ${mcpServerId}`,
+      )
+    ).changes;
   }
 
   // ---- context_versions ----

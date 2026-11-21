@@ -1,8 +1,10 @@
 import {
   type AgentHistoryRow,
+  type AgentLogRow,
   type AgentRow,
   BaseAgentsRepository,
   type ContextVersionRow,
+  type ServiceRow,
   sql,
 } from "@desplega/storage";
 
@@ -59,5 +61,39 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
       : this.db.query<ContextVersionRow>(sql`
           SELECT * FROM context_versions WHERE "agentId" = ${agentId} AND field = ${field}
           ORDER BY version DESC, rowid ASC LIMIT ${limit}`);
+  }
+
+  listLogsByTask(taskId: string, limit: number): Promise<AgentLogRow[]> {
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log WHERE "taskId" = ${taskId}
+      ORDER BY "createdAt" DESC, rowid ASC LIMIT ${limit}`);
+  }
+
+  listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]> {
+    const event = eventType === undefined ? sql`` : sql` AND "eventType" = ${eventType}`;
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log WHERE "taskId" = ${taskId}${event}
+      ORDER BY "createdAt" ASC, rowid ASC`);
+  }
+
+  listLogsByEventType(eventType: string): Promise<AgentLogRow[]> {
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log WHERE "eventType" = ${eventType}
+      ORDER BY "createdAt" DESC, rowid ASC`);
+  }
+
+  listServices(filters: {
+    agentId?: string;
+    nameLike?: string;
+    status?: string;
+  }): Promise<ServiceRow[]> {
+    return this.db.query<ServiceRow>(sql`
+      SELECT * FROM services${this.serviceFilters(filters)}
+      ORDER BY CASE status
+        WHEN 'healthy' THEN 1
+        WHEN 'starting' THEN 2
+        WHEN 'unhealthy' THEN 3
+        WHEN 'stopped' THEN 4
+      END, name, rowid`);
   }
 }
