@@ -179,6 +179,21 @@ agent-swarm rbac bootstrap
 The command accepts exactly the `bootstrap` subcommand. Anything else prints
 help and exits non-zero.
 
+### db-copy
+
+Copy a SQLite database file into an empty Postgres database at the same
+migration head. Stop the API first. The command opens the SQLite file
+read-only, refuses a target that holds rows, and writes nothing when a value
+cannot be stored in Postgres. It compares the row count and a checksum of every
+table and exits 1 when one differs.
+
+```bash
+agent-swarm db-copy --from ./agent-swarm-db.sqlite --to postgres://swarm:pass@db:5432/swarm
+agent-swarm db-copy --json report.json   # --from defaults to DATABASE_PATH, --to to DATABASE_URL
+```
+
+The cutover procedure is in the [Postgres guide](/docs/guides/postgres).
+
 ### worker-token
 
 Manage the agent-bound token a worker runs on in place of the shared swarm API key. The token acts only as its agent, so a worker no longer authenticates as the operator. Run it with your operator swarm API key. `create` and `rotate` print the new token to stdout once; all other messages go to stderr.

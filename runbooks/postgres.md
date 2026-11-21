@@ -1,0 +1,126 @@
+# Postgres storage engine
+
+The API server runs on SQLite (the default) or on Postgres. One environment variable selects the engine. The same black-box contract passes on both engines (`bun run e2e:strict` and `bun run e2e:strict --engine postgres`).
+
+This runbook covers: when to choose Postgres, the setup, the db-query reader role, the move of a SQLite database (the production cutover), the limits, and the rules a future change must obey.
+
+## Engine selection
+
+| Variable | Effect |
+|---|---|
+| `DATABASE_URL` | A `postgres://` or `postgresql://` URL selects Postgres. Absent: SQLite at `DATABASE_PATH`. Any other scheme is ignored with a warning. |
+| `DATABASE_QUERY_URL` | Postgres only. The URL of the restricted role that the `db-query` tool uses. Absent or refused by the probe: `db-query` is off and says why. |
+| `DATABASE_PATH` | SQLite file. On Postgres it still locates the data directory, unless `SWARM_DATA_DIR` is set. |
+| `SWARM_DATA_DIR` | Directory of the encryption key file and the page-session secret. Default: the directory of `DATABASE_PATH` (the same paths as before). |
+
+All four are deployment environment only: the dashboard cannot set them (reserved keys). The API passes both URLs through `scrubSecrets` before any log line.
+
+An installation that sets none of them behaves as before.
+
+## Requirements
+
+- Postgres 16 with the pgvector extension (memory vector search). CI uses `pgvector/pgvector:pg16`.
+- A database created with the `C` collation and character classes: `CREATE DATABASE swarm TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`. SQLite compares text by bytes and folds case for ASCII only; the `C` locale gives the same order and the same `ILIKE`/`lower()` behavior.
+- The extension: the first migration runs `CREATE EXTENSION IF NOT EXISTS vector`. If the swarm role may not create it, run that statement once as a superuser before the first start.
+- The swarm role owns the schema objects (it runs the migrations).
+
+## Setup
+
+1. Create the database (see Requirements) and a role that owns it.
+2. Set `DATABASE_URL` on the API and start it. The start takes the one-process lock, applies the Postgres migration chain (`src/be/migrations/postgres/`) under an advisory lock, and logs `[db] Postgres engine ready`.
+3. Optional: create the db-query reader role (next section) and set `DATABASE_QUERY_URL`. Restart the API.
+
+Compose: `docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --env-file .env up -d` (set `POSTGRES_PASSWORD` in `.env`).
+
+Helm: set `database.url` (stored in a chart Secret) or `database.existingSecret` (keys `DATABASE_URL`, optional `DATABASE_QUERY_URL`). The chart turns the Litestream sidecar off on Postgres. Keep `api.replicas: 1`.
+
+Keep the API volume on both engines: it holds the encryption key file and the page-session secret.
+
+## db-query reader role
+
+On Postgres the `db-query` tool runs the user's SQL as a second, restricted role. The security boundary is the role's grants. `SET ROLE` and SQL text filters are not a boundary, because user SQL can undo them.
+
+Create the role after the first start (the tables must exist):
+
+```sql
+CREATE ROLE swarm_reader LOGIN PASSWORD '<password>';
+GRANT CONNECT ON DATABASE swarm TO swarm_reader;
+GRANT USAGE ON SCHEMA public TO swarm_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO swarm_reader;
+REVOKE SELECT ON oauth_authorizations, oauth_apps, oauth_pending, user_tokens,
+  session_tokens, script_apis, codex_oauth_device_flows FROM swarm_reader;
+-- Tables that later migrations add:
+ALTER DEFAULT PRIVILEGES FOR ROLE swarm IN SCHEMA public GRANT SELECT ON TABLES TO swarm_reader;
+```
+
+Set `DATABASE_QUERY_URL=postgres://swarm_reader:<password>@<host>:5432/swarm`.
+
+At start, a probe checks that the role cannot read the 7 denied tables (directly, by column grant or through a view), cannot write, owns nothing, and cannot run a `SECURITY DEFINER` function. A superuser or owner URL fails the probe. When the probe fails, `db-query` is off and the log names the reason. Each query runs in a read-only transaction with a statement timeout.
+
+## One process per database
+
+The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on.
+
+More than one API replica is not supported on either engine. The parts that a second replica would break are listed, with file and line, in `thoughts/taras/research/2026-11-20-replica-blockers.md`: the in-memory realtime bus (`src/realtime/bus.ts`), the workflow event bus (`src/workflows/event-bus.ts`), in-memory locks (`src/oauth/ensure-mcp-token.ts`), per-process caches, and timers with no leader election.
+
+## Backups
+
+Litestream replicates the SQLite WAL only. On Postgres use the provider's backups or `pg_dump --format=custom`. Back up the API volume too (encryption key).
+
+## Production cutover (SQLite to Postgres)
+
+`agent-swarm db-copy` copies a SQLite file into an empty Postgres database at the same migration head. It runs in one transaction: a value Postgres cannot store, a foreign key that fails, or a count or checksum that differs leaves the target empty and exits 1.
+
+Before the window:
+
+1. Deploy the target build on SQLite as usual. Let it start once, so the SQLite file is at this build's migration head.
+2. Create the Postgres database and role (Requirements). Do not start an API on it.
+3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy`. Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you.
+
+In the window:
+
+1. Stop the API. Keep workers running: they retry until the API is back.
+2. Back up the SQLite file and its `-wal`/`-shm` files, and the encryption key file.
+3. Copy:
+   ```bash
+   agent-swarm db-copy --from /app/data/agent-swarm-db.sqlite \
+     --to "postgres://swarm:<password>@<host>:5432/swarm" --json /app/data/db-copy-report.json
+   ```
+   Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows.
+4. Set `DATABASE_URL` (and `DATABASE_QUERY_URL` if the reader role exists). Keep the same encryption key: secrets copy as ciphertext.
+5. Start the API. Check `[db] Postgres engine ready`, `/health`, the dashboard task list, a secret config value, and one memory search.
+
+Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
+
+What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds rows (rows the Postgres chain seeds are replaced); disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
+
+## Known differences
+
+- Full-text ranking is not equal between engines. Both return the same set of ids for a query; for ranked results at least 4 of the first 5 ids match (decision D15). Postgres folds case for ASCII only and does not remove accents.
+- `jsonb` reorders object keys. API responses carry the same keys and values in another order.
+- Text longer than 100,000 characters in a task is searchable only in its first 100,000 characters.
+- A Postgres write that loses a serialization race retries the whole transaction (up to 16 attempts). Five sites retry more than 5% under deliberate single-row races and stay at SERIALIZABLE by decision (ledger, D7 section).
+
+## Rules for changes
+
+- A new migration has one file for each engine with the same ordinal: `src/be/migrations/NNN_name.sql` and `src/be/migrations/postgres/NNN_name.sql`. A file may be a no-op for one engine, with a comment that says why. `bun run check:schema-parity` must pass. Never edit an applied migration.
+- No new triggers (`bun run check:no-new-triggers`). Put new rules in repository code.
+- SQL lives in the storage packages (`packages/storage*`) only (`bun run check:storage-boundary`). Write portable SQL with the dialect helpers; SQLite-only syntax stays in `packages/storage-sqlite` (`bun run check:sql-portability`). Quote each identifier that has an uppercase letter.
+- Code tests a capability (`fullTextSearch`, `vectorSearch`, `dbQuery`), never the engine name.
+- A transaction callback may run twice on Postgres. Side effects go in `afterCommit` (`bun run check:tx-callbacks`; prove it with `bun run e2e --tx-replay`).
+- A site may run at READ COMMITTED with explicit row locks only when its stress scenario measures more than 5% retries (decision D7), with the reason in a code comment.
+- A list method states a total order (no reliance on insertion order); `bun run test:storage` runs the repository contract suite on both engines.
+- Prove a change on both engines: `bun run e2e --only <scenario>` and `bun run e2e --engine postgres --only <scenario>` (needs `E2E_POSTGRES_URL`, a role that may create databases).
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `another API process holds this Postgres database` | A second API (or a running `db-copy`) holds the lock. Stop it. |
+| `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
+| `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
+| `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
+| `db-copy: the target database holds rows` | Copy into a new, empty database. |
+| `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
+
+Sources: decision records in `thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine-goal-prompt.md` (D1 to D18) and the ledger `thoughts/taras/plans/2026-11-20-postgres-storage-engine-ledger.md`.
