@@ -13,6 +13,7 @@ export {
   createBunSqliteClient,
   isInTransaction,
   SLOW_STATEMENT_WARN_MS,
+  type SqliteClientOptions,
 } from "./client";
 export { sqliteDialect } from "./dialect";
 

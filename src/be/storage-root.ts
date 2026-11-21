@@ -17,6 +17,10 @@ export type { BusyRetryOptions };
 
 const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
 
+/** Printed at client creation under --tx-replay; the e2e runner refuses a run without it. */
+export const TX_REPLAY_BANNER =
+  "[storage] tx-replay on: every transaction callback runs twice, the first run rolled back";
+
 /** Params are never logged: they can carry secrets and user content. */
 const serverObserver: StatementObserver = {
   onStatement: (sql, durationMs) => recordStatement(sql, durationMs),
@@ -45,7 +49,10 @@ export function createSqliteClient(
   getDatabase: Parameters<typeof createBunSqliteClient>[0],
   busyRetry?: BusyRetryOptions,
 ): DbClient {
-  return createBunSqliteClient(getDatabase, busyRetry, serverObserver);
+  // Test-only switch set by `bun run e2e --tx-replay` (Postgres brief D6).
+  const txReplay = process.env.STORAGE_TX_REPLAY === "1";
+  if (txReplay) console.log(TX_REPLAY_BANNER);
+  return createBunSqliteClient(getDatabase, busyRetry, serverObserver, { txReplay });
 }
 
 export function isInTransaction(): boolean {

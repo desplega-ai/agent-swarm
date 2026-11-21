@@ -291,7 +291,14 @@ class BusyGate {
   }
 }
 
+export type SqliteClientOptions = {
+  /** Run each outermost transaction callback twice, rolling back the first run (D6). */
+  txReplay?: boolean;
+};
+
 class BunSqliteClient implements DbClient {
+  /** Count of transactions replayed under `txReplay` (diagnostics). */
+  replayedTransactions = 0;
   private readonly lock = new FifoLock();
   private readonly gate: BusyGate;
   private savepointSeq = 0;
@@ -302,6 +309,7 @@ class BunSqliteClient implements DbClient {
     private readonly getDatabase: () => Database,
     private readonly busyRetry: BusyRetryOptions = DEFAULT_BUSY_RETRY,
     private readonly observer: StatementObserver = {},
+    private readonly options: SqliteClientOptions = {},
   ) {
     this.gate = new BusyGate(
       busyRetry.attemptSpinMs,
@@ -413,6 +421,21 @@ class BunSqliteClient implements DbClient {
         }
       }
       began = true;
+      if (this.options.txReplay) {
+        // --tx-replay (decision D6): run the callback once and roll it back,
+        // with its hooks discarded, then run it again for real. A callback
+        // that is not safe to run twice fails here instead of on Postgres.
+        const replayCtx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
+        db.run("SAVEPOINT db_client_tx_replay");
+        try {
+          await txContext.run(replayCtx, () => fn(this.boundExecutor(replayCtx)));
+        } finally {
+          replayCtx.closed = true;
+          db.run("ROLLBACK TO SAVEPOINT db_client_tx_replay");
+          db.run("RELEASE SAVEPOINT db_client_tx_replay");
+        }
+        this.replayedTransactions += 1;
+      }
       const result = await txContext.run(ctx, () => fn(tx));
       // Last point a deadline can stop the write: the throw rolls back in the catch below.
       assertBeforeDeadline(deadlineAt);
@@ -690,6 +713,7 @@ export function createBunSqliteClient(
   getDatabase: () => Database,
   busyRetry?: BusyRetryOptions,
   observer?: StatementObserver,
+  options?: SqliteClientOptions,
 ): DbClient {
-  return new BunSqliteClient(getDatabase, busyRetry, observer);
+  return new BunSqliteClient(getDatabase, busyRetry, observer, options);
 }

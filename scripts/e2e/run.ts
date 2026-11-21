@@ -229,6 +229,16 @@ async function cleanup(keep: boolean): Promise<void> {
   await cleanupCliTemp(keep);
 }
 
+/** A SUT that ignores --tx-replay would pass every scenario without replay: refuse that. */
+async function assertSutReplaysTransactions(logPath: string): Promise<void> {
+  const log = await Bun.file(logPath).text();
+  if (!log.includes("[storage] tx-replay on:")) {
+    throw new Error(
+      `--tx-replay: the API never reported replay mode in ${logPath}; it is not replaying transactions`,
+    );
+  }
+}
+
 /** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
 function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
   try {
@@ -270,6 +280,7 @@ async function bootStack(
     const db = openReadOnlyDb(sutDbTarget(sut));
     stack.db = db;
     if (options.engine !== "sqlite") assertSutUsesDatabase(db, options.engine);
+    if (options.txReplay) await assertSutReplaysTransactions(sut.logPath);
     const api = createApiClient(sut.baseUrl, sut.apiKey);
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
     const nonce = randomBytes(6).toString("hex");

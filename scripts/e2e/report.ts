@@ -126,6 +126,8 @@ export type Options = {
   coverageDir?: string;
   /** Storage engine of the SUT. `postgres` makes one new database per boot on E2E_POSTGRES_URL. */
   engine: "sqlite" | "postgres";
+  /** `--tx-replay`: the API runs every transaction callback twice (Postgres brief D6). */
+  txReplay: boolean;
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -156,6 +158,8 @@ Options:
                                 no exclusion is stale or dead, and every pinned flow passed
   --engine sqlite|postgres      Storage engine of the API (default sqlite). postgres reads
                                 E2E_POSTGRES_URL and makes one new database per API boot
+  --tx-replay                   The API runs each transaction callback twice and rolls
+                                back the first run, so a callback with a side effect fails
   --help                        Show this help`;
 
 function optionValue(args: string[], index: number, flag: string): string {
@@ -216,6 +220,7 @@ export function parseOptions(
     strict: false,
     sutEnv: {},
     engine: "sqlite",
+    txReplay: false,
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
@@ -235,7 +240,10 @@ export function parseOptions(
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
     else if (arg === "--strict") options.strict = true;
     else if (arg === "--engine") options.engine = engineValue(value());
-    else if (arg === "--shard") options.shard = parseShard(value());
+    else if (arg === "--tx-replay") {
+      options.txReplay = true;
+      options.sutEnv.STORAGE_TX_REPLAY = "1";
+    } else if (arg === "--shard") options.shard = parseShard(value());
     else if (arg === "--coverage") options.coverageDir = resolve("e2e-coverage");
     else if (arg === "--list") options.list = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
