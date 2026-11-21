@@ -137,11 +137,7 @@
   },
   "src/be/db/script-run-sources.ts": {
     "reason": "M2 move: scripts",
-    "sites": 3
-  },
-  "src/be/db/script-runs.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
+    "sites": 1
   },
   "src/be/db/session-costs.ts": {
     "reason": "M2 move: sessions and cost",
@@ -445,31 +441,11 @@
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
-    "sites": 26
-  },
-  "src/be/scripts/boot-args-schema.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 2
-  },
-  "src/be/scripts/boot-reembed.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
-  },
-  "src/be/scripts/db.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 26
+    "sites": 5
   },
   "src/be/scripts/durable.ts": {
     "reason": "M2 move: scripts",
     "sites": 2
-  },
-  "src/be/scripts/embeddings.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 5
-  },
-  "src/be/scripts/retention.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
   },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
@@ -703,14 +679,6 @@
     "reason": "M2 move: scripts",
     "sites": 3
   },
-  "src/http/script-runs.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
-  },
-  "src/http/scripts.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
-  },
   "src/http/sessions.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 2
@@ -818,10 +786,6 @@
   "src/tools/utils.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/ui-spec/script-actions.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
   },
   "src/workflows/approval-cancel.ts": {
     "reason": "M2 move: workflows",
