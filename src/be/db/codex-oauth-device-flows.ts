@@ -1,4 +1,4 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * Encrypted Codex device-login flow state. Kept out of `kv_entries` so
@@ -8,13 +8,11 @@ import { getDbClient } from "./runtime";
 export async function getCodexDeviceFlow(
   flowId: string,
 ): Promise<{ state: string; expiresAt: number } | null> {
-  const row = await getDbClient().get<{ state: string; expires_at: number }>(
-    "SELECT state, expires_at FROM codex_oauth_device_flows WHERE flow_id = ?",
-    [flowId],
-  );
+  const repo = getStorage().repos.oauth;
+  const row = await repo.getCodexDeviceFlow(flowId);
   if (!row) return null;
   if (row.expires_at <= Date.now()) {
-    await getDbClient().run("DELETE FROM codex_oauth_device_flows WHERE flow_id = ?", [flowId]);
+    await repo.deleteCodexDeviceFlow(flowId);
     return null;
   }
   return { state: row.state, expiresAt: row.expires_at };
@@ -27,14 +25,7 @@ export async function upsertCodexDeviceFlow(input: {
   expiresAt: number;
 }): Promise<void> {
   const now = Date.now();
-  await getDbClient().run("DELETE FROM codex_oauth_device_flows WHERE expires_at <= ?", [now]);
-  await getDbClient().run(
-    `INSERT INTO codex_oauth_device_flows (flow_id, state, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(flow_id) DO UPDATE SET
-         state = excluded.state,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at`,
-    [input.flowId, input.state, input.expiresAt, now, now],
-  );
+  const repo = getStorage().repos.oauth;
+  await repo.deleteExpiredCodexDeviceFlows(now);
+  await repo.upsertCodexDeviceFlow(input.flowId, input.state, input.expiresAt, now);
 }

@@ -1,5 +1,6 @@
 import type { McpServer } from "@/types";
-import { getDbClient, getMcpServerById, updateMcpServer } from "./db";
+import { getMcpServerById, updateMcpServer } from "./db";
+import { getStorage } from "./storage";
 
 export type CheckedMcpServerUpdate<Refusal> =
   | { kind: "updated"; server: McpServer }
@@ -21,7 +22,7 @@ export async function updateMcpServerChecked<Refusal>(
   updates: Parameters<typeof updateMcpServer>[1],
   check: (existing: McpServer) => Promise<Refusal | null> | Refusal | null,
 ): Promise<CheckedMcpServerUpdate<Refusal>> {
-  return await getDbClient().transaction(async (): Promise<CheckedMcpServerUpdate<Refusal>> => {
+  return await getStorage().transaction(async (): Promise<CheckedMcpServerUpdate<Refusal>> => {
     const existing = await getMcpServerById(id);
     if (!existing) return { kind: "not-found" };
 

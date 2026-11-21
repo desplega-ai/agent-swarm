@@ -8,12 +8,18 @@ import {
 import { sqliteDialect } from "./dialect";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteAssetsRepository } from "./repositories/assets";
+import { SqliteChatRepository } from "./repositories/chat";
 import { SqliteConfigRepository } from "./repositories/config";
+import { SqliteEventsRepository } from "./repositories/events";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
+import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteModelsRepository } from "./repositories/models";
+import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteSlackRepository } from "./repositories/slack";
+import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
 
 export {
@@ -54,6 +60,12 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       assets: new SqliteAssetsRepository(executor),
       users: new SqliteUsersRepository(executor),
       rbac: new SqliteRbacRepository(executor),
+      mcpServers: new SqliteMcpServersRepository(executor),
+      trackers: new SqliteTrackersRepository(executor),
+      events: new SqliteEventsRepository(executor),
+      chat: new SqliteChatRepository(executor),
+      oauth: new SqliteOAuthRepository(executor),
+      slack: new SqliteSlackRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

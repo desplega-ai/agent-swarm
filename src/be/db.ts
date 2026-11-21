@@ -251,7 +251,6 @@ import {
   threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
-import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
@@ -1057,19 +1056,8 @@ export async function abandonSlackOutcomeDelivery(
 export async function getSlackTreeMessages(
   options: { thread?: { channelId: string; threadTs: string } } = {},
 ): Promise<SlackMessageRecord[]> {
-  const thread = options.thread;
-  const rows = await getDbClient().query<SlackMessageRow>(
-    `SELECT tree.*
-       FROM slack_messages tree
-       JOIN slack_render_v2_state state ON state.id = 1
-       WHERE tree.kind = 'tree'
-       AND tree.closed_at IS NULL
-       ${thread ? "AND tree.channel_id = ? AND tree.thread_ts = ?" : ""}
-       AND ${SLACK_TREE_NEEDS_RENDER_SQL}
-       ORDER BY tree.created_at ASC`,
-    thread ? [thread.channelId, thread.threadTs] : [],
-  );
-  return rows.map(rowToSlackMessage);
+  const rows = await getStorage().repos.slack.listTreesNeedingRender(options.thread);
+  return (rows as SlackMessageRow[]).map(rowToSlackMessage);
 }
 
 export async function getSlackMessageByChannelTs(

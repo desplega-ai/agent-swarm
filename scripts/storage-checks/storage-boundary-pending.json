@@ -43,29 +43,13 @@
     "reason": "M2 move: tasks",
     "sites": 7
   },
-  "src/be/db-queries/mcp-oauth.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 19
-  },
   "src/be/db-queries/mcp-servers.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
   },
-  "src/be/db-queries/oauth.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 30
-  },
-  "src/be/db-queries/slack-inbound.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 21
-  },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
     "sites": 6
-  },
-  "src/be/db-queries/tracker.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 18
   },
   "src/be/db-retention-defaults.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -77,15 +61,11 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 387
+    "sites": 386
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 6
-  },
-  "src/be/db/codex-oauth-device-flows.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 5
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -163,13 +143,9 @@
     "reason": "M2 move: skills",
     "sites": 2
   },
-  "src/be/db/slack-card-groups.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 6
-  },
   "src/be/db/slack-trees.ts": {
     "reason": "M2 move: integrations",
-    "sites": 19
+    "sites": 2
   },
   "src/be/db/task-idempotency.ts": {
     "reason": "M2 move: tasks",
@@ -233,7 +209,7 @@
   },
   "src/be/events.ts": {
     "reason": "M2 move: integrations",
-    "sites": 14
+    "sites": 3
   },
   "src/be/extensions/assets.ts": {
     "reason": "M2 move: assets and import",
@@ -270,14 +246,6 @@
   "src/be/mcp-events/dispatcher.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
-  },
-  "src/be/mcp-events/store.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 14
-  },
-  "src/be/mcp-server-checked-update.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 1
   },
   "src/be/memory/boot-reembed.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
@@ -603,10 +571,6 @@
     "reason": "M2 move: sessions and cost",
     "sites": 1
   },
-  "src/http/codex-oauth-device.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 2
-  },
   "src/http/controllers-connect.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 7
@@ -626,10 +590,6 @@
   "src/http/memory.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/http/oauth-callback.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 3
   },
   "src/http/poll.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -682,18 +642,6 @@
   "src/http/workflows.ts": {
     "reason": "M2 move: workflows",
     "sites": 1
-  },
-  "src/integrations/chat-sdk/state.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 27
-  },
-  "src/jira/metadata.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 4
-  },
-  "src/jira/webhook-lifecycle.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 2
   },
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

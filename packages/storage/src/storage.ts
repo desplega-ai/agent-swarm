@@ -4,12 +4,18 @@ import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
 import type { AssetsRepository } from "./repositories/assets";
+import type { ChatRepository } from "./repositories/chat";
 import type { ConfigRepository } from "./repositories/config";
+import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { MaintenanceRepository } from "./repositories/maintenance";
+import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { ModelsRepository } from "./repositories/models";
+import type { OAuthRepository } from "./repositories/oauth";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SlackRepository } from "./repositories/slack";
+import type { TrackersRepository } from "./repositories/trackers";
 import type { UsersRepository } from "./repositories/users";
 
 /** Every domain repository, by domain name. */
@@ -23,6 +29,12 @@ export type Repositories = {
   assets: AssetsRepository;
   users: UsersRepository;
   rbac: RbacRepository;
+  mcpServers: McpServersRepository;
+  trackers: TrackersRepository;
+  events: EventsRepository;
+  chat: ChatRepository;
+  oauth: OAuthRepository;
+  slack: SlackRepository;
 };
 
 /**

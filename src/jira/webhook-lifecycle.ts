@@ -202,11 +202,10 @@ export async function deleteJiraWebhook(webhookId: number): Promise<void> {
 async function overwriteWebhookIds(
   next: Array<{ id: number; expiresAt: string; jql: string }>,
 ): Promise<void> {
-  const { getDbClient } = await import("../be/db");
-  await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{ metadata: string | null }>(
-      "SELECT metadata FROM oauth_apps WHERE provider = 'jira'",
-    );
+  const { getStorage } = await import("../be/storage");
+  const repo = getStorage().repos.oauth;
+  await getStorage().transaction(async () => {
+    const row = await repo.getAppMetadata("jira");
 
     if (!row) {
       throw new Error(
@@ -225,10 +224,7 @@ async function overwriteWebhookIds(
     }
 
     const merged = { ...current, webhookIds: next };
-    await tx.run(
-      "UPDATE oauth_apps SET metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
-      [JSON.stringify(merged)],
-    );
+    await repo.setAppMetadata("jira", JSON.stringify(merged));
   });
 }
 
