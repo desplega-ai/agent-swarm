@@ -23,6 +23,8 @@ import type {
   InboxItemStateRow,
   KvJsonFieldFilter,
   KvKeyRange,
+  McpServerRow,
+  McpServerWithInstallRow,
   MetricColumnUpdate,
   MetricRow,
   MetricVersionRow,
@@ -9247,27 +9249,6 @@ export async function toggleAgentSkill(
 
 // ── MCP Servers ──────────────────────────────────────────────────────────
 
-type McpServerRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  scope: string;
-  ownerAgentId: string | null;
-  transport: string;
-  command: string | null;
-  args: string | null;
-  url: string | null;
-  headers: string | null;
-  envConfigKeys: string | null;
-  headerConfigKeys: string | null;
-  extraAuthorizeParams: string | null;
-  authMethod: string | null;
-  isEnabled: number;
-  version: number;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
-
 type AgentMcpServerRow = {
   id: string;
   agentId: string;
@@ -9275,8 +9256,6 @@ type AgentMcpServerRow = {
   isActive: number;
   installedAt: string;
 };
-
-type McpServerWithInstallRow = McpServerRow & { isActive: number; installedAt: string };
 
 function rowToMcpServer(row: McpServerRow): McpServer {
   return {
@@ -9338,31 +9317,23 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<McpServerRow>(
-    `INSERT INTO mcp_servers (
-        id, name, description, scope, ownerAgentId, transport,
-        command, args, url, headers,
-        envConfigKeys, headerConfigKeys, extraAuthorizeParams,
-        isEnabled, version, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.description ?? null,
-      data.scope ?? "agent",
-      data.ownerAgentId ?? null,
-      data.transport,
-      data.command ?? null,
-      data.args ?? null,
-      data.url ?? null,
-      data.headers ?? null,
-      data.envConfigKeys ?? null,
-      data.headerConfigKeys ?? null,
-      data.extraAuthorizeParams ?? null,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.mcpServers.insertMcpServer({
+    id,
+    name: data.name,
+    description: data.description ?? null,
+    scope: data.scope ?? "agent",
+    ownerAgentId: data.ownerAgentId ?? null,
+    transport: data.transport,
+    command: data.command ?? null,
+    args: data.args ?? null,
+    url: data.url ?? null,
+    headers: data.headers ?? null,
+    envConfigKeys: data.envConfigKeys ?? null,
+    headerConfigKeys: data.headerConfigKeys ?? null,
+    extraAuthorizeParams: data.extraAuthorizeParams ?? null,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
 
   if (!row) throw new Error("Failed to create MCP server");
   return rowToMcpServer(row);
@@ -9371,10 +9342,8 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
 /** Shared by HTTP and MCP-tool creation paths so each new server emits once. */
 export async function emitMcpServerConnectedTelemetry(): Promise<void> {
   try {
-    const row = await getDbClient().get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM mcp_servers",
-    );
-    emitIntegrationConnected("other", undefined, row?.count === 1);
+    const count = await getStorage().repos.mcpServers.countMcpServers();
+    emitIntegrationConnected("other", undefined, count === 1);
   } catch {
     // Telemetry must never break MCP server creation.
   }
@@ -9391,85 +9360,29 @@ export async function updateMcpServer(
   if (!existing) return null;
 
   const now = new Date().toISOString();
-  const sets: string[] = ["lastUpdatedAt = ?"];
-  const params: (string | number | null)[] = [now];
-
-  if (updates.name !== undefined) {
-    sets.push("name = ?");
-    params.push(updates.name);
-  }
-  if (updates.description !== undefined) {
-    sets.push("description = ?");
-    params.push(updates.description ?? null);
-  }
-  if (updates.scope !== undefined) {
-    sets.push("scope = ?");
-    params.push(updates.scope);
-  }
-  if (updates.transport !== undefined) {
-    sets.push("transport = ?");
-    params.push(updates.transport);
-  }
-  if (updates.command !== undefined) {
-    sets.push("command = ?");
-    params.push(updates.command ?? null);
-  }
-  if (updates.args !== undefined) {
-    sets.push("args = ?");
-    params.push(updates.args ?? null);
-  }
-  if (updates.url !== undefined) {
-    sets.push("url = ?");
-    params.push(updates.url ?? null);
-  }
-  if (updates.headers !== undefined) {
-    sets.push("headers = ?");
-    params.push(updates.headers ?? null);
-  }
-  if (updates.envConfigKeys !== undefined) {
-    sets.push("envConfigKeys = ?");
-    params.push(updates.envConfigKeys ?? null);
-  }
-  if (updates.headerConfigKeys !== undefined) {
-    sets.push("headerConfigKeys = ?");
-    params.push(updates.headerConfigKeys ?? null);
-  }
-  if (updates.extraAuthorizeParams !== undefined) {
-    sets.push("extraAuthorizeParams = ?");
-    params.push(updates.extraAuthorizeParams ?? null);
-  }
-  if (updates.isEnabled !== undefined) {
-    sets.push("isEnabled = ?");
-    params.push(updates.isEnabled ? 1 : 0);
-  }
-  if (updates.ownerAgentId !== undefined) {
-    sets.push("ownerAgentId = ?");
-    params.push(updates.ownerAgentId ?? null);
-  }
-  if (updates.authMethod !== undefined) {
-    sets.push("authMethod = ?");
-    params.push(updates.authMethod);
-  }
-
-  // Bump version on config changes
-  const configFields = [
-    "command",
-    "args",
-    "url",
-    "headers",
-    "envConfigKeys",
-    "headerConfigKeys",
-    "extraAuthorizeParams",
-    "transport",
-  ];
-  if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {
-    sets.push("version = version + 1");
-  }
-
-  params.push(id);
-  const row = await getDbClient().get<McpServerRow>(
-    `UPDATE mcp_servers SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const nullable = (value: string | null | undefined) =>
+    value === undefined ? undefined : (value ?? null);
+  // Config changes (command, args, url, headers, env/header keys, authorize
+  // params, transport) bump the version.
+  const row = await getStorage().repos.mcpServers.updateMcpServer(
+    id,
+    {
+      name: updates.name,
+      description: nullable(updates.description),
+      scope: updates.scope,
+      transport: updates.transport,
+      command: nullable(updates.command),
+      args: nullable(updates.args),
+      url: nullable(updates.url),
+      headers: nullable(updates.headers),
+      envConfigKeys: nullable(updates.envConfigKeys),
+      headerConfigKeys: nullable(updates.headerConfigKeys),
+      extraAuthorizeParams: nullable(updates.extraAuthorizeParams),
+      isEnabled: updates.isEnabled,
+      ownerAgentId: nullable(updates.ownerAgentId),
+      authMethod: updates.authMethod,
+    },
+    now,
   );
 
   return row ? rowToMcpServer(row) : null;
@@ -9481,27 +9394,21 @@ export type DeleteMcpServerResult = {
 };
 
 export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult> {
-  const existing = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM mcp_servers WHERE id = ?",
-    [id],
-  );
+  const storage = getStorage();
+  const existing = await storage.repos.mcpServers.findMcpServerById(id);
   if (!existing) return { deleted: false, deletedScriptConnectionCount: 0 };
 
-  return await getDbClient().transaction(async (tx) => {
-    const deletedConnections = await tx.run(
-      "DELETE FROM script_connections WHERE mcp_server_id = ?",
-      [id],
-    );
-    const deletedServer = await tx.run("DELETE FROM mcp_servers WHERE id = ?", [id]);
+  return await storage.transaction(async () => {
+    const deleted = await storage.repos.mcpServers.deleteMcpServerCascade(id);
     return {
-      deleted: deletedServer.changes > 0,
-      deletedScriptConnectionCount: deletedConnections.changes,
+      deleted: deleted.servers > 0,
+      deletedScriptConnectionCount: deleted.scriptConnections,
     };
   });
 }
 
 export async function getMcpServerById(id: string): Promise<McpServer | null> {
-  const row = await getDbClient().get<McpServerRow>("SELECT * FROM mcp_servers WHERE id = ?", [id]);
+  const row = await getStorage().repos.mcpServers.findMcpServerById(id);
   return row ? rowToMcpServer(row) : null;
 }
 
@@ -9510,9 +9417,10 @@ export async function getMcpServerByName(
   scope: McpServerScope,
   ownerAgentId: string | null,
 ): Promise<McpServer | null> {
-  const row = await getDbClient().get<McpServerRow>(
-    "SELECT * FROM mcp_servers WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-    [name, scope, ownerAgentId ?? ""],
+  const row = await getStorage().repos.mcpServers.findMcpServerByName(
+    name,
+    scope,
+    ownerAgentId ?? "",
   );
   return row ? rowToMcpServer(row) : null;
 }
@@ -9526,34 +9434,7 @@ export interface McpServerFilters {
 }
 
 export async function listMcpServers(filters?: McpServerFilters): Promise<McpServer[]> {
-  let query = "SELECT * FROM mcp_servers WHERE 1=1";
-  const params: (string | number)[] = [];
-
-  if (filters?.scope) {
-    query += " AND scope = ?";
-    params.push(filters.scope);
-  }
-  if (filters?.ownerAgentId) {
-    query += " AND ownerAgentId = ?";
-    params.push(filters.ownerAgentId);
-  }
-  if (filters?.transport) {
-    query += " AND transport = ?";
-    params.push(filters.transport);
-  }
-  if (filters?.isEnabled !== undefined) {
-    query += " AND isEnabled = ?";
-    params.push(filters.isEnabled ? 1 : 0);
-  }
-  if (filters?.search) {
-    query += " AND (name LIKE ? OR description LIKE ?)";
-    const term = `%${filters.search}%`;
-    params.push(term, term);
-  }
-
-  query += " ORDER BY name ASC";
-
-  const rows = await getDbClient().query<McpServerRow>(query, params);
+  const rows = await getStorage().repos.mcpServers.listMcpServers(filters ?? {});
   return rows.map(rowToMcpServer);
 }
 
@@ -9578,17 +9459,7 @@ export async function getAgentMcpServers(
   agentId: string,
   activeOnly = true,
 ): Promise<McpServerWithInstallInfo[]> {
-  const query = `
-    SELECT ms.*, ams.isActive, ams.installedAt
-    FROM mcp_servers ms
-    JOIN agent_mcp_servers ams ON ms.id = ams.mcpServerId
-    WHERE ams.agentId = ?
-      ${activeOnly ? "AND ams.isActive = 1" : ""}
-      AND ms.isEnabled = 1
-    ORDER BY ms.name ASC
-  `;
-
-  const rows = await getDbClient().query<McpServerWithInstallRow>(query, [agentId]);
+  const rows = await getStorage().repos.mcpServers.listAgentMcpServers(agentId, activeOnly);
   return rows.map(rowToMcpServerWithInstall);
 }
 

@@ -1,6 +1,15 @@
-import { BaseMcpServersRepository, type McpEventSubscriptionRow, sql } from "@desplega/storage";
+import {
+  BaseMcpServersRepository,
+  type McpEventSubscriptionRow,
+  SqlQuery,
+  sql,
+} from "@desplega/storage";
 
 export class SqliteMcpServersRepository extends BaseMcpServersRepository {
+  protected insertionOrder(alias?: string): SqlQuery {
+    return new SqlQuery([alias ? `${alias}.rowid` : "rowid"], []);
+  }
+
   listLiveSubscriptions(
     userId: string,
     eventName: string,
