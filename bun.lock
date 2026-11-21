@@ -225,6 +225,15 @@
         "vite": "^7.3.8",
       },
     },
+    "packages/agent-swarm-sdk": {
+      "name": "@desplega.ai/agent-swarm-sdk",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "openapi-typescript": "^7",
+        "typescript": "^5.9.0",
+      },
+    },
     "packages/model-catalog": {
       "name": "@desplega/model-catalog",
       "version": "0.1.0",
@@ -474,6 +483,8 @@
     "@cursor/sdk-win32-x64": ["@cursor/sdk-win32-x64@1.4.2", "", { "os": "win32", "cpu": "x64", "bin": { "rg": "./bin/rg.exe" } }, "sha512-JBLJWDAAJOJFJrYZlYWnWWoyS7Eh9AZWXSOm/A7LX5wrGgeRJipIT2Y7yHbYJ2HgZQEletaywEkPpxPRJPdW5w=="],
 
     "@desplega.ai/agent-fs-just-bash": ["@desplega.ai/agent-fs-just-bash@0.18.37", "", { "peerDependencies": { "just-bash": ">=3.0.1" }, "optionalPeers": ["just-bash"] }, "sha512-ylXuyJiuMkpfcxHd5J+/a2p9cM1ZZs3m3NYvbH4wfWuaC57zalDJYP+3+QTP51ra/x6iBFteDYEdQrfjkVsiOg=="],
+
+    "@desplega.ai/agent-swarm-sdk": ["@desplega.ai/agent-swarm-sdk@workspace:packages/agent-swarm-sdk"],
 
     "@desplega.ai/business-use": ["@desplega.ai/business-use@0.4.3", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-qAqV3vDI1VX5khn2Mi7bul+mqJf0RE5Gdus+41VI8SUOCeRIidnqXaNO/dCUAoPwZLN7Mx9zLTn/I3s/IDcToA=="],
 

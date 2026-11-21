@@ -37,7 +37,7 @@ for arg in "$@"; do
 done
 
 # Directories CI runs Biome on: root `bun run lint` plus apps/ui's own lint.
-BIOME_SCOPE='^(src/|apps/evals/|apps/ui/|packages/ui-e2e/|packages/model-routing/)'
+BIOME_SCOPE='^(src/|apps/evals/|apps/ui/|packages/ui-e2e/|packages/model-routing/|packages/agent-swarm-sdk/)'
 
 # Wall time per step: each step() closes the one before it; the EXIT trap closes
 # the last one (also on failure) and prints the table.
