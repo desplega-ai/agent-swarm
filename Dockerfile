@@ -18,6 +18,9 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+COPY packages/storage-sqlite/package.json ./packages/storage-sqlite/package.json
+COPY packages/storage-postgres/package.json ./packages/storage-postgres/package.json
 # Retry transient extraction failures with a clean dependency tree.
 RUN for attempt in 1 2 3; do \
         bun install --frozen-lockfile && break; \
@@ -26,6 +29,9 @@ RUN for attempt in 1 2 3; do \
     done
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
+COPY packages/storage/ ./packages/storage/
+COPY packages/storage-sqlite/ ./packages/storage-sqlite/
+COPY packages/storage-postgres/ ./packages/storage-postgres/
 
 # Copy source files
 COPY src/ ./src/

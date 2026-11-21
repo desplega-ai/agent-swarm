@@ -197,6 +197,7 @@
     "@desplega/model-catalog": "workspace:*",
     "@desplega/model-routing": "workspace:*",
     "@desplega/storage": "workspace:*",
+    "@desplega/storage-postgres": "workspace:*",
     "@desplega/storage-sqlite": "workspace:*",
     "@faker-js/faker": "^10.6.0",
     "@opencode/plugin": "2.3.2",
