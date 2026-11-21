@@ -30,6 +30,12 @@ export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
  */
 const EXTRA_IN_VEC_ALIAS = new SqlQuery(["AS extraInVec"], []);
 
+/**
+ * The capped set's order in the engine-scored exhaustive arm, written unquoted
+ * (SQLite identifiers fold case): the learning-dedup test asserts this text.
+ */
+const CAPPED_ORDER_BY = new SqlQuery(["ORDER BY updatedAt DESC, id"], []);
+
 /** A `?`-placeholder statement as a query, so the executed text is exactly the constant. */
 function fromPlaceholders(text: string, values: (string | number)[]): SqlQuery {
   const strings = text.split("?");
@@ -103,7 +109,7 @@ export class SqliteMemoryRepository extends BaseMemoryRepository {
         SELECT id,
           CASE WHEN length(embedding) = ${embedding.byteLength} THEN 1 - vec_distance_cosine(embedding, ${embedding}) END
             AS similarity
-        FROM (SELECT id, embedding ${this.cappedSet(filter, cap)})
+        FROM (SELECT id, embedding ${this.cappedSet(filter, cap, CAPPED_ORDER_BY)})
       )
       WHERE similarity >= ${floor}
       ORDER BY similarity DESC, id

@@ -636,11 +636,15 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
   }
 
   /** FROM..LIMIT of the exhaustive arm's capped eligible set, newest first. */
-  protected cappedSet(filter: MemorySearchFilter, cap: number): SqlQuery {
+  protected cappedSet(
+    filter: MemorySearchFilter,
+    cap: number,
+    orderBy: SqlQuery = sql`ORDER BY "updatedAt" DESC, id`,
+  ): SqlQuery {
     const conditions = this.searchConditions([sql`embedding IS NOT NULL`], filter);
     return sql`FROM agent_memory
        WHERE ${sqlJoin(conditions, sql` AND `)}
-       ORDER BY "updatedAt" DESC, id
+       ${orderBy}
        LIMIT ${cap}`;
   }
 
