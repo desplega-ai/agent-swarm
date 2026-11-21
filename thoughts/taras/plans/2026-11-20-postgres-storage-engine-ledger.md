@@ -16,8 +16,8 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
-| M4 Engine-specific domains | steps 1 to 3 done; step 4 D10 reader done (part 6), seeded scripts in progress (`m4/seed-scripts`); step 5 in progress (`m4/own-handles`) | |
-| M5 Contract on Postgres | not started | |
+| M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
+| M5 Contract on Postgres | in progress (part 6): first full Postgres strict runs, fixes below; D16 guard done in M3; bench and stress tooling done; D7 not applied (open) | |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
 
@@ -329,9 +329,33 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - E2E on Postgres: the runner creates each per-run database with `LC_COLLATE 'C' LC_CTYPE 'C'`, applies the migration chain, creates a reader role (SELECT on all tables, the 7 denied revoked) and passes `DATABASE_QUERY_URL`, the order the runbook gives an operator. The SUT guard now asserts a boot seed row (`seed_state`), since the schema exists before the SUT starts.
 - CHECK failure text: SQLite reports the expression, Postgres the constraint name. The baseline generator now names each CHECK `<table>_check_<n>` and writes `check-messages.json` (SQLite source text by name); the error mapper uses it. Baseline regenerated (only the 153 CHECK lines changed); the generator keeps ordinal 367.
 
+## M4 results (part 6, steps 4 and 5) and M5 progress
+
+- Seeded db-query scripts (step 4): 17 scripts and 4 `.inline.ts` twins run on both engines. Portable text first (quoted identifiers, booleans, `$n` placeholders numbered in first-appearance order, JS-computed time cutoffs); one text per dialect where no portable form exists (`instr`/`strpos`, `group_concat`/`string_agg`, `json_extract`/`json_each`, `julianday`, `rowid`), chosen by the `dialect` field of each db_query response. A harness ran every Postgres statement of every script through the real reader and codec: 519 statements, 0 failures; outputs equal to SQLite except a time-dependent default and a raw `json_type` column the script does not read.
+- Check 12 exemption (needs review): `check-storage-boundary.ts` gained `PERMANENT_DIRS` with `src/be/seed-scripts/catalog/` (reason on the line: read-only user SQL that db_query runs under the D10 reader role). Nothing now stops new SQLite-only SQL in a seeded script; the harness is the only proof.
+- Own handles and memory (step 5): the SQLite db-query reader (bytecode denial, read-only handle, bounded child, worker pool) and the memory search worker moved into `packages/storage-sqlite`; the memory store is engine-neutral (`StorageMemoryStore`), reaching engine parts through `Storage.memoryIndexes` (SQLite: run-time `memory_fts`/`memory_vec`, worker pool; Postgres: migration 369, no worker). `getHealth()` is async. Memory store, search, edit, delete and health work over HTTP on Postgres. The worker starts from a Blob URL (checked in dev and a compiled binary; the Docker image is not built here).
+- Check 12 now at 0 pending sites. Permanent entries, reason on each line: `src/be/db/runtime.ts` (engine-handle owner), `src/be/storage.ts` (builds Storage over the engine client), `src/be/scripts/typecheck.ts` (SDK type text with example SQL in comments, not SQL).
+- Postgres fixes from the first Postgres strict runs (each with a contract test or a scenario that failed before):
+  - A 40001 that a callback caught still aborted the transaction; COMMIT then failed with 25P02 (concurrent agent registration answered 500). The client records a retryable SQLSTATE hit by any statement or savepoint and retries the whole callback.
+  - A single statement outside a transaction retries on 40001/40P01 (deviation, needs review: D6 names transactions only; such a statement is its own transaction and changed nothing when it lost).
+  - Retry budget 16 attempts, backoff cap 1 s (was 8 / 250 ms): `stress-poll-claim` went from 5 exhausted retries to 0.
+  - Foreign keys are `DEFERRABLE INITIALLY IMMEDIATE`, so `SET CONSTRAINTS ALL DEFERRED` matches SQLite's `PRAGMA defer_foreign_keys` (connection with a managed binding failed).
+  - CHECK failures carry SQLite's text (named constraints + `check-messages.json`).
+  - Moved off raw SQLite text in `db.ts`: the session list page, the session count, the attribution report, user deletion's reference rewrite.
+  - Asset summary union: new dialect helper `isoTimestampText`.
+  - Keyed workflow create: a loser that hits the winner's unique name replays the accepted operation.
+  - db-query refuses a non-query with the read-only error on Postgres too.
+- Scenario edits (section 10, SQL portability and helper use, no assertion change): `core-task-tools`, `core-telemetry`, `platform-secret-egress` bind `$n` (and `CAST($n AS text)` for an untyped select-list parameter); `script-run-storage` asks `ctx.db.reclaimsFreeSpace()` (SQLite auto_vacuum = 2, Postgres autovacuum on); `core-session-data` and `workflow-agent-task-crash-window` order by `${insertionOrder}` (rowid / `_rowid`).
+- Bench (check 21 tooling): `bun run e2e:bench --engine postgres [--only ...]` runs the suite on both engines and writes p95 per route group plus a per-site retry table (`STORAGE_TX_STATS_FILE`, bench only). Stress result (stress-poll-claim + divergence-concurrent-schedule-claim, part 6): 952 transactions, 247 retried, 0 exhausted; sites above 5%: `src/http/poll.ts:802` (poll write pass, 92%), `src/http/tasks.ts:2028` (88%), `src/http/tasks.ts:1381` (90%), `src/scheduler/scheduler.ts:362`.
+- Postgres strict runs (part 6): run 1 (head `a94edbdad`) and run 2 (head `16631956a`) both hit the run timeout before the end (50 and 65 min; the Postgres suite runs slower and retries); run 2 reached 196 passed / 54 failed attempts. Every failure group from those runs that is fixed above passed again with `--only` on Postgres afterwards. A full Postgres strict run on the current head has not been done.
+
+## Open decision (needs Taras): D7 opt-down
+
+Measured retry rates far above 5% at the poll write pass and task creation sites (above). D7 permits READ COMMITTED with explicit locks there, each with its own stress scenario. Not applied yet: each site's read-then-write invariants need a lock plan, and the tiny e2e tables make Postgres take relation-level predicate locks (sequential scans), which likely overstates conflicts compared with production-size tables. Recommendation: apply D7 to the poll claim first (`FOR UPDATE SKIP LOCKED`), re-measure on a larger seeded database, then decide the task-creation sites.
+
 ## Open decision (needs Taras): JSON key order in API responses
 
-`divergence-values` (M1) asserts that user metadata comes back byte-equal, key order included. On Postgres `users.metadata` is `jsonb` (D8), which reorders keys, so the scenario fails: `user metadata text changed`. The same holds for every API-visible `jsonb` column (83); the scenario tests one. The values are equal as JSON; only the text differs. Options: (a) keep D8 and accept reordered keys in API JSON (the scenario's byte-order assertion for jsonb columns would have to go, which section 10 forbids without a decision); (b) store API-visible JSON as `json` (keeps the text, still JSON-typed) instead of `jsonb`; (c) keep such columns `text` (as done for the 5 columns whose text code compares). Recommendation: (b) for columns the API returns, `jsonb` where SQL reads into the JSON. Until decided, check 2 fails on this assertion.
+`divergence-values` (M1) asserts that user metadata comes back byte-equal, key order included. On Postgres `users.metadata` is `jsonb` (D8), which reorders keys, so the scenario fails: `user metadata text changed`. The same holds for every API-visible `jsonb` column (83); the scenario tests one. The values are equal as JSON; only the text differs. Options: (a) keep D8 and accept reordered keys in API JSON (the scenario's byte-order assertion for jsonb columns would have to go, which section 10 forbids without a decision); (b) store API-visible JSON as `json` (keeps the text, still JSON-typed) instead of `jsonb`; (c) keep such columns `text` (as done for the 5 columns whose text code compares). Recommendation: (b) for columns the API returns, `jsonb` where SQL reads into the JSON. Until decided, check 2 fails on this assertion. Part 6 found a second case: `platform-users` asserts the `profile_changed` event's `after` JSON text (`events.after` is jsonb).
 
 ## Decisions inside my authority
 
