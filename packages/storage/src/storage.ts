@@ -4,10 +4,12 @@ import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
 import type { ConfigRepository } from "./repositories/config";
+import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { ModelsRepository } from "./repositories/models";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { TrackersRepository } from "./repositories/trackers";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
@@ -17,6 +19,8 @@ export type Repositories = {
   config: ConfigRepository;
   agents: AgentsRepository;
   mcpServers: McpServersRepository;
+  trackers: TrackersRepository;
+  events: EventsRepository;
 };
 
 /**

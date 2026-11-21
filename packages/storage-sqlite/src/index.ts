@@ -8,10 +8,12 @@ import {
 import { sqliteDialect } from "./dialect";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteConfigRepository } from "./repositories/config";
+import { SqliteEventsRepository } from "./repositories/events";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteTrackersRepository } from "./repositories/trackers";
 
 export {
   type BusyRetryOptions,
@@ -48,6 +50,8 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
       mcpServers: new SqliteMcpServersRepository(executor),
+      trackers: new SqliteTrackersRepository(executor),
+      events: new SqliteEventsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

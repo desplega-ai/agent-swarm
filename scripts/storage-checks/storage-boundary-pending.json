@@ -83,10 +83,6 @@
     "reason": "M2 move: tasks",
     "sites": 6
   },
-  "src/be/db-queries/tracker.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 18
-  },
   "src/be/db-retention-defaults.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
@@ -253,7 +249,7 @@
   },
   "src/be/events.ts": {
     "reason": "M2 move: integrations",
-    "sites": 14
+    "sites": 3
   },
   "src/be/extensions/assets.ts": {
     "reason": "M2 move: assets and import",
