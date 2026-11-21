@@ -21,8 +21,9 @@ import {
 //   coder's answer in the coder follow-up's card, with no time limit,
 // - "PR <url>" as "PR #42", and a review link into a PR the card already
 //   shows is not listed again under "Links:",
-// - the same footer on the card and on the mirrored Sessions reply, naming
-//   the worker and its work time (`Ns · coder → lead · <worker task>`),
+// - the footers main renders: `Ns · lead · <follow-up task>` on the card and
+//   `lead · <task>` on the mirrored Sessions reply, with no worker names;
+//   the card footer links only the newest follow-up, the answer it shows,
 // - no footer anywhere with SLACK_REPLY_FOOTER_ENABLED=false.
 //
 // Runs with render v2 on, delegation and the task tree off: the production state.
@@ -37,6 +38,7 @@ type ThreadRun = {
   reviewerTaskId: string;
   coderName: string;
   reviewerName: string;
+  leadName: string;
   /** Text from each follow-up's answer that has no URL, so linkifying leaves it as written. */
   coderFollowUpNeedle: string;
   reviewerFollowUpNeedle: string;
@@ -136,6 +138,8 @@ async function playThread(ctx: ScenarioContext, label: string): Promise<ThreadRu
   const ask = await findSlackTask(ctx, root.ts);
   const askId = String(ask.id);
   const leadId = String(ask.agentId);
+  const leadName =
+    ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId])?.name ?? "";
   await claim(ctx, leadId, askId);
   const askOutput = `Production deploys fail on a missing env var. Want me to send a worker? ${ctx.nonce}`;
   await finish(ctx, leadId, askId, { status: "completed", output: askOutput });
@@ -201,6 +205,7 @@ async function playThread(ctx: ScenarioContext, label: string): Promise<ThreadRu
     reviewerTaskId,
     coderName,
     reviewerName,
+    leadName,
     coderFollowUpNeedle,
     reviewerFollowUpNeedle,
     sessionOutput,
@@ -251,24 +256,42 @@ export const slackThreadOneCard: Scenario = {
       await ctx.restartSut({ env: noTree });
       const on = await playThread(ctx, "thread-footer-on");
       const card = await expectOneCard(ctx, on);
+      // The footers stay as main renders them: no worker credit.
+      const noWorkerCredit = (text: string) =>
+        !text.includes(on.coderName) &&
+        !text.includes(on.reviewerName) &&
+        !text.includes("→") &&
+        !/\bworkers?\b/.test(text) &&
+        !text.includes(on.coderTaskId.slice(0, 8)) &&
+        !text.includes(on.reviewerTaskId.slice(0, 8));
       const footer = contextTexts(card).at(-1) ?? "";
       expect(
-        new RegExp(`^\\d+[hms]\\S* · ${on.coderName}, ${on.reviewerName} → \\S+ · `).test(footer) &&
-          footer.includes(on.coderTaskId.slice(0, 8)) &&
-          footer.includes(on.reviewerTaskId.slice(0, 8)),
-        `The card footer does not name the workers, their time and their tasks: ${footer}`,
+        /^\d+[hms]\S* · /.test(footer) &&
+          footer.split(" · ")[1] === on.leadName &&
+          !footer.includes(on.coderFollowUpId.slice(0, 8)) &&
+          footer.includes(on.reviewerFollowUpId.slice(0, 8)) &&
+          noWorkerCredit(footer),
+        `The card footer is not main's "time · lead · tasks" line: ${footer}`,
       );
       const reply = carriers(ctx, on.threadTs, on.sessionOutput)[0];
       const replyFooter = contextTexts(reply).at(-1) ?? "";
       expect(
-        /^\d+[hms]\S* · /.test(replyFooter) && replyFooter.includes(on.sessionTaskId.slice(0, 8)),
-        `The mirrored Sessions reply does not carry the card footer: ${JSON.stringify(reply?.blocks)}`,
+        replyFooter.startsWith(`${on.leadName} · `) &&
+          replyFooter.includes(on.sessionTaskId.slice(0, 8)) &&
+          noWorkerCredit(replyFooter),
+        `The mirrored Sessions reply footer is not main's "lead · task" line: ${JSON.stringify(reply?.blocks)}`,
       );
 
       await ctx.restartSut({ env: { ...noTree, SLACK_REPLY_FOOTER_ENABLED: "false" } });
       const off = await playThread(ctx, "thread-footer-off");
       await expectOneCard(ctx, off);
-      const ids = [off.sessionTaskId, off.coderTaskId, off.reviewerTaskId, off.coderFollowUpId];
+      const ids = [
+        off.sessionTaskId,
+        off.coderTaskId,
+        off.reviewerTaskId,
+        off.coderFollowUpId,
+        off.reviewerFollowUpId,
+      ];
       // The task tree lists task links by design: it is not a footer.
       const trees = new Set(
         ctx.db

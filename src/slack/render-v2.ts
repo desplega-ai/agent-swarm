@@ -1698,55 +1698,17 @@ async function slackTeamId(client: WebClient): Promise<string | undefined> {
 }
 
 /**
- * The worker task a Lead follow-up reports on, with its agent's name. Undefined
- * for any other task, and when the reviewed task is the Lead's own.
- */
-async function reviewedWorkerTask(
-  task: AgentTask,
-  tasks: readonly AgentTask[],
-): Promise<{ task: AgentTask; agentName: string } | undefined> {
-  if (task.source !== "system" || task.taskType !== "follow-up" || !task.parentTaskId) {
-    return undefined;
-  }
-  const parentId = task.parentTaskId;
-  const reviewed =
-    tasks.find((candidate) => candidate.id === parentId) ?? (await getTaskById(parentId));
-  const agent = reviewed?.agentId ? await getAgentById(reviewed.agentId) : undefined;
-  return reviewed && agent && !agent.isLead ? { task: reviewed, agentName: agent.name } : undefined;
-}
-
-/**
  * The caption line under an outcome card: `duration · who · task link`. A
- * merged card passes all its tasks: the duration spans them, `who` counts the
- * workers under any of them, and the line lists every task link. A Lead
- * follow-up stands for the worker task it reviews, so the line shows the
- * work: `19m · Coder → Lead · <worker task>`, not the Lead's review time.
- * Empty when SLACK_REPLY_FOOTER_ENABLED is off.
+ * merged card passes all its tasks: `who` counts the workers under any of
+ * them, and the line lists every task link.
  */
 async function outcomeFooter(
   members: readonly AgentTask[],
   tasks: AgentTask[],
+  duration: string,
 ): Promise<unknown[]> {
   const task = members[0];
   if (!task || !isSlackReplyFooterEnabled()) return [];
-  const now = new Date();
-  const reviewed = await Promise.all(members.map((member) => reviewedWorkerTask(member, tasks)));
-  const subjects = members.map((member, index) => reviewed[index]?.task ?? member);
-  const duration = formatV2Duration(
-    new Date(Math.min(...subjects.map((subject) => Date.parse(subject.createdAt)))),
-    new Date(Math.max(...subjects.map((subject) => terminalEnd(subject, now).getTime()))),
-  );
-  const workerNames = [
-    ...new Set(reviewed.map((entry) => entry?.agentName).filter((name): name is string => !!name)),
-  ];
-  if (workerNames.length > 0) {
-    const leadName = task.agentId ? (await getAgentById(task.agentId))?.name : undefined;
-    const who = [workerNames.join(", "), leadName].filter(Boolean).join(" → ");
-    const links = [...new Set(subjects.map((subject) => getTaskLink(subject.id)))].join(", ");
-    return [
-      { type: "context", elements: [{ type: "mrkdwn", text: [duration, who, links].join(" · ") }] },
-    ];
-  }
   const memberIds = new Set(members.map((member) => member.id));
   const descendants = [
     ...new Map(
@@ -1782,19 +1744,6 @@ async function outcomeFooter(
   return [{ type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] }];
 }
 
-/**
- * The outcome card footer for `task`, for a message posted outside the
- * render loop (a Sessions reply), so every message in a thread carries the
- * same line. Empty when SLACK_REPLY_FOOTER_ENABLED is off.
- */
-export async function slackOutcomeFooter(task: AgentTask): Promise<unknown[]> {
-  if (!task.slackChannelId || !task.slackThreadTs || !isSlackReplyFooterEnabled()) return [];
-  return await outcomeFooter(
-    [task],
-    await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs),
-  );
-}
-
 export async function streamOutcomeCard(
   task: AgentTask,
   options?: {
@@ -1817,6 +1766,7 @@ export async function streamOutcomeCard(
   if (existing && isSettledSlackMessage(existing)) return existing?.finalizedAt ? existing : null;
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is
@@ -1829,7 +1779,7 @@ export async function streamOutcomeCard(
   // part of the streamed text, so notifications carry the answer alone.
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter([task], tasks)),
+    ...(await outcomeFooter([task], tasks, duration)),
   ];
   // The task's own card goes first in the blocks, under the answer. The
   // streamed text stays the answer alone.
@@ -2016,12 +1966,13 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   }
   // A merged row whose host card is gone has no Slack message to edit.
   if (isMergedSlackMessageTs(card.ts)) return false;
+  const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const content = await outcomeContent(task, task.slackReplySent);
   const presentation = await outcomePresentation(task, content);
   if (!presentation) return false;
   const captions = [
     ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter([task], tasks)),
+    ...(await outcomeFooter([task], tasks, duration)),
   ];
   const uiSpec = await outcomeUiSpec(task);
   await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
@@ -2080,8 +2031,8 @@ async function outcomeGroupMembers(
 
 /**
  * The text and blocks of a merged card: the answers it shows, in order and
- * separated by a blank line, then their captions, then one footer for every
- * task in the card. A newer Lead follow-up supersedes an older one, so the
+ * separated by a blank line, then their captions, then one footer for the
+ * answers shown. A newer Lead follow-up supersedes an older one, so the
  * card shows the ask's own answer (when the card started with it) and the
  * newest follow-up only. A card from a script action (ui spec) shows its
  * fallback text. Null when the text does not fit one markdown block.
@@ -2111,7 +2062,15 @@ async function renderOutcomeGroup(
   }
   const text = sections.join("\n\n");
   if (!text || text.length > MAX_OUTCOME_MARKDOWN_LENGTH) return null;
-  const footer = await outcomeFooter(members, tasks);
+  const now = new Date();
+  // The footer covers the answers shown, so a superseded follow-up drops out of it too.
+  const start = Math.min(...shown.map((member) => Date.parse(member.createdAt)));
+  const end = Math.max(...shown.map((member) => terminalEnd(member, now).getTime()));
+  const footer = await outcomeFooter(
+    shown,
+    tasks,
+    formatV2Duration(new Date(start), new Date(end)),
+  );
   return { text, blocks: [{ type: "markdown", text }, ...captions, ...footer] };
 }
 

@@ -33,7 +33,6 @@ type DelegatedAsk = {
   threadTs: string;
   askTaskId: string;
   askOutput: string;
-  childId: string;
   followUpId: string;
 };
 
@@ -85,7 +84,7 @@ async function delegatedAsk(
   });
   const followUpId = await findWorkerFollowUp(ctx, leadId, childId);
   await claim(ctx, leadId, followUpId);
-  return { leadId, threadTs: message.ts, askTaskId, askOutput, childId, followUpId };
+  return { leadId, threadTs: message.ts, askTaskId, askOutput, followUpId };
 }
 
 /** Waits until the follow-up's outcome row is finalized, and returns it. */
@@ -108,8 +107,7 @@ export const slackFollowUpCardMerge: Scenario = {
     const workerId = await registerWorker(ctx, "e2e-specialist-card-merge");
 
     // 1. The follow-up merges into the ask's card: same Slack message, both
-    // answers in order, one footer that links the ask and the worker task
-    // the follow-up reviews.
+    // answers in order, one footer with both task links.
     const merged = await delegatedAsk(ctx, workerId, "merged");
     const hostRow = outcomeRow(ctx, merged.askTaskId);
     if (!hostRow) throw new Error(`The ask ${merged.askTaskId} has no outcome row`);
@@ -136,9 +134,8 @@ export const slackFollowUpCardMerge: Scenario = {
     );
     expect(
       hostBody.includes(merged.askTaskId.slice(0, 8)) &&
-        hostBody.includes(merged.childId.slice(0, 8)) &&
-        hostBody.includes("e2e-specialist-card-merge → "),
-      "The merged card's footer does not link the ask and the worker's task",
+        hostBody.includes(merged.followUpId.slice(0, 8)),
+      "The merged card's footer does not link both tasks",
     );
     const postedForFollowUp = [
       ...ctx.slack.apiCalls("chat.startStream"),
