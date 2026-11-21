@@ -229,6 +229,17 @@ async function cleanup(keep: boolean): Promise<void> {
   await cleanupCliTemp(keep);
 }
 
+/** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
+function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
+  try {
+    db.get("SELECT 1 FROM _migrations LIMIT 1");
+  } catch (error) {
+    throw new Error(
+      `--engine ${engine}: the API did not migrate the per-run database (${errorMessage(error)}); it is not using DATABASE_URL`,
+    );
+  }
+}
+
 async function bootStack(
   options: Options,
   journalPath?: string,
@@ -258,6 +269,7 @@ async function bootStack(
     }
     const db = openReadOnlyDb(sutDbTarget(sut));
     stack.db = db;
+    if (options.engine !== "sqlite") assertSutUsesDatabase(db, options.engine);
     const api = createApiClient(sut.baseUrl, sut.apiKey);
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
     const nonce = randomBytes(6).toString("hex");
