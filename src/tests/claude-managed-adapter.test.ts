@@ -1625,7 +1625,12 @@ describe("ClaudeManagedAdapter — one-time context-bound note", () => {
   ) {
     const spy = makeFakeClient({
       streamEvents: async function* () {
-        for (const e of events) yield e;
+        // Events arrive over the network: give the note's template render (an
+        // async storage read in DB mode) the time a real stream gives it.
+        for (const e of events) {
+          await Bun.sleep(20);
+          yield e;
+        }
       },
       onSend,
     });
