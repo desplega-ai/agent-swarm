@@ -529,7 +529,9 @@ describe("cascades", () => {
     );
     expect(row?.status).toBe("cancelled");
     expect(row?.resolutionReason).toBe("Human-in-the-loop step cancelled");
-    expect(row?.resolvedAt).toBeInstanceOf(Date);
+    // The codec returns timestamps in the SQLite text format of the column.
+    expect(typeof row?.resolvedAt).toBe("string");
+    expect(Number.isNaN(Date.parse(String(row?.resolvedAt)))).toBe(false);
   });
 
   test("deleting the last run of a source deletes the source", async () => {
@@ -551,25 +553,26 @@ describe("rowid surrogate", () => {
   test("_rowid numbers rows in insertion order; seeded rows keep the SQLite rowid", async () => {
     const a = await task();
     const b = await task();
-    const rows = await db.query<{ id: string; _rowid: string }>(
-      `SELECT id, "_rowid" FROM agent_tasks WHERE id IN ($1, $2) ORDER BY "_rowid"`,
+    // The codec drops a result column named _rowid, so read it under another name.
+    const rows = await db.query<{ id: string; _rowid_value: string }>(
+      `SELECT id, "_rowid" AS _rowid_value FROM agent_tasks WHERE id IN ($1, $2) ORDER BY "_rowid"`,
       [a, b],
     );
     expect(rows.map((r) => r.id)).toEqual([a, b]);
-    expect(Number(rows[1]?._rowid)).toBeGreaterThan(Number(rows[0]?._rowid));
+    expect(Number(rows[1]?._rowid_value)).toBeGreaterThan(Number(rows[0]?._rowid_value));
     // A copied value is accepted (BY DEFAULT), and the unique index refuses a duplicate.
     await expect(
       db.run(
         `INSERT INTO agent_tasks (id, task, "createdAt", "lastUpdatedAt", "_rowid")
          VALUES ($1, 't', statement_timestamp(), statement_timestamp(), $2)`,
-        [id("task"), Number(rows[0]?._rowid)],
+        [id("task"), Number(rows[0]?._rowid_value)],
       ),
     ).rejects.toThrow(/UNIQUE constraint failed/);
     // The seed sequence continues after the seeded rowids.
-    const roles = await db.query<{ id: string; _rowid: string }>(
-      `SELECT id, "_rowid" FROM roles ORDER BY "_rowid"`,
+    const roles = await db.query<{ id: string; _rowid_value: string }>(
+      `SELECT id, "_rowid" AS _rowid_value FROM roles ORDER BY "_rowid"`,
     );
-    expect(roles.map((r) => Number(r._rowid))).toEqual([1, 2]);
+    expect(roles.map((r) => Number(r._rowid_value))).toEqual([1, 2]);
   });
 
   test("WITHOUT ROWID and INTEGER PRIMARY KEY tables get no _rowid", async () => {

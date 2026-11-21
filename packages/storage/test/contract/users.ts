@@ -131,7 +131,9 @@ export function usersContract(engine: ContractEngine): void {
 
     test("job function, org domain candidates and snapshot counts", async () => {
       await repo.insertUser(newUser({ id: "u1", metadata: '{"jobFunction":"eng"}' }));
-      await repo.insertUser(newUser({ id: "u2", metadata: "not json" }));
+      // A NULL metadata stands for an unreadable one: json_valid(NULL) drops the row on SQLite,
+      // and jsonb cannot hold invalid JSON (the data copy reports such values instead).
+      await repo.insertUser(newUser({ id: "u2", metadata: null }));
       await repo.insertUser(newUser({ id: "u3", metadata: '{"other":1}' }));
       expect(await repo.getUserJobFunction("u1")).toBe("eng");
       expect(await repo.getUserJobFunction("u2")).toBeUndefined();
