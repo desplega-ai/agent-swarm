@@ -2,4 +2,6 @@ export * from "./agents";
 export * from "./config";
 export * from "./extensions";
 export * from "./models";
+export * from "./rbac";
 export * from "./runtime-pools";
+export * from "./users";

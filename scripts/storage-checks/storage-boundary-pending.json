@@ -15,10 +15,6 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 1
   },
-  "src/apps/user-config.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 3
-  },
   "src/apps/version.ts": {
     "reason": "M2 move: pages, metrics, apps",
     "sites": 2
@@ -58,10 +54,6 @@
   "src/be/connection-bindings-blob-migration.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 4
-  },
-  "src/be/connector-codes.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 6
   },
   "src/be/db-queries/mcp-oauth.ts": {
     "reason": "M2 move: integrations",
@@ -415,13 +407,9 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 1
   },
-  "src/be/rbac-audit.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 3
-  },
   "src/be/rbac-roles.ts": {
     "reason": "M2 move: users and RBAC",
-    "sites": 30
+    "sites": 10
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
