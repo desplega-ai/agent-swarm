@@ -16,6 +16,7 @@ import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SchedulesRepository } from "./repositories/schedules";
 import type { ScriptsRepository } from "./repositories/scripts";
 import type { SkillsRepository } from "./repositories/skills";
 import type { SlackRepository } from "./repositories/slack";
@@ -45,6 +46,7 @@ export type Repositories = {
   pages: PagesRepository;
   skills: SkillsRepository;
   kv: KvRepository;
+  schedules: SchedulesRepository;
 };
 
 /**

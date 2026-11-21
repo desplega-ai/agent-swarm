@@ -12,6 +12,7 @@ export * from "./oauth";
 export * from "./pages";
 export * from "./rbac";
 export * from "./runtime-pools";
+export * from "./schedules";
 export * from "./scripts";
 export * from "./skills";
 export * from "./slack";

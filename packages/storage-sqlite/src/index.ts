@@ -20,6 +20,7 @@ import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteSchedulesRepository } from "./repositories/schedules";
 import { SqliteScriptsRepository } from "./repositories/scripts";
 import { SqliteSkillsRepository } from "./repositories/skills";
 import { SqliteSlackRepository } from "./repositories/slack";
@@ -76,6 +77,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       pages: new SqlitePagesRepository(executor),
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
+      schedules: new SqliteSchedulesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

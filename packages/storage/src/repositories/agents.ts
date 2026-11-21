@@ -337,6 +337,18 @@ export interface AgentsRepository {
    * first. Days with no task are absent.
    */
   dailyTaskCounts(agentId: string, sinceDay: string): Promise<{ date: string; count: number }[]>;
+
+  // ---- worker-reported model columns ----
+  /** The stored `modelTierOverrides` JSON text; null when unset or no agent. */
+  getModelTierOverrides(id: string): Promise<string | null>;
+  /** True when the agent exists and its `modelTierOverrides` differs from `next` (NULL-safe). */
+  modelTierOverridesDiffer(id: string, next: string | null): Promise<boolean>;
+  /** Sets `modelTierOverrides`; no write when the stored value equals `next` (NULL-safe). */
+  setModelTierOverrides(id: string, next: string | null): Promise<void>;
+  /** The stored `harnessCliVersion`; null when unset or no agent. */
+  getHarnessCliVersion(id: string): Promise<string | null>;
+  /** Sets `harnessCliVersion`; no write when the stored value equals `next` (NULL-safe). */
+  setHarnessCliVersion(id: string, next: string | null): Promise<void>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -767,5 +779,40 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
         sql`UPDATE active_sessions SET "providerSessionId" = ${providerSessionId} WHERE "taskId" = ${taskId}`,
       )
     ).changes;
+  }
+
+  // ---- worker-reported model columns ----
+
+  async getModelTierOverrides(id: string): Promise<string | null> {
+    const row = await this.db.get<{ modelTierOverrides: string | null }>(
+      sql`SELECT "modelTierOverrides" FROM agents WHERE id = ${id}`,
+    );
+    return row?.modelTierOverrides ?? null;
+  }
+
+  async modelTierOverridesDiffer(id: string, next: string | null): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM agents WHERE id = ${id} AND "modelTierOverrides" IS DISTINCT FROM ${next}`,
+    );
+    return row !== null;
+  }
+
+  async setModelTierOverrides(id: string, next: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agents SET "modelTierOverrides" = ${next}
+       WHERE id = ${id} AND "modelTierOverrides" IS DISTINCT FROM ${next}`);
+  }
+
+  async getHarnessCliVersion(id: string): Promise<string | null> {
+    const row = await this.db.get<{ harnessCliVersion: string | null }>(
+      sql`SELECT "harnessCliVersion" FROM agents WHERE id = ${id}`,
+    );
+    return row?.harnessCliVersion ?? null;
+  }
+
+  async setHarnessCliVersion(id: string, next: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agents SET "harnessCliVersion" = ${next}
+       WHERE id = ${id} AND "harnessCliVersion" IS DISTINCT FROM ${next}`);
   }
 }

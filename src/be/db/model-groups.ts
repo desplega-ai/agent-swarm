@@ -8,7 +8,6 @@ import type { ModelGroupRow } from "@desplega/storage";
 import type { ModelGroup } from "../../types";
 import { getStorage } from "../storage";
 import { taskHoldWindow } from "./model-profiles";
-import { getDbClient } from "./runtime";
 
 /** Most members a group may list. */
 export const MAX_MODEL_GROUP_MEMBERS = 20;
@@ -164,11 +163,8 @@ export async function modelGroupReferences(name: string): Promise<{
     name,
     taskHoldWindow(),
   );
-  const schedules = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM scheduled_tasks WHERE modelGroup = ? ORDER BY id",
-    [name],
-  );
-  return { openTaskCount, scheduleIds: schedules.map((s) => s.id) };
+  const scheduleIds = await getStorage().repos.schedules.listIdsByModelGroup(name);
+  return { openTaskCount, scheduleIds };
 }
 
 /**

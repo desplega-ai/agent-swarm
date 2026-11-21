@@ -1,6 +1,6 @@
 import { greatestStrict } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: config (`swarm_config`, `swarm_repos`, `api_key_status`,
@@ -352,6 +352,23 @@ export interface ConfigRepository {
     keyIndex: number,
     keySuffix: string | null,
   ): Promise<string[]>;
+  /**
+   * `scopeId`s of the agent-scoped rows of `key` whose value is exactly
+   * `value`. Insertion order.
+   */
+  listAgentScopeIdsWithValue(key: string, value: string): Promise<string[]>;
+  /**
+   * Keys among `keys` set at `(scope, scopeId)`; `includeSecrets: false`
+   * skips secret rows. Ordered by key (unique per scope and scopeId).
+   */
+  listScopedKeys(
+    scope: string,
+    scopeId: string,
+    keys: readonly string[],
+    opts: { includeSecrets: boolean },
+  ): Promise<string[]>;
+  /** Deletes the exact `(scope, scopeId, key)` rows; a null `scopeId` matches NULL. Returns the count. */
+  deleteConfigByScopeKey(scope: string, scopeId: string | null, key: string): Promise<number>;
 }
 
 const scopeIdIs = (scopeId: string | null): SqlQuery =>
@@ -862,5 +879,35 @@ export abstract class BaseConfigRepository implements ConfigRepository {
         AND ("keyIndex" = ${keyIndex} OR "keySuffix" = ${keySuffix})
       RETURNING "keySuffix"`);
     return rows.map((row) => row.keySuffix);
+  }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listAgentScopeIdsWithValue(key: string, value: string): Promise<string[]>;
+
+  async listScopedKeys(
+    scope: string,
+    scopeId: string,
+    keys: readonly string[],
+    opts: { includeSecrets: boolean },
+  ): Promise<string[]> {
+    if (keys.length === 0) return [];
+    const rows = await this.db.query<{ key: string }>(sql`
+      SELECT key FROM swarm_config
+       WHERE scope = ${scope} AND "scopeId" = ${scopeId} AND key IN (${sqlList(keys)})
+         ${opts.includeSecrets ? EMPTY : sql`AND "isSecret" = ${false}`}
+       ORDER BY key`);
+    return rows.map((row) => row.key);
+  }
+
+  async deleteConfigByScopeKey(
+    scope: string,
+    scopeId: string | null,
+    key: string,
+  ): Promise<number> {
+    return (
+      await this.db.run(
+        sql`DELETE FROM swarm_config WHERE scope = ${scope} AND ${scopeIdIs(scopeId)} AND key = ${key}`,
+      )
+    ).changes;
   }
 }

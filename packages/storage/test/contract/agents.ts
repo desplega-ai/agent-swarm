@@ -346,5 +346,25 @@ export function agentsContract(engine: ContractEngine): void {
         { date: "2026-11-21", count: 1 },
       ]);
     });
+
+    test("worker-reported model columns write only on change (NULL-safe)", async () => {
+      await repo.insertAgent(newAgent({ id: "m1" }));
+      expect(await repo.getModelTierOverrides("m1")).toBeNull();
+      expect(await repo.modelTierOverridesDiffer("m1", null)).toBe(false);
+      expect(await repo.modelTierOverridesDiffer("m1", '{"smol":"x"}')).toBe(true);
+      expect(await repo.modelTierOverridesDiffer("missing", '{"smol":"x"}')).toBe(false);
+      await repo.setModelTierOverrides("m1", '{"smol":"x"}');
+      expect(await repo.getModelTierOverrides("m1")).toBe('{"smol":"x"}');
+      expect(await repo.modelTierOverridesDiffer("m1", '{"smol":"x"}')).toBe(false);
+      await repo.setModelTierOverrides("m1", null);
+      expect(await repo.getModelTierOverrides("m1")).toBeNull();
+      expect(await repo.getModelTierOverrides("missing")).toBeNull();
+
+      expect(await repo.getHarnessCliVersion("m1")).toBeNull();
+      await repo.setHarnessCliVersion("m1", "1.2.3");
+      expect(await repo.getHarnessCliVersion("m1")).toBe("1.2.3");
+      await repo.setHarnessCliVersion("m1", null);
+      expect(await repo.getHarnessCliVersion("m1")).toBeNull();
+    });
   });
 }

@@ -43,14 +43,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 4
   },
-  "src/be/db/model-groups.ts": {
-    "reason": "M2 move: models",
-    "sites": 2
-  },
-  "src/be/db/model-profiles.ts": {
-    "reason": "M2 move: models",
-    "sites": 6
-  },
   "src/be/db/request-composition.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 6
@@ -157,7 +149,7 @@
   },
   "src/be/harness-model-support.ts": {
     "reason": "M2 move: models",
-    "sites": 4
+    "sites": 2
   },
   "src/be/import/index.ts": {
     "reason": "M2 move: assets and import",
@@ -257,7 +249,7 @@
   },
   "src/be/model-tier-resolution.ts": {
     "reason": "M2 move: models",
-    "sites": 8
+    "sites": 5
   },
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -310,10 +302,6 @@
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
-  },
-  "src/be/seed-model-profiles.ts": {
-    "reason": "M2 move: models",
-    "sites": 2
   },
   "src/be/seed-pricing.ts": {
     "reason": "M2 move: sessions and cost",

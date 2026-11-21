@@ -515,5 +515,41 @@ export function configContract(engine: ContractEngine): void {
       expect(await repo.deleteGlobalKeysAtSlot("CT_TYPE", 5, "k2")).toEqual(["k2"]);
       expect(await repo.deleteGlobalKeysAtSlot("CT_TYPE", 1, null)).toEqual([]);
     });
+
+    test("agent-scoped values, scoped keys and scope-key deletes", async () => {
+      await repo.insertConfig(
+        newConfig({ scope: "agent", scopeId: "z-agent", key: "CT_P", value: "x" }),
+      );
+      await repo.insertConfig(
+        newConfig({ scope: "agent", scopeId: "a-agent", key: "CT_P", value: "x" }),
+      );
+      await repo.insertConfig(
+        newConfig({ scope: "agent", scopeId: "m-agent", key: "CT_P", value: "y" }),
+      );
+      await repo.insertConfig(newConfig({ scope: "global", key: "CT_P", value: "x" }));
+      // Insertion order, not scopeId order.
+      expect(await repo.listAgentScopeIdsWithValue("CT_P", "x")).toEqual(["z-agent", "a-agent"]);
+      expect(await repo.listAgentScopeIdsWithValue("CT_P", "none")).toEqual([]);
+
+      await repo.insertConfig(newConfig({ scope: "repo", scopeId: "r1", key: "CT_B", value: "1" }));
+      await repo.insertConfig(
+        newConfig({ scope: "repo", scopeId: "r1", key: "CT_A", value: "1", isSecret: true }),
+      );
+      await repo.insertConfig(newConfig({ scope: "repo", scopeId: "r1", key: "CT_C", value: "1" }));
+      const keys = ["CT_A", "CT_B"];
+      expect(await repo.listScopedKeys("repo", "r1", keys, { includeSecrets: true })).toEqual([
+        "CT_A",
+        "CT_B",
+      ]);
+      expect(await repo.listScopedKeys("repo", "r1", keys, { includeSecrets: false })).toEqual([
+        "CT_B",
+      ]);
+      expect(await repo.listScopedKeys("repo", "r2", keys, { includeSecrets: true })).toEqual([]);
+
+      expect(await repo.deleteConfigByScopeKey("agent", "a-agent", "CT_P")).toBe(1);
+      expect(await repo.deleteConfigByScopeKey("agent", "a-agent", "CT_P")).toBe(0);
+      expect(await repo.deleteConfigByScopeKey("global", null, "CT_P")).toBe(1);
+      expect(await repo.findConfigByScopeKey("agent", "z-agent", "CT_P")).not.toBeNull();
+    });
   });
 }
