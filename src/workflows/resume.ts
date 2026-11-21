@@ -858,8 +858,7 @@ export async function cancelWorkflowRunStep(
   slackClient?: ApprovalSlackClient,
 ): Promise<void> {
   const now = new Date().toISOString();
-  let persistedReason = reason;
-  await getDbClient().transaction(async () => {
+  const persistedReason = await getDbClient().transaction(async () => {
     const step = await getWorkflowRunStep(stepId);
     if (!step) throw new Error("Workflow run step not found");
     if (step.nodeType !== "human-in-the-loop") {
@@ -868,10 +867,7 @@ export async function cancelWorkflowRunStep(
     if (["completed", "failed", "skipped"].includes(step.status)) {
       throw new Error(`Cannot cancel step in '${step.status}' state`);
     }
-    if (step.status === "cancelled") {
-      persistedReason = step.error ?? reason;
-      return;
-    }
+    if (step.status === "cancelled") return step.error ?? reason;
 
     const task = await getTaskByWorkflowRunStepId(stepId);
     if (task) await cancelTask(task.id, reason, { statusKind: "workflow" });
@@ -880,6 +876,7 @@ export async function cancelWorkflowRunStep(
       error: reason,
       finishedAt: now,
     });
+    return reason;
   });
 
   const approvals = await listCancelledApprovalRequestsForStep(stepId);
