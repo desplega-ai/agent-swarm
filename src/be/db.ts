@@ -20,6 +20,8 @@ import type {
   ChannelActivityCursorRow,
   ContextSnapshotRow,
   InboxItemStateRow,
+  KvJsonFieldFilter,
+  KvKeyRange,
   RoutingCandidateMatch,
   ScheduledTaskColumnUpdate,
   ScheduledTaskRow,
@@ -11940,17 +11942,11 @@ function encodeKvValue(value: unknown, valueType: KvValueType): string {
  * time without a background sweeper.
  */
 export async function getKv(namespace: string, key: string): Promise<KvEntry | null> {
-  const row = await getDbClient().get<KvRow>(
-    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-         FROM kv_entries WHERE namespace = ? AND key = ?`,
-    [namespace, key],
-  );
+  const kv = getStorage().repos.kv;
+  const row = (await kv.findEntry(namespace, key)) as KvRow | null;
   if (!row) return null;
   if (row.expires_at !== null && row.expires_at <= Date.now()) {
-    await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
-      namespace,
-      key,
-    ]);
+    await kv.deleteEntry(namespace, key);
     return null;
   }
   return decodeKvRow(row);
@@ -11959,14 +11955,7 @@ export async function getKv(namespace: string, key: string): Promise<KvEntry | n
 /** Delete expired entries in one namespace. Used by internal TTL-backed stores
  * that need proactive cleanup rather than waiting for a point read. */
 export async function sweepExpiredKv(namespace: string, now = Date.now()): Promise<number> {
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE namespace = ?
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [namespace, now],
-  );
-  return result.changes;
+  return await getStorage().repos.kv.deleteExpired(namespace, now);
 }
 
 /** Delete expired entries across a namespace family (`prefix` and
@@ -11987,18 +11976,14 @@ export async function sweepExpiredKvPrefix(
   // ROWID, so a batch selects the (namespace, key) primary key.
   let removed = 0;
   for (;;) {
-    const result = await getDbClient().run(
-      `DELETE FROM kv_entries
-          WHERE (namespace, key) IN (
-            SELECT namespace, key FROM kv_entries
-              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-                AND expires_at IS NOT NULL
-                AND expires_at <= ?
-              LIMIT ?)`,
-      [prefix, `${escaped}:%`, now, batchSize],
+    const changes = await getStorage().repos.kv.deleteExpiredInFamilyBatch(
+      prefix,
+      `${escaped}:%`,
+      now,
+      batchSize,
     );
-    removed += result.changes;
-    if (result.changes < batchSize) return removed;
+    removed += changes;
+    if (changes < batchSize) return removed;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
@@ -12020,17 +12005,15 @@ export async function upsertKv(input: {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const row = await getDbClient().get<KvRow>(
-    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(namespace, key) DO UPDATE SET
-         value = excluded.value,
-         value_type = excluded.value_type,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at
-       RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now],
-  );
+  const row = (await getStorage().repos.kv.upsertEntry({
+    namespace: input.namespace,
+    key: input.key,
+    value: encoded,
+    value_type: input.valueType,
+    expires_at: expiresAt,
+    created_at: now,
+    updated_at: now,
+  })) as KvRow | null;
   if (!row) throw new Error("Failed to upsert kv entry");
   return decodeKvRow(row);
 }
@@ -12052,18 +12035,19 @@ export async function claimKv(input: {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const result = await getDbClient().run(
-    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(namespace, key) DO UPDATE SET
-         value = excluded.value,
-         value_type = excluded.value_type,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at
-       WHERE kv_entries.expires_at IS NOT NULL AND kv_entries.expires_at <= ?`,
-    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now, now],
+  const changes = await getStorage().repos.kv.claimEntry(
+    {
+      namespace: input.namespace,
+      key: input.key,
+      value: encoded,
+      value_type: input.valueType,
+      expires_at: expiresAt,
+      created_at: now,
+      updated_at: now,
+    },
+    now,
   );
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -12071,11 +12055,7 @@ export async function claimKv(input: {
  * existed. Does not differentiate expired-but-not-yet-swept from never-existed.
  */
 export async function deleteKv(namespace: string, key: string): Promise<boolean> {
-  const result = await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
-    namespace,
-    key,
-  ]);
-  return result.changes > 0;
+  return (await getStorage().repos.kv.deleteEntry(namespace, key)) > 0;
 }
 
 export class KvTypeCollisionError extends Error {
@@ -12097,12 +12077,10 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
   if (!Number.isInteger(by) || !Number.isSafeInteger(by)) {
     throw new Error("INCR `by` must be a JS-safe integer");
   }
-  return await getDbClient().transaction(async (tx): Promise<KvEntry> => {
-    const existing = await tx.get<KvRow>(
-      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-           FROM kv_entries WHERE namespace = ? AND key = ?`,
-      [namespace, key],
-    );
+  const storage = getStorage();
+  const kv = storage.repos.kv;
+  return await storage.transaction(async (): Promise<KvEntry> => {
+    const existing = (await kv.findEntry(namespace, key)) as KvRow | null;
 
     const now = Date.now();
     const expired =
@@ -12114,17 +12092,15 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
     if (!existing || expired) {
       // Insert (or replace if expired). `upsertKv` re-enters the prepared
       // statement cache cheaply; inlining keeps this in one transaction.
-      const row = await tx.get<KvRow>(
-        `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-             VALUES (?, ?, ?, 'integer', ?, ?, ?)
-           ON CONFLICT(namespace, key) DO UPDATE SET
-             value = excluded.value,
-             value_type = excluded.value_type,
-             expires_at = excluded.expires_at,
-             updated_at = excluded.updated_at
-           RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-        [namespace, key, String(by), null, now, now],
-      );
+      const row = (await kv.upsertEntry({
+        namespace,
+        key,
+        value: String(by),
+        value_type: "integer",
+        expires_at: null,
+        created_at: now,
+        updated_at: now,
+      })) as KvRow | null;
       if (!row) throw new Error("Failed to insert kv entry on INCR");
       return decodeKvRow(row);
     }
@@ -12142,12 +12118,7 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
       throw new Error("INCR would overflow JS-safe integer range");
     }
 
-    const row = await tx.get<KvRow>(
-      `UPDATE kv_entries SET value = ?, updated_at = ?
-           WHERE namespace = ? AND key = ?
-         RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-      [String(next), now, namespace, key],
-    );
+    const row = (await kv.setEntryValue(namespace, key, String(next), now)) as KvRow | null;
     if (!row) throw new Error("Failed to update kv entry on INCR");
     return decodeKvRow(row);
   });
@@ -12176,23 +12147,17 @@ export function kvPrefixUpperBound(prefix: string): string | null {
  * BINARY), so it scanned every row of the namespace. A range seeks straight
  * to the prefix and matches it exactly (case-sensitive).
  */
-function kvPrefixCondition(prefix: string | undefined): { sql: string; params: string[] } {
-  if (prefix === undefined || prefix.length === 0) return { sql: "", params: [] };
+function kvPrefixCondition(prefix: string | undefined): KvKeyRange {
+  if (prefix === undefined || prefix.length === 0) return {};
   const upper = kvPrefixUpperBound(prefix);
-  return upper === null
-    ? { sql: "AND key >= ?", params: [prefix] }
-    : { sql: "AND key >= ? AND key < ?", params: [prefix, upper] };
+  return upper === null ? { from: prefix } : { from: prefix, before: upper };
 }
 
 /** Top-level JSON field equality, evaluated in SQLite before rows reach JS. */
 export type KvJsonFieldEquals = { field: string; value: string | number | boolean };
 
-function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
-  sql: string;
-  params: (string | number | boolean)[];
-} {
-  const parts: string[] = [];
-  const params: (string | number | boolean)[] = [];
+function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): KvJsonFieldFilter[] {
+  const out: KvJsonFieldFilter[] = [];
   for (const filter of filters ?? []) {
     // JSON path quoting has no escape for these characters.
     if (/["\\]/.test(filter.field)) {
@@ -12203,14 +12168,9 @@ function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
     // float parser) while the bound JS number is a double, so SQL could drop
     // a row that JS `===` matches. Other numbers are left to the caller.
     if (typeof filter.value === "number" && !Number.isSafeInteger(filter.value)) continue;
-    // json_valid guards the corrupt rows decodeKvRow tolerates: json_extract
-    // would abort the whole query on one of them.
-    parts.push(
-      "AND (CASE WHEN value_type = 'json' AND json_valid(value) THEN json_extract(value, ?) END) = ?",
-    );
-    params.push(`$."${filter.field}"`, filter.value);
+    out.push({ path: `$."${filter.field}"`, value: filter.value });
   }
-  return { sql: parts.join(" "), params };
+  return out;
 }
 
 /**
@@ -12244,26 +12204,21 @@ export async function listKv(
 ): Promise<KvEntry[]> {
   const now = Date.now();
   const upper = opts.prefix === undefined ? null : kvPrefixUpperBound(opts.prefix);
-  const prefix =
+  const range: KvKeyRange =
     opts.keyAfter === undefined
       ? kvPrefixCondition(opts.prefix)
       : opts.keyThrough !== undefined
-        ? { sql: "AND key > ? AND key <= ?", params: [opts.keyAfter, opts.keyThrough] }
+        ? { after: opts.keyAfter, through: opts.keyThrough }
         : upper === null
-          ? { sql: "AND key > ?", params: [opts.keyAfter] }
-          : { sql: "AND key > ? AND key < ?", params: [opts.keyAfter, upper] };
-  const json = kvJsonFieldConditions(opts.jsonFieldEquals);
-  const rows = await getDbClient().query<KvRow>(
-    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-         FROM kv_entries
-        WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-          ${prefix.sql}
-          ${json.sql}
-        ORDER BY key
-        LIMIT ? OFFSET ?`,
-    [namespace, now, ...prefix.params, ...json.params, opts.limit, opts.offset],
-  );
+          ? { after: opts.keyAfter }
+          : { after: opts.keyAfter, before: upper };
+  const rows = (await getStorage().repos.kv.listLiveEntries(namespace, {
+    nowMs: now,
+    range,
+    jsonFieldEquals: kvJsonFieldConditions(opts.jsonFieldEquals),
+    limit: opts.limit,
+    offset: opts.offset,
+  })) as KvRow[];
   return rows.map(decodeKvRow);
 }
 
@@ -12273,15 +12228,7 @@ export async function listKv(
  */
 export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
-  const prefix = kvPrefixCondition(opts.prefix);
-  const row = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM kv_entries
-        WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-          ${prefix.sql}`,
-    [namespace, now, ...prefix.params],
-  );
-  return row?.n ?? 0;
+  return await getStorage().repos.kv.countLiveEntries(namespace, now, kvPrefixCondition(opts.prefix));
 }
 
 // ─── Script Runs ────────────────────────────────────────────────────────────
