@@ -129,6 +129,17 @@ export {
 } from "./boot/open";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
+export {
+  assertNoDeniedTablesSqlite,
+  executeSqliteReadOnlyQuery,
+  getDbQueryWorkerPidsForTests,
+  isReportableTimeout,
+  openSqliteQueryReader,
+  resetDbQueryWorkerPoolForTests,
+  runSqliteBoundedQuery,
+  type SqliteBoundedQuery,
+  SqliteQuerySpawnUnavailableError,
+} from "./db-query";
 export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";
 export { KEY_WINDOW_USAGE_SQL } from "./repositories/key-window-usage";
 export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "./repositories/memory";

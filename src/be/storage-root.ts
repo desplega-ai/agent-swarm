@@ -14,6 +14,7 @@ import {
   type PromptTemplateRecordUpdate,
   type PromptTemplateRow,
   type QueryReader,
+  type QueryReaderResult,
   type StatementObserver,
   type Storage,
 } from "@desplega/storage";
@@ -34,17 +35,21 @@ import {
   type TimestampFormats,
 } from "@desplega/storage-postgres";
 import {
+  assertNoDeniedTablesSqlite,
   type BusyRetryOptions,
   createBunSqliteClient,
   createSqliteStorage,
+  executeSqliteReadOnlyQuery,
   insertPromptTemplateHistorySync,
   insertPromptTemplateSync,
   listPromptTemplatesSync,
+  openSqliteQueryReader,
+  runSqliteBoundedQuery,
   isInTransaction as sqliteIsInTransaction,
   updatePromptTemplateRecordSync,
 } from "@desplega/storage-sqlite";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDb, getDbClient, isPostgresEngine } from "./db/runtime";
+import { getDb, getDbClient, isPostgresEngine, resolveSqliteVecExtensionPath } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
 
 export type { BusyRetryOptions };
@@ -272,6 +277,59 @@ export const promptTemplateSqliteStart = {
     insertPromptTemplateHistorySync(getDb(), row),
 };
 
+// ---- The SQLite db-query reader (the engine's own read-only handle) ----
+
+/** A read-only handle on the current SQLite database, with sqlite-vec when the host has it. */
+function openSqliteDbQueryReader() {
+  return openSqliteQueryReader(getDb(), resolveSqliteVecExtensionPath());
+}
+
+/**
+ * `db-query` on SQLite. Postgres has its own reader (`Storage.queryReader`,
+ * decision D10); src/http uses this one when the engine provides none. Denied
+ * tables throw `QueryReaderDeniedError`, a spent budget `QueryReaderTimeoutError`.
+ */
+export const sqliteDbQuery = {
+  /** Run `sql` synchronously on a fresh read-only handle. */
+  executeInProcess(sql: string, params: unknown[] = [], maxRows?: number): QueryReaderResult {
+    const reader = openSqliteDbQueryReader();
+    try {
+      return executeSqliteReadOnlyQuery(reader, sql, params, maxRows);
+    } finally {
+      reader.close();
+    }
+  },
+  /** Refuse `sql` when its compiled program opens a denied table. */
+  assertNoDeniedTables(sql: string): void {
+    const reader = openSqliteDbQueryReader();
+    try {
+      assertNoDeniedTablesSqlite(sql, reader);
+    } finally {
+      reader.close();
+    }
+  },
+  /** Run `sql` in a bounded `bun` child process on the database file. */
+  runBounded(
+    sql: string,
+    params: unknown[],
+    budgetMs: number,
+    maxRows: number | undefined,
+    options: { pooled: boolean },
+  ): Promise<QueryReaderResult> {
+    return runSqliteBoundedQuery(
+      {
+        file: getDb().filename,
+        sql,
+        params,
+        vecExtensionPath: resolveSqliteVecExtensionPath(),
+        maxRows,
+        budgetMs,
+      },
+      options,
+    );
+  },
+};
+
 // SQLite boot (the synchronous start path of the SQLite engine).
 // The memory full-text backfill statements, for the query-plan test.
 // Retention statement texts, for the query-plan tests (src/be/db-retention.ts,
@@ -290,8 +348,10 @@ export {
   existingUserIdsSync,
   FTS_SCAN_BATCH_SQL,
   findDefaultOAuthAuthorization,
+  getDbQueryWorkerPidsForTests,
   hasEncryptedSecretRows,
   isEmptySqliteDatabase,
+  isReportableTimeout,
   KEY_WINDOW_USAGE_SQL,
   type LegacyCredentialBinding,
   listCredentialBindingBlobs,
@@ -302,8 +362,10 @@ export {
   readAssetKeyAuditDataSync,
   removeLegacyTaskStatusCheck,
   replaceCredentialBindingBlob,
+  resetDbQueryWorkerPoolForTests,
   retentionSweepStatements,
   runSqliteMigrations,
+  SqliteQuerySpawnUnavailableError,
   storeEncryptedOAuthSecrets,
   USER_REFERENCE_COLUMNS_SQL,
   userReferenceRewriteSql,
