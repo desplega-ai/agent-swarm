@@ -198,13 +198,31 @@ export async function resolveTemplateAsync(
 /**
  * DB-mode resolution (API server path), through the injected DB resolver.
  */
-async function resolveTemplateViaDb(
+function resolveTemplateViaDb(
+  eventType: string,
+  variables: Record<string, unknown>,
+  options: ResolveOptions,
+): ResolveResult | Promise<ResolveResult> {
+  // With no DB resolver and no template reference there is nothing to await:
+  // answer in the same tick, as the synchronous resolver did. In-process
+  // sessions render the context-bound note before the session settles.
+  if (!dbResolverFn) {
+    const defaultBody = getTemplateDefinition(eventType)?.defaultBody ?? "";
+    if (!TEMPLATE_REF_PROBE.test(defaultBody)) {
+      return composeResolved(eventType, variables, null, defaultBody, []);
+    }
+  }
+  return resolveTemplateViaDbAsync(eventType, variables, options);
+}
+
+const TEMPLATE_REF_PROBE = /\{\{@template\[[^\]]+\]\}\}/;
+
+async function resolveTemplateViaDbAsync(
   eventType: string,
   variables: Record<string, unknown>,
   options: ResolveOptions,
 ): Promise<ResolveResult> {
   const definition = getTemplateDefinition(eventType);
-  const header = definition?.header ?? "";
   const defaultBody = definition?.defaultBody ?? "";
 
   // DB resolution: scope chain lookup
@@ -231,6 +249,27 @@ async function resolveTemplateViaDb(
   // Expand {{@template[id]}} references in body
   const expandedRefs: ExpandedRef[] = [];
   body = await expandTemplateRefs(body, variables, options, new Set(), 0, expandedRefs);
+
+  return composeResolved(
+    eventType,
+    variables,
+    templateId === undefined ? null : { templateId, scope },
+    body,
+    expandedRefs,
+  );
+}
+
+/** Header + expanded body, interpolated: the final step of a DB-mode resolution. */
+function composeResolved(
+  eventType: string,
+  variables: Record<string, unknown>,
+  stored: { templateId: string; scope: string | undefined } | null,
+  body: string,
+  expandedRefs: ExpandedRef[],
+): ResolveResult {
+  const header = getTemplateDefinition(eventType)?.header ?? "";
+  const templateId = stored?.templateId;
+  const scope = stored?.scope;
 
   // Compose header + body
   const composed = header ? `${header}\n\n${body}` : body;
