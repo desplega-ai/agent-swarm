@@ -1,4 +1,4 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * The key `offset` rows past `afterKey` inside `[prefix, prefixUpper)`, or
@@ -11,12 +11,5 @@ export async function kvKeyAfter(
   afterKey: string,
   offset: number,
 ): Promise<string | null> {
-  const row = await getDbClient().get<{ key: string }>(
-    `SELECT key FROM kv_entries
-        WHERE namespace = ? AND key > ? AND key < ?
-        ORDER BY key
-        LIMIT 1 OFFSET ?`,
-    [namespace, afterKey, prefixUpper, offset],
-  );
-  return row?.key ?? null;
+  return getStorage().repos.kv.keyAfter(namespace, prefixUpper, afterKey, offset);
 }

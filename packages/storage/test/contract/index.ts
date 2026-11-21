@@ -5,12 +5,16 @@ import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { eventsContract } from "./events";
 import { extensionsContract } from "./extensions";
+import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
 import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
+import { pagesContract } from "./pages";
 import { rbacContract } from "./rbac";
 import { runtimePoolsContract } from "./runtime-pools";
+import { scriptsContract } from "./scripts";
+import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
 import { trackersContract } from "./trackers";
 import { usersContract } from "./users";
@@ -36,4 +40,8 @@ export function runStorageContract(engine: ContractEngine): void {
   oauthContract(engine);
   slackContract(engine);
   workflowsContract(engine);
+  scriptsContract(engine);
+  pagesContract(engine);
+  skillsContract(engine);
+  kvContract(engine);
 }

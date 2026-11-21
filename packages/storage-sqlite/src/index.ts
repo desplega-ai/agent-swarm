@@ -12,12 +12,16 @@ import { SqliteChatRepository } from "./repositories/chat";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteEventsRepository } from "./repositories/events";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
+import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
+import { SqlitePagesRepository } from "./repositories/pages";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteScriptsRepository } from "./repositories/scripts";
+import { SqliteSkillsRepository } from "./repositories/skills";
 import { SqliteSlackRepository } from "./repositories/slack";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
@@ -68,6 +72,10 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       oauth: new SqliteOAuthRepository(executor),
       slack: new SqliteSlackRepository(executor),
       workflows: new SqliteWorkflowsRepository(executor),
+      scripts: new SqliteScriptsRepository(executor),
+      pages: new SqlitePagesRepository(executor),
+      skills: new SqliteSkillsRepository(executor),
+      kv: new SqliteKvRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

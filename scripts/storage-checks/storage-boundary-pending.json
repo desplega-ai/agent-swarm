@@ -1,24 +1,4 @@
 {
-  "src/apps/row-store.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 7
-  },
-  "src/apps/schema-migrate.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
-  },
-  "src/apps/store.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 8
-  },
-  "src/apps/sync.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 1
-  },
-  "src/apps/version.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
-  },
   "src/azure-devops/outbound.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
@@ -63,10 +43,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 4
   },
-  "src/be/db/kv-windows.ts": {
-    "reason": "M2 move: kv",
-    "sites": 2
-  },
   "src/be/db/model-groups.ts": {
     "reason": "M2 move: models",
     "sites": 2
@@ -74,10 +50,6 @@
   "src/be/db/model-profiles.ts": {
     "reason": "M2 move: models",
     "sites": 6
-  },
-  "src/be/db/page-versions.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
   },
   "src/be/db/request-composition.ts": {
     "reason": "M2 move: sessions and cost",
@@ -89,11 +61,7 @@
   },
   "src/be/db/script-run-sources.ts": {
     "reason": "M2 move: scripts",
-    "sites": 3
-  },
-  "src/be/db/script-runs.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
+    "sites": 1
   },
   "src/be/db/session-costs.ts": {
     "reason": "M2 move: sessions and cost",
@@ -121,18 +89,6 @@
   },
   "src/be/db/session-visibility.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
-  "src/be/db/skill-audit.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
-  "src/be/db/skill-name-resolution.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
-  "src/be/db/skill-search.ts": {
-    "reason": "M2 move: skills",
     "sites": 2
   },
   "src/be/db/slack-trees.ts": {
@@ -317,19 +273,11 @@
   },
   "src/be/primitives/object-embed.ts": {
     "reason": "M2 move: pages, metrics, apps",
-    "sites": 4
+    "sites": 2
   },
   "src/be/primitives/object-webhooks.ts": {
     "reason": "M2 move: pages, metrics, apps",
-    "sites": 8
-  },
-  "src/be/primitives/objects.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 17
-  },
-  "src/be/primitives/sheets/service.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 1
+    "sites": 7
   },
   "src/be/rbac-roles.ts": {
     "reason": "M2 move: users and RBAC",
@@ -357,31 +305,7 @@
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
-    "sites": 26
-  },
-  "src/be/scripts/boot-args-schema.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 2
-  },
-  "src/be/scripts/boot-reembed.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
-  },
-  "src/be/scripts/db.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 26
-  },
-  "src/be/scripts/durable.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 2
-  },
-  "src/be/scripts/embeddings.ts": {
-    "reason": "M2 move: scripts",
     "sites": 5
-  },
-  "src/be/scripts/retention.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 4
   },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
@@ -479,10 +403,6 @@
     "reason": "M2 move: seeded db-query scripts (M4 step 4)",
     "sites": 2
   },
-  "src/be/seed-skills/index.ts": {
-    "reason": "M2 move: skills",
-    "sites": 2
-  },
   "src/be/session-shares.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 9
@@ -493,11 +413,7 @@
   },
   "src/be/skill-invocations.ts": {
     "reason": "M2 move: skills",
-    "sites": 5
-  },
-  "src/be/skill-usage.ts": {
-    "reason": "M2 move: skills",
-    "sites": 15
+    "sites": 1
   },
   "src/be/steering.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -591,14 +507,6 @@
     "reason": "M2 move: scripts",
     "sites": 3
   },
-  "src/http/script-runs.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
-  },
-  "src/http/scripts.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
-  },
   "src/http/sessions.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 2
@@ -618,10 +526,6 @@
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
-  },
-  "src/realtime/rooms.ts": {
-    "reason": "M2 move: kv",
-    "sites": 6
   },
   "src/scheduler/deferred-task-waits.ts": {
     "reason": "M2 move: schedules",
@@ -678,9 +582,5 @@
   "src/tools/utils.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/ui-spec/script-actions.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
   }
 }

@@ -1,8 +1,9 @@
 import * as z from "zod";
-import { deleteKv, getAllTasks, getDbClient, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { getStorage } from "../be/storage";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
 import { createSweepScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -619,7 +620,7 @@ async function writeInChunks<T>(
 ): Promise<void> {
   for (let start = 0; start < items.length; start += RECONCILE_CHUNK_SIZE) {
     const chunk = items.slice(start, start + RECONCILE_CHUNK_SIZE);
-    const tally = await getDbClient().transaction(async () => {
+    const tally = await getStorage().transaction(async () => {
       state?.attempt();
       const chunkTally: ReconcileTally = {
         created: 0,

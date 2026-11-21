@@ -1,4 +1,5 @@
-import { type AppVersion, createAppVersion, getAppVersions, getDbClient } from "../be/db";
+import { type AppVersion, createAppVersion, getAppVersions } from "../be/db";
+import { getStorage } from "../be/storage";
 import { type AppDefinition, type AppValidationIssue, parseAppDefinition } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
 import {
@@ -67,10 +68,7 @@ function snapshotDefinition(rawDefinition: string): unknown {
  * column directly: recovery snapshots must not depend on it being decodable.
  */
 export async function snapshotApp(appId: string, changedByAgentId?: string): Promise<AppVersion> {
-  const app = await getDbClient().get<StoredAppRow>(
-    "SELECT name, description, definition FROM apps WHERE id = ?",
-    [appId],
-  );
+  const app: StoredAppRow | null = await getStorage().repos.pages.getStoredApp(appId);
   if (!app) throw new Error(`App ${appId} not found — cannot create snapshot`);
 
   const versions = await getAppVersions(appId);

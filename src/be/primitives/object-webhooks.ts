@@ -11,6 +11,7 @@ import {
   agentFsRequest,
   resolveAgentFsServiceCredentials,
 } from "../seed/agent-fs-provision";
+import { getStorage } from "../storage";
 import { applyFileChange, type FileChangeResult } from "./objects";
 
 /**
@@ -91,10 +92,7 @@ export async function ensureObjectWebhook(orgId: string, driveId: string): Promi
 /** Boot pass over every drive that already holds objects. Never throws. */
 export async function ensureObjectWebhooksForKnownDrives(): Promise<EnsureResult[]> {
   try {
-    const drives = await getDbClient().query<{ orgId: string; driveId: string }>(
-      "SELECT DISTINCT orgId, driveId FROM primitive_objects ORDER BY orgId, driveId LIMIT ?",
-      [MAX_BOOT_DRIVES],
-    );
+    const drives = await getStorage().repos.pages.listObjectDrives(MAX_BOOT_DRIVES);
     const results: EnsureResult[] = [];
     for (const { orgId, driveId } of drives) {
       results.push(await ensureObjectWebhook(orgId, driveId));

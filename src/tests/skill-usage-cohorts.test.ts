@@ -202,7 +202,7 @@ describe("query plans", () => {
       );
       // MIN(createdAt) reads one end of the time index; everything else must
       // bound its range on createdAt, not just SEARCH some other index.
-      const minLookup = sql.includes("MIN(createdAt)");
+      const minLookup = sql.includes('MIN("createdAt")');
       for (const { detail } of plan) {
         if (!/\b(si|skill_invocations)\b/.test(detail)) continue;
         if (!detail.startsWith("SEARCH") || !(minLookup || detail.includes("createdAt>"))) {

@@ -1,4 +1,4 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * Record who last changed a skill when the write went through a path that does
@@ -9,9 +9,5 @@ export async function setSkillUpdatedBy(
   skillId: string,
   actor: { agentId: string | null; userId: string | null },
 ): Promise<void> {
-  await getDbClient().run("UPDATE skills SET updated_by = ?, updatedByAgentId = ? WHERE id = ?", [
-    actor.userId,
-    actor.agentId,
-    skillId,
-  ]);
+  await getStorage().repos.skills.setUpdatedBy(skillId, actor.userId, actor.agentId);
 }

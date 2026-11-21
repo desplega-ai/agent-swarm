@@ -302,7 +302,6 @@ import {
   createSkill,
   deleteSkill,
   deleteSkillFile,
-  getDbClient,
   getSkillByName,
   getSkillFiles,
   updateSkill,
@@ -311,6 +310,7 @@ import {
 import { deleteSeedState, getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
 import { parseSkillContent } from "../skill-parser";
+import { getStorage } from "../storage";
 import bundledFilesManifest from "./bundled-files.generated.json";
 import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
@@ -640,7 +640,7 @@ export async function retireSeedSkills(
       continue;
     }
 
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
       await deleteSkill(existing.id);
       await deleteSeedState("skill", name);
     });
@@ -701,13 +701,11 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
   async apply(item): Promise<void> {
     const { skill } = item;
 
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
       // NOTE: inline lookup (not the fuller `getSkillByName`) — only
       // `existing.id` is needed here.
-      const existing = await getDbClient().get<{ id: string }>(
-        "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-        [skill.name, "swarm", ""],
-      );
+      const existingId = await getStorage().repos.skills.findOwnerlessSkillId(skill.name, "swarm");
+      const existing = existingId === null ? null : { id: existingId };
 
       // Seed writes carry no agent and no person on purpose: the audit columns
       // stay NULL (and an update resets them) so a seeded row is never

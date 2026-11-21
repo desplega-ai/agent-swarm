@@ -8,12 +8,16 @@ import type { ChatRepository } from "./repositories/chat";
 import type { ConfigRepository } from "./repositories/config";
 import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
+import type { KvRepository } from "./repositories/kv";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
+import type { PagesRepository } from "./repositories/pages";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { ScriptsRepository } from "./repositories/scripts";
+import type { SkillsRepository } from "./repositories/skills";
 import type { SlackRepository } from "./repositories/slack";
 import type { TrackersRepository } from "./repositories/trackers";
 import type { UsersRepository } from "./repositories/users";
@@ -37,6 +41,10 @@ export type Repositories = {
   oauth: OAuthRepository;
   slack: SlackRepository;
   workflows: WorkflowsRepository;
+  scripts: ScriptsRepository;
+  pages: PagesRepository;
+  skills: SkillsRepository;
+  kv: KvRepository;
 };
 
 /**
