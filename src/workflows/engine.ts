@@ -12,7 +12,6 @@ import {
   createWorkflowRunStep,
   getCompletedStepNodeIds,
   getCurrentStepForNode,
-  getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
   getStepCountForNode,
@@ -27,6 +26,7 @@ import {
   getRunLineageBlock,
   isParentStepAttemptCurrent,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
@@ -158,7 +158,7 @@ export async function startWorkflowExecution(
     await getAutomationSetupStates(),
   );
   if (preflight.state === "needs_setup" && !options.parentStepId) {
-    const { runId, recorded } = await getDbClient().transaction(async () => {
+    const { runId, recorded } = await getStorage().transaction(async () => {
       const failure = await recordWorkflowPreflightFailure({
         workflowId: workflow.id,
         triggerType: options.triggerType ?? "manual",
@@ -347,7 +347,7 @@ async function createRunWithInitialState(
   preflightAlert?: boolean;
   status?: InitialRunState["status"];
 }> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
     if (parentStepId) {
@@ -425,7 +425,7 @@ const executingSteps = new Set<string>();
  */
 function claimExecutingStep(stepId: string): void {
   executingSteps.add(stepId);
-  getDbClient().onAttemptRollback(() => executingSteps.delete(stepId));
+  getStorage().onAttemptRollback(() => executingSteps.delete(stepId));
 }
 
 /**
@@ -712,7 +712,7 @@ async function walkGraphOwned(
   // overwritten from a stale snapshot, resurrecting the run as `completed` or
   // parking it in `waiting` with no waiting step left to ever finalize it.
   routed();
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || run.status !== "running") return;
     // Inside a cancelled tree the run's outcome is the cancel, not its steps.
@@ -990,7 +990,7 @@ async function executeStep(
     return { existingStep, stepId, fence, deduped: false };
   };
   // A claim whose transaction fails gives its mark back (claimExecutingStep).
-  const dedup = await getDbClient().transaction(claimStep);
+  const dedup = await getStorage().transaction(claimStep);
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
   if ("current" in dedup && dedup.current) {

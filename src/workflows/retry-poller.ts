@@ -1,5 +1,4 @@
 import {
-  getDbClient,
   getRetryableSteps,
   getRunWorkflow,
   getWorkflowRun,
@@ -7,6 +6,7 @@ import {
   updateWorkflowRun,
 } from "../be/db";
 import { disarmWorkflowTreeRetries, getRunLineageBlock } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import type { RetryPolicy } from "../types";
 import {
   adoptStoredContext,
@@ -321,7 +321,7 @@ async function claimRetry(
   stepId: string,
   options: { requeueForeachChild?: boolean } = {},
 ): Promise<boolean> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || !RETRYABLE_RUN_STATUSES.has(run.status)) return false;
     if (await getRunLineageBlock(runId)) {
@@ -329,22 +329,13 @@ async function claimRetry(
       return false;
     }
     if (options.requeueForeachChild && run.status === "failed") {
-      await getDbClient().run(
-        `UPDATE workflow_run_steps SET nextRetryAt = NULL, finishedAt = ?
-          WHERE id = ? AND runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL`,
-        [new Date().toISOString(), stepId, runId],
-      );
+      await getStorage().repos.workflows.dropStepRetry(runId, stepId, new Date().toISOString());
       return false;
     }
-    const set = options.requeueForeachChild
-      ? "status = 'pending', nextRetryAt = NULL, error = NULL"
-      : "status = 'running', nextRetryAt = NULL";
-    const claimed = await getDbClient().get<{ id: string }>(
-      `UPDATE workflow_run_steps
-          SET ${set}
-        WHERE id = ? AND runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL
-        RETURNING id`,
-      [stepId, runId],
+    const claimed = await getStorage().repos.workflows.claimStepRetry(
+      runId,
+      stepId,
+      options.requeueForeachChild === true,
     );
     if (!claimed) return false;
     if (run.status === "failed") {
@@ -360,7 +351,7 @@ async function claimRetry(
  * walkGraph finalizer.
  */
 async function completeRunIfSettled(runId: string, ctx: Record<string, unknown>): Promise<void> {
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) return;
     if (await getRunLineageBlock(runId)) return;

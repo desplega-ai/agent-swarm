@@ -1,5 +1,6 @@
-import { getDbClient, getWorkflowRun, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
+import { getWorkflowRun, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
 import { getRunLineageBlock } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import type { RetryPolicy } from "../types";
 
 /**
@@ -13,15 +14,8 @@ import type { RetryPolicy } from "../types";
 export type StepFence = { retryCount: number };
 
 async function holdsFence(runId: string, stepId: string, fence: StepFence): Promise<boolean> {
-  const row = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found
-       FROM workflow_run_steps s
-       JOIN workflow_runs r ON r.id = s.runId
-      WHERE s.id = ? AND s.runId = ? AND s.status = 'running' AND s.retryCount = ?
-        AND r.status IN ('running', 'waiting')`,
-    [stepId, runId, fence.retryCount],
-  );
-  return row != null && (await getRunLineageBlock(runId)) == null;
+  const held = await getStorage().repos.workflows.holdsStepFence(runId, stepId, fence.retryCount);
+  return held && (await getRunLineageBlock(runId)) == null;
 }
 
 /**
@@ -54,7 +48,7 @@ export async function checkpointStep(
 ): Promise<boolean> {
   // The context is built on a copy and adopted after commit: a replayed attempt
   // (decision D6) must re-read the stored context, not keep the first read.
-  const committed = await getDbClient().transaction(async () => {
+  const committed = await getStorage().transaction(async () => {
     if (options.fence && !(await holdsFence(runId, stepId, options.fence))) return null;
     await updateWorkflowRunStep(stepId, {
       status: "completed",
@@ -92,7 +86,7 @@ export async function checkpointStepFailure(
 ): Promise<{ shouldRetry: boolean; stale?: true }> {
   const now = new Date().toISOString();
 
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     if (options?.fence && !(await holdsFence(runId, stepId, options.fence))) {
       return { shouldRetry: false, stale: true as const };
     }
@@ -153,20 +147,10 @@ export async function checkpointStepWaiting(
   ctx: Record<string, unknown>,
   options: { keepRunStatus?: boolean } = {},
 ): Promise<boolean> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     if (await getRunLineageBlock(runId)) return false;
-    const step = await getDbClient().get<{ id: string }>(
-      `UPDATE workflow_run_steps
-         SET status = 'waiting'
-       WHERE id = ? AND runId = ? AND status = 'running'
-         AND EXISTS (
-           SELECT 1 FROM workflow_runs
-           WHERE id = ? AND status IN ('running', 'waiting')
-         )
-       RETURNING id`,
-      [stepId, runId, runId],
-    );
-    if (!step) return false;
+    const parked = await getStorage().repos.workflows.parkRunningStep(runId, stepId);
+    if (!parked) return false;
 
     await adoptStoredContext(runId, ctx);
     await updateWorkflowRun(
