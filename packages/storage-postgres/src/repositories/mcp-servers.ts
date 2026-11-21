@@ -1,6 +1,9 @@
-import type { SqlQuery } from "@desplega/storage";
-import { BaseMcpServersRepository, type McpEventSubscriptionRow, sql } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import {
+  BaseMcpServersRepository,
+  type McpEventSubscriptionRow,
+  SqlQuery,
+  sql,
+} from "@desplega/storage";
 
 export class PostgresMcpServersRepository extends BaseMcpServersRepository {
   listLiveSubscriptions(
@@ -17,6 +20,6 @@ export class PostgresMcpServersRepository extends BaseMcpServersRepository {
   }
 
   protected insertionOrder(alias?: string): SqlQuery {
-    return notOnPostgresYet("PostgresMcpServersRepository.insertionOrder");
+    return new SqlQuery([alias ? `${alias}."_rowid"` : '"_rowid"'], []);
   }
 }

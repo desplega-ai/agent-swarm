@@ -205,7 +205,7 @@ export function mcpServersContract(engine: ContractEngine): void {
         VALUES ('ag', 'ag', 'idle', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
       await storage.executor.run(sql`
         INSERT INTO agent_mcp_servers (id, "agentId", "mcpServerId", "isActive", "installedAt")
-        VALUES ('i1', 'ag', 'za', ${true}, 'x'), ('i2', 'ag', 'zb', ${true}, 'y')`);
+        VALUES ('i1', 'ag', 'za', ${true}, '2026-11-21T10:00:00.000Z'), ('i2', 'ag', 'zb', ${true}, '2026-11-21T11:00:00.000Z')`);
       expect((await repo.listAgentMcpServers("ag", true)).map((r) => [r.id, r.isActive])).toEqual([
         ["za", 1],
       ]);
