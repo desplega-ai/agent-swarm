@@ -37,7 +37,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 177
+    "sites": 146
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

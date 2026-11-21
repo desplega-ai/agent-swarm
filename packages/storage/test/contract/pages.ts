@@ -220,5 +220,142 @@ export function pagesContract(engine: ContractEngine): void {
       expect(await repo.tombstoneObjectAtVersion("o1", "a.excalidraw", 9, T2)).toBe(1);
       expect(await repo.tombstoneObjectAtVersion("o1", "a.excalidraw", 9, T2)).toBe(0);
     });
+
+    const pageRow = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      key: `shared/${id}/`,
+      agentId: "ag",
+      slug: id,
+      title: `Title ${id}`,
+      description: null,
+      contentType: "text/html",
+      authMode: "authed",
+      passwordHash: null,
+      body: "<p/>",
+      needsCredentials: null,
+      theme: null,
+      theme_tokens: null,
+      design_version: 2,
+      ...extra,
+    });
+
+    const addAgent = (id: string) =>
+      storage.executor.run(sql`
+        INSERT INTO agents (id, name, "isLead", status, "createdAt", "lastUpdatedAt")
+        VALUES (${id}, ${id}, ${false}, 'idle', ${T0}, ${T0})`);
+
+    test("pages: insert shape, filters, order, update, cascade delete", async () => {
+      await addAgent("ag");
+      await addAgent("other");
+      const p = await repo.insertPage(pageRow("p1"));
+      expect(p).toMatchObject({ id: "p1", view_count: 0, design_version: 2 });
+      expect(typeof p?.updatedAt).toBe("string");
+      await repo.insertPage(pageRow("p2", { description: "has 100%_ done" }));
+      await repo.insertPage(pageRow("p3", { agentId: "other", key: "shared/x/" }));
+      await storage.executor.run(sql`UPDATE pages SET "updatedAt" = ${T0}`);
+      const list = async (f: object, limit = 10, offset = 0) =>
+        (await repo.listPages(f, limit, offset)).map((r) => r.id);
+      expect(await list({})).toEqual(["p3", "p2", "p1"]);
+      expect(await list({ agentId: "ag" }, 1, 1)).toEqual(["p1"]);
+      expect(await list({ keyPattern: "shared/p%" })).toEqual(["p2", "p1"]);
+      expect(await list({ key: "shared/x/" })).toEqual(["p3"]);
+      expect(await list({ searchPattern: "%100\\%\\_%" })).toEqual(["p2"]);
+      expect(await list({ searchPattern: "%TITLE P1%" })).toEqual(["p1"]);
+      expect(await repo.countPages({ agentId: "ag" })).toBe(2);
+      expect((await repo.findPageBySlug("other", "p3"))?.id).toBe("p3");
+      await repo.insertPage(pageRow("p4", { agentId: "other", slug: "p1" }));
+      await storage.executor.run(sql`UPDATE pages SET "updatedAt" = ${T0} WHERE id = 'p4'`);
+      expect((await repo.findLatestPageBySlug("p1"))?.id).toBe("p4");
+      const updated = await repo.updatePage("p1", { title: "New", theme_tokens: null }, T1);
+      expect([updated?.title, updated?.updatedAt, updated?.body]).toEqual(["New", T1, "<p/>"]);
+      expect(await repo.incrementPageViewCount("p1")).toBe(1);
+      expect((await repo.findPage("p1"))?.view_count).toBe(1);
+      await storage.executor.run(sql`
+        INSERT INTO kv_entries (namespace, key, value, value_type, created_at, updated_at)
+        VALUES ('task:page:p1', 'k', '1', 'integer', 1, 1)`);
+      const v = await repo.insertPageVersion({
+        pageId: "p1",
+        version: 1,
+        snapshot: "{}",
+        changedByAgentId: null,
+      });
+      expect(typeof v?.id).toBe("string");
+      await repo.insertPageVersion({
+        pageId: "p1",
+        version: 2,
+        snapshot: "{}",
+        changedByAgentId: "ag",
+      });
+      expect((await repo.listPageVersions("p1")).map((r) => r.version)).toEqual([2, 1]);
+      expect((await repo.findPageVersion("p1", 2))?.changedByAgentId).toBe("ag");
+      expect(await repo.deletePageCascade("p1")).toBe(1);
+      expect(await repo.findPageVersion("p1", 2)).toBeNull();
+      const kv = await storage.executor.get(
+        sql`SELECT 1 AS one FROM kv_entries WHERE namespace = 'task:page:p1'`,
+      );
+      expect(kv).toBeNull();
+    });
+
+    test("metrics and metric and app versions", async () => {
+      await addAgent("ag");
+      const m = await repo.insertMetric({
+        agentId: "ag",
+        slug: "m",
+        title: "M",
+        description: null,
+        definition: "{}",
+      });
+      expect(typeof m?.id).toBe("string");
+      const m2 = await repo.insertMetric({
+        agentId: "ag",
+        slug: "m2",
+        title: "M2",
+        description: null,
+        definition: "{}",
+      });
+      await storage.executor.run(sql`UPDATE metrics SET "updatedAt" = ${T0}`);
+      expect((await repo.listMetrics("ag", 10, 0)).map((r) => r.slug)).toEqual(["m2", "m"]);
+      expect((await repo.listMetrics(null, 1, 1)).map((r) => r.slug)).toEqual(["m"]);
+      expect(await repo.countMetrics(null)).toBeGreaterThanOrEqual(2);
+      expect(await repo.countMetrics("nobody")).toBe(0);
+      expect((await repo.findMetricBySlug("ag", "m2"))?.id).toBe(m2!.id);
+      expect((await repo.updateMetric(m!.id, { description: "d" }, T1))?.updatedAt).toBe(T1);
+      await repo.insertMetricVersion({
+        metricId: m!.id,
+        version: 1,
+        snapshot: "{}",
+        changedByAgentId: null,
+      });
+      await repo.insertMetricVersion({
+        metricId: m!.id,
+        version: 2,
+        snapshot: "{}",
+        changedByAgentId: null,
+      });
+      expect((await repo.listMetricVersions(m!.id)).map((r) => r.version)).toEqual([2, 1]);
+      expect((await repo.findMetricVersion(m!.id, 1))?.version).toBe(1);
+      expect(await repo.deleteMetric(m!.id)).toBe(1);
+      expect(await repo.findMetric(m!.id)).toBeNull();
+      await repo.insertApp({
+        id: "app1",
+        key: "shared/app1/",
+        name: "a",
+        description: null,
+        definition: "{}",
+        now: T0,
+      });
+      const av = {
+        id: "v1",
+        appId: "app1",
+        version: 1,
+        snapshot: "{}",
+        changedByAgentId: null,
+        createdAt: T0,
+      };
+      expect(await repo.insertAppVersion(av)).toMatchObject(av);
+      await repo.insertAppVersion({ ...av, id: "v2", version: 2 });
+      expect((await repo.listAppVersions("app1")).map((r) => r.id)).toEqual(["v2", "v1"]);
+      expect((await repo.findAppVersion("app1", 2))?.id).toBe("v2");
+    });
   });
 }

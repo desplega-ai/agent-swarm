@@ -17,11 +17,19 @@ import type { Database } from "bun:sqlite";
 import type {
   ApiKeyRef,
   ApiKeyStatusRow,
+  AppVersionRow,
   ChannelActivityCursorRow,
   ContextSnapshotRow,
   InboxItemStateRow,
   KvJsonFieldFilter,
   KvKeyRange,
+  MetricColumnUpdate,
+  MetricRow,
+  MetricVersionRow,
+  PageColumnUpdate,
+  PageFilter,
+  PageRow,
+  PageVersionRow,
   RoutingCandidateMatch,
   ScheduledTaskColumnUpdate,
   ScheduledTaskRow,
@@ -242,7 +250,7 @@ import {
   getLatestContextVersion,
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
-import { pageSearchSql } from "./db/page-search";
+import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
 import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
@@ -7180,15 +7188,6 @@ export type AppVersion = {
   createdAt: string;
 };
 
-type AppVersionRow = {
-  id: string;
-  appId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
-
 function rowToAppVersion(row: AppVersionRow): AppVersion {
   return {
     id: row.id,
@@ -7207,35 +7206,25 @@ export async function createAppVersion(data: {
   changedByAgentId?: string;
 }): Promise<AppVersion> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<AppVersionRow>(
-    `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.appId,
-      data.version,
-      JSON.stringify(data.snapshot),
-      data.changedByAgentId ?? null,
-      new Date().toISOString(),
-    ],
-  );
+  const row = await getStorage().repos.pages.insertAppVersion({
+    id,
+    appId: data.appId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+    createdAt: new Date().toISOString(),
+  });
   if (!row) throw new Error("Failed to create app version");
   return rowToAppVersion(row);
 }
 
 export async function getAppVersions(appId: string): Promise<AppVersion[]> {
-  const rows = await getDbClient().query<AppVersionRow>(
-    "SELECT * FROM app_versions WHERE appId = ? ORDER BY version DESC",
-    [appId],
-  );
+  const rows = await getStorage().repos.pages.listAppVersions(appId);
   return rows.map(rowToAppVersion);
 }
 
 export async function getAppVersion(appId: string, version: number): Promise<AppVersion | null> {
-  const row = await getDbClient().get<AppVersionRow>(
-    "SELECT * FROM app_versions WHERE appId = ? AND version = ?",
-    [appId, version],
-  );
+  const row = await getStorage().repos.pages.findAppVersion(appId, version);
   return row ? rowToAppVersion(row) : null;
 }
 
@@ -7247,26 +7236,6 @@ export async function getAppVersion(appId: string, version: number): Promise<App
 // holds pre-update snapshots. snapshotPage() (src/pages/version.ts) MUST be
 // called BEFORE updatePage() so the snapshot freezes pre-update content.
 // ============================================================================
-
-type PageRow = {
-  id: string;
-  key: string;
-  agentId: string;
-  slug: string;
-  title: string;
-  description: string | null;
-  contentType: string;
-  authMode: string;
-  passwordHash: string | null;
-  body: string;
-  needsCredentials: string | null;
-  createdAt: string;
-  updatedAt: string;
-  view_count: number;
-  theme: string | null;
-  theme_tokens: string | null;
-  design_version: number;
-};
 
 function rowToPage(row: PageRow): Page {
   return {
@@ -7311,48 +7280,38 @@ export async function createPage(data: {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
-  const row = await getDbClient().get<PageRow>(
-    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
-      data.agentId,
-      data.slug,
-      data.title,
-      data.description ?? null,
-      data.contentType,
-      data.authMode ?? "authed",
-      data.passwordHash ?? null,
-      data.body,
-      data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
-      data.theme ?? null,
-      data.themeTokens ? JSON.stringify(data.themeTokens) : null,
-      data.designVersion ?? 2,
-    ],
-  );
+  const row = await getStorage().repos.pages.insertPage({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
+    agentId: data.agentId,
+    slug: data.slug,
+    title: data.title,
+    description: data.description ?? null,
+    contentType: data.contentType,
+    authMode: data.authMode ?? "authed",
+    passwordHash: data.passwordHash ?? null,
+    body: data.body,
+    needsCredentials: data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+    theme: data.theme ?? null,
+    theme_tokens: data.themeTokens ? JSON.stringify(data.themeTokens) : null,
+    design_version: data.designVersion ?? 2,
+  });
   if (!row) throw new Error("Failed to create page");
   return rowToPage(row);
 }
 
 export async function getPage(id: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>("SELECT * FROM pages WHERE id = ?", [id]);
+  const row = await getStorage().repos.pages.findPage(id);
   return row ? rowToPage(row) : null;
 }
 
 export async function getPageBySlug(agentId: string, slug: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>(
-    "SELECT * FROM pages WHERE agentId = ? AND slug = ?",
-    [agentId, slug],
-  );
+  const row = await getStorage().repos.pages.findPageBySlug(agentId, slug);
   return row ? rowToPage(row) : null;
 }
 
 export async function getLatestPageBySlug(slug: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>(
-    "SELECT * FROM pages WHERE slug = ? ORDER BY updatedAt DESC LIMIT 1",
-    [slug],
-  );
+  const row = await getStorage().repos.pages.findLatestPageBySlug(slug);
   return row ? rowToPage(row) : null;
 }
 
@@ -7407,19 +7366,7 @@ export async function listPagesByAgent(
   offset = 0,
   opts?: PageListOptions,
 ): Promise<Page[] | PageSummary[]> {
-  let query = "SELECT * FROM pages WHERE agentId = ?";
-  const params: (string | number)[] = [agentId];
-  if (opts?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(opts.key));
-  } else if (opts?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(opts.keyPrefix));
-  }
-  query += pageSearchSql(opts?.q, params);
-  query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  const rows = await getDbClient().query<PageRow>(query, params);
+  const rows = await getStorage().repos.pages.listPages(pageFilter(opts, agentId), limit, offset);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
@@ -7439,19 +7386,7 @@ export async function listAllPages(
   offset = 0,
   opts?: PageListOptions,
 ): Promise<Page[] | PageSummary[]> {
-  let query = "SELECT * FROM pages WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (opts?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(opts.key));
-  } else if (opts?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(opts.keyPrefix));
-  }
-  query += pageSearchSql(opts?.q, params);
-  query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  const rows = await getDbClient().query<PageRow>(query, params);
+  const rows = await getStorage().repos.pages.listPages(pageFilter(opts), limit, offset);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
@@ -7462,18 +7397,7 @@ export async function listAllPages(
 export async function countAllPages(
   filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
-  let query = "SELECT COUNT(*) AS count FROM pages WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += pageSearchSql(filters?.q, params);
-  const row = await getDbClient().get<{ count: number }>(query, params);
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countPages(pageFilter(filters));
 }
 
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
@@ -7481,18 +7405,7 @@ export async function countPagesByAgent(
   agentId: string,
   filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
-  let query = "SELECT COUNT(*) AS count FROM pages WHERE agentId = ?";
-  const params: (string | number)[] = [agentId];
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += pageSearchSql(filters?.q, params);
-  const row = await getDbClient().get<{ count: number }>(query, params);
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countPages(pageFilter(filters, agentId));
 }
 
 /**
@@ -7522,81 +7435,46 @@ export async function updatePage(
     designVersion?: number;
   },
 ): Promise<Page | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-  if (data.title !== undefined) {
-    updates.push("title = ?");
-    params.push(data.title);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description ?? null);
-  }
-  if (data.contentType !== undefined) {
-    updates.push("contentType = ?");
-    params.push(data.contentType);
-  }
-  if (data.authMode !== undefined) {
-    updates.push("authMode = ?");
-    params.push(data.authMode);
-  }
-  if (data.passwordHash !== undefined) {
-    updates.push("passwordHash = ?");
-    params.push(data.passwordHash ?? null);
-  }
-  if (data.body !== undefined) {
-    updates.push("body = ?");
-    params.push(data.body);
-  }
-  if (data.needsCredentials !== undefined) {
-    updates.push("needsCredentials = ?");
-    params.push(data.needsCredentials ? JSON.stringify(data.needsCredentials) : null);
-  }
-  if (data.slug !== undefined) {
-    updates.push("slug = ?");
-    params.push(data.slug);
-  }
-  if (data.theme !== undefined) {
-    updates.push("theme = ?");
-    params.push(data.theme);
-  }
-  if (data.themeTokens !== undefined) {
-    updates.push("theme_tokens = ?");
-    params.push(data.themeTokens ? JSON.stringify(data.themeTokens) : null);
-  }
-  if (data.designVersion !== undefined) {
-    updates.push("design_version = ?");
-    params.push(data.designVersion);
-  }
-  if (updates.length === 0) return getPage(id);
-  updates.push("updatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<PageRow>(
-    `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update: PageColumnUpdate = {
+    key: data.key === undefined ? undefined : normalizeAssetKey(data.key),
+    title: data.title,
+    description: data.description === undefined ? undefined : (data.description ?? null),
+    contentType: data.contentType,
+    authMode: data.authMode,
+    passwordHash: data.passwordHash === undefined ? undefined : (data.passwordHash ?? null),
+    body: data.body,
+    needsCredentials:
+      data.needsCredentials === undefined
+        ? undefined
+        : data.needsCredentials
+          ? JSON.stringify(data.needsCredentials)
+          : null,
+    slug: data.slug,
+    theme: data.theme,
+    theme_tokens:
+      data.themeTokens === undefined
+        ? undefined
+        : data.themeTokens
+          ? JSON.stringify(data.themeTokens)
+          : null,
+    design_version: data.designVersion,
+  };
+  if (Object.values(update).every((value) => value === undefined)) return getPage(id);
+  const row = await getStorage().repos.pages.updatePage(id, update, new Date().toISOString());
   return row ? rowToPage(row) : null;
 }
 
 export async function deletePage(id: string): Promise<boolean> {
-  const result = await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
-    await tx.run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
-    // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-    const deleted = await tx.run("DELETE FROM pages WHERE id = ?", [id]);
-    if (deleted.changes > 0) {
-      getDbClient().afterCommit(() =>
-        realtimeBus.publish("room:namespace-deleted", `task:page:${id}`),
-      );
+  const storage = getStorage();
+  const changes = await storage.transaction(async () => {
+    // Drops every user's favorite and the page's `task:page:<id>` kv namespace with it.
+    const deleted = await storage.repos.pages.deletePageCascade(id);
+    if (deleted > 0) {
+      storage.afterCommit(() => realtimeBus.publish("room:namespace-deleted", `task:page:${id}`));
     }
     return deleted;
   });
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -7608,21 +7486,8 @@ export async function deletePage(id: string): Promise<boolean> {
  * caller so an unexpected DB error never breaks page serving.
  */
 export async function incrementPageViewCount(id: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE pages SET view_count = view_count + 1 WHERE id = ?",
-    [id],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.pages.incrementPageViewCount(id)) > 0;
 }
-
-type PageVersionRow = {
-  id: string;
-  pageId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToPageVersion(row: PageVersionRow): PageVersion {
   return {
@@ -7641,28 +7506,23 @@ export async function createPageVersion(data: {
   snapshot: PageSnapshot;
   changedByAgentId?: string;
 }): Promise<PageVersion> {
-  const row = await getDbClient().get<PageVersionRow>(
-    `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?) RETURNING *`,
-    [data.pageId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
-  );
+  const row = await getStorage().repos.pages.insertPageVersion({
+    pageId: data.pageId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create page version");
   return rowToPageVersion(row);
 }
 
 export async function getPageVersions(pageId: string): Promise<PageVersion[]> {
-  const rows = await getDbClient().query<PageVersionRow>(
-    "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
-    [pageId],
-  );
+  const rows = await getStorage().repos.pages.listPageVersions(pageId);
   return rows.map(rowToPageVersion);
 }
 
 export async function getPageVersion(pageId: string, version: number): Promise<PageVersion | null> {
-  const row = await getDbClient().get<PageVersionRow>(
-    "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
-    [pageId, version],
-  );
+  const row = await getStorage().repos.pages.findPageVersion(pageId, version);
   return row ? rowToPageVersion(row) : null;
 }
 
@@ -7672,17 +7532,6 @@ export async function getPageVersion(pageId: string, version: number): Promise<P
 // Config-driven metrics mirror Pages: parent table `metrics` holds the current
 // JSON definition, and `metric_versions` holds pre-update snapshots.
 // ============================================================================
-
-type MetricRow = {
-  id: string;
-  agentId: string;
-  slug: string;
-  title: string;
-  description: string | null;
-  definition: string;
-  createdAt: string;
-  updatedAt: string;
-};
 
 function rowToMetric(row: MetricRow): Metric {
   return {
@@ -7716,31 +7565,24 @@ export async function createMetric(data: {
   description?: string;
   definition: MetricDefinition;
 }): Promise<Metric> {
-  const row = await getDbClient().get<MetricRow>(
-    `INSERT INTO metrics (agentId, slug, title, description, definition)
-       VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    [
-      data.agentId,
-      data.slug,
-      data.title,
-      data.description ?? null,
-      JSON.stringify(data.definition),
-    ],
-  );
+  const row = await getStorage().repos.pages.insertMetric({
+    agentId: data.agentId,
+    slug: data.slug,
+    title: data.title,
+    description: data.description ?? null,
+    definition: JSON.stringify(data.definition),
+  });
   if (!row) throw new Error("Failed to create metric");
   return rowToMetric(row);
 }
 
 export async function getMetric(id: string): Promise<Metric | null> {
-  const row = await getDbClient().get<MetricRow>("SELECT * FROM metrics WHERE id = ?", [id]);
+  const row = await getStorage().repos.pages.findMetric(id);
   return row ? rowToMetric(row) : null;
 }
 
 export async function getMetricBySlug(agentId: string, slug: string): Promise<Metric | null> {
-  const row = await getDbClient().get<MetricRow>(
-    "SELECT * FROM metrics WHERE agentId = ? AND slug = ?",
-    [agentId, slug],
-  );
+  const row = await getStorage().repos.pages.findMetricBySlug(agentId, slug);
   return row ? rowToMetric(row) : null;
 }
 
@@ -7761,10 +7603,7 @@ export async function listMetricsByAgent(
   offset = 0,
   opts?: { slim?: boolean },
 ): Promise<Metric[] | MetricSummary[]> {
-  const rows = await getDbClient().query<MetricRow>(
-    "SELECT * FROM metrics WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    [agentId, limit, offset],
-  );
+  const rows = await getStorage().repos.pages.listMetrics(agentId, limit, offset);
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
@@ -7779,24 +7618,16 @@ export async function listAllMetrics(
   offset = 0,
   opts?: { slim?: boolean },
 ): Promise<Metric[] | MetricSummary[]> {
-  const rows = await getDbClient().query<MetricRow>(
-    "SELECT * FROM metrics ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    [limit, offset],
-  );
+  const rows = await getStorage().repos.pages.listMetrics(null, limit, offset);
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
 export async function countAllMetrics(): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM metrics");
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countMetrics(null);
 }
 
 export async function countMetricsByAgent(agentId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM metrics WHERE agentId = ?",
-    [agentId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countMetrics(agentId);
 }
 
 export async function updateMetric(
@@ -7808,48 +7639,20 @@ export async function updateMetric(
     slug?: string;
   },
 ): Promise<Metric | null> {
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
-  if (data.title !== undefined) {
-    updates.push("title = ?");
-    params.push(data.title);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description ?? null);
-  }
-  if (data.definition !== undefined) {
-    updates.push("definition = ?");
-    params.push(JSON.stringify(data.definition));
-  }
-  if (data.slug !== undefined) {
-    updates.push("slug = ?");
-    params.push(data.slug);
-  }
-  if (updates.length === 0) return getMetric(id);
-  updates.push("updatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<MetricRow>(
-    `UPDATE metrics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update: MetricColumnUpdate = {
+    title: data.title,
+    description: data.description === undefined ? undefined : (data.description ?? null),
+    definition: data.definition === undefined ? undefined : JSON.stringify(data.definition),
+    slug: data.slug,
+  };
+  if (Object.values(update).every((value) => value === undefined)) return getMetric(id);
+  const row = await getStorage().repos.pages.updateMetric(id, update, new Date().toISOString());
   return row ? rowToMetric(row) : null;
 }
 
 export async function deleteMetric(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM metrics WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.pages.deleteMetric(id)) > 0;
 }
-
-type MetricVersionRow = {
-  id: string;
-  metricId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToMetricVersion(row: MetricVersionRow): MetricVersion {
   return {
@@ -7868,20 +7671,18 @@ export async function createMetricVersion(data: {
   snapshot: MetricSnapshot;
   changedByAgentId?: string;
 }): Promise<MetricVersion> {
-  const row = await getDbClient().get<MetricVersionRow>(
-    `INSERT INTO metric_versions (metricId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?) RETURNING *`,
-    [data.metricId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
-  );
+  const row = await getStorage().repos.pages.insertMetricVersion({
+    metricId: data.metricId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create metric version");
   return rowToMetricVersion(row);
 }
 
 export async function getMetricVersions(metricId: string): Promise<MetricVersion[]> {
-  const rows = await getDbClient().query<MetricVersionRow>(
-    "SELECT * FROM metric_versions WHERE metricId = ? ORDER BY version DESC",
-    [metricId],
-  );
+  const rows = await getStorage().repos.pages.listMetricVersions(metricId);
   return rows.map(rowToMetricVersion);
 }
 
@@ -7889,10 +7690,7 @@ export async function getMetricVersion(
   metricId: string,
   version: number,
 ): Promise<MetricVersion | null> {
-  const row = await getDbClient().get<MetricVersionRow>(
-    "SELECT * FROM metric_versions WHERE metricId = ? AND version = ?",
-    [metricId, version],
-  );
+  const row = await getStorage().repos.pages.findMetricVersion(metricId, version);
   return row ? rowToMetricVersion(row) : null;
 }
 
@@ -12228,7 +12026,11 @@ export async function listKv(
  */
 export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
-  return await getStorage().repos.kv.countLiveEntries(namespace, now, kvPrefixCondition(opts.prefix));
+  return await getStorage().repos.kv.countLiveEntries(
+    namespace,
+    now,
+    kvPrefixCondition(opts.prefix),
+  );
 }
 
 // ─── Script Runs ────────────────────────────────────────────────────────────
