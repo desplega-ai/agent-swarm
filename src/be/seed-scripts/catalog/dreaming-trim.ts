@@ -160,15 +160,15 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     if (typeof text !== "string") return { ok: false, errors: ["no pre-image for that runId/agentId/field"] };
     if (dry) return { ok: true, mode: "dry-run", wouldRestoreChars: text.length };
     await ctx.swarm.profile_update({ agentId, [field]: text });
-    const rr = await q(`SELECT ${field} AS body FROM agents WHERE id = ?`, [agentId]);
+    const rr = await q(`SELECT "${field}" AS body FROM agents WHERE id = $1`, [agentId]);
     const ok = (await sha(String(rr[0]?.body ?? ""))) === (await sha(text));
     if (ok) await kvSet(`trim-state:${agentId}:${field}`, { agentId, field, revertedAt: new Date().toISOString(), revertedRunId: runId });
     return { ok, mode: "live", restoredChars: text.length, verifiedBy: ok ? "sha256(re-read) = sha256(pre-image)" : "MISMATCH after restore" };
   }
 
   const agents = await q(
-    `SELECT id, name, isLead, status, claudeMd, toolsMd, soulMd, identityMd FROM agents
-     WHERE name NOT LIKE 'ext:%' AND status != 'offline' ORDER BY isLead DESC, name`,
+    `SELECT id, name, "isLead", status, "claudeMd", "toolsMd", "soulMd", "identityMd" FROM agents
+     WHERE name NOT LIKE 'ext:%' AND status != 'offline' ORDER BY "isLead" DESC, name, id`,
   );
   const byId = new Map(agents.map((x: any) => [x.id, x]));
   const states = await trimStates();
@@ -277,7 +277,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         // trim-state lives in a KV namespace any agent can write. Re-apply only a text that a lead really wrote
         // to this field before (context_versions keeps every profile version), never arbitrary KV text.
         const seen = await q(
-          `SELECT 1 AS x FROM context_versions WHERE agentId = ? AND field = ? AND contentHash = ? AND changedByAgentId IN (SELECT id FROM agents WHERE isLead = 1) LIMIT 1`,
+          `SELECT 1 AS x FROM context_versions WHERE "agentId" = $1 AND field = $2 AND "contentHash" = $3 AND "changedByAgentId" IN (SELECT id FROM agents WHERE "isLead" = true) LIMIT 1`,
           [st.agentId, st.field, await sha(String(st.afterText ?? ""))],
         );
         if (!seen.length) {
@@ -285,7 +285,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           continue;
         }
         await ctx.swarm.profile_update({ agentId: st.agentId, [st.field]: st.afterText });
-        const rr = await q(`SELECT ${st.field} AS body FROM agents WHERE id = ?`, [st.agentId]);
+        const rr = await q(`SELECT "${st.field}" AS body FROM agents WHERE id = $1`, [st.agentId]);
         const ok = (await sha(String(rr[0]?.body ?? ""))) === st.afterSha;
         out.reapplied.push({ agentId: st.agentId, agentName: ag.name, field: st.field, ok });
         if (ok) await kvSet(st.key, { ...st, key: undefined, reappliedAt: new Date().toISOString(), reappliedRunId: runId });
@@ -344,10 +344,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       if (!d.backupPath) { refuse("live trim without backupPath (agent-fs backup not confirmed)"); continue; }
       await kvSet(`trim-preimage:${runId}:${t.agentId}:${t.field}`, { text: live, sha256: liveSha, chars: live.length, backupPath: d.backupPath, at: new Date().toISOString() });
       // Re-check immediately before the write: the smallest window we can get without CAS on update-profile.
-      const again = await q(`SELECT ${t.field} AS body FROM agents WHERE id = ?`, [t.agentId]);
+      const again = await q(`SELECT "${t.field}" AS body FROM agents WHERE id = $1`, [t.agentId]);
       if ((await sha(String(again[0]?.body ?? ""))) !== liveSha) { refuse("field changed between plan and write"); continue; }
       await ctx.swarm.profile_update({ agentId: t.agentId, [t.field]: next });
-      const rr = await q(`SELECT ${t.field} AS body FROM agents WHERE id = ?`, [t.agentId]);
+      const rr = await q(`SELECT "${t.field}" AS body FROM agents WHERE id = $1`, [t.agentId]);
       const reSha = await sha(String(rr[0]?.body ?? ""));
       if (reSha !== afterSha) { refuse(`re-read sha ${reSha.slice(0, 12)} != ${afterSha.slice(0, 12)} after write`); continue; }
       await kvSet(`trim-state:${t.agentId}:${t.field}`, {
@@ -369,10 +369,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const name = String(m?.name ?? "");
         const content = String(m?.content ?? "");
         if (!/^[a-z0-9-]{3,90}$/.test(name) || !content.trim()) { out.memories.push({ name, status: "refused", reason: "bad name or empty" }); continue; }
-        const c = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = ?`, [name]);
+        const c = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = $1`, [name]);
         if (Number(c[0]?.n) > 0) { out.memories.push({ name, status: "exists" }); continue; }
         await ctx.swarm.memory_store({ name, content, scope: m?.scope === "agent" ? "agent" : "swarm", tags: ["dreaming-v2", runId, "trim"], intent: `dreaming-v2 ${runId} trim ${t.slot}` });
-        const c2 = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = ? AND COALESCE(chunkIndex, 0) = 0`, [name]);
+        const c2 = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = $1 AND COALESCE("chunkIndex", 0) = 0`, [name]);
         out.memories.push({ name, status: Number(c2[0]?.n) === 1 ? "stored" : "store-unverified", fromSlot: t.slot });
       }
     } catch (e: any) {
@@ -446,6 +446,10 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
   const key = `result:${runId}:${RUN_NODE}`;
   const flag = a.loadResult === true ? "loadResult" : "fromRun";
   if (!runId) return { ok: false, [flag]: true, error: `${flag} needs runId` };
+  // db_query runs the engine's own dialect: one SELECT 1 learns it (a response without the field is SQLite). The
+  // step outputs are JSON text on both engines; SQLite reads them with json_extract, Postgres with jsonb operators.
+  const probe: any = await ctx.swarm.db_query({ sql: "SELECT 1 AS one", params: [] });
+  const pg = (probe?.data ?? probe)?.dialect === "postgres";
   const stored: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key }))?.value;
   const have = stored && stored.runId === runId && stored.node === RUN_NODE;
   if (a.loadResult === true) {
@@ -454,7 +458,9 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
     // equals the sha256 the Lead step returned, which the engine recorded as the `<node>-lead` step output.
     const lead = rows(
       await ctx.swarm.db_query({
-        sql: `SELECT json_extract(output, '$.taskOutput') o FROM workflow_run_steps WHERE runId = ? AND nodeId = ? AND status = 'completed' ORDER BY startedAt DESC LIMIT 1`,
+        sql: pg
+          ? `SELECT CASE WHEN output IS JSON THEN CAST(output AS jsonb)->>'taskOutput' END o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`
+          : `SELECT json_extract(output, '$.taskOutput') o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`,
         params: [runId, `${RUN_NODE}-lead`],
       }),
     );
@@ -483,8 +489,14 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
     if (args[arg] !== undefined) continue;
     const r = rows(
       await ctx.swarm.db_query({
-        sql: `SELECT json_type(output, ?) t, json_extract(output, ?) v FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1`,
-        params: [path, path, runId, nodeId],
+        sql: pg
+          ? `SELECT CASE jsonb_typeof(x.v) WHEN 'boolean' THEN x.v #>> '{}' WHEN 'string' THEN 'text'
+               WHEN 'number' THEN CASE WHEN (x.v #>> '{}') ~ '^-?[0-9]+$' THEN 'integer' ELSE 'real' END ELSE jsonb_typeof(x.v) END t,
+               x.v #>> '{}' v
+             FROM (SELECT jsonb_path_query_first(CASE WHEN output IS JSON THEN CAST(output AS jsonb) END, CAST($1 AS jsonpath)) v
+               FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3 ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1) x`
+          : `SELECT json_type(output, $1) t, json_extract(output, $1) v FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3 ORDER BY "startedAt" DESC NULLS LAST, id LIMIT 1`,
+        params: [path, runId, nodeId],
       }),
     );
     if (!r.length) {

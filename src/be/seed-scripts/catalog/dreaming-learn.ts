@@ -37,7 +37,7 @@ const rows = (r: any): any[] => {
 let LEAD = "";
 async function resolveLead(ctx: ScriptContext, id: unknown): Promise<string> {
   if (typeof id === "string" && id.trim()) return id.trim();
-  const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE isLead = 1 ORDER BY createdAt ASC LIMIT 1` }));
+  const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE "isLead" = true ORDER BY "createdAt" ASC, id ASC LIMIT 1` }));
   return String(r[0]?.id ?? "");
 }
 
@@ -131,12 +131,12 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const restored = new Set((await kvList("restored:")).map((e) => String(e.key).slice("restored:".length)));
   const pinsExisting = await kvList("pin:", 500);
   const pinKeys = new Set(pinsExisting.map((e) => String(e.key)));
-  const agents = await q("agents", `SELECT id, name, isLead, status, soulMd, identityMd, toolsMd, claudeMd, CASE WHEN id = ? THEN heartbeatMd END AS heartbeatMd FROM agents WHERE name NOT LIKE 'ext:%'`, [LEAD]);
+  const agents = await q("agents", `SELECT id, name, "isLead", status, "soulMd", "identityMd", "toolsMd", "claudeMd", CASE WHEN id = $1 THEN "heartbeatMd" END AS "heartbeatMd" FROM agents WHERE name NOT LIKE 'ext:%' ORDER BY id`, [LEAD]);
   const byId = new Map(agents.map((x: any) => [x.id, x]));
   const trimStates = (await kvList("trim-state:")).map((e) => e.value ?? {});
   const hbState = parse((await ctx.swarm.kv_getOrNull({ namespace: NS, key: "hb-state:lead" }).catch(() => null))?.value) ?? null;
-  const failed = await q("failed", `SELECT id, failureReason FROM agent_tasks WHERE status = 'failed' AND finishedAt >= ? AND failureReason IS NOT NULL LIMIT 500`, [day]);
-  const coaching = await q("coaching", `SELECT id, changeReason FROM context_versions WHERE changeSource = 'lead_coaching' AND createdAt >= ? AND changeReason IS NOT NULL LIMIT 300`, [day]);
+  const failed = await q("failed", `SELECT id, "failureReason" FROM agent_tasks WHERE status = 'failed' AND "finishedAt" >= $1 AND "failureReason" IS NOT NULL ORDER BY "finishedAt", id LIMIT 500`, [day]);
+  const coaching = await q("coaching", `SELECT id, "changeReason" FROM context_versions WHERE "changeSource" = 'lead_coaching' AND "createdAt" >= $1 AND "changeReason" IS NOT NULL ORDER BY "createdAt", id LIMIT 300`, [day]);
   const references = [
     ...failed.map((r: any) => ({ ref: `task:${r.id}`, text: String(r.failureReason ?? "") })),
     ...coaching.map((r: any) => ({ ref: `context_version:${r.id}`, text: String(r.changeReason ?? "") })),
@@ -162,7 +162,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const { live, liveSha } = await liveOf(cut);
     let memory: ScoreEnv["memory"] = null;
     if (t.kind === "memory") {
-      const m = await q("memPresent", `SELECT COUNT(*) n, SUM(CASE WHEN source = 'file_index' AND sourcePath = ? THEN 1 ELSE 0 END) same FROM agent_memory WHERE name = ?`, [String(t.sourcePath ?? ""), String(cut.probe)]);
+      const m = await q("memPresent", `SELECT COUNT(*) n, SUM(CASE WHEN source = 'file_index' AND "sourcePath" = $1 THEN 1 ELSE 0 END) same FROM agent_memory WHERE name = $2`, [String(t.sourcePath ?? ""), String(cut.probe)]);
       memory = { present: Number(m[0]?.n ?? 0), reindexedSamePath: Number(m[0]?.same ?? 0) };
     }
     const revertState = t.kind === "heartbeat" ? hbState : trimStates.find((s: any) => s.agentId === t.agentId && s.field === t.field && s.runId === cut.runId) ?? null;
@@ -173,7 +173,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
     if (r.signals.includes("reintroduced")) {
       let by: any = null;
       if (t.kind === "profile" || t.kind === "heartbeat") {
-        const w = await q("writer", `SELECT changeSource, changedByAgentId, createdAt FROM context_versions WHERE agentId = ? AND field = ? AND createdAt >= ? ORDER BY createdAt DESC LIMIT 1`, [t.agentId, t.field, String(cut.at ?? since)]);
+        const w = await q("writer", `SELECT "changeSource", "changedByAgentId", "createdAt" FROM context_versions WHERE "agentId" = $1 AND field = $2 AND "createdAt" >= $3 ORDER BY "createdAt" DESC, id DESC LIMIT 1`, [t.agentId, t.field, String(cut.at ?? since)]);
         by = w[0] ?? null;
       }
       scored.reintroduced.push({ ...rec, by });
@@ -227,10 +227,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const hbCost = await q(
     "hbCost",
     `SELECT COUNT(*) n, SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END) failed,
-       ROUND((SELECT SUM(c.totalCostUsd) FROM session_costs c JOIN agent_tasks t2 ON t2.id = c.taskId
-              WHERE t2.agentId = ? AND t2.taskType = 'heartbeat-checklist' AND t2.createdAt >= ?), 2) usd
-     FROM agent_tasks t WHERE t.agentId = ? AND t.taskType = 'heartbeat-checklist' AND t.createdAt >= ?`,
-    [LEAD, new Date(now.getTime() - 7 * 86400000).toISOString(), LEAD, new Date(now.getTime() - 7 * 86400000).toISOString()],
+       ROUND(CAST((SELECT SUM(c."totalCostUsd") FROM session_costs c JOIN agent_tasks t2 ON t2.id = c."taskId"
+              WHERE t2."agentId" = $1 AND t2."taskType" = 'heartbeat-checklist' AND t2."createdAt" >= $2) AS numeric), 2) usd
+     FROM agent_tasks t WHERE t."agentId" = $1 AND t."taskType" = 'heartbeat-checklist' AND t."createdAt" >= $2`,
+    [LEAD, new Date(now.getTime() - 7 * 86400000).toISOString()],
   );
   const n7 = Number(hbCost[0]?.n ?? 0);
   const hb = parse(a.hb) ?? null;

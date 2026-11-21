@@ -121,17 +121,21 @@ export default async function bootTriage(args: any, ctx: any) {
 
   const mergedPrs = await recentMergedPrs(ctx, repo, nowMs, deployWindowMinutes);
 
+  // Cutoffs are ISO text, the format agent_tasks.lastUpdatedAt and
+  // active_sessions.lastHeartbeatAt store on SQLite (timestamptz on Postgres),
+  // so the same text compares right on both engines.
+  const failureCutoff = new Date(nowMs - failureLookbackMinutes * 60 * 1000).toISOString();
   const recentFailureRows = await query(
     ctx,
-    `SELECT t.id, t.task, t.status, t.taskType, t.agentId, a.name as agentName,
-            t.scheduleId, t.parentTaskId, t.failureReason, t.createdAt, t.lastUpdatedAt
+    `SELECT t.id, t.task, t.status, t."taskType", t."agentId", a.name AS "agentName",
+            t."scheduleId", t."parentTaskId", t."failureReason", t."createdAt", t."lastUpdatedAt"
      FROM agent_tasks t
-     LEFT JOIN agents a ON a.id = t.agentId
+     LEFT JOIN agents a ON a.id = t."agentId"
      WHERE t.status = 'failed'
-       AND datetime(t.lastUpdatedAt) >= datetime(?, ?)
-     ORDER BY datetime(t.lastUpdatedAt) DESC
+       AND t."lastUpdatedAt" >= $1
+     ORDER BY t."lastUpdatedAt" DESC, t.id ASC
      LIMIT 50`,
-    [now.toISOString(), `-${failureLookbackMinutes} minutes`],
+    [failureCutoff],
   );
   const recentlyFailedTasks = recentFailureRows
     .filter((row) => !row.unavailable)
@@ -145,23 +149,23 @@ export default async function bootTriage(args: any, ctx: any) {
   const recentThreshold = new Date(nowMs - stuckMinutes * 60 * 1000).toISOString();
   const stuckRows = await query(
     ctx,
-    `SELECT t.id, t.task, t.status, t.taskType, t.agentId, a.name as agentName,
-            t.scheduleId, t.parentTaskId, t.failureReason, t.createdAt, t.lastUpdatedAt
+    `SELECT t.id, t.task, t.status, t."taskType", t."agentId", a.name AS "agentName",
+            t."scheduleId", t."parentTaskId", t."failureReason", t."createdAt", t."lastUpdatedAt"
      FROM agent_tasks t
-     JOIN agents a ON a.id = t.agentId
+     JOIN agents a ON a.id = t."agentId"
      WHERE t.status = 'in_progress'
-       AND datetime(t.lastUpdatedAt) <= datetime(?, ?)
+       AND t."lastUpdatedAt" <= $1
        AND (
          a.status = 'offline'
          OR NOT EXISTS (
            SELECT 1 FROM active_sessions s
-           WHERE s.taskId = t.id
-             AND datetime(s.lastHeartbeatAt) >= datetime(?)
+           WHERE s."taskId" = t.id
+             AND s."lastHeartbeatAt" >= $1
          )
        )
-     ORDER BY datetime(t.lastUpdatedAt) ASC
+     ORDER BY t."lastUpdatedAt" ASC, t.id ASC
      LIMIT 50`,
-    [now.toISOString(), `-${stuckMinutes} minutes`, recentThreshold],
+    [recentThreshold],
   );
   const stuckInProgressOnOfflineAgents = stuckRows
     .filter((row) => !row.unavailable)
@@ -169,13 +173,13 @@ export default async function bootTriage(args: any, ctx: any) {
 
   const orphanRows = await query(
     ctx,
-    `SELECT t.id, t.task, t.status, t.taskType, t.agentId, a.name as agentName,
-            t.scheduleId, t.parentTaskId, t.failureReason, t.createdAt, t.lastUpdatedAt
+    `SELECT t.id, t.task, t.status, t."taskType", t."agentId", a.name AS "agentName",
+            t."scheduleId", t."parentTaskId", t."failureReason", t."createdAt", t."lastUpdatedAt"
      FROM agent_tasks t
-     JOIN agents a ON a.id = t.agentId
+     JOIN agents a ON a.id = t."agentId"
      WHERE t.status IN ('pending', 'offered')
        AND a.status = 'offline'
-     ORDER BY datetime(t.lastUpdatedAt) ASC
+     ORDER BY t."lastUpdatedAt" ASC, t.id ASC
      LIMIT 50`,
   );
   const orphanedPendingOrOfferedOnOfflineWorkers = orphanRows
@@ -184,23 +188,23 @@ export default async function bootTriage(args: any, ctx: any) {
 
   const supersededRows = await query(
     ctx,
-    `SELECT p.id, p.task, p.status, p.taskType, p.agentId, a.name as agentName,
-            p.scheduleId, p.parentTaskId, p.failureReason, p.createdAt, p.lastUpdatedAt
+    `SELECT p.id, p.task, p.status, p."taskType", p."agentId", a.name AS "agentName",
+            p."scheduleId", p."parentTaskId", p."failureReason", p."createdAt", p."lastUpdatedAt"
      FROM agent_tasks p
-     LEFT JOIN agents a ON a.id = p.agentId
+     LEFT JOIN agents a ON a.id = p."agentId"
      WHERE p.status = 'superseded'
-       AND p.failureReason IS NOT 'superseded_workflow_task'
-       AND datetime(p.lastUpdatedAt) >= datetime(?, ?)
+       AND p."failureReason" IS DISTINCT FROM 'superseded_workflow_task'
+       AND p."lastUpdatedAt" >= $1
        AND NOT EXISTS (
          SELECT 1
          FROM agent_tasks c
-         WHERE c.parentTaskId = p.id
-           AND c.taskType = 'resume'
+         WHERE c."parentTaskId" = p.id
+           AND c."taskType" = 'resume'
            AND c.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
        )
-     ORDER BY datetime(p.lastUpdatedAt) DESC
+     ORDER BY p."lastUpdatedAt" DESC, p.id ASC
      LIMIT 50`,
-    [now.toISOString(), `-${failureLookbackMinutes} minutes`],
+    [failureCutoff],
   );
   const supersededTasksMissingResumeChild = supersededRows
     .filter((row) => !row.unavailable)

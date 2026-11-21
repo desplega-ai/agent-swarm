@@ -171,27 +171,28 @@ async function buildState(ctx: any, leadId: string, nowMs: number, timeZone: str
   const since24h = new Date(nowMs - 24 * 3600e3).toISOString();
   // Sequential: db_query caps concurrent queries per caller, and parallel reads fail with
   // db_query_concurrency_cap on a busy swarm.
-  const lead = await q("SELECT heartbeatMd FROM agents WHERE id = ?", [leadId]);
+  const lead = await q('SELECT "heartbeatMd" FROM agents WHERE id = $1', [leadId]);
   const prev = await q(
     `SELECT id, substr(output, 1, 400) AS output
        FROM agent_tasks
-      WHERE agentId = ? AND taskType = 'heartbeat-checklist' AND status = 'completed'
-      ORDER BY createdAt DESC LIMIT 1`,
+      WHERE "agentId" = $1 AND "taskType" = 'heartbeat-checklist' AND status = 'completed'
+      ORDER BY "createdAt" DESC, id DESC LIMIT 1`,
     [leadId],
   );
   const failed = await q(
-    `SELECT id, agentId, substr(task, 1, 60) AS task, substr(failureReason, 1, 120) AS failureReason, finishedAt
-       FROM agent_tasks WHERE status = 'failed' AND finishedAt > ?
-      ORDER BY finishedAt DESC LIMIT 10`,
+    `SELECT id, "agentId", substr(task, 1, 60) AS task, substr("failureReason", 1, 120) AS "failureReason", "finishedAt"
+       FROM agent_tasks WHERE status = 'failed' AND "finishedAt" > $1
+      ORDER BY "finishedAt" DESC, id ASC LIMIT 10`,
     [since6h],
   );
   const overview = await q(
-    `SELECT SUM(status = 'in_progress') AS inProgress, SUM(status = 'pending') AS pending,
-            SUM(status = 'unassigned') AS unassigned,
-            SUM(status = 'completed' AND finishedAt > ?) AS completed24,
-            SUM(status = 'failed' AND finishedAt > ?) AS failed24
+    `SELECT SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS "inProgress",
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) AS unassigned,
+            SUM(CASE WHEN status = 'completed' AND "finishedAt" > $1 THEN 1 ELSE 0 END) AS completed24,
+            SUM(CASE WHEN status = 'failed' AND "finishedAt" > $1 THEN 1 ELSE 0 END) AS failed24
        FROM agent_tasks`,
-    [since24h, since24h],
+    [since24h],
   );
   const agents = await q(
     "SELECT status, COUNT(*) AS n FROM agents WHERE COALESCE(role, '') != 'extension' GROUP BY status",
@@ -362,7 +363,7 @@ export default async function heartbeatJevGate(args: any, ctx: any) {
     if (setup.status === "asked" && setup.requestId) {
       const [req] = rows(
         await ctx.swarm.db_query({
-          sql: "SELECT status FROM approval_requests WHERE id = ?",
+          sql: "SELECT status FROM approval_requests WHERE id = $1",
           params: [setup.requestId],
         }),
       );

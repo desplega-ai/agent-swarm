@@ -227,6 +227,26 @@ const rows = (r: any): any[] => {
   const c: string[] = d?.columns ?? [];
   return d.rows.map((x: any[]) => Object.fromEntries(c.map((k, i) => [k, x[i]])));
 };
+// db_query runs the SQL dialect of the swarm's storage engine, and every response states it (a response without the
+// field comes from SQLite). Most statements here are portable text; one with no portable form carries one text per
+// dialect. The dialect is read from the responses only: when a per-dialect statement comes first, one SELECT 1 asks.
+type Sql = string | { sqlite: string; postgres: string };
+type DialectState = { dialect?: "sqlite" | "postgres" };
+const noteDialect = (st: DialectState, r: any): any => {
+  const d = (r?.data ?? r)?.dialect;
+  if (d === "sqlite" || d === "postgres") st.dialect = d;
+  return r;
+};
+async function dbQuery(ctx: any, st: DialectState, sql: Sql, params: unknown[] = []): Promise<any> {
+  if (typeof sql !== "string" && !st.dialect) {
+    noteDialect(st, await ctx.swarm.db_query({ sql: "SELECT 1 AS one", params: [] }));
+    st.dialect ??= "sqlite";
+  }
+  const text = typeof sql === "string" ? sql : st.dialect === "postgres" ? sql.postgres : sql.sqlite;
+  return noteDialect(st, await ctx.swarm.db_query({ sql: text, params }));
+}
+// "$1, $2, ..." placeholders for a list, numbered from `from` (db_query binds $n in order of first appearance).
+const placeholders = (n: number, from = 1) => Array.from({ length: n }, (_, i) => `$${from + i}`).join(", ");
 export const sha = async (s: string) =>
   Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s ?? ""))))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -762,16 +782,17 @@ async function runScript(args: unknown, ctx: ScriptContext) {
   const runId = a.runId ?? "";
   const errors: string[] = [];
   const today = (a.generatedAt && !Number.isNaN(Date.parse(a.generatedAt)) ? new Date(a.generatedAt) : new Date()).toISOString().slice(0, 10);
-  const q = async (label: string, sql: string, params: unknown[] = []): Promise<any[]> => {
+  const st: DialectState = {};
+  const q = async (label: string, sql: Sql, params: unknown[] = []): Promise<any[]> => {
     try {
-      return rows(await ctx.swarm.db_query({ sql, params }));
+      return rows(await dbQuery(ctx, st, sql, params));
     } catch (e: any) {
       errors.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`);
       return [];
     }
   };
   // For reads whose failure must not look like "no rows" (a missing row is a final answer, a failed read is not).
-  const qStrict = async (sql: string, params: unknown[] = []): Promise<any[]> => rows(await ctx.swarm.db_query({ sql, params }));
+  const qStrict = async (sql: Sql, params: unknown[] = []): Promise<any[]> => rows(await dbQuery(ctx, st, sql, params));
   try {
     if (a.mode === "plan") return await plan();
     if (a.mode === "apply") return await apply();
@@ -783,9 +804,13 @@ async function runScript(args: unknown, ctx: ScriptContext) {
   }
 
   async function loadSources() {
-    const users = await q("users", `SELECT u.id, u.name, u.email, u.role, u.status, u.timezone, u.preferredChannel, (CASE WHEN json_extract(CASE WHEN json_valid(u.metadata) THEN u.metadata END, '$.comms') IS NOT NULL OR length(coalesce(u.notes, '')) > 0 THEN 1 ELSE 0 END) hasComms, (SELECT group_concat(DISTINCT e.kind) FROM user_external_ids e WHERE e.userId = u.id) ext FROM users u`);
-    const agents = await q("agents", `SELECT id, name, role, isLead, coalesce(harness_provider, provider) harness FROM agents`);
-    const repos = await q("repos", `SELECT id, name, url, defaultBranch, clonePath, autoClone FROM swarm_repos`);
+    // users.metadata is JSON text on SQLite and jsonb on Postgres; group_concat is string_agg on Postgres.
+    const users = await q("users", {
+      sqlite: `SELECT u.id, u.name, u.email, u.role, u.status, u.timezone, u."preferredChannel", (CASE WHEN json_extract(CASE WHEN json_valid(u.metadata) THEN u.metadata END, '$.comms') IS NOT NULL OR length(COALESCE(u.notes, '')) > 0 THEN 1 ELSE 0 END) AS "hasComms", (SELECT group_concat(DISTINCT e.kind) FROM user_external_ids e WHERE e."userId" = u.id) AS ext FROM users u`,
+      postgres: `SELECT u.id, u.name, u.email, u.role, u.status, u.timezone, u."preferredChannel", (CASE WHEN (u.metadata ->> 'comms') IS NOT NULL OR length(COALESCE(u.notes, '')) > 0 THEN 1 ELSE 0 END) AS "hasComms", (SELECT string_agg(DISTINCT e.kind, ',') FROM user_external_ids e WHERE e."userId" = u.id) AS ext FROM users u`,
+    });
+    const agents = await q("agents", `SELECT id, name, role, "isLead", COALESCE(harness_provider, provider) AS harness FROM agents`);
+    const repos = await q("repos", `SELECT id, name, url, "defaultBranch", "clonePath", "autoClone" FROM swarm_repos`);
     const { entities, skipped } = buildEntities(users, agents, repos);
     const live = new Map<string, { e: Entity; recSha: string } | { gone: string }>();
     for (const e of entities) live.set(`${e.table}/${e.sourceId}`, { e, recSha: await recordSha(e) });
@@ -795,8 +820,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
   async function loadLongterm() {
     return await q(
       "longterm",
-      `SELECT id, name, agentId, scope, totalChunks, contentHash, createdAt, updatedAt, version, substr(content, 1, 4000) content FROM agent_memory
-       WHERE chunkIndex = 0 AND name GLOB '/longterm/*' ORDER BY name, createdAt, id LIMIT 1000`,
+      `SELECT id, name, "agentId", scope, "totalChunks", "contentHash", "createdAt", "updatedAt", version, substr(content, 1, 4000) AS content FROM agent_memory
+       WHERE "chunkIndex" = 0 AND substr(name, 1, 10) = '/longterm/' ORDER BY name, "createdAt", id LIMIT 1000`,
     );
   }
 
@@ -810,7 +835,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const overCap = Number(budget?.prevRunUsd) > Number(budget?.cap ?? 25);
     const { entities, skipped, live, sourceCounts } = await loadSources();
     const existing = await loadLongterm();
-    const existingCount = (await q("longterm-count", `SELECT COUNT(*) n FROM agent_memory WHERE name GLOB '/longterm/*'`))[0]?.n ?? null;
+    const existingCount = (await q("longterm-count", `SELECT COUNT(*) AS n FROM agent_memory WHERE substr(name, 1, 10) = '/longterm/'`))[0]?.n ?? null;
     // Validate existing docs.
     const byName = new Map<string, any[]>();
     for (const d of existing) byName.set(d.name, [...(byName.get(d.name) ?? []), d]);
@@ -855,7 +880,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const carried: any[] = (Array.isArray(v?.promotions) ? v.promotions : []).filter((r: any) => r && typeof r.id === "string" && !promoRows.has(r.id) && !ltRows.some((x) => String(x?.id) === r.id));
         if (carried.length) {
           const cids = carried.map((r) => r.id);
-          const found = new Map((await qStrict(`SELECT id, name, key, createdAt, substr(content, 1, 1200) text FROM agent_memory WHERE id IN (${cids.map(() => "?").join(",")}) AND chunkIndex = 0 AND coalesce(key, '') GLOB '/learnings/*' AND (expiresAt IS NULL OR expiresAt > ?)`, [...cids, new Date().toISOString()])).map((r) => [String(r.id), r]));
+          const found = new Map((await qStrict(`SELECT id, name, key, "createdAt", substr(content, 1, 1200) AS text FROM agent_memory WHERE id IN (${placeholders(cids.length)}) AND "chunkIndex" = 0 AND substr(COALESCE(key, ''), 1, 11) = '/learnings/' AND ("expiresAt" IS NULL OR "expiresAt" > $${cids.length + 1})`, [...cids, new Date().toISOString()])).map((r) => [String(r.id), r]));
           for (const r of carried) {
             const d = found.get(r.id);
             if (!d) continue;
@@ -930,8 +955,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
       // deletes an undistilled learning, a B1 doc only waits.
       .sort((x, y) => Number(y.carried) - Number(x.carried) || x.tries - y.tries || Number(y.promoted > 0) - Number(x.promoted > 0) || y.members.length - x.members.length || (x.path < y.path ? -1 : 1));
     // Skill routing: how-to clusters leave lane B before distill, so they never reach /longterm or use a cluster slot.
-    const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE isEnabled = 1 ORDER BY name`)) as SkillRow[];
-    const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND isScratch = 0 ORDER BY name`)) as SkillRow[];
+    const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE "isEnabled" = true ORDER BY name`)) as SkillRow[];
+    const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND "isScratch" = false ORDER BY name`)) as SkillRow[];
     const skillRoutes: any[] = [];
     const recallLeft: any[] = [];
     const textsOf = (ms: any[]) => ms.map((m: any) => `${String(meta.get(m.id)?.name ?? "")}\n${String(meta.get(m.id)?.text ?? "")}`);
@@ -1053,7 +1078,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     const leadId = String(a.leadAgentId ?? "").trim();
     const taskIds = [...new Set(distillRuns.map((x) => x.taskId).filter((x): x is string => !!x))];
     const authors = new Map<string, string>();
-    if (leadId && taskIds.length) for (const r of await q("distill-authors", `SELECT id, agentId FROM agent_tasks WHERE id IN (${taskIds.map(() => "?").join(", ")})`, taskIds)) authors.set(String(r.id), String(r.agentId ?? ""));
+    if (leadId && taskIds.length) for (const r of await q("distill-authors", `SELECT id, "agentId" FROM agent_tasks WHERE id IN (${placeholders(taskIds.length)})`, taskIds)) authors.set(String(r.id), String(r.agentId ?? ""));
     for (const x of distillRuns) {
       if (x.status !== "completed") {
         failedJobs.push({ jobId: x.key, status: x.status, error: x.error });
@@ -1071,8 +1096,8 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     }
     // Distiller said "this cluster is how-to": no /longterm doc; route it like a B1 /howto group.
     if (flaggedHowto.length) {
-      const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE isEnabled = 1 ORDER BY name`)) as SkillRow[];
-      const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND isScratch = 0 ORDER BY name`)) as SkillRow[];
+      const skillRows = (await q("skills", `SELECT name, description FROM skills WHERE "isEnabled" = true ORDER BY name`)) as SkillRow[];
+      const scriptRows = (await q("scripts", `SELECT name, description FROM scripts WHERE scope = 'global' AND "isScratch" = false ORDER BY name`)) as SkillRow[];
       for (const cid of flaggedHowto) {
         const cl = clusterIndex.get(cid)!;
         const hp = `/howto/${cl.path.split("/").pop()}`;
@@ -1091,13 +1116,23 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     if (createPaths.length) {
       const srcIds = [...new Set(createPaths.flatMap((path) => distilled.get(path)!.facts.flatMap((f) => f.src)))];
       const vecs = new Map<string, Float32Array>();
-      const srcRows = srcIds.length ? await q("near-dup-sources", `SELECT id, hex(embedding) e FROM agent_memory WHERE id IN (${srcIds.map(() => "?").join(",")}) AND embedding IS NOT NULL`, srcIds) : [];
+      const srcRows = srcIds.length ? await q(
+            "near-dup-sources",
+            {
+              sqlite: `SELECT id, hex(embedding) AS e FROM agent_memory WHERE id IN (${placeholders(srcIds.length)}) AND embedding IS NOT NULL`,
+              postgres: `SELECT id, encode(embedding, 'hex') AS e FROM agent_memory WHERE id IN (${placeholders(srcIds.length)}) AND embedding IS NOT NULL`,
+            },
+            srcIds,
+          ) : [];
       for (const r of srcRows) {
         const v = decodeVec(r.e);
         if (v) vecs.set(String(r.id), v);
       }
       const twins: TwinDoc[] = [];
-      for (const r of await q("near-dup-docs", `SELECT id, name, key, substr(content, 1, 600) head, hex(embedding) e FROM agent_memory WHERE chunkIndex = 0 AND (name GLOB '/longterm/*' OR coalesce(key, '') GLOB '/longterm/*') AND embedding IS NOT NULL ORDER BY createdAt, id LIMIT 1000`)) {
+      for (const r of await q("near-dup-docs", {
+        sqlite: `SELECT id, name, key, substr(content, 1, 600) AS head, hex(embedding) AS e FROM agent_memory WHERE "chunkIndex" = 0 AND (substr(name, 1, 10) = '/longterm/' OR substr(COALESCE(key, ''), 1, 10) = '/longterm/') AND embedding IS NOT NULL ORDER BY "createdAt", id LIMIT 1000`,
+        postgres: `SELECT id, name, key, substr(content, 1, 600) AS head, encode(embedding, 'hex') AS e FROM agent_memory WHERE "chunkIndex" = 0 AND (substr(name, 1, 10) = '/longterm/' OR substr(COALESCE(key, ''), 1, 10) = '/longterm/') AND embedding IS NOT NULL ORDER BY "createdAt", id LIMIT 1000`,
+      })) {
         const v = decodeVec(r.e);
         const path = String(r.name ?? "").startsWith("/longterm/") ? String(r.name) : String(r.key ?? "");
         if (v) twins.push({ id: String(r.id), path, aliases: parseDoc(String(r.head ?? "")).aliases, vec: v });
@@ -1296,7 +1331,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         }
         try {
           if (x.op === "create") {
-            const c = await q("pre-create", `SELECT COUNT(*) n FROM agent_memory WHERE name = ?`, [x.name]);
+            const c = await q("pre-create", `SELECT COUNT(*) AS n FROM agent_memory WHERE name = $1`, [x.name]);
             if (Number(c[0]?.n ?? 1) !== 0) {
               writes.push({ actionId, op: "create", name: x.name, status: "skipped", why: "name appeared since plan" });
               continue;
@@ -1307,13 +1342,13 @@ async function runScript(args: unknown, ctx: ScriptContext) {
               writes.push({ actionId, op: "create", name: x.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200) });
               continue;
             }
-            const back = await q("post-create", `SELECT id, contentHash, totalChunks FROM agent_memory WHERE name = ? AND chunkIndex = 0`, [x.name]);
+            const back = await q("post-create", `SELECT id, "contentHash", "totalChunks" FROM agent_memory WHERE name = $1 AND "chunkIndex" = 0`, [x.name]);
             const afterSha = await sha(x.content!);
             const okBack = back.length === 1 && back[0].contentHash === afterSha && Number(back[0].totalChunks) === 1;
             writes.push({ actionId, op: "create", id: back[0]?.id ?? null, name: x.name, beforeSha: null, afterSha, status: okBack ? "verified" : "unverified" });
             ledgerItems.push({ actionId, lane: "memtax", kind: "memory-store", target: { name: x.name }, contentHash: afterSha });
           } else if (x.op === "edit") {
-            const cur = await q("pre-edit", `SELECT contentHash, version, content, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [x.id]);
+            const cur = await q("pre-edit", `SELECT "contentHash", version, content, "totalChunks" FROM agent_memory WHERE id = $1 AND "chunkIndex" = 0`, [x.id]);
             if (!cur.length || cur[0].contentHash !== x.beforeSha || Number(cur[0].totalChunks) !== 1) {
               writes.push({ actionId, op: "edit", id: x.id, name: x.name, status: "skipped", why: "doc changed since plan (sha) or became multi-chunk" });
               continue;
@@ -1325,12 +1360,12 @@ async function runScript(args: unknown, ctx: ScriptContext) {
               writes.push({ actionId, op: "edit", id: x.id, name: x.name, status: "failed", why: String(res.data.message ?? "refused").slice(0, 200), preimageKey });
               continue;
             }
-            const back = await q("post-edit", `SELECT contentHash FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [x.id]);
+            const back = await q("post-edit", `SELECT "contentHash" FROM agent_memory WHERE id = $1 AND "chunkIndex" = 0`, [x.id]);
             const afterSha = await sha(x.content!);
             writes.push({ actionId, op: "edit", id: x.id, name: x.name, beforeSha: x.beforeSha, afterSha, preimageKey, status: back[0]?.contentHash === afterSha ? "verified" : "unverified" });
             ledgerItems.push({ actionId, lane: "memtax", kind: "memory-edit", target: { name: x.name, memoryIds: [x.id] }, contentHash: afterSha, preimageKey });
           } else {
-            const cur = await q("pre-delete", `SELECT content, contentHash, name FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [x.id]);
+            const cur = await q("pre-delete", `SELECT content, "contentHash", name FROM agent_memory WHERE id = $1 AND "chunkIndex" = 0`, [x.id]);
             if (!cur.length || !String(cur[0].name).startsWith("/longterm/") || cur[0].contentHash !== x.beforeSha) {
               writes.push({ actionId, op: "delete", id: x.id, name: x.name, status: "skipped", why: "gone, renamed or changed since plan" });
               continue;
@@ -1338,7 +1373,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
             const preimageKey = `memtax-create:pre:${runId}:${x.id}`;
             await ctx.swarm.kv_set({ namespace: NS, key: preimageKey, value: { rows: [{ id: x.id, name: x.name, content: cur[0].content }], sha256: x.beforeSha, at: new Date().toISOString() } as any });
             await ctx.swarm.memory_delete({ id: x.id! });
-            const back = await q("post-delete", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [x.id]);
+            const back = await q("post-delete", `SELECT COUNT(*) AS n FROM agent_memory WHERE id = $1`, [x.id]);
             writes.push({ actionId, op: "delete", id: x.id, name: x.name, beforeSha: x.beforeSha, afterSha: null, preimageKey, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
             ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: x.name, memoryIds: [x.id] }, preimageKey });
           }
@@ -1383,7 +1418,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           const actionId = `LT${i + 1}`;
           try {
             // A failed read throws (retried), so only a row that is really gone or changed is skipped for good.
-            const cur = await qStrict(`SELECT id, name, key, tags, content, contentHash, totalChunks FROM agent_memory WHERE id = ? AND chunkIndex = 0`, [dr.id]);
+            const cur = await qStrict(`SELECT id, name, key, tags, content, "contentHash", "totalChunks" FROM agent_memory WHERE id = $1 AND "chunkIndex" = 0`, [dr.id]);
             if (!cur.length || !String(cur[0].key ?? "").startsWith("/learnings/") || !dr.contentHash || cur[0].contentHash !== dr.contentHash || Number(cur[0].totalChunks) !== 1) {
               writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: dr.name, status: "skipped", why: "gone, not a /learnings row, multi-chunk, no content hash, or changed since triage" });
               continue;
@@ -1396,7 +1431,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
               retry(dr);
               continue;
             }
-            const back = await q("post-drop", `SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [dr.id]);
+            const back = await q("post-drop", `SELECT COUNT(*) AS n FROM agent_memory WHERE id = $1`, [dr.id]);
             writes.push({ actionId, op: "delete", kind: "learning", id: dr.id, name: String(cur[0].name ?? ""), key: cur[0].key, beforeSha: cur[0].contentHash, afterSha: null, preimageKey, why: `${dr.dropWhy}: ${String(dr.reason ?? "").slice(0, 120)}`, status: Number(back[0]?.n) === 0 ? "verified" : "unverified" });
             ledgerItems.push({ actionId, lane: "memtax", kind: "memory-delete", target: { name: String(cur[0].name ?? ""), memoryIds: [dr.id] }, preimageKey });
             if (Number(back[0]?.n) !== 0) retry(dr);
@@ -1491,7 +1526,13 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         const prior: any[] = Array.isArray(stored?.routes) ? stored.routes : [];
         let consumed = new Set<string>();
         try {
-          for (const r of await qStrict(`SELECT json_extract(output, '$.taskOutput') v FROM workflow_run_steps WHERE runId = ? AND nodeId = 'synthesize'`, [runId])) for (const id of consumedMembers(r.v)) consumed.add(id);
+          for (const r of await qStrict(
+            {
+              sqlite: `SELECT json_extract(output, '$.taskOutput') AS v FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = 'synthesize'`,
+              postgres: `SELECT CASE WHEN output IS JSON OBJECT THEN CAST(output AS jsonb) ->> 'taskOutput' END AS v FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = 'synthesize'`,
+            },
+            [runId],
+          )) for (const id of consumedMembers(r.v)) consumed.add(id);
         } catch (e: any) {
           consumed = new Set();
           errors.push(`handoff: synthesize step unreadable, nothing marked consumed: ${String(e?.message ?? e).slice(0, 200)}`);
@@ -1502,7 +1543,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
           live = new Set<string>();
           for (let i = 0; i < ids.length; i += 500) {
             const part = ids.slice(i, i + 500);
-            for (const r of await qStrict(`SELECT DISTINCT id FROM agent_memory WHERE id IN (${part.map(() => "?").join(",")}) AND (expiresAt IS NULL OR expiresAt > ?)`, [...part, new Date().toISOString()])) live.add(String(r.id));
+            for (const r of await qStrict(`SELECT DISTINCT id FROM agent_memory WHERE id IN (${placeholders(part.length)}) AND ("expiresAt" IS NULL OR "expiresAt" > $${part.length + 1})`, [...part, new Date().toISOString()])) live.add(String(r.id));
           }
         } catch (e: any) {
           live = null;
@@ -1516,7 +1557,7 @@ async function runScript(args: unknown, ctx: ScriptContext) {
         handoff = "failed";
       }
     }
-    const longtermRowsAfter = Number((await q("longterm-count", `SELECT COUNT(*) n FROM agent_memory WHERE name GLOB '/longterm/*'`))[0]?.n ?? NaN);
+    const longtermRowsAfter = Number((await q("longterm-count", `SELECT COUNT(*) AS n FROM agent_memory WHERE substr(name, 1, 10) = '/longterm/'`))[0]?.n ?? NaN);
     // Report.
     const perPath: Record<string, { create: number; edit: number; delete: number }> = {};
     for (const x of props) {
@@ -1703,10 +1744,10 @@ async function runScript(args: unknown, ctx: ScriptContext) {
     for (const s of pats) {
       const r = await q(
         `sample-${s}`,
-        `SELECT m.id, m.name, m.source, m.key, m.tags, m.accessCount, m.alpha, m.beta, m.totalChunks, m.createdAt, substr(m.content, 1, 1500) text,
-           (SELECT COUNT(*) FROM memory_link l WHERE l.targetId = m.id) inLinks
-         FROM agent_memory m WHERE m.chunkIndex = 0 AND m.source = 'manual' AND m.scope = 'swarm' AND lower(m.name) LIKE ? AND m.name NOT GLOB '/longterm/*'
-         ORDER BY m.accessCount DESC, m.id LIMIT ?`,
+        `SELECT m.id, m.name, m.source, m.key, m.tags, m."accessCount", m.alpha, m.beta, m."totalChunks", m."createdAt", substr(m.content, 1, 1500) AS text,
+           (SELECT COUNT(*) FROM memory_link l WHERE l."targetId" = m.id) AS "inLinks"
+         FROM agent_memory m WHERE m."chunkIndex" = 0 AND m.source = 'manual' AND m.scope = 'swarm' AND lower(m.name) LIKE $1 AND substr(m.name, 1, 10) <> '/longterm/'
+         ORDER BY m."accessCount" DESC, m.id LIMIT $2`,
         [`%${s}%`, per + 10],
       );
       for (const d of r.filter((x) => !seen.has(x.id)).slice(0, per)) {
@@ -1933,6 +1974,7 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
   const runId = typeof a.runId === "string" ? a.runId.trim() : "";
   const key = `result:${runId}:${RUN_NODE}`;
   const flag = a.loadResult === true ? "loadResult" : "fromRun";
+  const st: DialectState = {};
   if (!runId) return { ok: false, [flag]: true, error: `${flag} needs runId` };
   const stored: any = (await ctx.swarm.kv_getOrNull({ namespace: NS, key }))?.value;
   const have = stored && stored.runId === runId && stored.node === RUN_NODE;
@@ -1941,10 +1983,15 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
     // Any agent can write namespace dreaming-v2, so the KV entry alone proves nothing. Return it only when its hash
     // equals the sha256 the Lead step returned, which the engine recorded as the `<node>-lead` step output.
     const lead = rows(
-      await ctx.swarm.db_query({
-        sql: `SELECT json_extract(output, '$.taskOutput') o FROM workflow_run_steps WHERE runId = ? AND nodeId = ? AND status = 'completed' ORDER BY startedAt DESC LIMIT 1`,
-        params: [runId, `${RUN_NODE}-lead`],
-      }),
+      await dbQuery(
+        ctx,
+        st,
+        {
+          sqlite: `SELECT json_extract(output, '$.taskOutput') AS o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC LIMIT 1`,
+          postgres: `SELECT CASE WHEN output IS JSON OBJECT THEN CAST(output AS jsonb) ->> 'taskOutput' END AS o FROM workflow_run_steps WHERE "runId" = $1 AND "nodeId" = $2 AND status = 'completed' ORDER BY "startedAt" DESC LIMIT 1`,
+        },
+        [runId, `${RUN_NODE}-lead`],
+      ),
     );
     let pointer: any = lead[0]?.o;
     if (typeof pointer === "string") {
@@ -1970,11 +2017,19 @@ async function fromRun(a: any, ctx: ScriptContext): Promise<any> {
   const missing: string[] = [];
   for (const [arg, nodeId, path, required] of RUN_PATHS) {
     if (args[arg] !== undefined) continue;
+    // t uses SQLite's json_type names ('true'/'false' for booleans); Postgres maps jsonb_typeof to them.
     const r = rows(
-      await ctx.swarm.db_query({
-        sql: `SELECT json_type(output, ?) t, json_extract(output, ?) v FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1`,
-        params: [path, path, runId, nodeId],
-      }),
+      await dbQuery(
+        ctx,
+        st,
+        {
+          sqlite: `SELECT json_type(output, $1) AS t, json_extract(output, $1) AS v FROM workflow_run_steps WHERE "runId" = $2 AND "nodeId" = $3 ORDER BY "startedAt" DESC LIMIT 1`,
+          postgres: `SELECT CASE jsonb_typeof(j.x) WHEN 'boolean' THEN j.x #>> '{}' WHEN 'string' THEN 'text' WHEN 'number' THEN 'real' ELSE jsonb_typeof(j.x) END AS t, j.x #>> '{}' AS v
+            FROM workflow_run_steps s CROSS JOIN LATERAL (SELECT CASE WHEN s.output IS JSON THEN jsonb_path_query_first(CAST(s.output AS jsonb), CAST($1 AS jsonpath)) END AS x) j
+            WHERE s."runId" = $2 AND s."nodeId" = $3 ORDER BY s."startedAt" DESC LIMIT 1`,
+        },
+        [path, runId, nodeId],
+      ),
     );
     if (!r.length) {
       if (required && !missing.includes(nodeId)) missing.push(nodeId);

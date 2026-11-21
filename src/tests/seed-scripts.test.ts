@@ -196,7 +196,7 @@ describe("seed-scripts catalog", () => {
     expect(listArgs?.limit).toBe(500);
     expect(projectionCalls).toBe(1);
     expect(projectionArgs?.sql).toBe(
-      "SELECT id, failureReason FROM agent_tasks WHERE id IN (?, ?, ?, ?)",
+      'SELECT id, "failureReason" FROM agent_tasks WHERE id IN ($1, $2, $3, $4)',
     );
     expect(projectionArgs?.params).toEqual([...reasons.keys()]);
     expect(result.groups).toEqual(
@@ -455,7 +455,7 @@ describe("seed-scripts catalog", () => {
               rows: [["agent", "session_summary", 2, 0]],
             };
           }
-          if (sql.includes("SELECT id, name, source, accessCount, embedding")) {
+          if (sql.includes('SELECT id, name, source, "accessCount", embedding')) {
             return {
               columns: ["id", "name", "source", "accessCount", "embedding"],
               rows: [
@@ -524,7 +524,7 @@ describe("seed-scripts catalog", () => {
               ],
             };
           }
-          if (sql.includes("FROM scripts") && sql.includes("GROUP BY scope, isScratch")) {
+          if (sql.includes("FROM scripts") && sql.includes('GROUP BY scope, "isScratch"')) {
             return {
               columns: ["scope", "isScratch", "count"],
               rows: [
@@ -1586,16 +1586,16 @@ describe("dreaming-heartbeat pin harvest targets", () => {
     const ctx = {
       swarm: {
         async db_query({ sql, params = [] }: { sql: string; params?: unknown[] }) {
-          if (sql.includes("SELECT heartbeatMd FROM agents")) return table([{ heartbeatMd: hb }]);
-          if (sql.includes("FROM agent_memory WHERE id = ? OR")) {
+          if (sql.includes('SELECT "heartbeatMd" FROM agents')) return table([{ heartbeatMd: hb }]);
+          if (sql.includes("FROM agent_memory WHERE id = $1 OR")) {
             const hit = [...mem.values()].find((r) => r.id === params[0] || r.name === params[1]);
             return table(hit ? [hit] : []);
           }
-          if (sql.includes("FROM agent_memory WHERE id = ? LIMIT 1")) {
+          if (sql.includes("FROM agent_memory WHERE id = $1 LIMIT 1")) {
             const hit = mem.get(String(params[0]));
             return table(hit ? [hit] : []);
           }
-          if (sql.includes("SELECT 1 FROM agent_memory WHERE name = ?")) {
+          if (sql.includes("SELECT 1 FROM agent_memory WHERE name = $1")) {
             return table([...mem.values()].some((r) => r.name === params[0]) ? [{ x: 1 }] : []);
           }
           return table([]);
@@ -1952,7 +1952,7 @@ describe("dreaming-heartbeat check refuses a worker-chosen draftPath", () => {
     const ctx = {
       swarm: {
         async db_query({ sql }: { sql: string }) {
-          if (sql.includes("SELECT heartbeatMd FROM agents")) return table([{ heartbeatMd: hb }]);
+          if (sql.includes('SELECT "heartbeatMd" FROM agents')) return table([{ heartbeatMd: hb }]);
           return table([]);
         },
         async kv_getOrNull() {
