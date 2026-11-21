@@ -18,9 +18,10 @@ export const COLUMN_TYPES_PATH = join(POSTGRES_MIGRATIONS_DIR, "column-types.jso
 export const TRIGGERS_PART_PATH = join(POSTGRES_MIGRATIONS_DIR, "parts", "triggers.sql");
 
 /**
- * Created at boot by `src/be/rbac-roles.ts` (`CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL`),
- * not by a migration. Same text; `check:schema-parity` proves the trigger exists
- * on both engines.
+ * Migration 109 creates this trigger, and every boot creates it again if it is
+ * missing (`src/be/rbac-roles.ts`, `CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL`, same
+ * text). Applied here too so the head schema matches a booted database even if
+ * a later migration drops it.
  */
 export const USERS_DEFAULT_ROLE_TRIGGER_SQL = `
 CREATE TRIGGER IF NOT EXISTS trg_users_default_role
