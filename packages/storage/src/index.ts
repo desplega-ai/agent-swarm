@@ -10,6 +10,7 @@ export {
 export {
   type Dialect,
   greatestStrict,
+  jsonText,
   type LikeEscape,
   leastStrict,
   likeAsciiCi,

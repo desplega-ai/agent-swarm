@@ -25,4 +25,5 @@ export const postgresDialect: Dialect = {
     sql`(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL ELSE GREATEST(${a}, ${b}) END)`,
   leastStrict: (a: SqlQuery, b: SqlQuery) =>
     sql`(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL ELSE LEAST(${a}, ${b}) END)`,
+  jsonText: (text: SqlQuery) => sql`CAST(${text} AS text)::jsonb`,
 };

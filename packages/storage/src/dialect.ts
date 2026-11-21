@@ -1,4 +1,4 @@
-import { type DialectFragment, dialectFragment, type SqlQuery } from "./sql";
+import { type DialectFragment, dialectFragment, type SqlQuery, sql } from "./sql";
 
 /**
  * The SQL language of an engine. A dialect is independent of the driver: a
@@ -29,6 +29,12 @@ export interface Dialect {
   greatestStrict(a: SqlQuery, b: SqlQuery): SqlQuery;
   /** Scalar minimum of two values that is NULL when either value is NULL (SQLite `min(a, b)`). */
   leastStrict(a: SqlQuery, b: SqlQuery): SqlQuery;
+  /**
+   * A JSON document given as JSON text, for a write to a JSON column. SQLite
+   * stores the text; Postgres must parse it into jsonb (a plain text bind into
+   * a jsonb column stores a JSON string instead of the document).
+   */
+  jsonText(text: SqlQuery): SqlQuery;
 }
 
 /** `${nowIso}` inside a `sql` template. */
@@ -52,4 +58,9 @@ export function greatestStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
 
 export function leastStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
   return dialectFragment((d) => d.leastStrict(a, b));
+}
+
+/** `${jsonText(value)}` inside a `sql` template: the bound JSON text, parsed on Postgres. */
+export function jsonText(text: string | null): DialectFragment {
+  return dialectFragment((d) => d.jsonText(sql`${text}`));
 }
