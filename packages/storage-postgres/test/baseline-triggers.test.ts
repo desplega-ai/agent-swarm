@@ -20,7 +20,7 @@ beforeAll(async () => {
   scratch = await createScratchDatabase("triggers");
   db = createPostgresClient(scratch.url, { max: 4 });
   await runPostgresMigrations(db, { migrationsDir: CHAIN_DIR, log: () => {}, warn: () => {} });
-});
+}, 60_000); // applies the full baseline: a budget, not a retry
 
 afterAll(async () => {
   await db.close();
@@ -544,5 +544,39 @@ describe("cascades", () => {
     expect(await db.get(`SELECT hash FROM script_run_sources WHERE hash = 'h1'`)).not.toBeNull();
     await db.run(`DELETE FROM script_runs WHERE id = 'sr-2'`);
     expect(await db.get(`SELECT hash FROM script_run_sources WHERE hash = 'h1'`)).toBeNull();
+  });
+});
+
+describe("rowid surrogate", () => {
+  test("_rowid numbers rows in insertion order; seeded rows keep the SQLite rowid", async () => {
+    const a = await task();
+    const b = await task();
+    const rows = await db.query<{ id: string; _rowid: string }>(
+      `SELECT id, "_rowid" FROM agent_tasks WHERE id IN ($1, $2) ORDER BY "_rowid"`,
+      [a, b],
+    );
+    expect(rows.map((r) => r.id)).toEqual([a, b]);
+    expect(Number(rows[1]?._rowid)).toBeGreaterThan(Number(rows[0]?._rowid));
+    // A copied value is accepted (BY DEFAULT), and the unique index refuses a duplicate.
+    await expect(
+      db.run(
+        `INSERT INTO agent_tasks (id, task, "createdAt", "lastUpdatedAt", "_rowid")
+         VALUES ($1, 't', statement_timestamp(), statement_timestamp(), $2)`,
+        [id("task"), Number(rows[0]?._rowid)],
+      ),
+    ).rejects.toThrow(/UNIQUE constraint failed/);
+    // The seed sequence continues after the seeded rowids.
+    const roles = await db.query<{ id: string; _rowid: string }>(
+      `SELECT id, "_rowid" FROM roles ORDER BY "_rowid"`,
+    );
+    expect(roles.map((r) => Number(r._rowid))).toEqual([1, 2]);
+  });
+
+  test("WITHOUT ROWID and INTEGER PRIMARY KEY tables get no _rowid", async () => {
+    const rows = await db.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.columns
+       WHERE column_name = '_rowid' AND table_name IN ('kv_entries', 'human_free_reclassify_queue', 'chat_queue')`,
+    );
+    expect(rows).toEqual([]);
   });
 });
