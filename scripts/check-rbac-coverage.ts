@@ -138,7 +138,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/skills/skill-list.ts": PIN_REASON,
   "src/tools/skills/skill-publish.ts": PIN_REASON,
   "src/tools/skills/skill-search.ts": PIN_REASON,
-  "src/tools/skills/skill-sync-remote.ts": PIN_REASON,
   "src/tools/slack-download-file.ts": PIN_REASON,
   "src/tools/slack-list-channels.ts": PIN_REASON,
   "src/tools/slack-reply.ts": PIN_REASON,

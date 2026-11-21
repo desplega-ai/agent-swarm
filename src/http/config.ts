@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { isHiddenFromAgentRead } from "../be/config-secret-visibility";
 import {
   deleteSwarmConfig,
   getResolvedConfig,
@@ -41,6 +42,9 @@ import { duplicateGuardedQueryKey, jsonError } from "./utils";
 const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
   " (secret values masked: this token cannot read secrets in this scope)";
+
+const SECRETS_NOT_EXPORTED_NOTE =
+  " (some global secrets are masked: they are not exported to the agent env, so an agent reaches them through a connection or credential binding)";
 
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter(
@@ -109,6 +113,7 @@ async function resolveSecretsRead(
   const scope = await requestSecretReadScope(req, resolvedScope);
   const auth = getRequestAuth(req);
   return {
+    scope,
     effectiveIncludeSecrets: includeSecrets && scope !== "none",
     includeRepoSecrets: !(auth?.kind === "agent" && auth.tokenKind !== "task" && scope !== "all"),
     secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
@@ -117,9 +122,9 @@ async function resolveSecretsRead(
 
 /**
  * Ids of the rows a script run's token reads unmasked on its own
- * `/api/config/resolved` (its agent over global, no repo secrets). The run
- * already holds these values in `ctx.swarm.config`. `undefined` for any other
- * caller.
+ * `/api/config/resolved` (its agent over global, no repo secrets, and no global
+ * secret with exportToEnv=false). The run already holds these values in
+ * `ctx.swarm.config`. `undefined` for any other caller.
  */
 async function scriptRunHeldConfigIds(req: IncomingMessage): Promise<Set<string> | undefined> {
   const auth = getRequestAuth(req);
@@ -128,7 +133,9 @@ async function scriptRunHeldConfigIds(req: IncomingMessage): Promise<Set<string>
   const held = stripApiOnlyKeys(
     await getResolvedConfig(auth.agentId, undefined, { includeRepoSecrets: false }),
   );
-  return new Set(held.map((config) => config.id));
+  return new Set(
+    held.filter((config) => !isHiddenFromAgentRead(config)).map((config) => config.id),
+  );
 }
 
 /**
@@ -462,17 +469,21 @@ export async function handleConfig(
         (auth?.kind === "agent" && auth.tokenKind !== "task" ? auth.agentId : undefined),
       repoId: parsed.query.repoId || undefined,
     };
-    const { effectiveIncludeSecrets, includeRepoSecrets, secretsNote } = await resolveSecretsRead(
-      req,
-      includeSecrets,
-      resolvedScope,
-    );
+    const { scope, effectiveIncludeSecrets, includeRepoSecrets, secretsNote } =
+      await resolveSecretsRead(req, includeSecrets, resolvedScope);
     // Filter by key before masking and before any secret is registered, so a
     // caller asking for one key never receives the rest (matches get-config).
     const configs = stripApiOnlyKeys(
       await getResolvedConfig(resolvedScope.agentId, resolvedScope.repoId, { includeRepoSecrets }),
     ).filter((c) => !key || c.key === key);
-    const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
+    // A plain agent (scope "self") reads open only what its worker gets in its env: its own
+    // agent-scope secrets, and global secrets whose effective exportToEnv is true. Other global
+    // secrets (exportToEnv=false, reached through a connection or credential binding) stay masked.
+    const hideFromSelf = (c: SwarmConfig) => scope === "self" && isHiddenFromAgentRead(c);
+    const hiddenCount = effectiveIncludeSecrets ? configs.filter(hideFromSelf).length : 0;
+    const result = effectiveIncludeSecrets
+      ? configs.map((c) => (hideFromSelf(c) ? maskSecrets([c])[0]! : c))
+      : maskSecrets(configs);
     if (effectiveIncludeSecrets) {
       for (const c of result) {
         if (c.isSecret && c.value) {
@@ -482,7 +493,11 @@ export async function handleConfig(
     }
     getResolvedConfigRoute.respond(res, 200, {
       configs: result,
-      ...(secretsNote ? { message: `Found ${result.length} config(s).${secretsNote}` } : {}),
+      ...(secretsNote || hiddenCount > 0
+        ? {
+            message: `Found ${result.length} config(s).${secretsNote || SECRETS_NOT_EXPORTED_NOTE}`,
+          }
+        : {}),
     });
     return true;
   }

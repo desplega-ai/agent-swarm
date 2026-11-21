@@ -1370,7 +1370,9 @@ The guard on this block checks `MCP_URL` (defaulted at L26 from `MCP_BASE_URL`, 
 
 1. `codex_oauth_0` in the resolved swarm_config (post-migration 071 pool slot 0).
 2. `codex_oauth` (legacy, pre-pool key).
-3. A plain `CODEX_OAUTH` **container env var** (`docker run -e CODEX_OAUTH=...`) — used only when neither config-store key has a row.
+3. A plain `CODEX_OAUTH` **container env var** (`docker run -e CODEX_OAUTH=...`) — used when neither config-store key yields a usable credential.
+
+The entrypoint skips hidden, malformed, and unsupported values without logging them. It leaves an existing ChatGPT-mode `auth.json` in place.
 
 The third source exists because `checkCodexCredentials` (`codex-adapter.ts`) treats a bare `CODEX_OAUTH` env var as `satisfiedBy: 'side-effect-pending'` — it trusts this entrypoint block to materialize `~/.codex/auth.json` from it before the first task runs. Resolving it into its own local variable (rather than reusing the `CODEX_OAUTH` name) also avoids clobbering the container-provided env var with an empty string when the config store has nothing — the bug tracked as issue #1102.
 

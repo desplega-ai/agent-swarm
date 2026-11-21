@@ -479,7 +479,7 @@ export const auditAttributionSkills: Scenario = {
   order: 585,
   async run(ctx) {
     const a = await actor(ctx, await registerWorker(ctx, "audit-skill-a"), "skill-a");
-    const b = await actor(ctx, await registerWorker(ctx, "audit-skill-b"), "skill-b");
+    const b = await actor(ctx, await getLead(ctx), "skill-b");
     const skillIds: string[] = [];
     try {
       // ── MCP create by A, HTTP update by B, MCP update with no person ───────────────────

@@ -164,112 +164,52 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         fi
     fi
 
-    # Auth path 1: Seed slot 0 from swarm config store at boot (backwards-compat),
-    # falling back to a plain CODEX_OAUTH container env var when the config
-    # store has nothing. Tries codex_oauth_0 first (post-migration 071), then
-    # legacy codex_oauth key, then $CODEX_OAUTH. Runner handles per-task
-    # materialization for multi-slot pools; this is only a boot-time seed so
-    # the credential-wait loop sees auth.json on fresh containers.
-    #
-    # `checkCodexCredentials` (codex-adapter.ts) treats a bare CODEX_OAUTH env
-    # var as `satisfiedBy: 'side-effect-pending'` — i.e. it trusts THIS block
-    # to materialise ~/.codex/auth.json from it. Previously nothing did: this
-    # block only ever queried the config store, so a container-only
-    # CODEX_OAUTH was never written to disk and every task auth-errored
-    # (issue #1102 bug 1, repro 2). Resolving into a *different* local
-    # variable (not reusing the `CODEX_OAUTH` name) also fixes a second,
-    # compounding bug: the old code did `CODEX_OAUTH=$(curl ... )`, which
-    # clobbered the container-provided $CODEX_OAUTH with an empty string
-    # whenever the config store had no row — destroying the very env var the
-    # boot gate said was present, which is why the boot loop kept reporting
-    # it "missing" despite it genuinely being set and valid.
-    #
-    # The refresh token is deliberately blanked below (matching the
-    # runner/adapter pool auth.json — see credentialsToAuthJson in
-    # auth-json.ts): this boot-seeded file is the last place a live pool
-    # refresh token could otherwise land on worker disk, and any Codex CLI
-    # run against it before the runner's first per-task overwrite
-    # (credential-wait probes, manual runs, crash loops) would self-refresh
-    # outside the /api/oauth/refresh-locks lock — an unlocked rotation that
-    # can revoke the whole token family. A container-provided CODEX_OAUTH is
-    # single-slot/non-pool, so this is a one-time seed same as the
-    # config-store path — the runner never refreshes it back to a
-    # `codex_oauth_<n>` config-store slot.
-    # Gate on MCP_URL (already defaulted at L26), not the raw MCP_BASE_URL —
-    # a standalone container that relies on the default API URL would
-    # otherwise never reach the CODEX_OAUTH env-var fallback below, even
-    # though every other API call in this script (wait_for_api_ready,
-    # /api/repos, etc.) already treats MCP_URL as "the" base
-    # URL. checkCodexCredentials (codex-adapter.ts) marks a bare CODEX_OAUTH
-    # as satisfiedBy: 'side-effect-pending' the moment it's set, trusting
-    # this block to write auth.json — so gating on the unset raw var meant
-    # the boot gate reported ready while no auth.json ever materialized and
-    # every task auth-errored.
+    # Auth path 1: Seed the first usable OAuth credential at boot. The runner
+    # handles per-task pool selection. Do not put a pool refresh token on disk:
+    # the CLI could rotate it outside the pool lock. Standalone CODEX_OAUTH
+    # keeps its refresh token since the runner does not rotate it.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_URL" ]; then
-        CODEX_OAUTH_SEED=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
+        if CODEX_OAUTH_SEED=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
             "${MCP_URL}/api/config/resolved?includeSecrets=true" \
-            2>/dev/null | jq -r '
-              (.configs[] | select(.key == "codex_oauth_0") | .value // empty),
-              (.configs[] | select(.key == "codex_oauth") | .value // empty)
-            ' 2>/dev/null | head -1)
-        CODEX_OAUTH_SEED_STANDALONE=false
-        if [ -z "$CODEX_OAUTH_SEED" ] && [ -n "${CODEX_OAUTH:-}" ]; then
-            CODEX_OAUTH_SEED="$CODEX_OAUTH"
-            CODEX_OAUTH_SEED_STANDALONE=true
-            echo "[entrypoint] No codex_oauth_0/codex_oauth in config store; seeding from CODEX_OAUTH env var"
+            2>/dev/null | jq -Rsec '
+              def nonblank: type == "string" and test("\\S");
+              def auth_json($standalone):
+                fromjson? | objects |
+                if .auth_mode == "chatgpt" then
+                  select(.tokens | type == "object") |
+                  select((.tokens.access_token | nonblank) and (.tokens.id_token | nonblank)
+                         and (.tokens.account_id | nonblank) and (.tokens.refresh_token | type == "string")) |
+                  if $standalone then . else .tokens.refresh_token = "" end
+                elif (.access | nonblank) and (.refresh | nonblank) and (.accountId | nonblank)
+                     and (.expires | type == "number") then
+                  {
+                    auth_mode: "chatgpt",
+                    OPENAI_API_KEY: null,
+                    tokens: {
+                      id_token: .access,
+                      access_token: .access,
+                      refresh_token: (if $standalone then .refresh else "" end),
+                      account_id: .accountId
+                    },
+                    last_refresh: (now | floor | todateiso8601),
+                    expires: .expires
+                  }
+                else empty end;
+              def values_for($key): .[] | objects | select(.key == $key) | .value | strings;
+              ((fromjson? | objects | .configs | arrays) // []) as $configs |
+              first(
+                ($configs | values_for("codex_oauth_0") | auth_json(false)),
+                ($configs | values_for("codex_oauth") | auth_json(false)),
+                (env.CODEX_OAUTH | strings | auth_json(true))
+              )
+            ' 2>/dev/null); then
+            mkdir -p "$WORKER_CODEX_HOME"
+            (umask 077; printf '%s\n' "$CODEX_OAUTH_SEED" > "$WORKER_CODEX_HOME/auth.json")
+            chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
+            chmod 600 "$WORKER_CODEX_HOME/auth.json"
+            echo "[entrypoint] Seeded codex OAuth credentials"
         fi
-        if [ -n "$CODEX_OAUTH_SEED" ]; then
-            if ! echo "$CODEX_OAUTH_SEED" | jq '.' >/dev/null 2>&1; then
-                echo "Warning: codex_oauth source is not valid JSON, skipping" >&2
-            else
-                mkdir -p "$WORKER_CODEX_HOME"
-                # Refresh token handling depends on the source: config-store
-                # pool credentials get their refresh_token blanked (see the
-                # comment above this block — an unlocked self-refresh outside
-                # /api/oauth/refresh-locks can revoke the whole token family
-                # for a *pool* credential the runner rotates). A standalone
-                # container-provided CODEX_OAUTH is single-slot/non-pool and
-                # never gets a per-task overwrite from the runner, so
-                # blanking its refresh token here would permanently strip the
-                # only copy — leaving the Codex CLI unable to renew an
-                # expired access token for the lifetime of the container.
-                # Preserve it on the standalone path. Read via jq's `env`
-                # builtin (rather than --argjson) so the invocation below
-                # keeps its plain, unadorned shape — extractCodexOauthSeedFilter
-                # in src/tests/entrypoint-codex-oauth-seed.test.ts locates this
-                # program by anchoring on that exact prefix and re-runs it
-                # against real jq.
-                export CODEX_OAUTH_SEED_STANDALONE
-                if ! echo "$CODEX_OAUTH_SEED" | jq '
-                    (env.CODEX_OAUTH_SEED_STANDALONE == "true") as $standalone |
-                    if .auth_mode == "chatgpt" then
-                      (if $standalone then . else .tokens.refresh_token = "" end)
-                    elif (.access and .refresh and .accountId and .expires) then
-                      {
-                        auth_mode: "chatgpt",
-                        OPENAI_API_KEY: null,
-                        tokens: {
-                          id_token: .access,
-                          access_token: .access,
-                          refresh_token: (if $standalone then (.refresh // "") else "" end),
-                          account_id: .accountId
-                        },
-                        last_refresh: (now | floor | todateiso8601),
-                        expires: .expires
-                      }
-                    else
-                      error("codex_oauth value is neither auth.json format nor flat credential format")
-                    end
-                ' > "$WORKER_CODEX_HOME/auth.json"; then
-                    echo "Warning: codex_oauth source could not be converted to auth.json, skipping" >&2
-                    rm -f "$WORKER_CODEX_HOME/auth.json"
-                else
-                chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
-                chmod 600 "$WORKER_CODEX_HOME/auth.json"
-                echo "[entrypoint] Seeded codex OAuth credentials (slot 0)"
-                fi
-            fi
-        fi
+        unset CODEX_OAUTH_SEED
     fi
 
     # Auth path 2: Fallback — bootstrap an api-key auth.json from OPENAI_API_KEY

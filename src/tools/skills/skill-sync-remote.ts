@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { getSkillById, listSkills, updateSkill } from "@/be/db";
+import { getAgentById, getSkillById, listSkills, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 function contentHash(content: string): string {
@@ -38,11 +39,35 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
     },
     async (args, requestInfo, _meta) => {
       try {
+        // Same gate as POST /api/skills/sync-remote: it rewrites skill content, so it needs the
+        // right to update the target skill (its owner, or a lead); with no skillId, a lead.
+        const target = args.skillId ? await getSkillById(args.skillId) : null;
+        const caller = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId ?? "",
+            isLead: caller?.isLead ?? false,
+          },
+          verb: "skill.update.any",
+          resource: {
+            kind: "owned",
+            ownerAgentId: target?.ownerAgentId ?? null,
+            scope: target?.scope,
+          },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          return toolErr(
+            "Forbidden: syncing remote skills needs the lead agent, or the skill's owner",
+            { data: { yourAgentId: requestInfo.agentId } },
+          );
+        }
+
         const skills = args.skillId
-          ? await (async () => {
-              const skill = await getSkillById(args.skillId!);
-              return skill && skill.type === "remote" ? [skill] : [];
-            })()
+          ? target && target.type === "remote"
+            ? [target]
+            : []
           : await listSkills({ type: "remote" });
 
         let updated = 0;

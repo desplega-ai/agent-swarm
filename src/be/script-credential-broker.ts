@@ -1,3 +1,4 @@
+import { can } from "@/rbac";
 import {
   type CredentialBinding,
   type CredentialBindingStore,
@@ -9,9 +10,11 @@ import {
 } from "@/scripts-runtime/credential-broker";
 import type { EgressSecretEntry, ScriptAgentFsDescriptor } from "@/scripts-runtime/executors/types";
 import { AGENT_FS_API_KEY_CONFIG } from "@/scripts-runtime/script-fs";
+import { MASKED_SECRET_VALUE } from "@/utils/config-secrets";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 import { resolveAgentFsIdentity } from "./agent-fs-identity";
-import { getResolvedConfig } from "./db";
+import { isHiddenFromAgentRead } from "./config-secret-visibility";
+import { getAgentById, getResolvedConfig, maskSecrets } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
 import { isApiOnlyConfigKey, isInternalConfigKey, isReservedConfigKey } from "./swarm-config-guard";
@@ -53,21 +56,45 @@ class RelationalCredentialBindingStore implements CredentialBindingStore {
   }
 }
 
+/**
+ * True when the run's agent is a plain agent: not a lead and without config.read.secrets. Such an
+ * agent reads a global secret with exportToEnv=false only masked. A run with no real agent (a
+ * workflow or schedule service identity) is not restricted.
+ */
+async function agentReadsOnlyExportedSecrets(agentId: string | undefined): Promise<boolean> {
+  if (!agentId) return false;
+  const agent = await getAgentById(agentId);
+  if (!agent) return false;
+  return !can({
+    principal: { kind: "agent", agentId, isLead: agent.isLead === true },
+    verb: "config.read.secrets",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
+}
+
 export type ScriptUserConfig = Record<string, { value: string; isSecret: boolean }>;
 
 /**
  * The values behind `ctx.swarm.config.get(KEY)`: the invoking agent's resolved
  * config (agent over global, plus repo when given), minus the keys the
- * `/api/config/resolved` route never hands out. A script's own SDK bearer
- * already reads every one of these through `ctx.swarm.config_get`, so this
- * widens nothing; it only makes the documented accessor return them. Secret
- * values are registered with the scrubber so they never leave in run output.
+ * `/api/config/resolved` route never hands out. For a plain agent (not a lead,
+ * and without config.read.secrets) a global secret with exportToEnv=false
+ * comes back masked, as on `/api/config/resolved`: the agent reaches it through
+ * a connection or credential binding, not as a value. Secret values are
+ * registered with the scrubber so they never leave in run output.
  */
-function toScriptUserConfig(configs: Awaited<ReturnType<typeof getResolvedConfig>>) {
-  const exposed = configs.filter(
-    (config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key),
-  );
+function toScriptUserConfig(
+  configs: Awaited<ReturnType<typeof getResolvedConfig>>,
+  maskNonExported: boolean,
+) {
+  const exposed = configs
+    .filter((config) => !isApiOnlyConfigKey(config.key) && !isInternalConfigKey(config.key))
+    .map((config) =>
+      maskNonExported && isHiddenFromAgentRead(config) ? maskSecrets([config])[0]! : config,
+    );
   for (const config of exposed) {
+    if (config.isSecret && config.value === MASKED_SECRET_VALUE) continue;
     if (config.isSecret && config.value) {
       registerVolatileSecret(config.value, `config:${config.key}`);
     }
@@ -126,7 +153,10 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
 }> {
   const resolvedConfigs = await getResolvedConfig(input.agentId, input.repoId);
   // Before the binding loop below, so a binding's own scrubber label wins.
-  const userConfig = toScriptUserConfig(resolvedConfigs);
+  const userConfig = toScriptUserConfig(
+    resolvedConfigs,
+    await agentReadsOnlyExportedSecrets(input.agentId),
+  );
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore(),

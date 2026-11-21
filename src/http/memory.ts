@@ -75,11 +75,10 @@ const indexMemory = route({
   session: bodyTask("sourceTaskId"),
   summary: "Ingest content into memory system (async embedding)",
   tags: ["Memory"],
-  // The gate only bites when the key that lands on the rows (here, `sourcePath`) sits under a
-  // lead-only /longterm root; every other ingest passes straight through.
-  rbac: { permission: "memory.write.consolidated" },
+  // Keep existing role grants working at admission; the key guard still checks the caller.
+  rbac: { permission: "memory.index", alsoAdmits: ["memory.write.consolidated"] },
   body: z.object({
-    agentId: z.string().optional(),
+    agentId: z.string().optional().describe("Defaults to the calling agent for agent requests"),
     content: z.string().min(1),
     name: z.string().min(1),
     scope: AgentMemoryScopeSchema,
@@ -97,7 +96,8 @@ const indexMemory = route({
         "Validation error, or a sourcePath under /longterm that is not an allowed memory key",
     },
     403: {
-      description: "sourcePath is under a lead-only /longterm root and the caller is not the lead",
+      description:
+        "sourcePath is under a lead-only /longterm root and the caller is not the lead, or a plain agent named another agent in `agentId`",
     },
   },
 });
@@ -833,21 +833,25 @@ export async function handleMemory(
       persistMemory,
       contextKey,
     } = parsed.body;
-    const memoryAgentId = agentId ?? (scope === "agent" ? myAgentId : undefined);
-    // An agent-bound token writes its own memory. Another agent's needs a lead.
-    const auth = getRequestAuth(req);
+    // Check the same owner we will store. This is independent of publication scope: workers
+    // can still index shared memory from /workspace/shared/memory with their own token.
+    const writerPrincipal = await ingestPrincipal(req, myAgentId);
+    const memoryAgentId =
+      agentId ??
+      (writerPrincipal.kind === "agent"
+        ? writerPrincipal.agentId || undefined
+        : scope === "agent"
+          ? myAgentId
+          : undefined);
     if (
-      auth?.kind === "agent" &&
-      memoryAgentId !== undefined &&
-      memoryAgentId !== auth.agentId &&
       !can({
-        principal: await ingestPrincipal(req, myAgentId),
-        verb: "memory.edit.any",
-        resource: { kind: "owned", ownerAgentId: memoryAgentId },
+        principal: writerPrincipal,
+        verb: "memory.index",
+        resource: { kind: "owned", ownerAgentId: memoryAgentId, scope },
         source: "http",
       }).allow
     ) {
-      jsonError(res, "An agent token can index memory only for its own agent", 403);
+      jsonError(res, "A memory can be written only as the calling agent", 403);
       return true;
     }
 
@@ -883,7 +887,7 @@ export async function handleMemory(
         tags,
         contextKey: resolvedContextKey,
         // The caller, not the memory's owner (`agentId` in the body can name another agent).
-        writer: { principal: await ingestPrincipal(req, myAgentId), source: "http" },
+        writer: { principal: writerPrincipal, source: "http" },
       });
     } catch (err) {
       // sourcePath doubles as the key, so it is held to the same checks as memory-store's `key`.
