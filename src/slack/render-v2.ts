@@ -46,13 +46,17 @@ import {
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
 import { slackContextKey } from "../tasks/context-key";
-import type { AgentTask, TaskAttachment } from "../types";
+import type { AgentTask } from "../types";
 import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
 import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
-import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import {
+  renderTaskCitations,
+  taskCitationSourceGroups,
+  taskCitationUrls,
+} from "../utils/task-citations";
 import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -71,6 +75,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import { isSlackReplyFooterEnabled } from "./config";
 import { getChannelBlockReason } from "./external-channel";
 import {
   completedStatusIcon,
@@ -80,6 +85,14 @@ import {
   type SlackReactionEvent,
 } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
+import {
+  describeLink,
+  linkifyBareUrls,
+  linkKey,
+  outputLinks,
+  reviewedTaskDeliverables,
+  slackLink,
+} from "./reviewed-deliverables";
 import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
@@ -1500,20 +1513,8 @@ async function recordSlackDelivery(
   });
 }
 
-function attachmentCaption(attachments: TaskAttachment[]): string | undefined {
-  const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
-  if (!attachment) return undefined;
-  const url = taskAttachmentDisplayUrl(attachment);
-  if (!/^https?:\/\//.test(url)) return undefined;
-  const label = attachment.name
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  // Keep the mrkdwn link destination intact without changing existing URL escapes.
-  const destination = url.replace(/[\s\\<>|]/g, encodeURIComponent);
-  return `📎 <${destination}|${label}>`;
+function linkCaption(url: string, name: string, icon: string): string | undefined {
+  return /^https?:\/\//.test(url) ? `${icon} ${slackLink(url, name)}` : undefined;
 }
 
 /** The task's own card: its Slack blocks and the text that stands in for them. */
@@ -1571,17 +1572,44 @@ function withUiSpecFallbackText(
 
 /**
  * Secondary metadata for an outcome card, as captions (`context` blocks)
- * under the answer: cited sources, general sources, then the primary
- * attachment. `content` is the unrendered answer, whose `[citation:N]`
- * markers decide which sources count as cited.
+ * under the answer: cited sources, general sources, then "Links:" with the
+ * primary attachment and a Lead review's worker deliverables. `content` is
+ * the unrendered answer, whose `[citation:N]` markers decide which sources
+ * count as cited. A URL shows once: a link in the answer or in a source is
+ * not listed under "Links:" again.
  */
 async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<unknown[]> {
   const moreUrl = getTaskUrl(task.id);
-  const sources = taskCitationSourceGroups(content, await getTaskCitations(task.id)).map((group) =>
+  const citations = await getTaskCitations(task.id);
+  const sources = taskCitationSourceGroups(content, citations).map((group) =>
     buildCaptionBlock(group.items, { heading: group.heading, moreUrl }),
   );
-  const attachment = attachmentCaption(await getSlackOutputAttachments(task.id));
-  return [...sources, attachment ? buildCaptionBlock([attachment]) : undefined].filter(Boolean);
+  const seen = [...outputLinks(content), ...taskCitationUrls(citations)];
+  const attachments = await getSlackOutputAttachments(task.id);
+  const primary = attachments.find((item) => item.isPrimary) ?? attachments[0];
+  const ownUrl = primary ? taskAttachmentDisplayUrl(primary) : undefined;
+  const ownShown = !!ownUrl && !new Set(seen.map(linkKey)).has(linkKey(ownUrl));
+  // A Lead review card also lists the reviewed worker's deliverables.
+  const reviewed = await reviewedTaskDeliverables(
+    task,
+    ownUrl ? [...seen, ownUrl] : seen,
+    getSlackApp()?.client,
+  );
+  const links = [
+    ...(primary && ownUrl && ownShown ? [{ url: ownUrl, ...describeLink(ownUrl, primary) }] : []),
+    ...reviewed.links,
+  ];
+  const items = links
+    .map((link) => linkCaption(link.url, link.label, link.icon))
+    .filter((item): item is string => !!item);
+  if (reviewed.omitted > 0) {
+    const more = `+${reviewed.omitted} more`;
+    items.push(reviewed.moreUrl ? `<${reviewed.moreUrl}|${more}>` : more);
+  }
+  return [
+    ...sources,
+    items.length > 0 ? buildCaptionBlock(items, { heading: "Links" }) : undefined,
+  ].filter(Boolean);
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };
@@ -1635,7 +1663,7 @@ function safeMarkdownBoundary(markdown: string, maxLength: number): number {
 /** The answer as Markdown, with citation markers resolved and no sources appended. */
 async function outcomePresentation(task: AgentTask, content: string): Promise<string> {
   const body = normalizeV2Text(
-    renderTaskCitations(content, await getTaskCitations(task.id), "slack", false),
+    renderTaskCitations(linkifyBareUrls(content), await getTaskCitations(task.id), "slack", false),
   );
   if (body.length <= MAX_OUTCOME_MARKDOWN_LENGTH) return body;
 
@@ -1667,7 +1695,7 @@ async function outcomeFooter(
   duration: string,
 ): Promise<unknown[]> {
   const task = members[0];
-  if (!task) return [];
+  if (!task || !isSlackReplyFooterEnabled()) return [];
   const memberIds = new Set(members.map((member) => member.id));
   const descendants = [
     ...new Map(

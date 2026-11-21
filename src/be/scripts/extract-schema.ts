@@ -10,6 +10,7 @@
 import { chown } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { readRunDirFile } from "../../scripts-runtime/executors/native";
+import { getDeploymentScriptExecutorName } from "../../scripts-runtime/executors/registry";
 import {
   buildSandboxedCommand,
   DEFAULT_SANDBOX_LIMITS,
@@ -26,6 +27,12 @@ function extractorPath(): string {
 }
 
 export async function extractArgsJsonSchema(source: string): Promise<string | null> {
+  // The extractor evaluates the module in native Bun. A deployment pinned to
+  // quickjs must not run script code natively, so no schema is extracted there;
+  // the quickjs runner still validates args against `argsSchema` at run time.
+  // shortcut: no argsJsonSchema under SCRIPT_EXECUTOR=quickjs; extract inside quickjs to restore it.
+  if (getDeploymentScriptExecutorName() === "quickjs") return null;
+
   const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/schema-extract-${crypto.randomUUID()}`;
 
   try {

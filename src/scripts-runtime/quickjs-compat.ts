@@ -23,6 +23,11 @@ export type QuickJSCompatFinding = {
   message: string;
   /** 1-based line in the script source, when the finding has one. */
   line?: number;
+  /**
+   * Every line the finding recurs on, ascending, starting with `line`. Present only
+   * when there is more than one: each call site needs its own fix.
+   */
+  lines?: number[];
 };
 
 export type QuickJSCompatReport = {
@@ -59,6 +64,8 @@ const FS_STDLIB = new Set(["glob", "grep"]);
 // ctx.swarm.config values that quickjs keeps host-side (see quickjs-runner.ts).
 const HOST_ONLY_CONFIG = new Set(["apiKey", "runtimeInstanceId"]);
 const MAX_FINDINGS = 20;
+// shortcut: warnings list this many lines per finding; `lines` keeps them all.
+const MAX_WARNING_LINES = 10;
 
 const SCRIPT_FILE = "user-script.ts";
 
@@ -243,6 +250,17 @@ function staticHostClass(hostname: string): "private" | "single-label" | null {
   return host !== "" && !host.includes(".") ? "single-label" : null;
 }
 
+/** The method a call invokes: `x.name()` or `x["name"]()`; null for anything else. */
+function calledMethodName(callee: ts.Expression): string | null {
+  const inner = unwrap(callee);
+  if (ts.isPropertyAccessExpression(inner)) return inner.name.text;
+  if (ts.isElementAccessExpression(inner)) {
+    const key = unwrap(inner.argumentExpression);
+    if (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) return key.text;
+  }
+  return null;
+}
+
 /** The fetch-like call this callee names: fetch, globalThis.fetch, ctx.stdlib.fetch or fetchJson. */
 function fetchCallName(callee: ts.Expression): string | null {
   const inner = unwrap(callee);
@@ -323,15 +341,26 @@ export function checkQuickJSCompat(
   options: { fsMode?: string } = {},
 ): QuickJSCompatReport {
   const findings: QuickJSCompatFinding[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, QuickJSCompatFinding>();
   const { sourceFile, isLocal, constInitializer } = createScope(source);
+  // One finding per rule and message, collecting every line it recurs on: a repeat
+  // on another line is another call site to fix, not noise to drop.
   const add = (rule: QuickJSCompatRule, message: string, node?: ts.Node) => {
-    if (seen.has(`${rule}:${message}`)) return;
-    seen.add(`${rule}:${message}`);
     const line = node
       ? sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
       : undefined;
-    findings.push(line === undefined ? { rule, message } : { rule, message, line });
+    const existing = seen.get(`${rule}:${message}`);
+    if (existing) {
+      if (line === undefined || existing.line === undefined) return;
+      const lines = existing.lines ?? [existing.line];
+      // The walk is in source order, so lines arrive ascending.
+      if (lines.at(-1) !== line) existing.lines = [...lines, line];
+      return;
+    }
+    const finding: QuickJSCompatFinding =
+      line === undefined ? { rule, message } : { rule, message, line };
+    seen.set(`${rule}:${message}`, finding);
+    findings.push(finding);
   };
 
   if (options.fsMode === "workspace-rw") {
@@ -427,8 +456,8 @@ export function checkQuickJSCompat(
       if (ts.isIdentifier(callee) && callee.text === "require" && !isLocal(callee)) {
         add("require", "require() is not supported; use an import", node);
       }
-      if (ts.isPropertyAccessExpression(callee)) {
-        const method = callee.name.text;
+      const method = calledMethodName(callee);
+      if (method !== null) {
         if (RESPONSE_BODY_METHODS.has(method) && node.arguments.length === 0) {
           add(
             "responseBody",
@@ -456,8 +485,13 @@ export function checkQuickJSCompat(
 /** One human-readable line per finding, for `warnings` arrays. */
 export function quickJSCompatWarnings(report: QuickJSCompatReport, label?: string): string[] {
   const prefix = label ? `${label}: ` : "";
-  return report.findings.map(
-    (finding) =>
-      `${prefix}quickjs compat (${finding.rule}${finding.line ? `, line ${finding.line}` : ""}): ${finding.message}`,
-  );
+  return report.findings.map((finding) => {
+    const lines = finding.lines ?? (finding.line ? [finding.line] : []);
+    const shown = lines.slice(0, MAX_WARNING_LINES).join(", ");
+    const more =
+      lines.length > MAX_WARNING_LINES ? `, +${lines.length - MAX_WARNING_LINES} more` : "";
+    const where =
+      lines.length === 0 ? "" : `, ${lines.length === 1 ? "line" : "lines"} ${shown}${more}`;
+    return `${prefix}quickjs compat (${finding.rule}${where}): ${finding.message}`;
+  });
 }

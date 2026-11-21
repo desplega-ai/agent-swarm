@@ -3,6 +3,9 @@ import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 
+export const TREE_CURSOR_CLASS =
+  "group-data-[kb=true]/tree:data-[cursor=true]:bg-accent group-data-[kb=true]/tree:data-[cursor=true]:ring-2 group-data-[kb=true]/tree:data-[cursor=true]:ring-ring/60 group-data-[kb=true]/tree:data-[cursor=true]:ring-inset";
+
 /**
  * The frame every sidebar row shares: the treeitem role, the indent (14 px a
  * level) with its guide line under the parent's icon, the pointer hover
@@ -36,7 +39,7 @@ export function TreeRow({
         // The avatar rings match the row fill.
         "[--avatar-ring:var(--color-surface)] hover:[--avatar-ring:var(--color-accent)]",
         "transition-colors hover-linger hover:bg-accent group-data-[kb=true]/tree:transition-none",
-        "group-data-[kb=true]/tree:data-[cursor=true]:bg-accent group-data-[kb=true]/tree:data-[cursor=true]:ring-2 group-data-[kb=true]/tree:data-[cursor=true]:ring-ring/60 group-data-[kb=true]/tree:data-[cursor=true]:ring-inset",
+        TREE_CURSOR_CLASS,
         level > 0 &&
           guide &&
           "before:pointer-events-none before:absolute before:inset-y-0 before:left-[calc(var(--lv)*14px)] before:border-l before:border-border-subtle",

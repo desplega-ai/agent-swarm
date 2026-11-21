@@ -12,7 +12,7 @@
  *   It does nothing on a read-only group (Shared with me, a source).
  */
 
-import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
+import type { HTMLAttributes, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import type { SessionListItem } from "@/api/types";
 import { useStableHandler } from "@/hooks/use-stable-handler";
 import type { SwipeSide } from "@/hooks/use-swipe-row";
@@ -31,6 +31,8 @@ import {
 
 export function MobileTreeBody({
   treeRef,
+  cursorKey,
+  keyboard,
   label,
   segments,
   rowsByKey,
@@ -52,10 +54,15 @@ export function MobileTreeBody({
   onRowClick,
   onRenameDone,
   onCreateDone,
+  onKeyDown,
+  onFocus,
+  onBlur,
   onPointerDown,
   renderRow,
 }: {
   treeRef: RefObject<HTMLDivElement | null>;
+  cursorKey?: string;
+  keyboard: boolean;
   label: string;
   segments: TreeSegment[];
   rowsByKey: ReadonlyMap<string, NavRow>;
@@ -86,7 +93,7 @@ export function MobileTreeBody({
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   /** The desktop row, for the rows a phone draws the same (loading). */
   renderRow: (row: TreeRow) => ReactNode;
-}) {
+} & Pick<HTMLAttributes<HTMLDivElement>, "onKeyDown" | "onFocus" | "onBlur">) {
   const onTap = useStableHandler((key: string, event: MouseEvent) => {
     const row = rowsByKey.get(key);
     if (row?.type === "session" && selection.selectionMode) {
@@ -111,6 +118,7 @@ export function MobileTreeBody({
   const onRename = useStableHandler(onRenameDone);
 
   const renderPhoneRow = (row: TreeRow) => {
+    const cursor = row.key === cursorKey;
     switch (row.type) {
       case "box":
       case "group":
@@ -121,6 +129,7 @@ export function MobileTreeBody({
             key={row.key}
             row={row}
             domId={domId(row.key)}
+            cursor={cursor}
             ownerName={row.type === "owner" ? nameOf(row.ownerId) : undefined}
             describedBy={describedBy(row.key)}
             onRowClick={onTap}
@@ -132,7 +141,13 @@ export function MobileTreeBody({
       }
       case "source":
         return (
-          <MobileSourceRow key={row.key} row={row} domId={domId(row.key)} onRowClick={onTap} />
+          <MobileSourceRow
+            key={row.key}
+            row={row}
+            domId={domId(row.key)}
+            cursor={cursor}
+            onRowClick={onTap}
+          />
         );
       case "session":
         return (
@@ -141,6 +156,7 @@ export function MobileTreeBody({
             rowKey={row.key}
             session={row.session}
             domId={domId(row.key)}
+            cursor={cursor}
             level={row.level}
             flat={row.flat}
             me={me}
@@ -162,6 +178,7 @@ export function MobileTreeBody({
           <MobileActionRow
             key={row.key}
             id={domId(row.key)}
+            cursor={cursor}
             level={row.level}
             kind={row.type}
             label={
@@ -206,11 +223,17 @@ export function MobileTreeBody({
       role="tree"
       aria-label={label}
       aria-multiselectable
+      aria-activedescendant={cursorKey ? domId(cursorKey) : undefined}
       aria-busy={loading || undefined}
-      tabIndex={-1}
+      tabIndex={0}
+      data-kb={keyboard ? "true" : undefined}
+      onKeyDown={onKeyDown}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onPointerDown={onPointerDown}
       className={cn(
-        "min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 outline-none",
+        "group/tree min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 outline-none",
+        !cursorKey && "focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset",
         // The selection bar covers the end of the list: the last rows stay above it.
         selection.selectionMode && "pb-24",
       )}

@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      all:
+        patterns: ["*"]
   # Only the digest-pinned nginx base of Dockerfile.ui; Bun pins follow package.json.
   - package-ecosystem: "docker"
     directory: "/"
@@ -11,3 +14,56 @@ updates:
       interval: "weekly"
     allow:
       - dependency-name: "nginxinc/nginx-unprivileged"
+    groups:
+      all:
+        patterns: ["*"]
+  # Root bun.lock: covers the root package.json and every workspace
+  # (apps/ui, apps/templates-ui, apps/evals, packages/*).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Skip releases younger than 7 days, so a compromised or broken release
+    # has a week to be caught upstream before we take it.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    # One PR per week: every non-major update lands in this group.
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Majors need code changes; take them by hand.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # Harness pins: the harness-upgrade job bumps these in lockstep with
+      # their Dockerfile.worker ARGs, adapter constants and docs.
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
+      - dependency-name: "@anthropic-ai/sdk"
+      - dependency-name: "@earendil-works/pi-*"
+      - dependency-name: "@openai/codex"
+      - dependency-name: "@opencode/*"
+      - dependency-name: "@agentclientprotocol/sdk"
+      - dependency-name: "@cursor/sdk"
+      # Bumped by `bun run bump:agent-fs` together with its image pins.
+      - dependency-name: "@desplega.ai/agent-fs-just-bash"
+      # Must equal the playwright pin in Dockerfile.worker
+      # (scripts/check-playwright-version.ts).
+      - dependency-name: "@playwright/test"
+  # docs-site deploys with pnpm (vercel.json), so it is an npm-ecosystem entry.
+  - package-ecosystem: "npm"
+    directory: "/docs-site"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    # One PR per week: every non-major update lands in this group.
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

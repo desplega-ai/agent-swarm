@@ -253,6 +253,12 @@ export async function authorizeAzureDevOpsActor(
   return null;
 }
 
+function logUntrustedActor(eventType: string, identity: AzureDevOpsIdentityRef, repo: string) {
+  console.log(
+    `[AzureDevOps] Skipped ${eventType} by ${identity.displayName} on ${repo}: actor is not a known swarm user or an allowed actor`,
+  );
+}
+
 /**
  * Render an Azure DevOps identity for agent-visible text: the resolved
  * canonical name or the explicit UNKNOWN sentinel.
@@ -294,11 +300,16 @@ export async function handlePullRequestCreated(
     return { created: false };
   }
 
-  const requestedByUserId = await resolveAzureDevOpsSender(
+  // A mention is content anyone able to open a PR can post, so only known or allowlisted actors pass.
+  const requestedByUserId = await authorizeAzureDevOpsActor(
     pr.createdBy,
     "pull_request",
     `PR !${pr.pullRequestId}: ${pr.title}`,
   );
+  if (!requestedByUserId) {
+    logUntrustedActor("pull_request", pr.createdBy, repo);
+    return { created: false };
+  }
 
   const context = pr.description ? extractMentionContext(pr.description, botId) : "";
   const prUrl = pullRequestWebUrl(pr);
@@ -389,11 +400,15 @@ export async function handlePullRequestCommented(
     return { created: false };
   }
 
-  const requestedByUserId = await resolveAzureDevOpsSender(
+  const requestedByUserId = await authorizeAzureDevOpsActor(
     comment.author,
     "pull_request_comment",
     comment.content,
   );
+  if (!requestedByUserId) {
+    logUntrustedActor("pull_request_comment", comment.author, repo);
+    return { created: false };
+  }
 
   // Check if there's already an active task for this PR
   const existingTask = await findTaskByVcs(repo, pr.pullRequestId, "azure-devops");

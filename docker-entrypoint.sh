@@ -716,9 +716,9 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
                 REPO_HOOKS_ENABLED=$(echo "$repo" | jq -r '.hooks.enabled // false')
 
-                # A leading dash would reach git as an option (git fetch has --upload-pack).
-                if [[ "$REPO_URL" == -* || "$REPO_BRANCH" == -* ]]; then
-                    echo "  Skipping ${REPO_NAME}: url and branch must not start with '-'"
+                # Match the runner's leading-dash check before using repo fields as arguments.
+                if [[ "$REPO_URL" == -* || "$REPO_DIR" == -* || "$REPO_BRANCH" == -* ]]; then
+                    echo "  Skipping ${REPO_NAME}: url, clonePath and branch must not start with '-'"
                     continue
                 fi
 

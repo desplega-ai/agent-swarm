@@ -12,7 +12,7 @@ import {
   getWorkflow,
   isExtensionAgent,
 } from "@/be/db";
-import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
+import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
@@ -118,7 +118,7 @@ export const createScheduleInputSchema = z.object({
       "Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
     ),
   modelTier: ModelTierSchema.optional().describe(
-    "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of each assignee's harness.",
+    "Deprecated: pass modelGroup \"<tier>\" (the tier's group) or profile \"<harness>-<tier>\" (same model) instead. Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile of each assignee's harness.",
   ),
   profile: z
     .string()
@@ -127,6 +127,14 @@ export const createScheduleInputSchema = z.object({
     .optional()
     .describe(
       "Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier.",
+    ),
+  modelGroup: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile.",
     ),
   allowCustomModel: z
     .boolean()
@@ -157,6 +165,7 @@ const scheduleDataShape = {
   model: z.string().optional(),
   modelTier: ModelTierSchema.optional(),
   profile: z.string().optional(),
+  modelGroup: z.string().optional(),
   scheduleType: z.string().optional(),
   targetType: ScheduledTaskTargetTypeSchema.optional(),
   workflowId: z.string().optional(),
@@ -206,6 +215,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         model,
         modelTier,
         profile,
+        modelGroup,
         allowCustomModel,
       },
       requestInfo,
@@ -306,6 +316,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         profile,
         model,
         modelTier,
+        modelGroup,
         agentId: targetAgentId,
       });
       if (profileError) return toolErr(profileError);
@@ -358,6 +369,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           model: normalizedModel.model,
           modelTier: normalizedModel.modelTier,
           profile,
+          modelGroup,
           scheduleType: scheduleType ?? "recurring",
           createdBy,
         });
@@ -389,7 +401,12 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           },
         );
       } catch (error) {
-        // The profile was deleted between taskProfileError and the insert.
+        // The profile or group was deleted between taskProfileError and the insert.
+        if (modelGroupRefError(error)) {
+          return toolErr(`Unknown model group "${modelGroup}".`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
+        }
         if (modelProfileRefError(error) === "missing") {
           return toolErr(`Unknown model profile "${profile}".`, {
             data: { yourAgentId: requestInfo.agentId },

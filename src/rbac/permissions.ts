@@ -387,6 +387,11 @@ export const PERMISSIONS = {
     description: "Open a public or authed page: mint its page-session cookie.",
     namespace: "page",
   },
+  "prompt-template.write": {
+    description:
+      "Create, change, reset or delete a prompt template override: any as lead, operator, or user; an agent-scope override only for the caller's own agent.",
+    namespace: "prompt-template",
+  },
   "objects.read": {
     description:
       "Read a board or sheet on the swarm's shared agent-fs drive through the object routes.",

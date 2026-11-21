@@ -357,6 +357,8 @@ export const LEGACY_POLICY = {
   "design-system.write": anyAuthenticated,
   // Opening a page is a read. Writes from the page session keep their own verbs.
   "page.launch": anyAuthenticated,
+  // Global and repo overrides reach every agent's prompts, the lead's included.
+  "prompt-template.write": humanOrLeadOrResourceOwner,
   // Humans only: agents edit objects with the board-* and sheet-* tools as themselves.
   "objects.read": operatorOrUser,
   "objects.write": operatorOrUser,

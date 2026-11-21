@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { getWorkflowRunTriggeredByAgentId } from "../../be/db/workflow-runs";
 import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
@@ -19,6 +18,7 @@ import {
 } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
 import { findInterpolationTokens } from "../../utils/template";
+import { resolveWorkflowRunPrincipal } from "../run-principal";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
@@ -95,10 +95,9 @@ export class SwarmScriptExecutor extends BaseExecutor<
     // Never `trigger.agentId`: trigger data is caller-supplied, so reading the
     // principal from it let any agent run a creator-less workflow's scripts as
     // the lead. The run row carries the server-stamped starting agent.
-    const agentId =
-      workflow?.createdByAgentId ??
-      (await getWorkflowRunTriggeredByAgentId(meta.runId)) ??
-      undefined;
+    const principal = await resolveWorkflowRunPrincipal(workflow, meta.runId);
+    if (!principal.ok) return { status: "failed", error: `swarm-script: ${principal.error}` };
+    const agentId = principal.agentId;
     const resolved = await resolveScriptSource(config, agentId);
 
     if (!resolved.ok) {

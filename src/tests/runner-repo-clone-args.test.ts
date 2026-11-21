@@ -80,19 +80,28 @@ describe("repo clone arguments and hook install", () => {
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
 
-  test(
-    "installs Husky hooks without running lifecycle scripts",
-    async () => {
+  test.each([
+    ["8.0.3", ".husky"],
+    ["9.1.7", ".husky/_"],
+  ])(
+    "installs Husky %s hooks without running lifecycle scripts",
+    async (version, hooksPath) => {
       const marker = join(tempRoot, "lifecycle-ran");
       const upstream = await makeUpstream({
         ".husky/pre-commit": "echo pre-commit\n",
         "fake-husky/package.json": JSON.stringify({
           name: "husky",
-          version: "9.0.0",
+          version,
           bin: { husky: "bin.sh" },
           scripts: { install: `touch ${marker}` },
         }),
-        "fake-husky/bin.sh": "#!/bin/sh\ngit config core.hooksPath .husky/_\n",
+        "fake-husky/bin.sh": `#!/bin/sh
+case "$#:$*" in
+  0:) git config core.hooksPath .husky/_ ;;
+  1:install) git config core.hooksPath .husky ;;
+  *) exit 1 ;;
+esac
+`,
         "package.json": JSON.stringify({
           name: "fixture",
           version: "1.0.0",
@@ -109,7 +118,7 @@ describe("repo clone arguments and hook install", () => {
       expectChildOk(result, "install-repo-hooks.sh");
 
       expect(existsSync(marker)).toBe(false);
-      expect((await git(upstream, ["config", "--get", "core.hooksPath"])).trim()).toBe(".husky/_");
+      expect((await git(upstream, ["config", "--get", "core.hooksPath"])).trim()).toBe(hooksPath);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

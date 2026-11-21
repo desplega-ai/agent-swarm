@@ -318,12 +318,14 @@ What the adapter does, and why:
 - **Model selection.** No model flag exists. `modelTier` maps to Amp's modes
   (`DEFAULT_MODEL_TIER_MAP.amp`: `low`, `medium`, `high`, `ultra`). A concrete model
   is a mode or a `provider/model` pin (`src/utils/amp-models.ts`; validated at
-  send-task, agent runtime and session start). A pin runs on the `medium` mode's
-  prompt and tools. Measured 2026-10-05: `low` is GLM-5.3 Flash (cheapest), `medium` is
-  Claude Opus 5.5, so the regular tier is not cheap. The Runtime editor defaults to `low`.
+  send-task, agent runtime and session start). A plugin agent must name a model, so
+  a mode runs its `AMP_MODE_MODELS` entry (measured 2026-10-05: `low` is GLM-5.3 Flash,
+  cheapest, at `low` effort since it has no `medium`; `medium` is Claude Opus 5.5, so the
+  regular tier is not cheap). Re-measure on a CLI bump. The Runtime editor defaults to `low`.
 - **System prompt.** The plugin route: a generated plugin registers one agent mode
-  that `extends` the base mode and appends the swarm prompt as `instructions`
-  (live verified). The prompt is a JSON literal. AGENTS.md was not needed.
+  on a concrete model and appends the swarm prompt as `instructions` (live verified).
+  Amp rejects `extends` and built-in agents there; a plugin that fails to load makes
+  thread creation fail with HTTP 400 on `agentMode`. The prompt is a JSON literal. AGENTS.md was not needed.
 - **Reasoning effort.** The CLI has no effort flag (`--effort` is rejected). The
   plugin agent's `reasoningEffort` carries it, only for a pinned model whose
   catalog entry lists levels (`off` -> `none`).
@@ -445,7 +447,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.4.1`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.4.2`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.

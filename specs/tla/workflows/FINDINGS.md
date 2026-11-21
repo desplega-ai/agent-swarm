@@ -1179,3 +1179,40 @@ Every config keeps its verdict and distinct-state count from the #3215 table abo
 `src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
 `workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
 `workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.
+
+## Sync with #3349 (`main` @ `50c105563`)
+
+#3349 moves the step watchdog into `runWithNodeDeadline` (`node-timeout.ts:55-69`) and calls it
+from `runClaimedStep`, the foreach item driver and the retry poller. The poller's `P5` now gets
+the same deadline as `XRun`: on expiry the race rejects into the poller's catch and takes the
+fenced `P7`. The model's `P5` already picks `fail` nondeterministically, and an attempt that hangs
+is a `P5` that never fires, so no guard, ordering or write path changes and the `.tla` and `.cfg`
+files are unchanged. Before #3349 a hung retry held the run (`P4`'s hold) until its executor
+returned; the model never forced `P5` to fire, so that liveness gap was not checked either way.
+ACTIONS.md re-pins the `XRun` and `P5` rows and every `engine.ts` line after the old race (-5) and
+`retry-poller.ts` line after its imports (+1).
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3349's e2e scenario
+`workflow-retry-deadline` passes.
+
+## Sync with #3476 (`main` @ `34c2c1b7d`)
+
+#3476 widens the executable-source interpolation guard from `script` bodies to `code-match` code
+and string `wait` filters (`EXECUTABLE_SOURCE_FIELDS`). A disallowed or unresolved token still
+fails the step with no retry policy before `executor.run`, through the same fenced
+`checkpointStepFailure` in `runClaimedStep`, the foreach item driver and the retry poller; only the
+error text now names the node type's field. The model does not distinguish node types, so the
+existing `XFail` / `P7` with a spent budget already covers every such node, and the `.tla` and
+`.cfg` files are unchanged. ACTIONS.md notes the guard on the `XFail` row and re-pins the
+`runClaimedStep` lines (`engine.ts:1020-1272`), which were one line short since the #3349 sync.
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3476's e2e scenario
+`workflow-executable-config-sources` passes.

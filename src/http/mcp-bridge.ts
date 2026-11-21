@@ -141,6 +141,7 @@ const mcpBridgeRoute = route({
     403: { description: "Tool not in SDK allowlist" },
     404: { description: "Tool not found" },
   },
+  rbac: { ungated: "scripts SDK bridge: each proxied MCP tool runs its own gates" },
 });
 
 function headerValue(req: IncomingMessage, name: string): string | undefined {

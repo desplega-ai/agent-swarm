@@ -478,6 +478,37 @@ export function enforceContentLengthCap(
   return null;
 }
 
+/** Body cap for public webhook receivers that read the raw body before their own check. */
+export const WEBHOOK_MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Read a public webhook's raw body as a string, bounded by `maxBytes`. A body
+ * over the cap, declared or streamed, gets `413` and `null` back; the rest of
+ * the stream is drained without buffering so the connection stays usable.
+ */
+export async function readWebhookBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBytes = WEBHOOK_MAX_BODY_BYTES,
+): Promise<string | null> {
+  if (enforceContentLengthCap(req, res, maxBytes) === BODY_TOO_LARGE) return null;
+  const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+  let tooLarge = false;
+  for await (const chunk of req) {
+    if (tooLarge) continue;
+    receivedBytes += (chunk as Buffer).byteLength;
+    if (receivedBytes > maxBytes) {
+      tooLarge = true;
+      chunks.length = 0;
+      jsonError(res, `Payload too large (max ${maxBytes} bytes)`, 413);
+      continue;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return tooLarge ? null : Buffer.concat(chunks).toString();
+}
+
 /** Send JSON response */
 export function json(res: ServerResponse, data: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json" });

@@ -1,0 +1,233 @@
+---
+title: Connect Your AI Client with the User MCP
+description: Send and track swarm tasks from ChatGPT, Claude, Codex, Cursor, Grok and other MCP clients with a personal token
+agent:
+  offer: true
+  when: "Someone wants to send or check swarm tasks from ChatGPT, Claude, Codex, Cursor or another AI assistant they already use"
+---
+
+The user MCP is a per-person MCP endpoint on your swarm's API server. Connect it to the AI client you already use, and you can hand work to the swarm, check on it, and steer it without opening the dashboard or Slack.
+
+Every call acts as you. Tasks you send are recorded as requested by you, and you see only your own tasks. Your [role](/docs/features/team-collaboration) decides which tools you may call.
+
+## Two ways in
+
+| Path | Endpoint | Auth | Use it from |
+|---|---|---|---|
+| [ChatGPT app](#chatgpt) | `https://mcp.agent-swarm.dev/mcp` (hosted by agent-swarm.dev) | Sign in to agent-swarm.dev, then link your swarm once | ChatGPT |
+| [Direct endpoint](#get-a-token) | `<API URL>/mcp-user` on your swarm | Personal `aswt_` bearer token | Claude Code, Claude Desktop, Codex, Cursor, VS Code, Grok Bot and any client that sends a bearer header |
+
+The direct endpoint has no OAuth flow. A client must send the token in an `Authorization: Bearer aswt_…` header. Clients that only support OAuth or no-auth servers cannot use it directly; see [Claude](#claude) and [Grok](#grok).
+
+## What you can do once connected
+
+| Tool | What it does | Permission (with RBAC on) |
+|---|---|---|
+| `send-task` | Send a task to the online Lead. Accepts `task`, `taskType`, `tags`, `priority`, `model`, `modelTier` and an `outputSchema`. Fails without creating a task when no Lead is online. | `task.create.own` |
+| `get-tasks` | List tasks you requested. | read |
+| `get-task-details` | Read one of your tasks: status, progress, output, logs. | read |
+| `cancel-task` | Cancel one of your pending or in-progress tasks. | `task.cancel.own` |
+| `steer-task` | Send a message to one of your running tasks. Present when `STEERING_ENABLED` is on (the default). See [Task steering](/docs/guides/task-steering). | `task.steer.own` |
+| `script-search`, `script-get-types`, `script-run` | Search and run the swarm's global scripts as you. See [Running scripts from the user MCP](/docs/guides/scripts-runtime#running-scripts-from-the-user-mcp). | `script.search`, `script.run` |
+
+The built-in `requester` role can send, read, cancel and steer its own tasks. `viewer` is read-only. Only `admin` holds the script permissions.
+
+Example prompts:
+
+- "Send the swarm a task: summarize yesterday's merged PRs in our main repo."
+- "Show my open swarm tasks."
+- "What did the task about the release notes return?"
+- "Tell the running migration task to keep the schema unchanged."
+
+Clients that support the draft MCP Events extension can get a webhook when a task finishes instead of polling. ChatGPT is the only one today; see [MCP Events](/docs/guides/mcp-events).
+
+## Get a token
+
+Mint the token in the dashboard. Admins can mint one for any person:
+
+1. Open **People** and pick the person.
+2. Under **MCP tokens**, click **Mint token**. Give it a label such as `MacBook Claude Code` so you know which client to revoke later.
+3. Copy the token. It is shown once; the server keeps only a hash.
+
+The dialog also shows the endpoint URL and ready-to-paste snippets for Claude Code, Cursor, VS Code, Claude Desktop and a curl check.
+
+The operator key can mint a token over the API too:
+
+```bash
+curl -X POST "$MCP_BASE_URL/api/users/<user-id>/mcp-tokens" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"Claude Code"}'
+```
+
+Revoke a token from the same **MCP tokens** table. Revocation blocks the next request at once.
+
+<Callout type="warn">
+Treat the token like a password. Anyone holding it acts as you on the swarm. Keep it in an environment variable or your client's secret store, not in a shared repo file.
+</Callout>
+
+## Find the endpoint URL
+
+The endpoint is your API server's public origin plus `/mcp-user`, for example `https://api.example.com/mcp-user`. The swarm builds it from `PUBLIC_MCP_BASE_URL`, then `MCP_BASE_URL`. The mint dialog shows the resolved URL, and so does:
+
+```bash
+curl -s "$MCP_BASE_URL/api/integrations/mcp-user/config" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY"
+```
+
+Remote clients such as ChatGPT and claude.ai need an `https://` URL they can reach from the internet. Local clients such as Claude Code or Codex can use `http://localhost:3013/mcp-user` against a local swarm.
+
+## ChatGPT
+
+The Agent Swarm app is published in the [ChatGPT app directory](https://chatgpt.com/apps). It runs on agent-swarm.dev's hosted connector, which signs you in with OAuth and talks to your swarm's user MCP on your behalf.
+
+1. In ChatGPT, open **Settings**, then **Apps**, search for **Agent Swarm**, connect it and sign in to agent-swarm.dev.
+2. Link your swarm. In your swarm's dashboard, open **People**, pick yourself, and click **Connect to ChatGPT** under **MCP tokens**. Or start from [mcp.agent-swarm.dev/connections](https://mcp.agent-swarm.dev/connections) and follow the prompts.
+3. In a chat, address the app: "@Agent Swarm show my tasks".
+
+Linking uses a single-use code that is valid for 10 minutes. The connector trades it once for a user MCP token, so no token passes through the URL or your clipboard. **Connect to ChatGPT** is disabled until your API origin is `https://`: set `PUBLIC_MCP_BASE_URL` to the public URL.
+
+## Claude
+
+An Agent Swarm listing in Claude's connector directory is pending. Until it lands, connect Claude to the direct endpoint.
+
+**Claude Code.** Add the endpoint as a user-scoped HTTP server:
+
+```bash
+claude mcp add --transport http agent-swarm-user https://api.example.com/mcp-user \
+  --scope user \
+  --header "Authorization: Bearer aswt_your_token"
+```
+
+To share it with a repo instead, use `--scope project`. That writes `.mcp.json`; keep the token in an environment variable there:
+
+```json
+{
+  "mcpServers": {
+    "agent-swarm-user": {
+      "type": "http",
+      "url": "https://api.example.com/mcp-user",
+      "headers": { "Authorization": "Bearer ${AGENT_SWARM_USER_TOKEN}" }
+    }
+  }
+}
+```
+
+**Claude Desktop.** `claude_desktop_config.json` launches local stdio servers, so bridge with `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "agent-swarm-user": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.example.com/mcp-user", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer aswt_your_token" }
+    }
+  }
+}
+```
+
+Keep `Authorization:${AUTH_HEADER}` without a space after the colon; `mcp-remote` documents an argument-escaping bug on Windows otherwise.
+
+**claude.ai custom connectors** (Customize, Connectors, Add custom connector) support OAuth or no sign-in. Static request headers are a beta for a limited set of organizations. If your org has it, choose **No sign-in** and add `Authorization` with the full value `Bearer aswt_…` under **Request headers**. Otherwise claude.ai cannot reach the direct endpoint; use Claude Code or Claude Desktop until the directory listing lands.
+
+## Codex
+
+Codex CLI reads the token from an environment variable:
+
+```bash
+export AGENT_SWARM_USER_TOKEN=aswt_your_token
+codex mcp add agent-swarm-user --url https://api.example.com/mcp-user \
+  --bearer-token-env-var AGENT_SWARM_USER_TOKEN
+```
+
+Or edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-swarm-user]
+url = "https://api.example.com/mcp-user"
+bearer_token_env_var = "AGENT_SWARM_USER_TOKEN"
+```
+
+## Cursor and VS Code
+
+Cursor reads `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
+
+```json
+{
+  "mcpServers": {
+    "agent-swarm-user": {
+      "url": "https://api.example.com/mcp-user",
+      "headers": { "Authorization": "Bearer ${env:AGENT_SWARM_USER_TOKEN}" }
+    }
+  }
+}
+```
+
+VS Code reads `.vscode/mcp.json` or your user MCP configuration, and can prompt for the token instead of storing it:
+
+```json
+{
+  "inputs": [
+    { "type": "promptString", "id": "agent-swarm-token", "description": "Agent Swarm user token", "password": true }
+  ],
+  "servers": {
+    "agent-swarm-user": {
+      "type": "http",
+      "url": "https://api.example.com/mcp-user",
+      "headers": { "Authorization": "Bearer ${input:agent-swarm-token}" }
+    }
+  }
+}
+```
+
+## Grok
+
+Support depends on the Grok surface:
+
+- **Grok Bot**: add a custom connector of type **Remote HTTPS**, set the server URL to your `/mcp-user` endpoint, and add an HTTP header `Authorization: Bearer aswt_…`.
+- **Grok Build CLI**: `grok mcp add --transport http agent-swarm-user https://api.example.com/mcp-user --header "Authorization: Bearer aswt_your_token"`.
+- **xAI API** (Responses API remote MCP tool): pass `server_url` and the token in `authorization`. It is a developer API for your own apps, not a chat client.
+- **grok.com custom connectors** take a server URL and "any required authentication". xAI does not document static headers there, so the direct endpoint is not known to work. There is no Agent Swarm listing for grok.com yet.
+
+## Other MCP clients
+
+Any client that speaks Streamable HTTP and lets you set a request header works. Give it:
+
+- URL: `<API URL>/mcp-user`
+- Header: `Authorization: Bearer aswt_…`
+
+For a client that only launches local stdio servers (Windsurf, Zed, Cline, Goose, JetBrains and others), bridge with [`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
+
+```json
+{
+  "command": "npx",
+  "args": [
+    "-y",
+    "mcp-remote",
+    "https://api.example.com/mcp-user",
+    "--header",
+    "Authorization: Bearer aswt_your_token"
+  ]
+}
+```
+
+Check the endpoint with curl. A `200` with an `event: message` line carrying a JSON-RPC `result` means the token and URL work. `401` means the token is wrong, revoked, or belongs to a user who is not `active`. `406` means the `Accept` header is missing.
+
+```bash
+curl -s https://api.example.com/mcp-user \
+  -H "Authorization: Bearer $AGENT_SWARM_USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"debug"}}}'
+```
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `401 Unauthorized` | The header is missing, the token does not start with `aswt_`, the token was revoked, or the user is suspended or still invited. |
+| `send-task` returns an error and no task appears | No Lead is online. Start the Lead and retry. |
+| `Forbidden: …` from a tool | Your role lacks the permission in the [tools table](#what-you-can-do-once-connected). Ask an admin to change your role. |
+| ChatGPT **Connect to ChatGPT** is disabled | The API origin is not `https://`. Set `PUBLIC_MCP_BASE_URL`. |
+| A session stops working after a long idle | The server closes idle MCP sessions. Reconnect the client. |

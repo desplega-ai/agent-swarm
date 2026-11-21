@@ -31,7 +31,7 @@ import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
 import { getValidCodexOAuth, loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
 import { CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey } from "../utils/codex-auth-failure";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getScriptApiBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
 
 /**
@@ -88,6 +88,10 @@ const keepWarmRoute = route({
       schema: z.object({ results: z.array(slotOutcomeSchema) }),
     },
   },
+  rbac: {
+    ungated:
+      "internal OAuth refresh coordination between API processes and workers; no user flow calls it",
+  },
 });
 
 export async function handleCodexOAuthKeepWarm(
@@ -99,7 +103,7 @@ export async function handleCodexOAuthKeepWarm(
   const parsed = await keepWarmRoute.parse(req, res, pathSegments, new URLSearchParams());
   if (!parsed) return true;
 
-  const apiUrl = getMcpBaseUrl();
+  const apiUrl = getScriptApiBaseUrl();
   const apiKey = getApiKey();
   const maxAgeMs = keepWarmMaxAgeMs();
   const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);

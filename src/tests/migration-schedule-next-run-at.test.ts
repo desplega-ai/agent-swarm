@@ -5,7 +5,7 @@ import { runMigrations } from "../be/migrations/runner";
 test("upgrading a database preserves the instants of pending schedule timestamps", () => {
   using db = new Database(":memory:");
   runMigrations(db);
-  db.run("DELETE FROM _migrations WHERE name = '366_schedule_next_run_at_utc'");
+  db.run("DELETE FROM _migrations WHERE name = '370_schedule_next_run_at_utc'");
 
   const utc = "2030-01-15T04:00:00.123Z";
   const timestamps = [

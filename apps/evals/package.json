@@ -14,20 +14,20 @@
   },
   "dependencies": {
     "@desplega/model-catalog": "workspace:*",
-    "@libsql/client": "^0.15.0",
-    "@openrouter/ai-sdk-provider": "^2.9.1",
-    "ai": "^6.0.116",
-    "e2b": "2.26.0",
-    "zod": "^4.2.1"
+    "@libsql/client": "^0.18.0",
+    "@openrouter/ai-sdk-provider": "^2.10.0",
+    "ai": "^6.0.331",
+    "e2b": "2.63.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.1.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "typescript": "^5.9.0",
-    "vite": "^7.1.0"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.8"
   }
 }

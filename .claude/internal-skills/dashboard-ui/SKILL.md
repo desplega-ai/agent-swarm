@@ -5,7 +5,7 @@ description: Use when building or changing UI in apps/ui, the agent-swarm dashbo
 
 # Dashboard UI (`apps/ui`)
 
-Read `apps/ui/CLAUDE.md` (primitives catalog, tokens, motion timings, DataGrid, PR evidence) and `apps/ui/DESIGN.md` (visual doctrine) first. This skill adds only what they lack. If a rule here conflicts with them, they win: fix this file.
+Read `apps/ui/CLAUDE.md` (DataGrid, data fetching, PR evidence), `apps/ui/docs/primitives.md` (primitives catalog), `apps/ui/docs/theming.md` (tokens), `apps/ui/docs/motion.md` (motion timings) and `apps/ui/DESIGN.md` (visual doctrine) first. This skill adds only what they lack. If a rule here conflicts with them, they win: fix this file.
 
 Placement: a piece used by more than one flow lives in `components/ui/` (primitive) or `components/shared/` (composed). A hook used by more than one component lives in `hooks/`. Flow-only parts stay in the flow folder (for example `components/onboarding/`, `pages/setup/`).
 

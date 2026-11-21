@@ -1,0 +1,88 @@
+---
+title: 'Preparing a digital asset license review for a human rights owner with AI agents'
+description: "Agent Swarm collects an asset's license, record and use request, flags missing versions and mismatched fields in one sourced packet, and a person decides."
+agent:
+  offer: false
+  when: "Someone wants a content marketplace to assemble evidence on whether an asset's license permits a requested use"
+---
+
+Agent Swarm can be configured to collect the license agreement, the asset record and the requested-use request that a team authorizes, flag agreement versions that are missing and requested-use fields that disagree, and hand a qualified rights owner one packet with a source link on every line. The rights owner decides whether to authorize the use or escalate it. Legal interpretation, publishing and communications stay with people. What the workflow removes is the assembly. The signed agreement lives in a contract store, the amendments in someone's mailbox, the asset's own record in the library, and the request in a ticket. Getting those four into one place, with the version each one came from, is the work that delays a rights review or skips it.
+
+The scope is one proposed use of one asset, reviewed before that use happens. It is not a comparison of catalog listings across channels ([catalog discrepancy review](/docs/playbooks/use-cases/marketplace-catalog-discrepancy-review)), not a moderation appeal against a decision already made ([moderation appeals](/docs/playbooks/use-cases/marketplace-moderation-appeals)), and not the tracking of delivery commitments to a customer ([customer commitment tracking](/docs/playbooks/use-cases/customer-commitment-tracking)).
+
+## When another tool fits better
+
+**A digital asset management or rights management platform that already holds the terms.** If the platform stores the license terms as structured fields, carries the restrictions that matter (channel, territory, period, permitted derivatives) and blocks a use outside them, that is enforcement, not evidence. A packet on top of it adds a queue in front of a system that already said no.
+
+**Legal review alone.** An ambiguous clause goes to counsel. So does a high-value asset, or a novel use of a right. Those are legal judgements, and a packet that assembles the documents does not make one. Where a person can read an agreement and its amendments and answer in one sitting, a workflow puts a document between that reader and the clause.
+
+Agent Swarm fits a different shape. The terms are spread across an agreement and its amendments, the asset record is somewhere else again, and the requesting team describes the use in its own words. Several teams hold a piece, the reviewer trusts none of them alone, and the definition of "permitted" is not stored anywhere a system can enforce. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in licensing or rights-clearance feature and not a customer result. It needs source integrations, matching rules, permissions and a scenario that your team configures and tests.
+
+<Mermaid title="Illustrative license review flow, from agreement, asset record and use request to a human rights decision." chart={`flowchart LR
+  A["License agreement<br/>+ asset record<br/>+ requested use"] --> B["Collection scripts<br/>swarm-script to JSON"]
+  B --> C["Deterministic checks<br/>missing agreement versions,<br/>channel / territory / period"]
+  C --> D["Agent assembles<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>rights owner"}}
+  G -- "authorize" --> R["Owner authorizes<br/>the requested use"]
+  G -- "escalate" --> S["Route to legal"]
+`} />
+
+**1. The team scopes one proposed use.** One asset, one requesting team, one described use: channel, territory, period, and what the asset will be used for. A request that leaves out the channel or the territory cannot be compared with a license, so it is reported as incomplete before anything is collected.
+
+**2. Configured scripts collect the records.** One collection step per source, each emitting JSON so no model fetches a document or does date arithmetic. Scripts reach each system through [script connections](/docs/guides/script-connections), which register a system once as a connection or a credential binding, and the [credential broker](/docs/guides/scripts-credential-broker) substitutes the secret only for allowlisted hosts, so no key sits in the script's source or arguments. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and synthesis.
+
+**3. The comparison runs in code.** The fields the team named are compared by deterministic steps: the agreement version in force against the versions the request cites, and channel, territory and usage period as the agreement states them against what the request asks for. The same inputs produce the same flags every run. A clause that cannot be reduced to a field is copied with its location rather than parsed.
+
+**4. An agent assembles the packet.** Each item carries the agreement's value, the request's value, a link to each record and when that record was read. Items the workflow could not compare are listed with what is missing and who could supply it, not resolved by inference.
+
+**5. A qualified rights owner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) stops the run, posts a summary and a link to the full packet, and resumes only when a person answers. The owner authorizes the use, authorizes it with conditions, or escalates it to legal, and the decision with its reason is recorded against the packet.
+
+## A fictional example
+
+Halden Row is invented, and so is the clip. It is a stock footage licensor and one of its files, `harbour-morning-4k`, a four-second clip of a boat leaving a harbour. Nothing below reports a real asset, a real agreement or a measured result.
+
+A marketing team wants the clip in a paid social campaign, and the licensor's approved agreement for the clip is v3. The packet compares three records.
+
+| Field | Agreement says | Request says | Flag |
+| --- | --- | --- | --- |
+| Agreement version | v3, dated 4 March 2027 | v3, plus "Amendment A1" the requester cites by name | Amendment A1 is not in the agreement archive the workflow can read |
+| Licensed channels | Brand-owned web and organic social | Paid social advertising on two platforms | Outside the channels the agreement names |
+| Territory | Spain and Portugal | Spain, Portugal and France | France is not in the territory clause |
+| Usage period | 1 January to 31 December 2027 | 1 January to 30 June 2028 | The request runs six months past the licensed period |
+| Permitted derivatives | Crop and resize | Crop, resize, and a caption burned into the clip | A burned-in caption is not in the permitted-derivative list |
+
+What the packet hands the rights owner: the three records with their links and read timestamps, the licensed values beside the requested ones, the amendment it could not find named as a gap with the person who owns the agreement archive, and one sentence of the license's own language behind each field. It does not say whether the campaign may run. The owner may know that Amendment A1 extends paid usage into France, or may need legal to read it. Either way the answer comes from a person who saw the evidence in one place.
+
+## Limits and escalation
+
+**Source coverage is the limit.** The packet knows only the sources the workflow is connected to. A license negotiated in email and never filed, a side letter in someone's drive, an amendment referenced but never uploaded: all of these are invisible, and a packet that looks complete while missing one is worse than a gap that is named.
+
+**A license can be out of date in three directions.** The archive copy may lag the signed version, the version on file may have been superseded by an amendment nobody filed, and the terms may have been renegotiated with the licensor since. The packet shows every version it found with its date, and when each was read. It never decides which one governs.
+
+**Access is a written decision.** Who may read which source, and who grants access, belongs in the team's governance record ([AI operations governance](/docs/playbooks/use-cases/ai-operations-governance)). A record the swarm cannot reach is reported by name with the owner who could grant access. Nobody is asked to paste an agreement into a thread instead.
+
+**Ambiguous language is quoted, never interpreted.** "Editorial use only", "no derivative works", "worldwide excluding a named market" are contract terms whose scope is a legal judgement. The packet reproduces the clause with a link and flags the field as unresolved. An agent that reads a restriction and concludes it applies has given legal advice.
+
+**Stop and route to legal** when the asset is high-value or exclusive, when it carries people, when it reproduces trademarks or private property whose own permissions are separate, when the request asks for terms the agreement does not contain, or when two records conflict in a way that reads as a missing document rather than a mismatched field.
+
+## What stays human-owned
+
+- **Whether the license permits the use.** That is interpretation, and it belongs to the rights owner or to counsel, not to a packet.
+- **Authorizing the use.** The agent never clears rights, and no run ends with a permission granted.
+- **Publishing.** No asset is published, scheduled or distributed by the workflow. Reading a license is reversible; publishing under a reading that turns out wrong is not.
+- **Any communication with the licensor or the customer**, including an amendment request or a note that a campaign is on hold. Those go through a person.
+
+## Building blocks
+
+Every piece here exists in agent-swarm today and has its own docs page. Pointing it at a rights review is the part that has to be designed.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): the `swarm-script` and `script-run` pattern for deterministic JSON collection, and the Researcher-style synthesis over it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the `human-in-the-loop` node, its approve and escalate paths, its timeout and fallback, and the message it posts.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a collection step reaches a contract store or an asset library with no raw secret in source.
+- [Per-customer working directories](/docs/playbooks/patterns/per-customer-working-directories): only if reviews of the same licensor or account need the agreement and its amendments kept in one persistent place between runs.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, role permissions and approval thresholds, written down.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): when a rights management platform, a single legal reading or a shared agent platform is the right call.

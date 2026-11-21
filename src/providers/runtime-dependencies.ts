@@ -120,7 +120,7 @@ export async function validateProviderDependencies(
             : resolveAcpTarget(config);
       const hint =
         provider === "grok"
-          ? "Use worker-full, install @xai-official/grok@1.0.89, or set GROK_BINARY to a trusted executable."
+          ? "Use worker-full, install @xai-official/grok@1.0.92, or set GROK_BINARY to a trusted executable."
           : provider === "fx"
             ? "Use worker-full, install the pinned fx release (Dockerfile.worker FX_VERSION), or set FX_BINARY."
             : `ACP_TARGET='${target.target}'. ${acpInstallHints[target.target]}`;
