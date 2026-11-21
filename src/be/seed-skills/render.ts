@@ -46,3 +46,31 @@ export function buildSkillContent(config: SkillTemplateConfig, body: string): st
   const userInvocable = config.userInvocable === false ? "\nuser-invocable: false" : "";
   return `---\nname: ${config.name}\ndescription: ${yamlScalar(config.description)}${userInvocable}\n---\n\n${body.trim()}\n`;
 }
+
+const DIALECT_OPEN = /^<!-- dialect:([a-z]+) -->$/;
+const DIALECT_CLOSE = "<!-- /dialect -->";
+
+/**
+ * Keep the `<!-- dialect:<name> -->` ... `<!-- /dialect -->` sections of the
+ * active `db-query` dialect (the engine's `dbQueryDialect` capability, Postgres
+ * brief D10) and drop the others, with their marker lines. Text outside a
+ * section stays. Content without markers comes back unchanged.
+ */
+export function renderDialectSections(content: string, dialect: string): string {
+  if (!content.includes(DIALECT_CLOSE)) return content;
+  const out: string[] = [];
+  let section: string | null = null;
+  for (const line of content.split("\n")) {
+    const open = DIALECT_OPEN.exec(line.trim());
+    if (open && section === null) {
+      section = open[1] ?? null;
+      continue;
+    }
+    if (line.trim() === DIALECT_CLOSE && section !== null) {
+      section = null;
+      continue;
+    }
+    if (section === null || section === dialect) out.push(line);
+  }
+  return out.join("\n");
+}

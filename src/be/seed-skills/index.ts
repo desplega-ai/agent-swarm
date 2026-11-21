@@ -312,7 +312,7 @@ import type { Seeder, SeedItem } from "../seed/types";
 import { parseSkillContent } from "../skill-parser";
 import { getStorage } from "../storage";
 import bundledFilesManifest from "./bundled-files.generated.json";
-import { buildSkillContent, type SkillTemplateConfig } from "./render";
+import { buildSkillContent, renderDialectSections, type SkillTemplateConfig } from "./render";
 
 /** One bundled file shipped alongside a skill's SKILL.md. */
 export type SeedSkillFile = {
@@ -656,7 +656,11 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
   kind: "skill",
 
   async items(): Promise<SkillSeedItem[]> {
-    const skills = await loadSeedSkills();
+    const dialect = getStorage().capabilities.dbQueryDialect;
+    const skills = (await loadSeedSkills()).map((skill) => ({
+      ...skill,
+      content: renderDialectSections(skill.content, dialect),
+    }));
     return skills.map((skill) => ({
       key: skill.name,
       contentHash: skillSeedHash(

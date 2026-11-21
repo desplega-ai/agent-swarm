@@ -1,7 +1,9 @@
 # DB Query Guidance
 
+<!-- dialect:sqlite -->
 The swarm database is SQLite, reachable read-only through the `db-query` MCP
 tool and the `POST /api/db-query` HTTP route (same executor underneath).
+Write SQLite SQL. Parameters are `?`.
 
 ## Execution model
 
@@ -21,6 +23,30 @@ Failures are documented and machine-readable, not a generic 400:
 | Query ran past its budget | 408 | `db_query_timeout` |
 | Too many bounded queries already in flight | 429 (with `Retry-After`) | `db_query_concurrency_cap` — retry shortly |
 | Write statement, bad SQL, multiple statements | 400 | (message describes the problem) |
+<!-- /dialect -->
+<!-- dialect:postgres -->
+The swarm database is Postgres, reachable read-only through the `db-query` MCP
+tool and the `POST /api/db-query` HTTP route (same executor underneath).
+Write Postgres SQL. Parameters are `$1`, `$2`, ... Quote every identifier that
+has an uppercase letter: `"taskId"`, `"createdAt"`. Flags are `boolean`
+(`"isLead"`, not `"isLead" = 1`). Timestamps are `timestamptz`; JSON columns
+are `jsonb` (`meta->>'field'`, `jsonb_array_elements_text(...)`).
+
+## Execution model
+
+A query runs on a separate connection that logs in as a restricted role: it
+cannot read the credential tables and cannot write. Each query runs in a
+READ ONLY transaction with a statement timeout (10s over HTTP, 5s over MCP).
+Only queries (`SELECT`, `WITH`, `VALUES`, `TABLE`) are accepted; `EXPLAIN` is
+not. When the operator has not set up that role, `db-query` returns an error
+that says so.
+
+| Condition | HTTP status | Error code |
+|---|---|---|
+| Query ran past its budget | 408 | `db_query_timeout` |
+| Too many queries already in flight | 429 (with `Retry-After`) | `db_query_concurrency_cap` — retry shortly |
+| Write statement, bad SQL, multiple statements | 400 | (message describes the problem) |
+<!-- /dialect -->
 
 ## Four tables are too large to read whole
 
@@ -32,7 +58,7 @@ For these four tables:
   `agent_log`: `agentId`, `taskId`, `eventType`, `createdAt`.
 - Add `LIMIT 1000` or less.
 - Do not use `COUNT(*)`, `SUM(...)`, or `typeof()` across the table.
-- Do not split a large read into `rowid` chunks — each chunk still reads
+- Do not split a large read into id or time chunks — each chunk still reads
   every row in its range. Chunking does not make a large read safe.
 
 If you need a row total or a column type census, ask the lead. Do not derive
@@ -40,11 +66,17 @@ it yourself by scanning the table.
 
 ## Columns audits guess wrong
 
+<!-- dialect:sqlite -->
 Run `SELECT name FROM pragma_table_info('<table>')` before you guess a column.
+<!-- /dialect -->
+<!-- dialect:postgres -->
+Run `SELECT column_name FROM information_schema.columns WHERE table_name = '<table>'`
+before you guess a column.
+<!-- /dialect -->
 
 - `agent_tasks`: no cost column and no `metadata` column. Cost is `session_costs.totalCostUsd`, joined on `taskId`. Assignee `agentId`, creator `creatorAgentId`, model `model`, `resolvedModel`, `modelSource`. `parentTaskId` is the only SQL child finder, because `key` is unique per task.
 - `scripts`: the owner is `createdByAgentId`; there is no `agentId`. `isScratch = 1` marks inline `script-run` bodies (`scratch-*` names), and they outnumber named scripts many times over. Add `isScratch = 0` to catalog audits. To find a script's callers, group by `isScratch` instead of dropping scratch rows: inline runs are often the negative tests.
-- `script_runs`: `scriptName`, `sourceTaskId`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no `scriptId` (the name column is `scriptName`) and no `taskId` (the task column is `sourceTaskId`). There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`. Filter on `scriptName` plus a narrow `startedAt` window; a `GROUP BY agentId` over a wide window can run past the MCP budget.
+- `script_runs`: `scriptName`, `sourceTaskId`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no `scriptId` (the name column is `scriptName`) and no `taskId` (the task column is `sourceTaskId`). There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400` on SQLite, `extract(epoch FROM "finishedAt" - "startedAt")` on Postgres. Filter on `scriptName` plus a narrow `startedAt` window; a `GROUP BY agentId` over a wide window can run past the MCP budget.
 - `session_costs`: `taskId`, `agentId`, `totalCostUsd`, `model`, the token columns, `createdAt`.
 
 ## Operator config knobs
@@ -55,13 +87,15 @@ effect on the next request, no restart) and surfaced on the dashboard's
 
 | Env var | Default | Controls |
 |---|---|---|
+<!-- dialect:sqlite -->
 | `DB_QUERY_BOUNDED_ENABLED` | `true` | Master kill switch for the bounded child-process path. `false` restores the pre-fix synchronous, unbounded path and logs a one-time startup-class warning. |
 | `DB_QUERY_WORKER_POOL_ENABLED` | `true` | Reuse long-lived child processes for bounded queries. `false` spawns a fresh child per query. |
+<!-- /dialect -->
 | `DB_QUERY_HTTP_BUDGET_MS` | `10000` | Wall-clock budget for `/api/db-query` before its child process is killed. |
 | `DB_QUERY_HTTP_MAX_ROWS` | `1000` | Row cap for `/api/db-query`, regardless of how many rows the query matched. |
 | `DB_QUERY_MCP_BUDGET_MS` | `5000` | Wall-clock budget for the MCP `db-query` tool. |
 | `DB_QUERY_MCP_MAX_ROWS` | `100` | Row cap for the MCP `db-query` tool, regardless of how many rows the query matched. |
 | `DB_QUERY_CONCURRENCY_CAP` | `3` | Max bounded queries in flight at once, across HTTP and MCP callers. Each in-flight query can peak around 200MB; the default is sized against a 1 GiB API pod memory limit — raise it only if the pod has more headroom. |
 
-`total` in a result always reports every row SQLite matched, even when the
+`total` in a result always reports every row the query matched, even when the
 returned `rows` are capped — compare the two to detect truncation.
