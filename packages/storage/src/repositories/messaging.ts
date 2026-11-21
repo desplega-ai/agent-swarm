@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlList, sqlWhere } from "../sql";
 import type { TaskRow } from "./tasks";
@@ -327,7 +327,7 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
   insertChannel(r: ChannelRow): Promise<ChannelRow | null> {
     return this.db.get<ChannelRow>(sql`
       INSERT INTO channels (id, name, description, type, "createdBy", participants, "createdAt")
-      VALUES (${r.id}, ${r.name}, ${r.description}, ${r.type}, ${r.createdBy}, ${r.participants},
+      VALUES (${r.id}, ${r.name}, ${r.description}, ${r.type}, ${r.createdBy}, ${jsonText(r.participants)},
         ${r.createdAt})
       RETURNING *`);
   }
@@ -356,7 +356,7 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
   insertChannelMessage(r: Omit<ChannelMessageRow, "agentName">): Promise<ChannelMessageRow | null> {
     return this.db.get<ChannelMessageRow>(sql`
       INSERT INTO channel_messages (id, "channelId", "agentId", content, "replyToId", mentions, "createdAt")
-      VALUES (${r.id}, ${r.channelId}, ${r.agentId}, ${r.content}, ${r.replyToId}, ${r.mentions},
+      VALUES (${r.id}, ${r.channelId}, ${r.agentId}, ${r.content}, ${r.replyToId}, ${jsonText(r.mentions)},
         ${r.createdAt})
       RETURNING *`);
   }
@@ -393,7 +393,8 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
   }
 
   private mentions(agentId: string): SqlQuery {
-    return sql`${likeAsciiCi(sql`m.mentions`, sql`${`%"${agentId}"%`}`)}`;
+    // CAST: the column is JSON text on SQLite (a no-op there) and jsonb elsewhere.
+    return sql`${likeAsciiCi(sql`CAST(m.mentions AS text)`, sql`${`%"${agentId}"%`}`)}`;
   }
 
   listMentionMessages(
