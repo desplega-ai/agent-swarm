@@ -105,7 +105,7 @@ async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<
   );
   expect(
     linkedEmail(stranger) === null &&
-      ctx.db.get("SELECT 1 AS one FROM users WHERE email = ?", [`${stranger}@example.test`]) ===
+      ctx.db.get(sql`SELECT 1 AS one FROM users WHERE email = ${`${stranger}@example.test`}`) ===
         null,
     "no user is created for an email no user owns",
   );
