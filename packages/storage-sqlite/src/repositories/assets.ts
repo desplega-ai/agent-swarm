@@ -6,6 +6,7 @@ import {
   type AssetKeyTable,
   type AttachmentMappingAuditRow,
   BaseAssetsRepository,
+  type ImportPendingAssignmentRow,
   type MappingSourceAuditRow,
   type SqlQuery,
   sql,
@@ -94,6 +95,17 @@ export class SqliteAssetsRepository extends BaseAssetsRepository {
       }
     }
     return found;
+  }
+
+  listPendingAssignmentsForAgent(
+    agentId: string,
+    agentName: string,
+  ): Promise<ImportPendingAssignmentRow[]> {
+    return this.db.query<ImportPendingAssignmentRow>(sql`
+      SELECT "sourceId", "agentKey", instructions, "instructionsHash", "skillKeys"
+        FROM import_pending_assignments
+       WHERE "agentId" = ${agentId} OR "agentName" = ${agentName}
+       ORDER BY rowid`);
   }
 }
 

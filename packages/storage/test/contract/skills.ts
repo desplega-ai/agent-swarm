@@ -222,5 +222,24 @@ export function skillsContract(engine: ContractEngine): void {
       // t1 completed and invoked a skill; t2 never started.
       expect(await repo.taskAdoption(T0)).toEqual({ tasks: 1, tasksWithSkill: 1 });
     });
+
+    test("findOldestSkillIdByName picks the lowest createdAt in any scope", async () => {
+      await agent("a1", "Ann");
+      await skill({
+        id: "late",
+        name: "beta",
+        scope: "swarm",
+        createdAt: "2026-11-21T12:00:00.000Z",
+      });
+      await skill({
+        id: "early",
+        name: "beta",
+        scope: "agent",
+        owner: "a1",
+        createdAt: "2026-11-21T09:00:00.000Z",
+      });
+      expect(await repo.findOldestSkillIdByName("beta")).toBe("early");
+      expect(await repo.findOldestSkillIdByName("none")).toBeNull();
+    });
   });
 }

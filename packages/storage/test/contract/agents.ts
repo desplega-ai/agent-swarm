@@ -366,5 +366,26 @@ export function agentsContract(engine: ContractEngine): void {
       await repo.setHarnessCliVersion("m1", null);
       expect(await repo.getHarnessCliVersion("m1")).toBeNull();
     });
+
+    test("non-extension agents by name and skill install if absent", async () => {
+      await repo.insertAgent(newAgent({ id: "n1", name: "nina" }));
+      await repo.insertAgent(newAgent({ id: "x1", name: "xt" }));
+      await storage.executor.run(sql`UPDATE agents SET role = 'extension' WHERE id = 'x1'`);
+      expect(await repo.listNonExtensionAgentIdsByName("nina", 2)).toEqual(["n1"]);
+      expect(await repo.listNonExtensionAgentIdsByName("xt", 2)).toEqual([]);
+      expect(await repo.listNonExtensionAgentIdsByName(null, 2)).toEqual([]);
+
+      await storage.executor.run(sql`
+        INSERT INTO skills (id, name, description, content, type, scope, "createdAt", "lastUpdatedAt")
+        VALUES ('sk1', 'sk', 'd', 'c', 'personal', 'swarm', ${T0}, ${T0})`);
+      expect(await repo.installSkillIfAbsent("i1", "n1", "sk1", T0)).toBe(true);
+      await repo.setSkillActive("n1", "sk1", false);
+      // A present row stays as it is (inactive).
+      expect(await repo.installSkillIfAbsent("i2", "n1", "sk1", T1)).toBe(false);
+      const row = await storage.executor.get<{ id: string; isActive: number }>(
+        sql`SELECT id, "isActive" FROM agent_skills WHERE "agentId" = 'n1'`,
+      );
+      expect(row).toEqual({ id: "i1", isActive: 0 });
+    });
   });
 }

@@ -1149,5 +1149,11 @@ export function workflowsContract(engine: ContractEngine): void {
         ["s-a", "wa", "timeout"],
       ]);
     });
+
+    test("findWorkflowIdByName finds by exact name", async () => {
+      await workflow("wf-a");
+      expect(await repo.findWorkflowIdByName("wf-a")).toBe("wf-a");
+      expect(await repo.findWorkflowIdByName("WF-A")).toBeNull();
+    });
   });
 }

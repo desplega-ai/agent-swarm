@@ -1,4 +1,5 @@
 import type { SqlExecutor } from "../executor";
+import { sql } from "../sql";
 
 /**
  * Domain: assets and import (`asset_key_mappings`, `asset_key_history`,
@@ -42,11 +43,58 @@ export type AssetKeyAuditData = {
   sourcedMappings: MappingSourceAuditRow[];
 };
 
+export type NewImportItem = {
+  sourceId: string;
+  kind: string;
+  itemKey: string;
+  entityId: string;
+  now: string;
+};
+
+export type ImportPendingAssignmentRow = {
+  sourceId: string;
+  agentKey: string;
+  instructions: string | null;
+  instructionsHash: string | null;
+  /** JSON array text. */
+  skillKeys: string;
+};
+
+export type NewImportPendingAssignment = {
+  sourceId: string;
+  agentKey: string;
+  agentId: string | null;
+  agentName: string | null;
+  instructions: string | null;
+  instructionsHash: string | null;
+  /** JSON array text. */
+  skillKeys: string;
+  now: string;
+};
+
 export interface AssetsRepository {
   /** Rows of each list come in insertion order. */
   readAssetKeyAuditData(): Promise<AssetKeyAuditData>;
   /** The subset of `ids` that name an existing user. */
   existingUserIds(ids: readonly string[]): Promise<Set<string>>;
+
+  // ---- import_items ----
+  /** The entity a source item owns, or null. */
+  findImportedEntityId(sourceId: string, kind: string, itemKey: string): Promise<string | null>;
+  /** True when any import source owns `entityId` of `kind`. */
+  isImportedEntity(kind: string, entityId: string): Promise<boolean>;
+  /** Records (or moves) the ownership of a source item; keeps `createdAt` on conflict. */
+  upsertImportItem(row: NewImportItem): Promise<void>;
+
+  // ---- import_pending_assignments ----
+  deletePendingAssignmentsBySource(sourceId: string): Promise<void>;
+  insertPendingAssignment(row: NewImportPendingAssignment): Promise<void>;
+  /** Pending rows naming the agent by id or by name. Insertion order. */
+  listPendingAssignmentsForAgent(
+    agentId: string,
+    agentName: string,
+  ): Promise<ImportPendingAssignmentRow[]>;
+  deletePendingAssignment(sourceId: string, agentKey: string): Promise<void>;
 }
 
 export abstract class BaseAssetsRepository implements AssetsRepository {
@@ -54,4 +102,58 @@ export abstract class BaseAssetsRepository implements AssetsRepository {
 
   abstract readAssetKeyAuditData(): Promise<AssetKeyAuditData>;
   abstract existingUserIds(ids: readonly string[]): Promise<Set<string>>;
+
+  // ---- import_items ----
+
+  async findImportedEntityId(
+    sourceId: string,
+    kind: string,
+    itemKey: string,
+  ): Promise<string | null> {
+    const row = await this.db.get<{ entityId: string }>(sql`
+      SELECT "entityId" FROM import_items
+       WHERE "sourceId" = ${sourceId} AND kind = ${kind} AND "itemKey" = ${itemKey}`);
+    return row?.entityId ?? null;
+  }
+
+  async isImportedEntity(kind: string, entityId: string): Promise<boolean> {
+    const row = await this.db.get<{ n: number }>(
+      sql`SELECT 1 AS n FROM import_items WHERE kind = ${kind} AND "entityId" = ${entityId} LIMIT 1`,
+    );
+    return row !== null;
+  }
+
+  async upsertImportItem(r: NewImportItem): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO import_items ("sourceId", kind, "itemKey", "entityId", "createdAt", "updatedAt")
+      VALUES (${r.sourceId}, ${r.kind}, ${r.itemKey}, ${r.entityId}, ${r.now}, ${r.now})
+      ON CONFLICT ("sourceId", kind, "itemKey") DO UPDATE SET
+        "entityId" = excluded."entityId", "updatedAt" = excluded."updatedAt"`);
+  }
+
+  // ---- import_pending_assignments ----
+
+  async deletePendingAssignmentsBySource(sourceId: string): Promise<void> {
+    await this.db.run(sql`DELETE FROM import_pending_assignments WHERE "sourceId" = ${sourceId}`);
+  }
+
+  async insertPendingAssignment(r: NewImportPendingAssignment): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO import_pending_assignments
+        ("sourceId", "agentKey", "agentId", "agentName", instructions, "instructionsHash", "skillKeys", "createdAt")
+      VALUES (${r.sourceId}, ${r.agentKey}, ${r.agentId}, ${r.agentName}, ${r.instructions},
+              ${r.instructionsHash}, ${r.skillKeys}, ${r.now})`);
+  }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listPendingAssignmentsForAgent(
+    agentId: string,
+    agentName: string,
+  ): Promise<ImportPendingAssignmentRow[]>;
+
+  async deletePendingAssignment(sourceId: string, agentKey: string): Promise<void> {
+    await this.db.run(sql`
+      DELETE FROM import_pending_assignments
+       WHERE "sourceId" = ${sourceId} AND "agentKey" = ${agentKey}`);
+  }
 }

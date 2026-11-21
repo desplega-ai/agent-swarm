@@ -139,10 +139,6 @@
     "reason": "M2 move: integrations",
     "sites": 3
   },
-  "src/be/extensions/assets.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
   "src/be/fleet-benchmark-stats.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
@@ -150,18 +146,6 @@
   "src/be/harness-model-support.ts": {
     "reason": "M2 move: models",
     "sites": 2
-  },
-  "src/be/import/index.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
-  "src/be/import/pending.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
-  "src/be/import/seeders.ts": {
-    "reason": "M2 move: config",
-    "sites": 8
   },
   "src/be/improvements.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

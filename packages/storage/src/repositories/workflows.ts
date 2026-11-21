@@ -736,6 +736,8 @@ export interface WorkflowsRepository {
    * overdue. Ordered by step insertion order, then wait insertion order.
    */
   listStuckWaitRuns(): Promise<StuckWaitRunRow[]>;
+  /** Id of the workflow named `name` (unique), or null. */
+  findWorkflowIdByName(name: string): Promise<string | null>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1655,5 +1657,12 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
            )
          )
        ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ws`)}`);
+  }
+
+  async findWorkflowIdByName(name: string): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM workflows WHERE name = ${name}`,
+    );
+    return row?.id ?? null;
   }
 }

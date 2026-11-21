@@ -349,6 +349,10 @@ export interface AgentsRepository {
   getHarnessCliVersion(id: string): Promise<string | null>;
   /** Sets `harnessCliVersion`; no write when the stored value equals `next` (NULL-safe). */
   setHarnessCliVersion(id: string, next: string | null): Promise<void>;
+  /** Ids of up to `limit` non-extension agents named `name`. Ordered by id (unique). */
+  listNonExtensionAgentIdsByName(name: string | null, limit: number): Promise<string[]>;
+  /** Installs an active skill unless the agent has it already. True when a row was written. */
+  installSkillIfAbsent(id: string, agentId: string, skillId: string, now: string): Promise<boolean>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -814,5 +818,25 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
     await this.db.run(sql`
       UPDATE agents SET "harnessCliVersion" = ${next}
        WHERE id = ${id} AND "harnessCliVersion" IS DISTINCT FROM ${next}`);
+  }
+
+  async listNonExtensionAgentIdsByName(name: string | null, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      sql`SELECT id FROM agents WHERE name = ${name} AND ${notExtension} ORDER BY id LIMIT ${limit}`,
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async installSkillIfAbsent(
+    id: string,
+    agentId: string,
+    skillId: string,
+    now: string,
+  ): Promise<boolean> {
+    const result = await this.db.run(sql`
+      INSERT INTO agent_skills (id, "agentId", "skillId", "isActive", "installedAt")
+      VALUES (${id}, ${agentId}, ${skillId}, ${true}, ${now})
+      ON CONFLICT ("agentId", "skillId") DO NOTHING`);
+    return result.changes > 0;
   }
 }
