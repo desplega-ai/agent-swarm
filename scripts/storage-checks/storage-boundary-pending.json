@@ -81,7 +81,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 397
+    "sites": 396
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -165,7 +165,7 @@
   },
   "src/be/db/slack-trees.ts": {
     "reason": "M2 move: integrations",
-    "sites": 19
+    "sites": 2
   },
   "src/be/db/task-idempotency.ts": {
     "reason": "M2 move: tasks",

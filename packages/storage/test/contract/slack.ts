@@ -275,5 +275,99 @@ export function slackContract(engine: ContractEngine): void {
       expect(await repo.findOutcomeHost("m1")).toBeNull();
       expect((await repo.findOutcomeHost("h1"))?.id).toBe("h1");
     });
+
+    test("render state: visibility transitions and reconcile cursors", async () => {
+      expect(await repo.getTreeVisibility()).toBeNull();
+      expect(await repo.getReconcileCursors()).toBeNull();
+      await storage.executor.run(
+        sql`INSERT INTO slack_render_v2_state (id, activated_at) VALUES (1, ${T0})`,
+      );
+      expect(await repo.getTreeVisibility()).toEqual({
+        task_tree_enabled: null,
+        task_tree_enabled_at: null,
+      });
+      // From unset (not 0) to on: the activation time is not stamped.
+      expect(await repo.setTreeVisibility(true, T1)).toBeNull();
+      expect(await repo.setTreeVisibility(false, T1)).toBeNull();
+      expect(await repo.getTreeVisibility()).toEqual({
+        task_tree_enabled: 0,
+        task_tree_enabled_at: null,
+      });
+      expect(await repo.setTreeVisibility(true, T2)).toBe(T2);
+      expect(await repo.setTreeVisibility(false, T0)).toBe(T2);
+      expect(await repo.getReconcileCursors()).toBe("{}");
+      await repo.setReconcileCursors('{"outcome":"x"}');
+      expect(await repo.getReconcileCursors()).toBe('{"outcome":"x"}');
+    });
+
+    test("bot and agent reply checks", async () => {
+      for (const task of ["t1", "t2"]) {
+        await storage.executor.run(sql`
+          INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt")
+          VALUES (${task}, 't', 'completed', ${T0}, ${T0})`);
+      }
+      const msg = (
+        id: string,
+        kind: string,
+        task: string | null,
+        createdAt: string,
+        by: string | null,
+      ) =>
+        storage.executor.run(sql`
+          INSERT INTO slack_messages (id, context_key, channel_id, thread_ts, ts, kind, task_id,
+            finalized_at, created_at, updated_at, created_by)
+          VALUES (${id}, ${`ctx-${id}`}, 'C1', '1.0', ${`${id}.ts`}, ${kind}, ${task}, ${T1},
+            ${createdAt}, ${createdAt}, ${by})`);
+      await msg("o1", "outcome", "t1", T1, null);
+      expect(await repo.threadHasBotReplySince("C1", "1.0", T0, "t1")).toBe(false);
+      expect(await repo.threadHasBotReplySince("C1", "1.0", T0, "t2")).toBe(true);
+      expect(await repo.threadHasBotReplySince("C1", "1.0", T2, "t2")).toBe(false);
+      await msg("a1", "agent", "t2", T1, "lead");
+      expect(await repo.threadHasBotReplySince("C1", "1.0", T1, "t1")).toBe(true);
+      expect(await repo.threadHasAgentReplyOnTasksSince("C1", "1.0", T0, "lead", ["t2"])).toBe(
+        true,
+      );
+      expect(await repo.threadHasAgentReplyOnTasksSince("C1", "1.0", T0, "lead", ["t1"])).toBe(
+        false,
+      );
+      expect(await repo.threadHasAgentReplyOnTasksSince("C1", "1.0", T0, "other", ["t2"])).toBe(
+        false,
+      );
+      expect(await repo.threadHasAgentReplyOnTasksSince("C1", "1.0", T0, "lead", [])).toBe(false);
+    });
+
+    test("trees: render work, settling and the reconcile pages", async () => {
+      await storage.executor.run(
+        sql`INSERT INTO slack_render_v2_state (id, activated_at) VALUES (1, ${T0})`,
+      );
+      const tree = (id: string, ts: string, channel: string, createdAt: string) =>
+        storage.executor.run(sql`
+          INSERT INTO slack_messages (id, context_key, channel_id, thread_ts, ts, kind,
+            created_at, updated_at)
+          VALUES (${id}, ${`ctx-${id}`}, ${channel}, '1.0', ${ts}, 'tree', ${createdAt}, ${createdAt})`);
+      await tree("tz", "pending:z", "C2", T1);
+      await tree("ta", "pending:a", "C3", T1);
+      await tree("posted", "9.9", "C4", T1);
+      const window = { finishedAfter: "", closureActiveAfter: "", delegationEnabled: false };
+      expect((await repo.listTreesNeedingRender()).map((row) => row.id)).toEqual(["tz", "ta"]);
+      expect(
+        (await repo.listTreesNeedingRender({ channelId: "C3", threadTs: "1.0" })).map((r) => r.id),
+      ).toEqual(["ta"]);
+      expect(await repo.closeTreeIfSettled("tz", T2)).toBe(false);
+      expect(await repo.closeTreeIfSettled("posted", T2)).toBe(true);
+      expect(await repo.closeTreeIfSettled("posted", T2)).toBe(false);
+      const trees = await repo.pageReconcileCandidates("tree", "", 50, false, window);
+      expect(trees).toEqual([
+        { id: "ta", channelId: "C3", threadTs: "1.0", eligible: 1 },
+        { id: "tz", channelId: "C2", threadTs: "1.0", eligible: 1 },
+      ]);
+      expect(await repo.pageReconcileCandidates("tree", "ta", 50, false, window)).toHaveLength(1);
+      expect(await repo.pageReconcileCandidates("outcome", "", 50, false, window)).toEqual([]);
+      expect(await repo.pageReconcileCandidates("active", "", 50, false, window)).toEqual([]);
+      expect(await repo.pageReconcileCandidates("terminal", "", 50, false, window)).toEqual([]);
+      expect(await repo.threadHasOutcomeWork({ channelId: "C2", threadTs: "1.0" }, window)).toBe(
+        false,
+      );
+    });
   });
 }

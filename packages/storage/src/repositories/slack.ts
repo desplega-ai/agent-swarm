@@ -1,6 +1,6 @@
 import { likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql } from "../sql";
+import { type SqlQuery, sql, sqlList } from "../sql";
 
 /**
  * Domain: Slack (`slack_inbound_receipts`, and the outcome card groups in
@@ -69,6 +69,45 @@ export type NewMergedSlackOutcome = {
   now: string;
 };
 
+export type SlackMessageRow = {
+  id: string;
+  context_key: string;
+  channel_id: string;
+  thread_ts: string;
+  ts: string;
+  kind: string;
+  task_id: string | null;
+  permalink: string | null;
+  finalized_at: string | null;
+  stream_chunks_appended: number;
+  conclusion_kind: string | null;
+  deferral_resolved_at: string | null;
+  deferral_abandoned_at: string | null;
+  delivery_attempts: number;
+  delivery_abandoned_at: string | null;
+  delivery_last_error: string | null;
+  closed_at: string | null;
+  merged_into_id: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+/** The outcome-card window of the render sweep (see src/be/db/slack-trees.ts). */
+export type SlackOutcomeWindowParams = {
+  finishedAfter: string;
+  closureActiveAfter: string;
+  delegationEnabled: boolean;
+};
+
+export type SlackThreadRef = { channelId: string; threadTs: string };
+
+/** One page of a reconcile source: candidate rows past the cursor, by id. */
+export type SlackReconcileCandidate = SlackThreadRef & { id: string; eligible: number };
+
+export type SlackReconcileSource = "active" | "terminal" | "outcome" | "tree";
+
 export interface SlackRepository {
   /** Counts a duplicate sighting of a stored key; returns the row, or null when the key is new. */
   touchInboundDuplicate(dedupKey: string, now: string): Promise<SlackInboundReceiptRow | null>;
@@ -121,6 +160,54 @@ export interface SlackRepository {
   lastInboundFailure(): Promise<{ error_code: string | null; updated_at: string } | null>;
   /** Uncertain receipts, newest `received_at` first (ties: newest insertion first). */
   listUncertainInbound(limit: number): Promise<SlackInboundReceiptRow[]>;
+
+  /**
+   * Open trees with render work, optionally in one thread. Order:
+   * `created_at`, then insertion.
+   */
+  listTreesNeedingRender(thread?: SlackThreadRef): Promise<SlackMessageRow[]>;
+  /** Closes the tree when the sweep has nothing left to do for it. True when closed. */
+  closeTreeIfSettled(id: string, now: string): Promise<boolean>;
+  /** True when the bot replied in the thread at or after `since`, other than `taskId`'s card. */
+  threadHasBotReplySince(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    taskId: string,
+  ): Promise<boolean>;
+  /** True when `agentId` sent a reply in the thread at or after `since` for one of `taskIds`. */
+  threadHasAgentReplyOnTasksSince(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    agentId: string,
+    taskIds: readonly string[],
+  ): Promise<boolean>;
+  /** True while the thread still owes an outcome card. */
+  threadHasOutcomeWork(thread: SlackThreadRef, window: SlackOutcomeWindowParams): Promise<boolean>;
+  getTreeVisibility(): Promise<{
+    task_tree_enabled: number | null;
+    task_tree_enabled_at: string | null;
+  } | null>;
+  /**
+   * Stores the visibility flag; turning it on from off stamps
+   * `task_tree_enabled_at` with `now`. Returns the stored `task_tree_enabled_at`.
+   */
+  setTreeVisibility(enabled: boolean, now: string): Promise<string | null>;
+  getReconcileCursors(): Promise<string | null>;
+  setReconcileCursors(cursors: string): Promise<void>;
+  /**
+   * One page of a reconcile source after `cursor`. Order: id. `delegationEnabled`
+   * gates the delegated-ask clause of the terminal page; `window` carries its
+   * own flag for the outcome window.
+   */
+  pageReconcileCandidates(
+    source: SlackReconcileSource,
+    cursor: string,
+    pageSize: number,
+    delegationEnabled: boolean,
+    window: SlackOutcomeWindowParams,
+  ): Promise<SlackReconcileCandidate[]>;
 
   /** Task ids merged into the host card. Order: `created_at`, then `id`. */
   listMergedOutcomeTasks(hostId: string): Promise<{ task_id: string; created_at: string }[]>;
@@ -304,6 +391,92 @@ export abstract class BaseSlackRepository implements SlackRepository {
   abstract lastInboundFailure(): Promise<{ error_code: string | null; updated_at: string } | null>;
 
   abstract listUncertainInbound(limit: number): Promise<SlackInboundReceiptRow[]>;
+
+  abstract listTreesNeedingRender(thread?: SlackThreadRef): Promise<SlackMessageRow[]>;
+
+  abstract closeTreeIfSettled(id: string, now: string): Promise<boolean>;
+
+  async threadHasBotReplySince(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    taskId: string,
+  ): Promise<boolean> {
+    const row = await this.db.get<{ found: number | boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM slack_messages reply
+        WHERE reply.channel_id = ${channelId} AND reply.thread_ts = ${threadTs}
+          AND reply.created_at >= ${since}
+          AND (reply.kind = 'agent'
+            OR (reply.kind = 'outcome' AND reply.finalized_at IS NOT NULL AND reply.task_id != ${taskId}))
+      ) AS found`);
+    return !!row?.found;
+  }
+
+  async threadHasAgentReplyOnTasksSince(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    agentId: string,
+    taskIds: readonly string[],
+  ): Promise<boolean> {
+    if (taskIds.length === 0) return false;
+    const row = await this.db.get<{ found: number | boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM slack_messages reply
+        WHERE reply.channel_id = ${channelId} AND reply.thread_ts = ${threadTs}
+          AND reply.created_at >= ${since}
+          AND reply.kind = 'agent' AND reply.created_by = ${agentId}
+          AND reply.task_id IN (${sqlList(taskIds)})
+      ) AS found`);
+    return !!row?.found;
+  }
+
+  abstract threadHasOutcomeWork(
+    thread: SlackThreadRef,
+    window: SlackOutcomeWindowParams,
+  ): Promise<boolean>;
+
+  getTreeVisibility(): Promise<{
+    task_tree_enabled: number | null;
+    task_tree_enabled_at: string | null;
+  } | null> {
+    return this.db.get(sql`
+      SELECT task_tree_enabled, task_tree_enabled_at FROM slack_render_v2_state WHERE id = 1`);
+  }
+
+  async setTreeVisibility(enabled: boolean, now: string): Promise<string | null> {
+    const enabledAt = enabled
+      ? sql`CASE WHEN task_tree_enabled = ${false} THEN ${now} ELSE task_tree_enabled_at END`
+      : sql`task_tree_enabled_at`;
+    const row = await this.db.get<{ task_tree_enabled_at: string | null }>(sql`
+      UPDATE slack_render_v2_state SET
+        task_tree_enabled_at = ${enabledAt},
+        task_tree_enabled = ${enabled}
+      WHERE id = 1 RETURNING task_tree_enabled_at`);
+    return row?.task_tree_enabled_at ?? null;
+  }
+
+  async getReconcileCursors(): Promise<string | null> {
+    const row = await this.db.get<{ reconcile_cursors: string }>(
+      sql`SELECT reconcile_cursors FROM slack_render_v2_state WHERE id = 1`,
+    );
+    return row?.reconcile_cursors ?? null;
+  }
+
+  async setReconcileCursors(cursors: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE slack_render_v2_state SET reconcile_cursors = ${cursors} WHERE id = 1`,
+    );
+  }
+
+  abstract pageReconcileCandidates(
+    source: SlackReconcileSource,
+    cursor: string,
+    pageSize: number,
+    delegationEnabled: boolean,
+    window: SlackOutcomeWindowParams,
+  ): Promise<SlackReconcileCandidate[]>;
 
   listMergedOutcomeTasks(hostId: string): Promise<{ task_id: string; created_at: string }[]> {
     return this.db.query<{ task_id: string; created_at: string }>(sql`
