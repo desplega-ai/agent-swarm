@@ -2090,7 +2090,12 @@ async function renderOutcomeGroup(
   members: readonly AgentTask[],
   tasks: AgentTask[],
 ): Promise<{ text: string; blocks: unknown[] } | null> {
-  const newestFollowUp = members.findLast(isLeadFollowUpTask);
+  // A reverse loop, not findLast: the extension-types bundle targets ES2022.
+  let newestFollowUp: AgentTask | undefined;
+  for (let i = members.length - 1; i >= 0 && !newestFollowUp; i--) {
+    const member = members[i];
+    if (member && isLeadFollowUpTask(member)) newestFollowUp = member;
+  }
   const shown = members.filter(
     (member) => !isLeadFollowUpTask(member) || member === newestFollowUp,
   );
