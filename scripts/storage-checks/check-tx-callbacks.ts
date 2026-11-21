@@ -171,10 +171,35 @@ for (const file of files) {
     visit(body);
   };
 
+  // A callback passed by name (`.transaction(claimStep)`) is scanned when the
+  // same file declares it as a function.
+  const namedFunctions = new Map<string, ts.FunctionLikeDeclaration>();
+  const collect = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      namedFunctions.set(node.name.text, node);
+    } else if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    ) {
+      namedFunctions.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && /(^|\.)transaction$/.test(calleeName(node, source))) {
-      const callback = node.arguments[0];
-      if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+      const argument = node.arguments[0];
+      const callback =
+        argument && ts.isIdentifier(argument) ? namedFunctions.get(argument.text) : argument;
+      if (
+        callback?.body &&
+        (ts.isArrowFunction(callback) ||
+          ts.isFunctionExpression(callback) ||
+          ts.isFunctionDeclaration(callback))
+      ) {
         callbacks += 1;
         scanBody(callback.body, lineOf(node), callback);
       }

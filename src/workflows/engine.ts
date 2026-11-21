@@ -418,6 +418,17 @@ const activeWalks = new Map<string, number>();
 const executingSteps = new Set<string>();
 
 /**
+ * Mark a step as executed by this process, inside the claim transaction. An
+ * attempt that rolls back gives the mark back, also when the client runs the
+ * callback again (decision D6): a kept mark would make the next attempt read
+ * its own claim as another walker's.
+ */
+function claimExecutingStep(stepId: string): void {
+  executingSteps.add(stepId);
+  getDbClient().onAttemptRollback(() => executingSteps.delete(stepId));
+}
+
+/**
  * Fail closed when a run's sealed replay state cannot be opened. Resuming from
  * the scrubbed copy would feed redaction markers to downstream nodes, so the
  * run (and `stepId`, when one was claimed) fails with the error instead.
@@ -892,7 +903,6 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  let claimedStepId: string | undefined;
   const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
@@ -921,8 +931,7 @@ async function executeStep(
       // executor reconnects to the child run or task it already started (a
       // crash between the insert and the step parking) instead of a second one.
       if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
-        claimedStepId = current.id;
-        executingSteps.add(current.id);
+        claimExecutingStep(current.id);
         return {
           existingStep: current,
           stepId: current.id,
@@ -976,17 +985,12 @@ async function executeStep(
     }
     // Registered before the transaction commits, so no other walker can see
     // this `running` row without also seeing it owned.
-    claimedStepId = stepId;
-    executingSteps.add(stepId);
+    claimExecutingStep(stepId);
     const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
     return { existingStep, stepId, fence, deduped: false };
   };
-  const dedup = await getDbClient()
-    .transaction(claimStep)
-    .catch((err) => {
-      if (claimedStepId) executingSteps.delete(claimedStepId);
-      throw err;
-    });
+  // A claim whose transaction fails gives its mark back (claimExecutingStep).
+  const dedup = await getDbClient().transaction(claimStep);
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
   if ("current" in dedup && dedup.current) {

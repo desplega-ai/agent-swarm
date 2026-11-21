@@ -41,5 +41,6 @@ export interface Storage {
   transaction<T>(fn: () => Promise<T>, opts?: TransactionOptions): Promise<T>;
   afterCommit(fn: () => void | Promise<void>): void;
   afterRollback(fn: () => void): void;
+  onAttemptRollback(fn: () => void): void;
   inTransaction(): boolean;
 }
