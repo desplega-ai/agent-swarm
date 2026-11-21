@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -7,6 +7,7 @@ import {
   createUser,
   deleteScheduledTask,
   getDbClient,
+  getDueScheduledTasks,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
@@ -596,18 +597,36 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.intervalMs).toBeUndefined();
     });
 
-    test("create one-time schedule preserves exact nextRunAt", async () => {
-      const runAt = new Date(Date.now() + 120000).toISOString();
-      const schedule = await createScheduledTask({
-        name: "one-time-runat-test",
+    test("offset-bearing one-time schedules are due at the same UTC instant", async () => {
+      const dueAt = "2030-01-15T04:00:00.123Z";
+      const created = await createScheduledTask({
+        name: "one-time-runat-positive-offset",
         taskTemplate: "One-time runAt task",
         scheduleType: "one_time",
-        nextRunAt: runAt,
+        nextRunAt: "2030-01-15T12:00:00.123+08:00",
         createdByAgentId: testAgent.id,
       });
+      const edited = await createScheduledTask({
+        name: "one-time-runat-negative-offset",
+        taskTemplate: "One-time runAt task",
+        scheduleType: "one_time",
+        nextRunAt: dueAt,
+        createdByAgentId: testAgent.id,
+      });
+      expect(edited.scheduleType).toBe("one_time");
+      expect(edited.nextRunAt).toBe(dueAt);
+      await updateScheduledTask(edited.id, { nextRunAt: "2030-01-14T23:00:00.123-05:00" });
 
-      expect(schedule.scheduleType).toBe("one_time");
-      expect(schedule.nextRunAt).toBe(runAt);
+      const dueIds = async () => (await getDueScheduledTasks()).map(({ id }) => id);
+      try {
+        setSystemTime(new Date(Date.parse(dueAt) - 1));
+        expect(await dueIds()).not.toContain(created.id);
+        expect(await dueIds()).not.toContain(edited.id);
+        setSystemTime(new Date(dueAt));
+        expect(await dueIds()).toEqual(expect.arrayContaining([created.id, edited.id]));
+      } finally {
+        setSystemTime();
+      }
     });
 
     test("executing one-time schedule auto-disables it", async () => {

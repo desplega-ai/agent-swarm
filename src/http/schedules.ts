@@ -3,6 +3,7 @@ import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
+import { parseScheduleInstant } from "../be/date-utils";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -360,9 +361,16 @@ export async function handleSchedules(
         jsonError(res, "Provide either delayMs or runAt, not both.", 400);
         return true;
       }
-      if (body.runAt && new Date(body.runAt).getTime() <= Date.now()) {
-        jsonError(res, "runAt must be in the future.", 400);
-        return true;
+      if (body.runAt) {
+        const instant = parseScheduleInstant(body.runAt);
+        if (!instant) {
+          jsonError(res, "runAt must be a valid timestamp.", 400);
+          return true;
+        }
+        if (instant.getTime() <= Date.now()) {
+          jsonError(res, "runAt must be in the future.", 400);
+          return true;
+        }
       }
     } else {
       if (body.delayMs || body.runAt) {
@@ -818,6 +826,10 @@ export async function handleSchedules(
       }
     }
 
+    if (typeof parsed.body.nextRunAt === "string" && !parseScheduleInstant(parsed.body.nextRunAt)) {
+      jsonError(res, "nextRunAt must be a valid timestamp.", 400);
+      return true;
+    }
     // Recalculate nextRunAt when timing fields or enabled status changes
     const newEnabled = parsed.body.enabled !== undefined ? parsed.body.enabled : existing.enabled;
     const cronTimezoneChanged =

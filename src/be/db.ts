@@ -196,7 +196,7 @@ import {
 } from "../utils/subscription-plans";
 import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
-import { normalizeDate, normalizeDateRequired } from "./date-utils";
+import { normalizeDate, normalizeDateRequired, serializeNextRunAt } from "./date-utils";
 import {
   type AgentRow,
   configureAgentDependencies,
@@ -6270,7 +6270,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.priority ?? 50,
       data.targetAgentId ?? null,
       data.enabled !== false ? 1 : 0,
-      data.nextRunAt ?? null,
+      serializeNextRunAt(data.nextRunAt),
       data.createdByAgentId ?? null,
       data.parentTaskId ?? null,
       data.requestedDelayMs ?? null,
@@ -6397,7 +6397,7 @@ export async function updateScheduledTask(
   }
   if (data.nextRunAt !== undefined) {
     updates.push("nextRunAt = ?");
-    params.push(data.nextRunAt);
+    params.push(serializeNextRunAt(data.nextRunAt));
   }
   if (data.timezone !== undefined) {
     updates.push("timezone = ?");
