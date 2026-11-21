@@ -17,7 +17,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
-| M5 Contract on Postgres | in progress (part 7): JSON key order decided and applied; D7 applied to the poll claim (87.5% -> 0%); task creation still above 5% (STOP-ASK) | |
+| M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-key or registration sites still above 5% (open, see D7 section) | `74403ae87` |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
 
@@ -55,7 +55,8 @@ Last updated part 6 (head `61477a358`).
 | 16 | existing gates | part 6 | `lint`, `lint:slop`, `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`: pass. `test:root -- --parallel=4` (head `f1e1b2275`): exit 1, 23,077 pass / 22 fail. 2 were branch regressions, fixed in `61477a358` (package-publish: the CLI bundle imported `bun`; the routingAffinity inventory count). The other 20 fail at the base commit or are listed there: AgentMail webhooks 8, realtime transport 7, GitLab event names 2, Slack config reload 1 (load), `initTelemetry` activation funnel 1 (fails alone at the base commit, `pg-base` worktree, part 6). `e2e:ui`: not re-run in part 6. |
 | 17 | `bun run docs:openapi` | part 6 | diff adds only `dialect` on the db-query response (an engine field) |
 | 18 | `bun run test:storage` | part 7, head `243a93a9e` | **pass**: SQLite 398/0, Postgres 448/0 (new: isolation test) |
-| 19 to 26 | data copy, bench report, stress, CI, docs, replica blockers, PR | | not done (M6, M7). Bench and stress tooling exist (M5). |
+| 21, 22 | bench report; stress scenarios | part 8, head `74403ae87` | **pass**: seeded bench writes p95 per route group and retry rate per site; `stress-poll-claim` and `stress-task-finish` show 0 exhausted retries and 0 5xx on Postgres. Sites above 5%: see D7 section. |
+| 19, 20, 23 to 26 | data copy, CI, docs, replica blockers, PR | | not done (M6, M7). |
 
 ## Failures at the base commit
 
@@ -381,6 +382,32 @@ Measurement: `E2E_POSTGRES_SEED_SQL=scripts/e2e/fixtures/postgres-bench-seed.sql
 
 Exhausted retries: 0 before and after. Both scenarios pass on both engines. Correction to part 6: `tasks.ts:2028` is the task finish transaction, not task creation. Task finish and keyed task creation stay above 5%: STOP-ASK raised in part 7 (no other retry change applied without Daniel).
 
+### Part 8: task finish applied, keyed creation kept (Daniel, 2026-11-21)
+
+Daniel chose `apply_fix` for task finish and `keep_strict` for keyed task creation.
+
+Applied (commit `74403ae87`): `POST /api/tasks/{id}/finish` (`src/http/tasks.ts`) runs with `transaction(..., { isolation: "read committed" })`, reason in the code. Locks, in the poll write pass order: the caller's agent row `FOR UPDATE` (the capacity count and the agent status write see every committed finish of that agent, and never run beside its own poll claim), then the task row `FOR UPDATE` (one finish per task; the terminal result guard reads the locked row). Every status write keeps its `status NOT IN terminal` guard. Dependents that the cascade fails are written through that guard too.
+
+New stress scenario `stress-task-finish` (flow `storage-engine-parity`): 12 workers with `maxTasks` 4, 48 running tasks, each finished twice in one tick with different text; the first task of each worker fails and has a dependent. Asserts: no 5xx, exactly one 200 and one 409 per task, the stored text is the winner's, one terminal status log per task, each dependent `failed`/`cascade`, every worker `idle` at the end. Passes on SQLite and Postgres. With the agent lock removed it fails on Postgres (a worker ends `busy` with no task running), so the scenario guards the lock.
+
+Measurement: same command, seed and host as part 7. Before = `bc73e306e`, after = `74403ae87`.
+
+| Site | Before (seeded) | After (seeded) |
+| --- | --- | --- |
+| Task finish, `POST /api/tasks/{id}/finish` (`tasks.ts:2028` -> `:2037`) | 43 of 60, 71.7% | 0 of 60, 0.0% |
+| Poll write pass (`poll.ts:822`) | 0 of 90, 0.0% | 0 of 88, 0.0% |
+| Keyed task creation (`tasks.ts:1381`) | 9 of 10, 90.0% | 9 of 10, 90.0% (accepted exception) |
+| Scheduler manual run (`scheduler.ts:297`) | 80 of 91, 87.9% | 91 of 101, 90.1% |
+| Agent registration (`agents.ts:758`) | 16 of 27, 59.3% | 16 of 27, 59.3% |
+| KV increment (`kv.ts:663`) | 18 of 20, 90.0% | 17 of 20, 85.0% |
+| Keyed workflow creation (`engine.ts:350`) | 9 of 10, 90.0% | 9 of 10, 90.0% |
+
+1,616 transactions, 142 retried, 0 exhausted. Both scenarios pass on both engines.
+
+Accepted exception to the 5% target: keyed creation stays SERIALIZABLE; 90% retry rate comes from a scenario that races one key on purpose; approved by Daniel 2026-11-21.
+
+Open (no change applied, needs Daniel): four other sites are above 5%. Three come from `divergence-concurrent-schedule-claim`, which fires 10 identical requests at one row on purpose: run-now on one schedule (`scheduler.ts:297`), increments of one KV key (`kv.ts:663`), and one workflow idempotency key (`engine.ts:350`). Agent registration (`agents.ts:758`) is different: `stress-poll-claim` registers 25 distinct agents at once, and 59% of them retry.
+
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
 Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metadata) and `platform-users` (the `profile_changed` event's before/after) failed on JSON text. Daniel chose (a), `accept_reorder`: keep `jsonb` and accept reordered keys. The two scenarios now compare the parsed value with a strict deep-equal (`Bun.deepEquals(..., true)`); every key and value is still asserted. Recorded under "Deviations" and "Edited scenarios". `kv_entries.value` is text and keeps its byte-order assertion.
@@ -409,6 +436,7 @@ Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metada
 - `onAttemptRollback` (needs human review): a third storage-client hook that D6 does not name. It runs when any attempt rolls back and only undoes in-process state (the successor-walk hold, the executing-step mark). Without it, runs never finalized under `--tx-replay`. Details under "Decisions inside my authority". The Postgres client implements it.
 - Check 11 mechanism (needs human review): dependency-cruiser cannot reject `Bun.SQL` (a named export of the built-in `bun` module, also a global). `check:dep-graph` now runs depcruise and then an AST scan (`check-driver-imports.ts`) that rejects `import { SQL } from "bun"` and `Bun.SQL` outside `packages/storage-postgres`. One allowed file, reason on the line: `src/be/sql-connections.ts` (user-configured script databases, present at the base commit).
 - E2E Postgres runner pre-applies the migration chain (part 6): the reader role needs the tables before the SUT starts. The SUT's own migration run is then a no-op; a fresh-database boot is covered by the contract tests and the manual boot proof (M3 results).
+- Keyed task creation (`POST /api/tasks` with an idempotency key) stays SERIALIZABLE above the 5% target: keyed creation stays SERIALIZABLE; 90% retry rate comes from a scenario that races one key on purpose; approved by Daniel 2026-11-21.
 - JSON key order, approved by Daniel 2026-11-21 (exception to section 10 for these assertions only): for jsonb columns, the byte-order JSON comparison became a parsed strict deep-equal. Scenarios: `divergence-values` (`users.metadata`), `platform-users-lifecycle` (`user_identity_events.afterJson`, avatar change) and `platform-users-access` (`beforeJson`/`afterJson`, role change). No value or key assertion was removed.
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
@@ -450,6 +478,7 @@ See "M1 results / Edited scenarios".
 
 ## New scenarios after M1
 
+- `stress-task-finish` (part 8, order 9444, flow `storage-engine-parity`): concurrent finishes; guards the D7 locks of task finish.
 - `task-live-claim` (part 4, order 9990, runs last): a worker claims a task and keeps a heartbeating session on it, so the strict gate's `task-statuses` surface sees `in_progress`. Closes the base-commit coverage gap without an exclusion.
 
 ## Edited unit tests (D5 import or SQL-text only)
