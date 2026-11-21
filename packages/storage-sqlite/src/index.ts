@@ -15,6 +15,7 @@ import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
+import { SqliteMemoryRepository } from "./repositories/memory";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
@@ -76,6 +77,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       pages: new SqlitePagesRepository(executor),
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
+      memory: new SqliteMemoryRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
@@ -110,3 +112,4 @@ export {
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
 export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";
+export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "./repositories/memory";

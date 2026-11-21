@@ -64,6 +64,7 @@ export function createStorage(client: DbClient, options: { vectorSearch: boolean
 }
 
 // SQLite boot (the synchronous start path of the SQLite engine).
+// The memory full-text backfill statements, for the query-plan test.
 export {
   applySqliteFilePragmas,
   applySqliteTemplatePragmas,
@@ -72,12 +73,14 @@ export {
   backfillScriptRunSources,
   ensureAgentProfileColumns,
   existingUserIdsSync,
+  FTS_SCAN_BATCH_SQL,
   findDefaultOAuthAuthorization,
   hasEncryptedSecretRows,
   isEmptySqliteDatabase,
   type LegacyCredentialBinding,
   listCredentialBindingBlobs,
   listPlaintextOAuthSecrets,
+  MEMORY_ID_BATCH_SQL,
   readAssetKeyAuditDataSync,
   removeLegacyTaskStatusCheck,
   replaceCredentialBindingBlob,

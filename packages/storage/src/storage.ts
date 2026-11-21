@@ -11,6 +11,7 @@ import type { ExtensionsRepository } from "./repositories/extensions";
 import type { KvRepository } from "./repositories/kv";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { McpServersRepository } from "./repositories/mcp-servers";
+import type { MemoryRepository } from "./repositories/memory";
 import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
@@ -45,6 +46,7 @@ export type Repositories = {
   pages: PagesRepository;
   skills: SkillsRepository;
   kv: KvRepository;
+  memory: MemoryRepository;
 };
 
 /**

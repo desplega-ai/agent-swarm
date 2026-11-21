@@ -8,6 +8,7 @@ import { extensionsContract } from "./extensions";
 import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
+import { memoryContract } from "./memory";
 import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
@@ -44,4 +45,5 @@ export function runStorageContract(engine: ContractEngine): void {
   pagesContract(engine);
   skillsContract(engine);
   kvContract(engine);
+  memoryContract(engine);
 }
