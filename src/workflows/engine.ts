@@ -903,7 +903,6 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  let claimedStepId: string | undefined;
   const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
@@ -932,7 +931,6 @@ async function executeStep(
       // executor reconnects to the child run or task it already started (a
       // crash between the insert and the step parking) instead of a second one.
       if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
-        claimedStepId = current.id;
         claimExecutingStep(current.id);
         return {
           existingStep: current,
@@ -987,17 +985,12 @@ async function executeStep(
     }
     // Registered before the transaction commits, so no other walker can see
     // this `running` row without also seeing it owned.
-    claimedStepId = stepId;
     claimExecutingStep(stepId);
     const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
     return { existingStep, stepId, fence, deduped: false };
   };
-  const dedup = await getDbClient()
-    .transaction(claimStep)
-    .catch((err) => {
-      if (claimedStepId) executingSteps.delete(claimedStepId);
-      throw err;
-    });
+  // A claim whose transaction fails gives its mark back (claimExecutingStep).
+  const dedup = await getDbClient().transaction(claimStep);
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
   if ("current" in dedup && dedup.current) {
