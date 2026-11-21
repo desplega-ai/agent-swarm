@@ -1,6 +1,7 @@
-import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "./db";
+import { getSwarmConfigs, upsertSwarmConfig } from "./db";
 import { wasDbCreatedThisBoot } from "./db/runtime";
 import { DB_RETENTION_TABLES } from "./db-retention";
+import { getStorage } from "./storage";
 
 /**
  * New-install seed: store each table's `newInstallDefault` as a global
@@ -20,7 +21,7 @@ export async function seedDbRetentionDefaults(
 ): Promise<string[]> {
   if (!isNewInstall) return [];
   // One transaction: a failure must not leave a partial set that no later boot completes.
-  const seeded = await getDbClient().transaction(async () => {
+  const seeded = await getStorage().transaction(async () => {
     const written: string[] = [];
     for (const table of DB_RETENTION_TABLES) {
       // Presence, not truthiness: an empty or blank env value is the operator's

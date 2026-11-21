@@ -425,5 +425,17 @@ export function agentsContract(engine: ContractEngine): void {
       );
       expect(await repo.firstAgentCreatedAt()).toBe("2000-01-01T00:00:00.000Z");
     });
+
+    test("steering fields by ids and the total agent count", async () => {
+      expect(await repo.listSteeringFieldsByIds([])).toEqual([]);
+      await repo.insertAgent(newAgent({ id: "s2", isLead: true, harnessProvider: "codex" }));
+      await repo.insertAgent(newAgent({ id: "s1" }));
+      await repo.insertAgent(newAgent({ id: "s3" }));
+      expect(await repo.listSteeringFieldsByIds(["s2", "s1", "nope"])).toEqual([
+        { id: "s1", isLead: 0, provider: null, harness_provider: null },
+        { id: "s2", isLead: 1, provider: null, harness_provider: "codex" },
+      ]);
+      expect(await repo.countAllAgents()).toBe(3);
+    });
   });
 }

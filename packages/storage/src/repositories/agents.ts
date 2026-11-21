@@ -359,6 +359,14 @@ export interface AgentsRepository {
   listAgentNames(): Promise<(string | null)[]>;
   /** The earliest agent `createdAt`, or null with no agent. */
   firstAgentCreatedAt(): Promise<string | null>;
+  /** `isLead`, `provider`, `harness_provider` of the agents among `ids`. Ordered by id. */
+  listSteeringFieldsByIds(
+    ids: readonly string[],
+  ): Promise<
+    { id: string; isLead: number; provider: string | null; harness_provider: string | null }[]
+  >;
+  /** Every agent row, extension identities included. */
+  countAllAgents(): Promise<number>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -863,5 +871,26 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
       sql`SELECT MIN("createdAt") AS first FROM agents`,
     );
     return row?.first ?? null;
+  }
+
+  async listSteeringFieldsByIds(
+    ids: readonly string[],
+  ): Promise<
+    { id: string; isLead: number; provider: string | null; harness_provider: string | null }[]
+  > {
+    if (ids.length === 0) return [];
+    return this.db.query<{
+      id: string;
+      isLead: number;
+      provider: string | null;
+      harness_provider: string | null;
+    }>(sql`
+      SELECT id, "isLead", provider, harness_provider FROM agents
+       WHERE id IN (${sqlList(ids)}) ORDER BY id`);
+  }
+
+  async countAllAgents(): Promise<number> {
+    const row = await this.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM agents`);
+    return row?.n ?? 0;
   }
 }

@@ -1,5 +1,5 @@
-import { getDbClient } from "../be/db";
 import { getTrackerSync } from "../be/db-queries/tracker";
+import { getStorage } from "../be/storage";
 import { onTaskStarted } from "../be/task-lifecycle-events";
 import type { AgentTask } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -81,7 +81,7 @@ export function initAzureDevOpsOutbound(): void {
     startedHookRegistered = true;
     onTaskStarted((task) => {
       // startTask/claimTask can emit inside a transaction; a rollback must not reach Azure.
-      if (subscribed) getDbClient().afterCommit(() => handleTaskStarted(task));
+      if (subscribed) getStorage().afterCommit(() => handleTaskStarted(task));
     });
   }
   workflowEventBus.on("task.completed", onTaskCompleted);

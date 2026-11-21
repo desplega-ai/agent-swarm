@@ -21,7 +21,8 @@
  * checker enforces that worker-side paths don't import this file.
  */
 
-import { deleteKv, getDbClient, getKv, incrKv, upsertKv } from "./db";
+import { deleteKv, getKv, incrKv, upsertKv } from "./db";
+import { getStorage } from "./storage";
 
 const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -62,7 +63,7 @@ export async function dismissUnmappedIdentity(
   dismissedBy: string,
 ): Promise<void> {
   const ns = namespace(kind);
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const meta = await getKv(ns, `${externalId}:meta`);
     const count = await getKv(ns, `${externalId}:count`);
     const prior = (await getKv(dismissedNamespace(kind), externalId))?.value as
@@ -92,7 +93,7 @@ export async function dismissUnmappedIdentity(
  */
 export async function restoreUnmappedIdentity(kind: string, externalId: string): Promise<boolean> {
   const ns = namespace(kind);
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const row = await getKv(dismissedNamespace(kind), externalId);
     if (!row) return false;
     await deleteKv(dismissedNamespace(kind), externalId);

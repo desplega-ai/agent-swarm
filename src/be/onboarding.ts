@@ -9,6 +9,7 @@ import {
   getTaskById,
   upsertSwarmConfig,
 } from "./db";
+import { getStorage } from "./storage";
 import { validateConfigValue } from "./swarm-config-guard";
 
 const ONBOARDING_CONFIG_KEY = "onboarding_state";
@@ -432,7 +433,7 @@ function queueTelemetry(events: PendingTelemetry[]): void {
   // may run after it has moved on. Null for an operator (API key) request.
   const actor = { userId: getCurrentRequestUserId() ?? null };
   for (const item of events) {
-    getDbClient().afterCommit(() => telemetry.onboarding(item.event, item.properties, actor));
+    getStorage().afterCommit(() => telemetry.onboarding(item.event, item.properties, actor));
   }
 }
 
@@ -729,16 +730,16 @@ export async function readOrUpdateOnboarding(
   loadSignals: SignalLoader,
   action?: OnboardingAction,
 ): Promise<{ state: OnboardingState; signals: OnboardingSignals }> {
-  const client = getDbClient();
+  const storage = getStorage();
   if (!action) {
-    const read = await client.transaction(async () => await loadAndDerive(loadSignals, []), {
+    const read = await storage.transaction(async () => await loadAndDerive(loadSignals, []), {
       readOnly: true,
     });
     if (!read.dirty)
       return { state: presentState(read.state, read.signals), signals: read.signals };
   }
 
-  return await client.transaction(async () => {
+  return await storage.transaction(async () => {
     const events: PendingTelemetry[] = [];
     const loaded = await loadAndDerive(loadSignals, events);
     const state = loaded.state;
@@ -788,7 +789,7 @@ export async function updateOnboardingMemory(
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
   change?: MemoryConfigChange,
 ): Promise<boolean> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const events: PendingTelemetry[] = [];
     const loaded = await loadState(events);
     let dirty = loaded.dirty;
@@ -841,7 +842,7 @@ export async function updateOnboardingMemory(
 export async function updateOnboardingAiFromCodexDevice(
   result: { status: "complete" } | { status: "failed"; errorClass: OnboardingErrorClass },
 ): Promise<boolean> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const rows = await getSwarmConfigs({ scope: "global", key: ONBOARDING_CONFIG_KEY });
     const stored = rows[0];
     if (!stored) return false;

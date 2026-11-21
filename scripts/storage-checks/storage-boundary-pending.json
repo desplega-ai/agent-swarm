@@ -1,8 +1,4 @@
 {
-  "src/azure-devops/outbound.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/api-drain.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
@@ -18,10 +14,6 @@
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
     "sites": 6
-  },
-  "src/be/db-retention-defaults.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/be/db-retention.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -123,17 +115,13 @@
     "reason": "M2 move: workflows",
     "sites": 4
   },
-  "src/be/design-system.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/events.ts": {
     "reason": "M2 move: integrations",
     "sites": 3
   },
   "src/be/fleet-benchmark-stats.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
+    "sites": 2
   },
   "src/be/harness-model-support.ts": {
     "reason": "M2 move: models",
@@ -369,7 +357,7 @@
   },
   "src/be/steering.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
+    "sites": 2
   },
   "src/be/storage.ts": {
     "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
@@ -382,14 +370,6 @@
   "src/be/task-ui-spec.ts": {
     "reason": "M2 move: tasks",
     "sites": 11
-  },
-  "src/be/telemetry-ingest-anchor.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/be/unmapped-identities.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/be/users.ts": {
     "reason": "M2 move: users and RBAC",
