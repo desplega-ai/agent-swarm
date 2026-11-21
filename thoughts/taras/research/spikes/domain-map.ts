@@ -9,19 +9,37 @@ import { runMigrations } from "../../../../src/be/migrations/runner";
 
 const dir = mkdtempSync(join(tmpdir(), "pg-domain-"));
 const db = new Database(join(dir, "x.sqlite"), { create: true });
-const dbg = console.debug; console.debug = () => {}; const log = console.log;
-try { runMigrations(db); } finally { console.debug = dbg; }
-const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-db.close(); rmSync(dir, { recursive: true, force: true });
+const dbg = console.debug;
+console.debug = () => {};
+const log = console.log;
+try {
+  runMigrations(db);
+} finally {
+  console.debug = dbg;
+}
+const tables = db
+  .query<{ name: string }, []>(
+    "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  )
+  .all()
+  .map((r) => r.name);
+db.close();
+rmSync(dir, { recursive: true, force: true });
 
 const src = (await Bun.file("src/be/db.ts").text()).split("\n");
 const sections: Array<[number, string]> = [];
 for (let i = 0; i < src.length - 2; i++)
-  if (/^\/\/ ={10,}/.test(src[i]) && /^\/\/ \S/.test(src[i + 1]) && /^\/\/ [=-]{10,}/.test(src[i + 2])) sections.push([i + 1, src[i + 1].replace(/^\/\/ /, "")]);
+  if (
+    /^\/\/ ={10,}/.test(src[i]!) &&
+    /^\/\/ \S/.test(src[i + 1]!) &&
+    /^\/\/ [=-]{10,}/.test(src[i + 2]!)
+  )
+    sections.push([i + 1, src[i + 1]!.replace(/^\/\/ /, "")]);
 
 const files: Array<[string, string]> = [];
 for await (const f of new Bun.Glob("src/**/*.{ts,tsx}").scan(".")) {
-  if (f.startsWith("src/tests/") || f.includes(".test.") || f.startsWith("src/be/migrations/")) continue;
+  if (f.startsWith("src/tests/") || f.includes(".test.") || f.startsWith("src/be/migrations/"))
+    continue;
   files.push([f, await Bun.file(f).text()]);
 }
 log("# Repository domain map input (base commit)\n");
@@ -31,7 +49,10 @@ sections.forEach(([l, t], i) => log(`- L${l}-${(sections[i + 1]?.[0] ?? src.leng
 log(`\n## Tables and the files whose SQL names them (${tables.length} tables and views)\n`);
 log("| Table | Files |\n|---|---|");
 for (const t of tables) {
-  const re = new RegExp(`\\b(FROM|JOIN|INTO|UPDATE|TABLE)\\s+"?${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"?\\b`, "i");
+  const re = new RegExp(
+    `\\b(FROM|JOIN|INTO|UPDATE|TABLE)\\s+"?${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"?\\b`,
+    "i",
+  );
   const hits = files.filter(([, x]) => re.test(x)).map(([f]) => f.replace(/^src\//, ""));
   log(`| \`${t}\` | ${hits.join(", ")} |`);
 }

@@ -22,7 +22,9 @@ const sql = new Bun.SQL({
 });
 try {
   await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
-  await sql.unsafe(`CREATE TABLE t ("id" bigserial primary key, "camelCol" text, "flag" boolean, "doc" jsonb, "at" timestamptz, "blob" bytea, "big" bigint, "num" numeric, "emb" vector(3))`);
+  await sql.unsafe(
+    `CREATE TABLE t ("id" bigserial primary key, "camelCol" text, "flag" boolean, "doc" jsonb, "at" timestamptz, "blob" bytea, "big" bigint, "num" numeric, "emb" vector(3))`,
+  );
 
   await check("pool: 8 concurrent pg_sleep in parallel", async () => {
     const t0 = performance.now();
@@ -47,7 +49,10 @@ try {
     return `pid ${pids[0]}`;
   });
   await check("unsafe with $n params + camelCase quoted key preserved", async () => {
-    const r = await sql.unsafe(`INSERT INTO t ("camelCol","flag") VALUES ($1,$2) RETURNING "id","camelCol","flag"`, ["x", true]);
+    const r = await sql.unsafe(
+      `INSERT INTO t ("camelCol","flag") VALUES ($1,$2) RETURNING "id","camelCol","flag"`,
+      ["x", true],
+    );
     return JSON.stringify(r[0]) + ` id type=${typeof r[0].id}`;
   });
   await check("savepoint rollback keeps outer tx usable (unique violation)", async () => {
@@ -72,7 +77,9 @@ try {
   await check("aborted tx without savepoint fails (25P02)", async () => {
     try {
       await sql.begin(async (tx) => {
-        try { await tx.unsafe(`INSERT INTO u VALUES ('a')`); } catch {}
+        try {
+          await tx.unsafe(`INSERT INTO u VALUES ('a')`);
+        } catch {}
         await tx.unsafe(`SELECT 1`);
       });
       throw new Error("no error");
@@ -91,17 +98,24 @@ try {
     // Hazard: a JS string bound straight to a jsonb parameter becomes a jsonb *string* value.
     const [bad] = await sql.unsafe(`SELECT jsonb_typeof($1::jsonb) AS k`, [text]);
     if (bad.k !== "string") throw new Error(`expected double-encode hazard, got ${bad.k}`);
-    const r = await sql.unsafe(`INSERT INTO t ("doc") VALUES ($1::text::jsonb) RETURNING "doc"`, [text]);
+    const r = await sql.unsafe(`INSERT INTO t ("doc") VALUES ($1::text::jsonb) RETURNING "doc"`, [
+      text,
+    ]);
     if (typeof r[0].doc !== "object") throw new Error(`doc is ${typeof r[0].doc}`);
     return `$1::jsonb on string => jsonb string; $1::text::jsonb => ${typeof r[0].doc} ${JSON.stringify(r[0].doc)} (key order lost)`;
   });
   await check("timestamptz returned as Date", async () => {
-    const r = await sql.unsafe(`INSERT INTO t ("at") VALUES ($1) RETURNING "at"`, ["2026-11-20T10:00:00.123Z"]);
+    const r = await sql.unsafe(`INSERT INTO t ("at") VALUES ($1) RETURNING "at"`, [
+      "2026-11-20T10:00:00.123Z",
+    ]);
     const d = r[0].at;
     return `${d?.constructor?.name} ${d instanceof Date ? d.toISOString() : d}`;
   });
   await check("bigint/numeric types", async () => {
-    const r = await sql.unsafe(`INSERT INTO t ("big","num") VALUES ($1,$2) RETURNING "big","num"`, ["9007199254740993", "1.5"]);
+    const r = await sql.unsafe(`INSERT INTO t ("big","num") VALUES ($1,$2) RETURNING "big","num"`, [
+      "9007199254740993",
+      "1.5",
+    ]);
     return `big=${typeof r[0].big}:${r[0].big} num=${typeof r[0].num}:${r[0].num}`;
   });
   await check("NUL byte in text rejected", async () => {
@@ -114,14 +128,27 @@ try {
   });
   await check("pgvector order", async () => {
     await sql.unsafe(`INSERT INTO t ("emb") VALUES ('[1,0,0]'),('[0,1,0]'),('[0.9,0.1,0]')`);
-    const r = await sql.unsafe(`SELECT "emb"::text AS e FROM t WHERE "emb" IS NOT NULL ORDER BY "emb" <=> $1::vector LIMIT 3`, ["[1,0,0]"]);
+    const r = await sql.unsafe(
+      `SELECT "emb"::text AS e FROM t WHERE "emb" IS NOT NULL ORDER BY "emb" <=> $1::vector LIMIT 3`,
+      ["[1,0,0]"],
+    );
     return r.map((x: { e: string }) => x.e).join(" ");
   });
   await check("error codes: FK 23503, check 23514, not-null 23502", async () => {
-    await sql.unsafe(`CREATE TABLE p (id int primary key); CREATE TABLE ch (pid int references p(id), v int check (v > 0) not null)`);
+    await sql.unsafe(
+      `CREATE TABLE p (id int primary key); CREATE TABLE ch (pid int references p(id), v int check (v > 0) not null)`,
+    );
     const codes: string[] = [];
-    for (const q of [`INSERT INTO ch VALUES (1, 1)`, `INSERT INTO p VALUES (1); INSERT INTO ch VALUES (1, -1)`, `INSERT INTO ch VALUES (1, NULL)`]) {
-      try { await sql.unsafe(q); } catch (e) { codes.push(String((e as { errno?: string }).errno)); }
+    for (const q of [
+      `INSERT INTO ch VALUES (1, 1)`,
+      `INSERT INTO p VALUES (1); INSERT INTO ch VALUES (1, -1)`,
+      `INSERT INTO ch VALUES (1, NULL)`,
+    ]) {
+      try {
+        await sql.unsafe(q);
+      } catch (e) {
+        codes.push(String((e as { errno?: string }).errno));
+      }
     }
     return codes.join(",");
   });
@@ -129,11 +156,15 @@ try {
     await sql.unsafe(`CREATE TABLE ctr (id int primary key, n int); INSERT INTO ctr VALUES (1,0)`);
     let errno = "none";
     const run = () =>
-      sql.begin(async (tx) => {
-        const [{ n }] = await tx.unsafe(`SELECT n FROM ctr WHERE id=1`);
-        await Bun.sleep(100);
-        await tx.unsafe(`UPDATE ctr SET n=$1 WHERE id=1`, [n + 1]);
-      }).catch((e) => { errno = String((e as { errno?: string }).errno); });
+      sql
+        .begin(async (tx) => {
+          const [{ n }] = await tx.unsafe(`SELECT n FROM ctr WHERE id=1`);
+          await Bun.sleep(100);
+          await tx.unsafe(`UPDATE ctr SET n=$1 WHERE id=1`, [n + 1]);
+        })
+        .catch((e) => {
+          errno = String((e as { errno?: string }).errno);
+        });
     await Promise.all([run(), run()]);
     return `errno=${errno}`;
   });
@@ -142,11 +173,14 @@ try {
     const [{ ok }] = await r1.unsafe(`SELECT pg_try_advisory_lock(42) AS ok`);
     const r2 = await sql.reserve();
     const [{ ok: ok2 }] = await r2.unsafe(`SELECT pg_try_advisory_lock(42) AS ok`);
-    r1.release(); r2.release();
+    r1.release();
+    r2.release();
     return `first=${ok} second=${ok2}`;
   });
   await check("tsvector search", async () => {
-    const r = await sql.unsafe(`SELECT to_tsvector('simple', 'hello postgres world') @@ plainto_tsquery('simple','postgres') AS m`);
+    const r = await sql.unsafe(
+      `SELECT to_tsvector('simple', 'hello postgres world') @@ plainto_tsquery('simple','postgres') AS m`,
+    );
     return String(r[0].m);
   });
 } finally {
