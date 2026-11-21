@@ -1,5 +1,5 @@
 import type { Lock, Message, QueueEntry, SerializedMessage, StateAdapter } from "chat";
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 
 /**
  * Chat SDK `StateAdapter` backed by the dedicated `chat_*` tables (migration
@@ -19,6 +19,10 @@ function decode<T>(value: string): T {
   return JSON.parse(value) as T;
 }
 
+function chat() {
+  return getStorage().repos.chat;
+}
+
 function expiresAtFor(ttlMs: number | undefined, now: number): number | null {
   return ttlMs ? now + ttlMs : null;
 }
@@ -34,95 +38,59 @@ export class SqliteChatState implements StateAdapter {
   async disconnect(): Promise<void> {}
 
   async subscribe(threadId: string): Promise<void> {
-    await getDbClient().run("INSERT OR IGNORE INTO chat_subscriptions (thread_id) VALUES (?)", [
-      threadId,
-    ]);
+    await chat().subscribe(threadId);
   }
 
   async unsubscribe(threadId: string): Promise<void> {
-    await getDbClient().run("DELETE FROM chat_subscriptions WHERE thread_id = ?", [threadId]);
+    await chat().unsubscribe(threadId);
   }
 
   async isSubscribed(threadId: string): Promise<boolean> {
-    const row = await getDbClient().get<{ one: number }>(
-      "SELECT 1 AS one FROM chat_subscriptions WHERE thread_id = ?",
-      [threadId],
-    );
-    return row !== null;
+    return chat().isSubscribed(threadId);
   }
 
   async acquireLock(threadId: string, ttlMs: number): Promise<Lock | null> {
     const now = Date.now();
     const lock: Lock = { threadId, token: crypto.randomUUID(), expiresAt: now + ttlMs };
-    const result = await getDbClient().run(
-      `INSERT INTO chat_locks (thread_id, token, expires_at) VALUES (?, ?, ?)
-       ON CONFLICT(thread_id) DO UPDATE SET
-         token = excluded.token,
-         expires_at = excluded.expires_at
-       WHERE chat_locks.expires_at <= ?`,
-      [threadId, lock.token, lock.expiresAt, now],
-    );
-    return result.changes > 0 ? lock : null;
+    const taken = await chat().acquireLock(threadId, lock.token, lock.expiresAt, now);
+    return taken ? lock : null;
   }
 
   async extendLock(lock: Lock, ttlMs: number): Promise<boolean> {
     const now = Date.now();
-    const result = await getDbClient().run(
-      "UPDATE chat_locks SET expires_at = ? WHERE thread_id = ? AND token = ? AND expires_at > ?",
-      [now + ttlMs, lock.threadId, lock.token, now],
-    );
-    return result.changes > 0;
+    return chat().extendLock(lock.threadId, lock.token, now + ttlMs, now);
   }
 
   async releaseLock(lock: Lock): Promise<void> {
-    await getDbClient().run("DELETE FROM chat_locks WHERE thread_id = ? AND token = ?", [
-      lock.threadId,
-      lock.token,
-    ]);
+    await chat().releaseLock(lock.threadId, lock.token);
   }
 
   async forceReleaseLock(threadId: string): Promise<void> {
-    await getDbClient().run("DELETE FROM chat_locks WHERE thread_id = ?", [threadId]);
+    await chat().forceReleaseLock(threadId);
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
     const now = Date.now();
-    const row = await getDbClient().get<{ value: string; expires_at: number | null }>(
-      "SELECT value, expires_at FROM chat_state_kv WHERE key = ?",
-      [key],
-    );
+    const row = await chat().getKv(key);
     if (!row) return null;
     if (row.expires_at !== null && row.expires_at <= now) {
-      await getDbClient().run("DELETE FROM chat_state_kv WHERE key = ? AND expires_at <= ?", [
-        key,
-        now,
-      ]);
+      await chat().deleteExpiredKv(key, now);
       return null;
     }
     return decode<T>(row.value);
   }
 
   async set<T = unknown>(key: string, value: T, ttlMs?: number): Promise<void> {
-    await getDbClient().run(
-      `INSERT INTO chat_state_kv (key, value, expires_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at`,
-      [key, encode(value), expiresAtFor(ttlMs, Date.now())],
-    );
+    await chat().setKv(key, encode(value), expiresAtFor(ttlMs, Date.now()));
   }
 
   async setIfNotExists(key: string, value: unknown, ttlMs?: number): Promise<boolean> {
     const now = Date.now();
-    const result = await getDbClient().run(
-      `INSERT INTO chat_state_kv (key, value, expires_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at
-       WHERE chat_state_kv.expires_at IS NOT NULL AND chat_state_kv.expires_at <= ?`,
-      [key, encode(value), expiresAtFor(ttlMs, now), now],
-    );
-    return result.changes > 0;
+    return chat().setKvIfAbsent(key, encode(value), expiresAtFor(ttlMs, now), now);
   }
 
   async delete(key: string): Promise<void> {
-    await getDbClient().run("DELETE FROM chat_state_kv WHERE key = ?", [key]);
+    await chat().deleteKv(key);
   }
 
   async appendToList(
@@ -132,77 +100,44 @@ export class SqliteChatState implements StateAdapter {
   ): Promise<void> {
     const now = Date.now();
     const expiresAt = expiresAtFor(options?.ttlMs, now);
-    await getDbClient().transaction(async (tx) => {
+    const repo = chat();
+    await getStorage().transaction(async () => {
       // An expired list starts over, like the memory adapter.
-      await tx.run(
-        "DELETE FROM chat_lists WHERE key = ? AND expires_at IS NOT NULL AND expires_at <= ?",
-        [key, now],
-      );
-      await tx.run(
-        `INSERT INTO chat_lists (key, seq, value, expires_at)
-         VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_lists WHERE key = ?), ?, ?)`,
-        [key, key, encode(value), expiresAt],
-      );
+      await repo.deleteExpiredList(key, now);
+      await repo.appendListItem(key, encode(value), expiresAt);
       if (options?.maxLength && options.maxLength > 0) {
-        await tx.run(
-          `DELETE FROM chat_lists WHERE key = ? AND seq NOT IN (
-             SELECT seq FROM chat_lists WHERE key = ? ORDER BY seq DESC LIMIT ?
-           )`,
-          [key, key, options.maxLength],
-        );
+        await repo.trimList(key, options.maxLength);
       }
-      await tx.run("UPDATE chat_lists SET expires_at = ? WHERE key = ?", [expiresAt, key]);
+      await repo.setListExpiry(key, expiresAt);
     });
   }
 
   async getList<T = unknown>(key: string): Promise<T[]> {
-    const rows = await getDbClient().query<{ value: string }>(
-      `SELECT value FROM chat_lists
-       WHERE key = ? AND (expires_at IS NULL OR expires_at > ?)
-       ORDER BY seq ASC`,
-      [key, Date.now()],
-    );
-    return rows.map((row) => decode<T>(row.value));
+    const values = await chat().listItems(key, Date.now());
+    return values.map((value) => decode<T>(value));
   }
 
   async enqueue(threadId: string, entry: QueueEntry, maxSize: number): Promise<number> {
-    return await getDbClient().transaction(async (tx) => {
-      await tx.run("INSERT INTO chat_queue (thread_id, entry) VALUES (?, ?)", [
-        threadId,
-        encode(entry),
-      ]);
-      await tx.run(
-        `DELETE FROM chat_queue WHERE thread_id = ? AND id NOT IN (
-           SELECT id FROM chat_queue WHERE thread_id = ? ORDER BY id DESC LIMIT ?
-         )`,
-        [threadId, threadId, Math.max(maxSize, 0)],
-      );
-      const row = await tx.get<{ depth: number }>(
-        "SELECT COUNT(*) AS depth FROM chat_queue WHERE thread_id = ?",
-        [threadId],
-      );
-      return row?.depth ?? 0;
+    const repo = chat();
+    return await getStorage().transaction(async () => {
+      await repo.enqueue(threadId, encode(entry));
+      await repo.trimQueue(threadId, Math.max(maxSize, 0));
+      return repo.queueDepth(threadId);
     });
   }
 
   async dequeue(threadId: string): Promise<QueueEntry | null> {
-    return await getDbClient().transaction(async (tx) => {
-      const row = await tx.get<{ id: number; entry: string }>(
-        "SELECT id, entry FROM chat_queue WHERE thread_id = ? ORDER BY id ASC LIMIT 1",
-        [threadId],
-      );
+    const repo = chat();
+    return await getStorage().transaction(async () => {
+      const row = await repo.firstQueued(threadId);
       if (!row) return null;
-      await tx.run("DELETE FROM chat_queue WHERE id = ?", [row.id]);
+      await repo.deleteQueued(row.id);
       return decode<QueueEntry>(row.entry);
     });
   }
 
   async queueDepth(threadId: string): Promise<number> {
-    const row = await getDbClient().get<{ depth: number }>(
-      "SELECT COUNT(*) AS depth FROM chat_queue WHERE thread_id = ?",
-      [threadId],
-    );
-    return row?.depth ?? 0;
+    return chat().queueDepth(threadId);
   }
 }
 
@@ -211,13 +146,7 @@ export class SqliteChatState implements StateAdapter {
  * now for tests.
  */
 export async function sweepExpired(now: number = Date.now()): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM chat_state_kv WHERE expires_at IS NOT NULL AND expires_at <= ?", [
-      now,
-    ]);
-    await tx.run("DELETE FROM chat_lists WHERE expires_at IS NOT NULL AND expires_at <= ?", [now]);
-    await tx.run("DELETE FROM chat_locks WHERE expires_at <= ?", [now]);
-  });
+  await getStorage().transaction(() => chat().sweepExpired(now));
 }
 
 /**

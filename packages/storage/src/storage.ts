@@ -3,11 +3,13 @@ import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
+import type { ChatRepository } from "./repositories/chat";
 import type { ConfigRepository } from "./repositories/config";
 import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { ModelsRepository } from "./repositories/models";
+import type { OAuthRepository } from "./repositories/oauth";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { TrackersRepository } from "./repositories/trackers";
 
@@ -21,6 +23,8 @@ export type Repositories = {
   mcpServers: McpServersRepository;
   trackers: TrackersRepository;
   events: EventsRepository;
+  chat: ChatRepository;
+  oauth: OAuthRepository;
 };
 
 /**

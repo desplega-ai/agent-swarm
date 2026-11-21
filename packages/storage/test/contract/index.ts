@@ -1,10 +1,12 @@
 import { agentsContract } from "./agents";
+import { chatContract } from "./chat";
 import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { eventsContract } from "./events";
 import { extensionsContract } from "./extensions";
 import { mcpServersContract } from "./mcp-servers";
 import { modelsContract } from "./models";
+import { oauthContract } from "./oauth";
 import { runtimePoolsContract } from "./runtime-pools";
 import { trackersContract } from "./trackers";
 
@@ -20,4 +22,6 @@ export function runStorageContract(engine: ContractEngine): void {
   mcpServersContract(engine);
   trackersContract(engine);
   eventsContract(engine);
+  chatContract(engine);
+  oauthContract(engine);
 }
