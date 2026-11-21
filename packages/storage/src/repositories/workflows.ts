@@ -743,6 +743,8 @@ export interface WorkflowsRepository {
   isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean>;
   /** Workflow count and enabled count. */
   countWorkflows(): Promise<{ total: number; enabled: number | null } | null>;
+  /** Replaces a run's sealed replay context. */
+  setRunContextReplay(runId: string, contextReplay: string): Promise<void>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1694,5 +1696,11 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     return this.db.get(sql`
       SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = ${true} THEN 1 ELSE 0 END) AS enabled
       FROM workflows`);
+  }
+
+  async setRunContextReplay(runId: string, contextReplay: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE workflow_runs SET context_replay = ${contextReplay} WHERE id = ${runId}`,
+    );
   }
 }

@@ -1292,6 +1292,8 @@ export interface TasksRepository {
   // ---- sessions: root chain ----
   /** The chain under `rootTaskId` with each task's `totalCostUsd`, by `createdAt` then insertion order. */
   listRootTaskChain(rootTaskId: string): Promise<TaskRow[]>;
+  /** Tasks the user requested, or in a workflow run the user created; by id. */
+  listTaskIdsRequestedByUser(userId: string): Promise<string[]>;
 }
 
 export abstract class BaseTasksRepository implements TasksRepository {
@@ -3278,4 +3280,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- sessions: root chain ----
 
   abstract listRootTaskChain(rootTaskId: string): Promise<TaskRow[]>;
+
+  async listTaskIdsRequestedByUser(userId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT id FROM agent_tasks WHERE "requestedByUserId" = ${userId}
+      UNION
+      SELECT id FROM agent_tasks
+      WHERE "workflowRunId" IN (SELECT id FROM workflow_runs WHERE created_by = ${userId})
+      ORDER BY id`);
+    return rows.map((row) => row.id);
+  }
 }

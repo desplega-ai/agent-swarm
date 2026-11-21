@@ -1534,5 +1534,25 @@ export function tasksContract(engine: ContractEngine): void {
       expect(ids(chain)).toEqual(["r", "c2", "c1", "g"]);
       expect(chain[0]?.totalCostUsd).toBeNull();
     });
+
+    test("task ids requested by a user, directly or through a workflow run", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u9', 'U')`);
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, "createdAt", "lastUpdatedAt")
+        VALUES ('wf9', 'wf9', '{}', ${T0}, ${T0})`);
+      await storage.executor.run(sql`
+        INSERT INTO workflow_runs (id, "workflowId", status, "startedAt", created_by)
+        VALUES ('run9', 'wf9', 'running', ${T0}, 'u9')`);
+      await seedTask(storage, { id: "z", requestedByUserId: "u9" });
+      await seedTask(storage, { id: "y", workflowRunId: "run9", requestedByUserId: "u9" });
+      await seedTask(storage, { id: "x", workflowRunId: "run9" });
+      await seedTask(storage, { id: "w" });
+      expect(await repo.listTaskIdsRequestedByUser("u9")).toEqual(["x", "y", "z"]);
+      await storage.repos.workflows.setRunContextReplay("run9", "sealed");
+      const run = await storage.executor.get<{ context_replay: string }>(
+        sql`SELECT context_replay FROM workflow_runs WHERE id = 'run9'`,
+      );
+      expect(run?.context_replay).toBe("sealed");
+    });
   });
 }

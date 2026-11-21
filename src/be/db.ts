@@ -9953,15 +9953,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // them. The workflow branch covers roots whose requester was never set.
     const reclassifySeedIds: string[] = replacementUserId
       ? []
-      : (
-          await tx.query<{ id: string }>(
-            `SELECT id FROM agent_tasks WHERE requestedByUserId = ?
-             UNION
-             SELECT id FROM agent_tasks
-             WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE created_by = ?)`,
-            [id, id],
-          )
-        ).map((row) => row.id);
+      : await getStorage().repos.tasks.listTaskIdsRequestedByUser(id);
     // Workflow context is persisted JSON rather than a relational column, but
     // it exposes the same requester identity to downstream interpolation. Keep
     // it consistent with workflow_runs.created_by inside this transaction.
@@ -9986,10 +9978,10 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       if (swarm.requestedByUserId !== id) continue;
       if (replacementUserId) swarm.requestedByUserId = replacementUserId;
       else delete swarm.requestedByUserId;
-      await tx.run("UPDATE workflow_runs SET context_replay = ? WHERE id = ?", [
-        sealJson({ ...context, swarm }),
+      await getStorage().repos.workflows.setRunContextReplay(
         row.id,
-      ]);
+        sealJson({ ...context, swarm }),
+      );
     }
     if (replacementUserId) {
       await tx.run(WORKFLOW_CONTEXT_SET_REQUESTER_SQL, [replacementUserId, id]);
