@@ -17,8 +17,12 @@ import type { Database } from "bun:sqlite";
 import type {
   ApiKeyRef,
   ApiKeyStatusRow,
+  ChannelActivityCursorRow,
   ContextSnapshotRow,
+  InboxItemStateRow,
   RoutingCandidateMatch,
+  ScheduledTaskColumnUpdate,
+  ScheduledTaskRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -3683,52 +3687,44 @@ export async function createChannel(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ChannelRow>(
-    `INSERT INTO channels (id, name, description, type, createdBy, participants, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      name,
-      options?.description ?? null,
-      options?.type ?? "public",
-      options?.createdBy ?? null,
-      JSON.stringify(options?.participants ?? []),
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.messaging.insertChannel({
+    id,
+    name,
+    description: options?.description ?? null,
+    type: options?.type ?? "public",
+    createdBy: options?.createdBy ?? null,
+    participants: JSON.stringify(options?.participants ?? []),
+    createdAt: now,
+  })) as ChannelRow | null;
 
   if (!row) throw new Error("Failed to create channel");
   return rowToChannel(row);
 }
 
 export async function getMessageById(id: string): Promise<ChannelMessage | null> {
-  const row = await getDbClient().get<ChannelMessageRow>(
-    "SELECT * FROM channel_messages WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.messaging.findChannelMessage(id);
   if (!row) return null;
   const agent = row.agentId ? await getAgentById(row.agentId) : null;
   return rowToChannelMessage(row, agent?.name);
 }
 
 export async function getChannelById(id: string): Promise<Channel | null> {
-  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE id = ?", [id]);
+  const row = (await getStorage().repos.messaging.findChannelById(id)) as ChannelRow | null;
   return row ? rowToChannel(row) : null;
 }
 
 export async function getChannelByName(name: string): Promise<Channel | null> {
-  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE name = ?", [name]);
+  const row = (await getStorage().repos.messaging.findChannelByName(name)) as ChannelRow | null;
   return row ? rowToChannel(row) : null;
 }
 
 export async function getAllChannels(): Promise<Channel[]> {
-  const rows = await getDbClient().query<ChannelRow>("SELECT * FROM channels ORDER BY name");
+  const rows = (await getStorage().repos.messaging.listChannels()) as ChannelRow[];
   return rows.map(rowToChannel);
 }
 
 export async function deleteChannel(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM channels WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.deleteChannel(id)) > 0;
 }
 
 export async function postMessage(
@@ -3751,19 +3747,15 @@ export async function postMessage(
     isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content,
   );
 
-  const row = await getDbClient().get<ChannelMessageRow>(
-    `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      channelId,
-      agentId,
-      messageContent,
-      options?.replyToId ?? null,
-      JSON.stringify(options?.mentions ?? []),
-      now,
-    ],
-  );
+  const row = await getStorage().repos.messaging.insertChannelMessage({
+    id,
+    channelId,
+    agentId,
+    content: messageContent,
+    replyToId: options?.replyToId ?? null,
+    mentions: JSON.stringify(options?.mentions ?? []),
+    createdAt: now,
+  });
 
   if (!row) throw new Error("Failed to post message");
 
@@ -3787,7 +3779,7 @@ export async function postMessage(
     }
   }
 
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     for (const mentionedAgentId of new Set(targetMentions)) {
       publishWorkerNudge(mentionedAgentId, { kind: "work" });
     }
@@ -3833,20 +3825,13 @@ export async function postMessage(
         .map((taskId) => `[#${taskId.slice(0, 8)}](task:${taskId})`)
         .join(" ");
       const updatedContent = `${messageContent}\n\n→ Created: ${taskLinks}`;
-      await getDbClient().run(`UPDATE channel_messages SET content = ? WHERE id = ?`, [
-        updatedContent,
-        id,
-      ]);
+      await getStorage().repos.messaging.setChannelMessageContent(id, updatedContent);
     }
   }
 
   // Get agent name for the response - re-fetch to get updated content
   const agent = agentId ? await getAgentById(agentId) : null;
-  const updatedRow = await getDbClient().get<ChannelMessageRow>(
-    `SELECT m.*, a.name as agentName FROM channel_messages m
-       LEFT JOIN agents a ON m.agentId = a.id WHERE m.id = ?`,
-    [id],
-  );
+  const updatedRow = await getStorage().repos.messaging.findChannelMessageWithAgent(id);
   return rowToChannelMessage(updatedRow ?? row, agent?.name);
 }
 
@@ -3858,48 +3843,21 @@ export async function getChannelMessages(
     before?: string;
   },
 ): Promise<ChannelMessage[]> {
-  let query =
-    "SELECT m.*, a.name as agentName FROM channel_messages m LEFT JOIN agents a ON m.agentId = a.id WHERE m.channelId = ?";
-  const params: (string | number)[] = [channelId];
-
-  if (options?.since) {
-    query += " AND m.createdAt > ?";
-    params.push(options.since);
-  }
-
-  if (options?.before) {
-    query += " AND m.createdAt < ?";
-    params.push(options.before);
-  }
-
-  query += " ORDER BY m.createdAt DESC";
-
-  if (options?.limit) {
-    query += " LIMIT ?";
-    params.push(options.limit);
-  }
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const rows = await getStorage().repos.messaging.listChannelMessages(channelId, {
+    since: options?.since,
+    before: options?.before,
+    limit: options?.limit,
+  });
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined)).reverse(); // Return in chronological order
 }
 
 export async function updateReadState(agentId: string, channelId: string): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO channel_read_state (agentId, channelId, lastReadAt)
-     VALUES (?, ?, ?)
-     ON CONFLICT(agentId, channelId) DO UPDATE SET lastReadAt = ?`,
-    [agentId, channelId, now, now],
-  );
+  await getStorage().repos.messaging.setChannelLastRead(agentId, channelId, now);
 }
 
 export async function getLastReadAt(agentId: string, channelId: string): Promise<string | null> {
-  const result = await getDbClient().get<{ lastReadAt: string }>(
-    "SELECT lastReadAt FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-    [agentId, channelId],
-  );
+  const result = await getStorage().repos.messaging.findChannelReadState(agentId, channelId);
   return result?.lastReadAt ?? null;
 }
 
@@ -3909,21 +3867,7 @@ export async function getUnreadMessages(
 ): Promise<ChannelMessage[]> {
   const lastReadAt = await getLastReadAt(agentId, channelId);
 
-  let query = `SELECT m.*, a.name as agentName FROM channel_messages m
-               LEFT JOIN agents a ON m.agentId = a.id
-               WHERE m.channelId = ?`;
-  const params: string[] = [channelId];
-
-  if (lastReadAt) {
-    query += " AND m.createdAt > ?";
-    params.push(lastReadAt);
-  }
-
-  query += " ORDER BY m.createdAt ASC";
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const rows = await getStorage().repos.messaging.listChannelMessagesSince(channelId, lastReadAt);
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
@@ -3931,29 +3875,14 @@ export async function getMentionsForAgent(
   agentId: string,
   options?: { unreadOnly?: boolean; channelId?: string },
 ): Promise<ChannelMessage[]> {
-  let query = `SELECT m.*, a.name as agentName FROM channel_messages m
-               LEFT JOIN agents a ON m.agentId = a.id
-               WHERE m.mentions LIKE ?`;
-  const params: string[] = [`%"${agentId}"%`];
-
-  if (options?.channelId) {
-    query += " AND m.channelId = ?";
-    params.push(options.channelId);
-
-    if (options?.unreadOnly) {
-      const lastReadAt = await getLastReadAt(agentId, options.channelId);
-      if (lastReadAt) {
-        query += " AND m.createdAt > ?";
-        params.push(lastReadAt);
-      }
-    }
-  }
-
-  query += " ORDER BY m.createdAt DESC LIMIT 50";
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const since =
+    options?.channelId && options.unreadOnly
+      ? await getLastReadAt(agentId, options.channelId)
+      : null;
+  const rows = await getStorage().repos.messaging.listMentionMessages(agentId, {
+    channelId: options?.channelId,
+    since,
+  });
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
@@ -3978,17 +3907,14 @@ export interface InboxSummary {
 }
 
 export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
   const channels = await getAllChannels();
   let unreadCount = 0;
   let mentionsCount = 0;
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = await client.get<{ lastReadAt: string; processing_since: string | null }>(
-      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      [agentId, channel.id],
-    );
+    const readState = await messaging.findChannelReadState(agentId, channel.id);
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -3997,23 +3923,11 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
     // Skip channels that are already being processed
     if (isProcessing) continue;
 
-    const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
-
     // Count unread (excluding own messages)
-    const channelUnread = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND (m.agentId != '${agentId}' OR m.agentId IS NULL) ${baseCondition}`,
-      [channel.id],
-    );
-    unreadCount += channelUnread?.count ?? 0;
+    unreadCount += await messaging.countUnreadChannelMessages(channel.id, agentId, lastReadAt);
 
     // Count mentions in unread
-    const channelMentions = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      [channel.id, `%"${agentId}"%`],
-    );
-    mentionsCount += channelMentions?.count ?? 0;
+    mentionsCount += await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
   }
 
   const tasks = getStorage().repos.tasks;
@@ -4071,20 +3985,14 @@ export async function claimMentions(
   opts?: { dryRun?: boolean },
 ): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
   const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
     [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = await client.get<{
-      lastReadAt: string | null;
-      processing_since: string | null;
-    }>(
-      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      [agentId, channel.id],
-    );
+    const readState = await messaging.findChannelReadState(agentId, channel.id);
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -4093,44 +4001,33 @@ export async function claimMentions(
     // Skip channels that are already being processed
     if (isProcessing) continue;
 
-    const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
-
     // Check if there are unread mentions
-    const mentionCountRow = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      [channel.id, `%"${agentId}"%`],
-    );
+    const mentionCount = await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
 
-    if (mentionCountRow && mentionCountRow.count > 0) {
+    if (mentionCount > 0) {
       // dryRun: report what a claim would take, without the write (idle-poll probe).
       if (opts?.dryRun) {
         claimedChannels.push({
           channelId: channel.id,
           lastReadAt,
-          mentionsCount: mentionCountRow.count,
+          mentionsCount: mentionCount,
         });
         continue;
       }
       // Atomically claim mentions for this channel
-      const result = await client.run(
-        `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(agentId, channelId) DO UPDATE SET
-           processing_since = CASE
-             WHEN processing_since IS NULL THEN ?
-             ELSE processing_since
-           END
-         WHERE processing_since IS NULL`,
-        [agentId, channel.id, lastReadAt || new Date(0).toISOString(), now, now],
+      const changes = await messaging.claimChannelMentions(
+        agentId,
+        channel.id,
+        lastReadAt || new Date(0).toISOString(),
+        now,
       );
 
       // Only add to claimed list if we actually claimed it (not already processing)
-      if (result.changes > 0) {
+      if (changes > 0) {
         claimedChannels.push({
           channelId: channel.id,
           lastReadAt,
-          mentionsCount: mentionCountRow.count,
+          mentionsCount: mentionCount,
         });
       }
     }
@@ -4149,12 +4046,7 @@ export async function releaseMentionProcessing(
 ): Promise<void> {
   if (channelIds.length === 0) return;
 
-  const placeholders = channelIds.map(() => "?").join(",");
-  await getDbClient().run(
-    `UPDATE channel_read_state SET processing_since = NULL
-     WHERE agentId = ? AND channelId IN (${placeholders})`,
-    [agentId, ...channelIds],
-  );
+  await getStorage().repos.messaging.releaseChannelProcessing(agentId, channelIds);
 }
 
 /**
@@ -4163,13 +4055,7 @@ export async function releaseMentionProcessing(
 export async function releaseStaleMentionProcessing(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE channel_read_state SET processing_since = NULL
-     WHERE processing_since IS NOT NULL AND processing_since < ?`,
-    [cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.messaging.releaseChannelProcessingBefore(cutoffTime);
 }
 
 // ============================================================================
@@ -5291,40 +5177,35 @@ export async function createInboxMessage(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<InboxMessageRow>(
-    `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      agentId,
-      scrubSecrets(content),
-      options?.source ?? "slack",
-      options?.slackChannelId ?? null,
-      options?.slackThreadTs ?? null,
-      options?.slackUserId ?? null,
-      options?.matchedText == null ? null : scrubSecrets(options.matchedText),
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.messaging.insertInboxMessage({
+    id,
+    agentId,
+    content: scrubSecrets(content),
+    source: options?.source ?? "slack",
+    status: "unread",
+    slackChannelId: options?.slackChannelId ?? null,
+    slackThreadTs: options?.slackThreadTs ?? null,
+    slackUserId: options?.slackUserId ?? null,
+    matchedText: options?.matchedText == null ? null : scrubSecrets(options.matchedText),
+    delegatedToTaskId: null,
+    responseText: null,
+    createdAt: now,
+    lastUpdatedAt: now,
+  })) as InboxMessageRow | null;
 
   if (!row) throw new Error("Failed to create inbox message");
   return rowToInboxMessage(row);
 }
 
 export async function getInboxMessageById(id: string): Promise<InboxMessage | null> {
-  const row = await getDbClient().get<InboxMessageRow>(
-    "SELECT * FROM inbox_messages WHERE id = ?",
-    [id],
-  );
+  const row = (await getStorage().repos.messaging.findInboxMessage(id)) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
 export async function getUnreadInboxMessages(agentId: string): Promise<InboxMessage[]> {
-  const rows = await getDbClient().query<InboxMessageRow>(
-    "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
-    [agentId],
-  );
+  const rows = (await getStorage().repos.messaging.listUnreadInboxMessages(
+    agentId,
+  )) as InboxMessageRow[];
   return rows.map(rowToInboxMessage);
 }
 
@@ -5338,13 +5219,10 @@ export async function claimInboxMessages(
   limit: number = 5,
 ): Promise<InboxMessage[]> {
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
 
   // Get IDs of unread messages to claim
-  const unreadRows = await client.query<{ id: string }>(
-    "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
-    [agentId, limit],
-  );
+  const unreadRows = await messaging.listUnreadInboxMessages(agentId, limit);
   const unreadIds = unreadRows.map((row) => row.id);
 
   if (unreadIds.length === 0) {
@@ -5352,22 +5230,17 @@ export async function claimInboxMessages(
   }
 
   // Atomically update status to 'processing' for these specific IDs
-  const placeholders = unreadIds.map(() => "?").join(",");
-  const rows = await client.query<InboxMessageRow>(
-    `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
-       WHERE id IN (${placeholders}) AND status = 'unread' RETURNING *`,
-    [now, ...unreadIds],
-  );
+  const rows = (await messaging.markInboxMessagesProcessing(unreadIds, now)) as InboxMessageRow[];
 
   return rows.map(rowToInboxMessage);
 }
 
 export async function markInboxMessageRead(id: string): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    [now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageRead(
+    id,
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5376,10 +5249,11 @@ export async function markInboxMessageResponded(
   responseText: string,
 ): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [scrubSecrets(responseText), now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageResponded(
+    id,
+    scrubSecrets(responseText),
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5388,10 +5262,11 @@ export async function markInboxMessageDelegated(
   taskId: string,
 ): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [taskId, now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageDelegated(
+    id,
+    taskId,
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5404,13 +5279,7 @@ export async function releaseStaleProcessingInbox(timeoutMinutes: number = 30): 
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE inbox_messages SET status = 'unread', lastUpdatedAt = ?
-     WHERE status = 'processing' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.messaging.releaseInboxProcessingBefore(cutoffTime, now);
 }
 
 // ============================================================================
@@ -5454,19 +5323,8 @@ export interface ConcurrentContext {
 export async function getConcurrentContext(readableBy?: {
   userId: string | null;
 }): Promise<ConcurrentContext> {
-  const client = getDbClient();
-
   // 1. Inbox messages currently being processed (status = 'processing')
-  const processingInboxMessages = await client.query<{
-    id: string;
-    content: string;
-    source: string;
-    slackChannelId: string | null;
-    slackThreadTs: string | null;
-    createdAt: string;
-  }>(
-    "SELECT id, content, source, slackChannelId, slackThreadTs, createdAt FROM inbox_messages WHERE status = 'processing' ORDER BY createdAt DESC",
-  );
+  const processingInboxMessages = await getStorage().repos.messaging.listProcessingInboxMessages();
 
   // 2. Tasks created in the last 5 minutes by lead agents
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -5490,48 +5348,6 @@ export async function getConcurrentContext(readableBy?: {
 // ============================================================================
 // Scheduled Task Queries
 // ============================================================================
-
-type ScheduledTaskRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  cronExpression: string | null;
-  intervalMs: number | null;
-  taskTemplate: string | null;
-  taskType: string | null;
-  tags: string | null;
-  priority: number;
-  targetAgentId: string | null;
-  enabled: number;
-  lastRunAt: string | null;
-  nextRunAt: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  parentTaskId: string | null;
-  requestedDelayMs: number | null;
-  requestedRunAt: string | null;
-  timezone: string;
-  consecutiveErrors: number | null;
-  lastErrorAt: string | null;
-  lastErrorMessage: string | null;
-  model: string | null;
-  modelTier: string | null;
-  profile: string | null;
-  modelGroup?: string | null;
-  scheduleType: string;
-  targetType: string;
-  workflowId: string | null;
-  scriptName: string | null;
-  scriptArgs: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 // ── List-endpoint slimming helpers ──────────────────────────────────────────
 // List endpoints ship slim rows by default; heavy text fields are replaced
@@ -5627,85 +5443,30 @@ export async function getScheduledTasks(
   filters?: ScheduledTaskFilters,
   opts?: { slim?: boolean },
 ): Promise<ScheduledTask[] | ScheduledTaskSummary[]> {
-  let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
-  const params: (string | number)[] = [];
-
-  if (filters?.enabled !== undefined) {
-    query += " AND enabled = ?";
-    params.push(filters.enabled ? 1 : 0);
-  }
-
-  if (filters?.name) {
-    query += " AND name LIKE ?";
-    params.push(`%${filters.name}%`);
-  }
-
-  if (filters?.scheduleType) {
-    query += " AND scheduleType = ?";
-    params.push(filters.scheduleType);
-  }
-
-  if (filters?.targetType) {
-    query += " AND targetType = ?";
-    params.push(filters.targetType);
-  }
-
-  if (filters?.workflowId) {
-    query += " AND workflowId = ?";
-    params.push(filters.workflowId);
-  }
-
-  if (filters?.scriptName) {
-    query += " AND scriptName = ?";
-    params.push(filters.scriptName);
-  }
-
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-
-  if (filters?.consecutiveErrorsMin !== undefined) {
-    query += " AND consecutiveErrors >= ?";
-    params.push(filters.consecutiveErrorsMin);
-  }
-
-  if (filters?.lastRunStatus === "failed") {
-    query += " AND consecutiveErrors > 0";
-  } else if (filters?.lastRunStatus === "succeeded") {
-    query += " AND lastRunAt IS NOT NULL AND consecutiveErrors = 0";
-  }
-
-  if (filters?.hideCompleted !== false) {
-    query += " AND NOT (scheduleType = 'one_time' AND enabled = 0)";
-  }
-
-  query += " ORDER BY lastRunAt IS NULL ASC, lastRunAt DESC, lastUpdatedAt DESC";
-  if (filters?.limit !== undefined) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-
-  const rows = await getDbClient().query<ScheduledTaskRow>(query, params);
+  const rows = await getStorage().repos.schedules.listScheduledTasks({
+    enabled: filters?.enabled,
+    name: filters?.name,
+    scheduleType: filters?.scheduleType,
+    targetType: filters?.targetType,
+    workflowId: filters?.workflowId,
+    scriptName: filters?.scriptName,
+    key: filters?.key ? normalizeAssetKey(filters.key) : undefined,
+    keyPattern: filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : undefined,
+    consecutiveErrorsMin: filters?.consecutiveErrorsMin,
+    lastRunStatus: filters?.lastRunStatus,
+    hideCompleted: filters?.hideCompleted !== false,
+    limit: filters?.limit,
+  });
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
 }
 
 export async function getScheduledTaskById(id: string): Promise<ScheduledTask | null> {
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    "SELECT * FROM scheduled_tasks WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.schedules.findScheduledTaskById(id);
   return row ? rowToScheduledTask(row) : null;
 }
 
 export async function getScheduledTaskByName(name: string): Promise<ScheduledTask | null> {
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    "SELECT * FROM scheduled_tasks WHERE name = ?",
-    [name],
-  );
+  const row = await getStorage().repos.schedules.findScheduledTaskByName(name);
   return row ? rowToScheduledTask(row) : null;
 }
 
@@ -5752,54 +5513,43 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    `INSERT INTO scheduled_tasks (
-        id, "key", name, description, cronExpression, intervalMs, taskTemplate,
-        taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
-        timezone, model, modelTier, profile, modelGroup, scheduleType,
-        targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
-        createdAt, lastUpdatedAt,
-        created_by, updated_by, updatedByAgentId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
-      data.name,
-      data.description == null ? null : scrubSecrets(data.description),
-      data.cronExpression ?? null,
-      data.intervalMs ?? null,
-      data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
-      data.taskType ?? null,
-      JSON.stringify(data.tags ?? []),
-      data.priority ?? 50,
-      data.targetAgentId ?? null,
-      data.enabled !== false ? 1 : 0,
-      data.nextRunAt ?? null,
-      data.createdByAgentId ?? null,
-      data.parentTaskId ?? null,
-      data.requestedDelayMs ?? null,
-      data.requestedRunAt ?? null,
-      data.timezone ?? "UTC",
-      data.model ?? null,
-      data.modelTier ?? null,
-      data.profile ?? null,
-      data.modelGroup ?? null,
-      data.scheduleType ?? "recurring",
-      data.targetType ?? "agent-task",
-      data.workflowId ?? null,
-      data.scriptName ?? null,
-      data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
-      JSON.stringify(data.params ?? {}),
-      JSON.stringify(data.requiredParams ?? []),
-      JSON.stringify(data.requires ?? []),
-      now,
-      now,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-      data.createdByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.schedules.insertScheduledTask({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
+    name: data.name,
+    description: data.description == null ? null : scrubSecrets(data.description),
+    cronExpression: data.cronExpression ?? null,
+    intervalMs: data.intervalMs ?? null,
+    taskTemplate: data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
+    taskType: data.taskType ?? null,
+    tags: JSON.stringify(data.tags ?? []),
+    priority: data.priority ?? 50,
+    targetAgentId: data.targetAgentId ?? null,
+    enabled: data.enabled !== false,
+    nextRunAt: data.nextRunAt ?? null,
+    createdByAgentId: data.createdByAgentId ?? null,
+    parentTaskId: data.parentTaskId ?? null,
+    requestedDelayMs: data.requestedDelayMs ?? null,
+    requestedRunAt: data.requestedRunAt ?? null,
+    timezone: data.timezone ?? "UTC",
+    model: data.model ?? null,
+    modelTier: data.modelTier ?? null,
+    profile: data.profile ?? null,
+    modelGroup: data.modelGroup ?? null,
+    scheduleType: data.scheduleType ?? "recurring",
+    targetType: data.targetType ?? "agent-task",
+    workflowId: data.workflowId ?? null,
+    scriptName: data.scriptName ?? null,
+    scriptArgs: data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
+    params: JSON.stringify(data.params ?? {}),
+    requiredParams: JSON.stringify(data.requiredParams ?? []),
+    requires: JSON.stringify(data.requires ?? []),
+    createdAt: now,
+    lastUpdatedAt: now,
+    created_by: data.createdBy ?? null,
+    updated_by: data.createdBy ?? null,
+    updatedByAgentId: data.createdByAgentId ?? null,
+  });
 
   if (!row) throw new Error("Failed to create scheduled task");
   return rowToScheduledTask(row);
@@ -5848,169 +5598,69 @@ export async function updateScheduledTask(
   id: string,
   data: UpdateScheduledTaskData,
 ): Promise<ScheduledTask | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
+  const opt = <T, R>(value: T | undefined, map: (v: T) => R): R | undefined =>
+    value === undefined ? undefined : map(value);
+  const scrub = (value: string | null) => (value == null ? null : scrubSecrets(value));
+  const update: ScheduledTaskColumnUpdate = {
+    key: opt(data.key, normalizeAssetKey),
+    name: data.name,
+    description: opt(data.description, scrub),
+    cronExpression: data.cronExpression,
+    intervalMs: data.intervalMs,
+    taskTemplate: opt(data.taskTemplate, scrub),
+    taskType: data.taskType,
+    tags: opt(data.tags, (tags) => JSON.stringify(tags)),
+    priority: data.priority,
+    targetAgentId: data.targetAgentId,
+    enabled: data.enabled,
+    lastRunAt: data.lastRunAt,
+    nextRunAt: data.nextRunAt,
+    timezone: data.timezone,
+    consecutiveErrors: data.consecutiveErrors,
+    lastErrorAt: data.lastErrorAt,
+    lastErrorMessage: opt(data.lastErrorMessage, scrub),
+    model: data.model,
+    modelTier: data.modelTier,
+    profile: data.profile,
+    modelGroup: data.modelGroup,
+    scheduleType: data.scheduleType,
+    targetType: data.targetType,
+    workflowId: data.workflowId,
+    scriptName: data.scriptName,
+    scriptArgs: opt(data.scriptArgs, (args) => (args === null ? null : JSON.stringify(args))),
+    params: opt(data.params, (p) => JSON.stringify(p)),
+    requiredParams: opt(data.requiredParams, (p) => JSON.stringify(p)),
+    requires: opt(data.requires, (r) => JSON.stringify(r)),
+    updated_by: data.updatedBy,
+    updatedByAgentId: data.updatedByAgentId,
+  };
 
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-
-  if (data.name !== undefined) {
-    updates.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description == null ? null : scrubSecrets(data.description));
-  }
-  if (data.cronExpression !== undefined) {
-    updates.push("cronExpression = ?");
-    params.push(data.cronExpression);
-  }
-  if (data.intervalMs !== undefined) {
-    updates.push("intervalMs = ?");
-    params.push(data.intervalMs);
-  }
-  if (data.taskTemplate !== undefined) {
-    updates.push("taskTemplate = ?");
-    params.push(data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate));
-  }
-  if (data.taskType !== undefined) {
-    updates.push("taskType = ?");
-    params.push(data.taskType);
-  }
-  if (data.tags !== undefined) {
-    updates.push("tags = ?");
-    params.push(JSON.stringify(data.tags));
-  }
-  if (data.priority !== undefined) {
-    updates.push("priority = ?");
-    params.push(data.priority);
-  }
-  if (data.targetAgentId !== undefined) {
-    updates.push("targetAgentId = ?");
-    params.push(data.targetAgentId);
-  }
-  if (data.enabled !== undefined) {
-    updates.push("enabled = ?");
-    params.push(data.enabled ? 1 : 0);
-  }
-  if (data.lastRunAt !== undefined) {
-    updates.push("lastRunAt = ?");
-    params.push(data.lastRunAt);
-  }
-  if (data.nextRunAt !== undefined) {
-    updates.push("nextRunAt = ?");
-    params.push(data.nextRunAt);
-  }
-  if (data.timezone !== undefined) {
-    updates.push("timezone = ?");
-    params.push(data.timezone);
-  }
-  if (data.consecutiveErrors !== undefined) {
-    updates.push("consecutiveErrors = ?");
-    params.push(data.consecutiveErrors);
-  }
-  if (data.lastErrorAt !== undefined) {
-    updates.push("lastErrorAt = ?");
-    params.push(data.lastErrorAt);
-  }
-  if (data.lastErrorMessage !== undefined) {
-    updates.push("lastErrorMessage = ?");
-    params.push(data.lastErrorMessage == null ? null : scrubSecrets(data.lastErrorMessage));
-  }
-  if (data.model !== undefined) {
-    updates.push("model = ?");
-    params.push(data.model);
-  }
-  if (data.modelTier !== undefined) {
-    updates.push("modelTier = ?");
-    params.push(data.modelTier);
-  }
-  if (data.profile !== undefined) {
-    updates.push("profile = ?");
-    params.push(data.profile);
-  }
-  if (data.modelGroup !== undefined) {
-    updates.push("modelGroup = ?");
-    params.push(data.modelGroup);
-  }
-  if (data.scheduleType !== undefined) {
-    updates.push("scheduleType = ?");
-    params.push(data.scheduleType);
-  }
-  if (data.targetType !== undefined) {
-    updates.push("targetType = ?");
-    params.push(data.targetType);
-  }
-  if (data.workflowId !== undefined) {
-    updates.push("workflowId = ?");
-    params.push(data.workflowId);
-  }
-  if (data.scriptName !== undefined) {
-    updates.push("scriptName = ?");
-    params.push(data.scriptName);
-  }
-  if (data.scriptArgs !== undefined) {
-    updates.push("scriptArgs = ?");
-    params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
-  }
-  if (data.params !== undefined) {
-    updates.push("params = ?");
-    params.push(JSON.stringify(data.params));
-  }
-  if (data.requiredParams !== undefined) {
-    updates.push("requiredParams = ?");
-    params.push(JSON.stringify(data.requiredParams));
-  }
-  if (data.requires !== undefined) {
-    updates.push("requires = ?");
-    params.push(JSON.stringify(data.requires));
-  }
-  if (data.updatedBy !== undefined) {
-    updates.push("updated_by = ?");
-    params.push(data.updatedBy);
-  }
-  if (data.updatedByAgentId !== undefined) {
-    updates.push("updatedByAgentId = ?");
-    params.push(data.updatedByAgentId);
-  }
-
-  if (updates.length === 0) {
+  if (Object.values(update).every((value) => value === undefined)) {
     return getScheduledTaskById(id);
   }
 
-  updates.push("lastUpdatedAt = ?");
-  params.push(data.lastUpdatedAt ?? new Date().toISOString());
-
-  params.push(id);
-
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const row = await getStorage().repos.schedules.updateScheduledTask(
+    id,
+    update,
+    data.lastUpdatedAt ?? new Date().toISOString(),
   );
 
   return row ? rowToScheduledTask(row) : null;
 }
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     // An unfired deferral is the only continuation of a suppressed completion.
     // Read under the delete's write lock so a concurrent wake cannot be missed.
-    const deferred = await tx.get<{ parentTaskId: string }>(
-      `SELECT parentTaskId FROM scheduled_tasks
-       WHERE id = ? AND taskType = 'deferred' AND parentTaskId IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM agent_tasks WHERE scheduleId = scheduled_tasks.id)`,
-      [id],
-    );
+    const deferredParentId = await storage.repos.schedules.findUnfiredDeferralParent(id);
     // Favorites carry no FK to the entity; drop every user's star with it.
-    await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
-    const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
-    if (result.changes > 0 && deferred) {
-      getDbClient().afterCommit(async () => {
+    await storage.repos.users.deleteFavoritesOfItem("schedule", id);
+    const deleted = await storage.repos.schedules.deleteScheduledTask(id);
+    if (deleted > 0 && deferredParentId) {
+      storage.afterCommit(async () => {
         try {
-          const parent = await getTaskById(deferred.parentTaskId);
+          const parent = await getTaskById(deferredParentId);
           if (!parent?.deferredAt) return;
           const { createWorkerTaskFollowUp } = await import("../tasks/worker-follow-up");
           await createWorkerTaskFollowUp({
@@ -6026,7 +5676,7 @@ export async function deleteScheduledTask(id: string): Promise<boolean> {
         }
       });
     }
-    return result.changes > 0;
+    return deleted > 0;
   });
 }
 
@@ -6036,12 +5686,7 @@ export async function deleteScheduledTask(id: string): Promise<boolean> {
  */
 export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<ScheduledTaskRow>(
-    `SELECT * FROM scheduled_tasks
-       WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?
-       ORDER BY nextRunAt ASC`,
-    [now],
-  );
+  const rows = await getStorage().repos.schedules.listDueScheduledTasks(now);
   return rows.map(rowToScheduledTask);
 }
 
@@ -6547,27 +6192,17 @@ export interface AgentMailInboxMapping {
 export async function getAgentMailInboxMapping(
   inboxId: string,
 ): Promise<AgentMailInboxMapping | null> {
-  return (
-    (await getDbClient().get<AgentMailInboxMapping>(
-      "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
-      [inboxId],
-    )) ?? null
-  );
+  return await getStorage().repos.messaging.findAgentMailInboxMapping(inboxId);
 }
 
 export async function getAgentMailInboxMappingsByAgent(
   agentId: string,
 ): Promise<AgentMailInboxMapping[]> {
-  return await getDbClient().query<AgentMailInboxMapping>(
-    "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
-  );
+  return await getStorage().repos.messaging.listAgentMailInboxMappings(agentId);
 }
 
 export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapping[]> {
-  return await getDbClient().query<AgentMailInboxMapping>(
-    "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
-  );
+  return await getStorage().repos.messaging.listAgentMailInboxMappings();
 }
 
 /**
@@ -6583,23 +6218,17 @@ export async function createAgentMailInboxMapping(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentMailInboxMapping>(
-    `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
-         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
-       RETURNING *`,
-    [id, inboxId, agentId, inboxEmail ?? null, now],
-  );
-
-  return row ?? null;
+  return await getStorage().repos.messaging.upsertAgentMailInboxMapping({
+    id,
+    inboxId,
+    agentId,
+    inboxEmail: inboxEmail ?? null,
+    createdAt: now,
+  });
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?", [
-    inboxId,
-  ]);
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.deleteAgentMailInboxMapping(inboxId)) > 0;
 }
 
 /**
@@ -8750,12 +8379,6 @@ export async function checkoutPromptTemplate(
 
 // ─── Channel Activity Cursors ─────────────────────────────────────────────────
 
-type ChannelActivityCursorRow = {
-  channelId: string;
-  lastSeenTs: string;
-  updatedAt: string;
-};
-
 export interface ChannelActivityCursor {
   channelId: string;
   lastSeenTs: string;
@@ -8771,19 +8394,14 @@ function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActiv
 }
 
 export async function getAllChannelActivityCursors(): Promise<ChannelActivityCursor[]> {
-  const rows = await getDbClient().query<ChannelActivityCursorRow>(
-    "SELECT * FROM channel_activity_cursors",
-  );
+  const rows = await getStorage().repos.messaging.listChannelActivityCursors();
   return rows.map(rowToChannelActivityCursor);
 }
 
 export async function getChannelActivityCursor(
   channelId: string,
 ): Promise<ChannelActivityCursor | null> {
-  const row = await getDbClient().get<ChannelActivityCursorRow>(
-    "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
-    [channelId],
-  );
+  const row = await getStorage().repos.messaging.findChannelActivityCursor(channelId);
   return row ? rowToChannelActivityCursor(row) : null;
 }
 
@@ -8791,12 +8409,7 @@ export async function upsertChannelActivityCursor(
   channelId: string,
   lastSeenTs: string,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
-       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
-    [channelId, lastSeenTs],
-  );
+  await getStorage().repos.messaging.upsertChannelActivityCursor(channelId, lastSeenTs);
 }
 
 // ============================================================================
@@ -11359,21 +10972,6 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
 // Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
 // ============================================================================
 
-interface InboxItemStateRow {
-  id: string;
-  userId: string;
-  itemType: string;
-  itemId: string;
-  status: string;
-  snoozeUntil: string | null;
-  dismissedAt: string | null;
-  doneAt: string | null;
-  readAt: string | null;
-  lastReadAt: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-}
-
 function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
   return {
     id: row.id,
@@ -11396,23 +10994,7 @@ export async function listInboxState(opts: {
   status?: InboxItemStatus;
   itemType?: InboxItemType;
 }): Promise<InboxItemState[]> {
-  const conditions: string[] = ["userId = ?"];
-  const params: string[] = [opts.userId];
-
-  if (opts.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts.itemType) {
-    conditions.push("itemType = ?");
-    params.push(opts.itemType);
-  }
-
-  const where = conditions.join(" AND ");
-  const rows = await getDbClient().query<InboxItemStateRow>(
-    `SELECT * FROM inbox_item_state WHERE ${where} ORDER BY lastUpdatedAt DESC`,
-    params,
-  );
+  const rows = await getStorage().repos.messaging.listInboxItemStates(opts);
   return rows.map(rowToInboxItemState);
 }
 
@@ -11435,36 +11017,25 @@ export async function upsertInboxState(opts: {
   const snoozeUntil = opts.snoozeUntil ?? null;
   const readAt = opts.readAt ?? null;
 
-  // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
-  // first non-null value written wins on every subsequent conflict.
+  // Upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the first
+  // non-null value written wins on every subsequent conflict.
   // `triageSessionList` in src/be/db/session-tree.ts copies these conflict
   // rules for whole-list triage. Keep the two in step.
-  const row = await getDbClient().get<InboxItemStateRow>(
-    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
-         status = excluded.status,
-         snoozeUntil = excluded.snoozeUntil,
-         dismissedAt = excluded.dismissedAt,
-         doneAt = excluded.doneAt,
-         readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
-         lastReadAt = CASE WHEN ? THEN excluded.lastReadAt ELSE inbox_item_state.lastReadAt END,
-         lastUpdatedAt = excluded.lastUpdatedAt
-       RETURNING *`,
-    [
-      opts.userId,
-      opts.itemType,
-      opts.itemId,
-      opts.status,
+  const row = await getStorage().repos.messaging.upsertInboxItemState(
+    {
+      userId: opts.userId,
+      itemType: opts.itemType,
+      itemId: opts.itemId,
+      status: opts.status,
       snoozeUntil,
       dismissedAt,
       doneAt,
       readAt,
-      opts.lastReadAt ?? null,
-      now,
-      now,
-      opts.lastReadAt !== undefined ? 1 : 0,
-    ],
+      lastReadAt: opts.lastReadAt ?? null,
+      createdAt: now,
+      lastUpdatedAt: now,
+    },
+    opts.lastReadAt !== undefined,
   );
   if (!row) throw new Error("Failed to upsert inbox state");
   return rowToInboxItemState(row);

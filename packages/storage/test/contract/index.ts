@@ -14,6 +14,7 @@ import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
 import { rbacContract } from "./rbac";
 import { runtimePoolsContract } from "./runtime-pools";
+import { schedulesContract } from "./schedules";
 import { scriptsContract } from "./scripts";
 import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
@@ -48,4 +49,5 @@ export function runStorageContract(engine: ContractEngine): void {
   kvContract(engine);
   tasksContract(engine);
   messagingContract(engine);
+  schedulesContract(engine);
 }

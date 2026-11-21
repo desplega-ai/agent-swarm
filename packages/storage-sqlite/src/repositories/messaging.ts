@@ -1,7 +1,7 @@
 import {
   BaseMessagingRepository,
   type PendingChatRelayRow,
-  type SqlQuery,
+  SqlQuery,
   sql,
   sqlJoin,
   type TaskRow,
@@ -20,6 +20,10 @@ function chatRelayEligible(now: string): SqlQuery {
 }
 
 export class SqliteMessagingRepository extends BaseMessagingRepository {
+  protected insertionOrder(alias?: string): SqlQuery {
+    return new SqlQuery([alias ? `${alias}.rowid` : "rowid"], []);
+  }
+
   listPendingSlackRelayTasks(): Promise<TaskRow[]> {
     return this.db.query<TaskRow>(sql`
       SELECT task.* FROM slack_relay_obligations obligation
