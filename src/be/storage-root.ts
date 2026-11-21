@@ -65,8 +65,13 @@ export function createStorage(client: DbClient, options: { vectorSearch: boolean
 
 // SQLite boot (the synchronous start path of the SQLite engine).
 export {
+  applySqliteFilePragmas,
+  applySqliteTemplatePragmas,
   assertNotEmptySqliteDatabase,
   assertScriptRunSourceSchema,
   backfillScriptRunSources,
+  ensureAgentProfileColumns,
+  isEmptySqliteDatabase,
+  removeLegacyTaskStatusCheck,
   runSqliteMigrations,
 } from "@desplega/storage-sqlite";

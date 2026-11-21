@@ -133,7 +133,7 @@
   },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 31
+    "sites": 6
   },
   "src/be/db/script-run-sources.ts": {
     "reason": "M2 move: scripts",

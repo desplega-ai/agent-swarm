@@ -55,9 +55,15 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     inTransaction: () => client.inTransaction(),
   };
 }
+export { ensureAgentProfileColumns, removeLegacyTaskStatusCheck } from "./boot/legacy";
 export {
   assertNotEmptySqliteDatabase,
   runSqliteMigrations,
   type SqliteMigrationOptions,
 } from "./boot/migrations";
+export {
+  applySqliteFilePragmas,
+  applySqliteTemplatePragmas,
+  isEmptySqliteDatabase,
+} from "./boot/open";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
