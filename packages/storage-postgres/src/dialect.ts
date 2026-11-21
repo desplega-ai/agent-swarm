@@ -21,6 +21,8 @@ export const postgresDialect: Dialect = {
   // escaping off when the caller names no escape character.
   likeAsciiCi: (column: SqlQuery, pattern: SqlQuery, escapeChar?: LikeEscape) =>
     sql`${column} ILIKE ${pattern} ESCAPE ${new SqlQuery([`'${escapeChar ?? ""}'`], [])}`,
+  isoTimestampText: (column: SqlQuery) =>
+    sql`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
   greatestStrict: (a: SqlQuery, b: SqlQuery) =>
     sql`(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL ELSE GREATEST(${a}, ${b}) END)`,
   leastStrict: (a: SqlQuery, b: SqlQuery) =>

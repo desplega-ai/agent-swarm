@@ -1,4 +1,4 @@
-import { jsonText, likeAsciiCi } from "../dialect";
+import { isoTimestampText, jsonText, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin } from "../sql";
 
@@ -107,7 +107,7 @@ export type AssetSummaryRow = {
 
 const ASSET_SUMMARY_SELECTS: Record<AssetEntityKind, SqlQuery> = {
   task: sql`SELECT 'task' AS "entityType", id, "key", 'Task ' || substr(id, 1, 8) AS label,
-    "lastUpdatedAt" AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
+    ${isoTimestampText(sql`"lastUpdatedAt"`)} AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM agent_tasks`,
   workflow: sql`SELECT 'workflow' AS "entityType", id, "key", name AS label,
@@ -115,7 +115,7 @@ const ASSET_SUMMARY_SELECTS: Record<AssetEntityKind, SqlQuery> = {
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM workflows`,
   schedule: sql`SELECT 'schedule' AS "entityType", id, "key", name AS label,
-    "lastUpdatedAt" AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
+    ${isoTimestampText(sql`"lastUpdatedAt"`)} AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM scheduled_tasks`,
   page: sql`SELECT 'page' AS "entityType", id, "key", title AS label,
@@ -123,15 +123,15 @@ const ASSET_SUMMARY_SELECTS: Record<AssetEntityKind, SqlQuery> = {
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM pages`,
   app: sql`SELECT 'app' AS "entityType", id, "key", name AS label,
-    updated_at AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
+    ${isoTimestampText(sql`updated_at`)} AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM apps`,
   script: sql`SELECT 'script' AS "entityType", id, "key", name AS label,
-    "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
+    ${isoTimestampText(sql`"updatedAt"`)} AS "updatedAt", NULL AS "providerId", NULL AS "providerOrgId",
     NULL AS "providerDriveId", NULL AS "providerKey"
     FROM scripts`,
   file: sql`SELECT 'file' AS "entityType", id, "key", provider_key AS label,
-    updated_at AS "updatedAt", provider_id AS "providerId",
+    ${isoTimestampText(sql`updated_at`)} AS "updatedAt", provider_id AS "providerId",
     NULLIF(provider_org_id, '') AS "providerOrgId",
     NULLIF(provider_drive_id, '') AS "providerDriveId",
     provider_key AS "providerKey"

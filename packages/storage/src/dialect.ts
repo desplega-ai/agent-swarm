@@ -35,6 +35,12 @@ export interface Dialect {
    * a jsonb column stores a JSON string instead of the document).
    */
   jsonText(text: SqlQuery): SqlQuery;
+  /**
+   * A timestamp column as the ISO text the app writes (`2026-11-20T10:00:00.000Z`),
+   * for an expression that mixes it with text (a UNION arm, a text comparison).
+   * SQLite stores that text already; Postgres formats its timestamptz.
+   */
+  isoTimestampText(column: SqlQuery): SqlQuery;
 }
 
 /** `${nowIso}` inside a `sql` template. */
@@ -58,6 +64,11 @@ export function greatestStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
 
 export function leastStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
   return dialectFragment((d) => d.leastStrict(a, b));
+}
+
+/** `${isoTimestampText(sql\`col\`)}` inside a `sql` template. */
+export function isoTimestampText(column: SqlQuery): DialectFragment {
+  return dialectFragment((d) => d.isoTimestampText(column));
 }
 
 /** `${jsonText(value)}` inside a `sql` template: the bound JSON text, parsed on Postgres. */

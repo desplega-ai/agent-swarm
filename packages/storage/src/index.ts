@@ -10,6 +10,7 @@ export {
 export {
   type Dialect,
   greatestStrict,
+  isoTimestampText,
   jsonText,
   type LikeEscape,
   leastStrict,

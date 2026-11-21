@@ -12,6 +12,7 @@ export const sqliteDialect: Dialect = {
       ? sql`${column} LIKE ${pattern}`
       : sql`${column} LIKE ${pattern} ESCAPE ${new SqlQuery([`'${escapeChar}'`], [])}`,
   greatestStrict: (a: SqlQuery, b: SqlQuery) => sql`max(${a}, ${b})`,
+  isoTimestampText: (column: SqlQuery) => column,
   leastStrict: (a: SqlQuery, b: SqlQuery) => sql`min(${a}, ${b})`,
   jsonText: (text: SqlQuery) => text,
 };

@@ -192,6 +192,16 @@ export function assetsContract(engine: ContractEngine): void {
         ["file", "m1", "/a.md", null],
       ]);
       expect(await repo.listAssetSummaries([], null, 10)).toEqual([]);
+      // Every kind at once: the arms mix timestamp and text columns.
+      const all = await repo.listAssetSummaries(
+        ["task", "workflow", "schedule", "page", "app", "script", "file"],
+        "shared/z/%",
+        10,
+      );
+      expect(all.map((r) => [r.entityType, r.updatedAt])).toEqual([
+        ["task", "2026-11-21T13:00:00.000Z"],
+        ["file", "2026-11-21T12:00:00.000Z"],
+      ]);
       expect(await repo.findAssetKey("task", "t1234567890")).toBe("shared/z/");
       expect(await repo.findAssetKey("page", "nope")).toBeNull();
     });
