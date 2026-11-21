@@ -330,6 +330,21 @@ export function formatUnsentFilesNote(unsent: UnsentChatFile[]): string {
 }
 
 /** A copy of the card with every string scrubbed, so a card cannot leak what text cannot. */
+/** Replace a sent message with `card`, such as an approval card once it resolves. */
+export async function editChatMessage(args: {
+  adapter: string;
+  threadId: string;
+  messageId: string;
+  card: CardElement;
+}): Promise<void> {
+  assertTrustedChatTarget(args.threadId);
+  const chat = getChatInstance(args.adapter);
+  if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
+  await chat
+    .getAdapter(args.adapter)
+    .editMessage(args.threadId, args.messageId, scrubCard(args.card));
+}
+
 function scrubCard(card: CardElement): CardElement {
   return JSON.parse(
     JSON.stringify(card, (_key, value) =>
