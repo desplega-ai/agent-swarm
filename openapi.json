@@ -3801,6 +3801,31 @@
           }
         }
       },
+      "PageKit": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "template": {
+            "type": "string",
+            "enum": [
+              "report",
+              "one-pager",
+              "dashboard",
+              "deck"
+            ]
+          },
+          "slots": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "template",
+          "slots"
+        ]
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -3872,6 +3897,9 @@
           "designVersion": {
             "type": "integer",
             "minimum": 1
+          },
+          "kit": {
+            "$ref": "#/components/schemas/PageKit"
           },
           "viewCount": {
             "type": "integer",
@@ -3991,6 +4019,9 @@
           "designVersion": {
             "type": "integer",
             "minimum": 1
+          },
+          "kit": {
+            "$ref": "#/components/schemas/PageKit"
           }
         },
         "required": [
@@ -43427,6 +43458,9 @@
                           "designVersion": {
                             "type": "integer",
                             "minimum": 1
+                          },
+                          "kit": {
+                            "$ref": "#/components/schemas/PageKit"
                           },
                           "viewCount": {
                             "type": "integer",

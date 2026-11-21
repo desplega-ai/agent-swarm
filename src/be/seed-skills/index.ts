@@ -316,7 +316,7 @@ import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
 /** One bundled file shipped alongside a skill's SKILL.md. */
 export type SeedSkillFile = {
-  /** Path relative to the skill directory, e.g. `examples/report-page.html`. */
+  /** Path relative to the skill directory, e.g. `examples/annotated-pr.html`. */
   path: string;
   content: string;
 };

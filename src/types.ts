@@ -3500,6 +3500,18 @@ export const DesignSystemInputSchema = z.strictObject({
 });
 export type DesignSystemInput = z.infer<typeof DesignSystemInputSchema>;
 
+/**
+ * A page kit spec as stored and returned (`pages.kit`). Writes validate it
+ * strictly with `PageKitSchema` (`src/pages/kit/schema.ts`); reads keep this
+ * loose shape so a stored spec never fails a response.
+ */
+export const PageKitStoredSchema = z
+  .object({
+    template: z.enum(["report", "one-pager", "dashboard", "deck"]),
+    slots: z.record(z.string(), z.unknown()),
+  })
+  .openapi("PageKit");
+
 // PageSnapshot captures the mutable content fields frozen per-version in
 // page_versions.snapshot. Omits id / agentId / slug / timestamps (these are
 // invariant across versions for a given page id; the slug is a parent-only
@@ -3517,6 +3529,7 @@ export const PageSnapshotSchema = z
     theme: z.string().nullable().optional(),
     themeTokens: PageThemeTokensSchema.nullable().optional(),
     designVersion: z.number().int().min(1).optional(),
+    kit: PageKitStoredSchema.nullable().optional(),
   })
   .openapi("PageSnapshot");
 export type PageSnapshot = z.infer<typeof PageSnapshotSchema>;
@@ -3537,6 +3550,7 @@ export const PageSchema = z
     theme: z.string().nullable(),
     themeTokens: PageThemeTokensSchema.nullable(),
     designVersion: z.number().int().min(1),
+    kit: PageKitStoredSchema.nullable().optional(),
     viewCount: z.number().int().min(0).default(0),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -3562,12 +3576,12 @@ export type WorkflowSummary = Omit<
 
 /**
  * `/api/pages` list item: drops the (potentially huge) `body` and `passwordHash`,
- * plus the design fields (`theme`, `themeTokens`, `designVersion`). List views do
+ * plus the design fields (`theme`, `themeTokens`, `designVersion`, `kit`). List views do
  * not render a page, so those only come with `?fields=full` or the get-by-id route.
  */
 export type PageSummary = Omit<
   Page,
-  "body" | "passwordHash" | "theme" | "themeTokens" | "designVersion"
+  "body" | "passwordHash" | "theme" | "themeTokens" | "designVersion" | "kit"
 >;
 
 /** `/api/schedules` list item — swaps the full `taskTemplate` for a short preview. */
