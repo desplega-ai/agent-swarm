@@ -7,10 +7,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
   },
-  "src/be/automation-preflight.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 7
-  },
   "src/be/boot-seeds.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 1

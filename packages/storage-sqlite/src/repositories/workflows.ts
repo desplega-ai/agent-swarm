@@ -1,6 +1,7 @@
 import {
   type ApprovalListFilter,
   type ApprovalRequestSummaryRow,
+  type AutomationPreflightRowText,
   BaseWorkflowsRepository,
   type SqlQuery,
   type StuckWorkflowRunRow,
@@ -155,5 +156,11 @@ export class SqliteWorkflowsRepository extends BaseWorkflowsRepository {
              "resolvedAt", "timeoutSeconds", "expiresAt", created_by, "createdAt", "updatedAt",
              json_array_length(questions) AS "questionCount"
         FROM approval_requests${this.approvalListTail(f)}`);
+  }
+
+  listEnabledPreflightRows(): Promise<AutomationPreflightRowText[]> {
+    return this.db.query<AutomationPreflightRowText>(sql`
+      SELECT id, name, 'workflow' AS kind, params, "requiredParams", requires
+        FROM workflows WHERE enabled = ${true} ORDER BY rowid`);
   }
 }

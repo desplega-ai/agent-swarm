@@ -63,5 +63,31 @@ export function schedulesContract(engine: ContractEngine): void {
       expect(await repo.listIdsByModelGroup("g1")).toEqual(["a", "b"]);
       expect(await repo.listIdsByModelGroup("none")).toEqual([]);
     });
+
+    test("enabled preflight rows in insertion order; last error read and write", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO scheduled_tasks (id, name, "intervalMs", "taskTemplate", "createdAt", "lastUpdatedAt", enabled)
+        VALUES ('z', 'zz', 60000, 't', ${T0}, ${T0}, ${true}),
+               ('a', 'aa', 60000, 't', ${T0}, ${T0}, ${false}),
+               ('m', 'mm', 60000, 't', ${T0}, ${T0}, ${true})`);
+      const rows = await repo.listEnabledPreflightRows();
+      expect(rows.map((r) => r.id)).toEqual(["z", "m"]);
+      expect(rows[0]).toEqual({
+        id: "z",
+        name: "zz",
+        kind: "schedule",
+        params: expect.any(String),
+        requiredParams: expect.any(String),
+        requires: expect.any(String),
+      });
+
+      expect(await repo.getLastError("z")).toEqual({ lastErrorAt: null, lastErrorMessage: null });
+      expect(await repo.getLastError("missing")).toBeNull();
+      await repo.setLastError("z", { at: "2026-11-21T11:00:00.000Z", message: "m1", now: T0 });
+      expect(await repo.getLastError("z")).toEqual({
+        lastErrorAt: "2026-11-21T11:00:00.000Z",
+        lastErrorMessage: "m1",
+      });
+    });
   });
 }
