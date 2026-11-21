@@ -613,4 +613,28 @@ export class SqliteTasksRepository extends BaseTasksRepository {
       WHERE dep.value = ${parentId}
       ORDER BY t.rowid`);
   }
+
+  async countTasksCreatedLastDay(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM agent_tasks
+      WHERE "createdAt" >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`);
+    return row?.count ?? 0;
+  }
+
+  listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
+    // `CROSS JOIN` keeps the chain as the outer loop: with a plain JOIN, SQLite
+    // scanned all of agent_tasks to skip the sort.
+    return this.db.query<TaskRow>(sql`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
+        UNION ALL
+        SELECT t.id FROM agent_tasks t
+        JOIN chain c ON t."parentTaskId" = c.id
+      )
+      SELECT t.*,
+        (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
+      FROM chain
+      CROSS JOIN agent_tasks t ON t.id = chain.id
+      ORDER BY t."createdAt", t.rowid`);
+  }
 }

@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { greatestStrict, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -521,6 +521,49 @@ export type RoutingCandidateMatch = Partial<{
   slackThreadTs: string;
   agentmailThreadId: string;
 }>;
+
+/** One `task_context_snapshots` row. */
+export type ContextSnapshotRow = {
+  id: string;
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens: number | null;
+  contextTotalTokens: number | null;
+  contextPercent: number | null;
+  eventType: string;
+  compactTrigger: string | null;
+  preCompactTokens: number | null;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  contextFormula: string | null;
+  createdAt: string;
+};
+
+/** One `task_templates` row (`payload` and `tags` as JSON text). */
+export type TaskTemplateRow = {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+  kind: string;
+  payload: string;
+  category: string | null;
+  tags: string;
+  createdAt: string;
+};
+
+/** A task of the lead's concurrent-context digest. */
+export type ConcurrentTaskRow = {
+  id: string;
+  task: string;
+  agentId: string | null;
+  agentName: string | null;
+  creatorAgentId?: string | null;
+  status: string;
+  createdAt: string;
+  progress?: string | null;
+};
 
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
@@ -1169,6 +1212,86 @@ export interface TasksRepository {
   listUnassignedTasks(limit: number, offset: number): Promise<TaskRow[]>;
   /** Tasks whose `dependsOn` JSON array holds `parentId`, in insertion order. */
   listDependentTasks(parentId: string): Promise<TaskRow[]>;
+  // ---- agent_tasks: counts, heartbeat and triage reads ----
+  /** Tasks with `status`, optionally of one assignee or offeree. */
+  countTasksWithStatus(
+    status: string,
+    only?: { agentId?: string; offeredTo?: string },
+  ): Promise<number>;
+  /** Tasks created after `since` by lead agents, newest first (insertion order breaks ties). */
+  listRecentLeadDelegations(
+    since: string,
+    readableBy?: { userId: string | null },
+  ): Promise<ConcurrentTaskRow[]>;
+  /** In-progress tasks across the swarm, newest first (insertion order breaks ties). */
+  listActiveSwarmTasks(readableBy?: { userId: string | null }): Promise<ConcurrentTaskRow[]>;
+  /** The newest task of an AgentMail thread (insertion order breaks ties). */
+  findLatestTaskByAgentMailThread(threadId: string): Promise<TaskRow | null>;
+  /** In-progress tasks idle since `cutoff`, oldest `lastUpdatedAt` first, then insertion order. */
+  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]>;
+  /** Pending protected pins created before `cutoff`, oldest first, then insertion order. */
+  listStalePinnedResumes(cutoff: string): Promise<TaskRow[]>;
+  /** pending -> `status` with its failure fields. */
+  failPendingTask(
+    taskId: string,
+    f: { status: string; statusKind: string; failureReason: string; now: string },
+  ): Promise<TaskRow | null>;
+  /** Unassigned tasks with routing affinity created before `cutoff`, oldest first, then insertion order. */
+  listStaleUnassignedAffinityTasks(cutoff: string): Promise<TaskRow[]>;
+  /** Failed tasks finished after `since`, newest `finishedAt` first, then insertion order (newest first). */
+  listRecentFailedTasks(since: string, limit: number): Promise<TaskRow[]>;
+  countTasksFinishedSince(status: string, since: string): Promise<number>;
+  /** Tasks created in the last 24 hours (database clock). */
+  countTasksCreatedLastDay(): Promise<number>;
+  hasCompletedTask(): Promise<boolean>;
+  /** Task counts per status, by status. */
+  countTasksByStatus(): Promise<{ status: string; count: number }[]>;
+
+  // ---- agent_tasks: workflow links ----
+  /** Tasks linked to a run of the workflow, in insertion order. */
+  listTaskIdsOfWorkflow(workflowId: string): Promise<string[]>;
+  unlinkTasksFromWorkflow(workflowId: string): Promise<void>;
+  findTaskByWorkflowRunStepId(stepId: string): Promise<TaskRow | null>;
+  detachTaskFromWorkflowRunStep(taskId: string): Promise<void>;
+
+  // ---- agent_tasks: credential keys ----
+  /** In-progress tasks per key suffix of one key type, by suffix. */
+  countInProgressByCredentialSuffix(
+    keyType: string,
+    suffixes: readonly string[],
+  ): Promise<{ suffix: string; n: number }[]>;
+  setTaskCredentialKey(taskId: string, keySuffix: string, keyType: string): Promise<void>;
+
+  // ---- task_context_snapshots ----
+  insertContextSnapshot(row: ContextSnapshotRow): Promise<void>;
+  /** Folds one snapshot into the task's aggregate context columns. */
+  applyContextSnapshotToTask(
+    taskId: string,
+    s: {
+      contextPercent: number | null;
+      contextUsedTokens: number | null;
+      contextTotalTokens: number | null;
+      compaction: boolean;
+    },
+  ): Promise<void>;
+  /** One task's or one session's snapshots, by `createdAt` then insertion order. */
+  listContextSnapshots(
+    by: { taskId: string } | { sessionId: string },
+    limit: number,
+  ): Promise<ContextSnapshotRow[]>;
+  countContextSnapshots(taskId: string): Promise<number>;
+
+  // ---- task_templates ----
+  /** By `createdAt` then insertion order. `query` matches title or description (lowercase LIKE). */
+  listTaskTemplates(f: {
+    category?: string;
+    kind?: string;
+    query?: string;
+  }): Promise<TaskTemplateRow[]>;
+
+  // ---- sessions: root chain ----
+  /** The chain under `rootTaskId` with each task's `totalCostUsd`, by `createdAt` then insertion order. */
+  listRootTaskChain(rootTaskId: string): Promise<TaskRow[]>;
 }
 
 export abstract class BaseTasksRepository implements TasksRepository {
@@ -2911,4 +3034,252 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   abstract listDependentTasks(parentId: string): Promise<TaskRow[]>;
+
+  // ---- agent_tasks: counts, heartbeat and triage reads ----
+
+  async countTasksWithStatus(
+    status: string,
+    only?: { agentId?: string; offeredTo?: string },
+  ): Promise<number> {
+    const conditions = [sql`status = ${status}`];
+    if (only?.agentId) conditions.unshift(sql`"agentId" = ${only.agentId}`);
+    if (only?.offeredTo) conditions.unshift(sql`"offeredTo" = ${only.offeredTo}`);
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) as count FROM agent_tasks${sqlWhere(conditions)}`,
+    );
+    return row?.count ?? 0;
+  }
+
+  listRecentLeadDelegations(
+    since: string,
+    readableBy?: { userId: string | null },
+  ): Promise<ConcurrentTaskRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`t.id`)}`
+      : EMPTY;
+    return this.db.query<ConcurrentTaskRow>(sql`
+      SELECT t.id, t.task, t."agentId", a.name as "agentName", t."creatorAgentId", t.status, t."createdAt"
+      FROM agent_tasks t
+      LEFT JOIN agents a ON t."agentId" = a.id
+      WHERE t."createdAt" > ${since}
+        AND t."creatorAgentId" IN (SELECT id FROM agents WHERE "isLead" = ${true})${readable}
+      ORDER BY t."createdAt" DESC, ${this.insertionOrder("t")} DESC`);
+  }
+
+  listActiveSwarmTasks(readableBy?: { userId: string | null }): Promise<ConcurrentTaskRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`t.id`)}`
+      : EMPTY;
+    return this.db.query<ConcurrentTaskRow>(sql`
+      SELECT t.id, t.task, t."agentId", a.name as "agentName", t.status, t."createdAt", t.progress
+      FROM agent_tasks t
+      LEFT JOIN agents a ON t."agentId" = a.id
+      WHERE t.status = 'in_progress'${readable}
+      ORDER BY t."createdAt" DESC, ${this.insertionOrder("t")} DESC`);
+  }
+
+  findLatestTaskByAgentMailThread(threadId: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE "agentmailThreadId" = ${threadId}
+      ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC LIMIT 1`);
+  }
+
+  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE status = 'in_progress' AND "lastUpdatedAt" < ${cutoff}
+      ORDER BY "lastUpdatedAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  listStalePinnedResumes(cutoff: string): Promise<TaskRow[]> {
+    const tagged = (tag: string) => likeAsciiCi(sql`tags`, sql`${`%"${tag}"%`}`);
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+      WHERE status = 'pending'
+        AND (
+          ("taskType" = 'resume' AND (${tagged("crash-recovery-pin")} OR ${tagged("graceful-shutdown-pin")}))
+          OR ${tagged("reboot-retry-pin")}
+        )
+        AND "createdAt" < ${cutoff}
+      ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  failPendingTask(
+    taskId: string,
+    f: { status: string; statusKind: string; failureReason: string; now: string },
+  ): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks
+      SET status = ${f.status}, "statusKind" = ${f.statusKind}, "failureReason" = ${f.failureReason},
+        "finishedAt" = ${f.now}, "lastUpdatedAt" = ${f.now}
+      WHERE id = ${taskId} AND status = 'pending' RETURNING *`);
+  }
+
+  listStaleUnassignedAffinityTasks(cutoff: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+      WHERE status = 'unassigned' AND "routingAffinity" IS NOT NULL AND "createdAt" < ${cutoff}
+      ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  listRecentFailedTasks(since: string, limit: number): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE status = 'failed' AND "finishedAt" > ${since}
+      ORDER BY "finishedAt" DESC, ${this.insertionOrder()} DESC LIMIT ${limit}`);
+  }
+
+  async countTasksFinishedSince(status: string, since: string): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) as count FROM agent_tasks WHERE status = ${status} AND "finishedAt" > ${since}`);
+    return row?.count ?? 0;
+  }
+
+  abstract countTasksCreatedLastDay(): Promise<number>;
+
+  async hasCompletedTask(): Promise<boolean> {
+    const row = await this.db.get<{ one: number }>(
+      sql`SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
+    );
+    return row !== null;
+  }
+
+  countTasksByStatus(): Promise<{ status: string; count: number }[]> {
+    return this.db.query<{ status: string; count: number }>(sql`
+      SELECT status, COUNT(*) AS count FROM agent_tasks GROUP BY status ORDER BY status`);
+  }
+
+  // ---- agent_tasks: workflow links ----
+
+  async listTaskIdsOfWorkflow(workflowId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+      WHERE "workflowRunId" IN (SELECT id FROM workflow_runs WHERE "workflowId" = ${workflowId})
+      ORDER BY ${this.insertionOrder()}`);
+    return rows.map((row) => row.id);
+  }
+
+  async unlinkTasksFromWorkflow(workflowId: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agent_tasks SET "workflowRunId" = NULL, "workflowRunStepId" = NULL
+      WHERE "workflowRunId" IN (SELECT id FROM workflow_runs WHERE "workflowId" = ${workflowId})`);
+  }
+
+  findTaskByWorkflowRunStepId(stepId: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(
+      sql`SELECT * FROM agent_tasks WHERE "workflowRunStepId" = ${stepId} LIMIT 1`,
+    );
+  }
+
+  async detachTaskFromWorkflowRunStep(taskId: string): Promise<void> {
+    await this.db.run(sql`UPDATE agent_tasks SET "workflowRunStepId" = NULL WHERE id = ${taskId}`);
+  }
+
+  // ---- agent_tasks: credential keys ----
+
+  countInProgressByCredentialSuffix(
+    keyType: string,
+    suffixes: readonly string[],
+  ): Promise<{ suffix: string; n: number }[]> {
+    return this.db.query<{ suffix: string; n: number }>(sql`
+      SELECT "credentialKeySuffix" AS suffix, COUNT(*) AS n FROM agent_tasks
+      WHERE status = 'in_progress' AND "credentialKeyType" = ${keyType}
+        AND "credentialKeySuffix" IN (${sqlList(suffixes)})
+      GROUP BY "credentialKeySuffix"
+      ORDER BY "credentialKeySuffix"`);
+  }
+
+  async setTaskCredentialKey(taskId: string, keySuffix: string, keyType: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agent_tasks SET "credentialKeySuffix" = ${keySuffix}, "credentialKeyType" = ${keyType}
+      WHERE id = ${taskId}`);
+  }
+
+  // ---- task_context_snapshots ----
+
+  async insertContextSnapshot(r: ContextSnapshotRow): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO task_context_snapshots (id, "taskId", "agentId", "sessionId", "contextUsedTokens",
+        "contextTotalTokens", "contextPercent", "eventType", "compactTrigger", "preCompactTokens",
+        "cumulativeInputTokens", "cumulativeOutputTokens", "contextFormula", "createdAt")
+      VALUES (${r.id}, ${r.taskId}, ${r.agentId}, ${r.sessionId}, ${r.contextUsedTokens},
+        ${r.contextTotalTokens}, ${r.contextPercent}, ${r.eventType}, ${r.compactTrigger},
+        ${r.preCompactTokens}, ${r.cumulativeInputTokens}, ${r.cumulativeOutputTokens},
+        ${r.contextFormula}, ${r.createdAt})`);
+  }
+
+  async applyContextSnapshotToTask(
+    taskId: string,
+    s: {
+      contextPercent: number | null;
+      contextUsedTokens: number | null;
+      contextTotalTokens: number | null;
+      compaction: boolean;
+    },
+  ): Promise<void> {
+    if (s.contextPercent != null) {
+      await this.db.run(sql`
+        UPDATE agent_tasks
+        SET "peakContextPercent" = ${greatestStrict(sql`COALESCE("peakContextPercent", 0)`, sql`${s.contextPercent}`)}
+        WHERE id = ${taskId}`);
+    }
+    // peakContextTokens is monotonic-max across snapshots, not a rolling latest.
+    if (s.contextUsedTokens != null) {
+      await this.db.run(sql`
+        UPDATE agent_tasks
+        SET "peakContextTokens" = ${greatestStrict(sql`COALESCE("peakContextTokens", 0)`, sql`${s.contextUsedTokens}`)}
+        WHERE id = ${taskId}`);
+    }
+    if (s.compaction) {
+      await this.db.run(sql`
+        UPDATE agent_tasks SET "compactionCount" = COALESCE("compactionCount", 0) + 1
+        WHERE id = ${taskId}`);
+    }
+    // The first snapshot that carries a window size sets it; the window does not change mid-session.
+    if (s.contextTotalTokens != null) {
+      await this.db.run(sql`
+        UPDATE agent_tasks SET "contextWindowSize" = ${s.contextTotalTokens}
+        WHERE id = ${taskId} AND "contextWindowSize" IS NULL`);
+    }
+  }
+
+  listContextSnapshots(
+    by: { taskId: string } | { sessionId: string },
+    limit: number,
+  ): Promise<ContextSnapshotRow[]> {
+    const where =
+      "taskId" in by ? sql`"taskId" = ${by.taskId}` : sql`"sessionId" = ${by.sessionId}`;
+    return this.db.query<ContextSnapshotRow>(sql`
+      SELECT * FROM task_context_snapshots WHERE ${where}
+      ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC LIMIT ${limit}`);
+  }
+
+  async countContextSnapshots(taskId: string): Promise<number> {
+    const row = await this.db.get<{ cnt: number }>(
+      sql`SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE "taskId" = ${taskId}`,
+    );
+    return row?.cnt ?? 0;
+  }
+
+  // ---- task_templates ----
+
+  listTaskTemplates(f: {
+    category?: string;
+    kind?: string;
+    query?: string;
+  }): Promise<TaskTemplateRow[]> {
+    const conditions: SqlQuery[] = [];
+    if (f.category) conditions.push(sql`category = ${f.category}`);
+    if (f.kind) conditions.push(sql`kind = ${f.kind}`);
+    if (f.query && f.query.trim().length > 0) {
+      const needle = `%${f.query.toLowerCase()}%`;
+      conditions.push(sql`(${likeAsciiCi(sql`LOWER(title)`, sql`${needle}`)}
+        OR ${likeAsciiCi(sql`LOWER(description)`, sql`${needle}`)})`);
+    }
+    return this.db.query<TaskTemplateRow>(sql`
+      SELECT * FROM task_templates${sqlWhere(conditions)}
+      ORDER BY "createdAt", ${this.insertionOrder()}`);
+  }
+
+  // ---- sessions: root chain ----
+
+  abstract listRootTaskChain(rootTaskId: string): Promise<TaskRow[]>;
 }

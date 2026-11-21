@@ -15,6 +15,7 @@ import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
+import { SqliteMessagingRepository } from "./repositories/messaging";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
@@ -78,6 +79,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
       tasks: new SqliteTasksRepository(executor),
+      messaging: new SqliteMessagingRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

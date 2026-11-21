@@ -7,6 +7,7 @@ export * from "./extensions";
 export * from "./kv";
 export * from "./maintenance";
 export * from "./mcp-servers";
+export * from "./messaging";
 export * from "./models";
 export * from "./oauth";
 export * from "./pages";

@@ -17,12 +17,14 @@ import type { Database } from "bun:sqlite";
 import type {
   ApiKeyRef,
   ApiKeyStatusRow,
+  ContextSnapshotRow,
   RoutingCandidateMatch,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
   TaskAttachmentRow,
   TaskSteeringMessageRow,
+  TaskTemplateRow,
 } from "@desplega/storage";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
@@ -4014,22 +4016,15 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
     mentionsCount += channelMentions?.count ?? 0;
   }
 
+  const tasks = getStorage().repos.tasks;
   // Count offered tasks for this agent
-  const offeredResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE offeredTo = ? AND status = 'offered'",
-    [agentId],
-  );
+  const offeredCount = await tasks.countTasksWithStatus("offered", { offeredTo: agentId });
 
   // Count unassigned tasks in pool
-  const poolResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-  );
+  const poolCount = await tasks.countUnassignedTasks();
 
   // Count my in-progress tasks
-  const inProgressResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
-    [agentId],
-  );
+  const inProgressCount = await tasks.countTasksWithStatus("in_progress", { agentId });
 
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
@@ -4059,9 +4054,9 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   return {
     unreadCount,
     mentionsCount,
-    offeredTasksCount: offeredResult?.count ?? 0,
-    poolTasksCount: poolResult?.count ?? 0,
-    inProgressCount: inProgressResult?.count ?? 0,
+    offeredTasksCount: offeredCount,
+    poolTasksCount: poolCount,
+    inProgressCount,
     recentMentions,
   };
 }
@@ -5460,9 +5455,6 @@ export async function getConcurrentContext(readableBy?: {
   userId: string | null;
 }): Promise<ConcurrentContext> {
   const client = getDbClient();
-  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
-  const readableSql = readable ? ` AND ${readable.sql}` : "";
-  const readableParams = readable?.params ?? [];
 
   // 1. Inbox messages currently being processed (status = 'processing')
   const processingInboxMessages = await client.query<{
@@ -5478,41 +5470,15 @@ export async function getConcurrentContext(readableBy?: {
 
   // 2. Tasks created in the last 5 minutes by lead agents
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const recentTaskDelegations = await client.query<{
-    id: string;
-    task: string;
-    agentId: string | null;
-    agentName: string | null;
-    creatorAgentId: string | null;
-    status: string;
-    createdAt: string;
-  }>(
-    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.creatorAgentId, t.status, t.createdAt
-       FROM agent_tasks t
-       LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.createdAt > ?
-         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)${readableSql}
-       ORDER BY t.createdAt DESC`,
-    [fiveMinutesAgo, ...readableParams],
-  );
+  const recentTaskDelegations = (await getStorage().repos.tasks.listRecentLeadDelegations(
+    fiveMinutesAgo,
+    readableBy,
+  )) as ConcurrentContext["recentTaskDelegations"];
 
   // 3. Currently in-progress tasks across the swarm
-  const activeSwarmTasks = await client.query<{
-    id: string;
-    task: string;
-    agentId: string | null;
-    agentName: string | null;
-    status: string;
-    createdAt: string;
-    progress: string | null;
-  }>(
-    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
-       FROM agent_tasks t
-       LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status = 'in_progress'${readableSql}
-       ORDER BY t.createdAt DESC`,
-    readableParams,
-  );
+  const activeSwarmTasks = (await getStorage().repos.tasks.listActiveSwarmTasks(
+    readableBy,
+  )) as ConcurrentContext["activeSwarmTasks"];
 
   return {
     processingInboxMessages,
@@ -6643,14 +6609,8 @@ export async function deleteAgentMailInboxMapping(inboxId: string): Promise<bool
 export async function findTaskByAgentMailThread(
   agentmailThreadId: string,
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE agentmailThreadId = ?
-       ORDER BY createdAt DESC
-       LIMIT 1`,
-    [agentmailThreadId],
-  );
-  return row ? rowToAgentTask(row) : null;
+  const row = await getStorage().repos.tasks.findLatestTaskByAgentMailThread(agentmailThreadId);
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 // ============================================================================
@@ -6779,13 +6739,8 @@ export async function getStalledInProgressTasks(
   thresholdMinutes: number = 30,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'in_progress' AND lastUpdatedAt < ?
-       ORDER BY lastUpdatedAt ASC`,
-    [cutoff],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStalledInProgressTasks(cutoff);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 /**
@@ -6822,18 +6777,8 @@ export async function getStalledInProgressTasks(
  */
 export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'pending'
-         AND (
-           (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
-           OR tags LIKE '%"reboot-retry-pin"%'
-         )
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [cutoff],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStalePinnedResumes(cutoff);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 /**
@@ -6855,12 +6800,13 @@ export async function failPendingResumeIfUnclaimed(
 ): Promise<AgentTask | null> {
   const now = new Date().toISOString();
   const scrubbedReason = scrubSecrets(failureReason);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
+  const row = await getStorage().repos.tasks.failPendingTask(taskId, {
+    status,
     // The resume budget ran out (failed) or the reaper escalated the pin (cancelled).
-    [status, status === "failed" ? "error" : "system", scrubbedReason, now, now, taskId],
-  );
+    statusKind: status === "failed" ? "error" : "system",
+    failureReason: scrubbedReason,
+    now,
+  });
 
   if (row) {
     try {
@@ -6875,7 +6821,7 @@ export async function failPendingResumeIfUnclaimed(
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 /**
@@ -6910,14 +6856,8 @@ export async function getUnassignedPoolTasks(
   limit: number = 10,
   offset: number = 0,
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'unassigned'
-       ORDER BY priority DESC, createdAt ASC, rowid ASC
-       LIMIT ? OFFSET ?`,
-    [limit, offset],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listUnassignedTasks(limit, offset);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 /**
@@ -6927,46 +6867,24 @@ export async function getUnassignedPoolTasks(
  * `isAgentEligibleForTask` before escalating; this only narrows by tag age.
  */
 export async function getStaleUnassignedAffinityTasks(cutoffIso: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'unassigned' AND routingAffinity IS NOT NULL AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [cutoffIso],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStaleUnassignedAffinityTasks(cutoffIso);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 export async function getRecentFailedTasks(hours: number = 6): Promise<AgentTask[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'failed'
-         AND finishedAt > ?
-       ORDER BY finishedAt DESC
-       LIMIT 20`,
-    [since],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listRecentFailedTasks(since, 20);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 export async function getRecentCompletedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE status = 'completed' AND finishedAt > ?`,
-    [since],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.tasks.countTasksFinishedSince("completed", since);
 }
 
 export async function getRecentFailedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE status = 'failed' AND finishedAt > ?`,
-    [since],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.tasks.countTasksFinishedSince("failed", since);
 }
 
 // ============================================================================
@@ -7175,18 +7093,11 @@ export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promis
 
 async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
   const client = getDbClient();
-  const linkedTaskIds = (
-    await client.query<{ id: string }>(
-      `SELECT id FROM agent_tasks WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-      [id],
-    )
-  ).map((row) => row.id);
+  const tasks = getStorage().repos.tasks;
+  const linkedTaskIds = await tasks.listTaskIdsOfWorkflow(id);
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
-  await client.run(
-    `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-    [id],
-  );
+  await tasks.unlinkTasksFromWorkflow(id);
   // 2. Fail the parent steps of child runs about to go, then delete steps
   await wakeParentsOfDeletedRuns(id);
   const workflows = getStorage().repos.workflows;
@@ -7537,15 +7448,12 @@ export async function getCompletedStepNodeIds(runId: string): Promise<string[]> 
 }
 
 export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
-    [stepId],
-  );
-  return row ? rowToAgentTask(row) : null;
+  const row = await getStorage().repos.tasks.findTaskByWorkflowRunStepId(stepId);
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 export async function detachTaskFromWorkflowRunStep(taskId: string): Promise<void> {
-  await getDbClient().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
+  await getStorage().repos.tasks.detachTaskFromWorkflowRunStep(taskId);
 }
 
 export async function getStepByIdempotencyKey(key: string): Promise<WorkflowRunStep | null> {
@@ -10519,24 +10427,6 @@ export async function getAgentMcpServers(
 // Context Usage Snapshots
 // ============================================================================
 
-type ContextSnapshotRow = {
-  id: string;
-  taskId: string;
-  agentId: string;
-  sessionId: string;
-  contextUsedTokens: number | null;
-  contextTotalTokens: number | null;
-  contextPercent: number | null;
-  eventType: ContextSnapshotEventType;
-  compactTrigger: string | null;
-  preCompactTokens: number | null;
-  cumulativeInputTokens: number;
-  cumulativeOutputTokens: number;
-  // Migration 063 — see ContextFormulaSchema in src/types.ts for the value set.
-  contextFormula: string | null;
-  createdAt: string;
-};
-
 function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
   return {
     id: row.id,
@@ -10546,7 +10436,7 @@ function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
     contextUsedTokens: row.contextUsedTokens ?? undefined,
     contextTotalTokens: row.contextTotalTokens ?? undefined,
     contextPercent: row.contextPercent ?? undefined,
-    eventType: row.eventType,
+    eventType: row.eventType as ContextSnapshotEventType,
     compactTrigger: (row.compactTrigger as "auto" | "manual" | "auto-inferred" | null) ?? undefined,
     preCompactTokens: row.preCompactTokens ?? undefined,
     cumulativeInputTokens: row.cumulativeInputTokens,
@@ -10577,68 +10467,34 @@ export async function createContextSnapshot(
 ): Promise<ContextSnapshot> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const tasks = getStorage().repos.tasks;
 
-  await client.run(
-    `INSERT INTO task_context_snapshots (id, taskId, agentId, sessionId, contextUsedTokens, contextTotalTokens, contextPercent, eventType, compactTrigger, preCompactTokens, cumulativeInputTokens, cumulativeOutputTokens, contextFormula, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      input.taskId,
-      input.agentId,
-      input.sessionId,
-      input.contextUsedTokens ?? null,
-      input.contextTotalTokens ?? null,
-      input.contextPercent ?? null,
-      input.eventType,
-      input.compactTrigger ?? null,
-      input.preCompactTokens ?? null,
-      input.cumulativeInputTokens ?? 0,
-      input.cumulativeOutputTokens ?? 0,
-      input.contextFormula ?? null,
-      now,
-    ],
-  );
+  await tasks.insertContextSnapshot({
+    id,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    sessionId: input.sessionId,
+    contextUsedTokens: input.contextUsedTokens ?? null,
+    contextTotalTokens: input.contextTotalTokens ?? null,
+    contextPercent: input.contextPercent ?? null,
+    eventType: input.eventType,
+    compactTrigger: input.compactTrigger ?? null,
+    preCompactTokens: input.preCompactTokens ?? null,
+    cumulativeInputTokens: input.cumulativeInputTokens ?? 0,
+    cumulativeOutputTokens: input.cumulativeOutputTokens ?? 0,
+    contextFormula: input.contextFormula ?? null,
+    createdAt: now,
+  });
 
-  // Update aggregate columns on agent_tasks
-  if (input.contextPercent != null) {
-    await client.run(
-      `UPDATE agent_tasks SET peakContextPercent = MAX(COALESCE(peakContextPercent, 0), ?)
-         WHERE id = ?`,
-      [input.contextPercent, input.taskId],
-    );
-  }
-
-  // Migration 063: peakContextTokens is monotonic-max across snapshots, not a
-  // rolling latest. Mirrors Claude Code's status-line "peak context" semantic.
-  if (input.contextUsedTokens != null) {
-    await client.run(
-      `UPDATE agent_tasks
-         SET peakContextTokens = MAX(COALESCE(peakContextTokens, 0), ?)
-         WHERE id = ?`,
-      [input.contextUsedTokens, input.taskId],
-    );
-  }
-
-  if (input.eventType === "compaction") {
-    await client.run(
-      "UPDATE agent_tasks SET compactionCount = COALESCE(compactionCount, 0) + 1 WHERE id = ?",
-      [input.taskId],
-    );
-  }
-
-  // Phase 10: set contextWindowSize on the FIRST snapshot that carries one
-  // (was previously gated on eventType === 'completion', meaning the UI saw
-  // NULL throughout running tasks). Subsequent snapshots leave it alone — the
-  // window doesn't change mid-session.
-  if (input.contextTotalTokens != null) {
-    await client.run(
-      `UPDATE agent_tasks
-         SET contextWindowSize = ?
-         WHERE id = ? AND contextWindowSize IS NULL`,
-      [input.contextTotalTokens, input.taskId],
-    );
-  }
+  // Update aggregate columns on agent_tasks. Migration 063: peakContextTokens is
+  // monotonic-max across snapshots (Claude Code's status-line "peak context").
+  // contextWindowSize is set by the FIRST snapshot that carries one (Phase 10).
+  await tasks.applyContextSnapshotToTask(input.taskId, {
+    contextPercent: input.contextPercent ?? null,
+    contextUsedTokens: input.contextUsedTokens ?? null,
+    contextTotalTokens: input.contextTotalTokens ?? null,
+    compaction: input.eventType === "compaction",
+  });
 
   return {
     id,
@@ -10662,10 +10518,7 @@ export async function getContextSnapshotsByTaskId(
   taskId: string,
   limit = 500,
 ): Promise<ContextSnapshot[]> {
-  const rows = await getDbClient().query<ContextSnapshotRow>(
-    "SELECT * FROM task_context_snapshots WHERE taskId = ? ORDER BY createdAt ASC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = await getStorage().repos.tasks.listContextSnapshots({ taskId }, limit);
   return rows.map(rowToContextSnapshot);
 }
 
@@ -10673,10 +10526,7 @@ export async function getContextSnapshotsBySessionId(
   sessionId: string,
   limit = 500,
 ): Promise<ContextSnapshot[]> {
-  const rows = await getDbClient().query<ContextSnapshotRow>(
-    "SELECT * FROM task_context_snapshots WHERE sessionId = ? ORDER BY createdAt ASC LIMIT ?",
-    [sessionId, limit],
-  );
+  const rows = await getStorage().repos.tasks.listContextSnapshots({ sessionId }, limit);
   return rows.map(rowToContextSnapshot);
 }
 
@@ -10691,17 +10541,14 @@ export interface ContextSummary {
 
 export async function getContextSummaryByTaskId(taskId: string): Promise<ContextSummary> {
   const task = await getTaskById(taskId);
-  const countRow = await getDbClient().get<{ cnt: number }>(
-    "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
-    [taskId],
-  );
+  const snapshotCount = await getStorage().repos.tasks.countContextSnapshots(taskId);
 
   return {
     compactionCount: task?.compactionCount ?? 0,
     peakContextPercent: task?.peakContextPercent ?? null,
     peakContextTokens: task?.peakContextTokens ?? null,
     contextWindowSize: task?.contextWindowSize ?? null,
-    snapshotCount: countRow?.cnt ?? 0,
+    snapshotCount,
   };
 }
 
@@ -10830,7 +10677,6 @@ export async function getAvailableKeyIndices(
 ): Promise<AvailableKeyIndicesResult> {
   const now = new Date().toISOString();
   const nowMs = Date.now();
-  const client = getDbClient();
   const keys = getStorage().repos.config;
   const effectiveScopeId = scopeId ?? "";
   const suffixes = keySuffixes?.length ? keySuffixes : undefined;
@@ -10936,12 +10782,9 @@ export async function getAvailableKeyIndices(
   const distinctSuffixes = [...new Set(positionSuffixes.filter((s): s is string => !!s))];
   const sessionsBySuffix = new Map<string, number>();
   if (distinctSuffixes.length > 0) {
-    const counts = await client.query<{ suffix: string; n: number }>(
-      `SELECT credentialKeySuffix AS suffix, COUNT(*) AS n FROM agent_tasks
-         WHERE status = 'in_progress' AND credentialKeyType = ?
-           AND credentialKeySuffix IN (${distinctSuffixes.map(() => "?").join(", ")})
-         GROUP BY credentialKeySuffix`,
-      [keyType, ...distinctSuffixes],
+    const counts = await getStorage().repos.tasks.countInProgressByCredentialSuffix(
+      keyType,
+      distinctSuffixes,
     );
     for (const { suffix, n } of counts) sessionsBySuffix.set(suffix, n);
   }
@@ -11022,10 +10865,7 @@ export async function recordKeyUsage(
 
     // Record which key was used on the task
     if (taskId) {
-      await getDbClient().run(
-        "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
-        [keySuffix, keyType, taskId],
-      );
+      await storage.repos.tasks.setTaskCredentialKey(taskId, keySuffix, keyType);
     }
     return { planChanged };
   });
@@ -11747,18 +11587,6 @@ export async function withFavoriteFlags<T extends { id: string }>(
 // Task Templates ("To start" bucket — polymorphic starters registry)
 // ============================================================================
 
-interface TaskTemplateRow {
-  id: string;
-  title: string;
-  description: string;
-  prompt: string;
-  kind: string;
-  payload: string;
-  category: string | null;
-  tags: string;
-  createdAt: string;
-}
-
 function rowToTaskTemplate(row: TaskTemplateRow): TaskTemplate {
   let payload: Record<string, unknown> = {};
   try {
@@ -11786,30 +11614,8 @@ export async function listTaskTemplates(opts?: {
   kind?: TaskTemplateKind;
   query?: string;
 }): Promise<TaskTemplate[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (opts?.category) {
-    conditions.push("category = ?");
-    params.push(opts.category);
-  }
-  if (opts?.kind) {
-    conditions.push("kind = ?");
-    params.push(opts.kind);
-  }
-  if (opts?.query && opts.query.trim().length > 0) {
-    // Case-insensitive LIKE match against title OR description, single
-    // parameter-bound WHERE clause to prevent injection.
-    conditions.push("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)");
-    const needle = `%${opts.query.toLowerCase()}%`;
-    params.push(needle, needle);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<TaskTemplateRow>(
-    `SELECT * FROM task_templates ${where} ORDER BY createdAt`,
-    params,
-  );
+  // `query` is a case-insensitive match against title OR description.
+  const rows = await getStorage().repos.tasks.listTaskTemplates(opts ?? {});
   return rows.map(rowToTaskTemplate);
 }
 
@@ -11824,21 +11630,8 @@ export async function listTaskTemplates(opts?: {
  * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `WITH RECURSIVE chain(id) AS (
-         SELECT id FROM agent_tasks WHERE id = ?
-         UNION ALL
-         SELECT t.id FROM agent_tasks t
-         JOIN chain c ON t.parentTaskId = c.id
-       )
-       SELECT t.*,
-         (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
-       FROM chain
-       CROSS JOIN agent_tasks t ON t.id = chain.id
-       ORDER BY t.createdAt, t.rowid`,
-    [rootTaskId],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listRootTaskChain(rootTaskId);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 export interface SessionListItem extends SessionRowFields {
@@ -12441,14 +12234,11 @@ export async function getInstanceActivity(): Promise<{
   recent_tasks_count: number;
 }> {
   const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
-  const tasksRow = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks
-       WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
-  );
+  const recentTasks = await getStorage().repos.tasks.countTasksCreatedLastDay();
   return {
     agents_online: leads_alive + workers_alive,
     leads_online: leads_alive,
-    recent_tasks_count: tasksRow?.count ?? 0,
+    recent_tasks_count: recentTasks,
   };
 }
 
@@ -12510,10 +12300,7 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
  * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
  */
 export async function hasFirstCompletedTask(): Promise<boolean> {
-  const row = await getDbClient().get<{ one: number }>(
-    `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
-  );
-  return row !== null;
+  return await getStorage().repos.tasks.hasCompletedTask();
 }
 
 // ============================================================================

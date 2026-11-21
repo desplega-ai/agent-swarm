@@ -1350,5 +1350,189 @@ export function tasksContract(engine: ContractEngine): void {
         ids(await repo.listRecentSimilarTasks({ since: T0, agentId: "zz", limit: 10 })),
       ).toEqual([]);
     });
+
+    test("status counts, lead delegations and active swarm tasks", async () => {
+      await addAgent("lead", true);
+      await addAgent("w", false);
+      await seedTask(storage, { id: "o", status: "offered", offeredTo: "w" });
+      await seedTask(storage, {
+        id: "i1",
+        status: "in_progress",
+        agentId: "w",
+        creatorAgentId: "lead",
+        createdAt: T1,
+      });
+      await seedTask(storage, {
+        id: "i2",
+        status: "in_progress",
+        agentId: "w",
+        creatorAgentId: "lead",
+        createdAt: T1,
+      });
+      await seedTask(storage, {
+        id: "x",
+        status: "in_progress",
+        creatorAgentId: "w",
+        createdAt: T1,
+      });
+      expect(await repo.countTasksWithStatus("offered", { offeredTo: "w" })).toBe(1);
+      expect(await repo.countTasksWithStatus("in_progress", { agentId: "w" })).toBe(2);
+      expect(await repo.countTasksWithStatus("in_progress")).toBe(3);
+      const delegations = await repo.listRecentLeadDelegations(T0);
+      expect(ids(delegations)).toEqual(["i2", "i1"]);
+      expect(delegations[0]).toEqual({
+        id: "i2",
+        task: "t",
+        agentId: "w",
+        agentName: "w",
+        creatorAgentId: "lead",
+        status: "in_progress",
+        createdAt: T1,
+      });
+      expect(ids(await repo.listActiveSwarmTasks({ userId: null }))).toEqual(["x", "i2", "i1"]);
+      expect(await repo.countTasksByStatus()).toEqual([
+        { status: "in_progress", count: 3 },
+        { status: "offered", count: 1 },
+      ]);
+      expect(await repo.hasCompletedTask()).toBe(false);
+    });
+
+    test("heartbeat reads: stalled, pinned, affinity, failed; guarded pending fail", async () => {
+      await seedTask(storage, { id: "s2", status: "in_progress" });
+      await seedTask(storage, { id: "s1", status: "in_progress" });
+      await seedTask(storage, { id: "s3", status: "in_progress", lastUpdatedAt: T1 });
+      expect(ids(await repo.listStalledInProgressTasks(T1))).toEqual(["s2", "s1"]);
+      await seedTask(storage, { id: "p1", taskType: "resume", tags: '["CRASH-RECOVERY-PIN"]' });
+      await seedTask(storage, { id: "p2", tags: '["reboot-retry-pin"]' });
+      await seedTask(storage, { id: "p3", tags: '["crash-recovery-pin"]' });
+      expect(ids(await repo.listStalePinnedResumes(T1))).toEqual(["p1", "p2"]);
+      const failed = await repo.failPendingTask("p1", {
+        status: "cancelled",
+        statusKind: "system",
+        failureReason: "r",
+        now: T1,
+      });
+      expect([failed?.status, failed?.finishedAt, failed?.failureReason]).toEqual([
+        "cancelled",
+        T1,
+        "r",
+      ]);
+      expect(
+        await repo.failPendingTask("p1", {
+          status: "failed",
+          statusKind: "error",
+          failureReason: "r",
+          now: T1,
+        }),
+      ).toBeNull();
+      await seedTask(storage, { id: "a1", status: "unassigned", routingAffinity: "{}" });
+      await seedTask(storage, { id: "a2", status: "unassigned" });
+      expect(ids(await repo.listStaleUnassignedAffinityTasks(T1))).toEqual(["a1"]);
+      await seedTask(storage, { id: "f1", status: "failed", finishedAt: T1 });
+      await seedTask(storage, { id: "f2", status: "failed", finishedAt: T1 });
+      await seedTask(storage, { id: "f3", status: "failed", finishedAt: T0 });
+      expect(ids(await repo.listRecentFailedTasks("2026-01-01", 2))).toEqual(["f2", "f1"]);
+      expect(await repo.countTasksFinishedSince("failed", T0)).toBe(2);
+      expect(await repo.countTasksCreatedLastDay()).toBeGreaterThanOrEqual(0);
+    });
+
+    test("workflow links, credential keys and the AgentMail thread lookup", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, "createdAt", "lastUpdatedAt")
+        VALUES ('wf', 'wf', '{}', ${T0}, ${T0})`);
+      await storage.executor.run(sql`
+        INSERT INTO workflow_runs (id, "workflowId", status, "startedAt")
+        VALUES ('run', 'wf', 'running', ${T0})`);
+      await seedTask(storage, { id: "b", workflowRunId: "run" });
+      await seedTask(storage, { id: "a", workflowRunId: "run" });
+      await seedTask(storage, { id: "c" });
+      expect(await repo.listTaskIdsOfWorkflow("wf")).toEqual(["b", "a"]);
+      await repo.unlinkTasksFromWorkflow("wf");
+      expect(await repo.listTaskIdsOfWorkflow("wf")).toEqual([]);
+      expect(await repo.findTaskByWorkflowRunStepId("none")).toBeNull();
+      await repo.setTaskCredentialKey("a", "abcd", "CLAUDE");
+      await repo.setTaskCredentialKey("b", "abcd", "CLAUDE");
+      await repo.setTaskCredentialKey("c", "zz", "CLAUDE");
+      await storage.executor.run(sql`UPDATE agent_tasks SET status = 'in_progress'`);
+      expect(
+        await repo.countInProgressByCredentialSuffix("CLAUDE", ["zz", "abcd", "nope"]),
+      ).toEqual([
+        { suffix: "abcd", n: 2 },
+        { suffix: "zz", n: 1 },
+      ]);
+      await storage.executor.run(sql`UPDATE agent_tasks SET "agentmailThreadId" = 'th'`);
+      expect((await repo.findLatestTaskByAgentMailThread("th"))?.id).toBe("c");
+    });
+
+    test("context snapshots fold into the task aggregates", async () => {
+      await addAgent("a", false);
+      await seedTask(storage, { id: "t" });
+      const snap = {
+        id: "s1",
+        taskId: "t",
+        agentId: "a",
+        sessionId: "sess",
+        contextUsedTokens: 100,
+        contextTotalTokens: 1000,
+        contextPercent: 10,
+        eventType: "progress",
+        compactTrigger: null,
+        preCompactTokens: null,
+        cumulativeInputTokens: 0,
+        cumulativeOutputTokens: 0,
+        contextFormula: null,
+        createdAt: T0,
+      };
+      await repo.insertContextSnapshot(snap);
+      await repo.insertContextSnapshot({ ...snap, id: "s0" });
+      await repo.applyContextSnapshotToTask("t", {
+        contextPercent: 10,
+        contextUsedTokens: 100,
+        contextTotalTokens: 1000,
+        compaction: false,
+      });
+      await repo.applyContextSnapshotToTask("t", {
+        contextPercent: 5,
+        contextUsedTokens: 50,
+        contextTotalTokens: 2000,
+        compaction: true,
+      });
+      const row = await repo.findTaskById("t");
+      expect([
+        row?.peakContextPercent,
+        row?.peakContextTokens,
+        row?.contextWindowSize,
+        row?.compactionCount,
+      ]).toEqual([10, 100, 1000, 1]);
+      expect(ids(await repo.listContextSnapshots({ taskId: "t" }, 10))).toEqual(["s1", "s0"]);
+      expect(ids(await repo.listContextSnapshots({ sessionId: "sess" }, 1))).toEqual(["s1"]);
+      expect((await repo.listContextSnapshots({ taskId: "t" }, 10))[0]).toEqual(snap);
+      expect(await repo.countContextSnapshots("t")).toBe(2);
+    });
+
+    test("task templates filter and keep insertion order on createdAt ties", async () => {
+      const tpl = (id: string, kind: string, title: string, category: string | null) =>
+        storage.executor.run(sql`
+          INSERT INTO task_templates (id, title, description, prompt, kind, payload, category, tags, "createdAt")
+          VALUES (${id}, ${title}, 'd', 'p', ${kind}, '{}', ${category}, '[]', ${T0})`);
+      await tpl("z", "task", "Fix Bug", "eng");
+      await tpl("a", "workflow", "Report", null);
+      const mine = (rows: { id: string }[]) => ids(rows).filter((id) => id === "z" || id === "a");
+      expect(mine(await repo.listTaskTemplates({}))).toEqual(["z", "a"]);
+      expect(mine(await repo.listTaskTemplates({ query: "BUG" }))).toEqual(["z"]);
+      expect(mine(await repo.listTaskTemplates({ kind: "workflow" }))).toEqual(["a"]);
+      expect(mine(await repo.listTaskTemplates({ category: "eng", query: "  " }))).toEqual(["z"]);
+    });
+
+    test("root task chain walks children with their cost", async () => {
+      await seedTask(storage, { id: "r" });
+      await seedTask(storage, { id: "c2", parentTaskId: "r", createdAt: T1 });
+      await seedTask(storage, { id: "c1", parentTaskId: "r", createdAt: T1 });
+      await seedTask(storage, { id: "g", parentTaskId: "c1", createdAt: T1 });
+      await seedTask(storage, { id: "other" });
+      const chain = await repo.listRootTaskChain("r");
+      expect(ids(chain)).toEqual(["r", "c2", "c1", "g"]);
+      expect(chain[0]?.totalCostUsd).toBeNull();
+    });
   });
 }
