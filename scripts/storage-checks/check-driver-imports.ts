@@ -21,7 +21,8 @@ const failures: string[] = [];
 for (const file of listCodeFiles(["src", "packages"])) {
   if (file.startsWith("packages/storage-postgres/") || ALLOWED[file]) continue;
   const source = parse(file);
-  const at = (node: ts.Node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+  const at = (node: ts.Node) =>
+    source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
   const visit = (node: ts.Node) => {
     if (
       ts.isImportDeclaration(node) &&
