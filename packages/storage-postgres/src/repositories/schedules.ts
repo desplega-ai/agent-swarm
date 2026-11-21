@@ -1,6 +1,9 @@
-import type { SqlQuery } from "@desplega/storage";
-import { type AutomationPreflightRowText, BaseSchedulesRepository, sql } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import {
+  type AutomationPreflightRowText,
+  BaseSchedulesRepository,
+  SqlQuery,
+  sql,
+} from "@desplega/storage";
 
 export class PostgresSchedulesRepository extends BaseSchedulesRepository {
   listEnabledPreflightRows(): Promise<AutomationPreflightRowText[]> {
@@ -10,6 +13,6 @@ export class PostgresSchedulesRepository extends BaseSchedulesRepository {
   }
 
   protected insertionOrder(): SqlQuery {
-    return notOnPostgresYet("PostgresSchedulesRepository.insertionOrder");
+    return new SqlQuery(['"_rowid"'], []);
   }
 }

@@ -10,7 +10,6 @@ import {
   sqlIdent,
   sqlJoin,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
 
 /** The `agents` columns in table order, without the `_rowid` surrogate. */
 const AGENT_COLUMNS = sql`
@@ -158,17 +157,31 @@ export class PostgresAgentsRepository extends BaseAgentsRepository {
     return rows.map((row) => row.name);
   }
 
-  countRecentQueuePickups(since: string): Promise<number> {
-    return notOnPostgresYet("PostgresAgentsRepository.countRecentQueuePickups");
+  async countRecentQueuePickups(since: string): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+        FROM agent_log
+       WHERE "eventType" IN ('task_status_change', 'task_claimed')
+         AND "oldValue" IN ('pending', 'unassigned')
+         AND "newValue" = 'in_progress'
+         AND "createdAt" >= ${since}`);
+    return row?.count ?? 0;
   }
 
   protected logOrder(): SqlQuery {
-    return notOnPostgresYet("PostgresAgentsRepository.logOrder");
+    return sql`"_rowid"`;
   }
 
   countLiveAgents(
     minutes: number,
   ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null> {
-    return notOnPostgresYet("PostgresAgentsRepository.countLiveAgents");
+    return this.db.get(sql`
+      SELECT
+        SUM(CASE WHEN "isLead" = ${true} THEN 1 ELSE 0 END) AS leads_alive,
+        SUM(CASE WHEN "isLead" = ${false} THEN 1 ELSE 0 END) AS workers_alive
+      FROM agents
+      WHERE "lastActivityAt" IS NOT NULL
+        AND "lastActivityAt" >= statement_timestamp() - CAST(${minutes} AS double precision) * interval '1 minute'
+        AND status != 'offline'`);
   }
 }

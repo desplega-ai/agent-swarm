@@ -1,8 +1,7 @@
-import { BasePromptTemplatesRepository, type SqlQuery } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import { BasePromptTemplatesRepository, SqlQuery } from "@desplega/storage";
 
 export class PostgresPromptTemplatesRepository extends BasePromptTemplatesRepository {
   protected insertionOrder(): SqlQuery {
-    return notOnPostgresYet("PostgresPromptTemplatesRepository.insertionOrder");
+    return new SqlQuery(['"_rowid"'], []);
   }
 }

@@ -921,9 +921,9 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       await set("r2", sql`reported_slots = 1, last_seen_at = ${T1}, task_id = 't-live'`);
       // Excluded: draining, credential not ready, stale.
       await runtime("r3", "a1");
-      await set("r3", sql`reported_slots = 5, last_seen_at = ${T1}, draining = 1`);
+      await set("r3", sql`reported_slots = 5, last_seen_at = ${T1}, draining = ${true}`);
       await runtime("r4", "a1");
-      await set("r4", sql`reported_slots = 5, last_seen_at = ${T1}, credential_ready = 0`);
+      await set("r4", sql`reported_slots = 5, last_seen_at = ${T1}, credential_ready = ${false}`);
       await runtime("r5", "a1");
       await set("r5", sql`reported_slots = 5, last_seen_at = ${T0}`);
       // a2 (per-task pool): a runtime on a live task counts (2 - 1 free); one whose
@@ -948,7 +948,7 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       await runtime("p1", "a1", { status: "provisioning" });
       await runtime("p2", "a1", { status: "provisioning" });
       await runtime("p3", "a2", { status: "provisioning" });
-      await set("p3", sql`draining = 1`);
+      await set("p3", sql`draining = ${true}`);
       expect(await repo.listProvisioningAgentIds()).toEqual(["a1"]);
 
       await storage.executor.run(sql`

@@ -540,7 +540,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   insertAppVersion(r: AppVersionRow): Promise<AppVersionRow | null> {
     return this.db.get<AppVersionRow>(sql`
       INSERT INTO app_versions (id, "appId", version, snapshot, "changedByAgentId", "createdAt")
-      VALUES (${r.id}, ${r.appId}, ${r.version}, ${r.snapshot}, ${r.changedByAgentId}, ${r.createdAt})
+      VALUES (${r.id}, ${r.appId}, ${r.version}, ${jsonText(r.snapshot)}, ${r.changedByAgentId}, ${r.createdAt})
       RETURNING *`);
   }
 

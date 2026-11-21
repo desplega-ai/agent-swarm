@@ -1,6 +1,7 @@
 import {
   BaseRuntimePoolsRepository,
   type ControllerRuntimeRow,
+  EMPTY,
   type RemoteControllerRow,
   RUNTIME_TASKLESS_TRIGGERS,
   type RuntimeCacheReleaseRow,
@@ -9,7 +10,6 @@ import {
   sql,
   sqlList,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
 
 /**
  * `resources` (TEXT holding a JSON object) has the number `value` under `key`,
@@ -158,6 +158,23 @@ export class PostgresRuntimePoolsRepository extends BaseRuntimePoolsRepository {
     seenSince: string,
     agentId?: string,
   ): Promise<{ agent_id: string; free_slots: number }[]> {
-    return notOnPostgresYet("PostgresRuntimePoolsRepository.listEligibleRuntimeSlots");
+    // SQLite hands the groups over in agent_id order; ORDER BY makes it explicit.
+    return this.db.query<{ agent_id: string; free_slots: number }>(sql`
+      SELECT r.agent_id, CAST(SUM(GREATEST(0, r.reported_slots - GREATEST(
+         (SELECT COUNT(*) FROM active_sessions WHERE "runtimeInstanceId" = r.id),
+         CASE WHEN t.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END
+       ))) AS bigint) AS free_slots
+       FROM runtime_instances r JOIN agents a ON a.id = r.agent_id
+       LEFT JOIN runtime_pools p ON p.id = a.runtime_pool_id
+       LEFT JOIN agent_tasks t ON t.id = r.task_id
+       WHERE r.status = 'active' AND r.draining = ${false}
+         AND (r.credential_ready IS NULL OR r.credential_ready = ${true})
+         AND r.last_seen_at >= ${seenSince}
+         AND (a.runtime_pool_id IS NULL OR p.enabled = ${true})
+         AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
+           OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped'))
+         ${agentId ? sql`AND r.agent_id = ${agentId}` : EMPTY}
+       GROUP BY r.agent_id
+       ORDER BY r.agent_id`);
   }
 }

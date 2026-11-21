@@ -107,6 +107,16 @@ export class SqliteAssetsRepository extends BaseAssetsRepository {
        WHERE "agentId" = ${agentId} OR "agentName" = ${agentName}
        ORDER BY rowid`);
   }
+
+  async listUserCreatedKeys(userId: string, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ key: string }>(sql`
+      SELECT "key", MAX("createdAt") AS newest FROM (
+        SELECT "key", "createdAt" FROM scheduled_tasks WHERE created_by = ${userId}
+        UNION ALL SELECT "key", "createdAt" FROM pages WHERE created_by = ${userId}
+        UNION ALL SELECT "key", "createdAt" FROM workflows WHERE created_by = ${userId}
+      ) AS created GROUP BY "key" ORDER BY newest DESC, "key" LIMIT ${limit}`);
+    return rows.map((row) => row.key);
+  }
 }
 
 /** The audit reads on the synchronous SQLite start path. */

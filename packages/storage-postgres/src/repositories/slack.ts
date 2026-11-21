@@ -13,7 +13,6 @@ import {
   type SqlQuery,
   sql,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
 
 /**
  * True when the tree sweep has render work for `tree` (aliases `tree` and
@@ -260,12 +259,71 @@ export class PostgresSlackRepository extends BaseSlackRepository {
   listResolvableDeferralOutcomes(
     limit: number,
   ): Promise<(SlackMessageRow & { wake_task_id: string })[]> {
-    return notOnPostgresYet("PostgresSlackRepository.listResolvableDeferralOutcomes");
+    // The SQLite query without its planner hints (CROSS JOIN order, unary +).
+    return this.db.query<SlackMessageRow & { wake_task_id: string }>(sql`
+      WITH RECURSIVE chain(card_id, task_id) AS (
+        SELECT card.id, deferred.id FROM agent_tasks deferred
+        JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+        WHERE deferred."deferredAt" IS NOT NULL
+          AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
+          AND card.ts NOT ILIKE 'pending:%'
+        UNION
+        SELECT chain.card_id, wake.id FROM chain
+        JOIN agent_tasks parent ON parent.id = chain.task_id AND parent."deferredAt" IS NOT NULL
+        JOIN agent_tasks wake ON wake."parentTaskId" = parent.id AND wake."taskType" = 'deferred'
+      )
+      SELECT card.*, wake.id AS wake_task_id
+      FROM chain
+      JOIN slack_messages card ON card.id = chain.card_id
+      JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
+      WHERE card.kind = 'outcome'
+        AND card.finalized_at IS NOT NULL
+        AND card.deferral_resolved_at IS NULL
+        AND card.ts NOT ILIKE 'pending:%'
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks child
+          WHERE child."parentTaskId" = wake.id AND child."taskType" = 'deferred'
+        )
+        AND (wake."deferredAt" IS NULL OR wake."finishedAt" > card.updated_at)
+        AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
+      ORDER BY wake."finishedAt" ASC NULLS FIRST, card."_rowid" ASC, wake."_rowid" ASC
+      LIMIT ${limit}`);
   }
 
   listSlackTasksMissingTree(
     scope: { thread: SlackThreadRef } | { since: string },
   ): Promise<TaskRow[]> {
-    return notOnPostgresYet("PostgresSlackRepository.listSlackTasksMissingTree");
+    // Ties: SQLite reads idx_agent_tasks_slack_last_updated (lastUpdatedAt DESC),
+    // whose equal keys stay in rowid order.
+    const scoped =
+      "thread" in scope
+        ? sql`task."slackChannelId" = ${scope.thread.channelId}
+            AND task."slackThreadTs" = ${scope.thread.threadTs}`
+        : sql`task."lastUpdatedAt" >= ${scope.since}`;
+    return this.db.query<TaskRow>(sql`
+      SELECT task.* FROM slack_render_v2_state state
+      CROSS JOIN agent_tasks task
+      WHERE state.id = 1
+        AND ${scoped}
+        AND task.source = 'slack'
+        AND task."slackChannelId" IS NOT NULL
+        AND task."slackThreadTs" IS NOT NULL
+        AND task."createdAt" >= state.activated_at
+        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks earlier
+          WHERE earlier.source = 'slack'
+            AND earlier."slackChannelId" = task."slackChannelId"
+            AND earlier."slackThreadTs" = task."slackThreadTs"
+            AND earlier."createdAt" < state.activated_at
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM slack_messages tree
+          WHERE tree.kind = 'tree'
+            AND tree.channel_id = task."slackChannelId"
+            AND tree.thread_ts = task."slackThreadTs"
+        )
+      ORDER BY task."lastUpdatedAt" DESC, task."_rowid" ASC
+      LIMIT 200`);
   }
 }
