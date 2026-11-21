@@ -163,57 +163,13 @@
     "reason": "M2 move: integrations",
     "sites": 2
   },
-  "src/be/memory/boot-reembed.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 4
-  },
-  "src/be/memory/demotion-evidence.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 1
-  },
-  "src/be/memory/edges-store.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 3
-  },
   "src/be/memory/embedding-space.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 8
-  },
-  "src/be/memory/graph-expansion.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 2
-  },
-  "src/be/memory/key-browser.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 6
-  },
-  "src/be/memory/link-resolver.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 6
-  },
-  "src/be/memory/links-store.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
     "sites": 3
   },
   "src/be/memory/providers/sqlite-store.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 79
-  },
-  "src/be/memory/raters/retrieval.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 4
-  },
-  "src/be/memory/raters/store.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 5
-  },
-  "src/be/memory/retrieval-store.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 3
-  },
-  "src/be/memory/review-recall-filter.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 3
+    "sites": 18
   },
   "src/be/memory/search-read-worker.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
@@ -222,14 +178,6 @@
   "src/be/memory/search-reader.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
     "sites": 2
-  },
-  "src/be/memory/task-learning.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 3
-  },
-  "src/be/memory/usefulness-stats.ts": {
-    "reason": "M2 move: memory (M2, engine search parts M4)",
-    "sites": 7
   },
   "src/be/model-catalog-store.ts": {
     "reason": "M2 move: models",
@@ -453,10 +401,6 @@
   },
   "src/http/db-query-shared.ts": {
     "reason": "M2 move: own database handle (M4 steps 4 and 5)",
-    "sites": 2
-  },
-  "src/http/memory.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
   },
   "src/http/poll.ts": {

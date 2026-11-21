@@ -5,7 +5,8 @@
  * PR references, agent-UI URLs) and resolves them to typed `memory_link` rows.
  * Phase 1: capture layer only — no traversal tools, no reranker integration.
  */
-import { getDbClient } from "@/be/db";
+import type { NewMemoryLink } from "@desplega/storage";
+import { getStorage } from "@/be/storage";
 import { getConfiguredAppUrls } from "@/utils/constants";
 
 export type LinkType =
@@ -194,7 +195,7 @@ export async function resolveWikilinksToMemoryIds(
   agentId: string,
   links: ResolvedLink[],
 ): Promise<ResolvedLink[]> {
-  const db = getDbClient();
+  const repo = getStorage().repos.memory;
   const resolved: ResolvedLink[] = [];
 
   for (const link of links) {
@@ -202,38 +203,26 @@ export async function resolveWikilinksToMemoryIds(
       resolved.push(link);
       continue;
     }
-    const row = await db.get<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE name = ? AND (agentId = ? OR scope = 'swarm') LIMIT 1",
-      [link.targetId, agentId],
-    );
-    resolved.push(row ? { ...link, targetId: row.id } : link);
+    const id = await repo.findIdByNameVisible(link.targetId, agentId);
+    resolved.push(id ? { ...link, targetId: id } : link);
   }
 
   return resolved;
 }
 
-const INSERT_LINK_SQL = `INSERT OR IGNORE INTO memory_link
-   (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-function insertLinkArgs(
-  memoryId: string,
-  link: ResolvedLink,
-  now: string,
-): [string, string, string, string, string, number, string, string, string | null, string, string] {
-  return [
-    crypto.randomUUID(),
-    memoryId,
-    link.linkType,
-    link.targetKind,
-    link.targetId,
-    link.strength,
-    link.resolver,
-    link.sourceText,
-    link.metadata ? JSON.stringify(link.metadata) : null,
+function newLink(memoryId: string, link: ResolvedLink, now: string): NewMemoryLink {
+  return {
+    id: crypto.randomUUID(),
+    fromMemoryId: memoryId,
+    linkType: link.linkType,
+    targetKind: link.targetKind,
+    targetId: link.targetId,
+    strength: link.strength,
+    resolver: link.resolver,
+    sourceText: link.sourceText,
+    metadata: link.metadata ? JSON.stringify(link.metadata) : null,
     now,
-    now,
-  ];
+  };
 }
 
 export async function storeLinks(
@@ -247,9 +236,10 @@ export async function storeLinks(
   const resolved = await resolveWikilinksToMemoryIds(agentId, links);
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  await storage.transaction(async () => {
     for (const link of resolved) {
-      await tx.run(INSERT_LINK_SQL, insertLinkArgs(memoryId, link, now));
+      await storage.repos.memory.insertLinkIfAbsent(newLink(memoryId, link, now));
     }
   });
 }
@@ -285,36 +275,33 @@ export async function refreshLinks(
 
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
-    const existing = await tx.query<{
-      id: string;
-      linkType: string;
-      targetKind: string;
-      targetId: string;
-      sourceText: string | null;
-    }>(
-      `SELECT id, linkType, targetKind, targetId, sourceText
-       FROM memory_link
-      WHERE from_memory_id = ? AND linkType != 'sequel'`,
-      [memoryId],
-    );
+  const storage = getStorage();
+  const repo = storage.repos.memory;
+  await storage.transaction(async () => {
+    const existing = await repo.listContentLinks(memoryId);
     for (const row of existing) {
       if (!nextIdentities.has(linkIdentity(row))) {
-        await tx.run("DELETE FROM memory_link WHERE id = ?", [row.id]);
+        await repo.deleteLink(row.id);
       }
     }
     for (const link of resolved) {
-      await tx.run(INSERT_LINK_SQL, insertLinkArgs(memoryId, link, now));
+      await repo.insertLinkIfAbsent(newLink(memoryId, link, now));
     }
   });
 }
 
 export async function storeSequelLink(fromMemoryId: string, toMemoryId: string): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT OR IGNORE INTO memory_link
-       (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
-     VALUES (?, ?, 'sequel', 'memory', ?, 1.0, 'sequel-auto', NULL, NULL, ?, ?)`,
-    [crypto.randomUUID(), fromMemoryId, toMemoryId, now, now],
-  );
+  await getStorage().repos.memory.insertLinkIfAbsent({
+    id: crypto.randomUUID(),
+    fromMemoryId,
+    linkType: "sequel",
+    targetKind: "memory",
+    targetId: toMemoryId,
+    strength: 1.0,
+    resolver: "sequel-auto",
+    sourceText: null,
+    metadata: null,
+    now,
+  });
 }
