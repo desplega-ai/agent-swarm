@@ -74,6 +74,13 @@ function decoderFor(column: ResultColumn, formats: TimestampFormats | null): Dec
   }
 }
 
+/**
+ * The `_rowid` surrogate column (SQLite's hidden rowid on Postgres). A table
+ * column with that name is dropped from results, as `SELECT *` on SQLite does
+ * not return the rowid; a query that needs it selects it under another alias.
+ */
+const HIDDEN_ROWID = "_rowid";
+
 /** Decode result rows in place of a copy; columns without a decoder pass through. */
 export function decodeRows(
   rows: readonly Record<string, unknown>[],
@@ -83,13 +90,19 @@ export function decodeRows(
   if (!columns || columns.length === 0 || rows.length === 0)
     return rows as Record<string, unknown>[];
   const decoders: [string, Decoder][] = [];
+  let hidden = false;
   for (const column of columns) {
+    if (column.name === HIDDEN_ROWID && column.table !== 0) {
+      hidden = true;
+      continue;
+    }
     const decoder = decoderFor(column, formats);
     if (decoder) decoders.push([column.name, decoder]);
   }
-  if (decoders.length === 0) return rows as Record<string, unknown>[];
+  if (decoders.length === 0 && !hidden) return rows as Record<string, unknown>[];
   return rows.map((row) => {
     const out: Record<string, unknown> = { ...row };
+    if (hidden) delete out[HIDDEN_ROWID];
     for (const [name, decode] of decoders) out[name] = decode(row[name]);
     return out;
   });
