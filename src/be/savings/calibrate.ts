@@ -21,6 +21,7 @@
  *   supported counts reach MIN_LOW_TURN at the bottom and MIN_HIGH_TURN at the top. Past the
  *   outermost supported count the shipped curve's shape is used, scaled to meet that count.
  */
+import { getStorage } from "../storage";
 import type { SavingsSql } from "./compute";
 import {
   CALIBRATION_MODEL,
@@ -305,17 +306,16 @@ export function compareToShipped(curve: CurveSet, sessionsPerTurn: number[]) {
 // ---- Reading the sessions ----------------------------------------------------------------
 
 const num = (v: unknown) => Number(v) || 0;
+const savings = () => getStorage().repos.savings;
 
-/** Keyset-paged read of `sql`, which selects `id` and takes `id > ?` as its last parameter. */
+/** Keyset-paged read: `page(after)` returns up to PAGE rows with `id > after`, by id. */
 async function pages<T extends { id: string }>(
-  sql: SavingsSql,
-  query: string,
-  params: (string | number)[],
+  page: (after: string) => Promise<T[]>,
 ): Promise<T[]> {
   const out: T[] = [];
   let after = "";
   for (;;) {
-    const rows = await sql<T>(query, [...params, after]);
+    const rows = await page(after);
     out.push(...rows);
     if (out.length > MAX_SESSIONS_READ) {
       throw new CalibrationRefusal(
@@ -328,17 +328,9 @@ async function pages<T extends { id: string }>(
 }
 
 export async function fetchInput(sql: SavingsSql, start: Date, end: Date): Promise<DeriveInput> {
-  const window = [start.toISOString(), end.toISOString()];
-  const opusRows = await pages<Record<string, unknown> & { id: string }>(
-    sql,
-    `SELECT s.id AS id, s.numTurns AS turns, s.durationMs AS durationMs,
-       json_extract(j.value,'$.inputTokens') AS inputTokens, json_extract(j.value,'$.outputTokens') AS outputTokens,
-       json_extract(j.value,'$.cacheReadTokens') AS cacheReadTokens, json_extract(j.value,'$.cacheWriteTokens') AS cacheWriteTokens,
-       json_extract(j.value,'$.costUsd') AS costUsd, s.totalCostUsd AS totalCostUsd
-     FROM session_costs s, json_each(CASE WHEN json_valid(s.modelBreakdown) THEN s.modelBreakdown ELSE '[]' END) j
-     WHERE s.model = ? AND json_extract(j.value,'$.model') = ? AND s.createdAt >= ? AND s.createdAt < ?
-       AND s.numTurns BETWEEN 1 AND ${TAU_MAX} AND s.id > ? ORDER BY s.id LIMIT ${PAGE}`,
-    [CALIBRATION_MODEL, CALIBRATION_MODEL, ...window],
+  const span = { start: start.toISOString(), end: end.toISOString() };
+  const opusRows = await pages((after) =>
+    savings().listCalibrationSessions(CALIBRATION_MODEL, span, TAU_MAX, after, PAGE, sql),
   );
   const opus = opusRows.map((r) => ({
     turns: num(r.turns),
@@ -351,11 +343,10 @@ export async function fetchInput(sql: SavingsSql, start: Date, end: Date): Promi
     otherUsd: Math.max(0, num(r.totalCostUsd) - num(r.costUsd)),
   }));
 
-  const priceRows = await sql<{ model: string; token_class: string; price: number }>(
-    `SELECT model, token_class, price_per_million_usd AS price FROM pricing
-     WHERE provider = 'claude' AND model IN (${SAVINGS_TIERS.map(() => "?").join(",")}) AND effective_from <= ?
-     ORDER BY effective_from`,
-    [...SAVINGS_TIERS.map((t) => TIER_MODEL[t]), end.getTime()],
+  const priceRows = await savings().listClaudePrices(
+    SAVINGS_TIERS.map((t) => TIER_MODEL[t]),
+    end.getTime(),
+    sql,
   );
   const latest = new Map<string, number>(); // later effective_from overwrites earlier
   for (const r of priceRows) latest.set(`${r.model}|${r.token_class}`, num(r.price));
@@ -377,11 +368,8 @@ export async function fetchInput(sql: SavingsSql, start: Date, end: Date): Promi
   const tierTurns: DeriveInput["tierTurns"] = {};
   for (const tier of SAVINGS_TIERS) {
     if (tier === "smart") continue;
-    const rows = await pages<{ id: string; turns: number; durationMs: number }>(
-      sql,
-      `SELECT id, numTurns AS turns, durationMs FROM session_costs
-       WHERE model = ? AND createdAt >= ? AND createdAt < ? AND numTurns BETWEEN 3 AND ${TAU_MAX} AND id > ? ORDER BY id LIMIT ${PAGE}`,
-      [TIER_MODEL[tier], ...window],
+    const rows = await pages((after) =>
+      savings().listTierSessions(TIER_MODEL[tier], span, TAU_MAX, after, PAGE, sql),
     );
     tierTurns[tier] = rows.map((r) => ({ turns: num(r.turns), durationMs: num(r.durationMs) }));
   }

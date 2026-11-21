@@ -135,22 +135,6 @@
     "reason": "M2 move: tasks",
     "sites": 3
   },
-  "src/be/savings/calibrate.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
-  },
-  "src/be/savings/compute.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 25
-  },
-  "src/be/savings/read.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 15
-  },
-  "src/be/savings/rollup.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
     "sites": 2
