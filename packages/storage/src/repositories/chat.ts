@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { sql } from "../sql";
 
@@ -124,7 +125,7 @@ export abstract class BaseChatRepository implements ChatRepository {
 
   async setKv(key: string, value: string, expiresAt: number | null): Promise<void> {
     await this.db.run(sql`
-      INSERT INTO chat_state_kv (key, value, expires_at) VALUES (${key}, ${value}, ${expiresAt})
+      INSERT INTO chat_state_kv (key, value, expires_at) VALUES (${key}, ${jsonText(value)}, ${expiresAt})
       ON CONFLICT (key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at`);
   }
 
@@ -135,7 +136,7 @@ export abstract class BaseChatRepository implements ChatRepository {
     now: number,
   ): Promise<boolean> {
     const result = await this.db.run(sql`
-      INSERT INTO chat_state_kv (key, value, expires_at) VALUES (${key}, ${value}, ${expiresAt})
+      INSERT INTO chat_state_kv (key, value, expires_at) VALUES (${key}, ${jsonText(value)}, ${expiresAt})
       ON CONFLICT (key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at
       WHERE chat_state_kv.expires_at IS NOT NULL AND chat_state_kv.expires_at <= ${now}`);
     return result.changes > 0;
@@ -154,7 +155,7 @@ export abstract class BaseChatRepository implements ChatRepository {
     await this.db.run(sql`
       INSERT INTO chat_lists (key, seq, value, expires_at)
       VALUES (${key}, (SELECT COALESCE(MAX(seq), 0) + 1 FROM chat_lists WHERE key = ${key}),
-        ${value}, ${expiresAt})`);
+        ${jsonText(value)}, ${expiresAt})`);
   }
 
   async trimList(key: string, maxLength: number): Promise<void> {

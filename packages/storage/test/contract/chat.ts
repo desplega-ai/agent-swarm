@@ -58,14 +58,15 @@ export function chatContract(engine: ContractEngine): void {
     });
 
     test("lists append in seq order, trim to the newest and expire", async () => {
-      for (const value of ["a", "b", "c", "d"]) await repo.appendListItem("l", value, null);
-      expect(await repo.listItems("l", 0)).toEqual(["a", "b", "c", "d"]);
+      // Values are JSON text the caller encodes (a jsonb column on Postgres).
+      for (const value of ['"a"', '"b"', '"c"', '"d"']) await repo.appendListItem("l", value, null);
+      expect(await repo.listItems("l", 0)).toEqual(['"a"', '"b"', '"c"', '"d"']);
       await repo.trimList("l", 2);
-      expect(await repo.listItems("l", 0)).toEqual(["c", "d"]);
-      await repo.appendListItem("l", "e", null);
-      expect(await repo.listItems("l", 0)).toEqual(["c", "d", "e"]);
+      expect(await repo.listItems("l", 0)).toEqual(['"c"', '"d"']);
+      await repo.appendListItem("l", '"e"', null);
+      expect(await repo.listItems("l", 0)).toEqual(['"c"', '"d"', '"e"']);
       await repo.setListExpiry("l", 100);
-      expect(await repo.listItems("l", 99)).toEqual(["c", "d", "e"]);
+      expect(await repo.listItems("l", 99)).toEqual(['"c"', '"d"', '"e"']);
       expect(await repo.listItems("l", 100)).toEqual([]);
       await repo.deleteExpiredList("l", 99);
       expect(await repo.listItems("l", 0)).toHaveLength(3);

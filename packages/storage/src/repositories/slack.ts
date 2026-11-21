@@ -1,4 +1,4 @@
-import { likeAsciiCi } from "../dialect";
+import { jsonText, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlList } from "../sql";
 
@@ -466,7 +466,7 @@ export abstract class BaseSlackRepository implements SlackRepository {
 
   async setReconcileCursors(cursors: string): Promise<void> {
     await this.db.run(
-      sql`UPDATE slack_render_v2_state SET reconcile_cursors = ${cursors} WHERE id = 1`,
+      sql`UPDATE slack_render_v2_state SET reconcile_cursors = ${jsonText(cursors)} WHERE id = 1`,
     );
   }
 

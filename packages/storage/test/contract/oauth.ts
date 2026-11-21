@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  jsonText,
   type OAuthAppWrite,
   type OAuthAuthorizationWrite,
   type OAuthRepository,
@@ -187,6 +188,36 @@ export function oauthContract(engine: ContractEngine): void {
       expect(await repo.deleteAuthorizationsForApp(a1)).toBe(2);
     });
 
+    test("keep-alive metadata values, sweep expiry text and clock-written updatedAt", async () => {
+      const kinds: [string, string][] = [
+        ["k-true", '{"keepAlive":true}'],
+        ["k-one", '{"keepAlive":1}'],
+        ["k-text", '{"keepAlive":"true"}'],
+        ["k-text-one", '{"keepAlive":"1"}'],
+        ["k-false", '{"keepAlive":false}'],
+        ["k-none", "{}"],
+      ];
+      for (const [provider, metadata] of kinds) {
+        const appId = await repo.insertApp(provider, appWrite({ metadata }));
+        await addAuth(provider, appId, "default", { expiresAt: "2026-11-21T10:00:00.123Z" });
+      }
+      expect((await repo.listKeepAliveRows()).map((row) => row.authorizationId)).toEqual([
+        "k-one",
+        "k-text",
+        "k-true",
+      ]);
+      expect((await repo.listSweepRows()).map((row) => row.expiresAt)).toEqual(
+        kinds.map(() => "2026-11-21T10:00:00.123Z"),
+      );
+      await storage.executor.run(sql`UPDATE oauth_authorizations SET "updatedAt" = 'legacy'`);
+      await repo.setAuthorizationStatus("k-one", "active", null);
+      expect((await repo.findAuthorization("k-one"))?.updatedAt).toMatch(ISO_MS);
+      await repo.setAppMetadata("k-none", '{"keepAlive":true}');
+      const app = await repo.findAppByProvider("k-none");
+      expect(app?.metadata).toBe('{"keepAlive":true}');
+      expect(app?.updatedAt).toMatch(ISO_MS);
+    });
+
     test("pending rows: flow filter, single delete and the cutoff sweep", async () => {
       const appId = await repo.insertApp("p", appWrite());
       const pending = {
@@ -207,8 +238,10 @@ export function oauthContract(engine: ContractEngine): void {
       expect(await repo.findPending("s2", ["generic", "tracker"])).toBeNull();
       await repo.deletePending("s1");
       expect(await repo.findPending("s1", ["generic"])).toBeNull();
-      expect(await repo.deletePendingBefore(["generic", "tracker"], "9999")).toBe(0);
-      expect(await repo.deletePendingBefore(["mcp"], "9999")).toBe(1);
+      expect(
+        await repo.deletePendingBefore(["generic", "tracker"], "9999-12-31T23:59:59.999Z"),
+      ).toBe(0);
+      expect(await repo.deletePendingBefore(["mcp"], "9999-12-31T23:59:59.999Z")).toBe(1);
     });
 
     test("refresh locks are taken when free or expired, released by the owner only", async () => {
@@ -390,7 +423,7 @@ export function oauthContract(engine: ContractEngine): void {
         storage.executor.run(sql`
           INSERT INTO oauth_apps (id, provider, "clientId", "clientSecret", "authorizeUrl", "tokenUrl",
             "redirectUri", scopes, "mcpServerId", "createdAt", "updatedAt")
-          VALUES (${id}, ${provider}, 'c', 's', 'https://a', 'https://t', 'https://r', 'x',
+          VALUES (${id}, ${provider}, 'c', 's', 'https://a', 'https://t', 'https://r', ${jsonText('["x"]')},
             ${mcpServerId}, ${T0}, ${T0})`);
       await app("z2", "zeta");
       await app("b1", "beta");
