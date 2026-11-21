@@ -406,7 +406,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
       }
 
-      let learningWrite: Promise<TaskLearningResult> | undefined;
+      // What the committed attempt decided about the learning and the uiSpec.
+      // Each attempt writes a fresh object, so a replayed attempt (decision D6)
+      // never reads the rolled-back attempt's values.
+      let decided: {
+        learningWrite?: Promise<TaskLearningResult>;
+        /** A sentence about the uiSpec, appended to a successful result message. */
+        uiSpecNote?: string;
+      } = {};
       // The full script-action checks (allowlist, scripts, args schemas) run
       // here, before the BEGIN IMMEDIATE below, so they never hold the write
       // lock. The transaction re-checks only the pins, with bounded work, so a
@@ -416,9 +423,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ? await scriptActionIssues(uiSpec.actions)
           : [];
 
-      // A sentence about the uiSpec, appended to a successful result message.
-      let uiSpecNote: string | undefined;
       const result = await getDbClient().transaction(async () => {
+        const attempt: typeof decided = {};
+        // tx-replay-safe: a fresh object per attempt replaces the previous attempt's
+        decided = attempt;
         const agent = await getAgentById(requestInfo.agentId ?? "");
 
         if (!agent) {
@@ -523,14 +531,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // A finished task takes no new writes, learnings included.
         if (learning && isTerminal) {
-          learningWrite = Promise.resolve({
+          attempt.learningWrite = Promise.resolve({
             status: "failed",
             error: "the task is already finished; use memory-store",
           });
         } else if (learning) {
           // Post-commit, so a rolled-back progress write never leaves a learning
           // behind, and a failed learning write never rolls back the progress.
-          learningWrite = new Promise((resolve) => {
+          attempt.learningWrite = new Promise((resolve) => {
             getDbClient().afterCommit(() =>
               storeTaskLearning({
                 agentId: agent.id,
@@ -630,9 +638,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // An invalid spec refuses the first completion, like citations above.
         let uiSpecToStore: Parameters<typeof upsertTaskUiSpec>[1] | undefined;
         if (uiSpec && !isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
-          uiSpecNote = "uiSpec ignored: UI_SPEC_ENABLED is off.";
+          attempt.uiSpecNote = "uiSpec ignored: UI_SPEC_ENABLED is off.";
         } else if (uiSpec && status !== "completed") {
-          uiSpecNote = 'uiSpec is stored only with status "completed".';
+          attempt.uiSpecNote = 'uiSpec is stored only with status "completed".';
         } else if (uiSpec) {
           // Script actions are checked first, so a bad one uses the same single refusal.
           const scriptIssues =
@@ -665,7 +673,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               message: `Completion refused: uiSpec is not valid. The task stays ${existingTask.status}. Fix these, then call store-progress again:\n- ${validation.issues.join("\n- ")}\nThis check refuses once per task; the next completion is accepted without the spec.`,
             };
           } else {
-            uiSpecNote = `uiSpec dropped: ${validation.issues[0]}`;
+            attempt.uiSpecNote = `uiSpec dropped: ${validation.issues[0]}`;
           }
         }
 
@@ -801,12 +809,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
         !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
       if (skipWasFresh && result.task) finalizeSkippedTaskReaction(result.task, "store-progress");
 
-      const learningResult = await learningWrite;
+      const learningResult = await decided.learningWrite;
       const { success } = result;
       const message = [
         result.message,
         ...(learningResult ? [learningSentence(learningResult)] : []),
-        ...(success && uiSpecNote ? [uiSpecNote] : []),
+        ...(success && decided.uiSpecNote ? [decided.uiSpecNote] : []),
       ].join(" ");
       const task = result.task
         ? {
