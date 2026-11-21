@@ -149,7 +149,8 @@ export interface UsersRepository {
   listUsers(): Promise<UserRow[]>;
   /**
    * The user whose primary email equals `email` ignoring ASCII case, skipping
-   * a merge source (`mergedIntoUserId` set). The email is unique.
+   * a merge source (`mergedIntoUserId` set). The unique index is case-sensitive,
+   * so two rows may match: the first inserted wins.
    */
   findUserByPrimaryEmail(email: string): Promise<UserRow | null>;
   /** Users with a non-empty alias array that are not a merge source. Insertion order. */

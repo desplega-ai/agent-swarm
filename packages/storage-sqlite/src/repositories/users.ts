@@ -18,7 +18,8 @@ export class SqliteUsersRepository extends BaseUsersRepository {
   // SQLite LOWER folds ASCII letters only.
   findUserByPrimaryEmail(email: string): Promise<UserRow | null> {
     return this.db.get<UserRow>(sql`
-      SELECT * FROM users WHERE LOWER(email) = LOWER(${email}) AND "mergedIntoUserId" IS NULL`);
+      SELECT * FROM users WHERE LOWER(email) = LOWER(${email}) AND "mergedIntoUserId" IS NULL
+      ORDER BY rowid LIMIT 1`);
   }
 
   listUsersWithEmailAliases(): Promise<UserRow[]> {

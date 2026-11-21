@@ -121,7 +121,11 @@ export function usersContract(engine: ContractEngine): void {
       ]);
       expect((await repo.listUsersWithEmailAliases()).map((r) => r.id)).toEqual(["c", "b"]);
       expect((await repo.findUserByPrimaryEmail("bob@example.COM"))?.id).toBe("a");
+      await repo.insertUser(newUser({ id: "a2", name: "x", email: "bob@example.com" }));
+      expect((await repo.findUserByPrimaryEmail("BOB@EXAMPLE.COM"))?.id).toBe("a");
       await repo.markUserMergedInto("a", "c", T1);
+      expect((await repo.findUserByPrimaryEmail("bob@example.com"))?.id).toBe("a2");
+      await repo.markUserMergedInto("a2", "c", T1);
       expect(await repo.findUserByPrimaryEmail("bob@example.com")).toBeNull();
     });
 
