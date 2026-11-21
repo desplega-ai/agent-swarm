@@ -18,6 +18,7 @@ import type {
   ApiKeyRef,
   ApiKeyStatusRow,
   AppVersionRow,
+  AssetKeyMappingRow,
   ChannelActivityCursorRow,
   ContextSnapshotRow,
   InboxItemStateRow,
@@ -1248,21 +1249,6 @@ async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promis
 // Cross-entity asset namespaces + logical provider mappings
 // ============================================================================
 
-type AssetKeyMappingRow = {
-  id: string;
-  provider_id: string;
-  provider_org_id: string;
-  provider_drive_id: string;
-  provider_key: string;
-  key: string;
-  source_entity_type: string | null;
-  source_entity_id: string | null;
-  created_at: string;
-  updated_at: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
 function rowToAssetKeyMapping(row: AssetKeyMappingRow): AssetKeyMapping {
   return {
     id: row.id,
@@ -1300,19 +1286,14 @@ async function insertAssetKeyHistory(input: {
   newKey: string;
   changedBy?: string;
 }): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO asset_key_history
-       (id, entity_type, entity_id, previous_key, new_key, changed_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      input.entityType,
-      input.entityId,
-      input.previousKey ?? null,
-      input.newKey,
-      input.changedBy ?? null,
-    ],
-  );
+  await getStorage().repos.assets.insertAssetKeyHistory({
+    id: crypto.randomUUID(),
+    entity_type: input.entityType,
+    entity_id: input.entityId,
+    previous_key: input.previousKey ?? null,
+    new_key: input.newKey,
+    changed_by: input.changedBy ?? null,
+  });
 }
 
 export async function getAssetKeyMappingByProvider(input: {
@@ -1321,12 +1302,12 @@ export async function getAssetKeyMappingByProvider(input: {
   providerDriveId?: string;
   providerKey: string;
 }): Promise<AssetKeyMapping | null> {
-  const row = await getDbClient().get<AssetKeyMappingRow>(
-    `SELECT * FROM asset_key_mappings
-       WHERE provider_id = ? AND provider_org_id = ?
-         AND provider_drive_id = ? AND provider_key = ?`,
-    [input.providerId, input.providerOrgId ?? "", input.providerDriveId ?? "", input.providerKey],
-  );
+  const row = await getStorage().repos.assets.findAssetKeyMappingByProvider({
+    providerId: input.providerId,
+    providerOrgId: input.providerOrgId ?? "",
+    providerDriveId: input.providerDriveId ?? "",
+    providerKey: input.providerKey,
+  });
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -1341,24 +1322,18 @@ export async function upsertAssetKeyMapping(
   if (!input.providerKey.trim()) throw new Error("providerKey is required");
   const now = new Date().toISOString();
 
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     const existing = await getAssetKeyMappingByProvider(input);
     if (existing) {
       const key = normalizeAssetKey(input.key ?? existing.key);
-      const row = await tx.get<AssetKeyMappingRow>(
-        `UPDATE asset_key_mappings
-           SET "key" = ?, source_entity_type = ?, source_entity_id = ?,
-               updated_at = ?, updated_by = ?
-           WHERE id = ? RETURNING *`,
-        [
-          key,
-          input.sourceEntityType ?? existing.sourceEntityType ?? null,
-          input.sourceEntityId ?? existing.sourceEntityId ?? null,
-          now,
-          input.updatedBy ?? input.createdBy ?? existing.updatedBy ?? null,
-          existing.id,
-        ],
-      );
+      const row = await storage.repos.assets.updateAssetKeyMapping(existing.id, {
+        key,
+        source_entity_type: input.sourceEntityType ?? existing.sourceEntityType ?? null,
+        source_entity_id: input.sourceEntityId ?? existing.sourceEntityId ?? null,
+        updated_at: now,
+        updated_by: input.updatedBy ?? input.createdBy ?? existing.updatedBy ?? null,
+      });
       if (!row) throw new Error("Failed to update asset key mapping");
       if (existing.key !== key) {
         await insertAssetKeyHistory({
@@ -1376,27 +1351,20 @@ export async function upsertAssetKeyMapping(
     const key = normalizeAssetKey(
       input.key ?? defaultAssetKey(`fs:${input.providerId.trim()}`, id),
     );
-    const row = await tx.get<AssetKeyMappingRow>(
-      `INSERT INTO asset_key_mappings (
-           id, provider_id, provider_org_id, provider_drive_id, provider_key,
-           "key", source_entity_type, source_entity_id,
-           created_at, updated_at, created_by, updated_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      [
-        id,
-        input.providerId.trim(),
-        input.providerOrgId ?? "",
-        input.providerDriveId ?? "",
-        input.providerKey,
-        key,
-        input.sourceEntityType ?? "external",
-        input.sourceEntityId ?? null,
-        now,
-        now,
-        input.createdBy ?? null,
-        input.updatedBy ?? input.createdBy ?? null,
-      ],
-    );
+    const row = await storage.repos.assets.insertAssetKeyMapping({
+      id,
+      provider_id: input.providerId.trim(),
+      provider_org_id: input.providerOrgId ?? "",
+      provider_drive_id: input.providerDriveId ?? "",
+      provider_key: input.providerKey,
+      key,
+      source_entity_type: input.sourceEntityType ?? "external",
+      source_entity_id: input.sourceEntityId ?? null,
+      created_at: now,
+      updated_at: now,
+      created_by: input.createdBy ?? null,
+      updated_by: input.updatedBy ?? input.createdBy ?? null,
+    });
     if (!row) throw new Error("Failed to create asset key mapping");
     await insertAssetKeyHistory({
       entityType: "file",
@@ -1409,10 +1377,7 @@ export async function upsertAssetKeyMapping(
 }
 
 export async function getAssetKeyMapping(id: string): Promise<AssetKeyMapping | null> {
-  const row = await getDbClient().get<AssetKeyMappingRow>(
-    "SELECT * FROM asset_key_mappings WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.assets.findAssetKeyMapping(id);
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -1422,102 +1387,30 @@ export interface AssetSummaryFilters {
   limit?: number;
 }
 
-type AssetSummaryRow = {
-  entityType: AssetEntityType;
-  id: string;
-  key: string;
-  label: string;
-  updatedAt: string;
-  providerId: string | null;
-  providerOrgId: string | null;
-  providerDriveId: string | null;
-  providerKey: string | null;
-};
-
-function assetSummaryQueries(types: Set<AssetEntityType>): string[] {
-  const queries: string[] = [];
-  if (types.has("task")) {
-    queries.push(
-      `SELECT 'task' AS entityType, id, "key", 'Task ' || substr(id, 1, 8) AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM agent_tasks`,
-    );
-  }
-  if (types.has("workflow")) {
-    queries.push(
-      `SELECT 'workflow' AS entityType, id, "key", name AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM workflows`,
-    );
-  }
-  if (types.has("schedule")) {
-    queries.push(
-      `SELECT 'schedule' AS entityType, id, "key", name AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM scheduled_tasks`,
-    );
-  }
-  if (types.has("page")) {
-    queries.push(
-      `SELECT 'page' AS entityType, id, "key", title AS label,
-              updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM pages`,
-    );
-  }
-  if (types.has("app")) {
-    queries.push(
-      `SELECT 'app' AS entityType, id, "key", name AS label,
-              updated_at AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM apps`,
-    );
-  }
-  if (types.has("script")) {
-    queries.push(
-      `SELECT 'script' AS entityType, id, "key", name AS label,
-              updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM scripts`,
-    );
-  }
-  if (types.has("file")) {
-    queries.push(
-      `SELECT 'file' AS entityType, id, "key", provider_key AS label,
-              updated_at AS updatedAt, provider_id AS providerId,
-              NULLIF(provider_org_id, '') AS providerOrgId,
-              NULLIF(provider_drive_id, '') AS providerDriveId,
-              provider_key AS providerKey
-       FROM asset_key_mappings`,
-    );
-  }
-  return queries;
-}
-
 export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise<AssetSummary[]> {
   const requestedTypes = new Set<AssetEntityType>(
     filters?.types?.length
       ? filters.types
       : ["task", "workflow", "schedule", "page", "app", "script", "file"],
   );
-  const queries = assetSummaryQueries(requestedTypes);
-  if (queries.length === 0) return [];
   const limit = Math.min(Math.max(filters?.limit ?? 500, 1), 1000);
-  const params: (string | number)[] = [];
-  let query = `SELECT * FROM (${queries.join(" UNION ALL ")})`;
-  if (filters?.keyPrefix) {
-    query += ` WHERE "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += ' ORDER BY "key" ASC, updatedAt DESC LIMIT ?';
-  params.push(limit);
-  const rows = await getDbClient().query<AssetSummaryRow>(query, params);
+  const order: AssetEntityType[] = [
+    "task",
+    "workflow",
+    "schedule",
+    "page",
+    "app",
+    "script",
+    "file",
+  ];
+  const rows = await getStorage().repos.assets.listAssetSummaries(
+    order.filter((type) => requestedTypes.has(type)),
+    filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : null,
+    limit,
+  );
 
   return rows.map((row) => ({
-    entityType: row.entityType,
+    entityType: row.entityType as AssetEntityType,
     id: row.id,
     key: row.key,
     label: row.label,
@@ -1535,54 +1428,11 @@ export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise
 }
 
 async function currentAssetKey(entityType: AssetEntityType, id: string): Promise<string | null> {
-  switch (entityType) {
-    case "task": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM agent_tasks WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "workflow": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM workflows WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "schedule": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM scheduled_tasks WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "page": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM pages WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "app": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM apps WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "script": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM scripts WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "file": {
-      const mapping = await getAssetKeyMapping(id);
-      return mapping?.key ?? null;
-    }
+  if (entityType === "file") {
+    const mapping = await getAssetKeyMapping(id);
+    return mapping?.key ?? null;
   }
+  return await getStorage().repos.assets.findAssetKey(entityType, id);
 }
 
 export async function moveAssetKey(input: {
@@ -1610,58 +1460,25 @@ export async function moveAssetKey(input: {
   }
   const now = new Date().toISOString();
 
-  return getDbClient().transaction(async (tx) => {
-    switch (input.entityType) {
-      case "task": {
-        const movedTaskIds = await moveTaskChainKeyInTx(
-          input.id,
-          input.descendantTaskIds ?? [],
-          key,
-          input.changedBy,
-        );
-        if (movedTaskIds === false) return false;
-        return { movedTaskIds };
-      }
-      case "workflow":
-        await tx.run(
-          'UPDATE workflows SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "schedule":
-        await tx.run(
-          'UPDATE scheduled_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "page":
-        await tx.run('UPDATE pages SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
-          key,
-          now,
-          input.changedBy ?? null,
-          input.id,
-        ]);
-        break;
-      case "app":
-        await tx.run('UPDATE apps SET "key" = ?, updated_at = ? WHERE id = ?', [
-          key,
-          now,
-          input.id,
-        ]);
-        break;
-      case "script":
-        await tx.run(
-          'UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "file":
-        await tx.run(
-          'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        break;
+  const storage = getStorage();
+  return storage.transaction(async () => {
+    if (input.entityType === "task") {
+      const movedTaskIds = await moveTaskChainKeyInTx(
+        input.id,
+        input.descendantTaskIds ?? [],
+        key,
+        input.changedBy,
+      );
+      if (movedTaskIds === false) return false;
+      return { movedTaskIds };
     }
+    // Workflows, schedules and scripts also record the moving agent.
+    await storage.repos.assets.setAssetKey(input.entityType, input.id, {
+      key,
+      now,
+      changedBy: input.changedBy ?? null,
+      changedByAgentId: input.changedByAgentId ?? null,
+    });
     await insertAssetKeyHistory({
       entityType: input.entityType,
       entityId: input.id,
