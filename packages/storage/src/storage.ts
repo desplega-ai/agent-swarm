@@ -4,11 +4,13 @@ import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { ModelsRepository } from "./repositories/models";
+import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
   extensions: ExtensionsRepository;
   models: ModelsRepository;
+  runtimePools: RuntimePoolsRepository;
 };
 
 /**

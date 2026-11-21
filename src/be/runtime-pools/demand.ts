@@ -1,31 +1,22 @@
 import type { AgentTask, RuntimeInstance, RuntimePool } from "../../types";
-import { checkDependencies, getDbClient } from "../db";
+import { checkDependencies } from "../db";
 import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
+import { getStorage } from "../storage";
 
 export async function pendingWorkForAgent(agentId: string): Promise<{
   work: number;
   topTask: AgentTask | null;
 }> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks WHERE (agentId = ? AND status = 'pending')
-       OR (offeredTo = ? AND status = 'offered') ORDER BY priority DESC, createdAt, rowid`,
-    [agentId, agentId],
-  );
+  const repo = getStorage().repos.runtimePools;
+  const rows = await repo.listPendingWork<AgentTaskRow>(agentId);
   const tasks: AgentTask[] = [];
   for (const row of rows) {
     const task = rowToAgentTask(row);
     if (task.status === "offered" || (await checkDependencies(task.id)).ready) tasks.push(task);
   }
   // claimMentions claims one channel at a time, regardless of its message count.
-  const mentions = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(DISTINCT m.channelId) AS count FROM channel_messages m
-     JOIN channels c ON c.id = m.channelId
-     LEFT JOIN channel_read_state s ON s.channelId = m.channelId AND s.agentId = ?
-     WHERE m.mentions LIKE ? AND s.processing_since IS NULL
-       AND (s.lastReadAt IS NULL OR m.createdAt > s.lastReadAt)`,
-    [agentId, `%"${agentId}"%`],
-  );
-  return { work: tasks.length + (mentions?.count ?? 0), topTask: tasks[0] ?? null };
+  const mentions = await repo.countUnreadMentionChannels(agentId);
+  return { work: tasks.length + mentions, topTask: tasks[0] ?? null };
 }
 
 export interface AgentDemand {

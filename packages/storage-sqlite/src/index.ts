@@ -8,6 +8,7 @@ import {
 import { sqliteDialect } from "./dialect";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteModelsRepository } from "./repositories/models";
+import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 
 export {
   type BusyRetryOptions,
@@ -40,6 +41,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     repos: {
       extensions: new SqliteExtensionsRepository(executor),
       models: new SqliteModelsRepository(executor),
+      runtimePools: new SqliteRuntimePoolsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

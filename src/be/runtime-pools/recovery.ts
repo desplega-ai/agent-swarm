@@ -6,18 +6,20 @@ import type { RuntimeInstance } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { getDbClient, getTaskById } from "../db";
+import { getTaskById } from "../db";
 import {
   getRuntimeInstanceById,
   listRuntimeInstancesForPool,
   markRuntimeTerminated,
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
+import { getStorage } from "../storage";
 import { ensureRuntimeOwnerId, getControllerCommands } from "./controllers";
 import { getRuntimePool, resolvePoolDelivery } from "./db";
 import { isRuntimeWanted, rotatingRuntimes } from "./lifecycle";
 import { runtimeHandle, terminateRuntime } from "./supervisor";
 
+const repo = () => getStorage().repos.runtimePools;
 const recovering = new Map<string, Promise<void>>();
 const currentAction = new AsyncLocalStorage<string>();
 const socketChecks = new Map<string, ReturnType<typeof setTimeout>>();
@@ -46,20 +48,12 @@ export async function serializeRuntimeAction(
 }
 
 async function recoverSessions(runtimeId: string, reason: string): Promise<void> {
-  const sessions = await getDbClient().query<{ taskId: string }>(
-    "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ?",
-    [runtimeId],
-  );
+  const sessions = (await repo().listRuntimeSessionTaskIds(runtimeId)).map((taskId) => ({
+    taskId,
+  }));
   if (isRuntimePoolsEnabled()) {
-    const dispatched = await getDbClient().query<{ taskId: string }>(
-      `SELECT t.id AS taskId FROM agent_tasks t
-       WHERE (t.runtime_instance_id = ? OR t.id IN (
-         SELECT task_id FROM runtime_instances WHERE id = ? AND agent_id = t.agentId
-       )) AND t.status = 'in_progress'
-       AND NOT EXISTS (SELECT 1 FROM active_sessions s WHERE s.taskId = t.id)`,
-      [runtimeId, runtimeId],
-    );
-    sessions.push(...dispatched);
+    const dispatched = await repo().listDispatchedTaskIdsWithoutSession(runtimeId);
+    sessions.push(...dispatched.map((taskId) => ({ taskId })));
   }
   if (!sessions.length) return;
   const { remediateTaskForDeadRuntime } = await import("../../heartbeat/heartbeat");
@@ -67,11 +61,7 @@ async function recoverSessions(runtimeId: string, reason: string): Promise<void>
     try {
       const task = await getTaskById(session.taskId);
       if (task?.status === "in_progress") await remediateTaskForDeadRuntime(task, reason);
-      else
-        await getDbClient().run(
-          "DELETE FROM active_sessions WHERE taskId = ? AND runtimeInstanceId = ?",
-          [session.taskId, runtimeId],
-        );
+      else await repo().deleteRuntimeSession(session.taskId, runtimeId);
     } catch (error) {
       reportRecoveryError(error);
     }
@@ -101,10 +91,7 @@ export async function recoverPausedRuntime(
     const handle = runtimeHandle(runtime);
     if (!handle || !controller.resume) throw new Error("Controller cannot resume a paused runtime");
     await controller.resume(handle);
-    await getDbClient().run(
-      "UPDATE runtime_instances SET last_seen_at = ?, lease_expires_at = NULL WHERE id = ? AND status != 'offline'",
-      [now.toISOString(), runtime.id],
-    );
+    await repo().markRuntimeResumed(runtime.id, now.toISOString());
   }
 }
 
@@ -146,10 +133,7 @@ export async function checkDisconnectedRuntime(runtimeId: string): Promise<void>
     const controller = await getControllerCommands(runtime.controllerId);
     const status = (await controller.status([handle]))[handle.externalId];
     if (status === "paused" && pool.kind === "e2b") {
-      const session = await getDbClient().get(
-        "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
-        [runtimeId],
-      );
+      const session = await repo().hasRuntimeSession(runtimeId);
       const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
       const now = new Date();
       const configured = Number(process.env.RUNTIME_TOKEN_ROTATE_BEFORE_MIN);
@@ -183,7 +167,7 @@ export async function checkDisconnectedRuntime(runtimeId: string): Promise<void>
         runtime,
         controller,
         await isRuntimeWanted(pool, runtime, rotations.has(runtime.id), remaining, now),
-        !!session || task?.status === "in_progress" || task?.status === "reviewing",
+        session || task?.status === "in_progress" || task?.status === "reviewing",
       );
       return;
     }
