@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 import type { AutomationPreflightRowText } from "./schedules";
@@ -1100,8 +1100,9 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
       INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input,
         "triggerSchema", params, "requiredParams", requires, dir, vcs_repo, "createdByAgentId",
         "updatedByAgentId", created_by, updated_by, enabled)
-      VALUES (${w.id}, ${w.key}, ${w.name}, ${w.description}, ${w.definition}, ${w.triggers},
-        ${w.cooldown}, ${w.input}, ${w.triggerSchema}, ${w.params}, ${w.requiredParams}, ${w.requires},
+      VALUES (${w.id}, ${w.key}, ${w.name}, ${w.description}, ${w.definition}, ${jsonText(w.triggers)},
+        ${w.cooldown}, ${w.input}, ${jsonText(w.triggerSchema)}, ${jsonText(w.params)},
+        ${jsonText(w.requiredParams)}, ${jsonText(w.requires)},
         ${w.dir}, ${w.vcsRepo}, ${w.createdByAgentId}, ${w.createdByAgentId}, ${w.createdBy},
         ${w.createdBy}, ${w.enabled})
       RETURNING *`);
@@ -1160,13 +1161,15 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     if (u.description !== undefined) sets.push(sql`description = ${u.description}`);
     if (u.enabled !== undefined) sets.push(sql`enabled = ${u.enabled}`);
     if (u.definition !== undefined) sets.push(sql`definition = ${u.definition}`);
-    if (u.triggers !== undefined) sets.push(sql`triggers = ${u.triggers}`);
+    if (u.triggers !== undefined) sets.push(sql`triggers = ${jsonText(u.triggers)}`);
     if (u.cooldown !== undefined) sets.push(sql`cooldown = ${u.cooldown}`);
     if (u.input !== undefined) sets.push(sql`input = ${u.input}`);
-    if (u.triggerSchema !== undefined) sets.push(sql`"triggerSchema" = ${u.triggerSchema}`);
-    if (u.params !== undefined) sets.push(sql`params = ${u.params}`);
-    if (u.requiredParams !== undefined) sets.push(sql`"requiredParams" = ${u.requiredParams}`);
-    if (u.requires !== undefined) sets.push(sql`requires = ${u.requires}`);
+    if (u.triggerSchema !== undefined)
+      sets.push(sql`"triggerSchema" = ${jsonText(u.triggerSchema)}`);
+    if (u.params !== undefined) sets.push(sql`params = ${jsonText(u.params)}`);
+    if (u.requiredParams !== undefined)
+      sets.push(sql`"requiredParams" = ${jsonText(u.requiredParams)}`);
+    if (u.requires !== undefined) sets.push(sql`requires = ${jsonText(u.requires)}`);
     if (u.dir !== undefined) sets.push(sql`dir = ${u.dir}`);
     if (u.vcsRepo !== undefined) sets.push(sql`vcs_repo = ${u.vcsRepo}`);
     if (u.updatedBy !== undefined) sets.push(sql`updated_by = ${u.updatedBy}`);
@@ -1208,7 +1211,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
       INSERT INTO workflow_runs (id, "workflowId", "triggerType", "startedAt", "triggerData",
         created_by, "parentStepId", "parentStepAttempt", "triggeredByAgentId", "definitionHash",
         "sourceStepId", principal)
-      VALUES (${r.id}, ${r.workflowId}, ${r.triggerType}, ${r.startedAt}, ${r.triggerData},
+      VALUES (${r.id}, ${r.workflowId}, ${r.triggerType}, ${r.startedAt}, ${jsonText(r.triggerData)},
         ${r.createdBy}, ${r.parentStepId}, ${r.parentStepAttempt}, ${r.triggeredByAgentId},
         ${r.definitionHash}, ${r.sourceStepId}, ${r.principal})
       RETURNING *`);
@@ -1225,7 +1228,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
   ): Promise<WorkflowRunRow | null> {
     const sets: SqlQuery[] = [];
     if (u.status !== undefined) sets.push(sql`status = ${u.status}`);
-    if (u.context !== undefined) sets.push(sql`context = ${u.context}`);
+    if (u.context !== undefined) sets.push(sql`context = ${jsonText(u.context)}`);
     if (u.context_replay !== undefined) sets.push(sql`context_replay = ${u.context_replay}`);
     if (u.error !== undefined) sets.push(sql`error = ${u.error}`);
     if (u.finishedAt !== undefined) sets.push(sql`"finishedAt" = ${u.finishedAt}`);
@@ -1264,7 +1267,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     return this.db.get<WorkflowRunRow>(sql`
       SELECT * FROM workflow_runs
        WHERE "workflowId" = ${workflowId} AND status = 'completed'
-       ORDER BY "finishedAt" DESC LIMIT 1`);
+       ORDER BY "finishedAt" DESC NULLS LAST LIMIT 1`);
   }
 
   lastRunStart(workflowId: string): Promise<WorkflowRunRow | null> {
@@ -1367,7 +1370,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
   }): Promise<WorkflowVersionRow | null> {
     return this.db.get<WorkflowVersionRow>(sql`
       INSERT INTO workflow_versions (id, "workflowId", version, snapshot, "changedByAgentId")
-      VALUES (${v.id}, ${v.workflowId}, ${v.version}, ${v.snapshot}, ${v.changedByAgentId})
+      VALUES (${v.id}, ${v.workflowId}, ${v.version}, ${jsonText(v.snapshot)}, ${v.changedByAgentId})
       RETURNING *`);
   }
 
@@ -1386,9 +1389,9 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
         (id, title, questions, "workflowRunId", "workflowRunStepId", "sourceTaskId",
          approvers, status, "resolutionReason", "resolvedAt", "timeoutSeconds", "expiresAt",
          "notificationChannels", created_by, "createdAt", "updatedAt")
-      VALUES (${a.id}, ${a.title}, ${a.questions}, ${a.workflowRunId}, ${a.workflowRunStepId},
-        ${a.sourceTaskId}, ${a.approvers}, ${a.status}, ${a.resolutionReason}, ${a.resolvedAt},
-        ${a.timeoutSeconds}, ${a.expiresAt}, ${a.notificationChannels}, ${a.createdBy}, ${a.now},
+      VALUES (${a.id}, ${a.title}, ${jsonText(a.questions)}, ${a.workflowRunId}, ${a.workflowRunStepId},
+        ${a.sourceTaskId}, ${jsonText(a.approvers)}, ${a.status}, ${a.resolutionReason}, ${a.resolvedAt},
+        ${a.timeoutSeconds}, ${a.expiresAt}, ${jsonText(a.notificationChannels)}, ${a.createdBy}, ${a.now},
         ${a.now})
       RETURNING *`);
   }
@@ -1492,7 +1495,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
   ): Promise<void> {
     await this.db.run(sql`
       UPDATE approval_requests
-         SET "cancellationNotificationClaims" = ${claims}, "updatedAt" = ${now}
+         SET "cancellationNotificationClaims" = ${jsonText(claims)}, "updatedAt" = ${now}
        WHERE id = ${id} AND ${this.settledClause(anyTerminal)}`);
   }
 
@@ -1503,7 +1506,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
 
   async setApprovalNotificationChannels(id: string, channels: string, now: string): Promise<void> {
     await this.db.run(sql`
-      UPDATE approval_requests SET "notificationChannels" = ${channels}, "updatedAt" = ${now}
+      UPDATE approval_requests SET "notificationChannels" = ${jsonText(channels)}, "updatedAt" = ${now}
        WHERE id = ${id}`);
   }
 
@@ -1511,7 +1514,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     const conditions: SqlQuery[] = [];
     if (f.status) conditions.push(sql`status = ${f.status}`);
     if (f.workflowRunId) conditions.push(sql`"workflowRunId" = ${f.workflowRunId}`);
-    return sql`${sqlWhere(conditions)} ORDER BY "createdAt" DESC, ${this.insertionOrder()} ASC LIMIT ${f.limit}`;
+    return sql`${sqlWhere(conditions)} ORDER BY "createdAt" DESC NULLS LAST, ${this.insertionOrder()} ASC LIMIT ${f.limit}`;
   }
 
   listApprovals(f: ApprovalListFilter): Promise<ApprovalRequestRow[]> {
@@ -1604,7 +1607,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
         (id, "workflowRunId", "workflowRunStepId", mode, "wakeUpAt", "eventName", "eventFilter",
          "expiresAt", "eventScope", "createdAt", "updatedAt")
       VALUES (${w.id}, ${w.workflowRunId}, ${w.workflowRunStepId}, ${w.mode}, ${w.wakeUpAt},
-        ${w.eventName}, ${w.eventFilter}, ${w.expiresAt}, ${w.eventScope}, ${w.now}, ${w.now})
+        ${w.eventName}, ${jsonText(w.eventFilter)}, ${w.expiresAt}, ${w.eventScope}, ${w.now}, ${w.now})
       RETURNING *`);
   }
 
@@ -1627,7 +1630,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
            OR
            (mode = 'event' AND "expiresAt" IS NOT NULL AND "expiresAt" <= ${nowIso})
          )
-       ORDER BY "expiresAt", ${this.insertionOrder()}`);
+       ORDER BY "expiresAt" NULLS FIRST, ${this.insertionOrder()}`);
   }
 
   async listPendingEventWaitNames(): Promise<string[]> {
@@ -1654,7 +1657,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
   ): Promise<WaitStateRow | null> {
     return this.db.get<WaitStateRow>(sql`
       UPDATE wait_states
-         SET status = ${status}, "firedPayload" = ${firedPayload}, "resolvedAt" = ${now}, "updatedAt" = ${now}
+         SET status = ${status}, "firedPayload" = ${jsonText(firedPayload)}, "resolvedAt" = ${now}, "updatedAt" = ${now}
        WHERE id = ${id} AND status = 'pending'
        RETURNING *`);
   }
@@ -1742,7 +1745,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
       INSERT INTO workflow_runs
         (id, "workflowId", status, "triggerType", "triggerData", error, created_by,
          "startedAt", "lastUpdatedAt", "finishedAt")
-      VALUES (${r.id}, ${r.workflowId}, 'failed', ${r.triggerType}, ${r.triggerData}, ${r.error},
+      VALUES (${r.id}, ${r.workflowId}, 'failed', ${r.triggerType}, ${jsonText(r.triggerData)}, ${r.error},
         ${r.createdBy}, ${r.now}, ${r.now}, ${r.now})`);
   }
 

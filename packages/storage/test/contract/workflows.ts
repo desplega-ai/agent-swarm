@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  jsonText,
   type NewApprovalRequest,
   type NewWaitState,
   type NewWorkflow,
@@ -34,7 +35,7 @@ export function workflowsContract(engine: ContractEngine): void {
     ) =>
       storage.executor.run(sql`
         INSERT INTO workflows (id, name, definition, triggers, enabled, "createdAt", "lastUpdatedAt")
-        VALUES (${id}, ${id}, '{"nodes":[]}', ${o.triggers ?? "[]"}, ${o.enabled ?? true}, ${T0},
+        VALUES (${id}, ${id}, '{"nodes":[]}', ${jsonText(o.triggers ?? "[]")}, ${o.enabled ?? true}, ${T0},
           ${o.lastUpdatedAt ?? T0})`);
 
     const run = (
@@ -995,6 +996,34 @@ export function workflowsContract(engine: ContractEngine): void {
       ]);
       expect(summaries[0]).not.toHaveProperty("questions");
       expect(summaries[0]).toMatchObject({ status: "pending", created_by: null, createdAt: T2 });
+    });
+
+    test("approval lists put a NULL createdAt last; a non-array questions value counts 0", async () => {
+      await repo.insertApproval(approval("no-date", { now: T2 }));
+      await repo.insertApproval(approval("dated", { now: T0, questions: '{"q":1}' }));
+      await storage.executor.run(
+        sql`UPDATE approval_requests SET "createdAt" = NULL WHERE id = 'no-date'`,
+      );
+      expect((await repo.listApprovals({ limit: 10 })).map((r) => r.id)).toEqual([
+        "dated",
+        "no-date",
+      ]);
+      expect(
+        (await repo.listApprovalSummaries({ limit: 10 })).map((r) => [r.id, r.questionCount]),
+      ).toEqual([
+        ["dated", 0],
+        ["no-date", 2],
+      ]);
+    });
+
+    test("lastSuccessfulRun skips a completed run with no finishedAt", async () => {
+      await workflow("w1");
+      await run("r-done", { status: "completed" });
+      await run("r-null", { status: "completed" });
+      await storage.executor.run(
+        sql`UPDATE workflow_runs SET "finishedAt" = ${T1} WHERE id = 'r-done'`,
+      );
+      expect((await repo.lastSuccessfulRun("w1"))?.id).toBe("r-done");
     });
 
     test("deadline scans, votes and task approvals", async () => {
