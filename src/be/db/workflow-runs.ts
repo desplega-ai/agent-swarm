@@ -13,7 +13,6 @@ import { normalizeDate, normalizeDateRequired } from "../date-utils";
 import { scrubJsonValue } from "../scrub-json";
 import { getStorage } from "../storage";
 import { defineWorkflowPayload, type WorkflowPayloadView } from "../workflow-replay";
-import { getDbClient } from "./runtime";
 
 const workflowsRepo = () => getStorage().repos.workflows;
 
@@ -235,13 +234,9 @@ export async function getWorkflowRunStatus(runId: string): Promise<WorkflowRunSt
 }
 
 /** Run `fn` over `ids` in chunks small enough for one statement's bound parameters. */
-async function forEachChunk(
-  ids: string[],
-  fn: (chunk: string[], placeholders: string) => Promise<void>,
-): Promise<void> {
+async function forEachChunk(ids: string[], fn: (chunk: string[]) => Promise<void>): Promise<void> {
   for (let i = 0; i < ids.length; i += TREE_QUERY_CHUNK) {
-    const chunk = ids.slice(i, i + TREE_QUERY_CHUNK);
-    await fn(chunk, chunk.map(() => "?").join(", "));
+    await fn(ids.slice(i, i + TREE_QUERY_CHUNK));
   }
 }
 
@@ -251,14 +246,10 @@ async function forEachChunk(
  */
 export async function getOpenWorkflowTreeTaskIds(runIds: string[]): Promise<string[]> {
   const ids: string[] = [];
-  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
-  await forEachChunk(runIds, async (chunk, placeholders) => {
-    const rows = await getDbClient().query<{ id: string }>(
-      `SELECT id FROM agent_tasks
-        WHERE workflowRunId IN (${placeholders}) AND status NOT IN (${terminal})`,
-      [...chunk, ...TERMINAL_TASK_STATUSES],
+  await forEachChunk(runIds, async (chunk) => {
+    ids.push(
+      ...(await getStorage().repos.tasks.listOpenTaskIdsOfRuns(chunk, TERMINAL_TASK_STATUSES)),
     );
-    for (const row of rows) ids.push(row.id);
   });
   return ids;
 }
@@ -269,14 +260,7 @@ export async function getOpenWorkflowTreeTaskIds(runIds: string[]): Promise<stri
  * tasks looks for dependents once instead of once per task.
  */
 export async function getTaskIdsWithDependents(): Promise<Set<string>> {
-  const rows = await getDbClient().query<{ id: string }>(
-    `SELECT DISTINCT dep.value AS id
-       FROM agent_tasks t, json_each(t.dependsOn) AS dep
-      WHERE t.status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
-        AND t.dependsOn IS NOT NULL AND t.dependsOn != '[]'`,
-    [...TERMINAL_TASK_STATUSES],
-  );
-  return new Set(rows.map((row) => row.id));
+  return new Set(await getStorage().repos.tasks.listDependedOnTaskIds(TERMINAL_TASK_STATUSES));
 }
 
 /**
@@ -285,24 +269,18 @@ export async function getTaskIdsWithDependents(): Promise<Set<string>> {
  * pending approval. Reads only, with a LIMIT 1 probe per chunk.
  */
 export async function workflowRunTreeHasOpenWork(runIds: string[]): Promise<boolean> {
-  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
   const repo = workflowsRepo();
-  const probes: Array<(chunk: string[], placeholders: string) => Promise<boolean>> = [
+  const probes: Array<(chunk: string[]) => Promise<boolean>> = [
     (chunk) => repo.hasLiveRun(chunk),
     (chunk) => repo.hasOpenStep(chunk),
-    // agent_tasks belongs to the tasks domain: its probe moves with it.
-    async (chunk, placeholders) =>
-      (await getDbClient().get(
-        `SELECT 1 FROM agent_tasks WHERE workflowRunId IN (${placeholders}) AND status NOT IN (${terminal}) LIMIT 1`,
-        [...chunk, ...TERMINAL_TASK_STATUSES],
-      )) != null,
+    (chunk) => getStorage().repos.tasks.hasOpenTaskOfRuns(chunk, TERMINAL_TASK_STATUSES),
     (chunk) => repo.hasPendingApproval(chunk),
   ];
   let open = false;
-  await forEachChunk(runIds, async (chunk, placeholders) => {
+  await forEachChunk(runIds, async (chunk) => {
     for (const probe of probes) {
       if (open) return;
-      if (await probe(chunk, placeholders)) open = true;
+      if (await probe(chunk)) open = true;
     }
   });
   return open;

@@ -17,7 +17,6 @@ import {
   getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
-  getDbClient,
   getDependentTasks,
   getIdleWorkersWithCapacity,
   getLeadAgent,
@@ -1052,12 +1051,9 @@ export async function runRebootSweep(): Promise<void> {
         }
 
         // Guard: only retry if parent doesn't already have a retry child
-        const existingRetry = await getDbClient().get<{ id: string }>(
-          `SELECT id FROM agent_tasks
-           WHERE parentTaskId = ?
-             AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
-           LIMIT 1`,
-          [task.id, ...TERMINAL_TASK_STATUSES],
+        const existingRetry = await getStorage().repos.tasks.findOpenChildTaskId(
+          task.id,
+          TERMINAL_TASK_STATUSES,
         );
 
         if (!existingRetry) {
@@ -1190,15 +1186,13 @@ async function settleRebootSweptDependents(
         ];
         // Status + membership predicates make the re-point a no-op if the
         // dependent was claimed or re-pointed since it was read.
-        const row = await getDbClient().get<{ id: string }>(
-          `UPDATE agent_tasks
-              SET dependsOn = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE id = ? AND status = ?
-              AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
-            RETURNING id`,
-          [JSON.stringify(dependsOn), dep.id, dep.status, sweptId],
+        const repointed = await getStorage().repos.tasks.repointTaskDependency(
+          dep.id,
+          dep.status,
+          sweptId,
+          JSON.stringify(dependsOn),
         );
-        if (!row) continue;
+        if (!repointed) continue;
         try {
           await createLogEntry({
             eventType: "task_dependency_repointed",
@@ -1848,15 +1842,9 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
   // Dedup: skip if lead already has an active heartbeat-checklist task.
-  // Unary + keeps agentId/taskType off their indexes, so the seek runs on
-  // status over the few open tasks instead of every past checklist task.
-  const existing = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-       WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
-         AND +agentId = ?
-         AND +taskType = 'heartbeat-checklist'
-       LIMIT 1`,
-    [...OPEN_TASK_STATUSES, lead.id],
+  const existing = await getStorage().repos.tasks.findOpenHeartbeatChecklistTask(
+    lead.id,
+    OPEN_TASK_STATUSES,
   );
   if (existing) return;
 
@@ -2122,13 +2110,9 @@ export async function createBootTriageTask(): Promise<void> {
   const heartbeatMd = lead.heartbeatMd ?? "";
 
   // Dedup: skip if lead already has an active boot-triage task
-  const existing = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-       WHERE agentId = ?
-         AND taskType = 'boot-triage'
-         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
-       LIMIT 1`,
-    [lead.id, ...TERMINAL_TASK_STATUSES],
+  const existing = await getStorage().repos.tasks.findOpenBootTriageTask(
+    lead.id,
+    TERMINAL_TASK_STATUSES,
   );
   if (existing) return;
 

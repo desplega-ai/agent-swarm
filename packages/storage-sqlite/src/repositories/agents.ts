@@ -5,6 +5,7 @@ import {
   BaseAgentsRepository,
   type ContextVersionRow,
   type ServiceRow,
+  SqlQuery,
   sql,
 } from "@desplega/storage";
 
@@ -80,6 +81,21 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
     return this.db.query<AgentLogRow>(sql`
       SELECT * FROM agent_log WHERE "eventType" = ${eventType}
       ORDER BY "createdAt" DESC, rowid ASC`);
+  }
+
+  async countRecentQueuePickups(since: string): Promise<number> {
+    // Unary + keeps eventType off idx_agent_log_eventType, so the short
+    // createdAt window drives through idx_agent_log_createdAt instead of every
+    // status-change row ever logged. The hint stays unquoted: the query-audit
+    // plan test reverts it by text.
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count
+        FROM agent_log
+       WHERE ${new SqlQuery(["+eventType"], [])} IN ('task_status_change', 'task_claimed')
+         AND "oldValue" IN ('pending', 'unassigned')
+         AND "newValue" = 'in_progress'
+         AND "createdAt" >= ${since}`);
+    return row?.count ?? 0;
   }
 
   listServices(filters: {

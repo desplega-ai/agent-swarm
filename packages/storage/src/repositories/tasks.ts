@@ -896,7 +896,143 @@ export interface TasksRepository {
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
   /** Plain insert: a duplicate `(principal, keyHash)` throws the engine's unique violation. */
   insertTaskIdempotencyKey(row: TaskIdempotencyKeyRow): Promise<void>;
+
+  // ---- agent_tasks: reads and writes of callers outside the tasks module ----
+  /** One child of `parentTaskId` whose status is not in `terminalStatuses`. */
+  findOpenChildTaskId(
+    parentTaskId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null>;
+  /**
+   * Sets `dependsOn` of a dependent that still has `status` and still lists
+   * `fromTaskId` (`lastUpdatedAt` = now). True when the row changed.
+   */
+  repointTaskDependency(
+    taskId: string,
+    status: string,
+    fromTaskId: string,
+    dependsOnJson: string,
+  ): Promise<boolean>;
+  /** The agent's `heartbeat-checklist` task with a status in `openStatuses`, if any. */
+  findOpenHeartbeatChecklistTask(
+    agentId: string,
+    openStatuses: readonly string[],
+  ): Promise<string | null>;
+  /** The agent's `boot-triage` task with a status not in `terminalStatuses`, if any. */
+  findOpenBootTriageTask(
+    agentId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null>;
+  /** Sets `runtime_instance_id` of the agent's task. */
+  setTaskRuntimeInstance(taskId: string, agentId: string, runtimeInstanceId: string): Promise<void>;
+  /**
+   * Ids of `in_progress` tasks whose agent is not offline and updated at or
+   * after `cutoff`. In no particular order (callers use the set).
+   */
+  listLiveInProgressTaskIds(cutoff: string): Promise<string[]>;
+  /** How many of `taskIds` are `in_progress`. */
+  countInProgressAmong(taskIds: readonly string[]): Promise<number>;
+  /**
+   * The claimable queue (pending/unassigned tasks whose dependencies all
+   * completed): its size and its oldest task by the time it became claimable.
+   */
+  queueStallOldest(): Promise<{
+    claimableCount: number;
+    oldestTaskId: string | null;
+    oldestClaimableAt: string | null;
+  } | null>;
+  /** True when a user exists or any task other than boot triage and the heartbeat checklist. */
+  hasUserOrNonSystemTask(): Promise<boolean>;
+  /**
+   * The task tree under `rootId` (parentTaskId links, cycles end the walk):
+   * how many tasks are not in `terminalStatuses`, whether an enabled
+   * `deferred` schedule hangs off it (0/1), and its newest finish time.
+   */
+  taskTreeSettlement(
+    rootId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<{ open: number; deferred: number; lastFinishedAt: string | null } | null>;
+  /**
+   * Moves the pending and delivered steering messages of `fromTaskId` to
+   * `toTaskId` as pending. Returns the moved ids, in no particular order.
+   */
+  carrySteeringMessages(fromTaskId: string, toTaskId: string): Promise<string[]>;
+  /** Count of completed and failed tasks (NULL sums when there are none). */
+  countFinishedTaskOutcomes(): Promise<{ completed: number | null; failed: number | null } | null>;
+  /** Tasks created, completed and failed at or after `since` (NULL sums on an empty table). */
+  countTaskActivitySince(since: string): Promise<{
+    created: number | null;
+    completed: number | null;
+    failed: number | null;
+  } | null>;
+  /** Distinct requesting users of tasks created at or after `since`. */
+  countDistinctRequestersSince(since: string): Promise<number>;
+  /**
+   * `source` of the topmost task reached from `taskId` through parent links,
+   * at most `maxDepth` hops up; null when the task does not exist.
+   */
+  findRootTaskSource(taskId: string, maxDepth: number): Promise<{ source: string | null } | null>;
+  findTaskStatus(taskId: string): Promise<string | null>;
+  findTaskParentId(taskId: string): Promise<{ parentTaskId: string | null } | null>;
+  /** Records the claim-time model resolution of a task. */
+  setTaskModelResolution(
+    taskId: string,
+    r: {
+      resolvedModel: string | null;
+      modelSource: string | null;
+      modelAlias: string | null;
+      resolvedProfile: string | null;
+    },
+  ): Promise<void>;
+  /** Clears the claim-time model resolution when any part is set. */
+  clearTaskModelResolution(taskId: string): Promise<void>;
+  /** True when the agent has a task that resolved to, or (unresolved) pinned, `modelId`. */
+  agentRanModel(agentId: string, modelId: string): Promise<boolean>;
+  /** Slack thread and type of the given tasks. In no particular order. */
+  listTaskSlackThreads(taskIds: readonly string[]): Promise<
+    {
+      slackChannelId: string | null;
+      slackThreadTs: string | null;
+      taskType: string | null;
+    }[]
+  >;
+  /** Ids of the tasks of the runs not in `terminalStatuses`. In no particular order. */
+  listOpenTaskIdsOfRuns(
+    runIds: readonly string[],
+    terminalStatuses: readonly string[],
+  ): Promise<string[]>;
+  /** True when a task of the runs is not in `terminalStatuses`. */
+  hasOpenTaskOfRuns(
+    runIds: readonly string[],
+    terminalStatuses: readonly string[],
+  ): Promise<boolean>;
+  /**
+   * Distinct ids listed in `dependsOn` of the tasks not in `terminalStatuses`.
+   * In no particular order (callers use the set).
+   */
+  listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]>;
+  /**
+   * The row a citation of `kind` points at (`content` for a memory, `id`
+   * otherwise); null when it does not exist.
+   */
+  findCitationTarget(
+    kind: TaskCitationTargetKind,
+    ref: string,
+  ): Promise<{ id?: string; content?: string } | null>;
+  /**
+   * SQL expressions (0/1) for task-reporting queries over the task alias
+   * `alias`: any attachment or PR in the output, and a PR attachment or PR in
+   * the output. `host` is the GitHub host, lower case. Matches
+   * `extractGitHubPullRequestUrls`.
+   */
+  shippingEvidenceSql(
+    alias: string,
+    host: string,
+  ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery };
 }
+
+/** The citation kinds whose target row can be checked. */
+export type TaskCitationTargetKind = "task" | "memory" | "page" | "script-run";
 
 export abstract class BaseTasksRepository implements TasksRepository {
   constructor(protected readonly db: SqlExecutor) {}
@@ -2225,4 +2361,257 @@ export abstract class BaseTasksRepository implements TasksRepository {
       VALUES (${r.id}, ${r.principal}, ${r.keyHash}, ${r.requestFingerprint}, ${r.taskId}, ${r.createdAt},
         ${r.created_by}, ${r.updated_by})`);
   }
+
+  // ---- agent_tasks: reads and writes of callers outside the tasks module ----
+
+  async findOpenChildTaskId(
+    parentTaskId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+      WHERE "parentTaskId" = ${parentTaskId} AND status NOT IN (${sqlList(terminalStatuses)})
+      LIMIT 1`);
+    return row?.id ?? null;
+  }
+
+  /** Membership test on the `dependsOn` JSON array (SQLite `json_each`). */
+  abstract repointTaskDependency(
+    taskId: string,
+    status: string,
+    fromTaskId: string,
+    dependsOnJson: string,
+  ): Promise<boolean>;
+
+  /** Keeps the SQLite index hints (unary `+`) that the query plan depends on. */
+  abstract findOpenHeartbeatChecklistTask(
+    agentId: string,
+    openStatuses: readonly string[],
+  ): Promise<string | null>;
+
+  async findOpenBootTriageTask(
+    agentId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+      WHERE "agentId" = ${agentId} AND "taskType" = 'boot-triage'
+        AND status NOT IN (${sqlList(terminalStatuses)})
+      LIMIT 1`);
+    return row?.id ?? null;
+  }
+
+  async setTaskRuntimeInstance(
+    taskId: string,
+    agentId: string,
+    runtimeInstanceId: string,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agent_tasks SET runtime_instance_id = ${runtimeInstanceId}
+      WHERE id = ${taskId} AND "agentId" = ${agentId}`);
+  }
+
+  async listLiveInProgressTaskIds(cutoff: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT t.id AS id
+      FROM agent_tasks t
+      JOIN agents a ON a.id = t."agentId"
+      WHERE t.status = 'in_progress' AND a.status != 'offline' AND a."lastUpdatedAt" >= ${cutoff}`);
+    return rows.map((row) => row.id);
+  }
+
+  /** Reads the ids as one JSON array (SQLite `json_each`), so no parameter limit applies. */
+  abstract countInProgressAmong(taskIds: readonly string[]): Promise<number>;
+
+  /** `json_each` over `dependsOn` and a scalar `max` (SQLite). */
+  abstract queueStallOldest(): Promise<{
+    claimableCount: number;
+    oldestTaskId: string | null;
+    oldestClaimableAt: string | null;
+  } | null>;
+
+  async hasUserOrNonSystemTask(): Promise<boolean> {
+    const row = await this.db.get<{ existing: number }>(sql`
+      SELECT CASE WHEN
+        EXISTS (SELECT 1 FROM users LIMIT 1)
+        OR EXISTS (
+          SELECT 1 FROM agent_tasks
+          WHERE "taskType" IS NULL OR "taskType" NOT IN ('boot-triage', 'heartbeat-checklist')
+          LIMIT 1
+        )
+      THEN 1 ELSE 0 END AS existing`);
+    return Number(row?.existing) === 1;
+  }
+
+  taskTreeSettlement(
+    rootId: string,
+    terminalStatuses: readonly string[],
+  ): Promise<{ open: number; deferred: number; lastFinishedAt: string | null } | null> {
+    // UNION (not UNION ALL) drops repeated ids, so a parentTaskId cycle ends the walk.
+    return this.db.get(sql`
+      WITH RECURSIVE tree(id) AS (
+        SELECT CAST(${rootId} AS TEXT)
+        UNION
+        SELECT t.id FROM agent_tasks t JOIN tree ON t."parentTaskId" = tree.id
+      )
+      SELECT
+        COALESCE(SUM(CASE WHEN t.status NOT IN (${sqlList(terminalStatuses)}) THEN 1 ELSE 0 END), 0) AS open,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM scheduled_tasks s
+          WHERE s."parentTaskId" IN (SELECT id FROM tree)
+            AND s."taskType" = 'deferred' AND s.enabled = ${true}
+        ) THEN 1 ELSE 0 END AS deferred,
+        MAX(COALESCE(t."finishedAt", t."lastUpdatedAt")) AS "lastFinishedAt"
+      FROM tree JOIN agent_tasks t ON t.id = tree.id`);
+  }
+
+  async carrySteeringMessages(fromTaskId: string, toTaskId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      UPDATE task_steering_messages
+        SET task_id = ${toTaskId}, status = 'pending', delivered_mode = NULL, delivered_at = NULL
+        WHERE task_id = ${fromTaskId} AND status IN ('pending', 'delivered')
+        RETURNING id`);
+    return rows.map((row) => row.id);
+  }
+
+  countFinishedTaskOutcomes(): Promise<{ completed: number | null; failed: number | null } | null> {
+    return this.db.get(sql`
+      SELECT SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+        FROM agent_tasks WHERE status IN ('completed', 'failed')`);
+  }
+
+  countTaskActivitySince(since: string): Promise<{
+    created: number | null;
+    completed: number | null;
+    failed: number | null;
+  } | null> {
+    return this.db.get(sql`
+      SELECT SUM(CASE WHEN "createdAt" >= ${since} THEN 1 ELSE 0 END) AS created,
+             SUM(CASE WHEN status = 'completed' AND "finishedAt" >= ${since} THEN 1 ELSE 0 END) AS completed,
+             SUM(CASE WHEN status = 'failed' AND "finishedAt" >= ${since} THEN 1 ELSE 0 END) AS failed
+        FROM agent_tasks`);
+  }
+
+  async countDistinctRequestersSince(since: string): Promise<number> {
+    const row = await this.db.get<{ n: number }>(sql`
+      SELECT COUNT(DISTINCT "requestedByUserId") AS n
+        FROM agent_tasks
+       WHERE "requestedByUserId" IS NOT NULL AND "createdAt" >= ${since}`);
+    return Number(row?.n ?? 0);
+  }
+
+  findRootTaskSource(taskId: string, maxDepth: number): Promise<{ source: string | null } | null> {
+    return this.db.get(sql`
+      WITH RECURSIVE chain(id, "parentTaskId", source, depth) AS (
+        SELECT id, "parentTaskId", source, 0 FROM agent_tasks WHERE id = ${taskId}
+        UNION ALL
+        SELECT t.id, t."parentTaskId", t.source, c.depth + 1
+          FROM agent_tasks t JOIN chain c ON t.id = c."parentTaskId"
+         WHERE c.depth < ${maxDepth}
+      )
+      SELECT source FROM chain ORDER BY depth DESC LIMIT 1`);
+  }
+
+  async findTaskStatus(taskId: string): Promise<string | null> {
+    const row = await this.db.get<{ status: string }>(
+      sql`SELECT status FROM agent_tasks WHERE id = ${taskId}`,
+    );
+    return row?.status ?? null;
+  }
+
+  findTaskParentId(taskId: string): Promise<{ parentTaskId: string | null } | null> {
+    return this.db.get(sql`SELECT "parentTaskId" FROM agent_tasks WHERE id = ${taskId}`);
+  }
+
+  async setTaskModelResolution(
+    taskId: string,
+    r: {
+      resolvedModel: string | null;
+      modelSource: string | null;
+      modelAlias: string | null;
+      resolvedProfile: string | null;
+    },
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agent_tasks SET "resolvedModel" = ${r.resolvedModel}, "modelSource" = ${r.modelSource},
+        "modelAlias" = ${r.modelAlias}, "resolvedProfile" = ${r.resolvedProfile}
+      WHERE id = ${taskId}`);
+  }
+
+  async clearTaskModelResolution(taskId: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agent_tasks SET "resolvedModel" = NULL, "modelSource" = NULL, "modelAlias" = NULL,
+        "resolvedProfile" = NULL
+      WHERE id = ${taskId} AND ("resolvedModel" IS NOT NULL OR "modelSource" IS NOT NULL
+        OR "modelAlias" IS NOT NULL OR "resolvedProfile" IS NOT NULL)`);
+  }
+
+  async agentRanModel(agentId: string, modelId: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+      WHERE "agentId" = ${agentId}
+        AND ("resolvedModel" = ${modelId} OR ("resolvedModel" IS NULL AND model = ${modelId}))
+      LIMIT 1`);
+    return row != null;
+  }
+
+  listTaskSlackThreads(taskIds: readonly string[]): Promise<
+    {
+      slackChannelId: string | null;
+      slackThreadTs: string | null;
+      taskType: string | null;
+    }[]
+  > {
+    if (taskIds.length === 0) return Promise.resolve([]);
+    return this.db.query(sql`
+      SELECT "slackChannelId", "slackThreadTs", "taskType" FROM agent_tasks
+      WHERE id IN (${sqlList(taskIds)})`);
+  }
+
+  async listOpenTaskIdsOfRuns(
+    runIds: readonly string[],
+    terminalStatuses: readonly string[],
+  ): Promise<string[]> {
+    if (runIds.length === 0) return [];
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+      WHERE "workflowRunId" IN (${sqlList(runIds)}) AND status NOT IN (${sqlList(terminalStatuses)})`);
+    return rows.map((row) => row.id);
+  }
+
+  async hasOpenTaskOfRuns(
+    runIds: readonly string[],
+    terminalStatuses: readonly string[],
+  ): Promise<boolean> {
+    if (runIds.length === 0) return false;
+    const row = await this.db.get(sql`
+      SELECT 1 AS found FROM agent_tasks
+      WHERE "workflowRunId" IN (${sqlList(runIds)}) AND status NOT IN (${sqlList(terminalStatuses)})
+      LIMIT 1`);
+    return row != null;
+  }
+
+  /** Expands the `dependsOn` JSON arrays (SQLite `json_each`). */
+  abstract listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]>;
+
+  findCitationTarget(
+    kind: TaskCitationTargetKind,
+    ref: string,
+  ): Promise<{ id?: string; content?: string } | null> {
+    const table = {
+      task: "agent_tasks",
+      memory: "agent_memory",
+      page: "pages",
+      "script-run": "script_runs",
+    }[kind];
+    const column = kind === "memory" ? sql`content` : sql`id`;
+    return this.db.get(sql`SELECT ${column} FROM ${sqlIdent(table)} WHERE id = ${ref}`);
+  }
+
+  /** GLOB, `instr` and `char` text scanning (SQLite). */
+  abstract shippingEvidenceSql(
+    alias: string,
+    host: string,
+  ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery };
 }

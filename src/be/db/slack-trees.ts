@@ -1,5 +1,4 @@
 import type { SlackReconcileSource } from "@desplega/storage";
-import { getDbClient } from "../db";
 import { getStorage } from "../storage";
 
 /**
@@ -28,15 +27,7 @@ export async function getSlackThreadsOfTasks(taskIds: string[]): Promise<{
   let wakeTouched = false;
   for (let i = 0; i < taskIds.length; i += THREAD_LOOKUP_CHUNK) {
     const chunk = taskIds.slice(i, i + THREAD_LOOKUP_CHUNK);
-    const rows = await getDbClient().query<{
-      slackChannelId: string | null;
-      slackThreadTs: string | null;
-      taskType: string | null;
-    }>(
-      `SELECT slackChannelId, slackThreadTs, taskType FROM agent_tasks
-         WHERE id IN (${chunk.map(() => "?").join(",")})`,
-      chunk,
-    );
+    const rows = await getStorage().repos.tasks.listTaskSlackThreads(chunk);
     for (const row of rows) {
       if (row.taskType === "deferred") wakeTouched = true;
       if (!row.slackChannelId || !row.slackThreadTs) continue;

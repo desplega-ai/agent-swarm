@@ -569,4 +569,244 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
       )`);
   }
+
+  // ---- agent_tasks: reads and writes of callers outside the tasks module ----
+
+  async repointTaskDependency(
+    taskId: string,
+    status: string,
+    fromTaskId: string,
+    dependsOnJson: string,
+  ): Promise<boolean> {
+    // Status + membership predicates make the re-point a no-op if the
+    // dependent was claimed or re-pointed since it was read.
+    const row = await this.db.get<{ id: string }>(sql`
+      UPDATE agent_tasks
+         SET "dependsOn" = ${dependsOnJson}, "lastUpdatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ${taskId} AND status = ${status}
+         AND EXISTS (SELECT 1 FROM json_each(agent_tasks."dependsOn") WHERE value = ${fromTaskId})
+       RETURNING id`);
+    return row != null;
+  }
+
+  async findOpenHeartbeatChecklistTask(
+    agentId: string,
+    openStatuses: readonly string[],
+  ): Promise<string | null> {
+    // Unary + keeps agentId/taskType off their indexes, so the seek runs on
+    // status over the few open tasks instead of every past checklist task.
+    // The hint text stays unquoted: the query-audit plan test reverts it by text.
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+       WHERE status IN (${sqlList(openStatuses)})
+         AND ${raw("+agentId")} = ${agentId}
+         AND ${raw("+taskType")} = 'heartbeat-checklist'
+       LIMIT 1`);
+    return row?.id ?? null;
+  }
+
+  async countInProgressAmong(taskIds: readonly string[]): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const row = await this.db.get<{ n: number }>(sql`
+      SELECT count(*) AS n FROM agent_tasks
+       WHERE status = 'in_progress' AND id IN (SELECT value FROM json_each(${JSON.stringify(taskIds)}))`);
+    return row?.n ?? 0;
+  }
+
+  queueStallOldest(): Promise<{
+    claimableCount: number;
+    oldestTaskId: string | null;
+    oldestClaimableAt: string | null;
+  } | null> {
+    return this.db.get(sql`
+      WITH queued AS (
+          SELECT
+            t.id,
+            t."dependsOn",
+            COALESCE(
+              (
+                SELECT MAX(entry."createdAt")
+                FROM agent_log entry
+                WHERE entry."taskId" = t.id
+                  AND entry."newValue" = t.status
+                  AND entry."eventType" IN (
+                    'task_created',
+                    'task_status_change',
+                    'task_released',
+                    'task_accepted',
+                    'task_rejected'
+                  )
+              ),
+              t."createdAt"
+            ) AS "queueEnteredAt"
+          FROM agent_tasks t
+          WHERE t.status IN ('pending', 'unassigned')
+        ),
+        claimable AS (
+          SELECT
+            queued.id,
+            MAX(
+              queued."queueEnteredAt",
+              COALESCE(
+                (
+                  SELECT MAX(COALESCE(prerequisite."finishedAt", prerequisite."createdAt"))
+                  FROM json_each(COALESCE(queued."dependsOn", '[]')) dep
+                  JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+                ),
+                queued."queueEnteredAt"
+              )
+            ) AS "claimableAt"
+          FROM queued
+          WHERE NOT EXISTS (
+              SELECT 1
+              FROM json_each(COALESCE(queued."dependsOn", '[]')) dep
+              LEFT JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+              WHERE prerequisite.id IS NULL OR prerequisite.status != 'completed'
+            )
+        ),
+        oldest AS (
+          SELECT id, "claimableAt" FROM claimable ORDER BY "claimableAt" ASC LIMIT 1
+        )
+        SELECT
+          (SELECT COUNT(*) FROM claimable) AS "claimableCount",
+          (SELECT id FROM oldest) AS "oldestTaskId",
+          (SELECT "claimableAt" FROM oldest) AS "oldestClaimableAt"`);
+  }
+
+  async listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT DISTINCT dep.value AS id
+        FROM agent_tasks t, json_each(t."dependsOn") AS dep
+       WHERE t.status NOT IN (${sqlList(terminalStatuses)})
+         AND t."dependsOn" IS NOT NULL AND t."dependsOn" != '[]'`);
+    return rows.map((row) => row.id);
+  }
+
+  shippingEvidenceSql(
+    alias: string,
+    host: string,
+  ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery } {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+      throw new Error(`Invalid task SQL alias: ${alias}`);
+    }
+    if (!/^[a-z0-9._:-]+$/.test(host)) throw new Error(`Invalid GitHub host for SQL: ${host}`);
+    const t = alias;
+    const outputHasPullRequest = githubPullRequestExistsSql(`${t}.output`, host);
+    const hasAnyAttachment = `EXISTS (
+    SELECT 1 FROM task_attachments ta WHERE ta.task_id = ${t}.id
+  )`;
+    const hasPullRequestAttachment = `EXISTS (
+    SELECT 1 FROM task_attachments ta
+    WHERE ta.task_id = ${t}.id
+      AND ta.kind = 'url'
+      AND ${githubPullRequestExistsSql("ta.url", host)}
+  )`;
+    return {
+      hasArtifact: raw(
+        `CASE WHEN ${hasAnyAttachment} THEN 1 WHEN ${outputHasPullRequest} THEN 1 ELSE 0 END`,
+      ),
+      hasPullRequest: raw(
+        `CASE WHEN ${hasPullRequestAttachment} THEN 1 WHEN ${outputHasPullRequest} THEN 1 ELSE 0 END`,
+      ),
+    };
+  }
+}
+
+// ECMAScript whitespace plus prose wrappers that terminate URL-like tokens.
+const githubTokenDelimiterCodePoints = [
+  9, 10, 11, 12, 13, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+  8232, 8233, 8239, 8287, 12288, 65279, 40, 41, 91, 93, 123, 125, 60, 62, 34, 39, 96,
+];
+
+function githubTokenDelimitersSql(): string {
+  return githubTokenDelimiterCodePoints.map((code, index) => `(${index + 1}, ${code})`).join(", ");
+}
+
+/**
+ * Keep aggregate SQL matching aligned with extractGitHubPullRequestUrls()
+ * (src/utils/github-pull-request). `value` is a column reference chosen by
+ * code; `host` is a checked lower-case host. Both are inlined as text.
+ */
+function githubPullRequestExistsSql(value: string, host: string): string {
+  return `EXISTS (
+    WITH RECURSIVE
+    token_delimiters(position, code_point) AS (
+      VALUES ${githubTokenDelimitersSql()}
+    ),
+    normalized(value, position) AS (
+      SELECT coalesce(${value}, ''), 0
+
+      UNION ALL
+
+      SELECT replace(value, char(code_point), ' '), normalized.position + 1
+      FROM normalized
+      JOIN token_delimiters ON token_delimiters.position = normalized.position + 1
+    ),
+    tokens(remaining, token) AS (
+      SELECT trim(value) || ' ', NULL
+      FROM normalized
+      WHERE position = (SELECT max(position) FROM token_delimiters)
+
+      UNION ALL
+
+      SELECT
+        ltrim(substr(remaining, instr(remaining, ' ') + 1)),
+        substr(remaining, 1, instr(remaining, ' ') - 1)
+      FROM tokens
+      WHERE remaining <> ''
+    ),
+    github_paths(path) AS (
+      SELECT CASE
+        WHEN lower(token) GLOB 'https://${host}/*'
+          THEN substr(token, length('https://${host}/') + 1)
+        WHEN lower(token) GLOB 'http://${host}/*'
+          THEN substr(token, length('http://${host}/') + 1)
+        ELSE substr(token, length('${host}/') + 1)
+      END
+      FROM tokens
+      WHERE lower(token) GLOB 'https://${host}/*'
+         OR lower(token) GLOB 'http://${host}/*'
+         OR lower(token) GLOB '${host}/*'
+    ),
+    github_segments(owner, repo, remainder) AS (
+      SELECT
+        substr(path, 1, instr(path, '/') - 1),
+        substr(
+          substr(path, instr(path, '/') + 1),
+          1,
+          instr(substr(path, instr(path, '/') + 1), '/') - 1
+        ),
+        substr(
+          substr(path, instr(path, '/') + 1),
+          instr(substr(path, instr(path, '/') + 1), '/') + 1
+        )
+      FROM github_paths
+      WHERE instr(path, '/') > 1
+        AND instr(substr(path, instr(path, '/') + 1), '/') > 1
+    ),
+    github_pull_numbers(remainder, position) AS (
+      SELECT remainder, length('pull/') + 1
+      FROM github_segments
+      WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
+        AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+        AND owner NOT IN ('.', '..')
+        AND repo NOT IN ('.', '..')
+        AND lower(remainder) GLOB 'pull/[0-9]*'
+
+      UNION ALL
+
+      SELECT remainder, position + 1
+      FROM github_pull_numbers
+      WHERE substr(remainder, position, 1) GLOB '[0-9]'
+    )
+    SELECT 1
+    FROM github_pull_numbers
+    WHERE substr(remainder, position, 1) NOT GLOB '[0-9]'
+      AND (
+        substr(remainder, position, 1) = ''
+        OR substr(remainder, position, 1) IN ('/', '?', '#')
+        OR trim(substr(remainder, position), ')]},.;:!') = ''
+      )
+    LIMIT 1
+  )`;
 }

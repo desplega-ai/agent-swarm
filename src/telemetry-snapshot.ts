@@ -8,7 +8,6 @@
  * API server only. Workers never import this file.
  */
 
-import { getDbClient } from "./be/db/runtime";
 import { getStorage } from "./be/storage";
 import {
   isTelemetryReady,
@@ -36,13 +35,6 @@ const ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 /** Identity kinds that get their own `users_linked_*` counter. Every other kind sums into `users_linked_other`. */
 const NAMED_LINK_KINDS = ["slack", "github", "gitlab", "linear", "jira"] as const;
-
-type CountRow = { n: number };
-
-async function count(sql: string, params: unknown[] = []): Promise<number> {
-  const row = await getDbClient().get<CountRow>(sql, params as never[]);
-  return Number(row?.n ?? 0);
-}
 
 /** Read-only aggregates over the user, token, identity, task and agent tables. */
 export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot> {
@@ -73,12 +65,7 @@ export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot>
     linked("linear"),
     linked("jira"),
     users.countActiveUsersLinkedOutside(NAMED_LINK_KINDS),
-    count(
-      `SELECT COUNT(DISTINCT requestedByUserId) AS n
-         FROM agent_tasks
-        WHERE requestedByUserId IS NOT NULL AND createdAt >= ?`,
-      [since],
-    ),
+    getStorage().repos.tasks.countDistinctRequestersSince(since),
     getStorage().repos.agents.countAllAgents(),
   ]);
   return {

@@ -1,17 +1,9 @@
 {
-  "src/be/api-drain.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
-  },
   "src/be/boot-seeds.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 1
   },
   "src/be/checklist.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
-  },
-  "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
     "sites": 3
   },
@@ -23,10 +15,6 @@
     "reason": "M2 move: every domain (see the domain map in the ledger)",
     "sites": 292
   },
-  "src/be/db/instance-signals.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 5
@@ -35,17 +23,9 @@
     "reason": "M2 move: scripts",
     "sites": 1
   },
-  "src/be/db/slack-trees.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 2
-  },
   "src/be/db/tasks/read.ts": {
     "reason": "M2 move: tasks",
     "sites": 11
-  },
-  "src/be/db/tasks/write.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
   },
   "src/be/db/user-references.ts": {
     "reason": "M2 move: users and RBAC",
@@ -59,28 +39,12 @@
     "reason": "M2 move: workflows",
     "sites": 12
   },
-  "src/be/db/workflow-runs.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 4
-  },
   "src/be/events.ts": {
     "reason": "M2 move: integrations",
-    "sites": 3
-  },
-  "src/be/fleet-benchmark-stats.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/be/harness-model-support.ts": {
-    "reason": "M2 move: models",
-    "sites": 2
+    "sites": 1
   },
   "src/be/key-window-usage.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/be/mcp-events/dispatcher.ts": {
-    "reason": "M2 move: integrations",
     "sites": 2
   },
   "src/be/memory/embedding-space.ts": {
@@ -103,17 +67,9 @@
     "reason": "M2 move: models",
     "sites": 2
   },
-  "src/be/model-tier-resolution.ts": {
-    "reason": "M2 move: models",
-    "sites": 5
-  },
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/be/onboarding.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
@@ -223,25 +179,9 @@
     "reason": "M2 move: skills",
     "sites": 1
   },
-  "src/be/steering.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
   "src/be/storage.ts": {
     "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
     "sites": 1
-  },
-  "src/be/task-citations.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
-  },
-  "src/be/task-ui-spec.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 2
-  },
-  "src/heartbeat/heartbeat.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 5
   },
   "src/http/db-query-bounded.ts": {
     "reason": "M2 move: own database handle (M4 steps 4 and 5)",
@@ -251,28 +191,8 @@
     "reason": "M2 move: own database handle (M4 steps 4 and 5)",
     "sites": 2
   },
-  "src/http/poll.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/queue-stall-alarm.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
-  },
   "src/scheduler/deferred-task-waits.ts": {
     "reason": "M2 move: schedules",
-    "sites": 2
-  },
-  "src/telemetry-snapshot.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/telemetry-trigger.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/tools/utils.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
   }
 }

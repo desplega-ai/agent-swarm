@@ -10,7 +10,7 @@
  * from the poll response.
  */
 
-import { getDbClient } from "./be/db/runtime";
+import { getStorage } from "./be/storage";
 import { isTelemetryEnabled, telemetry } from "./telemetry";
 import { mapTriggerSurface } from "./telemetry-context";
 import type { PropsFor, TriggerSurface } from "./telemetry-contract";
@@ -49,17 +49,7 @@ export async function resolveTriggerSurface(
     remember(taskId, cached);
     return cached;
   }
-  const row = await getDbClient().get<{ source: string | null }>(
-    `WITH RECURSIVE chain(id, parentTaskId, source, depth) AS (
-       SELECT id, parentTaskId, source, 0 FROM agent_tasks WHERE id = ?
-       UNION ALL
-       SELECT t.id, t.parentTaskId, t.source, c.depth + 1
-         FROM agent_tasks t JOIN chain c ON t.id = c.parentTaskId
-        WHERE c.depth < ?
-     )
-     SELECT source FROM chain ORDER BY depth DESC LIMIT 1`,
-    [taskId, MAX_CHAIN_DEPTH],
-  );
+  const row = await getStorage().repos.tasks.findRootTaskSource(taskId, MAX_CHAIN_DEPTH);
   if (!row) return mapTriggerSurface(fallbackSource);
   const surface = mapTriggerSurface(row.source);
   remember(taskId, surface);

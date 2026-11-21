@@ -18,7 +18,6 @@ import {
   createSteeringMessage,
   createTaskExtended,
   getAgentById,
-  getDbClient,
   getPendingSteeringForTask,
   getSteeringMessageById,
   getTaskById,
@@ -284,14 +283,11 @@ export async function carryUnhandledSteering(
   successorTaskId: string,
 ): Promise<string[]> {
   try {
-    const rows = await getDbClient().query<{ id: string }>(
-      `UPDATE task_steering_messages
-         SET task_id = ?, status = 'pending', delivered_mode = NULL, delivered_at = NULL
-         WHERE task_id = ? AND status IN ('pending', 'delivered')
-         RETURNING id`,
-      [successorTaskId, predecessorTaskId],
+    const ids = await getStorage().repos.tasks.carrySteeringMessages(
+      predecessorTaskId,
+      successorTaskId,
     );
-    for (const { id } of rows) {
+    for (const id of ids) {
       try {
         await createLogEntry({
           eventType: "task_steering",
@@ -301,7 +297,7 @@ export async function carryUnhandledSteering(
         });
       } catch {}
     }
-    return rows.map((row) => row.id);
+    return ids;
   } catch (error) {
     console.error(
       `[steering] Failed to carry steering from ${predecessorTaskId} to ${successorTaskId}:`,

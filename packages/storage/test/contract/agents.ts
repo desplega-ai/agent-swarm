@@ -445,5 +445,44 @@ export function agentsContract(engine: ContractEngine): void {
       expect(await repo.countNonExtensionAgents()).toBe(1);
       expect(await repo.countAllAgents()).toBe(2);
     });
+
+    test("task log lookups: event exists, latest entry, metadata, queue pickups", async () => {
+      const log = (id: string, taskId: string, eventType: string, createdAt: string, extra = {}) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_log (id, "eventType", "taskId", "oldValue", "newValue", metadata, "createdAt")
+          VALUES (${id}, ${eventType}, ${taskId}, ${(extra as { oldValue?: string }).oldValue ?? null},
+            ${(extra as { newValue?: string }).newValue ?? null}, ${'{"a":1}'}, ${createdAt})`);
+      expect(await repo.hasTaskLogEvent("t1", "task_superseded")).toBe(false);
+      await log("l1", "t1", "task_superseded", T0);
+      await log("l2", "t1", "task_superseded", T1);
+      await log("l3", "t2", "task_superseded", T1);
+      expect(await repo.hasTaskLogEvent("t1", "task_superseded")).toBe(true);
+      expect(await repo.hasTaskLogEvent("t1", "other")).toBe(false);
+      expect(await repo.findLatestTaskLog("t1", "task_superseded")).toEqual({
+        id: "l2",
+        metadata: '{"a":1}',
+      });
+      expect(await repo.findLatestTaskLog("t9", "task_superseded")).toBeNull();
+      expect(await repo.setLogMetadata("l2", '{"b":2}')).toBe(1);
+      expect(await repo.setLogMetadata("missing", "{}")).toBe(0);
+      expect(await repo.findLatestTaskLog("t1", "task_superseded")).toEqual({
+        id: "l2",
+        metadata: '{"b":2}',
+      });
+      const pick = { oldValue: "pending", newValue: "in_progress" };
+      await log("p1", "t1", "task_status_change", T1, pick);
+      await log("p2", "t1", "task_claimed", T1, {
+        oldValue: "unassigned",
+        newValue: "in_progress",
+      });
+      await log("p3", "t1", "task_claimed", T0, pick);
+      await log("p4", "t1", "task_status_change", T1, {
+        oldValue: "paused",
+        newValue: "in_progress",
+      });
+      await log("p5", "t1", "task_created", T1, pick);
+      expect(await repo.countRecentQueuePickups(T1)).toBe(2);
+      expect(await repo.countRecentQueuePickups(T0)).toBe(3);
+    });
   });
 }

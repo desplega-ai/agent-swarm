@@ -1,5 +1,4 @@
 import { getStorage } from "../storage";
-import { getDbClient } from "./runtime";
 
 /**
  * Install-wide counts behind the dashboard's feedback pop-up triggers, plus
@@ -13,10 +12,7 @@ export async function getInstanceFeedbackSignals(): Promise<{
 }> {
   const { repos } = getStorage();
   const firstSeenAt = await repos.agents.firstAgentCreatedAt();
-  const tasks = await getDbClient().get<{ completed: number | null; failed: number | null }>(
-    `SELECT SUM(status = 'completed') AS completed, SUM(status = 'failed') AS failed
-       FROM agent_tasks WHERE status IN ('completed', 'failed')`,
-  );
+  const tasks = await repos.tasks.countFinishedTaskOutcomes();
   const runsCompleted = await repos.workflows.countCompletedRunsAll();
   return {
     first_seen_at: firstSeenAt,
