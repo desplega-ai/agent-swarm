@@ -46,6 +46,7 @@
 
 import { createHash } from "node:crypto";
 import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import {
   embeddingEndpoint,
@@ -112,27 +113,21 @@ function endpointAllowed(): boolean {
 }
 
 async function readState(key: string): Promise<string | null> {
-  const row = await getDbClient().get<{ seededHash: string }>(
-    "SELECT seededHash FROM seed_state WHERE kind = 'maintenance' AND key = ?",
-    [key],
-  );
-  return row?.seededHash ?? null;
+  return getStorage().repos.maintenance.getState(key);
 }
 
 async function writeState(key: string, value: string): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-     VALUES ('maintenance', ?, ?, datetime('now'))
-     ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
-    [key, value],
-  );
+  await getStorage().repos.maintenance.setState(key, value);
 }
 
+async function deleteState(key: string): Promise<void> {
+  await getStorage().repos.config.deleteSeedState("maintenance", key);
+}
+
+/** Both cursors. Callers run it inside their transaction. */
 async function deleteCursors(): Promise<void> {
-  await getDbClient().run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key IN (?, ?)", [
-    embeddingSpaceCursorKey("memory"),
-    embeddingSpaceCursorKey("scripts"),
-  ]);
+  await deleteState(embeddingSpaceCursorKey("memory"));
+  await deleteState(embeddingSpaceCursorKey("scripts"));
 }
 
 const short = (fingerprint: string | null) => (fingerprint ? fingerprint.slice(0, 12) : "none");
@@ -154,7 +149,7 @@ async function reembedMemory(
   counts: Counts,
   opts: EmbeddingSpaceOptions,
 ): Promise<boolean> {
-  const client = getDbClient();
+  const storage = getStorage();
   const store = getMemoryStore();
   const cursorKey = embeddingSpaceCursorKey("memory");
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
@@ -162,10 +157,7 @@ async function reembedMemory(
   let batches = 0;
 
   for (;;) {
-    const rows = await client.query<{ id: string; content: string }>(
-      "SELECT id, content FROM agent_memory WHERE id > ? ORDER BY id ASC LIMIT ?",
-      [cursor, batchSize],
-    );
+    const rows = await storage.repos.memory.listContentAfter(cursor, batchSize);
     if (rows.length === 0) return true;
     // A config reload built a new provider: the run it queued takes over.
     if (getEmbeddingProvider() !== provider) return false;
@@ -184,7 +176,7 @@ async function reembedMemory(
     if (vectors.some((v) => !v) && !(await endpointWorks(provider))) return false;
 
     const lastId = rows[rows.length - 1]!.id;
-    const batch = await client.transaction(async () => {
+    const batch = await storage.transaction(async () => {
       const tally = { done: 0, failed: 0 };
       for (let i = 0; i < rows.length; i++) {
         const vector = vectors[i];
@@ -311,7 +303,7 @@ export async function reconcileEmbeddingSpace(
   }
 
   if (target !== current) {
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
       await writeState(EMBEDDING_SPACE_TARGET_KEY, current);
       await deleteCursors();
     });
@@ -340,11 +332,9 @@ export async function reconcileEmbeddingSpace(
     return "interrupted";
   }
 
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     await writeState(EMBEDDING_SPACE_KEY, current);
-    await getDbClient().run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
-      EMBEDDING_SPACE_TARGET_KEY,
-    ]);
+    await deleteState(EMBEDDING_SPACE_TARGET_KEY);
     await deleteCursors();
   });
   console.log(

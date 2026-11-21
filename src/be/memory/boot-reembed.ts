@@ -12,21 +12,15 @@
  * instead.
  */
 
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { EMBEDDING_DIMENSIONS } from "./constants";
 import { getEmbeddingProvider, getMemoryStore } from "./index";
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 const BATCH_SIZE = 20;
-const INVALID_EMBEDDING_WHERE = `embedding IS NULL OR length(embedding) != ${VECTOR_BYTES}`;
 
 export async function runBootReembed(): Promise<void> {
-  const invalidCount =
-    (
-      await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
-      )
-    )?.count ?? 0;
+  const invalidCount = await getStorage().repos.memory.countInvalidEmbeddings(VECTOR_BYTES);
 
   if (invalidCount === 0) {
     return;
@@ -46,9 +40,7 @@ export async function runBootReembed(): Promise<void> {
   );
 
   const store = getMemoryStore();
-  const rows = await getDbClient().query<{ id: string; content: string }>(
-    `SELECT id, content FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
-  );
+  const rows = await getStorage().repos.memory.listInvalidEmbeddings(VECTOR_BYTES);
 
   let reembedded = 0;
   let failed = 0;
@@ -75,12 +67,7 @@ export async function runBootReembed(): Promise<void> {
     }
   }
 
-  const afterInvalid =
-    (
-      await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
-      )
-    )?.count ?? 0;
+  const afterInvalid = await getStorage().repos.memory.countInvalidEmbeddings(VECTOR_BYTES);
 
   console.log(
     `[boot-reembed] complete: reembedded=${reembedded} failed=${failed} remaining_invalid=${afterInvalid}`,

@@ -1,5 +1,7 @@
-import { getDb, getDbClient, isSqliteVecAvailable } from "@/be/db";
+import type { AgentMemoryRow, MemoryListFilter, MemorySearchFilter } from "@desplega/storage";
+import { getDb, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
+import { getStorage } from "@/be/storage";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -16,7 +18,7 @@ import {
 } from "../constants";
 import { isLearningKey, isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
-import { notReviewTaskCompletionSql } from "../review-recall-filter";
+import { REVIEW_TASK_RULE } from "../review-recall-filter";
 import { MAX_CANDIDATE_FETCH } from "../search-candidates";
 import { memorySearchReader } from "../search-reader";
 import type {
@@ -47,21 +49,10 @@ function armFetchLimit(limit: number): number {
   return Math.min(Math.max(Math.min(limit * 4, 100), limit), MAX_CANDIDATE_FETCH);
 }
 
-// memory_fts.memory_id is UNINDEXED (FTS5 cannot index it), so a CORRELATED
-// lookup against it is a full table scan per outer row. The old backfill used
-// `WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
-// which is N x N: at ~18k memories it held the main connection for minutes at
-// boot. The diff below reads each table once, in rowid batches (FTS5 seeks a
-// rowid range), and yields the event loop between batches: one whole-table
-// statement held the loop for seconds on a large DB. A memory_fts row is an
-// orphan when its memory is gone; that check is a lookup on the agent_memory
-// primary key. A NULL memory_id is never an orphan, as with the old NOT IN.
-export const FTS_SCAN_BATCH_SQL = `SELECT rowid AS rowid, memory_id AS memoryId,
-  memory_id IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM agent_memory m WHERE m.id = memory_fts.memory_id) AS orphan
-  FROM memory_fts WHERE rowid > ? ORDER BY rowid LIMIT ?`;
-export const MEMORY_ID_BATCH_SQL = `SELECT rowid AS rowid, id FROM agent_memory
-  WHERE rowid > ? ORDER BY rowid LIMIT ?`;
+// The FTS backfill statements (see populateFtsTable) live in the SQLite
+// memory repository; re-exported for the query-plan test.
+export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "@/be/storage-root";
+export type { AgentMemoryRow };
 /** How long search reuses one health result. Stale by at most this long. */
 export const SEARCH_HEALTH_TTL_MS = 60_000;
 /** Off-loop health refreshes a search retries when writes invalidate them, before it counts in-process. */
@@ -71,32 +62,33 @@ type SearchHealthRefresh = { db: unknown; generation: number; promise: Promise<M
 const FTS_SCAN_BATCH_SIZE = 1000;
 const FTS_POPULATE_BATCH_SIZE = 500;
 
-export type AgentMemoryRow = {
-  id: string;
-  agentId: string | null;
+const memoryRepo = () => getStorage().repos.memory;
+
+type SearchArmOptions = {
   scope: string;
-  name: string;
-  content: string;
-  summary: string | null;
-  embedding: Buffer | null;
-  source: string;
-  sourceTaskId: string | null;
-  sourcePath: string | null;
-  chunkIndex: number;
-  totalChunks: number;
-  tags: string;
-  createdAt: string;
-  accessedAt: string;
-  expiresAt: string | null;
-  accessCount: number;
-  embeddingModel: string | null;
-  alpha: number;
-  beta: number;
-  key: string | null;
-  contentHash: string | null;
-  version: number;
-  updatedAt: string | null;
+  limit: number;
+  source?: AgentMemorySource;
+  isLead: boolean;
+  includeExpired: boolean;
+  keyPrefix?: string;
+  excludeReviewTaskCompletions?: boolean;
+  minSimilarity?: number;
 };
+
+/** The repository filter of one search arm. */
+function searchFilter(agentId: string, options: SearchArmOptions): MemorySearchFilter {
+  return {
+    agentId,
+    scope: options.scope,
+    isLead: options.isLead,
+    keyPrefix: options.keyPrefix,
+    source: options.source,
+    includeExpired: options.includeExpired,
+    excludeReviewTaskCompletions: options.excludeReviewTaskCompletions
+      ? REVIEW_TASK_RULE
+      : undefined,
+  };
+}
 
 function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
   return {
@@ -253,10 +245,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
   private async getFtsTableSchema(): Promise<string | null> {
     try {
-      const row = await getDbClient().get<{ sql: string | null }>(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'",
-      );
-      return row?.sql ?? null;
+      return await memoryRepo().ftsTableSchema();
     } catch {
       return null;
     }
@@ -274,7 +263,7 @@ export class SqliteMemoryStore implements MemoryStore {
    * a write that commits its memory and FTS rows together cannot be doubled.
    */
   private async populateFtsTable(): Promise<void> {
-    const client = getDbClient();
+    const repo = memoryRepo();
     const startedAt = performance.now();
     const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -282,18 +271,12 @@ export class SqliteMemoryStore implements MemoryStore {
     const indexed = new Set<string>();
     let removed = 0;
     for (let after = 0; ; ) {
-      const rows = await client.query<{ rowid: number; memoryId: string | null; orphan: number }>(
-        FTS_SCAN_BATCH_SQL,
-        [after, FTS_SCAN_BATCH_SIZE],
-      );
+      const rows = await repo.scanFtsBatch(after, FTS_SCAN_BATCH_SIZE);
       if (rows.length === 0) break;
       after = rows[rows.length - 1]!.rowid;
       const orphans = rows.filter((row) => row.orphan).map((row) => row.rowid);
       if (orphans.length > 0) {
-        await client.run(
-          `DELETE FROM memory_fts WHERE rowid IN (${orphans.map(() => "?").join(",")})`,
-          orphans,
-        );
+        await repo.deleteFtsRowsByRowid(orphans);
         removed += orphans.length;
       }
       for (const row of rows) if (!row.orphan && row.memoryId) indexed.add(row.memoryId);
@@ -305,10 +288,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const missing: { id: string }[] = [];
     for (let after = 0; ; ) {
-      const rows = await client.query<{ rowid: number; id: string }>(MEMORY_ID_BATCH_SQL, [
-        after,
-        FTS_SCAN_BATCH_SIZE,
-      ]);
+      const rows = await repo.scanMemoryIdBatch(after, FTS_SCAN_BATCH_SIZE);
       if (rows.length === 0) break;
       after = rows[rows.length - 1]!.rowid;
       for (const row of rows) if (!indexed.has(row.id)) missing.push(row);
@@ -317,15 +297,7 @@ export class SqliteMemoryStore implements MemoryStore {
 
     for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
       const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
-      const placeholders = ids.map(() => "?").join(",");
-      await client.run(
-        `INSERT INTO memory_fts(memory_id, name, content)
-         SELECT m.id, m.name, m.content
-         FROM agent_memory m
-         WHERE m.id IN (${placeholders})
-           AND m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`,
-        ids,
-      );
+      await repo.insertMissingFtsRows(ids);
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     console.log(
@@ -353,13 +325,10 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
     try {
-      await getDbClient().transaction(async (tx) => {
-        if (!freshId) await tx.run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
-        await tx.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
-          memoryId,
-          name,
-          content,
-        ]);
+      const storage = getStorage();
+      await storage.transaction(async () => {
+        if (!freshId) await storage.repos.memory.deleteFtsRow(memoryId);
+        await storage.repos.memory.insertFtsRow(memoryId, name, content);
       });
     } catch (err) {
       console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
@@ -372,8 +341,7 @@ export class SqliteMemoryStore implements MemoryStore {
     // process-wide), and a stale `true` would make this DELETE throw
     // "no such table: memory_fts". Mirrors the vec guard in purgeByIds.
     if (ids.length === 0 || !(await this.getFtsTableSchema())) return;
-    const placeholders = ids.map(() => "?").join(",");
-    await getDbClient().run(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`, ids);
+    await memoryRepo().deleteFtsRows(ids);
   }
 
   private ensureVecTable(): void {
@@ -532,54 +500,42 @@ export class SqliteMemoryStore implements MemoryStore {
     const contentHash = contentSha256(content);
     const version = 1;
 
-    const row = await getDbClient().transaction(async (tx) => {
-      const inserted = await tx.get<AgentMemoryRow>(
-        `INSERT INTO agent_memory (id, agentId, scope, key, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, updatedAt, accessedAt, expiresAt, accessCount, embeddingModel, contextKey, contentHash, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-        [
-          id,
-          input.agentId ?? null,
-          input.scope,
-          key,
-          name,
-          content,
-          summary,
-          input.source,
-          input.sourceTaskId ?? null,
-          input.sourcePath ?? null,
-          input.chunkIndex ?? 0,
-          input.totalChunks ?? 1,
-          JSON.stringify((input.tags ?? []).map((tag) => scrubSecrets(tag))),
-          now,
-          now,
-          now,
-          expiresAt,
-          0,
-          null,
-          input.contextKey ?? null,
-          contentHash,
-          version,
-        ],
-      );
+    const storage = getStorage();
+    const repo = storage.repos.memory;
+    const row = await storage.transaction(async () => {
+      const inserted = await repo.insertMemory({
+        id,
+        agentId: input.agentId ?? null,
+        scope: input.scope,
+        key,
+        name,
+        content,
+        summary,
+        source: input.source,
+        sourceTaskId: input.sourceTaskId ?? null,
+        sourcePath: input.sourcePath ?? null,
+        chunkIndex: input.chunkIndex ?? 0,
+        totalChunks: input.totalChunks ?? 1,
+        tags: JSON.stringify((input.tags ?? []).map((tag) => scrubSecrets(tag))),
+        now,
+        expiresAt,
+        contextKey: input.contextKey ?? null,
+        contentHash,
+        version,
+      });
 
       if (!inserted) throw new Error("Failed to create memory");
-      await tx.run(
-        `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'create', ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          inserted.id,
-          version,
-          content,
-          contentHash,
-          input.intent ?? "create memory",
-          input.agentId ?? null,
-          now,
-          now,
-          input.agentId ?? null,
-          input.agentId ?? null,
-        ],
-      );
+      await repo.insertMemoryVersion({
+        id: crypto.randomUUID(),
+        memoryId: inserted.id,
+        version,
+        content,
+        contentHash,
+        intent: input.intent ?? "create memory",
+        operation: "create",
+        changedByAgentId: input.agentId ?? null,
+        now,
+      });
       // Same transaction: a backfill sees the memory row only with its FTS row.
       await this.syncFtsRow(inserted.id, inserted.name, inserted.content, true);
       return inserted;
@@ -589,7 +545,7 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
-    return await getDbClient().transaction(async () => {
+    return await getStorage().transaction(async () => {
       const results: AgentMemory[] = [];
       for (const input of inputs) {
         results.push(await this.store(input));
@@ -602,19 +558,17 @@ export class SqliteMemoryStore implements MemoryStore {
     document: MemoryDocumentRef,
     inputs: MemoryInput[],
   ): Promise<AgentMemory[]> {
-    return await getDbClient().transaction(async (tx) => {
+    const storage = getStorage();
+    return await storage.transaction(async () => {
       // Only this owner's rows of this source, in this scope, under this key.
       // Another source holding the key is left alone and the insert fails.
-      const rows = await tx.query<{ id: string }>(
-        `SELECT id FROM agent_memory
-          WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '') AND source = ?`,
-        [document.key, document.scope, document.agentId ?? null, document.source],
+      const ids = await storage.repos.memory.listDocumentIdsOfSource(
+        { key: document.key, scope: document.scope, agentId: document.agentId ?? null },
+        document.source,
       );
-      const ids = rows.map((row) => row.id);
       if (ids.length > 0) {
         await this.purgeByIds(ids);
-        const placeholders = ids.map(() => "?").join(",");
-        await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+        await storage.repos.memory.deleteMemoriesByIds(ids);
       }
       const results: AgentMemory[] = [];
       for (const input of inputs) {
@@ -625,23 +579,18 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async get(id: string): Promise<AgentMemory | null> {
-    const db = getDbClient();
-    const row = await db.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
+    const repo = memoryRepo();
+    const row = await repo.findMemoryById(id);
     if (!row) return null;
 
     // Update accessedAt and increment accessCount
-    await db.run(
-      "UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WHERE id = ?",
-      [new Date().toISOString(), id],
-    );
+    await repo.touchMemory(id, new Date().toISOString());
 
     return rowToAgentMemory(row);
   }
 
   async peek(id: string): Promise<AgentMemory | null> {
-    const row = await getDbClient().get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [
-      id,
-    ]);
+    const row = await memoryRepo().findMemoryById(id);
     if (!row) return null;
     return rowToAgentMemory(row);
   }
@@ -825,10 +774,7 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<void> {
     const missing = ids.filter((id) => !cosines.has(id));
     if (missing.length === 0) return;
-    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer | null }>(
-      `SELECT id, embedding FROM agent_memory WHERE id IN (${missing.map(() => "?").join(",")})`,
-      missing,
-    );
+    const rows = await memoryRepo().listEmbeddingsByIds(missing, memorySearchReader);
     for (const row of rows) {
       if (!row.embedding) continue;
       const embedding = deserializeEmbedding(row.embedding);
@@ -853,34 +799,12 @@ export class SqliteMemoryStore implements MemoryStore {
     const match = this.buildFtsMatch(queryText);
     if (!match) return [];
 
-    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
-    const conditions: string[] = ["memory_fts MATCH ?"];
-    const params: (Buffer | string | number | null)[] = [match];
-
-    this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
-    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
-    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions, "m");
-
-    if (source) {
-      conditions.push("m.source = ?");
-      params.push(source);
-    }
-
-    if (!includeExpired) {
-      conditions.push("(m.expiresAt IS NULL OR m.expiresAt > datetime('now'))");
-    }
+    const { limit } = options;
+    const filter = searchFilter(agentId, options);
 
     try {
       const sqlLimit = armFetchLimit(limit);
-      const rows = await memorySearchReader.query<AgentMemoryRow & { rank: number }>(
-        `SELECT m.*, bm25(memory_fts) AS rank
-         FROM memory_fts
-         JOIN agent_memory m ON m.id = memory_fts.memory_id
-         WHERE ${conditions.join(" AND ")}
-         ORDER BY rank
-         LIMIT ?`,
-        [...params, sqlLimit],
-      );
+      const rows = await memoryRepo().searchFtsRows(match, filter, sqlLimit, memorySearchReader);
 
       const now = new Date();
       return rows
@@ -930,7 +854,7 @@ export class SqliteMemoryStore implements MemoryStore {
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const { limit } = options;
     const floor = options.minSimilarity ?? minSimilarity();
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
@@ -938,33 +862,12 @@ export class SqliteMemoryStore implements MemoryStore {
     // returns them all, so no per-query row count is needed to size k.
     const knnLimit = 4096;
 
-    const conditions: string[] = ["v.embedding MATCH ?"];
-    const params: (Buffer | string | number | null)[] = [embeddingBuffer];
-
-    this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
-    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
-    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions, "m");
-
-    if (source) {
-      conditions.push("m.source = ?");
-      params.push(source);
-    }
-
-    if (!includeExpired) {
-      conditions.push("(m.expiresAt IS NULL OR m.expiresAt > datetime('now'))");
-    }
-
-    conditions.push("v.k = ?");
-    params.push(knnLimit);
-
-    const rows = await memorySearchReader.query<AgentMemoryRow & { distance: number }>(
-      `SELECT m.*, v.distance
-       FROM memory_vec v
-       JOIN agent_memory m ON m.id = v.memory_id
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY v.distance
-       LIMIT ?`,
-      [...params, limit],
+    const rows = await memoryRepo().searchVecRows(
+      embeddingBuffer,
+      searchFilter(agentId, options),
+      knnLimit,
+      limit,
+      memorySearchReader,
     );
 
     const candidates: MemoryCandidate[] = [];
@@ -1002,40 +905,22 @@ export class SqliteMemoryStore implements MemoryStore {
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const { scope, limit } = options;
     const floor = options.minSimilarity ?? minSimilarity();
-
-    const conditions: string[] = ["embedding IS NOT NULL"];
-    const params: (string | number | null)[] = [];
-    this.addScopeConditions(conditions, params, agentId, scope, isLead);
-    this.addKeyPrefixCondition(conditions, params, keyPrefix);
-    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions);
-    if (source) {
-      conditions.push("source = ?");
-      params.push(source);
-    }
-    if (!includeExpired) {
-      conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
-    }
-    // FROM..LIMIT of the capped eligible set, newest first, so a capped scan
-    // drops the oldest rows. Each path adds its own projection.
-    const capped = `FROM agent_memory
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY updatedAt DESC, id
-       LIMIT ?`;
-    const cappedParams = [...params, EXHAUSTIVE_SEARCH_MAX_ROWS];
+    // The capped eligible set, newest first, so a capped scan drops the oldest rows.
+    const filter = searchFilter(agentId, options);
 
     const { scanned, top } = isSqliteVecAvailable()
-      ? await this.scoreCappedInSql(queryEmbedding, capped, cappedParams, floor, limit)
-      : await this.scoreCappedInJs(queryEmbedding, capped, cappedParams, floor, limit);
+      ? await this.scoreCappedInSql(queryEmbedding, filter, floor, limit)
+      : await this.scoreCappedInJs(queryEmbedding, filter, floor, limit);
     console.log(
       `[memory-search] retrieval_path=exhaustive scope=${scope} limit=${limit} scanned=${scanned} hits=${top.length}${scanned >= EXHAUSTIVE_SEARCH_MAX_ROWS ? " capped=true" : ""}`,
     );
     if (top.length === 0) return [];
 
-    const rows = await memorySearchReader.query<AgentMemoryRow>(
-      `SELECT * FROM agent_memory WHERE id IN (${top.map(() => "?").join(", ")})`,
+    const rows = await memoryRepo().listRowsByIds(
       top.map((hit) => hit.id),
+      memorySearchReader,
     );
     const byId = new Map(rows.map((row) => [row.id, row]));
     const candidates: MemoryCandidate[] = [];
@@ -1050,45 +935,39 @@ export class SqliteMemoryStore implements MemoryStore {
   /** Rank the capped set inside SQLite; only the top `limit` ids leave the query. */
   private async scoreCappedInSql(
     queryEmbedding: Float32Array,
-    capped: string,
-    cappedParams: (string | number | null)[],
+    filter: MemorySearchFilter,
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const db = memorySearchReader;
-    const counted = await db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM (SELECT 1 ${capped})`,
-      cappedParams,
+    const repo = memoryRepo();
+    const scanned = await repo.countCappedRows(
+      filter,
+      EXHAUSTIVE_SEARCH_MAX_ROWS,
+      memorySearchReader,
     );
     const queryBuffer = serializeEmbedding(queryEmbedding);
-    // The length guard keeps a row of another dimension from raising inside
-    // vec_distance_cosine; a zero vector scores NULL and fails the floor.
-    const top = await db.query<{ id: string; similarity: number }>(
-      `SELECT id, similarity FROM (
-         SELECT id,
-           CASE WHEN length(embedding) = ? THEN 1 - vec_distance_cosine(embedding, ?) END
-             AS similarity
-         FROM (SELECT id, embedding ${capped})
-       )
-       WHERE similarity >= ?
-       ORDER BY similarity DESC, id
-       LIMIT ?`,
-      [queryBuffer.byteLength, queryBuffer, ...cappedParams, floor, limit],
+    const top = await repo.scoreCappedRows(
+      queryBuffer,
+      filter,
+      EXHAUSTIVE_SEARCH_MAX_ROWS,
+      floor,
+      limit,
+      memorySearchReader,
     );
-    return { scanned: counted?.n ?? 0, top };
+    return { scanned, top };
   }
 
   /** Score the capped set in JS when sqlite-vec is not loaded, reading only id + embedding. */
   private async scoreCappedInJs(
     queryEmbedding: Float32Array,
-    capped: string,
-    cappedParams: (string | number | null)[],
+    filter: MemorySearchFilter,
     floor: number,
     limit: number,
   ): Promise<{ scanned: number; top: { id: string; similarity: number }[] }> {
-    const rows = await memorySearchReader.query<{ id: string; embedding: Buffer }>(
-      `SELECT id, embedding ${capped}`,
-      cappedParams,
+    const rows = await memoryRepo().listCappedEmbeddings(
+      filter,
+      EXHAUSTIVE_SEARCH_MAX_ROWS,
+      memorySearchReader,
     );
     const scored: { id: string; similarity: number }[] = [];
     for (const row of rows) {
@@ -1115,30 +994,12 @@ export class SqliteMemoryStore implements MemoryStore {
       minSimilarity?: number;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
+    const { limit } = options;
     const floor = options.minSimilarity ?? minSimilarity();
 
-    const conditions: string[] = ["embedding IS NOT NULL"];
-    const params: (string | null)[] = [];
-
-    this.addScopeConditions(conditions, params, agentId, scope, isLead);
-    this.addKeyPrefixCondition(conditions, params, keyPrefix);
-    this.addReviewExclusion(conditions, params, options.excludeReviewTaskCompletions);
-
-    if (source) {
-      conditions.push("source = ?");
-      params.push(source);
-    }
-
-    if (!includeExpired) {
-      conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const rows = await memorySearchReader.query<AgentMemoryRow>(
-      `SELECT * FROM agent_memory ${whereClause}`,
-      params,
+    const rows = await memoryRepo().listEmbeddedRows(
+      searchFilter(agentId, options),
+      memorySearchReader,
     );
 
     const candidates: MemoryCandidate[] = [];
@@ -1155,117 +1016,28 @@ export class SqliteMemoryStore implements MemoryStore {
     return candidates.slice(0, limit);
   }
 
-  private addScopeConditions(
-    conditions: string[],
-    params: (Buffer | string | number | null)[],
-    agentId: string,
-    scope: string,
-    isLead: boolean,
-    tableAlias = "",
-  ): void {
-    const col = (name: string) => (tableAlias ? `${tableAlias}.${name}` : name);
-    if (!isLead) {
-      if (scope === "agent") {
-        conditions.push(`${col("agentId")} = ? AND ${col("scope")} = 'agent'`);
-        params.push(agentId);
-      } else if (scope === "swarm") {
-        conditions.push(`${col("scope")} = 'swarm'`);
-      } else {
-        conditions.push(`(${col("agentId")} = ? OR ${col("scope")} = 'swarm')`);
-        params.push(agentId);
-      }
-    } else {
-      if (scope === "agent") {
-        conditions.push(`${col("scope")} = 'agent'`);
-      } else if (scope === "swarm") {
-        conditions.push(`${col("scope")} = 'swarm'`);
-      }
-    }
-  }
-
-  /**
-   * Literal prefix match on `key`. substr/length instead of GLOB or LIKE so a
-   * prefix holding `*`, `?`, `[` or `%` is matched as text, not as a pattern.
-   */
-  private addKeyPrefixCondition(
-    conditions: string[],
-    params: (Buffer | string | number | null)[],
-    keyPrefix: string | undefined,
-    tableAlias = "",
-  ): void {
-    if (!keyPrefix) return;
-    const key = tableAlias ? `${tableAlias}.key` : "key";
-    conditions.push(`substr(${key}, 1, length(?)) = ?`);
-    params.push(keyPrefix, keyPrefix);
-  }
-
-  /** A review recaller's filter, applied in SQL so the rows never fill the window. */
-  private addReviewExclusion(
-    conditions: string[],
-    params: (Buffer | string | number | null)[],
-    exclude: boolean | undefined,
-    tableAlias = "",
-  ): void {
-    if (!exclude) return;
-    const filter = notReviewTaskCompletionSql(tableAlias);
-    conditions.push(filter.sql);
-    params.push(...filter.params);
-  }
-
-  private buildListWhereClause(
-    agentId: string,
-    options: MemoryListOptions,
-  ): { whereClause: string; params: (Buffer | string | number | null)[] } {
+  private listFilter(agentId: string, options: MemoryListOptions): MemoryListFilter {
     const { scope = "all", isLead = false, ownerAgentId, source, sourcePath, keyPrefix } = options;
-    const conditions: string[] = [];
-    const params: (Buffer | string | number | null)[] = [];
-
-    this.addScopeConditions(conditions, params, agentId, scope, isLead);
-    this.addKeyPrefixCondition(conditions, params, keyPrefix);
-
-    if (ownerAgentId) {
-      conditions.push("agentId = ?");
-      params.push(ownerAgentId);
-    }
-
-    if (source) {
-      conditions.push("source = ?");
-      params.push(source);
-    }
-
-    const sourcePathNeedle = sourcePath?.trim().toLowerCase();
-    if (sourcePathNeedle) {
-      conditions.push("instr(lower(coalesce(sourcePath, '')), ?) > 0");
-      params.push(sourcePathNeedle);
-    }
-
     return {
-      whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
-      params,
+      agentId,
+      scope,
+      isLead,
+      keyPrefix,
+      ownerAgentId,
+      source,
+      sourcePathNeedle: sourcePath?.trim().toLowerCase() || undefined,
     };
   }
 
   async list(agentId: string, options: MemoryListOptions = {}): Promise<AgentMemory[]> {
     const { limit = 20, offset = 0 } = options;
-    const { whereClause, params } = this.buildListWhereClause(agentId, options);
-    const queryParams = [...params, limit, offset];
-
-    const rows = await getDbClient().query<AgentMemoryRow>(
-      `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
-      queryParams,
-    );
+    const rows = await memoryRepo().list(this.listFilter(agentId, options), limit, offset);
 
     return rows.map(rowToAgentMemory);
   }
 
   async count(agentId: string, options: MemoryListOptions = {}): Promise<number> {
-    const { whereClause, params } = this.buildListWhereClause(agentId, options);
-    const row = await getDbClient().get<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM agent_memory ${whereClause}`,
-      params,
-    );
-
-    return row?.count ?? 0;
+    return memoryRepo().count(this.listFilter(agentId, options));
   }
 
   isSourceProtected(source: AgentMemorySource, key?: string | null): boolean {
@@ -1281,16 +1053,16 @@ export class SqliteMemoryStore implements MemoryStore {
     // optimistic-lock check all run INSIDE the transaction: once every read is
     // awaited, a concurrent edit could otherwise commit between the version
     // read and the UPDATE and silently win.
-    const { result, ftsContent } = await getDbClient().transaction(async (tx) => {
+    const storage = getStorage();
+    const repo = storage.repos.memory;
+    const { result, ftsContent } = await storage.transaction(async () => {
       const row = input.id
-        ? await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [input.id])
-        : await tx.get<AgentMemoryRow>(
-            `SELECT * FROM agent_memory
-             WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
-             ORDER BY chunkIndex ASC
-             LIMIT 1`,
-            [input.key!, input.scope!, input.agentId ?? null],
-          );
+        ? await repo.findMemoryById(input.id)
+        : await repo.findFirstChunk({
+            key: input.key!,
+            scope: input.scope!,
+            agentId: input.agentId ?? null,
+          });
 
       if (!row) throw new Error("memory not found");
       // A pure move (newKey, no content fields) may span every chunk; any
@@ -1342,12 +1114,7 @@ export class SqliteMemoryStore implements MemoryStore {
       if (moving) {
         const owner = row.agentId ?? null;
         if (row.key) {
-          targets = await tx.query<AgentMemoryRow>(
-            `SELECT * FROM agent_memory
-             WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
-             ORDER BY chunkIndex ASC`,
-            [row.key, row.scope, owner],
-          );
+          targets = await repo.listChunks({ key: row.key, scope: row.scope, agentId: owner });
         }
         if (
           targets.length !== (row.totalChunks ?? 1) ||
@@ -1357,12 +1124,11 @@ export class SqliteMemoryStore implements MemoryStore {
             "memory move needs every chunk of the document under one key; this document's chunks do not share one, re-store it with a key",
           );
         }
-        const taken = await tx.get<{ id: string }>(
-          `SELECT id FROM agent_memory
-           WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
-           LIMIT 1`,
-          [input.newKey!, row.scope, owner],
-        );
+        const taken = await repo.findAnyIdOfDocument({
+          key: input.newKey!,
+          scope: row.scope,
+          agentId: owner,
+        });
         if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
       }
 
@@ -1389,39 +1155,27 @@ export class SqliteMemoryStore implements MemoryStore {
           : (target.contentHash ?? contentSha256(target.content));
         const targetVersion = (target.version ?? 1) + 1;
         if (addressed) nextVersion = targetVersion;
-        await tx.run(
-          `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
-          [
-            crypto.randomUUID(),
-            target.id,
-            targetVersion,
-            targetContent,
-            targetHash,
-            versionIntent,
-            input.changedByAgentId ?? null,
-            now,
-            now,
-            input.changedByAgentId ?? null,
-            input.changedByAgentId ?? null,
-          ],
-        );
-        await tx.run(
-          `UPDATE agent_memory
-           SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?,
-               expiresAt = CASE WHEN ? = 1 THEN ? ELSE expiresAt END
-           WHERE id = ?`,
-          [
-            targetContent,
-            targetHash,
-            targetVersion,
-            now,
-            moving ? input.newKey! : target.key,
-            resetExpiry ? 1 : 0,
-            expiresAt,
-            target.id,
-          ],
-        );
+        await repo.insertMemoryVersion({
+          id: crypto.randomUUID(),
+          memoryId: target.id,
+          version: targetVersion,
+          content: targetContent,
+          contentHash: targetHash,
+          intent: versionIntent,
+          operation: "edit",
+          changedByAgentId: input.changedByAgentId ?? null,
+          now,
+        });
+        await repo.updateChunk({
+          id: target.id,
+          content: targetContent,
+          contentHash: targetHash,
+          version: targetVersion,
+          updatedAt: now,
+          key: moving ? input.newKey! : target.key,
+          resetExpiry,
+          expiresAt,
+        });
       }
 
       return {
@@ -1454,88 +1208,61 @@ export class SqliteMemoryStore implements MemoryStore {
   async listForCuration(
     agentId?: string,
   ): Promise<{ id: string; source: string; name: string; createdAt: string }[]> {
-    const db = getDbClient();
-    const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
     // A /longterm key is protected whatever its source (see tierSource).
-    const notLongterm = `coalesce(key, '') != '${LONGTERM_ROOT}' AND substr(coalesce(key, ''), 1, ${LONGTERM_ROOT.length + 1}) != '${LONGTERM_ROOT}/'`;
-    if (agentId) {
-      return db.query<{ id: string; source: string; name: string; createdAt: string }>(
-        `SELECT id, source, name, createdAt FROM agent_memory
-         WHERE agentId = ? AND source NOT IN (${protectedList}) AND ${notLongterm}`,
-        [agentId],
-      );
-    }
-    return db.query<{ id: string; source: string; name: string; createdAt: string }>(
-      `SELECT id, source, name, createdAt FROM agent_memory
-       WHERE source NOT IN (${protectedList}) AND ${notLongterm}`,
+    return memoryRepo().listForCuration(
+      agentId || undefined,
+      [...PROTECTED_SOURCES],
+      LONGTERM_ROOT,
     );
   }
 
   async listForReembedding(options?: {
     agentId?: string;
   }): Promise<{ id: string; content: string }[]> {
-    const db = getDbClient();
-    if (options?.agentId) {
-      return db.query<{ id: string; content: string }>(
-        "SELECT id, content FROM agent_memory WHERE agentId = ?",
-        [options.agentId],
-      );
-    }
-    return db.query<{ id: string; content: string }>("SELECT id, content FROM agent_memory");
+    return memoryRepo().listForReembedding(options?.agentId || undefined);
   }
 
   private async purgeByIds(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     if (this.vecInitialized && this.getVecTableSchema()) {
-      const placeholders = ids.map(() => "?").join(",");
-      await getDbClient().run(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`, ids);
+      await memoryRepo().deleteVecRows(ids);
       this.noteVecWrite();
     }
     await this.deleteFtsRows(ids);
   }
 
   async delete(id: string): Promise<boolean> {
-    return getDbClient().transaction(async (tx) => {
-      const row = await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
+    const storage = getStorage();
+    const repo = storage.repos.memory;
+    return storage.transaction(async () => {
+      const row = await repo.findMemoryById(id);
       if (!row) return false;
       // Explicit keys identify a document. Legacy generated keys identify only a row.
-      const rows = row.key
-        ? await tx.query<{ id: string }>(
-            "SELECT id FROM agent_memory WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '')",
-            [row.key, row.scope, row.agentId],
-          )
-        : [{ id }];
-      const ids = rows.map((chunk) => chunk.id);
+      const ids = row.key
+        ? await repo.listDocumentIds({ key: row.key, scope: row.scope, agentId: row.agentId })
+        : [id];
       await this.purgeByIds(ids);
-      const placeholders = ids.map(() => "?").join(",");
-      await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+      await repo.deleteMemoriesByIds(ids);
       return true;
     });
   }
 
   async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {
-    const db = getDbClient();
+    const repo = memoryRepo();
 
-    const ids = await db.query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE sourcePath = ? AND agentId = ?",
-      [sourcePath, agentId],
-    );
+    const ids = await repo.listIdsBySourcePath(sourcePath, agentId);
 
-    await this.purgeByIds(ids.map((r) => r.id));
+    await this.purgeByIds(ids);
 
-    const result = await db.run("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?", [
-      sourcePath,
-      agentId,
-    ]);
-    return ids.length || result.changes;
+    const changes = await repo.deleteBySourcePath(sourcePath, agentId);
+    return ids.length || changes;
   }
 
   async purgeExpired(): Promise<number> {
-    const db = getDbClient();
+    const storage = getStorage();
+    const repo = storage.repos.memory;
 
-    const expiredIds = await db.query<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now') ORDER BY id",
-    );
+    const expiredIds = await repo.listExpiredIds();
 
     if (expiredIds.length === 0) return 0;
 
@@ -1545,25 +1272,15 @@ export class SqliteMemoryStore implements MemoryStore {
       // Yield a macrotask between batches: chained awaits on the DB client are
       // microtasks, so without it the whole purge is one event-loop stall.
       if (i > 0) await new Promise<void>((resolve) => setImmediate(resolve));
-      const batch = expiredIds.slice(i, i + batchSize).map((r) => r.id);
+      const batch = expiredIds.slice(i, i + batchSize);
       // A memory can be curated (moved to /longterm, expiry cleared) during
       // the yield. Recheck expiry and delete the index rows and memory rows of
       // the batch in one transaction, so a live row never loses its index.
-      purged += await db.transaction(async (tx) => {
-        const placeholders = batch.map(() => "?").join(",");
-        const still = await tx.query<{ id: string }>(
-          `SELECT id FROM agent_memory WHERE id IN (${placeholders})
-           AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')`,
-          batch,
-        );
-        const ids = still.map((r) => r.id);
+      purged += await storage.transaction(async () => {
+        const ids = await repo.filterStillExpired(batch);
         if (ids.length === 0) return 0;
         await this.purgeByIds(ids);
-        const result = await tx.run(
-          `DELETE FROM agent_memory WHERE id IN (${ids.map(() => "?").join(",")})`,
-          ids,
-        );
-        return result.changes;
+        return repo.deleteMemoriesByIds(ids);
       });
     }
 
@@ -1577,14 +1294,13 @@ export class SqliteMemoryStore implements MemoryStore {
     const buffer = serializeEmbedding(embedding);
     // One transaction: a delete or replaceDocument queued behind this write
     // cannot land between the row UPDATE and the vec insert and orphan it.
-    await getDbClient().transaction(async (tx) => {
-      const updated = await tx.run(
-        "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
-        [buffer, model, id],
-      );
+    const storage = getStorage();
+    const repo = storage.repos.memory;
+    await storage.transaction(async () => {
+      const changes = await repo.setEmbedding(id, buffer, model);
       // The row was deleted (or replaced) while its embedding was in flight:
       // a vec row now would point at nothing.
-      if (updated.changes === 0) return;
+      if (changes === 0) return;
 
       if (this.vecInitialized && this.getVecTableSchema()) {
         const vecBuffer = this.toVecBuffer(embedding);
@@ -1595,11 +1311,8 @@ export class SqliteMemoryStore implements MemoryStore {
           return;
         }
         try {
-          await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
-          await tx.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [
-            id,
-            vecBuffer,
-          ]);
+          await repo.deleteVecRow(id);
+          await repo.insertVecRow(id, vecBuffer);
           this.noteVecWrite();
         } catch (err) {
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
@@ -1611,12 +1324,11 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async clearEmbedding(id: string): Promise<void> {
-    await getDbClient().transaction(async (tx) => {
-      await tx.run("UPDATE agent_memory SET embedding = NULL, embeddingModel = NULL WHERE id = ?", [
-        id,
-      ]);
+    const storage = getStorage();
+    await storage.transaction(async () => {
+      await storage.repos.memory.clearEmbedding(id);
       if (this.vecInitialized && this.getVecTableSchema()) {
-        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+        await storage.repos.memory.deleteVecRow(id);
         this.noteVecWrite();
       }
     });
@@ -1628,33 +1340,23 @@ export class SqliteMemoryStore implements MemoryStore {
     after: MemoryScrubFields,
   ): Promise<boolean> {
     const contentChanged = after.content !== before.content;
-    return getDbClient().transaction(async (tx) => {
+    const storage = getStorage();
+    const repo = storage.repos.memory;
+    return storage.transaction(async () => {
       // Compare-and-set: the sweep scrubbed `before` outside the write lock, so
       // skip the row if a concurrent write moved it since.
-      const result = await tx.run(
-        `UPDATE agent_memory
-         SET name = ?, content = ?, summary = ?, contentHash = ?,
-             embedding = CASE WHEN ? = 1 THEN NULL ELSE embedding END,
-             embeddingModel = CASE WHEN ? = 1 THEN NULL ELSE embeddingModel END
-         WHERE id = ? AND name IS ? AND content IS ? AND summary IS ?`,
-        [
-          after.name,
-          after.content,
-          after.summary,
-          contentSha256(after.content),
-          contentChanged ? 1 : 0,
-          contentChanged ? 1 : 0,
-          id,
-          before.name,
-          before.content,
-          before.summary,
-        ],
-      );
-      if (result.changes === 0) return false;
+      const changes = await repo.rewriteForScrub(id, before, {
+        name: after.name,
+        content: after.content,
+        summary: after.summary,
+        contentHash: contentSha256(after.content),
+        dropEmbedding: contentChanged,
+      });
+      if (changes === 0) return false;
       // The vector embeds the old (secret-bearing) content. Drop it; the
       // re-embed backfill picks the row up via `embedding IS NULL`.
       if (contentChanged && this.vecInitialized && this.getVecTableSchema()) {
-        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+        await repo.deleteVecRow(id);
         this.noteVecWrite();
       }
       if (after.name !== before.name || contentChanged) {
@@ -1665,32 +1367,13 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async getStats(agentId: string): Promise<MemoryStats> {
-    const db = getDbClient();
-
-    const total = await db.get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
-      [agentId],
-    );
-
-    const bySourceRows = await db.query<{ source: string; count: number }>(
-      "SELECT source, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY source",
-      [agentId],
-    );
-
-    const byScopeRows = await db.query<{ scope: string; count: number }>(
-      "SELECT scope, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY scope",
-      [agentId],
-    );
-
-    const withEmbeddings = await db.get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND embedding IS NOT NULL",
-      [agentId],
-    );
-
-    const expired = await db.get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-      [agentId],
-    );
+    const {
+      total,
+      bySource: bySourceRows,
+      byScope: byScopeRows,
+      withEmbeddings,
+      expired,
+    } = await memoryRepo().getStatsRows(agentId);
 
     const bySource: Record<string, number> = {};
     for (const row of bySourceRows) bySource[row.source] = row.count;
@@ -1699,11 +1382,11 @@ export class SqliteMemoryStore implements MemoryStore {
     for (const row of byScopeRows) byScope[row.scope] = row.count;
 
     return {
-      total: total?.count ?? 0,
+      total,
       bySource,
       byScope,
-      withEmbeddings: withEmbeddings?.count ?? 0,
-      expired: expired?.count ?? 0,
+      withEmbeddings,
+      expired,
     };
   }
 
@@ -1714,31 +1397,7 @@ export class SqliteMemoryStore implements MemoryStore {
    */
   private async getHealthCountsOffLoop(): Promise<MemoryHealth["counts"]> {
     const tableUsable = this.getVecTableSchema() !== null && isSqliteVecAvailable();
-    const valid = `embedding IS NOT NULL AND length(embedding) = ${VECTOR_BYTES}`;
-    const row = await memorySearchReader.get<Record<keyof MemoryHealth["counts"], number>>(
-      `SELECT
-         (SELECT COUNT(*) FROM agent_memory) AS total,
-         (SELECT COUNT(*) FROM agent_memory WHERE embedding IS NOT NULL) AS withEmbedding,
-         (SELECT COUNT(*) FROM agent_memory WHERE ${valid}) AS validEmbedding,
-         (SELECT COUNT(*) FROM agent_memory
-           WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}) AS invalidEmbedding,
-         (SELECT COUNT(*) FROM agent_memory
-           WHERE ${valid} AND (expiresAt IS NULL OR expiresAt > datetime('now'))) AS searchable,
-         ${tableUsable ? "(SELECT COUNT(*) FROM memory_vec)" : "0"} AS memoryVec,
-         ${
-           tableUsable
-             ? `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})
-                - (SELECT COUNT(*) FROM memory_vec v CROSS JOIN agent_memory m ON m.id = v.memory_id
-                   WHERE m.embedding IS NOT NULL AND length(m.embedding) = ${VECTOR_BYTES})`
-             : `(SELECT COUNT(*) FROM agent_memory WHERE ${valid})`
-         } AS missingFromVec,
-         ${
-           tableUsable
-             ? `(SELECT COUNT(*) FROM memory_vec v LEFT JOIN agent_memory m ON m.id = v.memory_id
-                 WHERE m.id IS NULL)`
-             : "0"
-         } AS extraInVec`,
-    );
+    const row = await memoryRepo().healthCounts(VECTOR_BYTES, tableUsable, memorySearchReader);
     if (!row) throw new Error("health counts returned no row");
     return {
       total: row.total,
@@ -1893,7 +1552,7 @@ export class SqliteMemoryStore implements MemoryStore {
    */
   private invalidateSearchHealth(): void {
     this.dropSearchHealth();
-    if (isInTransaction()) getDbClient().afterCommit(() => this.dropSearchHealth());
+    if (isInTransaction()) getStorage().afterCommit(() => this.dropSearchHealth());
   }
 
   private dropSearchHealth(): void {

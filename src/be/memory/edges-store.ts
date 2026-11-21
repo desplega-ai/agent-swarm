@@ -10,7 +10,7 @@
  *
  * Server-side only.
  */
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 
 const USEFULNESS_FLOOR = 1.0;
 const USEFULNESS_CEILING = 2.0;
@@ -36,26 +36,12 @@ export async function listEdgesForAgent(
   agentId: string,
   memoryId: string,
 ): Promise<MemoryEdgeRow[]> {
-  const client = getDbClient();
-  const memory = await client.get<{ scope: string; agentId: string | null }>(
-    "SELECT scope, agentId FROM agent_memory WHERE id = ?",
-    [memoryId],
-  );
+  const repo = getStorage().repos.memory;
+  const memory = await repo.getScopeOwner(memoryId);
   if (!memory) return [];
   if (memory.scope !== "swarm" && memory.agentId !== agentId) return [];
 
-  const rows = await client.query<{
-    to_id: string;
-    alpha: number;
-    beta: number;
-    createdAt: string;
-  }>(
-    `SELECT to_id, alpha, beta, createdAt
-         FROM agent_memory_edge
-        WHERE from_id = ? AND type = 'references-source'
-        ORDER BY createdAt DESC`,
-    [memoryId],
-  );
+  const rows = await repo.listReferenceEdges(memoryId);
 
   return rows.map((row) => ({
     to: row.to_id,
