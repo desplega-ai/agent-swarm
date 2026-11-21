@@ -14,6 +14,8 @@ import {
   BaseSessionsRepository,
   type BudgetRefusalNotificationRow,
   EMPTY,
+  jsonText,
+  KEY_WINDOW_USAGE_MAX_ROWS,
   type KeyCostSummaryRow,
   type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
@@ -35,7 +37,19 @@ import {
   sqlWhere,
   type TaskAncestorRow,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import {
+  isoText,
+  legacySessionSummarySql,
+  SESSION_ROOTS,
+  sessionCountSql,
+  sessionMineSql,
+  sessionRootFilterSql,
+  sessionSummarySql,
+  sessionViewerSql,
+  sourceThreadKeySql,
+  threadPromptSql,
+  threadRootsSql,
+} from "./session-tree";
 
 type SumRow = { total: number };
 
@@ -55,6 +69,12 @@ const HUMAN_FREE = sql`(COALESCE(t."isHumanFree", false))`;
 const COST_FROM = sql`FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc."taskId"`;
 /** SQLite's `DATE(createdAt)` of the stored ISO text: the UTC day. */
 const UTC_DAY = (column: SqlQuery) => sql`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+
+/** The session columns of a credential window usage row. */
+const KEY_WINDOW_USAGE_COLUMNS = sql`sc."taskId", sc."credentialKeyType", sc."credentialKeySuffix", sc.harness,
+  sc."inputTokens", sc."outputTokens", sc."cacheReadTokens", sc."cacheWriteTokens",
+  sc."reasoningOutputTokens", sc."thinkingTokens", sc.model, sc."modelBreakdown",
+  sc."isError", sc."createdAt"`;
 
 /** The session_logs columns, without the `_rowid` surrogate. */
 const LOG_COLUMNS = sql`id, "taskId", "sessionId", iteration, cli, content, "lineNumber", "createdAt", "reasoningChars", "reasoningKind"`;
@@ -455,32 +475,41 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
         FROM budget_refusal_notifications ORDER BY "createdAt" DESC, "_rowid" ASC LIMIT ${limit}`);
   }
 
+  // ---- session tree ----
+
   sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.sessionThreadRootsSql");
+    return threadRootsSql(rules);
   }
 
   sessionRootFilterSql(rules: SessionTreeRules, spec: SessionRootFilterSpec): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.sessionRootFilterSql");
+    return sessionRootFilterSql(rules, spec);
   }
 
   sessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.sessionSummarySql");
+    return sessionSummarySql(rules, spec);
   }
 
   legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.legacySessionSummarySql");
+    return legacySessionSummarySql(rules, spec);
   }
 
   sessionCountSql(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.sessionCountSql");
+    return sessionCountSql(rules, spec, chain);
   }
 
   protected threadRootCountsSql(rules: SessionTreeRules): SqlQuery {
-    return notOnPostgresYet("PostgresSessionsRepository.threadRootCountsSql");
+    return sql`SELECT r."key", COUNT(*) AS "threadRoots" FROM session_summaries r
+    WHERE r."requestedByUserId" IS NOT NULL AND ${sourceThreadKeySql(rules)} GROUP BY r."key"`;
   }
 
   listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listSessionPageMembers");
+    return this.db.query<SessionPageMemberRow>(sql`
+      SELECT m."rootId" AS root_id, t."requestedByUserId" AS id, u.name,
+        CASE WHEN t.source = 'system' AND t."taskType" = 'follow-up' THEN NULL ELSE NULLIF(trim(substr(t.output, 1, 200)), '') END AS preview
+      FROM session_members m JOIN agent_tasks t ON t.id = m."taskId"
+      LEFT JOIN users u ON u.id = t."requestedByUserId"
+      WHERE m."rootId" IN (${sqlList(rootIds)})
+      ORDER BY t."lastUpdatedAt" DESC, t."createdAt" DESC, t.id DESC`);
   }
 
   listSessionTreeRows(
@@ -488,44 +517,130 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
     spec: SessionSummarySpec,
     visibleRule: { mine: boolean; userId: string | null; readAll?: boolean } | null,
   ): Promise<SessionTreeRow[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listSessionTreeRows");
+    const visible = visibleRule
+      ? sql`(r."requestedByUserId" IS NOT NULL${
+          visibleRule.mine
+            ? sql` AND ${sessionMineSql(rules, visibleRule.userId, visibleRule.readAll)}`
+            : EMPTY
+        })`
+      : sql`TRUE`;
+    return this.db.query<SessionTreeRow>(sql`
+      SELECT a.root_id, a."key", a.source, a."slackChannelId", a."lastActivityAt", a."latestStatus",
+        a."readState", a."needsYou", r."scheduleId", CAST(${visible} AS integer) AS "defaultVisible"
+      FROM (${sessionSummarySql(rules, spec)}) a JOIN ${SESSION_ROOTS} r ON r.id = a.root_id`);
   }
 
   listThreadLabels(
     rootIds: readonly string[],
     promptChars: number,
   ): Promise<SessionThreadLabelRow[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listThreadLabels");
+    return this.db.query<SessionThreadLabelRow>(sql`
+      SELECT "key", title, prompt FROM (
+        SELECT r."key", NULLIF(trim(r.title), '') AS title, ${threadPromptSql(promptChars)} AS prompt,
+          ROW_NUMBER() OVER (PARTITION BY r."key" ORDER BY r."createdAt", r."_rowid") AS ordinal
+        FROM agent_tasks r WHERE r.id IN (${sqlList(rootIds)})
+      ) AS labelled WHERE ordinal = 1`);
   }
 
-  triageSessionList(
+  async triageSessionList(
     rules: SessionTreeRules,
     spec: SessionSummarySpec,
     write: SessionListTriageWrite,
   ): Promise<number> {
-    return notOnPostgresYet("PostgresSessionsRepository.triageSessionList");
+    // lastReadAt is a text column: the activity time goes in as SQLite's ISO text.
+    const lastReadAt = !write.lastReadAt
+      ? sql`CAST(NULL AS text)`
+      : write.lastReadAt.kind === "activity"
+        ? isoText(sql`a."lastActivityAt"`)
+        : sql`CAST(${write.lastReadAt.value} AS text)`;
+    const result = await this.db.run(sql`
+      INSERT INTO inbox_item_state
+        ("userId", "itemType", "itemId", status, "snoozeUntil", "dismissedAt", "doneAt", "readAt", "lastReadAt", "createdAt", "lastUpdatedAt")
+      SELECT CAST(${write.userId} AS text), 'to_read', a.root_id, CAST(${write.status} AS text), CAST(NULL AS text),
+        CAST(NULL AS timestamptz), CAST(${write.doneAt} AS timestamptz), CAST(${write.readAt} AS text), ${lastReadAt},
+        CAST(${write.now} AS timestamptz), CAST(${write.now} AS timestamptz)
+      FROM (${sessionSummarySql(rules, spec)}) a
+      ON CONFLICT ("userId", "itemType", "itemId") DO UPDATE SET
+        status = excluded.status,
+        "snoozeUntil" = NULL,
+        "dismissedAt" = NULL,
+        "doneAt" = excluded."doneAt",
+        "readAt" = COALESCE(inbox_item_state."readAt", excluded."readAt"),
+        "lastReadAt" = ${write.lastReadAt ? sql`excluded."lastReadAt"` : sql`inbox_item_state."lastReadAt"`},
+        "lastUpdatedAt" = excluded."lastUpdatedAt"`);
+    return result.changes;
   }
 
-  moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void> {
-    return notOnPostgresYet("PostgresSessionsRepository.moveKeyFavorites");
+  // ---- session moves ----
+
+  async moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void> {
+    const inRange = (alias: SqlQuery) => sql`${alias}."itemType" IN ('key','hidden-key')
+      AND ${alias}."itemId" >= ${range.lo} AND ${alias}."itemId" < ${range.hi}${
+        scope !== undefined ? sql` AND ${alias}."favoriteScope" = ${scope}` : EMPTY
+      }`;
+    const moved = sql`CAST(${to} AS text) || substr(f."itemId", ${range.lo.length + 1}::integer)`;
+    // SQLite's UPDATE OR IGNORE leaves a row whose new key another row of the
+    // same scope and type already holds: the NOT EXISTS skips the same rows.
+    await this.db.run(sql`
+      UPDATE user_favorites f SET "itemId" = ${moved}
+      WHERE ${inRange(sql`f`)} AND NOT EXISTS (SELECT 1 FROM user_favorites o
+        WHERE o."favoriteScope" = f."favoriteScope" AND o."itemType" = f."itemType" AND o."itemId" = ${moved})`);
+    await this.db.run(sql`DELETE FROM user_favorites f WHERE ${inRange(sql`f`)}`);
   }
 
   listVisiblePrefixRoots(
     range: SessionKeyRange,
     viewer: SessionViewerSpec,
   ): Promise<{ id: string }[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listVisiblePrefixRoots");
+    return this.db.query(sql`
+      SELECT r.id FROM agent_tasks r
+      WHERE r."parentTaskId" IS NULL AND r."key" >= ${range.lo} AND r."key" < ${range.hi}
+        AND ${sessionViewerSql(viewer)} ORDER BY r.id`);
   }
 
   listSourceBackfillRoots(afterId: string, limit: number): Promise<SourceBackfillRootRow[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listSourceBackfillRoots");
+    return this.db.query<SourceBackfillRootRow>(sql`
+      SELECT id, "slackChannelId", "slackThreadTs", "contextKey" FROM agent_tasks
+       WHERE "parentTaskId" IS NULL AND id > ${afterId}
+         AND ("key" = 'shared/' OR "key" = 'shared/task:' || lower(id) || '/')
+         AND (("slackChannelId" IS NOT NULL AND "slackThreadTs" IS NOT NULL)
+           OR starts_with("contextKey", 'task:chat-sdk:'))
+       ORDER BY id LIMIT ${limit}`);
   }
+
   listKeyWindowUsageRows(
-    _credentials: { keyType: string; keySuffix: string }[],
-    _start: string,
-    _through: string,
+    credentials: { keyType: string; keySuffix: string }[],
+    start: string,
+    through: string,
   ): Promise<KeyWindowUsageRow[]> {
-    return notOnPostgresYet("PostgresSessionsRepository.listKeyWindowUsageRows");
+    // Receipt rows and older completion-attribution rows are disjoint (see
+    // the SQLite statement). No ORDER BY, as on SQLite: callers group the rows.
+    const startTs = sql`CAST(${start} AS timestamptz)`;
+    const throughTs = sql`CAST(${through} AS timestamptz)`;
+    return this.db.query<KeyWindowUsageRow>(sql`
+      WITH requested_keys AS (
+        SELECT k->>'keyType' AS "keyType", k->>'keySuffix' AS "keySuffix"
+        FROM jsonb_array_elements(${jsonText(JSON.stringify(credentials))}) AS k
+      )
+      SELECT ${KEY_WINDOW_USAGE_COLUMNS}, CASE WHEN t.status = 'completed' THEN t."finishedAt" END AS "finishedAt"
+      FROM requested_keys k
+      JOIN session_costs sc ON sc."credentialKeyType" = k."keyType" AND sc."credentialKeySuffix" = k."keySuffix"
+      LEFT JOIN agent_tasks t ON t.id = sc."taskId"
+      WHERE sc."createdAt" >= ${startTs} AND sc."createdAt" < ${throughTs}
+      UNION ALL
+      SELECT ${KEY_WINDOW_USAGE_COLUMNS}, t."finishedAt"
+      FROM agent_tasks t
+      JOIN session_costs sc ON sc."taskId" = t.id
+      JOIN requested_keys k ON sc."credentialKeyType" = k."keyType" AND sc."credentialKeySuffix" = k."keySuffix"
+      WHERE t.status = 'completed' AND t."finishedAt" >= ${startTs} AND t."finishedAt" < ${throughTs}
+        AND sc."createdAt" < ${startTs}
+      UNION ALL
+      SELECT NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, 0, 0, '', NULL, FALSE, sc."createdAt", NULL
+      FROM session_costs sc
+      WHERE (sc."credentialKeyType" IS NULL OR sc."credentialKeySuffix" IS NULL)
+        AND sc.kind = 'harness'
+        AND sc."createdAt" >= ${startTs} AND sc."createdAt" < ${throughTs}
+      LIMIT ${KEY_WINDOW_USAGE_MAX_ROWS + 1}`);
   }
 
   async insertPricingSeedRow(
