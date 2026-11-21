@@ -4,6 +4,7 @@ import type { ContractEngine } from "./env";
 import { extensionsContract } from "./extensions";
 import { modelsContract } from "./models";
 import { runtimePoolsContract } from "./runtime-pools";
+import { workflowsContract } from "./workflows";
 
 export type { ContractEngine } from "./env";
 
@@ -14,4 +15,5 @@ export function runStorageContract(engine: ContractEngine): void {
   runtimePoolsContract(engine);
   configContract(engine);
   agentsContract(engine);
+  workflowsContract(engine);
 }

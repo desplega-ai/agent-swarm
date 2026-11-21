@@ -11,6 +11,7 @@ import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteWorkflowsRepository } from "./repositories/workflows";
 
 export {
   type BusyRetryOptions,
@@ -46,6 +47,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       runtimePools: new SqliteRuntimePoolsRepository(executor),
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
+      workflows: new SqliteWorkflowsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
