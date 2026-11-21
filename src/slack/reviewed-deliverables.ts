@@ -22,6 +22,9 @@ const PUBLIC_SHARE_PATH = /^\/(?:share|site)\/[^/]+/;
 
 const VIDEO_EXTENSION = /\.(?:mp4|mov|webm|m4v|mkv)$/i;
 const VIDEO_HOSTS = new Set(["youtube.com", "youtu.be", "loom.com", "vimeo.com"]);
+// A GitHub PR or issue: `owner/repo`, `pull` or `issues`, the number. A tab
+// (`/files`) or an anchor (`#pullrequestreview-…`) is still that PR.
+const GITHUB_ITEM_PATH = /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)(?=\/|$)/;
 
 /** `icon` is a Unicode emoji, which Slack renders in mrkdwn. */
 export type DeliverableLink = { url: string; label: string; icon: string };
@@ -112,11 +115,16 @@ export function describeLink(
   const host = parsed.hostname.replace(/^www\./, "");
   const path = parsed.pathname;
   const fileName = decoded(path.split("/").filter(Boolean).at(-1) ?? "") || shortUrlLabel(parsed);
-  const github = host === "github.com" ? path.match(/^\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/) : null;
+  const github = host === "github.com" ? path.match(GITHUB_ITEM_PATH) : null;
   // The server names its own PR attachments "GitHub pull request #N": always use the short form.
   if (github) {
-    const pull = github[1] === "pull";
-    return { icon: pull ? "🔀" : "🎫", label: `${pull ? "PR" : "Issue"} #${github[2]}` };
+    const pull = github[2] === "pull";
+    const anchor = parsed.hash.startsWith("#pullrequestreview-")
+      ? " review"
+      : /^#(?:discussion_r|issuecomment-)/.test(parsed.hash)
+        ? " comment"
+        : "";
+    return { icon: pull ? "🔀" : "🎫", label: `${pull ? "PR" : "Issue"} #${github[3]}${anchor}` };
   }
   if (attachment?.mimeType?.startsWith("video/") || VIDEO_EXTENSION.test(path)) {
     return labelled("🎬", fileName);
@@ -138,11 +146,17 @@ export function describeLink(
   return labelled("🌐", shortUrlLabel(parsed));
 }
 
-/** A URL compared by target: `www.`, host case and trailing slashes do not count. */
+/**
+ * A URL compared by target: `www.`, host case and trailing slashes do not
+ * count, and every link into one GitHub PR or issue (a review, a comment, the
+ * files tab) is that PR.
+ */
 export function linkKey(url: string): string {
   try {
     const parsed = new URL(url);
     parsed.hostname = parsed.hostname.replace(/^www\./, "");
+    const github = parsed.hostname === "github.com" && parsed.pathname.match(GITHUB_ITEM_PATH);
+    if (github) return `https://github.com/${github[1]}/${github[2]}/${github[3]}`;
     return parsed.href.replace(/\/+(?=$|[?#])/, "");
   } catch {
     return url.replace(/\/+$/, "");
@@ -175,9 +189,14 @@ const LINKIFY_PATTERN = new RegExp(
   "g",
 );
 
+// The words a writer puts before a PR or issue URL: "PR <url>" reads "PR #12".
+const ITEM_KIND_BEFORE = /\b(?:PR|pull request|issue)\s+$/i;
+
 /**
  * Bare http(s) URLs in Markdown as Slack `<url|label>` links, labelled like
- * the "Links:" caption. Code, `<url|label>` and `[label](url)` stay as written.
+ * the "Links:" caption. A PR or issue URL right after "PR" or "issue" is
+ * labelled `#12`, so the text never reads "PR PR #12". Code, `<url|label>`
+ * and `[label](url)` stay as written.
  */
 export function linkifyBareUrls(text: string): string {
   return text.replace(
@@ -187,7 +206,13 @@ export function linkifyBareUrls(text: string): string {
       // braces) has no known end: leave it bare rather than link half of it.
       if (!url || /[[({<`]/.test(whole[offset + match.length] ?? "")) return match;
       const href = url.replace(/[.,;:!?*_~]+$/, "");
-      return `${slackLink(href, describeLink(href).label)}${url.slice(href.length)}`;
+      const { label } = describeLink(href);
+      const kindless = label.match(/^(?:PR|Issue) (#\d+.*)$/)?.[1];
+      const shown =
+        kindless && ITEM_KIND_BEFORE.test(whole.slice(Math.max(0, offset - 32), offset))
+          ? kindless
+          : label;
+      return `${slackLink(href, shown)}${url.slice(href.length)}`;
     },
   );
 }
