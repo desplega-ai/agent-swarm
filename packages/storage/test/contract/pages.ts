@@ -255,9 +255,11 @@ export function pagesContract(engine: ContractEngine): void {
       await storage.executor.run(sql`UPDATE pages SET "updatedAt" = ${T0}`);
       const list = async (f: object, limit = 10, offset = 0) =>
         (await repo.listPages(f, limit, offset)).map((r) => r.id);
-      expect(await list({})).toEqual(["p3", "p2", "p1"]);
-      expect(await list({ agentId: "ag" }, 1, 1)).toEqual(["p1"]);
-      expect(await list({ keyPattern: "shared/p%" })).toEqual(["p2", "p1"]);
+      // Ties on updatedAt: insertion order, oldest first (the base-commit
+      // order that divergence-list-order pins through the API).
+      expect(await list({})).toEqual(["p1", "p2", "p3"]);
+      expect(await list({ agentId: "ag" }, 1, 1)).toEqual(["p2"]);
+      expect(await list({ keyPattern: "shared/p%" })).toEqual(["p1", "p2"]);
       expect(await list({ key: "shared/x/" })).toEqual(["p3"]);
       expect(await list({ searchPattern: "%100\\%\\_%" })).toEqual(["p2"]);
       expect(await list({ searchPattern: "%TITLE P1%" })).toEqual(["p1"]);

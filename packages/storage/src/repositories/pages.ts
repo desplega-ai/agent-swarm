@@ -244,7 +244,7 @@ export interface PagesRepository {
   findPageBySlug(agentId: string, slug: string): Promise<PageRow | null>;
   /** The most recently updated page with the slug (insertion order breaks ties, newest first). */
   findLatestPageBySlug(slug: string): Promise<PageRow | null>;
-  /** Newest `updatedAt` first, then insertion order (newest first). */
+  /** Newest `updatedAt` first, then insertion order (oldest first). */
   listPages(f: PageFilter, limit: number, offset: number): Promise<PageRow[]>;
   countPages(f: PageFilter): Promise<number>;
   /** Sets the given columns and `updatedAt`. */
@@ -599,7 +599,7 @@ export abstract class BasePagesRepository implements PagesRepository {
   listPages(f: PageFilter, limit: number, offset: number): Promise<PageRow[]> {
     return this.db.query<PageRow>(sql`
       SELECT * FROM pages${this.pageWhere(f)}
-      ORDER BY "updatedAt" DESC, ${this.insertionOrder()} DESC LIMIT ${limit} OFFSET ${offset}`);
+      ORDER BY "updatedAt" DESC, ${this.insertionOrder()} ASC LIMIT ${limit} OFFSET ${offset}`);
   }
 
   async countPages(f: PageFilter): Promise<number> {

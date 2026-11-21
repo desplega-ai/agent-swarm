@@ -250,6 +250,10 @@
         "trigger-cascades"
       ]
     },
+    "live-task-claim": {
+      "description": "A task claimed by a worker with a live, heartbeating session stays in_progress until the run ends",
+      "scenarios": ["task-live-claim"]
+    },
     "caller-scoped-writes": {
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
