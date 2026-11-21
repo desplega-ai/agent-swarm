@@ -95,6 +95,14 @@ export interface AssetsRepository {
     agentName: string,
   ): Promise<ImportPendingAssignmentRow[]>;
   deletePendingAssignment(sourceId: string, agentKey: string): Promise<void>;
+
+  // ---- asset keys across resources ----
+  /**
+   * Distinct asset keys of the schedules, pages and workflows `userId`
+   * created, newest first by the latest `createdAt` per key, then by key.
+   * At most `limit` keys.
+   */
+  listUserCreatedKeys(userId: string, limit: number): Promise<string[]>;
 }
 
 export abstract class BaseAssetsRepository implements AssetsRepository {
@@ -155,5 +163,17 @@ export abstract class BaseAssetsRepository implements AssetsRepository {
     await this.db.run(sql`
       DELETE FROM import_pending_assignments
        WHERE "sourceId" = ${sourceId} AND "agentKey" = ${agentKey}`);
+  }
+
+  // ---- asset keys across resources ----
+
+  async listUserCreatedKeys(userId: string, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ key: string }>(sql`
+      SELECT "key", MAX("createdAt") AS newest FROM (
+        SELECT "key", "createdAt" FROM scheduled_tasks WHERE created_by = ${userId}
+        UNION ALL SELECT "key", "createdAt" FROM pages WHERE created_by = ${userId}
+        UNION ALL SELECT "key", "createdAt" FROM workflows WHERE created_by = ${userId}
+      ) AS created GROUP BY "key" ORDER BY newest DESC, "key" LIMIT ${limit}`);
+    return rows.map((row) => row.key);
   }
 }

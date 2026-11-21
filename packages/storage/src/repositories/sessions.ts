@@ -620,6 +620,15 @@ export interface SessionsRepository {
     tokenClass: string,
     effectiveFrom: number,
   ): Promise<number>;
+  /** Sets the price and lastUpdatedAt of one pricing row (the triple at `effectiveFrom`). */
+  updatePricingPrice(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    effectiveFrom: number,
+    pricePerMillionUsd: number,
+    now: number,
+  ): Promise<void>;
   // ---- session tree ----
   /**
    * Owned roots at the source thread key of the root `r` (0 off a thread
@@ -646,6 +655,8 @@ export interface SessionsRepository {
     rules: SessionTreeRules,
     spec: SessionSummarySpec,
   ): Promise<{ readState: string | null; lastActivityAt: string } | null>;
+  /** True when any session row of the summary has read state `read`. */
+  hasReadSession(rules: SessionTreeRules, spec: SessionSummarySpec): Promise<boolean>;
   /**
    * Chain tasks of the roots with requester name and output preview, newest
    * activity first, then newest created, then id descending.
@@ -1154,6 +1165,20 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
     return result.changes;
   }
 
+  async updatePricingPrice(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    effectiveFrom: number,
+    pricePerMillionUsd: number,
+    now: number,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE pricing SET price_per_million_usd = ${pricePerMillionUsd}, "lastUpdatedAt" = ${now}
+      WHERE provider = ${provider} AND model = ${model} AND token_class = ${tokenClass}
+        AND effective_from = ${effectiveFrom}`);
+  }
+
   // ---- session tree (SQLite syntax throughout: kept per engine) ----
 
   abstract sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery;
@@ -1187,6 +1212,13 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
     return this.db.get(
       sql`SELECT "readState", "lastActivityAt" FROM (${this.sessionSummarySql(rules, spec)})`,
     );
+  }
+
+  async hasReadSession(rules: SessionTreeRules, spec: SessionSummarySpec): Promise<boolean> {
+    const row = await this.db.get<{ found: number }>(
+      sql`SELECT 1 AS found FROM (${this.sessionSummarySql(rules, spec)}) WHERE "readState" = 'read' LIMIT 1`,
+    );
+    return row !== null;
   }
 
   abstract listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]>;

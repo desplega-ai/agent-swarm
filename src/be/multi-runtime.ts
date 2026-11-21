@@ -15,7 +15,6 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getSwarmConfigs,
   updateAgentMaxTasks,
   updateAgentStatus,
@@ -401,15 +400,9 @@ export async function agentsWithLiveRuntime(): Promise<Set<string>> {
  */
 export async function liveRuntimeAuthModes(): Promise<Map<string, boolean[]>> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<{ agent_id: string; runtime_token: number }>(
-    `SELECT r.agent_id, EXISTS(
-       SELECT 1 FROM session_tokens s
-       WHERE s.runtimeId = r.id AND s.agentId = r.agent_id
-         AND s.revokedAt IS NULL AND s.expiresAt > ?
-     ) AS runtime_token
-     FROM runtime_instances r
-     WHERE r.status = 'active' AND r.last_seen_at >= ?`,
-    [now, runtimeLivenessCutoff()],
+  const rows = await getStorage().repos.runtimePools.listLiveRuntimeAuthModes(
+    now,
+    runtimeLivenessCutoff(),
   );
   const modes = new Map<string, boolean[]>();
   for (const row of rows) {

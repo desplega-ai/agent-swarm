@@ -1,6 +1,5 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
 import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
 import { getStorage } from "./storage";
@@ -87,8 +86,8 @@ async function insertEvent(id: string, input: CreateEventInput): Promise<void> {
     data: input.data ? serializeEventData(input.data) : null,
   });
   // `skill.invoke` also feeds the per-skill counter and invocation history
-  // (skills domain, still on the client; inside a transaction it joins it).
-  await recordSkillInvocation(getDbClient(), input, id);
+  // (skills repository; inside a transaction it joins it).
+  await recordSkillInvocation(input, id);
 }
 
 export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> {

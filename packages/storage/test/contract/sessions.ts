@@ -360,6 +360,12 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(await repo.findActivePricingRow("contract", "m", "input", 50)).toBeNull();
       expect(await repo.deletePricingRow("contract", "m", "input", 100)).toBe(1);
       expect(await repo.deletePricingRow("contract", "m", "input", 100)).toBe(0);
+      await repo.updatePricingPrice("contract", "m", "input", 200, 7, 500);
+      expect(await repo.findActivePricingRow("contract", "m", "input", 250)).toMatchObject({
+        price_per_million_usd: 7,
+        lastUpdatedAt: 500,
+        createdAt: 1,
+      });
     });
 
     test("findActiveSessionIdentity reads the active session by runner or row id", async () => {
@@ -679,6 +685,7 @@ export function sessionsContract(engine: ContractEngine): void {
         readState: "unread",
         lastActivityAt: "2026-11-21T10:00:00.000Z",
       });
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r1" }))).toBe(false);
 
       const write = {
         userId: "u1",
@@ -712,6 +719,21 @@ export function sessionsContract(engine: ContractEngine): void {
         },
         { itemId: "r3", status: "done", doneAt: NOW, readAt: null, lastReadAt: null },
       ]);
+      // Read once the viewer's cursor passes the chain's last activity.
+      await repo.triageSessionList(RULES, summary("u1", { rootIds: ["r1"] }), {
+        ...write,
+        status: "open",
+        doneAt: null,
+        readAt: NOW,
+        lastReadAt: { kind: "value", value: NOW },
+      });
+      expect(await repo.findSessionReadState(RULES, summary("u1", { rootId: "r1" }))).toMatchObject(
+        {
+          readState: "read",
+        },
+      );
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r1" }))).toBe(true);
+      expect(await repo.hasReadSession(RULES, summary("u1", { rootId: "r3" }))).toBe(false);
 
       const tree = await repo.listSessionTreeRows(RULES, summary("u1"), {
         mine: false,

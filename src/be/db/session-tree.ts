@@ -345,6 +345,11 @@ export function legacySessionSummaryQuery(opts: SessionFilters = {}): SqlFragmen
   return rendered(sessionsRepo().legacySessionSummarySql(treeRules(), summarySpec(opts)));
 }
 
+/** True when a row of the session summary for `opts` has read state `read`. */
+export async function hasReadSession(opts: SessionFilters): Promise<boolean> {
+  return sessionsRepo().hasReadSession(treeRules(), summarySpec(opts));
+}
+
 /**
  * One session's read state for a user, with the same rule and chain activity
  * as the list rows. Null when the user cannot see the root.
