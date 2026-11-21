@@ -64,6 +64,59 @@ export function promptTemplatesContract(engine: ContractEngine): void {
       expect(await repo.deletePromptTemplate("p1")).toBe(0);
     });
 
+    test("list by event type, ties in the SQLite plan order of each filter set", async () => {
+      const insert = (id: string, eventType: string, scope: string, scopeId: string | null) =>
+        storage.executor.run(sql`
+          INSERT INTO prompt_templates (id, "eventType", scope, "scopeId", state, body, "isDefault",
+            version, "createdBy", "createdAt", "updatedAt")
+          VALUES (${id}, ${eventType}, ${scope}, ${scopeId}, 'enabled', 'b', ${id.endsWith("d")}, 1, null, ${T0}, ${T0})`);
+      await insert("q1", "contract.b", "repo", "r1");
+      await insert("q2", "contract.a", "repo", null);
+      await insert("q3", "contract.b", "agent", "a2");
+      await insert("q4d", "contract.b", "global", null);
+      await insert("q5", "contract.b", "agent", null);
+      await insert("q7", "contract.b", "repo", "a1");
+      await insert("q6d", "contract.b", "agent", "a1");
+      const ids = async (
+        filters: Parameters<PromptTemplatesRepository["listPromptTemplates"]>[0],
+      ) => (await repo.listPromptTemplates(filters)).map((row) => row.id);
+      // The eventType index: ties in insertion order.
+      expect(await ids({})).toEqual(["q2", "q1", "q3", "q4d", "q5", "q7", "q6d", "p1"]);
+      expect(await ids({ eventType: "contract.b" })).toEqual([
+        "q1",
+        "q3",
+        "q4d",
+        "q5",
+        "q7",
+        "q6d",
+      ]);
+      expect(await ids({ isDefault: true })).toEqual(["q4d", "q6d", "p1"]);
+      // The (scope, scopeId) index, sorted: ties by scopeId, NULL first.
+      expect(await ids({ scope: "agent" })).toEqual(["q5", "q6d", "q3", "p1"]);
+      // The (eventType, scope, scopeId) index.
+      expect(await ids({ eventType: "contract.b", scope: "agent" })).toEqual(["q5", "q6d", "q3"]);
+      // scopeId alone reads the (eventType, scope, scopeId) index; with an
+      // event type it reads the eventType index.
+      expect(await ids({ scopeId: "a1" })).toEqual(["q6d", "q7", "p1"]);
+      expect(await ids({ eventType: "contract.b", scopeId: "a1" })).toEqual(["q7", "q6d"]);
+      const first = (await repo.listPromptTemplates({ eventType: "contract.a" }))[0];
+      expect(first).toEqual({
+        id: "q2",
+        eventType: "contract.a",
+        scope: "repo",
+        scopeId: null,
+        state: "enabled",
+        body: "b",
+        isDefault: 0,
+        version: 1,
+        createdBy: null,
+        createdAt: T0,
+        updatedAt: T0,
+        created_by: null,
+        updated_by: null,
+      });
+    });
+
     test("history order and the first entry of a shared version", async () => {
       await repo.insertPromptTemplateHistory(history("h1", 1, "one"));
       await repo.insertPromptTemplateHistory(history("h2", 2, "two-a"));
