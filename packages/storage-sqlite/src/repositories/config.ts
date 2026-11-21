@@ -56,8 +56,11 @@ export class SqliteConfigRepository extends BaseConfigRepository {
     scope?: string;
     scopeId?: string;
   }): Promise<ApiKeyStatusRow[]> {
+    // Ties keep the order SQLite returned before the move: with a key type the
+    // lookup index (keyType, scope, scopeId, status) drives it, else rowid.
+    const tiebreak = filters.keyType ? sql`scope, "scopeId", status, rowid` : sql`rowid`;
     return this.db.query<ApiKeyStatusRow>(
-      sql`SELECT * FROM api_key_status${this.keyStatusFilters(filters)} ORDER BY "keyIndex", rowid`,
+      sql`SELECT * FROM api_key_status${this.keyStatusFilters(filters)} ORDER BY "keyIndex", ${tiebreak}`,
     );
   }
 
@@ -67,6 +70,10 @@ export class SqliteConfigRepository extends BaseConfigRepository {
         "authFailureSeq", "lastValidationFailedAt", "spendCap"
       FROM api_key_status
       WHERE ${apiKeyRowFilter(filter)}
-      ORDER BY rowid`);
+      ORDER BY ${
+        // The order SQLite returned before the move: the unique index for a
+        // suffix list, the lookup index (keyType, scope, scopeId, status) for a scope.
+        "suffixes" in filter ? sql`"keySuffix", scope, "scopeId"` : sql`status, rowid`
+      }`);
   }
 }

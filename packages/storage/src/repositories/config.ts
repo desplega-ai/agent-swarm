@@ -217,7 +217,10 @@ export interface ConfigRepository {
   listKeyLabels(): Promise<
     Pick<ApiKeyStatusRow, "keyType" | "keySuffix" | "name" | "plan" | "planSource">[]
   >;
-  /** All rows matching the filters. Ordered by key index, then insertion order. */
+  /**
+   * All rows matching the filters, by key index. Ties: with `keyType`, by
+   * scope, scopeId, status, then insertion order; without, insertion order.
+   */
   listKeyStatuses(filters: {
     keyType?: string;
     scope?: string;
@@ -229,7 +232,10 @@ export interface ConfigRepository {
     now: string,
     benchThreshold: number,
   ): Promise<void>;
-  /** Admission columns of the matching rows, in insertion order. */
+  /**
+   * Admission columns of the matching rows. A suffix filter orders by suffix,
+   * scope, scopeId (unique); a scope filter by status, then insertion order.
+   */
   listAdmissionRows(filter: ApiKeyRowFilter): Promise<ApiKeyAdmissionRow[]>;
   /** True when a row of `keyType` has one of `suffixes`, at the agent's scope or global. */
   hasKeySuffix(keyType: string, suffixes: string[], agentId: string): Promise<boolean>;

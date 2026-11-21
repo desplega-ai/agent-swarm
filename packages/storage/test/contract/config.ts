@@ -249,6 +249,28 @@ export function configContract(engine: ContractEngine): void {
       expect(await repo.hasKeySuffix("CT_TYPE", [], "a2")).toBe(false);
     });
 
+    test("status and admission tie orders follow the pre-move SQLite plans", async () => {
+      await repo.upsertKeyUsage(ref("s1", "agent", "z"), 1, "claude", T0);
+      await repo.upsertKeyUsage(ref("s2"), 1, "claude", T0);
+      await repo.upsertKeyUsage(ref("s3"), 0, "claude", T0);
+      await repo.upsertKeyUsage(ref("s4", "agent", "a"), 1, "claude", T0);
+      const suffixes = (rows: { keySuffix: string }[]) => rows.map((r) => r.keySuffix);
+      expect(
+        suffixes((await repo.listKeyStatuses({})).filter((r) => r.keyType === "CT_TYPE")),
+      ).toEqual(["s3", "s1", "s2", "s4"]);
+      expect(suffixes(await repo.listKeyStatuses({ keyType: "CT_TYPE" }))).toEqual([
+        "s3",
+        "s4",
+        "s1",
+        "s2",
+      ]);
+      expect(
+        suffixes(
+          await repo.listAdmissionRows({ keyType: "CT_TYPE", suffixes: ["s4", "s1", "s2"] }),
+        ),
+      ).toEqual(["s1", "s2", "s4"]);
+    });
+
     test("labels: manual plans first, then newest update, ties in insertion order", async () => {
       await repo.upsertKeyUsage(ref("k1"), 0, "claude", T0);
       await repo.upsertKeyUsage(ref("k2"), 1, "claude", T1);
@@ -387,8 +409,9 @@ export function configContract(engine: ContractEngine): void {
       expect(lifted2).toEqual(["k1"]);
       const rows = await repo.listKeyStatuses({ keyType: "CT_TYPE", scope: "global" });
       expect(rows.map((r) => [r.keySuffix, r.status, r.consecutiveAuthFailures])).toEqual([
-        ["k1", "rate_limited", 0],
+        // Ties within a key type order by status (the lookup index).
         ["k3", "available", 0],
+        ["k1", "rate_limited", 0],
       ]);
     });
 
@@ -430,8 +453,8 @@ export function configContract(engine: ContractEngine): void {
       expect(
         rows.map((r) => [r.keySuffix, r.scope, r.lastValidationError, r.lastValidationFailedAt]),
       ).toEqual([
-        ["k1", "global", null, null],
         ["k1", "agent", null, null],
+        ["k1", "global", null, null],
         ["k2", "global", "HTTP 401", T0],
         ["k3", "global", null, null],
       ]);
