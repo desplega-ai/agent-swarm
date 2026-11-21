@@ -104,7 +104,7 @@ import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
-import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError, readWebhookBody } from "./utils";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
 
@@ -196,6 +196,7 @@ const githubWebhook = route({
       schema: z.union([z.object({ message: z.literal("pong") }), WebhookDispatchResultSchema]),
     },
     401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 5 MiB" },
     503: { description: "GitHub integration not configured" },
   },
   rbac: {
@@ -270,6 +271,7 @@ const agentmailWebhook = route({
   responses: {
     200: { description: "Event received", schema: z.object({ received: z.literal(true) }) },
     401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 5 MiB" },
     503: { description: "AgentMail integration not configured or inbound archive unavailable" },
   },
   rbac: {
@@ -293,6 +295,7 @@ const kapsoWebhook = route({
       }),
     },
     401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 5 MiB" },
     503: { description: "Kapso integration not configured" },
   },
   rbac: {
@@ -466,11 +469,8 @@ export async function handleWebhooks(
       return true;
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     const isValid = await verifyWebhookSignature(rawBody, signature ?? null);
     if (!isValid) {
@@ -952,11 +952,8 @@ export async function handleWebhooks(
       return true;
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     const svixHeaders: Record<string, string> = {};
     for (const key of ["svix-id", "svix-timestamp", "svix-signature"]) {
@@ -1050,11 +1047,8 @@ export async function handleWebhooks(
       return true;
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     const signature = req.headers["x-webhook-signature"];
     const signatureValue = Array.isArray(signature) ? signature[0] : signature;
