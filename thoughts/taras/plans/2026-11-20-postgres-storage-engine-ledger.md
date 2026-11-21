@@ -13,7 +13,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | Milestone | State | Head |
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
-| M1 Stronger contract on SQLite | not started | |
+| M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
 | M2 Storage packages on SQLite | not started | |
 | M3 Postgres engine | not started | |
 | M4 Engine-specific domains | not started | |
@@ -37,9 +37,9 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 
 | # | Check | Last run | Result |
 |---|---|---|---|
-| 1 | `bun run e2e:strict` (SQLite) | M0, base commit | see "Failures at the base commit" |
+| 1 | `bun run e2e:strict` (SQLite) | M1 head `493630671` (15 min 34 s) | exit 0: 235 passed, 0 failed, 2 flaky (`model-group-resolution`, pre-existing; `trigger-chat-relay`, new, under investigation). The base-commit coverage gap (`in_progress`) is closed by the new scenarios. |
 | 8 | no change to base migration files | M0 | pass (no migration touched) |
-| 16 | existing gates | M0, base commit | see "Failures at the base commit" |
+| 16 | existing gates | M1 head | pass: `lint`, `lint:slop`, `tsc:check:tsc` (after a type fix in the spike scripts), `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. Not run yet: `test:root -- --parallel=4`, `e2e:ui`. |
 
 Other checks: not run yet. Most of their commands do not exist yet.
 
@@ -145,6 +145,59 @@ Input (generated): `thoughts/taras/research/2026-11-20-domain-map-input.md` list
 | runtime pools | `runtime_pools`, `runtime_instances`, `runtime_controllers`, `runtime_cache_releases` | `be/runtime-pools/` |
 | assets and import | `asset_key_mappings`, `asset_key_history`, `import_items`, `import_pending_assignments` | `db.ts` L1492-1985 |
 
+## M1 results
+
+### Runner and ctx.db (steps 1 and 2)
+
+- `bun run e2e --engine sqlite|postgres` (default sqlite). With `postgres`, `scripts/e2e/sut.ts` reads `E2E_POSTGRES_URL`, creates one new database per API boot (`e2e_<stamp>`), passes it as `DATABASE_URL`, and drops it at stop (kept with `--keep`).
+- Guard: after boot, the runner reads `_migrations` from the per-run database. An API that ignores `DATABASE_URL` fails the run at boot instead of passing on the default engine. Verified: `E2E_POSTGRES_URL=... bun run e2e --engine postgres --only upgrade-base-db` fails today with `the API did not migrate the per-run database (relation "_migrations" does not exist)`, as expected before M3.
+- `ctx.db` (`scripts/e2e/db.ts`): SQL goes through the `sql` tag (`?` on SQLite, `$n` on Postgres) with `sqlList` and `sqlIdent`. On Postgres a worker owns a `Bun.SQL` pool and the main thread blocks on `Atomics.wait`, so `ctx.db` stays synchronous and scenarios keep their shape. Each Postgres read runs in a `READ ONLY` transaction (a probe INSERT fails with `cannot execute INSERT in a read-only transaction`). Rows come back in the SQLite shape: bigint to number, boolean to 0/1, jsonb to text, timestamptz to ISO text. Per-column timestamp formats come from the storage codec in M3.
+- Driver use in e2e stays in `scripts/e2e/db.ts` and its worker `scripts/e2e/db-postgres-worker.ts`.
+
+### Edited scenarios (section 10 record)
+
+All edits are "SQL portability and helper use". No assertion was removed or weakened.
+
+- 105 scenario files: every `ctx.db.get/query(text, params)` became `ctx.db.get/query(sql\`...\`)` with mixed-case identifiers double-quoted. Tool: `scripts/codemods/e2e-portable-sql.ts` (author-time codemod, committed). 351 call sites converted by the tool, 7 by hand (dynamic table names via `sqlIdent`, IN lists via `sqlList`, helper signatures `dbCount`, `webhookTasks`, `countRows` now take a `SqlQuery`).
+- `script-connections.ts`: imports the tag as `dbSql`, because a local variable is named `sql`.
+- `coverage-manifest.json` state-surface queries `stepType` and `fsMode`: identifiers quoted (D8). Not an exclusion.
+
+### New scenarios (steps 3 and 4)
+
+All pass on SQLite. They form the strict flow `storage-engine-parity` in `coverage-manifest.json`, so a missing or failing one fails the strict run.
+
+| Hazard | Scenarios |
+|---|---|
+| Full-text and vector search (D15) | `divergence-fulltext-search`, `divergence-vector-search` |
+| Order: ties, NULL, text order, pages | `divergence-list-order`, `divergence-text-order` |
+| LIKE case and wildcards | `divergence-like-case` |
+| Timestamp formats | `divergence-timestamps` |
+| JSON, flags, large integers | `divergence-values` |
+| Error mapping (unique, FK, CHECK) | `divergence-error-mapping` |
+| Concurrent claims (schedule occurrence, idempotency keys, kv incr) | `divergence-concurrent-schedule-claim` |
+| Trigger groups (8) | `trigger-asset-keys`, `trigger-model-profiles`, `trigger-session-maintenance`, `trigger-fts-sync`, `trigger-chat-relay`, `trigger-immutability`, `trigger-rbac-default-role`, `trigger-cascades` |
+| Retention | `divergence-retention` |
+| db-query denial of the 7 tables | `divergence-db-query-denial` |
+| Start on a base-commit database (check 10) | `upgrade-base-db` |
+| Stress (check 22) | `stress-poll-claim` (24 workers, 60 tasks, zero 5xx, each task claimed once) |
+
+Facts these scenarios pin, which the Postgres side must reproduce:
+
+- Text order is byte order (`10, 9, B, Z, _x, a, é`): Postgres needs `COLLATE "C"` or a C-collation database.
+- LIKE folds ASCII case only. `%` and `_` are live wildcards on mcp-servers and schedules filters; workflows `q` escapes them.
+- Three timestamp text formats reach the API: ISO with ms and `Z`, `YYYY-MM-DD HH:MM:SS` (built-in roles, task templates), and the space format rewritten to `.000Z` (pages, metrics). Epoch-ms integers in KV, pricing, budgets.
+- Error bodies: unique conflicts mostly map to 409 with a fixed code. Skills return 400 with the raw `UNIQUE constraint failed` text. MCP server FK violations return 400 `FOREIGN KEY constraint failed`. A skill PUT with a bad `scope` returns 500. The typed errors of M3 must give the same status and text. The raw engine text and the 500 are product defects; they are recorded here, not fixed (no behavior change before the engine work).
+- Ties: memory chunks and pages break ties by insertion order only (`// tie order: insertion` in `divergence-list-order`). The repositories must add a total-order tiebreaker that gives the same order.
+- A vector hit at cosine 0.108 passes the 0.1 floor (`divergence-vector-search`). The pgvector distance must keep that floor exactly.
+- 14 of 65 triggers have no API path (inventory: `thoughts/taras/research/2026-11-20-trigger-groups.md`). The repository contract suite (`test:storage`, M2/M3) must cover them.
+- `trg_users_default_role` is created at boot by `src/be/rbac-roles.ts`, not by a migration. The Postgres baseline must include it.
+
+Not covered by M1 scenarios: age-based deletion in retention (the API cannot backdate rows); two schedulers racing (the scheduler runs in one process with a re-entry guard).
+
+### Fixture for check 10
+
+`scripts/e2e/fixtures/base-db.sqlite.gz` (2.0 MB, a VACUUMed file made by base commit `99d7de13a`) plus `base-db.json` (row ids and a throwaway encryption key for the one secret config row). Generator: `bun scripts/e2e/fixtures/make-base-db.ts <checkout of the base commit>`. `ctx.startFixtureSut("base-db")` boots a second API on it. On Postgres the fixture goes through the copy command, which arrives in M6. Until then `startFixtureSut` throws on Postgres with a pointer to M6.
+
 ## Decisions inside my authority
 
 - D4 entity types: open. Decided in M2, recorded here.
@@ -165,4 +218,4 @@ None.
 
 ## Edited scenarios
 
-None.
+See "M1 results / Edited scenarios".
