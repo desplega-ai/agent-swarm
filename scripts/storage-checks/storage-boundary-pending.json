@@ -733,7 +733,7 @@
   },
   "src/scheduler/deferred-task-waits.ts": {
     "reason": "M2 move: schedules",
-    "sites": 11
+    "sites": 2
   },
   "src/scheduler/schedule-task.ts": {
     "reason": "M2 move: schedules",

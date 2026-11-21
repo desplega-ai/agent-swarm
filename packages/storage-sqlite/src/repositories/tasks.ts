@@ -547,4 +547,26 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         AND COALESCE(routing_reason, '') != 'human_pinned'`);
     return result.changes;
   }
+
+  listSupersededWaitMembers(): Promise<{ taskId: string; resumeTaskId: string }[]> {
+    return this.db.query<{ taskId: string; resumeTaskId: string }>(sql`
+      SELECT DISTINCT m."taskId", (
+          SELECT r.id FROM agent_tasks r
+          WHERE r."parentTaskId" = t.id AND r."taskType" = 'resume'
+          ORDER BY r."createdAt", r.id LIMIT 1
+        ) AS "resumeTaskId"
+      FROM deferred_task_wait_members m
+      JOIN deferred_task_waits w ON w."scheduleId" = m."scheduleId"
+      JOIN agent_tasks t ON t.id = m."taskId"
+      WHERE w.status = 'pending' AND t.status = 'superseded'
+        AND "resumeTaskId" IS NOT NULL`);
+  }
+
+  async repointWaitMembers(taskId: string, resumeTaskId: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE OR REPLACE deferred_task_wait_members SET "taskId" = ${resumeTaskId}, updated_at = ${now}
+      WHERE "taskId" = ${taskId} AND "scheduleId" IN (
+        SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
+      )`);
+  }
 }

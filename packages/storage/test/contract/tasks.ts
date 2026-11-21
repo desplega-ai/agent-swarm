@@ -881,6 +881,91 @@ export function tasksContract(engine: ContractEngine): void {
       expect(await repo.countPendingEventWaitsForAgent("ag")).toBe(1);
     });
 
+    test("deferred waits: resolution reads, claim, member re-point", async () => {
+      const schedule = (id: string, parentTaskId: string, enabled = true, taskType = "x") =>
+        storage.executor.run(sql`
+          INSERT INTO scheduled_tasks (id, name, "taskTemplate", "targetAgentId", enabled, "parentTaskId",
+            "taskType", "scheduleType", "nextRunAt", "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, 't', 'ag', ${enabled}, ${parentTaskId}, ${taskType}, 'one_time', ${T1}, ${T0}, ${T0})`);
+      await seedTask(storage, { id: "waiter" });
+      await seedTask(storage, { id: "m1", status: "completed" });
+      await seedTask(storage, { id: "m2", status: "superseded", failureReason: "wf" });
+      await seedTask(storage, { id: "m3", status: "superseded" });
+      await seedTask(storage, { id: "m3r", parentTaskId: "m3", taskType: "resume" });
+      await schedule("s1", "waiter");
+      await repo.insertDeferredTaskWait({
+        scheduleId: "s1",
+        eventName: "settled",
+        mode: "all",
+        userId: null,
+      });
+      for (const m of ["m1", "m2", "m3"]) await repo.insertDeferredTaskWaitMember("s1", m, null);
+      expect(await repo.findDeferredTaskWait("s1")).toMatchObject({
+        scheduleId: "s1",
+        eventName: "settled",
+        mode: "all",
+        status: "pending",
+      });
+      expect(await repo.findDeferredEventWait("s1")).toBeNull();
+      expect(await repo.hasDeferredWait("s1")).toBe(true);
+      expect(await repo.hasDeferredWait("nope")).toBe(false);
+      const members = await repo.listDeferredWaitMembers("s1", "wf");
+      expect(members.map((m) => [m.taskId, m.taskStatus, Number(m.deferred)]).sort()).toEqual([
+        ["m1", "completed", 0],
+        ["m2", "failed", 0],
+        ["m3", "superseded", 0],
+      ]);
+      expect((await repo.listReadyDeferredTaskWaits("wf")).map((r) => r.taskStatus).sort()).toEqual(
+        ["completed", "failed"],
+      );
+      expect((await repo.listReadyDeferredTaskWaits("wf", "m1")).map((r) => r.taskStatus)).toEqual([
+        "completed",
+      ]);
+      expect(await repo.listSupersededWaitMembers()).toEqual([
+        { taskId: "m3", resumeTaskId: "m3r" },
+      ]);
+      await repo.repointWaitMembers("m3", "m3r", T1);
+      expect((await repo.listDeferredWaitMembers("s1", "wf")).map((m) => m.taskId).sort()).toEqual([
+        "m1",
+        "m2",
+        "m3r",
+      ]);
+      // A deferral pending on a member hides it from the ready list.
+      await schedule("d1", "m1", true, "deferred");
+      expect(await repo.listReadyDeferredTaskWaits("wf", "m1")).toEqual([]);
+
+      expect(await repo.claimDeferredWait("deferred_task_waits", "s1", "task.completed", T1)).toBe(
+        1,
+      );
+      expect(await repo.claimDeferredWait("deferred_task_waits", "s1", "task.completed", T1)).toBe(
+        0,
+      );
+      await repo.setDeferredWaitChild("deferred_task_waits", "s1", "m1");
+      expect(await repo.findDeferredTaskWait("s1")).toMatchObject({ status: "fired" });
+
+      await schedule("e1", "waiter");
+      await repo.insertDeferredEventWait({
+        scheduleId: "e1",
+        source: "github",
+        event: "pr.merged",
+        matchKey: "k1",
+        matchJson: "{}",
+        userId: null,
+      });
+      expect(await repo.hasPendingEventWait("github", "pr.merged")).toBe(true);
+      expect(await repo.hasPendingEventWait("github", "other")).toBe(false);
+      expect(await repo.listPendingEventWaits()).toEqual([
+        { scheduleId: "e1", source: "github", event: "pr.merged", matchKey: "k1", matchJson: "{}" },
+      ]);
+      expect(
+        await repo.listPendingEventWaits({ source: "github", event: "pr.merged", matchKey: "k2" }),
+      ).toEqual([]);
+      expect(
+        await repo.claimDeferredWait("deferred_event_waits", "e1", "external:github:pr.merged", T1),
+      ).toBe(1);
+      expect(await repo.hasPendingEventWait("github", "pr.merged")).toBe(false);
+    });
+
     test("appendDraftTaskText changes only a draft", async () => {
       await seedTask(storage, { id: "d1", task: "base", status: "draft" });
       await seedTask(storage, { id: "p1", task: "base", status: "pending" });

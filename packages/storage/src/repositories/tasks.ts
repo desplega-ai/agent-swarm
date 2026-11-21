@@ -356,6 +356,24 @@ export type TaskCitationRow = {
   general: number;
 };
 
+export type DeferredTaskWaitRow = {
+  scheduleId: string;
+  eventName: string;
+  mode: "all" | "any";
+  status: "pending" | "fired";
+};
+
+export type DeferredEventWaitRow = {
+  scheduleId: string;
+  source: string;
+  event: string;
+  matchKey: string;
+  matchJson: string;
+  status: "pending" | "fired";
+};
+
+export type DeferredWaitTable = "deferred_task_waits" | "deferred_event_waits";
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -821,6 +839,56 @@ export interface TasksRepository {
     taskId: string,
     userId: string | null,
   ): Promise<void>;
+
+  // ---- deferred waits: wake resolution ----
+  findDeferredTaskWait(scheduleId: string): Promise<DeferredTaskWaitRow | null>;
+  findDeferredEventWait(scheduleId: string): Promise<DeferredEventWaitRow | null>;
+  /** True when the schedule has a task or an event wait. */
+  hasDeferredWait(scheduleId: string): Promise<boolean>;
+  /**
+   * The wait's members with the status waits see (a workflow step superseded
+   * with `workflowReason` reads `failed`) and whether an enabled deferral of
+   * the member is pending (0/1). In no particular order.
+   */
+  listDeferredWaitMembers(
+    scheduleId: string,
+    workflowReason: string,
+  ): Promise<{ taskId: string; taskStatus: string | null; deferred: number }[]>;
+  /** `pending` to `fired`. Returns the changed count. */
+  claimDeferredWait(
+    table: DeferredWaitTable,
+    scheduleId: string,
+    firedBy: string,
+    now: string,
+  ): Promise<number>;
+  setDeferredWaitChild(
+    table: DeferredWaitTable,
+    scheduleId: string,
+    childTaskId: string,
+  ): Promise<void>;
+  /** Members of pending waits whose task is superseded, with its first resume child. */
+  listSupersededWaitMembers(): Promise<{ taskId: string; resumeTaskId: string }[]>;
+  /**
+   * Point members of pending waits from `taskId` to `resumeTaskId`; a member
+   * that already watches the resume replaces the old one.
+   */
+  repointWaitMembers(taskId: string, resumeTaskId: string, now: string): Promise<void>;
+  /**
+   * Pending task waits of enabled schedules with a settled, not re-deferred
+   * member that matches the wait's event, with that member's status
+   * (optionally only for member `taskId`). Distinct rows, in no particular order.
+   */
+  listReadyDeferredTaskWaits(
+    workflowReason: string,
+    taskId?: string,
+  ): Promise<(DeferredTaskWaitRow & { taskStatus: string })[]>;
+  hasPendingEventWait(source: string, event: string): Promise<boolean>;
+  /** Pending event waits of enabled schedules (optionally one target). In no particular order. */
+  listPendingEventWaits(only?: {
+    source: string;
+    event: string;
+    matchKey: string;
+  }): Promise<Omit<DeferredEventWaitRow, "status">[]>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -2019,6 +2087,115 @@ export abstract class BaseTasksRepository implements TasksRepository {
     await this.db.run(sql`
       INSERT INTO deferred_task_wait_members ("scheduleId", "taskId", created_by, updated_by)
       VALUES (${scheduleId}, ${taskId}, ${userId}, ${userId})`);
+  }
+
+  // ---- deferred waits: wake resolution ----
+
+  /** A member's status as waits see it: a superseded workflow step reads as `failed`. */
+  protected waitMemberStatus(workflowReason: string): SqlQuery {
+    return sql`CASE
+      WHEN t.status = 'superseded' AND t."failureReason" = ${workflowReason} THEN 'failed'
+      ELSE t.status END`;
+  }
+
+  findDeferredTaskWait(scheduleId: string): Promise<DeferredTaskWaitRow | null> {
+    return this.db.get<DeferredTaskWaitRow>(
+      sql`SELECT * FROM deferred_task_waits WHERE "scheduleId" = ${scheduleId}`,
+    );
+  }
+
+  findDeferredEventWait(scheduleId: string): Promise<DeferredEventWaitRow | null> {
+    return this.db.get<DeferredEventWaitRow>(
+      sql`SELECT * FROM deferred_event_waits WHERE "scheduleId" = ${scheduleId}`,
+    );
+  }
+
+  async hasDeferredWait(scheduleId: string): Promise<boolean> {
+    const row = await this.db.get(sql`
+      SELECT 1 AS found FROM deferred_task_waits WHERE "scheduleId" = ${scheduleId}
+      UNION ALL SELECT 1 FROM deferred_event_waits WHERE "scheduleId" = ${scheduleId}`);
+    return !!row;
+  }
+
+  listDeferredWaitMembers(
+    scheduleId: string,
+    workflowReason: string,
+  ): Promise<{ taskId: string; taskStatus: string | null; deferred: number }[]> {
+    return this.db.query(sql`
+      SELECT m."taskId", ${this.waitMemberStatus(workflowReason)} AS "taskStatus", EXISTS (
+          SELECT 1 FROM scheduled_tasks d
+          WHERE d."parentTaskId" = t.id AND d."taskType" = 'deferred' AND d.enabled = ${true}
+        ) AS deferred
+      FROM deferred_task_wait_members m LEFT JOIN agent_tasks t ON t.id = m."taskId"
+      WHERE m."scheduleId" = ${scheduleId}`);
+  }
+
+  async claimDeferredWait(
+    table: DeferredWaitTable,
+    scheduleId: string,
+    firedBy: string,
+    now: string,
+  ): Promise<number> {
+    const result = await this.db.run(sql`
+      UPDATE ${sqlIdent(table)} SET status = 'fired', "firedBy" = ${firedBy}, "resolvedAt" = ${now},
+        updated_at = ${now}
+      WHERE "scheduleId" = ${scheduleId} AND status = 'pending'`);
+    return result.changes;
+  }
+
+  async setDeferredWaitChild(
+    table: DeferredWaitTable,
+    scheduleId: string,
+    childTaskId: string,
+  ): Promise<void> {
+    await this.db.run(
+      sql`UPDATE ${sqlIdent(table)} SET "childTaskId" = ${childTaskId} WHERE "scheduleId" = ${scheduleId}`,
+    );
+  }
+
+  /** Filters on an output alias in WHERE (SQLite). */
+  abstract listSupersededWaitMembers(): Promise<{ taskId: string; resumeTaskId: string }[]>;
+  /** `UPDATE OR REPLACE` (SQLite). */
+  abstract repointWaitMembers(taskId: string, resumeTaskId: string, now: string): Promise<void>;
+
+  listReadyDeferredTaskWaits(
+    workflowReason: string,
+    taskId?: string,
+  ): Promise<(DeferredTaskWaitRow & { taskStatus: string })[]> {
+    const status = this.waitMemberStatus(workflowReason);
+    const member = taskId === undefined ? EMPTY : sql` AND m."taskId" = ${taskId}`;
+    return this.db.query(sql`
+      SELECT DISTINCT w.*, ${status} AS "taskStatus" FROM deferred_task_waits w
+      JOIN deferred_task_wait_members m ON m."scheduleId" = w."scheduleId"
+      JOIN agent_tasks t ON t.id = m."taskId"
+      JOIN scheduled_tasks s ON s.id = w."scheduleId"
+      WHERE w.status = 'pending' AND s.enabled = ${true}
+        AND ${status} IN ('completed', 'failed', 'cancelled', 'skipped')
+        AND NOT EXISTS (
+          SELECT 1 FROM scheduled_tasks d
+          WHERE d."parentTaskId" = t.id AND d."taskType" = 'deferred' AND d.enabled = ${true}
+        )
+        AND (w."eventName" = 'settled' OR w."eventName" = 'task.' || ${status})${member}`);
+  }
+
+  async hasPendingEventWait(source: string, event: string): Promise<boolean> {
+    return !!(await this.db.get(sql`
+      SELECT 1 AS found FROM deferred_event_waits
+      WHERE status = 'pending' AND source = ${source} AND event = ${event} LIMIT 1`));
+  }
+
+  listPendingEventWaits(only?: {
+    source: string;
+    event: string;
+    matchKey: string;
+  }): Promise<Omit<DeferredEventWaitRow, "status">[]> {
+    const target = only
+      ? sql` AND w.source = ${only.source} AND w.event = ${only.event} AND w."matchKey" = ${only.matchKey}`
+      : EMPTY;
+    return this.db.query(sql`
+      SELECT w."scheduleId", w.source, w.event, w."matchKey", w."matchJson" FROM deferred_event_waits w
+      JOIN scheduled_tasks s ON s.id = w."scheduleId"
+      WHERE w.status = 'pending' AND s.enabled = ${true}${target}`);
   }
 
   // ---- task_idempotency_keys ----
