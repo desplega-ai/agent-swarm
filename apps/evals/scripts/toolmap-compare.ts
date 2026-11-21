@@ -4,17 +4,20 @@
  * Reads two finished runs of the same scenarios and configs, one per arm
  * (`run --worker-env HARNESS_TOOL_MAPPINGS_ENABLED=false|true`), and scores the
  * treatment arm against control per harness. Measured post hoc from each
- * attempt's stored `tasks.json` and `session-logs.jsonl` artifacts, so the
- * scenarios themselves need no change.
+ * attempt's stored `tasks.json`, `session-logs.jsonl` (upfront tasks) and
+ * `spawned-session-logs.json` (child, follow-up and wake-up tasks) artifacts, so
+ * the scenarios themselves need no change.
  *
  * Usage:
  *   cd apps/evals && bun scripts/toolmap-compare.ts --control <run id|name> --treatment <run id|name> [--out <dir>]
  *
  * Writes toolmap-report.md and toolmap-report.json to --out (default: cwd).
- * Exits 1 when any gate is FAIL or NO DATA.
+ * Exits 1 when any gate is FAIL or NO DATA, and before any gate when the inputs
+ * are not a valid pair (`validateArms`) or an attempt's evidence is incomplete
+ * (`attemptEvidence`): the report then lists the problems and no gates.
  *
- * The extraction and gate math are pure functions (`attemptFacts`, `evaluateGates`)
- * so the unit test feeds synthetic attempts; DB I/O lives in `main()`.
+ * The validation, extraction and gate math are pure functions so the unit test
+ * feeds synthetic runs and attempts; DB I/O lives in `main()`.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,10 +29,12 @@ import {
   memberCreatedTasks,
   swarmToolSlug,
 } from "../scenarios/orchestration-utils.ts";
+import { EXPERIMENT_SCENARIO_IDS } from "../scenarios/suite.ts";
 import { parseToolUses } from "../src/judge/session-log-parse.ts";
+import { parseSpawnedLogs, SPAWNED_LOGS_ARTIFACT } from "../src/runner/spawned-logs.ts";
 import { bootstrapDiffCI } from "../src/stats.ts";
 import type { SessionLogRow } from "../src/swarm/client.ts";
-import type { SwarmTask } from "../src/types.ts";
+import type { AttemptRow, EvalRunRow, SwarmTask } from "../src/types.ts";
 
 export type Arm = "control" | "treatment";
 
@@ -39,6 +44,166 @@ export const EXPECTED_WORKER_TASKS: Readonly<Record<string, number>> = {
 };
 
 const COMMS_SCENARIO = "tool-mapping-worker-comms";
+
+/** The worker env flag the two arms differ on. */
+export const FLAG = "HARNESS_TOOL_MAPPINGS_ENABLED";
+
+/** Plan Phase 4: rerun any cell with more excluded attempts than this. */
+export const MAX_EXCLUDED_PER_CELL = 2;
+
+/** The run row fields a valid pair must agree on. */
+export interface ArmRun {
+  run: Pick<EvalRunRow, "id" | "status" | "scenarioIds" | "configIds" | "workerEnv" | "efforts">;
+  /** config id -> pinned resolved model (eval_run_configs). */
+  pins: Record<string, string>;
+  attempts: Pick<AttemptRow, "id" | "scenarioId" | "configId" | "scenarioVersion" | "status">[];
+}
+
+const TERMINAL = new Set(["passed", "failed", "error"]);
+const canon = (v: Record<string, unknown> | null | undefined): string =>
+  JSON.stringify(Object.entries(v ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+const sameSet = (a: string[], b: string[]): boolean =>
+  JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
+
+/**
+ * Why the two runs are not a valid A/B pair; empty when they are. Both arms must
+ * be finished runs of the same matrix, effort, pinned models and worker env,
+ * differing only in an explicit flag value (false vs true), and every declared
+ * cell must hold scored attempts at one shared scenario version.
+ */
+export function validateArms(control: ArmRun, treatment: ArmRun): string[] {
+  const problems: string[] = [];
+  const c = control.run;
+  const t = treatment.run;
+  if (c.id === t.id) problems.push(`control and treatment are the same run (${c.id})`);
+  for (const [arm, r] of [
+    ["control", c],
+    ["treatment", t],
+  ] as const) {
+    if (r.status !== "done") problems.push(`${arm} run ${r.id} is ${r.status}, not done`);
+  }
+  const flag = (r: ArmRun["run"]) => r.workerEnv?.[FLAG];
+  if (flag(c) !== "false")
+    problems.push(`control run must set ${FLAG}=false, has ${flag(c) ?? "unset"}`);
+  if (flag(t) !== "true")
+    problems.push(`treatment run must set ${FLAG}=true, has ${flag(t) ?? "unset"}`);
+  const otherEnv = (r: ArmRun["run"]) => canon({ ...r.workerEnv, [FLAG]: null });
+  if (otherEnv(c) !== otherEnv(t)) problems.push("the arms' worker env differs beyond the flag");
+  if (!sameSet(c.scenarioIds, t.scenarioIds)) problems.push("the arms ran different scenarios");
+  if (!sameSet(c.configIds, t.configIds)) problems.push("the arms ran different configs");
+  if (canon(c.efforts) !== canon(t.efforts))
+    problems.push("the arms ran different reasoning efforts");
+  if (canon(control.pins) !== canon(treatment.pins))
+    problems.push("the arms pinned different models");
+  const missing = EXPERIMENT_SCENARIO_IDS.filter(
+    (s) => !c.scenarioIds.includes(s) || !t.scenarioIds.includes(s),
+  );
+  if (missing.length) problems.push(`required scenario(s) missing: ${missing.join(", ")}`);
+
+  const versions = new Map<string, string>();
+  for (const [arm, a] of [
+    ["control", control],
+    ["treatment", treatment],
+  ] as const) {
+    const declared = new Set(
+      a.run.scenarioIds.flatMap((s) => a.run.configIds.map((cfg) => `${s} × ${cfg}`)),
+    );
+    for (const x of a.attempts) {
+      if (!declared.has(`${x.scenarioId} × ${x.configId}`))
+        problems.push(`${arm} attempt ${x.id} is outside the run's matrix`);
+    }
+    for (const cell of declared) {
+      const cellAttempts = a.attempts.filter((x) => `${x.scenarioId} × ${x.configId}` === cell);
+      const open = cellAttempts.filter((x) => !TERMINAL.has(x.status));
+      const excluded = cellAttempts.filter((x) => x.status === "error").length;
+      const kept = cellAttempts.length - excluded - open.length;
+      if (cellAttempts.length === 0) problems.push(`${arm} cell ${cell} has no attempts`);
+      else if (open.length)
+        problems.push(`${arm} cell ${cell} has ${open.length} unfinished attempt(s)`);
+      else if (kept === 0) problems.push(`${arm} cell ${cell} has every attempt excluded`);
+      if (excluded > MAX_EXCLUDED_PER_CELL)
+        problems.push(
+          `${arm} cell ${cell} has ${excluded} excluded attempts (max ${MAX_EXCLUDED_PER_CELL})`,
+        );
+      const vs = [...new Set(cellAttempts.map((x) => String(x.scenarioVersion ?? "none")))];
+      if (vs.length > 1)
+        problems.push(`${arm} cell ${cell} mixes scenario versions ${vs.join(", ")}`);
+      const prior = versions.get(cell);
+      if (prior === undefined) versions.set(cell, vs.join(","));
+      else if (vs.length && prior !== vs.join(","))
+        problems.push(
+          `cell ${cell} ran scenario version ${prior} in control, ${vs.join(",")} in treatment`,
+        );
+    }
+  }
+  return problems;
+}
+
+/** One stored artifact, as listArtifacts returns it. */
+export interface StoredArtifact {
+  kind: string;
+  name: string | null;
+  content?: string | null;
+}
+
+/** Same cap as the runner's raw-session-logs slice: a full artifact may be cut. */
+const RAW_LOGS_CAP = 2_000_000;
+
+/**
+ * Tasks and every run task's session-log rows for one scored attempt, plus why
+ * that evidence is incomplete (empty = complete). `upfrontTaskIds` is the
+ * attempt's `taskIds`, the set raw-session-logs covers; every other run task in
+ * tasks.json must be covered by the spawned-logs artifact.
+ */
+export function attemptEvidence(
+  upfrontTaskIds: string[],
+  artifacts: StoredArtifact[],
+): { tasks: SwarmTask[]; logRows: SessionLogRow[]; problems: string[] } {
+  const problems: string[] = [];
+  let tasks: SwarmTask[] = [];
+  const tasksArtifact = artifacts.find((x) => x.kind === "task" && x.name === "tasks.json");
+  try {
+    if (!tasksArtifact?.content) problems.push("tasks.json missing");
+    else tasks = JSON.parse(tasksArtifact.content) as SwarmTask[];
+  } catch {
+    problems.push("tasks.json unparseable");
+  }
+
+  const logRows: SessionLogRow[] = [];
+  const raw = artifacts.find((x) => x.kind === "raw-session-logs")?.content;
+  if (!raw) problems.push("session-logs.jsonl missing");
+  else {
+    let bad = raw.length >= RAW_LOGS_CAP;
+    for (const line of raw.split("\n").filter(Boolean)) {
+      try {
+        logRows.push(JSON.parse(line) as SessionLogRow);
+      } catch {
+        bad = true;
+      }
+    }
+    if (bad) problems.push("session-logs.jsonl truncated or corrupt");
+  }
+
+  const covered = new Set(upfrontTaskIds);
+  const spawnedContent = artifacts.find(
+    (x) => x.kind === "meta" && x.name === SPAWNED_LOGS_ARTIFACT,
+  )?.content;
+  const spawned = spawnedContent ? parseSpawnedLogs(spawnedContent) : null;
+  if (!spawnedContent)
+    problems.push(`${SPAWNED_LOGS_ARTIFACT} missing (continuation logs not captured)`);
+  else if (!spawned) problems.push(`${SPAWNED_LOGS_ARTIFACT} unparseable`);
+  else {
+    if (spawned.truncated) problems.push(`${SPAWNED_LOGS_ARTIFACT} truncated`);
+    if (spawned.failedTaskIds.length)
+      problems.push(`log fetch failed for task(s) ${spawned.failedTaskIds.join(", ")}`);
+    for (const id of spawned.taskIds) covered.add(id);
+    logRows.push(...spawned.rows);
+  }
+  const uncovered = tasks.filter((x) => x.origin !== "seed" && !x.skipped && !covered.has(x.id));
+  if (uncovered.length)
+    problems.push(`no session logs captured for task(s) ${uncovered.map((x) => x.id).join(", ")}`);
+  return { tasks, logRows, problems };
+}
 
 /** The stored inputs for one attempt. */
 export interface AttemptInput {
@@ -313,6 +478,8 @@ export function cellRows(facts: AttemptFacts[]): Record<string, string | number>
 export function renderReport(opts: {
   control: string;
   treatment: string;
+  /** Input problems; non-empty means no gates were evaluated. */
+  problems?: string[];
   gates: GateResult[];
   cells: Record<string, string | number>[];
 }): string {
@@ -330,6 +497,9 @@ export function renderReport(opts: {
     "",
     `Control run: \`${opts.control}\`. Treatment run: \`${opts.treatment}\`.`,
     "",
+    ...(opts.problems?.length
+      ? ["## Invalid input: no ship decision", "", ...opts.problems.map((p) => `- ${p}`), ""]
+      : []),
     "## Gates",
     "",
     ...table(
@@ -350,9 +520,9 @@ export function renderReport(opts: {
 
 // ---- DB I/O ----
 
-async function main(): Promise<number> {
+export async function main(argv: string[]): Promise<number> {
   const { values } = parseArgs({
-    args: process.argv.slice(2),
+    args: argv,
     options: {
       control: { type: "string" },
       treatment: { type: "string" },
@@ -377,29 +547,38 @@ async function main(): Promise<number> {
     return run;
   };
 
+  const control = resolveRun(values.control);
+  const treatment = resolveRun(values.treatment);
+  const loadArm = async (run: EvalRunRow) => {
+    const pins = await db.execute({
+      sql: "SELECT config_id, resolved_model FROM eval_run_configs WHERE run_id = ?",
+      args: [run.id],
+    });
+    return {
+      run,
+      pins: Object.fromEntries(
+        pins.rows.map((r) => [String(r.config_id), String(r.resolved_model)]),
+      ),
+      attempts: await listAttempts(db, run.id),
+    };
+  };
+  const arms = { control: await loadArm(control), treatment: await loadArm(treatment) };
+  const problems = validateArms(arms.control, arms.treatment);
+
   const facts: AttemptFacts[] = [];
-  for (const [arm, ref] of [
-    ["control", values.control],
-    ["treatment", values.treatment],
-  ] as const) {
-    const run = resolveRun(ref);
-    for (const attempt of await listAttempts(db, run.id)) {
-      const artifacts = await listArtifacts(db, attempt.id, { withContent: true });
-      const tasksArtifact = artifacts.find((x) => x.kind === "task" && x.name === "tasks.json");
-      const logsArtifact = artifacts.find((x) => x.kind === "raw-session-logs");
-      const tasks = tasksArtifact?.content
-        ? (JSON.parse(tasksArtifact.content) as SwarmTask[])
-        : [];
-      const logRows = (logsArtifact?.content ?? "")
-        .split("\n")
-        .filter(Boolean)
-        .flatMap((line) => {
-          try {
-            return [JSON.parse(line) as SessionLogRow];
-          } catch {
-            return [];
-          }
-        });
+  for (const arm of ["control", "treatment"] as const) {
+    for (const attempt of arms[arm].attempts) {
+      const excluded = attempt.status === "error";
+      const evidence = excluded
+        ? { tasks: [], logRows: [], problems: [] }
+        : attemptEvidence(
+            attempt.taskIds,
+            await listArtifacts(db, attempt.id, { withContent: true }),
+          );
+      for (const p of evidence.problems)
+        problems.push(
+          `${arm} attempt ${attempt.id} (${attempt.scenarioId} × ${attempt.configId}): ${p}`,
+        );
       const t = attempt.tokens;
       facts.push(
         attemptFacts({
@@ -409,7 +588,7 @@ async function main(): Promise<number> {
             attempt.workers?.[0]?.provider ??
             attempt.configId,
           scenarioId: attempt.scenarioId,
-          excluded: attempt.status === "error",
+          excluded,
           passed: attempt.passed === true,
           score: attempt.score ?? 0,
           totalTokens: t
@@ -417,28 +596,35 @@ async function main(): Promise<number> {
             : null,
           tasksMs: attempt.timings?.tasksMs ?? null,
           roster: (attempt.workers ?? []).map((w) => ({ agentId: w.agentId, isLead: w.isLead })),
-          tasks,
-          logRows,
+          tasks: evidence.tasks,
+          logRows: evidence.logRows,
         }),
       );
     }
   }
 
-  const gates = evaluateGates(facts);
+  // Gates on an invalid pair or incomplete evidence would be a ship decision on missing data.
+  const gates = problems.length ? [] : evaluateGates(facts);
+  if (!problems.length && gates.length === 0) problems.push("no scored attempts: no gates");
   const cells = cellRows(facts);
   mkdirSync(values.out, { recursive: true });
   const report = renderReport({
     control: values.control,
     treatment: values.treatment,
+    problems,
     gates,
     cells,
   });
   writeFileSync(join(values.out, "toolmap-report.md"), report);
   writeFileSync(
     join(values.out, "toolmap-report.json"),
-    `${JSON.stringify({ control: values.control, treatment: values.treatment, gates, cells }, null, 2)}\n`,
+    `${JSON.stringify({ control: values.control, treatment: values.treatment, problems, gates, cells }, null, 2)}\n`,
   );
   console.log(report);
+  if (problems.length > 0) {
+    console.error(`${problems.length} input problem(s), no gates evaluated`);
+    return 1;
+  }
   const failing = gates.filter((g) => g.status !== "PASS");
   if (failing.length > 0) {
     console.error(
@@ -450,5 +636,5 @@ async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  process.exit(await main());
+  process.exit(await main(process.argv.slice(2)));
 }

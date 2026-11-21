@@ -461,8 +461,8 @@
       "scenarios": ["knowledge-objects", "knowledge-objects-reindex-scope"]
     },
     "prompt-template-override": {
-      "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
-      "scenarios": ["knowledge-prompt-templates"]
+      "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default; the native tool-mapping system templates render within budget",
+      "scenarios": ["knowledge-prompt-templates", "prompt-tool-mapping"]
     },
     "provider-webhooks": {
       "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",

@@ -104,6 +104,7 @@ import {
 } from "./member-seeding.ts";
 import { applyRunConfigPins, ensureRunConfigPins } from "./run-configs.ts";
 import { applyRunEfforts } from "./run-efforts.ts";
+import { collectSpawnedLogs, SPAWNED_LOGS_ARTIFACT, serializeSpawnedLogs } from "./spawned-logs.ts";
 import { topoOrder } from "./topo.ts";
 
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -1997,6 +1998,17 @@ async function runAttemptOnce(opts: {
         content: stack.redact(jsonl).slice(0, 2_000_000),
       });
     }
+    // Logs of the runtime-spawned tasks tasks.json lists (child, follow-up, wake-up).
+    const spawnedLogs = await collectSpawnedLogs(ctxTasks, upfrontTaskIds, (id) =>
+      client.getSessionLogs(id),
+    );
+    await insertArtifact(db, {
+      id: crypto.randomUUID(),
+      attemptId: attempt.id,
+      kind: "meta",
+      name: SPAWNED_LOGS_ARTIFACT,
+      content: serializeSpawnedLogs(spawnedLogs, stack.redact),
+    });
     // Opt-in api extension: its recorded hook runs and gated-vs-all tool-call coverage.
     if (stack.apiExtension) {
       try {
@@ -2007,17 +2019,9 @@ async function runAttemptOnce(opts: {
         );
         // The extension sees every agent's calls (lead, workers, spawned tasks), so the
         // denominator needs every ran task's session logs, not only the upfront ones.
-        const covered = new Set(activeTasks.map((t) => t.id));
-        const spawnedRows = (
-          await Promise.all(
-            ctxTasks
-              .filter((t) => !covered.has(t.id) && t.origin !== "seed")
-              .map((t) => client.getSessionLogs(t.id).catch(() => [])),
-          )
-        ).flat();
         const coverage = toolCoverage(
           runs,
-          parseToolUses([...logRows, ...spawnedRows]).map((t) => t.toolName),
+          parseToolUses([...logRows, ...spawnedLogs.rows]).map((t) => t.toolName),
         );
         log(
           `[extension] ${stack.apiExtension.name}: ${coverage.gatedCalls}/${coverage.allCalls} tool calls gated`,
