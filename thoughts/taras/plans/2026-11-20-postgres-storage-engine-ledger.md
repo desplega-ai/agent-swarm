@@ -14,8 +14,8 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
-| M2 Storage packages on SQLite | in progress (part 4): every domain moved; check 12 pending list at 35 files / 298 sites, of which 235 are seeded db-query scripts and 5 own-handle sites that the brief puts in M4; strict suite rerun pending | see git log |
-| M3 Postgres engine | prepared on branch `m3/engine` (not merged until M2 closes): client, codec, baseline, triggers, runner, checks 7/9/14, Postgres contract suite | |
+| M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
+| M3 Postgres engine | in progress (part 5) on local branch `m3/engine`: `test:storage` Postgres 420 pass / 2 fail (both full-text search, M4); checks 7, 9, 14 pass | |
 | M4 Engine-specific domains | not started | |
 | M5 Contract on Postgres | not started | |
 | M6 Data copy | not started | |
@@ -37,9 +37,10 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 
 | # | Check | Last run | Result |
 |---|---|---|---|
-| 1 | `bun run e2e:strict` (SQLite) | M1 head `c7d63f23e` (15 min 59 s) | **fail, pre-existing cause**: 235 passed, 0 failed, 2 flaky (`model-group-resolution` and `slack-lead-follow-up-card`, both scenarios that exist at the base commit, order below every new scenario; both passed on rerun). Strict gate fails only on the base-commit coverage gap `task-statuses: in_progress`. An earlier M1 run (`493630671`) exited 0 only because a stuck `trigger-chat-relay` task left an `in_progress` row; that flake is fixed in `c7d63f23e`. Open: close the `in_progress` gap honestly (a scenario that ends with a live claimed task) before the final commit. |
+| 1 | `bun run e2e:strict` (SQLite) | M2 head `7599d6cd2`, part 5 | **pass** (exit 0): 238 passed, 0 failed, 1 flaky (`model-group-resolution`, flaky at the base commit too). Coverage 100% on every axis, `task-statuses` 10/10. Same result with `--tx-replay` (exit 0, 238 passed, same flaky). |
 | 8 | no change to base migration files | M0 | pass (no migration touched) |
-| 16 | existing gates | M1 head | pass: `lint`, `lint:slop`, `tsc:check:tsc` (after a type fix in the spike scripts), `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. `test:root -- --parallel=4`: **fail, pre-existing** (see Failures at the base commit). `e2e:ui`: not run yet. |
+| 16 | existing gates | M2 head, part 5 | pass: `lint`, `lint:slop`, `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh` (after one allowlist line, see below), `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`. `test:root -- --parallel=4` (head `8f135b9d7`): exit 1, 22,999 pass / 57 fail; 44 of the 57 are in the base-commit failure set; of the other 13, 6 were a real regression (fixed in `f3ce45ec5`, see Part 5) and 7 pass when rerun alone (load: `routing-reason-inventory` 5 s timeout, `savings-rollup` SQLite busy, `db-query` bounded heartbeat rate, `gate fuzz`, Slack config reload). `e2e:ui`: see Part 5. |
+| 8 (M2) | no change to base migration files | M2 head, part 5 | pass: `git diff 99d7de13a -- 'src/be/migrations/*.sql'` is empty |
 
 Other checks: not run yet. Most of their commands do not exist yet.
 
@@ -199,7 +200,7 @@ Not covered by M1 scenarios: age-based deletion in retention (the API cannot bac
 
 `scripts/e2e/fixtures/base-db.sqlite.gz` (2.0 MB, a VACUUMed file made by base commit `99d7de13a`) plus `base-db.json` (row ids and a throwaway encryption key for the one secret config row). Generator: `bun scripts/e2e/fixtures/make-base-db.ts <checkout of the base commit>`. `ctx.startFixtureSut("base-db")` boots a second API on it. On Postgres the fixture goes through the copy command, which arrives in M6. Until then `startFixtureSut` throws on Postgres with a pointer to M6.
 
-## M2 results (in progress)
+## M2 results
 
 ### Packages (step 1, D4)
 
@@ -284,6 +285,12 @@ Strict suite on SQLite after the merges (run 1, head `add6484a8`): 235 passed, 1
 
 Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unknown as` chains and 2 unused types left by merges), `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`: pass. `test:root` and `e2e:ui`: not run yet in part 4.
 
+### Part 5 summary (2026-11-21)
+
+- The synchronous prompt-template resolver now goes through the async `promptTemplates` repository; `resolveTemplate()` is async and its callers await it. The SQLite start path seeds default templates synchronously through `packages/storage-sqlite` (`promptTemplateSqliteStart` in the composition root). The pricing seed, the key window usage read and the boot seeds moved into repositories. Pending list: 298 to 281 sites.
+- Regression found by `test:root` and fixed: with the resolver async, an in-process session settled before the context-bound note rendered (6 tests in `claude-managed-adapter.test.ts`). Fix: with no DB resolver and no `{{@template[...]}}` reference, the resolver answers in the same tick, as before.
+- Check 12 is not at 0. What is left, by owner: 235 sites in the seeded db-query scripts and 9 in the own-handle readers and the memory search worker (M4 steps 4 and 5); 21 in the SQLite memory provider (M4, its synchronous `getHealth()` and table bootstrap); 16 SQLite start-path and handle-owner sites (`db.ts` 7, `runtime.ts` 5, `script-connections.ts` 2, `storage.ts` 1) and 1 false positive (`scripts/typecheck.ts`, a TypeScript declaration string). The start-path sites move behind the composition root when M3 adds the Postgres start.
+
 ## Decisions inside my authority
 
 - `_rowid` surrogate (M3 prep). Every Postgres table that has a SQLite rowid gets `"_rowid" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL` with a unique index (133 tables); tables whose INTEGER PRIMARY KEY is the rowid use that key; `kv_entries` is WITHOUT ROWID. Reasons: session logs expose `rowid AS seq` in the API, `human_free_reclassify_queue` stores rowids, and about 140 repository ORDER BYs break ties on rowid. The data copy (M6) copies rowid into `_rowid` and resets the identity, so API values stay equal across engines. The read codec drops a result column named `_rowid` (SQLite's `SELECT *` never returns rowid). One parity-allowlist key covers the pattern.
@@ -302,6 +309,7 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 
 ## Deviations
 
+- `onAttemptRollback` (needs human review): a third storage-client hook that D6 does not name. It runs when any attempt rolls back and only undoes in-process state (the successor-walk hold, the executing-step mark). Without it, runs never finalized under `--tx-replay`. Details under "Decisions inside my authority". The Postgres client implements it.
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
@@ -322,6 +330,7 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - `src/tools/store-progress.ts`: a fresh per-attempt object replaces the previous attempt's.
 - `src/workflows/foreach-driver.ts` (6 lines): the per-process claim set must change under the write lock; the callback first gives back the previous attempt's claims.
 - `src/workflows/successor-routing.ts` (1 line): a rolled-back attempt releases its own hold through `onAttemptRollback`.
+- `scripts/check-async-db-seam.sh` ALLOWLIST (part 5): `src/be/storage-root.ts`, reason on the line: the composition root owns the engine-handle identity and the prompt-template seed inside `initDb` (SQLite start path).
 
 ## Edited scenarios
 
