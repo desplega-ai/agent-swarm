@@ -1,7 +1,7 @@
 /**
  * Canonical API-side identity surface — the only path that mutates identity
  * tables. Every mutating helper wraps row mutation + event emission in a
- * single `getDbClient().transaction()` so the invariant "every identity
+ * single `getStorage().transaction()` so the invariant "every identity
  * mutation has a matching event row" (Q9) holds even on partial failures.
  *
  * This module is API-side ONLY. The DB-boundary checker (`scripts/check-db-boundary.sh`)
@@ -20,6 +20,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import type { IdentityEventRow, UserRow } from "@desplega/storage";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import type { ScriptRunProvenance } from "../utils/request-auth-context";
@@ -28,7 +29,10 @@ import { closeSessionTokenConnections } from "../utils/session-token-connections
 import { randomChars } from "../utils/short-id";
 import { getDbClient } from "./db";
 import type { DbExecutor } from "./db-client";
+import { getStorage } from "./storage";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
+
+const usersRepo = () => getStorage().repos.users;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,24 +57,6 @@ export type IdentityActor = {
 function actorString(actor: IdentityActor): string {
   return `${actor.kind}:${actor.id}`;
 }
-
-/** Internal row shape — superset of `User` plus columns added in migration 064. */
-type UserRow = {
-  id: string;
-  name: string;
-  email: string | null;
-  role: string | null;
-  notes: string | null;
-  emailAliases: string | null;
-  preferredChannel: string | null;
-  timezone: string | null;
-  metadata: string | null;
-  dailyBudgetUsd: number | null;
-  status: string;
-  mergedIntoUserId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 function rowToUser(row: UserRow): User {
   return {
@@ -97,7 +83,7 @@ function rowToUser(row: UserRow): User {
 
 /** Single SELECT by primary key. */
 export async function findUserById(id: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const row = await usersRepo().findUserById(id);
   return row ? rowToUser(row) : null;
 }
 
@@ -110,9 +96,7 @@ export async function findUserById(id: string): Promise<User | null> {
  */
 async function followMergedUser(row: UserRow): Promise<User | null> {
   if (!row.mergedIntoUserId) return rowToUser(row);
-  const target = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [
-    row.mergedIntoUserId,
-  ]);
+  const target = await usersRepo().findUserById(row.mergedIntoUserId);
   return target ? rowToUser(target) : null;
 }
 
@@ -121,12 +105,7 @@ async function followMergedUser(row: UserRow): Promise<User | null> {
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
 export async function findUserByExternalId(kind: string, externalId: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>(
-    `SELECT u.* FROM users u
-       INNER JOIN user_external_ids x ON x.userId = u.id
-       WHERE x.kind = ? AND x.externalId = ?`,
-    [kind, externalId],
-  );
+  const row = await usersRepo().findUserByExternalId(kind, externalId);
   return row ? followMergedUser(row) : null;
 }
 
@@ -140,22 +119,15 @@ export async function findUserByExternalId(kind: string, externalId: string): Pr
  */
 export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
-  const db = getDbClient();
 
   // Primary email (case-insensitive). A merge source keeps its primary email
   // until the job deletes it, while the target already holds it as an alias,
   // so the source row must not win here.
-  const primary = await db.get<UserRow>(
-    "SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND mergedIntoUserId IS NULL",
-    [email],
-  );
+  const primary = await usersRepo().findUserByPrimaryEmail(email);
   if (primary) return rowToUser(primary);
 
   // Alias array
-  const aliasRows = await db.query<UserRow>(
-    `SELECT * FROM users
-     WHERE emailAliases IS NOT NULL AND emailAliases != '[]' AND mergedIntoUserId IS NULL`,
-  );
+  const aliasRows = await usersRepo().listUsersWithEmailAliases();
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
     if (aliases.some((a) => a.toLowerCase() === lower)) {
@@ -175,21 +147,14 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 export async function findUsersByName(name: string): Promise<User[]> {
   const trimmed = name.trim();
   if (!trimmed) return [];
-  const client = getDbClient();
 
   // A merge source (mergedIntoUserId set) is on its way out; its target is
   // found by its own name.
-  const exact = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) = LOWER(?) AND mergedIntoUserId IS NULL",
-    [trimmed],
-  );
+  const exact = await usersRepo().listUsersByName(trimmed);
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
-  const prefixed = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%' AND mergedIntoUserId IS NULL",
-    [firstToken],
-  );
+  const prefixed = await usersRepo().listUsersByNamePrefix(firstToken);
   return prefixed.map(rowToUser);
 }
 
@@ -200,10 +165,7 @@ export async function findUsersByName(name: string): Promise<User[]> {
 export async function getUserIdentities(
   userId: string,
 ): Promise<Array<{ kind: string; externalId: string }>> {
-  return getDbClient().query<{ kind: string; externalId: string }>(
-    "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
-    [userId],
-  );
+  return usersRepo().listExternalIds(userId);
 }
 
 /**
@@ -218,16 +180,6 @@ export type IdentityEvent = {
   actor: string;
   before: unknown | null;
   after: unknown | null;
-  createdAt: string;
-};
-
-type IdentityEventRow = {
-  id: string;
-  userId: string;
-  eventType: string;
-  actor: string;
-  beforeJson: string | null;
-  afterJson: string | null;
   createdAt: string;
 };
 
@@ -255,27 +207,10 @@ export async function listUserEvents(
 ): Promise<IdentityEvent[]> {
   const limit = Math.max(0, Math.min(opts.limit ?? 50, 200));
   if (limit === 0) return [];
-  const before = opts.before;
-  const client = getDbClient();
-  if (before) {
-    const rows = await client.query<IdentityEventRow>(
-      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
-           FROM user_identity_events
-          WHERE userId = ? AND createdAt < ?
-          ORDER BY createdAt DESC, rowid DESC
-          LIMIT ?`,
-      [userId, before, limit],
-    );
-    return rows.map(rowToEvent);
-  }
-  const rows = await client.query<IdentityEventRow>(
-    `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
-         FROM user_identity_events
-        WHERE userId = ?
-        ORDER BY createdAt DESC, rowid DESC
-        LIMIT ?`,
-    [userId, limit],
-  );
+  const rows = await usersRepo().listIdentityEvents(userId, {
+    before: opts.before ? opts.before : null,
+    limit,
+  });
   return rows.map(rowToEvent);
 }
 
@@ -293,8 +228,6 @@ export type UserTokenSummary = {
   revokedAt: string | null;
 };
 
-type UserTokenRow = UserTokenSummary;
-
 /**
  * List a user's MCP tokens (without the hash). Used to render the People
  * page token panel — the mint/revoke endpoints + UI dialog ship with the
@@ -302,13 +235,7 @@ type UserTokenRow = UserTokenSummary;
  * can include token summaries.
  */
 export async function listUserTokens(userId: string): Promise<UserTokenSummary[]> {
-  return getDbClient().query<UserTokenRow>(
-    `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
-         FROM user_tokens
-        WHERE userId = ? AND expiresAt IS NULL
-        ORDER BY createdAt DESC`,
-    [userId],
-  );
+  return usersRepo().listUserTokens(userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,19 +266,15 @@ export async function recordIdentityEvent(
   before: unknown | null,
   after: unknown | null,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      randomUUID().replace(/-/g, ""),
-      userId,
-      eventType,
-      actorString(actor),
-      before == null ? null : JSON.stringify(before),
-      after == null ? null : JSON.stringify(after),
-      new Date().toISOString(),
-    ],
-  );
+  await usersRepo().insertIdentityEvent({
+    id: randomUUID().replace(/-/g, ""),
+    userId,
+    eventType,
+    actor: actorString(actor),
+    beforeJson: before == null ? null : JSON.stringify(before),
+    afterJson: after == null ? null : JSON.stringify(after),
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +289,7 @@ export async function recordIdentityEvent(
  * - Otherwise create a new row with `name` from hints (or the email
  *   local-part) and emit `identity_added` with the new row in `afterJson`.
  *
- * Only the create branch is wrapped in `getDbClient().transaction()` so the
+ * Only the create branch is wrapped in `getStorage().transaction()` so the
  * new row + its event land together; the `findUserByEmail` read and the
  * `auto_merge` event above it run outside any transaction.
  */
@@ -385,40 +308,44 @@ export async function findOrCreateUserByEmail(
   const now = new Date().toISOString();
   const name = hints.name?.trim() || email.split("@")[0] || email;
 
-  const created = await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-      [
-        id,
-        name,
-        email,
-        hints.role ?? null,
-        hints.notes ?? null,
-        "[]",
-        hints.preferredChannel ?? "slack",
-        null,
-        now,
-        now,
-      ],
-    );
-    const row = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const storage = getStorage();
+  const created = await storage.transaction(async () => {
+    const row = await usersRepo().insertUser({
+      id,
+      name,
+      email,
+      role: hints.role ?? null,
+      notes: hints.notes ?? null,
+      emailAliases: "[]",
+      preferredChannel: hints.preferredChannel ?? "slack",
+      timezone: null,
+      metadata: null,
+      dailyBudgetUsd: null,
+      status: "active",
+      avatar: null,
+      now,
+    });
     if (!row) throw new Error("Failed to create user");
     await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
   });
   // The org's email domain may come from this user (debounced, post-commit).
-  getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  storage.afterCommit(scheduleOrgDomainRecompute);
 
   return { user: created, created: true };
 }
 
+/**
+ * Mark `sourceId` as merged into `targetId`: from then on identity lookups
+ * resolve to the target and the source can no longer authenticate.
+ */
+export async function markUserMergedInto(sourceId: string, targetId: string): Promise<void> {
+  await usersRepo().markUserMergedInto(sourceId, targetId, new Date().toISOString());
+}
+
 /** A profile lookup can finish after a manual edit. Test the stored value in the write. */
 export async function fillMissingUserTimezone(id: string, timezone: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE users SET timezone = ?, lastUpdatedAt = ? WHERE id = ? AND (timezone IS NULL OR timezone = '')",
-    [timezone, new Date().toISOString(), id],
-  );
+  await usersRepo().fillMissingTimezone(id, timezone, new Date().toISOString());
 }
 
 // ---------------------------------------------------------------------------
@@ -438,12 +365,8 @@ export async function linkIdentity(
   externalId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)", [
-      userId,
-      kind,
-      externalId,
-    ]);
+  await getStorage().transaction(async () => {
+    await usersRepo().insertExternalId(userId, kind, externalId);
     await recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
   });
 }
@@ -459,12 +382,8 @@ export async function unlinkIdentity(
   externalId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?", [
-      userId,
-      kind,
-      externalId,
-    ]);
+  await getStorage().transaction(async () => {
+    await usersRepo().deleteExternalId(userId, kind, externalId);
     await recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
   });
 }
@@ -503,12 +422,16 @@ export async function mintToken(
   const preview = plaintext.slice(-4);
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [tokenId, userId, label, hash, preview, now],
-    );
+  await getStorage().transaction(async () => {
+    await usersRepo().insertUserToken({
+      id: tokenId,
+      userId,
+      label,
+      tokenHash: hash,
+      tokenPreview: preview,
+      createdAt: now,
+      expiresAt: null,
+    });
     await recordIdentityEvent(userId, "token_minted", actor, null, {
       tokenId,
       label,
@@ -534,27 +457,21 @@ export async function mintUserScriptRunToken(
   const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const now = new Date();
-  await getDbClient().run(
-    `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt, expiresAt)
-     VALUES (?, ?, 'script-run', ?, ?, ?, ?)`,
-    [
-      tokenId,
-      userId,
-      sha256Hex(plaintext),
-      plaintext.slice(-4),
-      now.toISOString(),
-      new Date(now.getTime() + ttlMs).toISOString(),
-    ],
-  );
+  await usersRepo().insertUserToken({
+    id: tokenId,
+    userId,
+    label: "script-run",
+    tokenHash: sha256Hex(plaintext),
+    tokenPreview: plaintext.slice(-4),
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+  });
   return { tokenId, plaintext };
 }
 
 /** Revoke a token minted by `mintUserScriptRunToken`. No-op if already revoked. */
 export async function revokeUserScriptRunToken(tokenId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE user_tokens SET revokedAt = ? WHERE id = ? AND expiresAt IS NOT NULL AND revokedAt IS NULL",
-    [new Date().toISOString(), tokenId],
-  );
+  await usersRepo().revokeExpiringUserToken(tokenId, new Date().toISOString());
 }
 
 /**
@@ -562,18 +479,12 @@ export async function revokeUserScriptRunToken(tokenId: string): Promise<void> {
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
 export async function revokeToken(tokenId: string, actor: IdentityActor): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{ userId: string; label: string | null; tokenPreview: string }>(
-      "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
-      [tokenId],
-    );
+  await getStorage().transaction(async () => {
+    const row = await usersRepo().findUserTokenSummary(tokenId);
     if (!row) {
       throw new Error(`Token not found: ${tokenId}`);
     }
-    await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      tokenId,
-    ]);
+    await usersRepo().setUserTokenRevoked(tokenId, new Date().toISOString());
     await recordIdentityEvent(
       row.userId,
       "token_revoked",
@@ -593,14 +504,11 @@ export async function revokeAllUserCredentials(
   userId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     const now = new Date().toISOString();
-    const live = await tx.query<{ id: string; label: string | null; tokenPreview: string }>(
-      "SELECT id, label, tokenPreview FROM user_tokens WHERE userId = ? AND revokedAt IS NULL",
-      [userId],
-    );
+    const live = await usersRepo().listUnrevokedUserTokens(userId);
     for (const token of live) {
-      await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [now, token.id]);
+      await usersRepo().setUserTokenRevoked(token.id, now);
       await recordIdentityEvent(
         userId,
         "token_revoked",
@@ -609,10 +517,7 @@ export async function revokeAllUserCredentials(
         null,
       );
     }
-    await tx.run("UPDATE connector_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL", [
-      now,
-      userId,
-    ]);
+    await usersRepo().spendUnusedConnectorCodes(userId, now);
   });
 }
 
@@ -630,24 +535,15 @@ export async function resolveUserToken(
   plaintext: string,
 ): Promise<{ user: User | null; tokenId: string } | null> {
   const hash = sha256Hex(plaintext);
-  const client = getDbClient();
 
-  const row = await client.get<{
-    id: string;
-    userId: string;
-    revokedAt: string | null;
-    expiresAt: string | null;
-  }>("SELECT id, userId, revokedAt, expiresAt FROM user_tokens WHERE tokenHash = ?", [hash]);
+  const row = await usersRepo().findUserTokenByHash(hash);
   if (!row || row.revokedAt !== null) return null;
   if (row.expiresAt !== null && Date.parse(row.expiresAt) <= Date.now()) return null;
 
   // Best-effort lastUsedAt update — never let a failure here leak to the
   // caller and block a successful token resolution.
   try {
-    await client.run("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      row.id,
-    ]);
+    await usersRepo().touchUserToken(row.id, new Date().toISOString());
   } catch {
     // Never let a `lastUsedAt` update failure leak to the caller.
   }
@@ -661,12 +557,7 @@ export async function resolveUserToken(
  * write lock.
  */
 export async function isLiveUserToken(tokenId: string, userId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found FROM user_tokens
-      WHERE id = ? AND userId = ? AND revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > ?)`,
-    [tokenId, userId, new Date().toISOString()],
-  );
-  return row != null;
+  return usersRepo().isLiveUserToken(tokenId, userId, new Date().toISOString());
 }
 
 // ---------------------------------------------------------------------------

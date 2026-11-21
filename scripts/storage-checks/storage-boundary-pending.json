@@ -89,7 +89,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 397
+    "sites": 387
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -603,13 +603,9 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/be/user-merge-jobs.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 18
-  },
   "src/be/users.ts": {
     "reason": "M2 move: users and RBAC",
-    "sites": 45
+    "sites": 17
   },
   "src/comb/review-batch.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -715,10 +711,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/http/users.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 2
-  },
   "src/http/workflows.ts": {
     "reason": "M2 move: workflows",
     "sites": 1
@@ -777,10 +769,6 @@
   },
   "src/tools/join-swarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/manage-user.ts": {
-    "reason": "M2 move: users and RBAC",
     "sites": 1
   },
   "src/tools/poll-task.ts": {
