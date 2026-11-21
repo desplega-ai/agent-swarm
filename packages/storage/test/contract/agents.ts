@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { AgentsRepository, NewAgent, Storage } from "../../src";
+import { type AgentsRepository, type NewAgent, type Storage, sql } from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
@@ -315,6 +315,36 @@ export function agentsContract(engine: ContractEngine): void {
       }
       expect(await repo.deleteActiveSessionById("s2")).toBe(1);
       expect(await repo.deleteActiveSessionsByAgent("a1")).toBe(1);
+    });
+
+    test("capacity counts in-progress tasks and reviewed offers; daily counts by UTC day", async () => {
+      await repo.insertAgent(newAgent({ id: "a1" }));
+      const task = (
+        id: string,
+        status: string,
+        createdAt: string,
+        agentId: string | null,
+        offeredTo: string | null,
+      ) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "agentId", "offeredTo")
+          VALUES (${id}, 't', ${status}, ${createdAt}, ${createdAt}, ${agentId}, ${offeredTo})`);
+      await task("t1", "in_progress", "2026-11-19T23:59:59.999Z", "a1", null);
+      await task("t2", "reviewing", "2026-11-20T00:00:00.000Z", null, "a1");
+      await task("t3", "reviewing", "2026-11-20T10:00:00.000Z", "a1", null);
+      await task("t4", "completed", "2026-11-21T10:00:00.000Z", "a1", null);
+      await task("t5", "in_progress", "2026-11-21T11:00:00.000Z", null, null);
+      expect(await repo.countActiveTasks("a1")).toBe(2);
+      expect(await repo.countActiveTasks("nobody")).toBe(0);
+      expect(await repo.dailyTaskCounts("a1", "2026-11-20")).toEqual([
+        { date: "2026-11-20", count: 1 },
+        { date: "2026-11-21", count: 1 },
+      ]);
+      expect(await repo.dailyTaskCounts("a1", "2026-11-01")).toEqual([
+        { date: "2026-11-19", count: 1 },
+        { date: "2026-11-20", count: 1 },
+        { date: "2026-11-21", count: 1 },
+      ]);
     });
   });
 }

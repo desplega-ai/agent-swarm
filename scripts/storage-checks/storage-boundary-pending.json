@@ -99,10 +99,6 @@
     "reason": "M2 move: every domain (see the domain map in the ledger)",
     "sites": 397
   },
-  "src/be/db/agents.ts": {
-    "reason": "M2 move: agents",
-    "sites": 3
-  },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 6

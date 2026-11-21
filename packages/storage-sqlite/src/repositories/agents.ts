@@ -96,4 +96,17 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
         WHEN 'stopped' THEN 4
       END, name, rowid`);
   }
+
+  async dailyTaskCounts(
+    agentId: string,
+    sinceDay: string,
+  ): Promise<{ date: string; count: number }[]> {
+    const rows = await this.db.query<{ date: string; count: number | string }>(sql`
+      SELECT substr("createdAt", 1, 10) AS date, COUNT(*) AS count
+        FROM agent_tasks
+       WHERE "agentId" = ${agentId} AND "createdAt" >= ${sinceDay}
+       GROUP BY date
+       ORDER BY date`);
+    return rows.map((row) => ({ date: row.date, count: Number(row.count) }));
+  }
 }
