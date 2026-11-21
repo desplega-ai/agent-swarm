@@ -5,6 +5,7 @@ import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
 import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
+import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { ModelsRepository } from "./repositories/models";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 
@@ -15,6 +16,7 @@ export type Repositories = {
   runtimePools: RuntimePoolsRepository;
   config: ConfigRepository;
   agents: AgentsRepository;
+  maintenance: MaintenanceRepository;
 };
 
 /**
