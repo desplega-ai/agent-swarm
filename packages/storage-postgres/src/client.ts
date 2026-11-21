@@ -99,6 +99,13 @@ export type TransactionEndInfo = {
 type TxContext = {
   closed: boolean;
   handle: TxHandle;
+  /**
+   * Shared by the outermost transaction and its savepoints: the SQLSTATE of a
+   * retryable failure (40001, 40P01) that a statement hit, even when the
+   * callback caught it. Postgres aborts the transaction either way, so the
+   * client retries the whole callback (D6) instead of failing at COMMIT.
+   */
+  failure: { retryable: string | null };
   afterCommit: (() => void | Promise<void>)[];
   afterRollback: (() => void)[];
   attemptRollback: (() => void)[];
@@ -167,6 +174,8 @@ export class PostgresClient implements DbClient {
     try {
       return await this.handle().unsafe(text, bindParams(params));
     } catch (err) {
+      const ctx = txContext.getStore();
+      if (ctx && !ctx.closed && isRetryable(err)) ctx.failure.retryable ??= sqlstateOf(err) ?? "";
       throw mapPostgresError(err, this.options.checkMessages);
     } finally {
       this.options.observer?.onStatement?.(text, performance.now() - started);
@@ -232,6 +241,7 @@ export class PostgresClient implements DbClient {
             ctx = {
               closed: false,
               handle,
+              failure: { retryable: null },
               afterCommit: [],
               afterRollback: [],
               attemptRollback: [],
@@ -265,15 +275,19 @@ export class PostgresClient implements DbClient {
         }
         const err = mapPostgresError(rawErr, this.options.checkMessages);
         if (failed) runHooks(failed.attemptRollback, "onAttemptRollback");
-        if (isRetryable(rawErr) && attempt < this.retry.maxAttempts) {
+        // A retryable failure the callback swallowed still aborted the transaction.
+        const retryState = isRetryable(rawErr)
+          ? (sqlstateOf(rawErr) ?? "")
+          : (failed?.failure.retryable ?? null);
+        if (retryState !== null && attempt < this.retry.maxAttempts) {
           this.retriedAttempts += 1;
-          this.options.onRetry?.(sqlstateOf(rawErr) ?? "", attempt);
-          stats?.retries.push(sqlstateOf(rawErr) ?? "");
+          this.options.onRetry?.(retryState, attempt);
+          stats?.retries.push(retryState);
           await Bun.sleep(this.backoffMs(attempt));
           continue;
         }
         if (failed) runHooks(failed.afterRollback, "afterRollback");
-        end(attempt, isRetryable(rawErr) ? "exhausted" : "error");
+        end(attempt, retryState !== null ? "exhausted" : "error");
         throw err;
       }
     }
@@ -291,6 +305,7 @@ export class PostgresClient implements DbClient {
         const inner: TxContext = {
           closed: false,
           handle: sp,
+          failure: outer.failure,
           // Hooks registered inside a savepoint belong to the outermost transaction.
           afterCommit: outer.afterCommit,
           afterRollback: outer.afterRollback,
@@ -303,6 +318,7 @@ export class PostgresClient implements DbClient {
         }
       });
     } catch (err) {
+      if (isRetryable(err)) outer.failure.retryable ??= sqlstateOf(err) ?? "";
       throw mapPostgresError(err, this.options.checkMessages);
     }
   }

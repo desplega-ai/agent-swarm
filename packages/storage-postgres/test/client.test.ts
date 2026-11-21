@@ -150,6 +150,37 @@ describe("postgres client", () => {
     expect(attemptRollbacks).toBe(client.retriedAttempts - before);
   });
 
+  test("a serialization failure the callback swallowed still retries the whole callback", async () => {
+    let attempts = 0;
+    const value = await client.transaction(async () => {
+      attempts += 1;
+      await client.run(`INSERT INTO t VALUES ($1, $2, $3)`, [`swallow-${attempts}`, "S", 1]);
+      if (attempts === 1) {
+        // A caller that logs and continues (the hazard): Postgres has aborted the transaction.
+        try {
+          await client.run(
+            `DO $$ BEGIN RAISE EXCEPTION 'conflict' USING ERRCODE = '40001'; END $$`,
+          );
+        } catch {
+          // swallowed
+        }
+        try {
+          await client.transaction(async () => {
+            await client.run(`SELECT 1`);
+          });
+        } catch {
+          // a later statement fails too (25P02); also swallowed
+        }
+      }
+      return attempts;
+    });
+    expect(value).toBe(2);
+    const rows = await client.query<{ id: string }>(
+      `SELECT id FROM t WHERE id LIKE 'swallow-%' ORDER BY id`,
+    );
+    expect(rows.map((row) => row.id)).toEqual(["swallow-2"]);
+  });
+
   test("tx-replay runs each outermost callback twice and keeps only the second run", async () => {
     const replay = createPostgresClient(scratch.url, { max: 2, txReplay: true });
     try {
