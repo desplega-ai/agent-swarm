@@ -133,6 +133,22 @@ AgentMail archives verified inbound deliveries before acknowledging them and ret
 - [Public ranking](https://docs.agent-swarm.dev/docs/reference/telemetry#public-ranking): opt in with **Get ranked** (Settings → Configuration → Branding) to rank your install by tokens used on [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking). It shows at the next hourly refresh. Token totals are public and exact; telemetry, the organization name and website must be set.
 - Help: [contact@desplega.sh](mailto:contact@desplega.sh) · [Discord](https://discord.gg/KZgfyyDVZa)
 
+## Slack theme
+
+These Slack custom themes come from the Hive design tokens in [`apps/ui/src/styles/globals.css`](./apps/ui/src/styles/globals.css). Paste one via Slack **Preferences → Themes → Custom theme**.
+
+Hive dark:
+
+```
+#18181B,#27272A,#FE9A00,#09090B,#27272A,#FAFAFA,#00C951,#FF6467
+```
+
+Hive light:
+
+```
+#FAFAFA,#F4F4F5,#BB4D00,#FAFAFA,#F4F4F5,#09090B,#00BC7D,#E7000B
+```
+
 ## Contributing
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md), fork the repository, create a branch, and open a PR. Discuss ideas on [Discord](https://discord.gg/KZgfyyDVZa).
