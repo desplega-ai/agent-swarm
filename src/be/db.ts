@@ -12197,12 +12197,12 @@ function rowToUser(row: UserRow): User {
 }
 
 export async function getUserById(id: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const row = await getStorage().repos.users.findUserById(id);
   return row ? rowToUser(row) : null;
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  const rows = await getDbClient().query<UserRow>("SELECT * FROM users ORDER BY name");
+  const rows = await getStorage().repos.users.listUsers();
   return rows.map(rowToUser);
 }
 
@@ -12221,29 +12221,25 @@ export async function createUser(data: {
 }): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
-  const row = await getDbClient().get<UserRow>(
-    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, avatar, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.email ?? null,
-      data.role ?? null,
-      data.notes ?? null,
-      JSON.stringify(data.emailAliases ?? []),
-      data.preferredChannel ?? "slack",
-      data.timezone ?? null,
-      data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
-      data.dailyBudgetUsd ?? null,
-      data.status ?? "active",
-      data.avatar ? JSON.stringify(data.avatar) : null,
-      now,
-      now,
-    ],
-  );
+  const storage = getStorage();
+  const row = await storage.repos.users.insertUser({
+    id,
+    name: data.name,
+    email: data.email ?? null,
+    role: data.role ?? null,
+    notes: data.notes ?? null,
+    emailAliases: JSON.stringify(data.emailAliases ?? []),
+    preferredChannel: data.preferredChannel ?? "slack",
+    timezone: data.timezone ?? null,
+    metadata: data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
+    dailyBudgetUsd: data.dailyBudgetUsd ?? null,
+    status: data.status ?? "active",
+    avatar: data.avatar ? JSON.stringify(data.avatar) : null,
+    now,
+  });
   if (!row) throw new Error("Failed to create user");
   // The org's email domain may come from this user (debounced, post-commit).
-  getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  storage.afterCommit(scheduleOrgDomainRecompute);
   return rowToUser(row);
 }
 
@@ -12264,66 +12260,27 @@ export async function updateUser(
     avatar: UserAvatar | null;
   }>,
 ): Promise<User | null> {
-  const sets: string[] = [];
-  const params: (string | number | null)[] = [];
+  const update: import("@desplega/storage").UserColumnUpdate = {};
+  if (data.name !== undefined) update.name = data.name;
+  if (data.email !== undefined) update.email = data.email;
+  if (data.role !== undefined) update.role = data.role;
+  if (data.notes !== undefined) update.notes = data.notes;
+  if (data.emailAliases !== undefined) update.emailAliases = JSON.stringify(data.emailAliases);
+  if (data.preferredChannel !== undefined) update.preferredChannel = data.preferredChannel;
+  if (data.timezone !== undefined) update.timezone = data.timezone;
+  if (data.metadata !== undefined)
+    update.metadata = data.metadata === null ? null : JSON.stringify(data.metadata);
+  if (data.dailyBudgetUsd !== undefined) update.dailyBudgetUsd = data.dailyBudgetUsd;
+  if (data.status !== undefined) update.status = data.status;
+  if (data.avatar !== undefined)
+    update.avatar = data.avatar === null ? null : JSON.stringify(data.avatar);
 
-  if (data.name !== undefined) {
-    sets.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.email !== undefined) {
-    sets.push("email = ?");
-    params.push(data.email);
-  }
-  if (data.role !== undefined) {
-    sets.push("role = ?");
-    params.push(data.role);
-  }
-  if (data.notes !== undefined) {
-    sets.push("notes = ?");
-    params.push(data.notes);
-  }
-  if (data.emailAliases !== undefined) {
-    sets.push("emailAliases = ?");
-    params.push(JSON.stringify(data.emailAliases));
-  }
-  if (data.preferredChannel !== undefined) {
-    sets.push("preferredChannel = ?");
-    params.push(data.preferredChannel);
-  }
-  if (data.timezone !== undefined) {
-    sets.push("timezone = ?");
-    params.push(data.timezone);
-  }
-  if (data.metadata !== undefined) {
-    sets.push("metadata = ?");
-    params.push(data.metadata === null ? null : JSON.stringify(data.metadata));
-  }
-  if (data.dailyBudgetUsd !== undefined) {
-    sets.push("dailyBudgetUsd = ?");
-    params.push(data.dailyBudgetUsd);
-  }
-  if (data.status !== undefined) {
-    sets.push("status = ?");
-    params.push(data.status);
-  }
-  if (data.avatar !== undefined) {
-    sets.push("avatar = ?");
-    params.push(data.avatar === null ? null : JSON.stringify(data.avatar));
-  }
+  if (Object.keys(update).length === 0) return getUserById(id);
 
-  if (sets.length === 0) return getUserById(id);
-
-  sets.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-
-  const row = await getDbClient().get<UserRow>(
-    `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const storage = getStorage();
+  const row = await storage.repos.users.updateUser(id, update, new Date().toISOString());
   if (row) {
-    getDbClient().afterCommit(() => {
+    storage.afterCommit(() => {
       invalidateTelemetryUserRole(id);
       scheduleOrgDomainRecompute();
     });
@@ -12345,22 +12302,13 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
   }
 
   return await getDbClient().transaction(async (tx) => {
-    const userExists = (
-      await tx.get<{ present: number }>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-        [id],
-      )
-    )?.present;
-    if (!userExists) return false;
+    const users = getStorage().repos.users;
+    if (!(await users.userExists(id))) return false;
 
     if (replacementUserId) {
-      const replacementExists = (
-        await tx.get<{ present: number }>(
-          "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-          [replacementUserId],
-        )
-      )?.present;
-      if (!replacementExists) throw new Error("Replacement user not found");
+      if (!(await users.userExists(replacementUserId))) {
+        throw new Error("Replacement user not found");
+      }
     }
 
     // Preserve rows that carry user attribution but lack ON DELETE semantics.
@@ -12428,14 +12376,14 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
 
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
-    const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
-    if (result.changes > 0) {
-      getDbClient().afterCommit(() => {
+    const deleted = await users.deleteUser(id);
+    if (deleted > 0) {
+      getStorage().afterCommit(() => {
         invalidateTelemetryUserRole(id);
         scheduleOrgDomainRecompute();
       });
     }
-    return result.changes > 0;
+    return deleted > 0;
   });
 }
 
@@ -12588,23 +12536,7 @@ export async function listFavorites(opts: {
   itemType?: FavoriteItemType;
   itemIds?: string[];
 }): Promise<UserFavorite[]> {
-  const conditions = ["favoriteScope = ?"];
-  const params: string[] = [opts.favoriteScope];
-
-  if (opts.itemType) {
-    conditions.push("itemType = ?");
-    params.push(opts.itemType);
-  }
-
-  if (opts.itemIds && opts.itemIds.length > 0) {
-    conditions.push(`itemId IN (${opts.itemIds.map(() => "?").join(",")})`);
-    params.push(...opts.itemIds);
-  }
-
-  const rows = await getDbClient().query<UserFavoriteRow>(
-    `SELECT * FROM user_favorites WHERE ${conditions.join(" AND ")} ORDER BY lastUpdatedAt DESC`,
-    params,
-  );
+  const rows = await getStorage().repos.users.listFavorites(opts);
   return rows.map(rowToUserFavorite);
 }
 
@@ -12636,26 +12568,20 @@ export async function setFavorite(opts: {
   // A `key` item id arrives normalized: `PUT /api/favorites` normalizes it and answers 400.
   const itemId = opts.itemId;
   if (!opts.favorite) {
-    await getDbClient().run(
-      "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",
-      [opts.favoriteScope, opts.itemType, itemId],
-    );
+    await getStorage().repos.users.deleteFavorite(opts.favoriteScope, opts.itemType, itemId);
     return null;
   }
 
   const now = new Date().toISOString();
   const actor = opts.actorId ?? opts.userId ?? opts.favoriteScope;
-  const row = await getDbClient().get<UserFavoriteRow>(
-    `INSERT INTO user_favorites (
-         favoriteScope, userId, itemType, itemId, createdAt, lastUpdatedAt, created_by, updated_by
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(favoriteScope, itemType, itemId) DO UPDATE SET
-         lastUpdatedAt = excluded.lastUpdatedAt,
-         updated_by = excluded.updated_by
-       RETURNING *`,
-    [opts.favoriteScope, opts.userId ?? null, opts.itemType, itemId, now, now, actor, actor],
-  );
+  const row = await getStorage().repos.users.upsertFavorite({
+    favoriteScope: opts.favoriteScope,
+    userId: opts.userId ?? null,
+    itemType: opts.itemType,
+    itemId,
+    actor,
+    now,
+  });
   if (!row) throw new Error("Failed to set favorite");
   return rowToUserFavorite(row);
 }

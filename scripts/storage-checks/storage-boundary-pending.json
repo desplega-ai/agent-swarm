@@ -15,10 +15,6 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 1
   },
-  "src/apps/user-config.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 3
-  },
   "src/apps/version.ts": {
     "reason": "M2 move: pages, metrics, apps",
     "sites": 2
@@ -46,10 +42,6 @@
   "src/be/checklist.ts": {
     "reason": "M2 move: tasks",
     "sites": 7
-  },
-  "src/be/connector-codes.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 6
   },
   "src/be/db-queries/mcp-oauth.ts": {
     "reason": "M2 move: integrations",
@@ -85,7 +77,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 397
+    "sites": 387
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -391,13 +383,9 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 1
   },
-  "src/be/rbac-audit.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 3
-  },
   "src/be/rbac-roles.ts": {
     "reason": "M2 move: users and RBAC",
-    "sites": 30
+    "sites": 10
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
@@ -587,13 +575,9 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/be/user-merge-jobs.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 18
-  },
   "src/be/users.ts": {
     "reason": "M2 move: users and RBAC",
-    "sites": 45
+    "sites": 17
   },
   "src/comb/review-batch.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -695,10 +679,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/http/users.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 2
-  },
   "src/http/workflows.ts": {
     "reason": "M2 move: workflows",
     "sites": 1
@@ -735,13 +715,9 @@
     "reason": "M2 move: tasks",
     "sites": 1
   },
-  "src/telemetry-identity.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
-  },
   "src/telemetry-snapshot.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 9
+    "sites": 3
   },
   "src/telemetry-trigger.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -757,10 +733,6 @@
   },
   "src/tools/join-swarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/manage-user.ts": {
-    "reason": "M2 move: users and RBAC",
     "sites": 1
   },
   "src/tools/poll-task.ts": {

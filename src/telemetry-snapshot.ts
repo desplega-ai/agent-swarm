@@ -9,6 +9,7 @@
  */
 
 import { getDbClient } from "./be/db/runtime";
+import { getStorage } from "./be/storage";
 import {
   isTelemetryReady,
   setTelemetryFunctionResolver,
@@ -45,13 +46,8 @@ async function count(sql: string, params: unknown[] = []): Promise<number> {
 
 /** Read-only aggregates over the user, token, identity, task and agent tables. */
 export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot> {
-  const linked = async (kind: string) =>
-    count(
-      `SELECT COUNT(DISTINCT x.userId) AS n
-         FROM user_external_ids x JOIN users u ON u.id = x.userId
-        WHERE u.status = 'active' AND x.kind = ?`,
-      [kind],
-    );
+  const users = getStorage().repos.users;
+  const linked = (kind: string) => users.countActiveUsersLinked(kind);
   const since = new Date(now - ACTIVE_WINDOW_MS).toISOString();
   const [
     usersTotal,
@@ -67,33 +63,16 @@ export async function collectOrgSnapshot(now = Date.now()): Promise<OrgSnapshot>
     usersActive7d,
     agentsTotal,
   ] = await Promise.all([
-    count(`SELECT COUNT(*) AS n FROM users WHERE status = 'active'`),
-    count(`SELECT COUNT(*) AS n FROM users WHERE status = 'suspended'`),
-    count(
-      `SELECT COUNT(DISTINCT u.id) AS n
-         FROM users u
-         JOIN principal_roles pr ON pr.principalType = 'user' AND pr.principalId = u.id
-         JOIN roles r ON r.id = pr.roleId
-        WHERE u.status = 'active' AND r.grantsAll = 1`,
-    ),
-    count(
-      `SELECT COUNT(*) AS n
-         FROM users u
-        WHERE u.status = 'active'
-          AND ((u.email IS NOT NULL AND TRIM(u.email) <> '')
-               OR EXISTS (SELECT 1 FROM user_tokens t WHERE t.userId = u.id AND t.revokedAt IS NULL))`,
-    ),
+    users.countUsersByStatus("active"),
+    users.countUsersByStatus("suspended"),
+    users.countActiveGrantAllUsers(),
+    users.countActiveUsersWithLogin(),
     linked("slack"),
     linked("github"),
     linked("gitlab"),
     linked("linear"),
     linked("jira"),
-    count(
-      `SELECT COUNT(DISTINCT x.userId) AS n
-         FROM user_external_ids x JOIN users u ON u.id = x.userId
-        WHERE u.status = 'active' AND x.kind NOT IN (${NAMED_LINK_KINDS.map(() => "?").join(", ")})`,
-      [...NAMED_LINK_KINDS],
-    ),
+    users.countActiveUsersLinkedOutside(NAMED_LINK_KINDS),
     count(
       `SELECT COUNT(DISTINCT requestedByUserId) AS n
          FROM agent_tasks

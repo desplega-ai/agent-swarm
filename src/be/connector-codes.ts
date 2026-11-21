@@ -18,9 +18,11 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { getDbClient } from "./db";
 import { assertMayActOnOperatorGrantedTarget, userHoldsOperatorGrantedRole } from "./rbac-roles";
+import { getStorage } from "./storage";
 import { type IdentityActor, mintToken, recordIdentityEvent } from "./users";
+
+const usersRepo = () => getStorage().repos.users;
 
 export type ConnectorCodeKind = "connector" | "invite";
 
@@ -49,14 +51,18 @@ export async function createConnectorCode(
   const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
   // Check and insert under one write lock, so an operator grant cannot land
   // between them (OperatorGrantedTargetError for another user's auditor).
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     await assertMayActOnOperatorGrantedTarget(actor, userId);
-    await tx.run(
-      `INSERT INTO connector_codes
-         (code_hash, user_id, label, actor_kind, actor_id, created_at, expires_at, kind)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [sha256Hex(code), userId, label, actor.kind, actor.id, now.toISOString(), expiresAt, kind],
-    );
+    await usersRepo().insertConnectorCode({
+      codeHash: sha256Hex(code),
+      userId,
+      label,
+      actorKind: actor.kind,
+      actorId: actor.id,
+      createdAt: now.toISOString(),
+      expiresAt,
+      kind,
+    });
   });
   return { code, expiresAt };
 }
@@ -74,20 +80,13 @@ export async function exchangeConnectorCode(
 ): Promise<{ token: string; userId: string } | null> {
   const kind = opts.kind ?? "connector";
   const nowIso = (opts.now ?? new Date()).toISOString();
-  return getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{
-      user_id: string;
-      label: string;
-      actor_kind: IdentityActor["kind"];
-      actor_id: string;
-    }>(
-      `UPDATE connector_codes SET used_at = ?
-        WHERE code_hash = ? AND used_at IS NULL AND expires_at > ? AND kind = ?
-        RETURNING user_id, label, actor_kind, actor_id`,
-      [nowIso, sha256Hex(code), nowIso, kind],
-    );
+  return getStorage().transaction(async () => {
+    const row = await usersRepo().redeemConnectorCode(sha256Hex(code), kind, nowIso);
     if (!row) return null;
-    const actor: IdentityActor = { kind: row.actor_kind, id: row.actor_id };
+    const actor: IdentityActor = {
+      kind: row.actor_kind as IdentityActor["kind"],
+      id: row.actor_id,
+    };
     // Another user's code must not become a credential for an operator-granted
     // role the target gained after the code was created. The code is spent.
     if (
@@ -99,11 +98,8 @@ export async function exchangeConnectorCode(
     }
 
     if (kind === "invite") {
-      const activated = await tx.run(
-        "UPDATE users SET status = 'active', lastUpdatedAt = ? WHERE id = ? AND status = 'invited'",
-        [nowIso, row.user_id],
-      );
-      if (activated.changes === 0) return null;
+      const activated = await usersRepo().activateInvitedUser(row.user_id, nowIso);
+      if (activated === 0) return null;
       await recordIdentityEvent(
         row.user_id,
         "status_changed",
@@ -122,18 +118,11 @@ export async function exchangeConnectorCode(
 
 /** Delete a user's unused invite codes, so a re-invite leaves one live link. */
 export async function deleteUnusedInviteCodes(userId: string): Promise<number> {
-  const result = await getDbClient().run(
-    "DELETE FROM connector_codes WHERE user_id = ? AND kind = 'invite' AND used_at IS NULL",
-    [userId],
-  );
-  return result.changes;
+  return usersRepo().deleteUnusedInviteCodes(userId);
 }
 
 /** Delete codes that expired more than 1h ago. Returns the number of deleted rows. */
 export async function deleteExpiredConnectorCodes(now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - CONNECTOR_CODE_RETENTION_MS).toISOString();
-  const result = await getDbClient().run("DELETE FROM connector_codes WHERE expires_at < ?", [
-    cutoff,
-  ]);
-  return result.changes;
+  return usersRepo().deleteConnectorCodesExpiredBefore(cutoff);
 }

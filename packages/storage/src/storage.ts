@@ -8,7 +8,9 @@ import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { ModelsRepository } from "./repositories/models";
+import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { UsersRepository } from "./repositories/users";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
@@ -19,6 +21,8 @@ export type Repositories = {
   agents: AgentsRepository;
   maintenance: MaintenanceRepository;
   assets: AssetsRepository;
+  users: UsersRepository;
+  rbac: RbacRepository;
 };
 
 /**
