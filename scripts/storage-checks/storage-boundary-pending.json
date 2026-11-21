@@ -1,7 +1,7 @@
 {
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 6
+    "sites": 4
   },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",

@@ -301,14 +301,6 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
-import {
-  USER_REFERENCE_COLUMNS_SQL,
-  type UserReferenceRow,
-  userReferenceRewriteSql,
-  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
-  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
-  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
-} from "./db/user-references";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
@@ -9440,7 +9432,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     throw new Error("Replacement user must differ from deleted user");
   }
 
-  return await getDbClient().transaction(async (tx) => {
+  return await getStorage().transaction(async () => {
     const users = getStorage().repos.users;
     if (!(await users.userExists(id))) return false;
 
@@ -9455,7 +9447,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
     // recreating that table, so discover those two known logical references as
     // well until the table is next rebuilt with its original constraints.
-    const references = await tx.query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
+    const references = await users.listUserReferenceColumns();
     const replacement = replacementUserId ?? null;
     // The human-free rule only asks whether a task's requester or its workflow
     // run's creator is NULL, so only clearing them (no replacement) can change a
@@ -9471,10 +9463,8 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // touch only this user's runs instead of parsing the JSON of every row
     // (153 s on 493k prod rows). The sealed replay copy is what a resume
     // reads, so rewrite it first, while the scrubbed column still matches.
-    const sealedContexts = await tx.query<{ id: string; context_replay: string }>(
-      WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
-      [id],
-    );
+    const requesterRunIds = await users.listWorkflowRunIdsRequestedBy(id);
+    const sealedContexts = await users.listSealedWorkflowContextsRequestedBy(requesterRunIds, id);
     for (const row of sealedContexts) {
       let context: Record<string, unknown>;
       try {
@@ -9493,16 +9483,12 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
         sealJson({ ...context, swarm }),
       );
     }
-    if (replacementUserId) {
-      await tx.run(WORKFLOW_CONTEXT_SET_REQUESTER_SQL, [replacementUserId, id]);
-    } else {
-      await tx.run(WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL, [id]);
-    }
+    await users.rewriteWorkflowRunContextRequester(requesterRunIds, id, replacement);
 
     // Migration 319 indexes every discovered column (the user-delete-perf test
     // pins the plans), so these are index lookups rather than table scans.
     for (const reference of references) {
-      await tx.run(userReferenceRewriteSql(reference), [replacement, id]);
+      await users.rewriteUserReferenceColumn(reference, id, replacement);
     }
 
     await reclassifyTaskHumanFree(reclassifySeedIds);
