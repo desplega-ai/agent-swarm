@@ -159,7 +159,9 @@ export function modelsContract(engine: ContractEngine): void {
       await repo.insertProfile(newProfile({ name: "target" }));
       await repo.insertProfile(newProfile({ name: "b", fallbacks: '["target"]' }));
       await repo.insertProfile(newProfile({ name: "a", fallbacks: '["x","target"]' }));
-      await repo.insertProfile(newProfile({ name: "bad", fallbacks: "not json" }));
+      // fallbacks is jsonb on Postgres, so unparseable text cannot be stored;
+      // a stored document that is not a list of names lists nothing.
+      await repo.insertProfile(newProfile({ name: "bad", fallbacks: '{"k":"x"}' }));
       expect(await repo.listProfilesWithFallback("target")).toEqual(["a", "b"]);
 
       const group = await repo.insertGroup({
