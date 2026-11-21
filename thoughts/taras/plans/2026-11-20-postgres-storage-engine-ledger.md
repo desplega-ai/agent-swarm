@@ -41,7 +41,7 @@ Last updated part 6 (head `61477a358`).
 |---|---|---|---|
 | 1 | `bun run e2e:strict` (SQLite) | part 6, head `f1e1b2275` | **pass** (exit 0): 236 passed, 0 failed, 2 flaky (`slack-lead-follow-up-card`, `model-group-resolution`, both flaky before this work). `task-statuses` 10/10. |
 | 2 | `bun run e2e:strict --engine postgres` | part 6, heads `a94edbdad` and `16631956a` | **fail / incomplete**: both runs hit the run timeout (50 and 65 min). Run 2: 196 passed, 54 failed attempts. Fixed groups re-pass with `--only`. Open: retry rates at task creation (D7, part 7 STOP-ASK). JSON key order decided part 7 (the two scenarios pass on Postgres). |
-| 3, 4, 5 | same scenario list, `--tx-replay` on Postgres, divergence scenarios on Postgres | | not run on Postgres yet (5 of the 11 divergence scenarios pass on Postgres with `--only`; `divergence-values` fails on JSON key order) |
+| 3, 4, 5 | same scenario list, `--tx-replay` on Postgres, divergence scenarios on Postgres | | not run on Postgres yet (6 of the 11 divergence scenarios pass on Postgres with `--only`; `divergence-values` passes since part 7) |
 | 6 | no new coverage exclusion | | not checked yet |
 | 7 | `bun run check:schema-parity` | part 6, head `16631956a` | **pass**: 0 unexplained, 164 allowlisted |
 | 8 | no change to base migration files | part 6, head `61477a358` | **pass**: `git diff --name-status 99d7de13a -- 'src/be/migrations/*.sql'` lists 6 added files, 0 modified, deleted or renamed |
@@ -54,7 +54,7 @@ Last updated part 6 (head `61477a358`).
 | 15 | `bun run check:tx-callbacks` | part 6 | **pass** |
 | 16 | existing gates | part 6 | `lint`, `lint:slop`, `tsc:check:tsc`, `check-db-boundary.sh`, `check-async-db-seam.sh`, `check-floating-promises.ts`, `check-promise-sinks.ts`, `check-audit-columns.sh`, `check:unit-test-allowlist`: pass. `test:root -- --parallel=4` (head `f1e1b2275`): exit 1, 23,077 pass / 22 fail. 2 were branch regressions, fixed in `61477a358` (package-publish: the CLI bundle imported `bun`; the routingAffinity inventory count). The other 20 fail at the base commit or are listed there: AgentMail webhooks 8, realtime transport 7, GitLab event names 2, Slack config reload 1 (load), `initTelemetry` activation funnel 1 (fails alone at the base commit, `pg-base` worktree, part 6). `e2e:ui`: not re-run in part 6. |
 | 17 | `bun run docs:openapi` | part 6 | diff adds only `dialect` on the db-query response (an engine field) |
-| 18 | `bun run test:storage` | part 6, head `14f212978` | **pass**: SQLite 398/0, Postgres 447/0 |
+| 18 | `bun run test:storage` | part 7, head `243a93a9e` | **pass**: SQLite 398/0, Postgres 448/0 (new: isolation test) |
 | 19 to 26 | data copy, bench report, stress, CI, docs, replica blockers, PR | | not done (M6, M7). Bench and stress tooling exist (M5). |
 
 ## Failures at the base commit
