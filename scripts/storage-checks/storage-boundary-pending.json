@@ -695,10 +695,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 5
   },
-  "src/http/agents.ts": {
-    "reason": "M2 move: agents",
-    "sites": 1
-  },
   "src/http/approval-requests.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
