@@ -416,13 +416,10 @@ export abstract class BaseAssetsRepository implements AssetsRepository {
 
   // ---- asset keys across resources ----
 
-  async listUserCreatedKeys(userId: string, limit: number): Promise<string[]> {
-    const rows = await this.db.query<{ key: string }>(sql`
-      SELECT "key", MAX("createdAt") AS newest FROM (
-        SELECT "key", "createdAt" FROM scheduled_tasks WHERE created_by = ${userId}
-        UNION ALL SELECT "key", "createdAt" FROM pages WHERE created_by = ${userId}
-        UNION ALL SELECT "key", "createdAt" FROM workflows WHERE created_by = ${userId}
-      ) AS created GROUP BY "key" ORDER BY newest DESC, "key" LIMIT ${limit}`);
-    return rows.map((row) => row.key);
-  }
+  /**
+   * Engine-specific: the three `createdAt` columns are stored text on SQLite
+   * (compared as text, mixed formats included) and typed differently on other
+   * engines, so the union needs each engine's text rendering.
+   */
+  abstract listUserCreatedKeys(userId: string, limit: number): Promise<string[]>;
 }

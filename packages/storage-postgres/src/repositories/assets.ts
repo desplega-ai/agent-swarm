@@ -87,4 +87,22 @@ export class PostgresAssetsRepository extends BaseAssetsRepository {
        WHERE "agentId" = ${agentId} OR "agentName" = ${agentName}
        ORDER BY "_rowid"`);
   }
+
+  /**
+   * SQLite compares the stored text: scheduled_tasks keeps ISO with ms and Z,
+   * pages the space format, workflows is text (mixed formats) already. Each
+   * timestamptz column is rendered in its SQLite text so MAX and the order
+   * compare the same strings (byte order, C collation).
+   */
+  async listUserCreatedKeys(userId: string, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ key: string }>(sql`
+      SELECT "key", MAX("createdAt") AS newest FROM (
+        SELECT "key", to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+          FROM scheduled_tasks WHERE created_by = ${userId}
+        UNION ALL SELECT "key", to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+          FROM pages WHERE created_by = ${userId}
+        UNION ALL SELECT "key", "createdAt" FROM workflows WHERE created_by = ${userId}
+      ) AS created GROUP BY "key" ORDER BY newest DESC, "key" LIMIT ${limit}`);
+    return rows.map((row) => row.key);
+  }
 }
