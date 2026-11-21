@@ -17,7 +17,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
-| M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
+| M5 Contract on Postgres | in progress (part 10): D7 applied to the poll claim (87.5% -> 0%), task finish (71.7% -> 0%) and unkeyed task creation (68.6% -> 0%, `7084a65ef`); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
 | M6 Data copy | done (part 9): `agent-swarm db-copy`, CLI and check-20 scenario `data-copy`, base-db fixture boots on Postgres through the copy (check 10), 4 contract tests | `f0480cc9a` |
 | M7 Delivery | in progress (part 9): CI, chart, compose, docs, runbook, replica blockers done; PR not opened (STOP-ASK on unkeyed task creation retries; `github-emulate-flows` intermittent on Postgres) | `52bf8352c` |
 
@@ -416,6 +416,33 @@ Accepted exceptions (Daniel, 2026-11-21, part 9; no code change on these paths):
 
 With these and the keyed-creation exception, the retry-rate part of check 21 passes with recorded exceptions.
 
+### Part 10: unkeyed task creation fixed (Daniel, 2026-11-21)
+
+Daniel chose `fix` for unkeyed task creation (`POST /api/tasks` with no idempotency key, 58.3% in part 9): the task-finish mechanism, READ COMMITTED with explicit row locks.
+
+Applied (commit `7084a65ef`): the REST create passes `{ readCommitted: true }` to `createTaskExtended` (`src/be/db.ts`); its INSERT transaction then runs with `isolation: "read committed"` when it is the outermost transaction. Reason in the code. What SERIALIZABLE guarded, and how each holds:
+
+- Parent key re-read (a chain move can commit between the parent read and the INSERT): the parent row is locked `FOR UPDATE` before the read, so an in-flight move commits first.
+- Linear tracker dedup (`task:trackers:linear:` contextKey) and the workflow step check: no row to lock. A create that needs either stays SERIALIZABLE (same transaction, same code).
+- Routing snapshot and human-free class: read-only inputs, no invariant.
+
+New scenarios (flow `storage-engine-parity`): `stress-task-create` (12 workers, 60 unkeyed creates in one tick, 24 of them children of one keyed parent; asserts no 5xx, 60 distinct 201s, each child has the parent's key and id, one create log per task) and `divergence-tracker-dedup` (6 creates on one tracker key make one task). With the tracker split removed, `divergence-tracker-dedup` fails on Postgres 3 of 3 (6 tasks made), so it guards the split. Both pass on both engines.
+
+Measurement: same seed and host as parts 7 to 9, bench list plus `stress-task-create`. Before = `c51a18c64` with the new scenario file, after = `7084a65ef`. Report: agent-fs `shared/swarm-postgres/bench-2026-11-21-part10.md`.
+
+| Site | Before (seeded) | After (seeded) |
+| --- | --- | --- |
+| Unkeyed task creation (`tasks.ts:1388`) | 83 of 121, 68.6% (481 retries) | 0 of 121, 0.0% |
+| Task finish (`tasks.ts:2037` -> `:2039`) | 0 of 156 | 0 of 156 |
+| Keyed task creation (`tasks.ts:1381`, accepted) | 9 of 10, 90.0% | 9 of 10, 90.0% |
+| Schedule run-now (`scheduler.ts:297`, accepted) | 90 of 101, 89.1% | 99 of 111, 89.2% |
+| Agent registration (`agents.ts:758`, accepted) | 35 of 51, 68.6% | 38 of 51, 74.5% |
+| KV increment (`kv.ts:663`, accepted) | 18 of 20, 90.0% | 18 of 20, 90.0% |
+| Keyed workflow (`engine.ts:350`, accepted) | 9 of 10, 90.0% | 9 of 10, 90.0% |
+| Schedule occurrence claim (`scheduler.ts:362`) | 1 of 1 | 0 of 1 |
+
+After: 1,923 transactions, 173 retried, 0 exhausted, 0 5xx. Acceptance (at or below 5%, exhausted 0, 5xx 0) met. The schedule occurrence claim ran once per run (one retry in the before run, none after); no new site above 5% on the head.
+
 ## M6 results (part 9)
 
 Command: `agent-swarm db-copy --from <sqlite file> --to <postgres url> [--json <report>]` (defaults `DATABASE_PATH`, `DATABASE_URL`). Code: `packages/storage-sqlite/src/copy-source.ts` (read-only source), `packages/storage-postgres/src/data-copy.ts` (target), contract types in `packages/storage/src/data-copy.ts`, wiring in the composition root, CLI front end `src/be/data-copy-command.ts`.
@@ -551,6 +578,8 @@ See "M1 results / Edited scenarios".
 
 - `data-copy` (part 9, order 9010): check 20.
 
+- `stress-task-create` (part 10, order 9442, flow `storage-engine-parity`): concurrent unkeyed creates; measures the D7 site of unkeyed task creation.
+- `divergence-tracker-dedup` (part 10, order 9441, flow `storage-engine-parity`): one task per Linear tracker key under a race; guards the SERIALIZABLE split of task creation.
 - `stress-task-finish` (part 8, order 9444, flow `storage-engine-parity`): concurrent finishes; guards the D7 locks of task finish.
 - `task-live-claim` (part 4, order 9990, runs last): a worker claims a task and keeps a heartbeating session on it, so the strict gate's `task-statuses` surface sees `in_progress`. Closes the base-commit coverage gap without an exclusion.
 
