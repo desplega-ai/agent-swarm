@@ -8,7 +8,6 @@ import {
   findExistingLinearTrackerContextWork,
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getLeadAgent,
   getTaskById,
   getUserById,
@@ -19,6 +18,7 @@ import {
 import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
+import { getStorage } from "@/be/storage";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { can } from "@/rbac";
 import {
@@ -672,7 +672,7 @@ export async function sendTaskHandler(
       : toolErr(guard.message, { data: guardData });
   }
 
-  const created = getDbClient().transaction(async () => {
+  const created = getStorage().transaction(async () => {
     // Authoritative re-check: the reads above are separated from the INSERT by
     // the whole handler, so only a guard inside this transaction can see a
     // concurrent send-task's committed task.

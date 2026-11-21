@@ -1,6 +1,7 @@
-import { createLogEntry, getDbClient } from "../be/db";
+import { createLogEntry } from "../be/db";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { getStorage } from "../be/storage";
 import type { AgentTask, ScriptRecord } from "../types";
 import {
   isFollowUpGateScheduleId,
@@ -153,7 +154,7 @@ export function setFollowUpGateTimeoutMsForTests(ms: number | null): void {
 export async function drainFollowUpGateShadowForTest(): Promise<void> {
   // Hooks run in FIFO order behind the client lock, so once this marker runs,
   // every earlier hook has started and registered its promise.
-  await new Promise<void>((resolve) => getDbClient().afterCommit(resolve));
+  await new Promise<void>((resolve) => getStorage().afterCommit(resolve));
   while (pending.size > 0) await Promise.allSettled([...pending]);
 }
 
@@ -215,7 +216,7 @@ export function scheduleFollowUpGateShadow(args: ShadowArgs): void {
   )
     ? { mode: "enforce", followUpTaskId: args.followUpTaskId, skipped: false }
     : { mode: "shadow", followUpTaskId: args.followUpTaskId };
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     track(
       verdict.eligible
         ? verifyCapped(args, config, deps).then((record) => writeRecord(args, record, outcome))
@@ -235,7 +236,7 @@ export function scheduleFollowUpGateShadow(args: ShadowArgs): void {
  */
 export function scheduleFollowUpGateEnforce(args: EnforceArgs): void {
   const deps = depsForTests ?? defaultDeps;
-  getDbClient().afterCommit(() => track(runEnforce(args, deps)));
+  getStorage().afterCommit(() => track(runEnforce(args, deps)));
 }
 
 async function runEnforce(args: EnforceArgs, deps: FollowUpGateDeps): Promise<void> {

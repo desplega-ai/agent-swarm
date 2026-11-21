@@ -11,7 +11,6 @@ import {
   failTask,
   getAgentById,
   getAllTasks,
-  getDbClient,
   getInProgressTasksByContextKey,
   getLeadAgent,
   getLogsByTaskId,
@@ -65,6 +64,7 @@ import {
   STEERING_MOVED_ERROR,
   SteeringRequestError,
 } from "../be/steering";
+import { getStorage } from "../be/storage";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
@@ -1378,7 +1378,7 @@ export async function handleTasks(
       // Extension pre-hooks ran above, outside the transaction; the key record
       // commits with the task, so a rollback drops both.
       const task = claim
-        ? await getDbClient().transaction(async () => {
+        ? await getStorage().transaction(async () => {
             // A concurrent request with this key committed while this one got ready.
             if (await findAcceptedTaskCreate(claim)) throw new IdempotencyKeyTakenError();
             const created = await createTaskExtended(prepared.description, prepared.options);
@@ -1405,7 +1405,7 @@ export async function handleTasks(
 
       // A person's Sessions follow-up shows up in the session's Slack thread too.
       if (principal.kind === "user" || principal.kind === "operator") {
-        getDbClient().afterCommit(() => mirrorSessionPrompt(task));
+        getStorage().afterCommit(() => mirrorSessionPrompt(task));
       }
 
       createTask.respond(res, 201, task);
@@ -1477,7 +1477,7 @@ export async function handleTasks(
     }
     // A draft holds back its mirror until its uploads settle, like its claim.
     if (existingTask.status === "draft") {
-      getDbClient().afterCommit(() => mirrorSessionPrompt(promoted));
+      getStorage().afterCommit(() => mirrorSessionPrompt(promoted));
     }
 
     promoteDraftTaskRoute.respond(res, 200, promoted);
@@ -1493,7 +1493,7 @@ export async function handleTasks(
     // the offeree while a task is offered or in review (its review session), else
     // strictly the assignee, so a stale offer never grants a write.
     // Check and write in one transaction so a reassignment cannot slip between.
-    const task = await getDbClient().transaction(async () => {
+    const task = await getStorage().transaction(async () => {
       if (auth?.kind === "agent") {
         if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
         const existing = await getTaskById(parsed.params.id);
@@ -1942,7 +1942,7 @@ export async function handleTasks(
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
 
     // Check and write in one transaction so a reassignment cannot slip between.
-    const status = await getDbClient().transaction(async (): Promise<200 | 403 | 404> => {
+    const status = await getStorage().transaction(async (): Promise<200 | 403 | 404> => {
       const task = await getTaskById(parsed.params.id);
       if (!task) return 404;
       const decision = can({
@@ -2025,7 +2025,7 @@ export async function handleTasks(
     ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
       !("alreadyFinished" in r && r.alreadyFinished);
 
-    const result = await getDbClient().transaction(
+    const result = await getStorage().transaction(
       async (): Promise<FinishTaskTransactionResult> => {
         const task = await getTaskById(parsed.params.id);
 
@@ -2268,7 +2268,7 @@ export async function handleTasks(
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const auth = getRequestAuth(req);
-    const task = await getDbClient().transaction(async () => {
+    const task = await getStorage().transaction(async () => {
       if (auth?.kind === "agent") {
         const existing = await getTaskById(parsed.params.id);
         if (!existing) return null;
