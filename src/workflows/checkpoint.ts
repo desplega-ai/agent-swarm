@@ -52,8 +52,10 @@ export async function checkpointStep(
   ctx: Record<string, unknown>,
   options: { fence?: StepFence } = {},
 ): Promise<boolean> {
-  return getDbClient().transaction(async () => {
-    if (options.fence && !(await holdsFence(runId, stepId, options.fence))) return false;
+  // The context is built on a copy and adopted after commit: a replayed attempt
+  // (decision D6) must re-read the stored context, not keep the first read.
+  const committed = await getDbClient().transaction(async () => {
+    if (options.fence && !(await holdsFence(runId, stepId, options.fence))) return null;
     await updateWorkflowRunStep(stepId, {
       status: "completed",
       output: result.output,
@@ -62,13 +64,17 @@ export async function checkpointStep(
     });
 
     // Merge step output into run context
-    await adoptStoredContext(runId, ctx);
-    ctx[nodeId] = result.output;
+    const next = { ...ctx };
+    await adoptStoredContext(runId, next);
+    next[nodeId] = result.output;
     await updateWorkflowRun(runId, {
-      context: ctx,
+      context: next,
     });
-    return true;
+    return next;
   });
+  if (!committed) return false;
+  Object.assign(ctx, committed);
+  return true;
 }
 
 /**
