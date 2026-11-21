@@ -6,7 +6,6 @@ import {
   type QueryReaderResult,
   QueryReaderTimeoutError,
 } from "@desplega/storage";
-import { SQL } from "bun";
 import { decodeValueRows, type ResultColumn, type TimestampFormats } from "./codec";
 
 /**
@@ -30,6 +29,10 @@ const CURSOR = "swarm_db_query";
 const DECLARE = `DECLARE ${CURSOR} NO SCROLL CURSOR FOR`;
 /** Small: the bounded SQLite path also caps concurrent db-query runs (3 by default). */
 const READER_POOL_MAX = 4;
+
+// The Bun.SQL global, not `import { SQL } from "bun"`: the node-target CLI
+// bundle includes this package and cannot import "bun" (see client.ts).
+type SQL = InstanceType<typeof Bun.SQL>;
 
 type PgError = { errno?: string; message?: string; position?: string };
 
@@ -56,7 +59,7 @@ export async function openPostgresQueryReader(
   deniedTables: readonly string[],
   timestampFormats: TimestampFormats | null = null,
 ): Promise<QueryReaderProbeResult> {
-  const pool = new SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
+  const pool = new Bun.SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
   try {
     const reason = await probe(pool, deniedTables);
     if (reason) {
