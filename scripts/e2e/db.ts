@@ -69,6 +69,11 @@ export type ReadOnlyDb = {
   engine: Engine;
   query: <T>(query: SqlQuery | string) => T[];
   get: <T>(query: SqlQuery | string) => T | null;
+  /**
+   * The engine reclaims the space of deleted rows by itself: SQLite in
+   * incremental auto-vacuum mode, Postgres with autovacuum on.
+   */
+  reclaimsFreeSpace: () => boolean;
   close: () => void;
 };
 
@@ -105,6 +110,9 @@ function openSqlite(path: string): ReadOnlyDb {
       const { statement, params } = prepare(query);
       return (statement.get(...params) as T | null) ?? null;
     },
+    reclaimsFreeSpace: () =>
+      (handle().query("PRAGMA auto_vacuum").get() as { auto_vacuum: number } | null)
+        ?.auto_vacuum === 2,
     close: () => {
       database?.close();
       database = undefined;
@@ -151,6 +159,9 @@ function openPostgres(url: string): ReadOnlyDb {
     engine: "postgres",
     query: <T>(query: SqlQuery | string) => call(query) as T[],
     get: <T>(query: SqlQuery | string) => (call(query)[0] as T | undefined) ?? null,
+    reclaimsFreeSpace: () =>
+      (call("SELECT current_setting('autovacuum') AS autovacuum")[0] as { autovacuum: string })
+        ?.autovacuum === "on",
     close: () => {
       worker?.terminate();
       worker = undefined;
@@ -227,7 +238,9 @@ export async function dropPostgresDatabase(databaseUrl: string): Promise<void> {
   const client = new Bun.SQL({ url: adminUrl(), max: 1 });
   try {
     await client.unsafe(`DROP DATABASE IF EXISTS "${name.replaceAll('"', '""')}" WITH (FORCE)`);
-    await client.unsafe(`DROP ROLE IF EXISTS "${readerRoleName(databaseUrl).replaceAll('"', '""')}"`);
+    await client.unsafe(
+      `DROP ROLE IF EXISTS "${readerRoleName(databaseUrl).replaceAll('"', '""')}"`,
+    );
   } finally {
     await client.close();
   }

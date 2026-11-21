@@ -1,6 +1,7 @@
 import {
   type QueryReader,
   QueryReaderDeniedError,
+  QueryReaderNotQueryError,
   type QueryReaderOptions,
   type QueryReaderResult,
   QueryReaderTimeoutError,
@@ -23,11 +24,14 @@ import { decodeValueRows, type ResultColumn, type TimestampFormats } from "./cod
 
 const SQLSTATE_INSUFFICIENT_PRIVILEGE = "42501";
 const SQLSTATE_QUERY_CANCELED = "57014";
+const SQLSTATE_SYNTAX_ERROR = "42601";
+const SQLSTATE_FEATURE_NOT_SUPPORTED = "0A000";
 const CURSOR = "swarm_db_query";
+const DECLARE = `DECLARE ${CURSOR} NO SCROLL CURSOR FOR`;
 /** Small: the bounded SQLite path also caps concurrent db-query runs (3 by default). */
 const READER_POOL_MAX = 4;
 
-type PgError = { errno?: string; message?: string };
+type PgError = { errno?: string; message?: string; position?: string };
 
 function pgError(err: unknown): PgError {
   return typeof err === "object" && err !== null ? (err as PgError) : {};
@@ -234,7 +238,22 @@ class PostgresQueryReader implements QueryReader {
       return await this.pool.begin("read only", async (tx) => {
         // Each statement gets what is left of the budget.
         await tx.unsafe(`SET LOCAL statement_timeout = ${timeout()}`);
-        await tx.unsafe(`DECLARE ${CURSOR} NO SCROLL CURSOR FOR ${sql}`, params);
+        try {
+          await tx.unsafe(`${DECLARE} ${sql}`, params);
+        } catch (err) {
+          // The cursor accepts only a query. A syntax error at the first token of
+          // the user text, or a data-modifying WITH, means the text is not one.
+          const { errno, position } = pgError(err);
+          const leading = sql.length - sql.trimStart().length;
+          const atFirstToken = Number(position) === DECLARE.length + 2 + leading;
+          if (
+            (errno === SQLSTATE_SYNTAX_ERROR && atFirstToken) ||
+            errno === SQLSTATE_FEATURE_NOT_SUPPORTED
+          ) {
+            throw new QueryReaderNotQueryError();
+          }
+          throw err;
+        }
         await tx.unsafe(`SET LOCAL statement_timeout = ${timeout()}`);
         const fetched = await tx
           .unsafe(

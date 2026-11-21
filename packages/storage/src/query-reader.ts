@@ -42,6 +42,14 @@ export class QueryReaderDeniedError extends Error {
   }
 }
 
+/** The statement is not a query (a write, DDL or another command): db-query runs only queries. */
+export class QueryReaderNotQueryError extends Error {
+  constructor() {
+    super("Only read-only queries are allowed");
+    this.name = "QueryReaderNotQueryError";
+  }
+}
+
 /** The query ran past its budget and the engine cancelled it. */
 export class QueryReaderTimeoutError extends Error {
   constructor(readonly budgetMs: number) {

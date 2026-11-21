@@ -396,7 +396,7 @@ async function deferral(ctx: ScenarioContext, bystander: McpConnection) {
 /** The read-only SQL tool and route share one guard. */
 async function sqlTools(ctx: ScenarioContext, conn: McpConnection, taskId: string) {
   let outcome = await expectToolOk(conn, "db-query", {
-    sql: "SELECT id, status FROM agent_tasks WHERE id = ?",
+    sql: "SELECT id, status FROM agent_tasks WHERE id = $1",
     params: [taskId],
   });
   expect(
@@ -422,7 +422,7 @@ async function sqlTools(ctx: ScenarioContext, conn: McpConnection, taskId: strin
 
   // POST /api/db-query: same guard, plus the deprecated `query` alias.
   let response = await ctx.api("POST", "/api/db-query", {
-    body: { sql: "SELECT id FROM agent_tasks WHERE id = ?", params: [taskId] },
+    body: { sql: "SELECT id FROM agent_tasks WHERE id = $1", params: [taskId] },
   });
   expectStatus(response, [200], "db-query over HTTP");
   const result = asRecord(response.json);

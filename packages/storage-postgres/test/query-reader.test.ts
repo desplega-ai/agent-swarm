@@ -3,6 +3,7 @@ import {
   DB_QUERY_DENIED_TABLES,
   type QueryReader,
   QueryReaderDeniedError,
+  QueryReaderNotQueryError,
   QueryReaderTimeoutError,
 } from "@desplega/storage";
 import { openPostgresQueryReader } from "../src/query-reader";
@@ -161,12 +162,20 @@ describe("db-query reader queries", () => {
   });
 
   test("a write is refused (only queries open a cursor)", async () => {
-    await expect(reader.run(`UPDATE agents SET n = 0`, [], { budgetMs: 5_000 })).rejects.toThrow();
+    await expect(
+      reader.run(`UPDATE agents SET n = 0`, [], { budgetMs: 5_000 }),
+    ).rejects.toBeInstanceOf(QueryReaderNotQueryError);
+    await expect(
+      reader.run(`  DELETE FROM agents`, [], { budgetMs: 5_000 }),
+    ).rejects.toBeInstanceOf(QueryReaderNotQueryError);
     await expect(
       reader.run(`WITH d AS (DELETE FROM agents RETURNING id) SELECT * FROM d`, [], {
         budgetMs: 5_000,
       }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(QueryReaderNotQueryError);
+    const syntax = await reader.run(`SELECT 1 FROM`, [], { budgetMs: 5_000 }).catch((e) => e);
+    expect(syntax).toBeInstanceOf(Error);
+    expect(syntax).not.toBeInstanceOf(QueryReaderNotQueryError);
     const [row] = (await admin.unsafe(`SELECT count(*)::int AS n FROM agents WHERE n <> 0`)) as {
       n: number;
     }[];

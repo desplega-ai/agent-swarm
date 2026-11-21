@@ -36,6 +36,7 @@ export {
   DB_QUERY_DENIED_TABLES,
   type QueryReader,
   QueryReaderDeniedError,
+  QueryReaderNotQueryError,
   type QueryReaderOptions,
   type QueryReaderResult,
   QueryReaderTimeoutError,

@@ -259,8 +259,10 @@ async function metricDefinitions(ctx: ScenarioContext, agentId: string, otherId:
   const definition = {
     version: 1,
     widgets: [
-      widget("stat", "SELECT COUNT(*) AS n FROM agents WHERE id = ?", ["{{agent}}"]),
-      widget("rows", "SELECT id, status FROM agent_tasks WHERE agentId = ? LIMIT 5", ["{{agent}}"]),
+      widget("stat", "SELECT COUNT(*) AS n FROM agents WHERE id = $1", ["{{agent}}"]),
+      widget("rows", 'SELECT id, status FROM agent_tasks WHERE "agentId" = $1 LIMIT 5', [
+        "{{agent}}",
+      ]),
     ],
     variables: [{ key: "agent", label: "Agent", type: "text", defaultValue: agentId }],
   };

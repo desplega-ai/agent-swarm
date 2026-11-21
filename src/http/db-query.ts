@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   type QueryReader,
   QueryReaderDeniedError,
+  QueryReaderNotQueryError,
   QueryReaderTimeoutError,
 } from "@desplega/storage";
 import { z } from "zod";
@@ -142,6 +143,7 @@ async function runOnQueryReader(
   } catch (err) {
     if (err instanceof QueryReaderDeniedError) throw new DbQueryDeniedTableError(err.tables);
     if (err instanceof QueryReaderTimeoutError) throw timeoutError(budgetMs);
+    if (err instanceof QueryReaderNotQueryError) throw new Error(err.message);
     throw err;
   } finally {
     releaseBoundedQuerySlot();

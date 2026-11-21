@@ -17,10 +17,7 @@ export const scriptRunStorage: Scenario = {
   name: "script-run-storage",
   order: 445,
   async run(ctx) {
-    expect(
-      ctx.db.get<{ auto_vacuum: number }>(sql`PRAGMA auto_vacuum`)?.auto_vacuum === 2,
-      "a fresh database must enable incremental auto vacuum",
-    );
+    expect(ctx.db.reclaimsFreeSpace(), "a fresh database must enable incremental auto vacuum");
     const agentId = await registerAgent(ctx, "storage");
     const source = `// storage ${ctx.nonce}: café 雪\nexport default async function (args: { value: number }) {\n  return { value: args.value };\n}\n`;
     let scratchName = "";
