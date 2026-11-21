@@ -6,7 +6,16 @@
  * adapter's event normalization loop without starting the real CLI.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   lstatSync,
   mkdirSync,
@@ -20,6 +29,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyProviderErrorOf } from "../commands/provider-error-class";
+import * as toolLoop from "../hooks/tool-loop-detection";
 import { renderContextBoundNote } from "../prompts/context-bound-note";
 import type {
   AgentMessageItem,
@@ -533,6 +543,54 @@ describe("Codex app-server session", () => {
     expect(
       emitted.find((event) => event.type === "tool_start" && event.toolCallId === "file-1"),
     ).toMatchObject({ toolName: "Write" });
+  });
+
+  test.each([
+    { scenario: "distinct queries", count: 20, blocked: false },
+    { scenario: "identical queries", count: 15, blocked: true },
+    { scenario: "distinct batches sharing the first query", count: 20, blocked: false },
+    { scenario: "distinct queries alternating with bash", count: 8, blocked: false },
+  ])("checks completed web searches for loops: $scenario", async ({ scenario, count, blocked }) => {
+    const taskId = crypto.randomUUID();
+    const check = spyOn(toolLoop, "checkToolLoop");
+    const withBash = scenario === "distinct queries alternating with bash";
+    try {
+      const fake = makeFakeAppServer((method, _params, emit) => {
+        if (method === "thread/start") return { thread: { id: "thread-search" } };
+        if (method !== "turn/start") return {};
+        for (let i = 0; i < count; i++) {
+          const search = { type: "webSearch", id: `search-${i}` };
+          const query = `query ${i}`;
+          emit("item/started", { item: { ...search, query: "" } });
+          const args =
+            scenario === "distinct batches sharing the first query"
+              ? { query: "shared", action: { type: "search", queries: ["shared", query] } }
+              : { query: blocked ? "same query" : query };
+          emit("item/completed", { item: { ...search, ...args } });
+          if (withBash) {
+            const item = { type: "commandExecution", id: `cmd-${i}`, command: "pwd", exitCode: 0 };
+            emit("item/started", { item });
+            emit("item/completed", { item });
+          }
+        }
+        emit("turn/completed", { turn: { id: "turn-search", status: "completed" } });
+        return { turn: { id: "turn-search" } };
+      });
+      const session = await new CodexAdapter({
+        bypassSubprocess: true,
+        appServerFactory: () => fake.client as never,
+      }).createSession(testConfig({ taskId }));
+      await session.waitForCompletion();
+
+      // The guard serializes its file writes and the adapter fires it asynchronously.
+      const checks = await Promise.all(check.mock.results.map((call) => call.value));
+      expect(checks).toHaveLength(count * (withBash ? 2 : 1));
+      expect(checks.slice(0, -1).every((result) => !result.blocked)).toBe(true);
+      expect(checks.at(-1)?.blocked).toBe(blocked);
+    } finally {
+      check.mockRestore();
+      await toolLoop.clearToolHistory(taskId);
+    }
   });
 
   test("context follows the latest request, not the turn's summed usage", async () => {

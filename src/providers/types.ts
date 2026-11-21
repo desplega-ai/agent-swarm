@@ -106,12 +106,21 @@ export type ProviderEvent =
       content: string;
       messageId?: string;
     }
-  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
+  | {
+      type: "tool_start";
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      /** The harness supplies the arguments for loop detection on tool_end. */
+      argsPending?: true;
+    }
   | {
       type: "tool_end";
       toolCallId: string;
       toolName: string;
       result: unknown;
+      /** Final arguments for a call whose tool_start marked argsPending. */
+      finalArgs?: unknown;
       /** The tool call failed. Set by adapters whose harness reports it; absent means unknown. */
       isError?: boolean;
     }
