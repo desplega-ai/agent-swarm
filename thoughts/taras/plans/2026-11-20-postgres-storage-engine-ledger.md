@@ -15,8 +15,8 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
-| M3 Postgres engine | in progress (part 5) on local branch `m3/engine`: `test:storage` Postgres 420 pass / 2 fail (both full-text search, M4); checks 7, 9, 14 pass | |
-| M4 Engine-specific domains | not started | |
+| M3 Postgres engine | in progress (part 5): repositories, codec, baseline, triggers, runner, checks 7, 9, 14, 18 done; the API start on Postgres (D1, D16) in progress | |
+| M4 Engine-specific domains | steps 1 and 2 done (part 5, full text and vector search in the repositories); steps 3 to 5 not started | |
 | M5 Contract on Postgres | not started | |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
@@ -291,7 +291,34 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - Regression found by `test:root` and fixed: with the resolver async, an in-process session settled before the context-bound note rendered (6 tests in `claude-managed-adapter.test.ts`). Fix: with no DB resolver and no `{{@template[...]}}` reference, the resolver answers in the same tick, as before.
 - Check 12 is not at 0. What is left, by owner: 235 sites in the seeded db-query scripts and 9 in the own-handle readers and the memory search worker (M4 steps 4 and 5); 21 in the SQLite memory provider (M4, its synchronous `getHealth()` and table bootstrap); 16 SQLite start-path and handle-owner sites (`db.ts` 7, `runtime.ts` 5, `script-connections.ts` 2, `storage.ts` 1) and 1 false positive (`scripts/typecheck.ts`, a TypeScript declaration string). The start-path sites move behind the composition root when M3 adds the Postgres start.
 
+## M3 results
+
+- Client, codec, typed errors, baseline 367, 56 of 65 trigger ports (the 9 FTS sync triggers have no Postgres table to write; full text runs on expression indexes, migration 368), Postgres runner with an advisory lock, checks 7, 9 and 14 (part 4 prep, merged in part 5).
+- Every repository has a Postgres class with no `notOnPostgresYet` left. Ported in parallel worktrees (one per domain group), each group gated by both contract suites, `tsc`, `check:sql-portability` and biome.
+- `bun run test:storage` now runs the contract suite on SQLite and then on Postgres (`test:storage:postgres`, needs `STORAGE_TEST_POSTGRES_URL`). Part 5 result after the M4 search merges: SQLite 396 pass / 0 fail, Postgres 431 pass / 0 fail.
+- `check:schema-parity` broke when the read codec landed (every index read `unique=0` instead of `unique=false`). Fix: a `rawValues` client option, used only by catalog tools. Result: 0 unexplained, 164 allowlisted.
+- Base-class SQL changed for Postgres, identical on SQLite (bun:sqlite binds `true`/`false` as 1/0; `CAST(text AS text)` is a no-op): `listAgentSkills` binds the flag in its UNION; the agent-token check compares `"scriptRun"` to `${false}`; task attachments write `capabilities` through `jsonText`; `listStalePinnedResumes` casts `tags` to text before LIKE.
+- Not yet: the API start on Postgres (engine selection D1, the async Postgres start, the D16 guard). In progress on branch `m3/pg-start`.
+
+### Contract-test fixture edits (section 10 record)
+
+- `skills` agent-skills test: `installedAt` fixture values `'x'`/`'y'` became real timestamps (a `timestamptz` column cannot hold `'x'`). No assertion reads them.
+- `users` job-function test: the `"not json"` metadata fixture became NULL. Both engines answer `undefined` for it (SQLite `json_valid(NULL)` drops the row). Postgres `jsonb` cannot hold invalid JSON; the data copy (D11) reports such values instead.
+- Postgres baseline tests read through the codec: a timestamp comes back as text (was a `Date`), and `_rowid` is read under an alias (the codec drops a column named `_rowid`).
+- `migrations.test.ts`: the chain length is counted from the files (it was hard-coded to 1).
+- Task FTS backfill test: its FTS5 `'delete-all'` setup became "set the mark to 0 before seeding" (same start state). Two assertions added, none removed.
+
+## M4 results (part 5, steps 1 and 2)
+
+- Full text on `tsvector` with GIN expression indexes, no shadow table, no trigger (migration 368 for skills and tasks, 369 for memory; each has a SQLite file with the same ordinal that states it is a no-op).
+- Repository interfaces that took an FTS5 MATCH string now take the term list: `searchRankedSkills(terms)`, `searchFtsRows(terms)`. Each engine builds its own query; the SQLite text is unchanged.
+- Vector search: `memory_vec` (pgvector, no fixed dimension, exact cosine k-NN, k first then filter, like sqlite-vec). Capped scoring runs in TypeScript with float32 arithmetic.
+- D15 parity is asserted on a fixed corpus by contract tests on both engines: same id set, ranked FTS at least 4 of the first 5 equal (memory bm25 port: top 5 equal and in order), vectors in the same order.
+- Not yet: M4 steps 3 (remaining `json_each`/`json_extract` sites outside repositories, if any), 4 (`db-query` on Postgres, D10, and the 235 seeded-script sites) and 5 (own-handle readers, the memory search worker, a Postgres `MemoryStore`).
+
 ## Decisions inside my authority
+
+- Text search configurations (M4). Skills: `english` (SQLite uses the porter tokenizer). Tasks: `simple` (SQLite `agent_tasks_fts` is unicode61 without porter, so ids and numbers match exactly). Memory: `memory_english`, english with a snowball stemmer that keeps stop words (FTS5 indexes every word and the memory query ORs its terms). A SQL function turns ASCII and common Unicode punctuation into spaces before `to_tsvector`, so words split as unicode61 splits them; task text is cut at 100,000 characters (a 1.3 MB task otherwise fails to insert: a tsvector over 1 MB errors).
 
 - `_rowid` surrogate (M3 prep). Every Postgres table that has a SQLite rowid gets `"_rowid" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL` with a unique index (133 tables); tables whose INTEGER PRIMARY KEY is the rowid use that key; `kv_entries` is WITHOUT ROWID. Reasons: session logs expose `rowid AS seq` in the API, `human_free_reclassify_queue` stores rowids, and about 140 repository ORDER BYs break ties on rowid. The data copy (M6) copies rowid into `_rowid` and resets the identity, so API values stay equal across engines. The read codec drops a result column named `_rowid` (SQLite's `SELECT *` never returns rowid). One parity-allowlist key covers the pattern.
 - Postgres databases use the C collation and C character classes (`LC_COLLATE 'C' LC_CTYPE 'C'`): byte text order like SQLite, and ILIKE/lower()/upper() fold ASCII only, like SQLite's LIKE/lower()/upper(). The dialect's `likeAsciiCi` is `ILIKE ... ESCAPE` (with `ESCAPE ''` when the caller names none: Postgres escapes with a backslash by default, SQLite does not).
@@ -309,10 +336,15 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 
 ## Deviations
 
+- Milestone order (part 5): M4 steps 1 and 2 (full text and vector search in the repositories) landed before M3 closed, because the contract suite (M3 step 5) has search tests that only pass with them.
 - `onAttemptRollback` (needs human review): a third storage-client hook that D6 does not name. It runs when any attempt rolls back and only undoes in-process state (the successor-walk hold, the executing-step mark). Without it, runs never finalized under `--tx-replay`. Details under "Decisions inside my authority". The Postgres client implements it.
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
+
+- Postgres full text differs from FTS5 in known ways: no non-ASCII case folding under the C ctype, no accent removal, porter vs snowball stems, text past 100,000 characters (tasks) or tsvector position 16,383 not searchable by phrase. D15 tests pass on the fixed corpus.
+- Memory full text on Postgres costs about 0.1 ms per matching row (each match rebuilds its tsvector): a term that matches 20,000 memories took 2.2 to 2.7 s. A stored tsvector column would fix it; the bench (M5) decides.
+- `listCalibrationSessions` on Postgres reads a JSON string token (`"5"`) as NULL where SQLite returns the text; the caller turns it into 0 instead of 5.
 
 - Unit-test failures blamed on the base commit are partly the container environment: the host shell sets `BOOT_SCRUB_MODE=forward-only` (all 7 boot retro-sweep failures) and `RBAC_ENABLED=false` (5 RBAC HTTP failures). With both unset those tests pass on the base and on the branch. Run check 16 with `env -u BOOT_SCRUB_MODE -u RBAC_ENABLED`.
 - Parallel domain moves share one git stash list across worktrees; two agents popped each other's stash once (restored, verified byte-equal). Rule: no `git stash` in this work.
