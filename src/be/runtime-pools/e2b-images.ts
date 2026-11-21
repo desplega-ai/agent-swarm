@@ -1,6 +1,6 @@
 import { buildImageTemplate } from "../../e2b/dispatch";
 import type { RuntimePool } from "../../types";
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 import { getRuntimeController, getRuntimeControllerTarget, getRuntimePool } from "./db";
 
 type ImageBuild = { abort: AbortController; error?: unknown; done: boolean };
@@ -32,21 +32,14 @@ async function buildPoolImage(pool: RuntimePool, name: string, signal: AbortSign
     signal,
   });
   signal.throwIfAborted();
-  const saved = await getDbClient().run(
-    `UPDATE runtime_pools SET resolved_image = ?, updated_at = ? WHERE id = ? AND image = ?
-     AND COALESCE(json_extract(resources, '$.cpu'), 4) = ?
-     AND COALESCE(json_extract(resources, '$.memoryMb'), 8192) = ?`,
-    [
-      name,
-      new Date().toISOString(),
-      pool.id,
-      pool.image!,
-      pool.resources?.cpu ?? 4,
-      pool.resources?.memoryMb ?? 8192,
-    ],
-  );
-  if (!saved.changes)
-    throw new Error("E2B pool image or resources changed during template construction");
+  const saved = await getStorage().repos.runtimePools.setResolvedImage(pool.id, {
+    name,
+    now: new Date().toISOString(),
+    image: pool.image!,
+    cpu: pool.resources?.cpu ?? 4,
+    memoryMb: pool.resources?.memoryMb ?? 8192,
+  });
+  if (!saved) throw new Error("E2B pool image or resources changed during template construction");
 }
 
 // A pending build reserves no runtime or credential and never blocks the tick.

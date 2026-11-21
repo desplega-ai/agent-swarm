@@ -463,53 +463,9 @@
     "reason": "M2 move: config",
     "sites": 1
   },
-  "src/be/runtime-pools/cache-cleanup.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 8
-  },
-  "src/be/runtime-pools/controllers.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 6
-  },
-  "src/be/runtime-pools/db.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 28
-  },
-  "src/be/runtime-pools/demand.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 3
-  },
-  "src/be/runtime-pools/e2b-images.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 2
-  },
-  "src/be/runtime-pools/lifecycle.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 2
-  },
-  "src/be/runtime-pools/reachability.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 2
-  },
-  "src/be/runtime-pools/recovery.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 6
-  },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
     "sites": 7
-  },
-  "src/be/runtime-pools/seed.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 6
-  },
-  "src/be/runtime-pools/supervisor.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 30
-  },
-  "src/be/runtime-pools/tokens.ts": {
-    "reason": "M2 move: runtime pools",
-    "sites": 5
   },
   "src/be/savings/calibrate.ts": {
     "reason": "M2 move: sessions and cost",

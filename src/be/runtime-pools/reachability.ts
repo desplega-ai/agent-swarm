@@ -2,8 +2,8 @@ import { canProvisionKind } from "../../runtime-providers";
 import type { Agent, RuntimePool } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
-import { getDbClient } from "../db";
 import { listRuntimeInstancesForPool, runtimeStaleThresholdMinutes } from "../multi-runtime";
+import { getStorage } from "../storage";
 import { getRuntimePool } from "./db";
 import { agentRuntimeLimit, countPoolRuntimes } from "./demand";
 
@@ -23,13 +23,7 @@ export async function isAgentReachable(agent: Agent): Promise<boolean> {
   const pool = await getRuntimePool(agent.runtimePoolId);
   if (!pool?.enabled) return false;
   if (isRuntimePoolWakeable(pool)) return true;
-  return (
-    (await getDbClient().get(
-      `SELECT id FROM runtime_instances WHERE agent_id = ? AND pool_id = ?
-     AND status = 'provisioning' AND draining = 0 LIMIT 1`,
-      [agent.id, pool.id],
-    )) !== null
-  );
+  return await getStorage().repos.runtimePools.hasProvisioningRuntime(agent.id, pool.id);
 }
 
 /**
