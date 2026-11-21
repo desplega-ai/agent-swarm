@@ -1,0 +1,89 @@
+name: Publish SDK
+
+# Publishes packages/agent-swarm-sdk (@desplega.ai/agent-swarm-sdk) to npm when its
+# package.json version changes on main. It is its own workflow, not a job in
+# docker-and-deploy.yml: that workflow's path filter would then rebuild and promote
+# every Docker image on an SDK-only bump.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/agent-swarm-sdk/package.json"
+      - ".github/workflows/publish-sdk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-sdk
+  cancel-in-progress: false
+
+jobs:
+  publish-sdk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: packages/agent-swarm-sdk
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check for version change
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          NAME=$(jq -r '.name' package.json)
+          VERSION=$(jq -r '.version' package.json)
+          echo "spec=${NAME}@${VERSION}" >> "$GITHUB_OUTPUT"
+          # A missing old file (the first publish) counts as a change. A manual run always checks npm.
+          OLD=$(git show "${BEFORE}:packages/agent-swarm-sdk/package.json" 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$OLD" != "$VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::SDK version ${OLD:-none} -> ${VERSION}"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "SDK version unchanged: ${VERSION}"
+          fi
+
+      - name: Check if already published
+        id: check
+        if: steps.version.outputs.changed == 'true'
+        env:
+          SPEC: ${{ steps.version.outputs.spec }}
+        run: |
+          if npm view "$SPEC" version 2>/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::${SPEC} already on npm, skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Bun
+        if: steps.check.outputs.skip == 'false'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        if: steps.check.outputs.skip == 'false'
+        working-directory: .
+        run: bun install --frozen-lockfile
+
+      # prepack runs `bun run build`, so dist/ is built from this commit.
+      - name: Publish to npm
+        if: steps.check.outputs.skip == 'false'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

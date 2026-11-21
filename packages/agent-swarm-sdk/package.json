@@ -1,5 +1,5 @@
 {
-  "name": "agent-swarm-sdk",
+  "name": "@desplega.ai/agent-swarm-sdk",
   "version": "0.1.0",
   "description": "Typed, fetch-based client for the Agent Swarm API: send tasks, wait for results, search memory, run scripts.",
   "license": "MIT",

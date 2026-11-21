@@ -1,5 +1,5 @@
 /**
- * agent-swarm-sdk: a typed, fetch-based client for the Agent Swarm HTTP API.
+ * @desplega.ai/agent-swarm-sdk: a typed, fetch-based client for the Agent Swarm HTTP API.
  *
  *   const swarm = createSwarm();
  *   const task = await swarm.tasks.run("Summarize yesterday's merged PRs");

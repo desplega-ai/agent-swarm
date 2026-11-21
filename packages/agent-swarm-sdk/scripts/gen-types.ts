@@ -75,5 +75,5 @@ const header =
   "// Regenerate with `bun run docs:openapi` (repo root).\n\n";
 await Bun.write(join(pkgRoot, "src/openapi.gen.ts"), header + body);
 console.log(
-  `Generated agent-swarm-sdk types: ${Object.keys(paths).length} paths, ${Object.keys(sorted).length} schemas`,
+  `Generated @desplega.ai/agent-swarm-sdk types: ${Object.keys(paths).length} paths, ${Object.keys(sorted).length} schemas`,
 );

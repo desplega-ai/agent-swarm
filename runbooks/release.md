@@ -54,6 +54,8 @@ It does **not** stage or commit anything — it regenerates and reports. Commit 
 
 The Helm chart is published separately by `helm-publish.yml` when `charts/agent-swarm/Chart.yaml`'s `version` changes — which is exactly what `sync-chart-version` (and thus `prepare-release`) updates.
 
+The SDK (`@desplega.ai/agent-swarm-sdk`, `packages/agent-swarm-sdk`) is versioned on its own. `publish-sdk.yml` publishes it to npm (public, with provenance) when `packages/agent-swarm-sdk/package.json`'s `version` changes on `main`, and skips a version already on npm. To release it, bump that version (`npm version --no-git-tag-version patch` inside the package) in a PR. No git tag, GitHub release or Docker image comes with it, and the root release does not publish it. Verify with `npm view @desplega.ai/agent-swarm-sdk@<version> version`.
+
 If you push to `main` **without** a version change, none of the publish jobs run — Docker images still build (and deploy at the next window) but aren't tagged with a release version. So a release is opt-in: it's defined by the `package.json` version bump.
 
 ### Moving Docker tags and deployment

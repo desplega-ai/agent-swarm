@@ -1,9 +1,9 @@
-# agent-swarm-sdk
+# @desplega.ai/agent-swarm-sdk
 
 Typed client for the [Agent Swarm](https://agent-swarm.dev) API. One call sends a task and waits for its result.
 
 ```ts
-import { createSwarm } from "agent-swarm-sdk";
+import { createSwarm } from "@desplega.ai/agent-swarm-sdk";
 
 const swarm = createSwarm(); // reads AGENT_SWARM_API_KEY and AGENT_SWARM_URL
 
@@ -12,7 +12,7 @@ console.log(task.output);
 ```
 
 ```bash
-npm i agent-swarm-sdk
+npm i @desplega.ai/agent-swarm-sdk
 ```
 
 No runtime dependencies. It uses the global `fetch`, so it runs in Node 18+, Bun, Deno, and browsers.
@@ -52,7 +52,7 @@ await swarm.scripts.run("pr-triage-leads", { pr: 12 });       // ScriptRun (need
 Every failure is a `SwarmError`. Branch on `code`:
 
 ```ts
-import { SwarmError } from "agent-swarm-sdk";
+import { SwarmError } from "@desplega.ai/agent-swarm-sdk";
 
 try {
   await swarm.tasks.run("Ship the release notes");
