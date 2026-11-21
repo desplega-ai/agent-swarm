@@ -22,6 +22,11 @@ const API_KEY = "example-test-key";
 const mockTasks: Record<string, TaskContextForPreamble> = {};
 // Session-log rows served by /api/tasks/:id/session-logs
 const mockSessionLogs: Record<string, { createdAt: string; content: string }[]> = {};
+// Open intent rows served by /api/tasks/:id/tool-intents
+const mockToolIntents: Record<
+  string,
+  { toolCallId: string; toolName: string; argsSummary?: string; createdAt: string }[]
+> = {};
 
 let server: Server;
 let lineageReads = 0;
@@ -33,6 +38,12 @@ beforeAll(async () => {
     if (logsMatch) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ logs: mockSessionLogs[logsMatch[1]] ?? [] }));
+      return;
+    }
+    const intentsMatch = url.match(/^\/api\/tasks\/([^/?]+)\/tool-intents/);
+    if (intentsMatch) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ intents: mockToolIntents[intentsMatch[1]] ?? [] }));
       return;
     }
     // Mirrors GET /api/tasks/{id}/lineage: the path to the topmost of at most 50 ancestors.
@@ -972,6 +983,50 @@ describe("buildResumeContextPreamble interrupted tool call", () => {
     const preamble = (await buildResumeContextPreamble(API_URL, API_KEY, "attempt-2")) ?? "";
     expect(preamble).toContain("## Resuming Interrupted Task");
     expect(preamble).not.toContain("Interrupted:");
+  });
+
+  describe("with intent rows", () => {
+    const intent = (toolCallId: string, toolName: string, argsSummary: string) => ({
+      toolCallId,
+      toolName,
+      argsSummary,
+      createdAt: "2026-11-03T10:01:00.000Z",
+    });
+
+    test("flags an intent whose tool_use line never reached session_logs", async () => {
+      mockToolIntents[TASK_ID] = [
+        intent("toolu_9", "mcp__agent-swarm__slack-reply", '{"message":"Shipped"}'),
+      ];
+      try {
+        const preamble = await preambleFor([]);
+        expect(preamble).toContain(
+          'Interrupted: mcp__agent-swarm__slack-reply {"message":"Shipped"} may have landed.',
+        );
+      } finally {
+        delete mockToolIntents[TASK_ID];
+      }
+    });
+
+    test("skips an intent the logs pair, and never lists a call twice", async () => {
+      mockToolIntents[TASK_ID] = [
+        intent("toolu_1", "Bash", "gh pr create --fill"),
+        intent("toolu_2", "Bash", "gh pr create --title x"),
+      ];
+      try {
+        const preamble = await preambleFor([
+          toolUse("toolu_1", "Bash", { command: "gh pr create --fill" }),
+          toolResult("toolu_1"),
+          toolUse("toolu_2", "Bash", { command: "gh pr create --title x" }),
+        ]);
+        expect(preamble).toContain(
+          "Interrupted: Bash gh pr create --title x may have landed. Check its effect",
+        );
+        expect(preamble).not.toContain("--fill may have landed");
+        expect(preamble).not.toContain("--title x; Bash");
+      } finally {
+        delete mockToolIntents[TASK_ID];
+      }
+    });
   });
 
   test("redacts a token in the interrupted call's args", async () => {
