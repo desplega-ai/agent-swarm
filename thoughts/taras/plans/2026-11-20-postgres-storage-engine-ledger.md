@@ -17,7 +17,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
-| M5 Contract on Postgres | in progress (part 6): first full Postgres strict runs, fixes below; D16 guard done in M3; bench and stress tooling done; D7 not applied (open) | |
+| M5 Contract on Postgres | in progress (part 7): JSON key order decided and applied; D7 applied to the poll claim (87.5% -> 0%); task creation still above 5% (STOP-ASK) | |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
 
@@ -40,7 +40,7 @@ Last updated part 6 (head `61477a358`).
 | # | Check | Last run | Result |
 |---|---|---|---|
 | 1 | `bun run e2e:strict` (SQLite) | part 6, head `f1e1b2275` | **pass** (exit 0): 236 passed, 0 failed, 2 flaky (`slack-lead-follow-up-card`, `model-group-resolution`, both flaky before this work). `task-statuses` 10/10. |
-| 2 | `bun run e2e:strict --engine postgres` | part 6, heads `a94edbdad` and `16631956a` | **fail / incomplete**: both runs hit the run timeout (50 and 65 min). Run 2: 196 passed, 54 failed attempts. Fixed groups re-pass with `--only`. Open: JSON key order (decision needed), retry rates (D7 decision). |
+| 2 | `bun run e2e:strict --engine postgres` | part 6, heads `a94edbdad` and `16631956a` | **fail / incomplete**: both runs hit the run timeout (50 and 65 min). Run 2: 196 passed, 54 failed attempts. Fixed groups re-pass with `--only`. Open: retry rates at task creation (D7, part 7 STOP-ASK). JSON key order decided part 7 (the two scenarios pass on Postgres). |
 | 3, 4, 5 | same scenario list, `--tx-replay` on Postgres, divergence scenarios on Postgres | | not run on Postgres yet (5 of the 11 divergence scenarios pass on Postgres with `--only`; `divergence-values` fails on JSON key order) |
 | 6 | no new coverage exclusion | | not checked yet |
 | 7 | `bun run check:schema-parity` | part 6, head `16631956a` | **pass**: 0 unexplained, 164 allowlisted |
@@ -361,9 +361,25 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - Bench (check 21 tooling): `bun run e2e:bench --engine postgres [--only ...]` runs the suite on both engines and writes p95 per route group plus a per-site retry table (`STORAGE_TX_STATS_FILE`, bench only). Stress result (stress-poll-claim + divergence-concurrent-schedule-claim, part 6): 952 transactions, 247 retried, 0 exhausted; sites above 5%: `src/http/poll.ts:802` (poll write pass, 92%), `src/http/tasks.ts:2028` (88%), `src/http/tasks.ts:1381` (90%), `src/scheduler/scheduler.ts:362`.
 - Postgres strict runs (part 6): run 1 (head `a94edbdad`) and run 2 (head `16631956a`) both hit the run timeout before the end (50 and 65 min; the Postgres suite runs slower and retries); run 2 reached 196 passed / 54 failed attempts. Every failure group from those runs that is fixed above passed again with `--only` on Postgres afterwards. A full Postgres strict run on the current head has not been done.
 
-## Open decision (needs Taras): D7 opt-down
+## D7 opt-down: poll claim applied, task creation still open (Daniel, 2026-11-21)
 
-Measured retry rates far above 5% at the poll write pass and task creation sites (above). D7 permits READ COMMITTED with explicit locks there, each with its own stress scenario. Not applied yet: each site's read-then-write invariants need a lock plan, and the tiny e2e tables make Postgres take relation-level predicate locks (sequential scans), which likely overstates conflicts compared with production-size tables. Recommendation: apply D7 to the poll claim first (`FOR UPDATE SKIP LOCKED`), re-measure on a larger seeded database, then decide the task-creation sites.
+Daniel chose `skip_locked_first`: apply READ COMMITTED + `FOR UPDATE SKIP LOCKED` to the poll claim, re-measure on a larger seeded database, and stop and ask if a rate stays above 5%.
+
+Applied (part 7, commit `243a93a9e`): the poll write pass (`src/http/poll.ts`) runs with `transaction(..., { isolation: "read committed" })`, reason in the code. Locks that keep the old invariants: the agent row `FOR UPDATE` as the first statement (one write pass per agent: capacity, offers, pending tasks, mentions, runtime rows), the offered or pending task row `FOR UPDATE` before its claim (the pending path re-checks status and assignee after the lock), and the pool claim `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED) AND status = 'unassigned'`. New seams: `TransactionOptions.isolation` (SQLite ignores it) and the dialect's `forUpdate` / `forUpdateSkipLocked` (empty on SQLite). Stress scenario: `stress-poll-claim` (one winner per task, maxTasks never exceeded).
+
+Measurement: `E2E_POSTGRES_SEED_SQL=scripts/e2e/fixtures/postgres-bench-seed.sql bun run e2e:bench --engine postgres --only stress-poll-claim,divergence-concurrent-schedule-claim` (300 agents and 60,000 finished tasks seeded before boot). Before = `05c0e94e1`, after = `243a93a9e`, same seed, same host.
+
+| Site | Before (seeded) | After (seeded) |
+| --- | --- | --- |
+| Poll write pass (`poll.ts:802` -> `:822`) | 63 of 72, 87.5% | 0 of 90, 0.0% |
+| Task finish, `POST /api/tasks/{id}/finish` (`tasks.ts:2028`) | 52 of 60, 86.7% | 43 of 60, 71.7% |
+| Keyed task creation, `POST /api/tasks` with an idempotency key (`tasks.ts:1381`) | 9 of 10, 90.0% | 9 of 10, 90.0% |
+| Scheduler (`scheduler.ts:297`) | 90 of 101, 89.1% | 80 of 91, 87.9% |
+| Agent registration (`agents.ts:758`) | 18 of 27, 66.7% | 16 of 27, 59.3% |
+| KV (`kv.ts:663`) | 18 of 20, 90.0% | 18 of 20, 90.0% |
+| Workflow engine (`engine.ts:350`) | 9 of 10, 90.0% | 9 of 10, 90.0% |
+
+Exhausted retries: 0 before and after. Both scenarios pass on both engines. Correction to part 6: `tasks.ts:2028` is the task finish transaction, not task creation. Task finish and keyed task creation stay above 5%: STOP-ASK raised in part 7 (no other retry change applied without Daniel).
 
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
