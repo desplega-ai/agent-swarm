@@ -259,10 +259,6 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 7
   },
-  "src/be/rbac-roles.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 10
-  },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
     "sites": 3

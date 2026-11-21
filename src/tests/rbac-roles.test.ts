@@ -43,10 +43,10 @@ async function removeDbFiles() {
   }
 }
 
-function resetDb() {
+async function resetDb() {
   closeDb();
   initDb(TEST_DB_PATH);
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
 }
 
 function sortedVerbs(verbs: ReadonlySet<PermissionVerb>): PermissionVerb[] {
@@ -83,7 +83,7 @@ async function insertCustomRole(
 
 beforeEach(async () => {
   await removeDbFiles();
-  resetDb();
+  await resetDb();
 });
 
 afterEach(() => {
@@ -198,7 +198,7 @@ describe("ensureRbacSeedsSynced", () => {
   test("seeds viewer with a subset of the requester verbs", async () => {
     await getDbClient().run("DELETE FROM roles WHERE id = 'rbac-role-viewer'");
 
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
 
     const viewerVerbs = await roleVerbs("rbac-role-viewer");
     expect(viewerVerbs).toEqual([
@@ -216,7 +216,7 @@ describe("ensureRbacSeedsSynced", () => {
   test("restores a deleted built-in role and its permissions", async () => {
     await getDbClient().run("DELETE FROM roles WHERE id = ?", [REQUESTER_ROLE_ID]);
 
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
 
     const row = await getDbClient().get<{
       id: string;
@@ -242,7 +242,7 @@ describe("ensureRbacSeedsSynced", () => {
       );
     });
 
-    expect(() => ensureRbacSeedsSynced({ quiet: true })).toThrow(
+    await expect(ensureRbacSeedsSynced({ quiet: true })).rejects.toThrow(
       /RBAC built-in role "admin" \(rbac-role-admin\) is missing because role "admin" \(custom-role-admin-collision\) already uses that name\. Rename or remove the conflicting role, then rerun `rbac bootstrap`\./,
     );
   });
@@ -257,7 +257,7 @@ describe("ensureRbacSeedsSynced", () => {
       "user.manage",
     ]);
 
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
 
     expect(await roleVerbs(REQUESTER_ROLE_ID)).toEqual(REQUESTER_VERBS);
   });
@@ -265,7 +265,7 @@ describe("ensureRbacSeedsSynced", () => {
   test("leaves custom roles and custom permissions untouched", async () => {
     await insertCustomRole("custom-role-support", "support", ["user.manage"]);
 
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
 
     const row = await getDbClient().get<{ isBuiltin: number; grantsAll: number }>(
       "SELECT isBuiltin, grantsAll FROM roles WHERE id = ?",
@@ -278,7 +278,7 @@ describe("ensureRbacSeedsSynced", () => {
   test("recreates the default-role trigger when it has been dropped", async () => {
     await getDbClient().run("DROP TRIGGER trg_users_default_role");
 
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     const user = await createUser({ name: "Recreated Trigger User" });
 
     expect((await listUserRoles(user.id)).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
@@ -289,7 +289,7 @@ describe("ensureRbacSeedsSynced", () => {
     await detachRole(user.id, "admin");
     expect(await listUserRoles(user.id)).toEqual([]);
 
-    const stats = ensureRbacSeedsSynced({ quiet: true });
+    const stats = await ensureRbacSeedsSynced({ quiet: true });
 
     expect(stats.usersBackfilled).toBe(1);
     expect((await listUserRoles(user.id)).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
@@ -301,7 +301,7 @@ describe("ensureRbacSeedsSynced", () => {
     await detachRole(user.id, "admin");
     expect((await listUserRoles(user.id)).map((role) => role.id)).toEqual([REQUESTER_ROLE_ID]);
 
-    const stats = ensureRbacSeedsSynced({ quiet: true });
+    const stats = await ensureRbacSeedsSynced({ quiet: true });
 
     expect(stats.usersBackfilled).toBe(0);
     expect((await listUserRoles(user.id)).map((role) => role.id)).toEqual([REQUESTER_ROLE_ID]);
@@ -316,7 +316,7 @@ describe("ensureRbacSeedsSynced", () => {
     requester.verbs.push("invalid.permission" as PermissionVerb);
 
     try {
-      expect(() => ensureRbacSeedsSynced({ quiet: true })).toThrow(
+      await expect(ensureRbacSeedsSynced({ quiet: true })).rejects.toThrow(
         /Invalid RBAC permission verb "invalid\.permission"/,
       );
       expect(await roleVerbs(REQUESTER_ROLE_ID)).toEqual(REQUESTER_VERBS);

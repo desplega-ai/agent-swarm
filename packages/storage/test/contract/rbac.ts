@@ -173,5 +173,40 @@ export function rbacContract(engine: ContractEngine): void {
       expect(await repo.purgeAuditOlderThanDays(30)).toBe(1);
       expect(await repo.purgeAuditOlderThanDays(30)).toBe(0);
     });
+
+    test("built-in role seed: insert once, update only on drift, verbs in byte order", async () => {
+      const seed = { id: "ct-builtin", name: "ct-builtin", description: "d", grantsAll: false };
+      expect(await repo.insertBuiltinRole(seed)).toBe(1);
+      expect(await repo.insertBuiltinRole(seed)).toBe(0);
+      expect(await repo.insertBuiltinRole({ ...seed, id: "ct-other" })).toBe(0);
+      expect(await repo.updateBuiltinRole(seed)).toBe(0);
+      expect(await repo.updateBuiltinRole({ ...seed, description: "d2" })).toBe(1);
+      expect(await repo.findRoleIdentity({ id: "ct-builtin" })).toEqual({
+        id: "ct-builtin",
+        name: "ct-builtin",
+      });
+      expect(await repo.findRoleIdentity({ name: "ct-builtin" })).toEqual({
+        id: "ct-builtin",
+        name: "ct-builtin",
+      });
+      expect(await repo.findRoleIdentity({ id: "ct-none" })).toBeNull();
+      expect(await repo.insertRolePermission("ct-builtin", "b.verb")).toBe(1);
+      expect(await repo.insertRolePermission("ct-builtin", "B.verb")).toBe(1);
+      expect(await repo.insertRolePermission("ct-builtin", "b.verb")).toBe(0);
+      expect(await repo.listRoleVerbs("ct-builtin")).toEqual(["B.verb", "b.verb"]);
+      expect(await repo.deleteRolePermission("ct-builtin", "B.verb")).toBe(1);
+      expect(await repo.listRoleVerbs("ct-builtin")).toEqual(["b.verb"]);
+    });
+
+    test("default-role trigger and the roleless-user backfill", async () => {
+      await repo.ensureDefaultRoleTrigger();
+      await repo.ensureDefaultRoleTrigger();
+      await addRole("ct-default", "ct-default", []);
+      await addUser("ct-u1");
+      await addUser("ct-u2");
+      const before = await repo.listUserRoles("ct-u1");
+      expect(await repo.attachRoleToRolelessUsers("ct-default")).toBe(before.length === 0 ? 2 : 0);
+      expect(await repo.attachRoleToRolelessUsers("ct-default")).toBe(0);
+    });
   });
 }

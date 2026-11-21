@@ -1,3 +1,4 @@
+import { nowText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { sql, sqlList } from "../sql";
 
@@ -40,6 +41,13 @@ export type PermissionAuditInsert = {
   source: "mcp" | "http";
 };
 
+export type BuiltinRoleSeed = {
+  id: string;
+  name: string;
+  description: string;
+  grantsAll: boolean;
+};
+
 export interface RbacRepository {
   findRoleByName(name: string): Promise<RoleGrantRow | null>;
   /** True when one of the user's roles lists one of `verbs` in `role_permissions`. */
@@ -75,6 +83,27 @@ export interface RbacRepository {
   insertPermissionAudit(row: PermissionAuditInsert): Promise<void>;
   /** Deletes audit rows older than `days` days. Returns the deleted row count. */
   purgeAuditOlderThanDays(days: number): Promise<number>;
+
+  // ---- built-in role seed sync (start and `rbac bootstrap`) ----
+  /** Insert a built-in role unless its id or name exists. Returns rows inserted. */
+  insertBuiltinRole(role: BuiltinRoleSeed): Promise<number>;
+  /** Rewrite a built-in role when any seeded field differs. Returns rows updated. */
+  updateBuiltinRole(role: BuiltinRoleSeed): Promise<number>;
+  findRoleIdentity(
+    by: { id: string } | { name: string },
+  ): Promise<{ id: string; name: string } | null>;
+  /** Verbs of a role, in byte order. */
+  listRoleVerbs(roleId: string): Promise<string[]>;
+  deleteRolePermission(roleId: string, verb: string): Promise<number>;
+  /** Insert unless present. Returns rows inserted. */
+  insertRolePermission(roleId: string, verb: string): Promise<number>;
+  /**
+   * Make sure the trigger that gives each new user the admin role exists.
+   * SQLite creates it at start; the Postgres baseline already has it.
+   */
+  ensureDefaultRoleTrigger(): Promise<void>;
+  /** Attach `roleId` to every user that holds no role. Returns rows inserted. */
+  attachRoleToRolelessUsers(roleId: string): Promise<number>;
 }
 
 export abstract class BaseRbacRepository implements RbacRepository {
@@ -204,4 +233,75 @@ export abstract class BaseRbacRepository implements RbacRepository {
 
   /** `ts` holds `YYYY-MM-DD HH:MM:SS` text; the cutoff arithmetic differs per engine. */
   abstract purgeAuditOlderThanDays(days: number): Promise<number>;
+
+  // ---- built-in role seed sync ----
+
+  async insertBuiltinRole(r: BuiltinRoleSeed): Promise<number> {
+    const result = await this.db.run(sql`
+      INSERT INTO roles (id, name, description, "isBuiltin", "grantsAll")
+      VALUES (${r.id}, ${r.name}, ${r.description}, ${true}, ${r.grantsAll})
+      ON CONFLICT DO NOTHING`);
+    return result.changes;
+  }
+
+  async updateBuiltinRole(r: BuiltinRoleSeed): Promise<number> {
+    const result = await this.db.run(sql`
+      UPDATE roles
+      SET name = ${r.name}, description = ${r.description}, "isBuiltin" = ${true},
+          "grantsAll" = ${r.grantsAll}, "lastUpdatedAt" = ${nowText}
+      WHERE id = ${r.id}
+        AND (
+          name <> ${r.name}
+          OR COALESCE(description, '') <> COALESCE(${r.description}, '')
+          OR "isBuiltin" <> ${true}
+          OR "grantsAll" <> ${r.grantsAll}
+        )`);
+    return result.changes;
+  }
+
+  findRoleIdentity(
+    by: { id: string } | { name: string },
+  ): Promise<{ id: string; name: string } | null> {
+    return "id" in by
+      ? this.db.get(sql`SELECT id, name FROM roles WHERE id = ${by.id}`)
+      : this.db.get(sql`SELECT id, name FROM roles WHERE name = ${by.name}`);
+  }
+
+  async listRoleVerbs(roleId: string): Promise<string[]> {
+    const rows = await this.db.query<{ verb: string }>(
+      sql`SELECT verb FROM role_permissions WHERE "roleId" = ${roleId} ORDER BY verb`,
+    );
+    return rows.map((row) => row.verb);
+  }
+
+  async deleteRolePermission(roleId: string, verb: string): Promise<number> {
+    return (
+      await this.db.run(
+        sql`DELETE FROM role_permissions WHERE "roleId" = ${roleId} AND verb = ${verb}`,
+      )
+    ).changes;
+  }
+
+  async insertRolePermission(roleId: string, verb: string): Promise<number> {
+    return (
+      await this.db.run(
+        sql`INSERT INTO role_permissions ("roleId", verb) VALUES (${roleId}, ${verb}) ON CONFLICT DO NOTHING`,
+      )
+    ).changes;
+  }
+
+  abstract ensureDefaultRoleTrigger(): Promise<void>;
+
+  async attachRoleToRolelessUsers(roleId: string): Promise<number> {
+    const result = await this.db.run(sql`
+      INSERT INTO principal_roles ("principalType", "principalId", "roleId")
+      SELECT 'user', u.id, ${roleId}
+      FROM users u
+      WHERE NOT EXISTS (
+        SELECT 1 FROM principal_roles pr
+        WHERE pr."principalType" = 'user' AND pr."principalId" = u.id
+      )
+      ON CONFLICT DO NOTHING`);
+    return result.changes;
+  }
 }

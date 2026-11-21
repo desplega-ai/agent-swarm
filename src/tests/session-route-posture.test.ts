@@ -128,7 +128,7 @@ beforeAll(async () => {
   delete process.env.AGENT_FS_API_KEY;
   resetFileStorageProvider();
   initDb(":memory:");
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   agent = await createAgent({ name: "Worker", isLead: false, status: "idle" });
   owner = await createUser({ name: "Owner" });
   writer = await createUser({ name: "Writer" });

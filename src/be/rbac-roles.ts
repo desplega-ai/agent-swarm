@@ -3,7 +3,6 @@ import type { PermissionVerb } from "../rbac";
 import { PermissionVerbSchema } from "../rbac";
 import { invalidateTelemetryUserRole } from "../telemetry-identity";
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getDb } from "./db";
 import { getStorage } from "./storage";
 import { findUserById, isLiveUserToken, revokeAllUserCredentials } from "./users";
 
@@ -104,16 +103,6 @@ export type UserRole = {
   grantsAll: boolean;
   createdAt: string;
 };
-
-const CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL = `
-CREATE TRIGGER IF NOT EXISTS trg_users_default_role
-AFTER INSERT ON users
-BEGIN
-  INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-  SELECT 'user', NEW.id, 'rbac-role-admin'
-  WHERE EXISTS (SELECT 1 FROM roles WHERE id = 'rbac-role-admin');
-END;
-`;
 
 type RoleIdentityRow = {
   id: string;
@@ -422,124 +411,75 @@ export async function setUserRoles(
   });
 }
 
-export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncStats {
-  const db = getDb();
+export async function ensureRbacSeedsSynced(opts?: {
+  quiet?: boolean;
+}): Promise<RbacSeedSyncStats> {
   const desiredVerbsByRoleId = validatedBuiltinVerbSets();
+  const storage = getStorage();
+  const rbac = storage.repos.rbac;
 
-  const insertRole = db.prepare<null, [string, string, string, number]>(
-    `INSERT OR IGNORE INTO roles (id, name, description, isBuiltin, grantsAll)
-     VALUES (?, ?, ?, 1, ?)`,
-  );
-  const updateRole = db.prepare<null, [string, string, number, string, string, string, number]>(
-    `UPDATE roles
-     SET name = ?, description = ?, isBuiltin = 1, grantsAll = ?, lastUpdatedAt = CURRENT_TIMESTAMP
-     WHERE id = ?
-       AND (
-         name <> ?
-         OR COALESCE(description, '') <> COALESCE(?, '')
-         OR isBuiltin <> 1
-         OR grantsAll <> ?
-       )`,
-  );
-  const selectRoleById = db.prepare<RoleIdentityRow, string>(
-    "SELECT id, name FROM roles WHERE id = ?",
-  );
-  const selectRoleByName = db.prepare<RoleIdentityRow, string>(
-    "SELECT id, name FROM roles WHERE name = ?",
-  );
-  const selectRolePermissions = db.prepare<PermissionRow, string>(
-    "SELECT verb FROM role_permissions WHERE roleId = ?",
-  );
-  const deleteRolePermission = db.prepare<null, [string, string]>(
-    "DELETE FROM role_permissions WHERE roleId = ? AND verb = ?",
-  );
-  const insertRolePermission = db.prepare<null, [string, string]>(
-    "INSERT OR IGNORE INTO role_permissions (roleId, verb) VALUES (?, ?)",
-  );
-  const backfillDefaultRoleForZeroRoleUsers = db.prepare<null, string>(
-    `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-     SELECT 'user', u.id, ?
-     FROM users u
-     WHERE NOT EXISTS (
-       SELECT 1
-       FROM principal_roles pr
-       WHERE pr.principalType = 'user'
-         AND pr.principalId = u.id
-     )`,
-  );
-
-  // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
-  const stats = db
-    .transaction((): RbacSeedSyncStats => {
-      const stats: RbacSeedSyncStats = {
-        rolesInserted: 0,
-        rolesUpdated: 0,
-        permissionsInserted: 0,
-        permissionsDeleted: 0,
-        usersBackfilled: 0,
+  const stats = await storage.transaction(async (): Promise<RbacSeedSyncStats> => {
+    const stats: RbacSeedSyncStats = {
+      rolesInserted: 0,
+      rolesUpdated: 0,
+      permissionsInserted: 0,
+      permissionsDeleted: 0,
+      usersBackfilled: 0,
+    };
+    for (const role of BUILTIN_ROLES) {
+      const seed = {
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        grantsAll: Boolean(role.grantsAll),
       };
-      for (const role of BUILTIN_ROLES) {
-        const grantsAll = role.grantsAll ? 1 : 0;
-        const insertResult = insertRole.run(role.id, role.name, role.description, grantsAll);
-        stats.rolesInserted += insertResult.changes;
-        if (insertResult.changes === 0) {
-          const updateResult = updateRole.run(
-            role.name,
-            role.description,
-            grantsAll,
-            role.id,
-            role.name,
-            role.description,
-            grantsAll,
-          );
-          stats.rolesUpdated += updateResult.changes;
-        }
+      const inserted = await rbac.insertBuiltinRole(seed);
+      stats.rolesInserted += inserted;
+      if (inserted === 0) stats.rolesUpdated += await rbac.updateBuiltinRole(seed);
+    }
+
+    for (const role of BUILTIN_ROLES) {
+      const row = await rbac.findRoleIdentity({ id: role.id });
+      if (row) {
+        continue;
       }
 
-      for (const role of BUILTIN_ROLES) {
-        const row = selectRoleById.get(role.id);
-        if (row) {
-          continue;
-        }
-
-        const colliding = selectRoleByName.get(role.name);
-        if (colliding) {
-          throw new Error(
-            `RBAC built-in role "${role.name}" (${role.id}) is missing because role ` +
-              `"${colliding.name}" (${colliding.id}) already uses that name. ` +
-              "Rename or remove the conflicting role, then rerun `rbac bootstrap`.",
-          );
-        }
-
+      const colliding = await rbac.findRoleIdentity({ name: role.name });
+      if (colliding) {
         throw new Error(
-          `RBAC built-in role "${role.name}" (${role.id}) is missing after seed sync. ` +
-            "Rerun `rbac bootstrap`; if it still fails, inspect the roles table.",
+          `RBAC built-in role "${role.name}" (${role.id}) is missing because role ` +
+            `"${colliding.name}" (${colliding.id}) already uses that name. ` +
+            "Rename or remove the conflicting role, then rerun `rbac bootstrap`.",
         );
       }
 
-      for (const role of BUILTIN_ROLES) {
-        const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
-        const existingRows = selectRolePermissions.all(role.id);
-        for (const row of existingRows) {
-          if (!desiredVerbs.has(row.verb as PermissionVerb)) {
-            stats.permissionsDeleted += deleteRolePermission.run(role.id, row.verb).changes;
-          }
-        }
-        for (const verb of desiredVerbs) {
-          stats.permissionsInserted += insertRolePermission.run(role.id, verb).changes;
+      throw new Error(
+        `RBAC built-in role "${role.name}" (${role.id}) is missing after seed sync. ` +
+          "Rerun `rbac bootstrap`; if it still fails, inspect the roles table.",
+      );
+    }
+
+    for (const role of BUILTIN_ROLES) {
+      const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
+      for (const verb of await rbac.listRoleVerbs(role.id)) {
+        if (!desiredVerbs.has(verb as PermissionVerb)) {
+          stats.permissionsDeleted += await rbac.deleteRolePermission(role.id, verb);
         }
       }
+      for (const verb of desiredVerbs) {
+        stats.permissionsInserted += await rbac.insertRolePermission(role.id, verb);
+      }
+    }
 
-      db.run(CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL);
+    await rbac.ensureDefaultRoleTrigger();
 
-      // DES-445 pre-GA heal: zero user roles is never intentional today; users
-      // are deactivated, not stripped. When RBAC reaches GA with real role
-      // management, zero roles becomes a deliberate deny-all posture and this
-      // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
-      stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
-      return stats;
-    })
-    .immediate();
+    // DES-445 pre-GA heal: zero user roles is never intentional today; users
+    // are deactivated, not stripped. When RBAC reaches GA with real role
+    // management, zero roles becomes a deliberate deny-all posture and this
+    // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
+    stats.usersBackfilled += await rbac.attachRoleToRolelessUsers(DEFAULT_ROLE_ID);
+    return stats;
+  });
 
   if (!opts?.quiet) {
     console.log(
@@ -589,7 +529,7 @@ export async function runRbacCliCommand(args: string[]): Promise<void> {
     throw new Error(`Unknown RBAC command: ${args.join(" ") || "(none)"}`);
   }
 
-  const stats = ensureRbacSeedsSynced({ quiet: true });
+  const stats = await ensureRbacSeedsSynced({ quiet: true });
   const roles = await getRbacRoleSummary();
 
   console.log("RBAC bootstrap complete");
