@@ -148,13 +148,10 @@ export function parseModelTierOverridesHeader(
 }
 
 export async function getAgentModelTierOverrides(agentId: string): Promise<ModelTierOverrides> {
-  const row = await getDbClient().get<{ modelTierOverrides: string | null }>(
-    "SELECT modelTierOverrides FROM agents WHERE id = ?",
-    [agentId],
-  );
-  if (!row?.modelTierOverrides) return {};
+  const stored = await getStorage().repos.agents.getModelTierOverrides(agentId);
+  if (!stored) return {};
   try {
-    return sanitizeModelTierOverrides(JSON.parse(row.modelTierOverrides));
+    return sanitizeModelTierOverrides(JSON.parse(stored));
   } catch {
     return {};
   }
@@ -170,11 +167,7 @@ export async function modelTierOverridesDiffer(
   overrides: ModelTierOverrides,
 ): Promise<boolean> {
   const next = storedModelTierOverrides(overrides);
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM agents WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [agentId, next],
-  );
-  return row !== null;
+  return getStorage().repos.agents.modelTierOverridesDiffer(agentId, next);
 }
 
 /** Store the worker's overrides; no write when unchanged. Empty object clears. */
@@ -183,10 +176,7 @@ export async function setAgentModelTierOverrides(
   overrides: ModelTierOverrides,
 ): Promise<void> {
   const next = storedModelTierOverrides(overrides);
-  await getDbClient().run(
-    "UPDATE agents SET modelTierOverrides = ? WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [next, agentId, next],
-  );
+  await getStorage().repos.agents.setModelTierOverrides(agentId, next);
 }
 
 // ─── Catalog for alias resolution ────────────────────────────────────────────

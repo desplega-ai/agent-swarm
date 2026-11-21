@@ -109,4 +109,11 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
        ORDER BY date`);
     return rows.map((row) => ({ date: row.date, count: Number(row.count) }));
   }
+
+  async listAgentNames(): Promise<(string | null)[]> {
+    const rows = await this.db.query<{ name: string | null }>(
+      sql`SELECT name FROM agents ORDER BY rowid`,
+    );
+    return rows.map((row) => row.name);
+  }
 }

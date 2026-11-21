@@ -158,6 +158,8 @@ export interface SkillsRepository {
     since: string | null,
     limit: number,
   ): Promise<SkillDetailRecentRow[]>;
+  /** Id of the oldest skill named `name` in any scope (lowest `createdAt`), or null. */
+  findOldestSkillIdByName(name: string): Promise<string | null>;
 }
 
 /**
@@ -325,5 +327,12 @@ export abstract class BaseSkillsRepository implements SkillsRepository {
        WHERE ${detailWhere(skillId, since)}
        ORDER BY si."createdAt" DESC
        LIMIT ${limit}`);
+  }
+
+  async findOldestSkillIdByName(name: string): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM skills WHERE name = ${name} ORDER BY "createdAt" LIMIT 1`,
+    );
+    return row?.id ?? null;
   }
 }

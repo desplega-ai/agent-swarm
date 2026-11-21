@@ -2,12 +2,14 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { AgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import type { AgentsRepository } from "./repositories/agents";
 import type { AssetsRepository } from "./repositories/assets";
 import type { ChatRepository } from "./repositories/chat";
 import type { ConfigRepository } from "./repositories/config";
 import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
+import type { ImprovementsRepository } from "./repositories/improvements";
 import type { KvRepository } from "./repositories/kv";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { McpServersRepository } from "./repositories/mcp-servers";
@@ -17,6 +19,7 @@ import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SchedulesRepository } from "./repositories/schedules";
 import type { ScriptsRepository } from "./repositories/scripts";
 import type { SkillsRepository } from "./repositories/skills";
 import type { SlackRepository } from "./repositories/slack";
@@ -49,6 +52,9 @@ export type Repositories = {
   kv: KvRepository;
   tasks: TasksRepository;
   memory: MemoryRepository;
+  schedules: SchedulesRepository;
+  agentFsWebhooks: AgentFsWebhooksRepository;
+  improvements: ImprovementsRepository;
 };
 
 /**

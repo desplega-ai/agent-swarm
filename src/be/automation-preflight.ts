@@ -2,10 +2,10 @@ import type { AutomationIntegrationId, ScheduledTask, Workflow } from "@/types";
 import { isSlackConfigured } from "../slack/config";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
 import { emitRunFinished } from "./db/workflow-runs";
 import { getOAuthApp, hasOAuthTokens } from "./db-queries/oauth";
 import { scrubJsonValue } from "./scrub-json";
+import { getStorage } from "./storage";
 
 export type AutomationKind = "schedule" | "workflow";
 export type AutomationState = "running" | "needs_setup";
@@ -318,15 +318,11 @@ export function workflowPreflightInput(workflow: Workflow): AutomationPreflightI
 
 /** Load only the setup metadata needed by the globally polled status endpoint. */
 export async function listEnabledAutomationPreflightInputs(): Promise<AutomationPreflightInput[]> {
-  const rows = await getDbClient().query<AutomationPreflightRow>(
-    `SELECT id, name, 'schedule' AS kind, params, requiredParams, requires
-     FROM scheduled_tasks
-     WHERE enabled = 1
-     UNION ALL
-     SELECT id, name, 'workflow' AS kind, params, requiredParams, requires
-     FROM workflows
-     WHERE enabled = 1`,
-  );
+  const { repos } = getStorage();
+  const rows: AutomationPreflightRow[] = [
+    ...(await repos.schedules.listEnabledPreflightRows()),
+    ...(await repos.workflows.listEnabledPreflightRows()),
+  ];
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -354,15 +350,12 @@ export async function isFirstWorkflowPreflightFailureToday(
   now: Date = new Date(),
 ): Promise<boolean> {
   const bounds = utcDayBounds(now);
-  const row = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found FROM workflow_runs
-     WHERE workflowId = ? AND id != ? AND status = 'failed'
-       AND error LIKE 'needs_setup:%'
-       AND startedAt >= ? AND startedAt < ?
-     LIMIT 1`,
-    [workflowId, runId, bounds.start, bounds.end],
-  );
-  return row == null;
+  return !(await getStorage().repos.workflows.hasOtherSetupFailureRun(
+    workflowId,
+    runId,
+    bounds.start,
+    bounds.end,
+  ));
 }
 
 /** Record at most one copy of the same setup failure on a schedule per UTC day. */
@@ -374,11 +367,9 @@ export async function recordSchedulePreflightFailure(
   // Scrub before the same-day dedup compare: the stored message is scrubbed,
   // so a raw reason would never match it and the dedup would stop working.
   const message = scrubSecrets(failureReason);
-  return await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{ lastErrorAt: string | null; lastErrorMessage: string | null }>(
-      "SELECT lastErrorAt, lastErrorMessage FROM scheduled_tasks WHERE id = ?",
-      [scheduleId],
-    );
+  const schedules = getStorage().repos.schedules;
+  return await getStorage().transaction(async () => {
+    const row = await schedules.getLastError(scheduleId);
     if (!row) return false;
     if (
       row.lastErrorMessage === message &&
@@ -386,12 +377,11 @@ export async function recordSchedulePreflightFailure(
     ) {
       return false;
     }
-    await tx.run(
-      `UPDATE scheduled_tasks
-       SET lastErrorAt = ?, lastErrorMessage = ?, lastUpdatedAt = ?
-       WHERE id = ?`,
-      [now.toISOString(), message, now.toISOString(), scheduleId],
-    );
+    await schedules.setLastError(scheduleId, {
+      at: now.toISOString(),
+      message,
+      now: now.toISOString(),
+    });
     return true;
   });
 }
@@ -411,38 +401,28 @@ export async function recordWorkflowPreflightFailure(input: {
 }): Promise<{ runId: string; recorded: boolean }> {
   const now = input.now ?? new Date();
   const bounds = utcDayBounds(now);
-  return await getDbClient().transaction(async (tx) => {
+  const workflows = getStorage().repos.workflows;
+  return await getStorage().transaction(async () => {
     // Child runs record their own linked failure (`startWorkflowExecution`);
     // a top-level trigger never reuses one.
-    const existing = await tx.get<{ id: string }>(
-      `SELECT id FROM workflow_runs
-       WHERE workflowId = ? AND status = 'failed' AND parentStepId IS NULL
-         AND error LIKE 'needs_setup:%'
-         AND startedAt >= ? AND startedAt < ?
-       ORDER BY startedAt ASC LIMIT 1`,
-      [input.workflowId, bounds.start, bounds.end],
+    const existingId = await workflows.findFirstTopLevelSetupFailureRunId(
+      input.workflowId,
+      bounds.start,
+      bounds.end,
     );
-    if (existing) return { runId: existing.id, recorded: false };
+    if (existingId) return { runId: existingId, recorded: false };
 
     const runId = crypto.randomUUID();
     const timestamp = now.toISOString();
-    await tx.run(
-      `INSERT INTO workflow_runs
-         (id, workflowId, status, triggerType, triggerData, error, created_by,
-          startedAt, lastUpdatedAt, finishedAt)
-       VALUES (?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        runId,
-        input.workflowId,
-        input.triggerType,
-        input.triggerData === undefined ? null : scrubJsonValue(input.triggerData),
-        scrubSecrets(input.failureReason),
-        input.createdBy ?? null,
-        timestamp,
-        timestamp,
-        timestamp,
-      ],
-    );
+    await workflows.insertFailedRun({
+      id: runId,
+      workflowId: input.workflowId,
+      triggerType: input.triggerType,
+      triggerData: input.triggerData === undefined ? null : scrubJsonValue(input.triggerData),
+      error: scrubSecrets(input.failureReason),
+      createdBy: input.createdBy ?? null,
+      now: timestamp,
+    });
     emitRunFinished(runId, input.workflowId, "failed");
     // Claimed in this transaction, which also sees every child failure run
     // committed before it: concurrent failures alert exactly once a day.

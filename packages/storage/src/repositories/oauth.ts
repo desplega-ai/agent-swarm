@@ -186,6 +186,26 @@ export type McpOAuthPendingJoinRow = {
   contextJson: string;
 };
 
+/** A non-MCP app row of the connections listing, with its `default` authorization. */
+export type OAuthAppListingRow = {
+  id: string;
+  provider: string;
+  clientId: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  redirectUri: string;
+  scopes: string;
+  extraParamsJson: string | null;
+  tokenAuthStyle: "body" | "basic";
+  tokenBodyFormat: "form" | "json";
+  source: string;
+  authorizationId: string | null;
+  tokenExpiresAt: string | null;
+  tokenUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface OAuthRepository {
   /** The oldest non-MCP app of a provider (`createdAt`, then `id`). */
   findAppByProvider(provider: string): Promise<OAuthAppRow | null>;
@@ -300,6 +320,13 @@ export interface OAuthRepository {
     expiresAt: number,
     now: number,
   ): Promise<void>;
+  /**
+   * Non-MCP apps with their `default` authorization's id and token times, for
+   * the connections listing. Ordered by provider, ties in insertion order.
+   */
+  listProviderAppsWithDefaultToken(): Promise<OAuthAppListingRow[]>;
+  /** Deletes the app row by id (its authorizations cascade). */
+  deleteAppById(id: string): Promise<void>;
 }
 
 export abstract class BaseOAuthRepository implements OAuthRepository {
@@ -708,5 +735,12 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
         state = excluded.state,
         expires_at = excluded.expires_at,
         updated_at = excluded.updated_at`);
+  }
+
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listProviderAppsWithDefaultToken(): Promise<OAuthAppListingRow[]>;
+
+  async deleteAppById(id: string): Promise<void> {
+    await this.db.run(sql`DELETE FROM oauth_apps WHERE id = ${id}`);
   }
 }

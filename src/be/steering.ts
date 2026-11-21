@@ -25,6 +25,7 @@ import {
   markSteeringPromoted,
   resumeTask,
 } from "./db";
+import { getStorage } from "./storage";
 
 /** 409 body for a worker callback about a row that moved to a successor task. */
 export const STEERING_MOVED_ERROR = "Steering message moved to another task";
@@ -129,15 +130,7 @@ export async function getTaskSteeringFieldsForTasks(
   const agents = new Map<string, SteeringAgent>();
   for (let i = 0; i < agentIds.length; i += AGENT_ID_CHUNK) {
     const ids = agentIds.slice(i, i + AGENT_ID_CHUNK);
-    const rows = await getDbClient().query<{
-      id: string;
-      isLead: number;
-      provider: string | null;
-      harness_provider: string | null;
-    }>(
-      `SELECT id, isLead, provider, harness_provider FROM agents WHERE id IN (${ids.map(() => "?").join(",")})`,
-      ids,
-    );
+    const rows = await getStorage().repos.agents.listSteeringFieldsByIds(ids);
     for (const row of rows) {
       // Same mapping as rowToAgent for these three fields.
       agents.set(row.id, {
@@ -237,7 +230,7 @@ export async function markSteeringUndeliverable(
     throw new SteeringRequestError("Undeliverable reason must not be empty", 400);
   }
 
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const message = await getSteeringMessageById(id);
     if (!message) {
       throw new SteeringRequestError("Steering message not found", 404);

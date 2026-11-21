@@ -1,6 +1,6 @@
-import { likeAsciiCi } from "../dialect";
+import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { EMPTY, sql, sqlList } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlList } from "../sql";
 
 /**
  * Domain: runtime pools (`runtime_controllers`, `runtime_pools`,
@@ -138,6 +138,40 @@ export type RemoteControllerRow = {
   updated_at: string;
   last_seen_at: string | null;
 };
+
+/** A `runtime_instances` row (SQLite value shape: flags 0/1, JSON as text). */
+export type RuntimeInstanceRow = {
+  id: string;
+  agent_id: string;
+  pool_id: string | null;
+  controller_id: string | null;
+  external_handle: string | null;
+  provision_attempts: number;
+  provision_error: string | null;
+  provision_requested_at: string | null;
+  draining: number;
+  idle_since: string | null;
+  lease_expires_at: string | null;
+  task_id: string | null;
+  workspace_slot?: number | null;
+  status: string;
+  reported_slots: number;
+  credential_ready: number | null;
+  metadata: string | null;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+};
+
+/**
+ * An `active` row of the agent seen at or after `since`. A workspace runtime
+ * counts only once the supervisor stored its verified handle.
+ */
+const liveConfirmedRuntime = (id: string, agentId: string, since: string): SqlQuery => sql`
+  id = ${id} AND agent_id = ${agentId} AND status = 'active' AND last_seen_at >= ${since}
+  AND (workspace_slot IS NULL OR external_handle IS NOT NULL)`;
 
 export interface RuntimePoolsRepository {
   // --- controllers ---
@@ -372,6 +406,90 @@ export interface RuntimePoolsRepository {
   // --- seed marker ---
   hasSeedMarker(kind: string, key: string): Promise<boolean>;
   insertSeedMarker(kind: string, key: string, seededHash: string): Promise<void>;
+
+  // --- runtime instance lifecycle (src/be/multi-runtime.ts) ---
+  findRuntimeInstance(id: string): Promise<RuntimeInstanceRow | null>;
+  /** True when `id` is a `provisioning` row of `agentId`. */
+  isProvisioningRuntimeOf(id: string, agentId: string): Promise<boolean>;
+  /**
+   * Inserts an `active` row, or refreshes the row with that id (status,
+   * slots, metadata unless null, last_seen_at, updated_at) only when it
+   * belongs to the same agent. Null when the id belongs to another agent.
+   */
+  upsertActiveRuntime(row: {
+    id: string;
+    agentId: string;
+    reportedSlots: number;
+    metadata: string | null;
+  }): Promise<RuntimeInstanceRow | null>;
+  /** Clears the pool's failure count and open circuit. */
+  resetPoolCircuit(poolId: string): Promise<void>;
+  insertProvisioningRuntime(row: {
+    id: string;
+    agentId: string;
+    poolId: string;
+    controllerId: string;
+    reportedSlots: number;
+    workspaceSlot: number | null;
+    now: string;
+  }): Promise<RuntimeInstanceRow | null>;
+  /** Workspace slots held by the agent's non-offline runtimes. Ascending. */
+  listWorkspaceSlotsInUse(agentId: string): Promise<number[]>;
+  /** Overwrites provision_error, whatever the row's state. */
+  overwriteProvisionError(runtimeId: string, error: string): Promise<void>;
+  /**
+   * Refreshes last_seen_at / updated_at of an `active` row of the agent seen
+   * at or after `since` whose workspace (if any) is confirmed. True when one matched.
+   */
+  touchLiveRuntime(id: string, agentId: string, since: string): Promise<boolean>;
+  /** True when the row matches the `touchLiveRuntime` condition (read-only). */
+  isLiveConfirmedRuntime(id: string, agentId: string, since: string): Promise<boolean>;
+  /** Marks the agent's row offline and returns it, or null when none matched. */
+  markRuntimeOffline(id: string, agentId: string): Promise<RuntimeInstanceRow | null>;
+  /** `active` rows of the agent seen at or after `since`. */
+  countLiveRuntimes(agentId: string, since: string): Promise<number>;
+  /**
+   * Every row of the agent, with `is_live` (1 when `active` and seen at or
+   * after `since`, else 0). Ordered by created_at, then id.
+   */
+  listRuntimesForAgent(
+    agentId: string,
+    since: string,
+  ): Promise<(RuntimeInstanceRow & { is_live: number })[]>;
+  /** Sets credential_ready on an `active` row seen at or after `since`. True when one matched. */
+  setRuntimeCredentialReady(
+    id: string,
+    agentId: string,
+    ready: boolean,
+    since: string,
+  ): Promise<boolean>;
+  /** True when a live row of the agent has credential_ready NULL or true. */
+  hasReadyLiveRuntime(agentId: string, since: string): Promise<boolean>;
+  /** Agents with an `active` row seen at or after `since`. Ordered by agent id. */
+  listAgentIdsWithLiveRuntime(since: string): Promise<string[]>;
+  /** Non-pool `active` rows last seen before `cutoff`. Insertion order. */
+  listStaleUnpooledRuntimes(cutoff: string): Promise<{ id: string; agent_id: string }[]>;
+  /**
+   * Deletes rows last seen before `cutoff` that are not provisioning and are
+   * either non-pool or offline. Returns the count.
+   */
+  pruneStaleRuntimes(cutoff: string): Promise<number>;
+  /** Rows of the pool, ordered by created_at, then insertion order. */
+  listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+
+  // --- remote controller connection (src/http/controllers-connect.ts) ---
+  /** Stores the connection error; an `online` controller stays online, any other goes offline. */
+  recordControllerConnectionError(id: string, error: string, now: string): Promise<void>;
+  /** Sets only the status column (updated_at unchanged). */
+  setControllerStatusOnly(id: string, status: string): Promise<void>;
+  /** Marks the controller online, seen at `seenAt`, and clears its last error. */
+  markControllerOnline(id: string, seenAt: string, updatedAt: string): Promise<void>;
+  /** Sets only last_seen_at. */
+  touchControllerSeen(id: string, now: string): Promise<void>;
+  /** Marks the controller offline, whatever its status, with updated_at and last_seen_at. */
+  markControllerDisconnected(id: string, now: string): Promise<void>;
+  /** Sets the runtime's current task id (scoped to its agent). */
+  setRuntimeTask(runtimeId: string, agentId: string, taskId: string): Promise<void>;
 }
 
 const CONTROLLER_COLUMNS = sql`id, name, kind, placement, config, secret_config AS "secretConfig",
@@ -936,6 +1054,193 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
     await this.db.run(
       sql`INSERT INTO seed_state (kind, key, "seededHash") VALUES (${kind}, ${key}, ${seededHash})`,
     );
+  }
+
+  // --- runtime instance lifecycle ---
+
+  findRuntimeInstance(id: string): Promise<RuntimeInstanceRow | null> {
+    return this.db.get<RuntimeInstanceRow>(sql`SELECT * FROM runtime_instances WHERE id = ${id}`);
+  }
+
+  async isProvisioningRuntimeOf(id: string, agentId: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM runtime_instances
+       WHERE id = ${id} AND status = 'provisioning' AND agent_id = ${agentId}`);
+    return row !== null;
+  }
+
+  upsertActiveRuntime(r: {
+    id: string;
+    agentId: string;
+    reportedSlots: number;
+    metadata: string | null;
+  }): Promise<RuntimeInstanceRow | null> {
+    return this.db.get<RuntimeInstanceRow>(sql`
+      INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
+      VALUES (${r.id}, ${r.agentId}, 'active', ${r.reportedSlots}, ${r.metadata})
+      ON CONFLICT (id) DO UPDATE SET
+        status = 'active',
+        reported_slots = excluded.reported_slots,
+        metadata = COALESCE(excluded.metadata, runtime_instances.metadata),
+        last_seen_at = ${nowIso},
+        updated_at = ${nowIso}
+      WHERE runtime_instances.agent_id = excluded.agent_id
+      RETURNING *`);
+  }
+
+  async resetPoolCircuit(poolId: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_pools SET consecutive_failures = 0, circuit_open_until = NULL
+       WHERE id = ${poolId}`);
+  }
+
+  insertProvisioningRuntime(r: {
+    id: string;
+    agentId: string;
+    poolId: string;
+    controllerId: string;
+    reportedSlots: number;
+    workspaceSlot: number | null;
+    now: string;
+  }): Promise<RuntimeInstanceRow | null> {
+    return this.db.get<RuntimeInstanceRow>(sql`
+      INSERT INTO runtime_instances (id, agent_id, pool_id, controller_id, status,
+        reported_slots, provision_requested_at, workspace_slot)
+      VALUES (${r.id}, ${r.agentId}, ${r.poolId}, ${r.controllerId}, 'provisioning',
+        ${r.reportedSlots}, ${r.now}, ${r.workspaceSlot})
+      RETURNING *`);
+  }
+
+  async listWorkspaceSlotsInUse(agentId: string): Promise<number[]> {
+    const rows = await this.db.query<{ slot: number }>(sql`
+      SELECT workspace_slot AS slot FROM runtime_instances
+       WHERE agent_id = ${agentId} AND workspace_slot IS NOT NULL AND status != 'offline'
+       ORDER BY workspace_slot`);
+    return rows.map((row) => row.slot);
+  }
+
+  async overwriteProvisionError(runtimeId: string, error: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE runtime_instances SET provision_error = ${error} WHERE id = ${runtimeId}`,
+    );
+  }
+
+  async touchLiveRuntime(id: string, agentId: string, since: string): Promise<boolean> {
+    const { changes } = await this.db.run(sql`
+      UPDATE runtime_instances SET last_seen_at = ${nowIso}, updated_at = ${nowIso}
+       WHERE ${liveConfirmedRuntime(id, agentId, since)}`);
+    return changes > 0;
+  }
+
+  async isLiveConfirmedRuntime(id: string, agentId: string, since: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM runtime_instances WHERE ${liveConfirmedRuntime(id, agentId, since)}`,
+    );
+    return row !== null;
+  }
+
+  markRuntimeOffline(id: string, agentId: string): Promise<RuntimeInstanceRow | null> {
+    return this.db.get<RuntimeInstanceRow>(sql`
+      UPDATE runtime_instances SET status = 'offline', updated_at = ${nowIso}
+       WHERE id = ${id} AND agent_id = ${agentId} RETURNING *`);
+  }
+
+  async countLiveRuntimes(agentId: string, since: string): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM runtime_instances
+       WHERE agent_id = ${agentId} AND status = 'active' AND last_seen_at >= ${since}`);
+    return row?.count ?? 0;
+  }
+
+  listRuntimesForAgent(
+    agentId: string,
+    since: string,
+  ): Promise<(RuntimeInstanceRow & { is_live: number })[]> {
+    return this.db.query<RuntimeInstanceRow & { is_live: number }>(sql`
+      SELECT *, CASE WHEN status = 'active' AND last_seen_at >= ${since} THEN 1 ELSE 0 END AS is_live
+        FROM runtime_instances
+       WHERE agent_id = ${agentId}
+       ORDER BY created_at ASC, id ASC`);
+  }
+
+  async setRuntimeCredentialReady(
+    id: string,
+    agentId: string,
+    ready: boolean,
+    since: string,
+  ): Promise<boolean> {
+    const { changes } = await this.db.run(sql`
+      UPDATE runtime_instances SET credential_ready = ${ready}, updated_at = ${nowIso}
+       WHERE id = ${id} AND agent_id = ${agentId} AND status = 'active' AND last_seen_at >= ${since}`);
+    return changes > 0;
+  }
+
+  async hasReadyLiveRuntime(agentId: string, since: string): Promise<boolean> {
+    const row = await this.db.get<{ c: number }>(sql`
+      SELECT COUNT(*) AS c FROM runtime_instances
+       WHERE agent_id = ${agentId} AND status = 'active' AND last_seen_at >= ${since}
+         AND (credential_ready IS NULL OR credential_ready = ${true})`);
+    return (row?.c ?? 0) > 0;
+  }
+
+  async listAgentIdsWithLiveRuntime(since: string): Promise<string[]> {
+    const rows = await this.db.query<{ agent_id: string }>(sql`
+      SELECT DISTINCT agent_id FROM runtime_instances
+       WHERE status = 'active' AND last_seen_at >= ${since}
+       ORDER BY agent_id`);
+    return rows.map((row) => row.agent_id);
+  }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listStaleUnpooledRuntimes(cutoff: string): Promise<{ id: string; agent_id: string }[]>;
+
+  async pruneStaleRuntimes(cutoff: string): Promise<number> {
+    const { changes } = await this.db.run(sql`
+      DELETE FROM runtime_instances
+       WHERE last_seen_at < ${cutoff} AND status != 'provisioning'
+         AND (pool_id IS NULL OR status = 'offline')`);
+    return changes;
+  }
+
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+
+  // --- remote controller connection ---
+
+  async recordControllerConnectionError(id: string, error: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers
+         SET last_error = ${error}, last_error_at = ${now},
+             status = CASE WHEN status = 'online' THEN status ELSE 'offline' END
+       WHERE id = ${id}`);
+  }
+
+  async setControllerStatusOnly(id: string, status: string): Promise<void> {
+    await this.db.run(sql`UPDATE runtime_controllers SET status = ${status} WHERE id = ${id}`);
+  }
+
+  async markControllerOnline(id: string, seenAt: string, updatedAt: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers
+         SET status = 'online', last_seen_at = ${seenAt}, updated_at = ${updatedAt},
+             last_error = NULL, last_error_at = NULL
+       WHERE id = ${id}`);
+  }
+
+  async touchControllerSeen(id: string, now: string): Promise<void> {
+    await this.db.run(sql`UPDATE runtime_controllers SET last_seen_at = ${now} WHERE id = ${id}`);
+  }
+
+  async markControllerDisconnected(id: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_controllers SET status = 'offline', updated_at = ${now}, last_seen_at = ${now}
+       WHERE id = ${id}`);
+  }
+
+  async setRuntimeTask(runtimeId: string, agentId: string, taskId: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE runtime_instances SET task_id = ${taskId}
+       WHERE id = ${runtimeId} AND agent_id = ${agentId}`);
   }
 }
 

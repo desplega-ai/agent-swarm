@@ -1,3 +1,4 @@
+import { agentFsWebhooksContract } from "./agent-fs-webhooks";
 import { agentsContract } from "./agents";
 import { assetsContract } from "./assets";
 import { chatContract } from "./chat";
@@ -5,6 +6,7 @@ import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { eventsContract } from "./events";
 import { extensionsContract } from "./extensions";
+import { improvementsContract } from "./improvements";
 import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
@@ -14,6 +16,7 @@ import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
 import { rbacContract } from "./rbac";
 import { runtimePoolsContract } from "./runtime-pools";
+import { schedulesContract } from "./schedules";
 import { scriptsContract } from "./scripts";
 import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
@@ -48,4 +51,7 @@ export function runStorageContract(engine: ContractEngine): void {
   kvContract(engine);
   tasksContract(engine);
   memoryContract(engine);
+  schedulesContract(engine);
+  agentFsWebhooksContract(engine);
+  improvementsContract(engine);
 }

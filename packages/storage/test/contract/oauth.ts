@@ -8,6 +8,7 @@ import {
 } from "../../src";
 import type { ContractEngine } from "./env";
 
+const T0 = "2026-11-21T10:00:00.000Z";
 const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function appWrite(overrides: Partial<OAuthAppWrite> = {}): OAuthAppWrite {
@@ -382,6 +383,37 @@ export function oauthContract(engine: ContractEngine): void {
       await repo.deletePending("p-tie-1");
       await repo.deleteOrphanMcpApp("app-2");
       expect(await repo.findAppById("app-2")).toBeNull();
+    });
+
+    test("oauth app listing: non-MCP apps by provider then insertion, with the default authorization", async () => {
+      const app = (id: string, provider: string, mcpServerId: string | null = null) =>
+        storage.executor.run(sql`
+          INSERT INTO oauth_apps (id, provider, "clientId", "clientSecret", "authorizeUrl", "tokenUrl",
+            "redirectUri", scopes, "mcpServerId", "createdAt", "updatedAt")
+          VALUES (${id}, ${provider}, 'c', 's', 'https://a', 'https://t', 'https://r', 'x',
+            ${mcpServerId}, ${T0}, ${T0})`);
+      await app("z2", "zeta");
+      await app("b1", "beta");
+      await app("z1", "zeta");
+      await storage.executor.run(sql`
+        INSERT INTO mcp_servers (id, name, scope, transport, "createdAt", "lastUpdatedAt")
+        VALUES ('m1', 'm1', 'global', 'http', ${T0}, ${T0})`);
+      await app("mcp", "alpha", "m1");
+      const rows = await repo.listProviderAppsWithDefaultToken();
+      expect(rows.map((r) => r.id)).toEqual(["b1", "z2", "z1"]);
+      expect(rows[0]).toMatchObject({
+        provider: "beta",
+        clientId: "c",
+        authorizationId: null,
+        tokenExpiresAt: null,
+        tokenUpdatedAt: null,
+      });
+      expect(Object.keys(rows[0] as object)).not.toContain("clientSecret");
+      await repo.deleteAppById("z2");
+      expect((await repo.listProviderAppsWithDefaultToken()).map((r) => r.id)).toEqual([
+        "b1",
+        "z1",
+      ]);
     });
   });
 }

@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import {
   checkoutPromptTemplate,
   deletePromptTemplate,
-  getDbClient,
   getPromptTemplateById,
   getPromptTemplateHistory,
   getPromptTemplates,
@@ -417,7 +417,7 @@ export async function handlePromptTemplates(
       // The sync helper stays on the raw handle for the boot seeder; on this
       // request path, run it inside a client transaction so the write holds
       // the FIFO lock instead of landing inside a foreign BEGIN window.
-      const template = await getDbClient().transaction(async () =>
+      const template = await getStorage().transaction(async () =>
         resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody),
       );
       resetRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
@@ -521,7 +521,7 @@ export async function handlePromptTemplates(
     try {
       // Same rationale as the reset route: serialize the sync raw-handle
       // write through the client's lock on this request path.
-      const template = await getDbClient().transaction(async () =>
+      const template = await getStorage().transaction(async () =>
         upsertPromptTemplate({
           eventType,
           scope,

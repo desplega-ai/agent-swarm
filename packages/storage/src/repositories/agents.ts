@@ -337,6 +337,38 @@ export interface AgentsRepository {
    * first. Days with no task are absent.
    */
   dailyTaskCounts(agentId: string, sinceDay: string): Promise<{ date: string; count: number }[]>;
+
+  // ---- worker-reported model columns ----
+  /** The stored `modelTierOverrides` JSON text; null when unset or no agent. */
+  getModelTierOverrides(id: string): Promise<string | null>;
+  /** True when the agent exists and its `modelTierOverrides` differs from `next` (NULL-safe). */
+  modelTierOverridesDiffer(id: string, next: string | null): Promise<boolean>;
+  /** Sets `modelTierOverrides`; no write when the stored value equals `next` (NULL-safe). */
+  setModelTierOverrides(id: string, next: string | null): Promise<void>;
+  /** The stored `harnessCliVersion`; null when unset or no agent. */
+  getHarnessCliVersion(id: string): Promise<string | null>;
+  /** Sets `harnessCliVersion`; no write when the stored value equals `next` (NULL-safe). */
+  setHarnessCliVersion(id: string, next: string | null): Promise<void>;
+  /** Ids of up to `limit` non-extension agents named `name`. Ordered by id (unique). */
+  listNonExtensionAgentIdsByName(name: string | null, limit: number): Promise<string[]>;
+  /** Installs an active skill unless the agent has it already. True when a row was written. */
+  installSkillIfAbsent(id: string, agentId: string, skillId: string, now: string): Promise<boolean>;
+  /** Active installs per MCP server id; servers with no active install are absent. Ordered by server id. */
+  countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]>;
+  /** Every agent name (extension rows too). Insertion order. */
+  listAgentNames(): Promise<(string | null)[]>;
+  /** The earliest agent `createdAt`, or null with no agent. */
+  firstAgentCreatedAt(): Promise<string | null>;
+  /** `isLead`, `provider`, `harness_provider` of the agents among `ids`. Ordered by id. */
+  listSteeringFieldsByIds(
+    ids: readonly string[],
+  ): Promise<
+    { id: string; isLead: number; provider: string | null; harness_provider: string | null }[]
+  >;
+  /** Every agent row, extension identities included. */
+  countAllAgents(): Promise<number>;
+  /** Agents that are not extension identities. */
+  countNonExtensionAgents(): Promise<number>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -767,5 +799,107 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
         sql`UPDATE active_sessions SET "providerSessionId" = ${providerSessionId} WHERE "taskId" = ${taskId}`,
       )
     ).changes;
+  }
+
+  // ---- worker-reported model columns ----
+
+  async getModelTierOverrides(id: string): Promise<string | null> {
+    const row = await this.db.get<{ modelTierOverrides: string | null }>(
+      sql`SELECT "modelTierOverrides" FROM agents WHERE id = ${id}`,
+    );
+    return row?.modelTierOverrides ?? null;
+  }
+
+  async modelTierOverridesDiffer(id: string, next: string | null): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM agents WHERE id = ${id} AND "modelTierOverrides" IS DISTINCT FROM ${next}`,
+    );
+    return row !== null;
+  }
+
+  async setModelTierOverrides(id: string, next: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agents SET "modelTierOverrides" = ${next}
+       WHERE id = ${id} AND "modelTierOverrides" IS DISTINCT FROM ${next}`);
+  }
+
+  async getHarnessCliVersion(id: string): Promise<string | null> {
+    const row = await this.db.get<{ harnessCliVersion: string | null }>(
+      sql`SELECT "harnessCliVersion" FROM agents WHERE id = ${id}`,
+    );
+    return row?.harnessCliVersion ?? null;
+  }
+
+  async setHarnessCliVersion(id: string, next: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE agents SET "harnessCliVersion" = ${next}
+       WHERE id = ${id} AND "harnessCliVersion" IS DISTINCT FROM ${next}`);
+  }
+
+  async listNonExtensionAgentIdsByName(name: string | null, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      sql`SELECT id FROM agents WHERE name = ${name} AND ${notExtension} ORDER BY id LIMIT ${limit}`,
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async installSkillIfAbsent(
+    id: string,
+    agentId: string,
+    skillId: string,
+    now: string,
+  ): Promise<boolean> {
+    const result = await this.db.run(sql`
+      INSERT INTO agent_skills (id, "agentId", "skillId", "isActive", "installedAt")
+      VALUES (${id}, ${agentId}, ${skillId}, ${true}, ${now})
+      ON CONFLICT ("agentId", "skillId") DO NOTHING`);
+    return result.changes > 0;
+  }
+
+  countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]> {
+    return this.db.query<{ mcpServerId: string; installs: number }>(sql`
+      SELECT "mcpServerId", COUNT(*) AS installs
+        FROM agent_mcp_servers
+       WHERE "isActive" = ${true}
+       GROUP BY "mcpServerId"
+       ORDER BY "mcpServerId"`);
+  }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listAgentNames(): Promise<(string | null)[]>;
+
+  async firstAgentCreatedAt(): Promise<string | null> {
+    const row = await this.db.get<{ first: string | null }>(
+      sql`SELECT MIN("createdAt") AS first FROM agents`,
+    );
+    return row?.first ?? null;
+  }
+
+  async listSteeringFieldsByIds(
+    ids: readonly string[],
+  ): Promise<
+    { id: string; isLead: number; provider: string | null; harness_provider: string | null }[]
+  > {
+    if (ids.length === 0) return [];
+    return this.db.query<{
+      id: string;
+      isLead: number;
+      provider: string | null;
+      harness_provider: string | null;
+    }>(sql`
+      SELECT id, "isLead", provider, harness_provider FROM agents
+       WHERE id IN (${sqlList(ids)}) ORDER BY id`);
+  }
+
+  async countAllAgents(): Promise<number> {
+    const row = await this.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM agents`);
+    return row?.n ?? 0;
+  }
+
+  async countNonExtensionAgents(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM agents WHERE ${notExtension}`,
+    );
+    return row?.count ?? 0;
   }
 }

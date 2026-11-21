@@ -4,6 +4,7 @@ import {
   type RemoteControllerRow,
   RUNTIME_TASKLESS_TRIGGERS,
   type RuntimeCacheReleaseRow,
+  type RuntimeInstanceRow,
   sql,
   sqlList,
 } from "@desplega/storage";
@@ -122,5 +123,18 @@ export class SqliteRuntimePoolsRepository extends BaseRuntimePoolsRepository {
         OR (t.id IS NULL AND s."triggerType" IN (${RUNTIME_TASKLESS_TRIGGERS})
           AND s."lastHeartbeatAt" >= ${sessionCutoff}))
       ORDER BY s.rowid LIMIT 1`);
+  }
+
+  listStaleUnpooledRuntimes(cutoff: string): Promise<{ id: string; agent_id: string }[]> {
+    return this.db.query<{ id: string; agent_id: string }>(sql`
+      SELECT id, agent_id FROM runtime_instances
+       WHERE status = 'active' AND last_seen_at < ${cutoff} AND pool_id IS NULL
+       ORDER BY rowid`);
+  }
+
+  listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]> {
+    return this.db.query<RuntimeInstanceRow>(
+      sql`SELECT * FROM runtime_instances WHERE pool_id = ${poolId} ORDER BY created_at, rowid`,
+    );
   }
 }

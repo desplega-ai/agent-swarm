@@ -1,15 +1,7 @@
 {
-  "src/azure-devops/outbound.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/api-drain.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
-  },
-  "src/be/automation-preflight.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 7
   },
   "src/be/boot-seeds.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
@@ -19,17 +11,9 @@
     "reason": "M2 move: tasks",
     "sites": 3
   },
-  "src/be/db-queries/mcp-servers.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 2
-  },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
     "sites": 3
-  },
-  "src/be/db-retention-defaults.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/be/db-retention.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -41,15 +25,7 @@
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 4
-  },
-  "src/be/db/model-groups.ts": {
-    "reason": "M2 move: models",
     "sites": 2
-  },
-  "src/be/db/model-profiles.ts": {
-    "reason": "M2 move: models",
-    "sites": 6
   },
   "src/be/db/request-composition.ts": {
     "reason": "M2 move: sessions and cost",
@@ -119,41 +95,17 @@
     "reason": "M2 move: workflows",
     "sites": 4
   },
-  "src/be/design-system.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/events.ts": {
     "reason": "M2 move: integrations",
     "sites": 3
   },
-  "src/be/extensions/assets.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
   "src/be/fleet-benchmark-stats.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
+    "sites": 2
   },
   "src/be/harness-model-support.ts": {
     "reason": "M2 move: models",
-    "sites": 4
-  },
-  "src/be/import/index.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
-  "src/be/import/pending.ts": {
-    "reason": "M2 move: assets and import",
-    "sites": 3
-  },
-  "src/be/import/seeders.ts": {
-    "reason": "M2 move: config",
-    "sites": 8
-  },
-  "src/be/improvements.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 11
+    "sites": 2
   },
   "src/be/key-window-usage.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -185,11 +137,11 @@
   },
   "src/be/model-tier-resolution.ts": {
     "reason": "M2 move: models",
-    "sites": 8
+    "sites": 5
   },
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 22
+    "sites": 2
   },
   "src/be/onboarding.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -198,14 +150,6 @@
   "src/be/pricing-refresh.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 2
-  },
-  "src/be/primitives/object-embed.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 2
-  },
-  "src/be/primitives/object-webhooks.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 7
   },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
@@ -229,15 +173,11 @@
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
-    "sites": 5
+    "sites": 2
   },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
-  },
-  "src/be/seed-model-profiles.ts": {
-    "reason": "M2 move: models",
-    "sites": 2
   },
   "src/be/seed-pricing.ts": {
     "reason": "M2 move: sessions and cost",
@@ -341,7 +281,7 @@
   },
   "src/be/steering.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
+    "sites": 2
   },
   "src/be/storage.ts": {
     "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
@@ -355,29 +295,9 @@
     "reason": "M2 move: tasks",
     "sites": 2
   },
-  "src/be/telemetry-ingest-anchor.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/be/unmapped-identities.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/users.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 17
-  },
-  "src/comb/review-batch.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/extensions/identity.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/extensions/lifecycle.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/heartbeat/heartbeat.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -385,14 +305,6 @@
   },
   "src/http/budgets.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 1
-  },
-  "src/http/controllers-connect.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 7
-  },
-  "src/http/core.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
   "src/http/db-query-bounded.ts": {
@@ -405,39 +317,15 @@
   },
   "src/http/poll.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
-  },
-  "src/http/pool-keys.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/http/prompt-templates.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/http/ranking.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
+    "sites": 2
   },
   "src/http/savings-calibration.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 1
   },
-  "src/http/script-connections.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 3
-  },
   "src/http/sessions.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 2
-  },
-  "src/http/status.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/http/used-by.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -449,23 +337,11 @@
   },
   "src/telemetry-snapshot.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
+    "sites": 2
   },
   "src/telemetry-trigger.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/tools/join-swarm.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/prompt-templates/set.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
-  "src/tools/store-progress.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
   },
   "src/tools/utils.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

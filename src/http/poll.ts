@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import { isApiDraining } from "../be/api-drain";
 import { canClaim } from "../be/budget-admission";
 import {
@@ -243,7 +244,7 @@ async function buildChecklistNudge(task: AgentTask, agent: Agent) {
     return undefined;
   }
   try {
-    return await getDbClient().transaction(async () => {
+    return await getStorage().transaction(async () => {
       // RBAC off: the legacy policy lets the Lead edit swarm items.
       const canEditSwarm = (await userGrantCanEditSwarm(userId)) ?? true;
       const item = await firstOpenItem(userId, canEditSwarm);
@@ -351,10 +352,7 @@ export async function handlePoll(
   );
   const recordRuntimeTask = async (taskId: string): Promise<void> => {
     if (!isMultiRuntimeEnabled() || !runtimeInstanceId) return;
-    await getDbClient().run(
-      "UPDATE runtime_instances SET task_id = ? WHERE id = ? AND agent_id = ?",
-      [taskId, runtimeInstanceId, myAgentId!],
-    );
+    await getStorage().repos.runtimePools.setRuntimeTask(runtimeInstanceId, myAgentId!, taskId);
     if (isRuntimePoolsEnabled()) {
       await getDbClient().run(
         "UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ? AND agentId = ?",
@@ -548,7 +546,7 @@ export async function handlePoll(
             // Lifecycle announcements go through `afterCommit`, not straight
             // line: they must not claim "this task started" for a claim the
             // transaction can still roll back.
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               ensure({
                 id: "started",
                 flow: "task",
@@ -765,7 +763,7 @@ export async function handlePoll(
                 await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
-                getDbClient().afterCommit(() => {
+                getStorage().afterCommit(() => {
                   void emitTaskTelemetry("claimed", {
                     taskId: claimed.id,
                     source: claimed.source,
@@ -801,11 +799,11 @@ export async function handlePoll(
         // No trigger found
         return { trigger: null };
       };
-      const probed = await getDbClient().transaction(() => pollBody(true), { readOnly: true });
+      const probed = await getStorage().transaction(() => pollBody(true), { readOnly: true });
       // The write pass never returns NEEDS_WRITE: every guard above is `if (probe)`.
       result =
         probed === NEEDS_WRITE
-          ? ((await getDbClient().transaction(() => pollBody(false))) as PollTxnResult)
+          ? ((await getStorage().transaction(() => pollBody(false))) as PollTxnResult)
           : probed;
     } catch (error) {
       console.error("[/api/poll] Database error:", error);

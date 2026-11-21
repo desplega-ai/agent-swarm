@@ -94,11 +94,7 @@ export async function agentRanModel(agentId: string, modelId: string): Promise<b
 }
 
 export async function getAgentHarnessCliVersion(agentId: string): Promise<string | null> {
-  const row = await getDbClient().get<{ harnessCliVersion: string | null }>(
-    "SELECT harnessCliVersion FROM agents WHERE id = ?",
-    [agentId],
-  );
-  return row?.harnessCliVersion ?? null;
+  return getStorage().repos.agents.getHarnessCliVersion(agentId);
 }
 
 /** Store the worker's CLI version; no write when unchanged. */
@@ -106,10 +102,7 @@ export async function setAgentHarnessCliVersion(
   agentId: string,
   cliVersion: string | null,
 ): Promise<void> {
-  await getDbClient().run(
-    "UPDATE agents SET harnessCliVersion = ? WHERE id = ? AND harnessCliVersion IS NOT ?",
-    [cliVersion, agentId, cliVersion],
-  );
+  await getStorage().repos.agents.setHarnessCliVersion(agentId, cliVersion);
 }
 
 export function unsupportedModelMessage(harness: string, cliVersion: string, model: string) {

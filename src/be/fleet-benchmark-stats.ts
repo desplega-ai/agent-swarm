@@ -10,6 +10,7 @@
  */
 import { FLEET_WINDOW_DAYS, fleetCountStart, type LocalFleetStats } from "../fleet-benchmark";
 import { getDbClient } from "./db/runtime";
+import { getStorage } from "./storage";
 import { getTelemetryIngestAnchor } from "./telemetry-ingest-anchor";
 
 export async function getLocalFleetStats(
@@ -33,12 +34,12 @@ export async function getLocalFleetStats(
        FROM agent_tasks`,
     [since, since, since],
   );
-  const agents = await client.get<{ n: number }>("SELECT COUNT(*) AS n FROM agents");
+  const agentCount = await getStorage().repos.agents.countAllAgents();
   return {
     tasksCreated: Number(tasks?.created ?? 0),
     tasksCompleted: Number(tasks?.completed ?? 0),
     tasksFailed: Number(tasks?.failed ?? 0),
     countStart: since,
-    agents: Number(agents?.n ?? 0),
+    agents: Number(agentCount),
   };
 }

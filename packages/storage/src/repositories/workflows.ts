@@ -1,6 +1,7 @@
 import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
+import type { AutomationPreflightRowText } from "./schedules";
 
 /**
  * Domain: workflows (`workflows`, `workflow_versions`, `workflow_runs`,
@@ -736,6 +737,38 @@ export interface WorkflowsRepository {
    * overdue. Ordered by step insertion order, then wait insertion order.
    */
   listStuckWaitRuns(): Promise<StuckWaitRunRow[]>;
+  /** Id of the workflow named `name` (unique), or null. */
+  findWorkflowIdByName(name: string): Promise<string | null>;
+  /** Setup metadata of the enabled workflows (see `AutomationPreflightRowText`). Insertion order. */
+  listEnabledPreflightRows(): Promise<AutomationPreflightRowText[]>;
+  /**
+   * True when a failed run of the workflow other than `runId` with a
+   * `needs_setup:` error started in `[start, end)`.
+   */
+  hasOtherSetupFailureRun(
+    workflowId: string,
+    runId: string,
+    start: string,
+    end: string,
+  ): Promise<boolean>;
+  /** The earliest top-level failed `needs_setup:` run started in `[start, end)`, or null. */
+  findFirstTopLevelSetupFailureRunId(
+    workflowId: string,
+    start: string,
+    end: string,
+  ): Promise<string | null>;
+  /** Inserts a top-level run that is already `failed` and finished at `now`. */
+  insertFailedRun(run: {
+    id: string;
+    workflowId: string;
+    triggerType: string;
+    triggerData: string | null;
+    error: string;
+    createdBy: string | null;
+    now: string;
+  }): Promise<void>;
+  /** Completed runs across every workflow. */
+  countCompletedRunsAll(): Promise<number>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1655,5 +1688,68 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
            )
          )
        ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ws`)}`);
+  }
+
+  async findWorkflowIdByName(name: string): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM workflows WHERE name = ${name}`,
+    );
+    return row?.id ?? null;
+  }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listEnabledPreflightRows(): Promise<AutomationPreflightRowText[]>;
+
+  async hasOtherSetupFailureRun(
+    workflowId: string,
+    runId: string,
+    start: string,
+    end: string,
+  ): Promise<boolean> {
+    const row = await this.db.get<{ found: number }>(sql`
+      SELECT 1 AS found FROM workflow_runs
+       WHERE "workflowId" = ${workflowId} AND id != ${runId} AND status = 'failed'
+         AND ${likeAsciiCi(sql`error`, sql`'needs_setup:%'`)}
+         AND "startedAt" >= ${start} AND "startedAt" < ${end}
+       LIMIT 1`);
+    return row !== null;
+  }
+
+  async findFirstTopLevelSetupFailureRunId(
+    workflowId: string,
+    start: string,
+    end: string,
+  ): Promise<string | null> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM workflow_runs
+       WHERE "workflowId" = ${workflowId} AND status = 'failed' AND "parentStepId" IS NULL
+         AND ${likeAsciiCi(sql`error`, sql`'needs_setup:%'`)}
+         AND "startedAt" >= ${start} AND "startedAt" < ${end}
+       ORDER BY "startedAt" ASC LIMIT 1`);
+    return row?.id ?? null;
+  }
+
+  async insertFailedRun(r: {
+    id: string;
+    workflowId: string;
+    triggerType: string;
+    triggerData: string | null;
+    error: string;
+    createdBy: string | null;
+    now: string;
+  }): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO workflow_runs
+        (id, "workflowId", status, "triggerType", "triggerData", error, created_by,
+         "startedAt", "lastUpdatedAt", "finishedAt")
+      VALUES (${r.id}, ${r.workflowId}, 'failed', ${r.triggerType}, ${r.triggerData}, ${r.error},
+        ${r.createdBy}, ${r.now}, ${r.now}, ${r.now})`);
+  }
+
+  async countCompletedRunsAll(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM workflow_runs WHERE status = 'completed'`,
+    );
+    return row?.count ?? 0;
   }
 }
