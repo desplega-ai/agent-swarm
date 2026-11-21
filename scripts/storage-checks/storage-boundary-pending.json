@@ -63,17 +63,9 @@
     "reason": "M2 move: users and RBAC",
     "sites": 6
   },
-  "src/be/db-queries/mcp-oauth.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 19
-  },
   "src/be/db-queries/mcp-servers.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
-  },
-  "src/be/db-queries/slack-inbound.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 21
   },
   "src/be/db-queries/task-artifacts.ts": {
     "reason": "M2 move: tasks",
@@ -170,10 +162,6 @@
   "src/be/db/skill-search.ts": {
     "reason": "M2 move: skills",
     "sites": 2
-  },
-  "src/be/db/slack-card-groups.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 6
   },
   "src/be/db/slack-trees.ts": {
     "reason": "M2 move: integrations",

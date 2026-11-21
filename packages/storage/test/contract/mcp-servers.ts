@@ -135,5 +135,20 @@ export function mcpServersContract(engine: ContractEngine): void {
         lastDeliveryAt: T2,
       });
     });
+
+    test("authMethod reads and writes stamp lastUpdatedAt", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO mcp_servers (id, name, scope, transport, "createdAt", "lastUpdatedAt")
+        VALUES ('srv', 'srv', 'global', 'http', ${T0}, ${T0})`);
+      expect(await repo.getAuthMethod("srv")).toBe("static");
+      expect(await repo.getAuthMethod("missing")).toBeNull();
+      await repo.setAuthMethod("srv", "oauth");
+      expect(await repo.getAuthMethod("srv")).toBe("oauth");
+      const row = await storage.executor.get<{ lastUpdatedAt: string }>(
+        sql`SELECT "lastUpdatedAt" FROM mcp_servers WHERE id = 'srv'`,
+      );
+      expect(row?.lastUpdatedAt).not.toBe(T0);
+      expect(row?.lastUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    });
   });
 }

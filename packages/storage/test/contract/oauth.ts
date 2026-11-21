@@ -265,5 +265,123 @@ export function oauthContract(engine: ContractEngine): void {
       await repo.deleteCodexDeviceFlow("f1");
       expect(await repo.getCodexDeviceFlow("f1")).toBeNull();
     });
+
+    test("MCP apps, tokens and pending attempts", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO mcp_servers (id, name, scope, transport, "createdAt", "lastUpdatedAt")
+        VALUES ('srv', 'srv', 'global', 'http', ${"2026-01-01T00:00:00.000Z"}, ${"2026-01-01T00:00:00.000Z"})`);
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'U')`);
+      const app = {
+        provider: "mcp-srv",
+        clientId: "dcr-1",
+        clientSecretCiphertext: null,
+        authorizeUrl: "https://as/authorize",
+        tokenUrl: "https://as/token",
+        revocationUrl: null,
+        redirectUri: "https://cb",
+        scopes: "[]",
+        source: "dcr",
+        metadata: "{}",
+      };
+      await repo.insertMcpApp("app-1", "srv", app);
+      expect(await repo.findAppById("app-1")).toMatchObject({
+        provider: "mcp-srv",
+        mcpServerId: "srv",
+        clientSecretEncrypted: 1,
+        requiresRefreshTokenRotation: 0,
+        scopeSeparator: " ",
+        tokenAuthStyle: "body",
+        tokenBodyFormat: "form",
+      });
+      expect(await repo.findProviderAppById("app-1")).toBeNull();
+      await repo.updateMcpApp("app-1", {
+        ...app,
+        clientId: "dcr-2",
+        clientSecretCiphertext: "enc",
+      });
+      await repo.setAppMetadataById("app-1", '{"invalidated":true}');
+      expect(await repo.findAppById("app-1")).toMatchObject({
+        clientId: "dcr-2",
+        clientSecret: "enc",
+        metadata: '{"invalidated":true}',
+      });
+
+      await addAuth("tok-b", "app-1", "default");
+      await addAuth("tok-a", "app-1", "user:u1", { userId: "u1" });
+      await storage.executor.run(
+        sql`UPDATE oauth_authorizations SET "createdAt" = '2026-01-01T00:00:00.000Z'`,
+      );
+      const shared = await repo.findMcpToken("srv", null);
+      expect(shared).toMatchObject({
+        id: "tok-b",
+        appId: "app-1",
+        mcpServerId: "srv",
+        userId: null,
+        clientId: "dcr-2",
+        tokenVersion: 1,
+      });
+      expect((await repo.findMcpToken("srv", "u1"))?.id).toBe("tok-a");
+      expect((await repo.findMcpTokenById("tok-a"))?.userId).toBe("u1");
+      expect((await repo.listMcpTokens("srv")).map((row) => row.id)).toEqual(["tok-a", "tok-b"]);
+      await repo.setAuthorizationStatus("tok-a", "expired", "gone");
+      expect(await repo.findAuthorization("tok-a")).toMatchObject({
+        status: "expired",
+        lastErrorMessage: "gone",
+      });
+      expect(await repo.revokeAuthorization("tok-a", "enc-empty")).toBe(true);
+      expect(await repo.revokeAuthorization("missing", "enc-empty")).toBe(false);
+
+      await repo.insertMcpApp("app-2", "srv", app);
+      await repo.insertMcpApp("app-3", "srv", app);
+      const pending = {
+        label: "default",
+        flow: "mcp",
+        codeVerifier: "enc-v",
+        nonce: null,
+        redirectUri: "https://cb",
+        finalRedirect: null,
+        userId: null,
+        contextJson: "{}",
+      };
+      await repo.insertPending({ ...pending, state: "p-old", appId: "app-3" });
+      await repo.insertPending({ ...pending, state: "p-tie-1", appId: "app-2" });
+      await repo.insertPending({ ...pending, state: "p-tie-2", appId: "app-3" });
+      await repo.insertPending({ ...pending, state: "p-user", appId: "app-1", userId: "u1" });
+      const at = (state: string, createdAt: string) =>
+        storage.executor.run(
+          sql`UPDATE oauth_pending SET "createdAt" = ${createdAt} WHERE state = ${state}`,
+        );
+      await at("p-old", "2026-01-01T00:00:00.000Z");
+      await at("p-tie-1", "2026-01-02T00:00:00.000Z");
+      await at("p-tie-2", "2026-01-02T00:00:00.000Z");
+      await at("p-user", "2026-01-03T00:00:00.000Z");
+      expect(await repo.findLatestMcpPendingAppId("srv", null)).toBe("app-2");
+      expect(await repo.findLatestMcpPendingAppId("srv", "u1")).toBe("app-1");
+      expect(await repo.findLatestMcpPendingAppId("other", null)).toBeNull();
+      expect(await repo.findMcpPending("p-old")).toMatchObject({
+        state: "p-old",
+        mcpServerId: "srv",
+        appId: "app-3",
+        codeVerifier: "enc-v",
+        contextJson: "{}",
+      });
+      expect(await repo.listPendingAppIdsBefore("mcp", "2026-01-02T12:00:00.000Z")).toEqual([
+        "app-2",
+        "app-3",
+      ]);
+      await repo.deletePending("p-old", "generic");
+      expect(await repo.findMcpPending("p-old")).not.toBeNull();
+      await repo.deletePending("p-old", "mcp");
+      expect(await repo.findMcpPending("p-old")).toBeNull();
+
+      // app-1 has authorizations, app-2 and app-3 have pending rows.
+      await repo.deleteOrphanMcpApp("app-1");
+      await repo.deleteOrphanMcpApp("app-2");
+      expect(await repo.findAppById("app-1")).not.toBeNull();
+      expect(await repo.findAppById("app-2")).not.toBeNull();
+      await repo.deletePending("p-tie-1");
+      await repo.deleteOrphanMcpApp("app-2");
+      expect(await repo.findAppById("app-2")).toBeNull();
+    });
   });
 }

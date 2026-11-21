@@ -128,6 +128,64 @@ export type OAuthPendingRow = {
 
 export type NewOAuthPending = Omit<OAuthPendingRow, "createdAt">;
 
+/** An MCP authorization joined with its MCP-managed app. */
+export type McpOAuthTokenRow = {
+  id: string;
+  appId: string;
+  mcpServerId: string;
+  userId: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+  tokenType: string;
+  expiresAt: string | null;
+  scope: string | null;
+  tokensEncrypted: number;
+  tokenVersion: number;
+  status: string;
+  lastErrorMessage: string | null;
+  lastRefreshedAt: string | null;
+  connectedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  revocationUrl: string | null;
+  clientId: string;
+  clientSecret: string | null;
+  clientSecretEncrypted: number;
+  scopes: string;
+  source: string;
+  metadata: string;
+};
+
+/** The columns an MCP app write sets. The secret is stored encrypted (flag 1). */
+export type McpOAuthAppWrite = {
+  provider: string;
+  clientId: string;
+  clientSecretCiphertext: string | null;
+  authorizeUrl: string;
+  tokenUrl: string;
+  revocationUrl: string | null;
+  redirectUri: string;
+  scopes: string;
+  source: string;
+  metadata: string;
+};
+
+/** An MCP pending row joined with its app. */
+export type McpOAuthPendingJoinRow = {
+  state: string;
+  mcpServerId: string;
+  userId: string | null;
+  codeVerifier: string;
+  nonce: string | null;
+  redirectUri: string;
+  finalRedirect: string | null;
+  createdAt: string;
+  appId: string;
+  contextJson: string;
+};
+
 export interface OAuthRepository {
   /** The oldest non-MCP app of a provider (`createdAt`, then `id`). */
   findAppByProvider(provider: string): Promise<OAuthAppRow | null>;
@@ -184,8 +242,12 @@ export interface OAuthRepository {
   deleteAuthorizationsForApp(appId: string): Promise<number>;
   /** Marks `refresh-failed` unless the row is `revoked`. True when updated. */
   markRefreshFailed(id: string, message: string | null): Promise<boolean>;
-  /** Clears the tokens (access token = `emptyCiphertext`) and marks the row `revoked`. */
-  revokeAuthorization(id: string, emptyCiphertext: string): Promise<void>;
+  /**
+   * Clears the tokens (access token = `emptyCiphertext`) and marks the row
+   * `revoked`. True when the row was updated.
+   */
+  revokeAuthorization(id: string, emptyCiphertext: string): Promise<boolean>;
+  setAuthorizationStatus(id: string, status: string, message: string | null): Promise<void>;
   /** Non-MCP authorizations. Order: provider, label, then app insertion. */
   listSweepRows(): Promise<OAuthAuthorizationSweepRow[]>;
   /** Active refreshable authorizations of keep-alive apps. Order: provider, label, then app insertion. */
@@ -194,9 +256,31 @@ export interface OAuthRepository {
   insertPending(row: NewOAuthPending): Promise<void>;
   /** The pending row of `state` when its flow is one of `flows`. */
   findPending(state: string, flows: readonly string[]): Promise<OAuthPendingRow | null>;
-  deletePending(state: string): Promise<void>;
+  /** Deletes the pending row of `state` (only when its flow is `flow`, when given). */
+  deletePending(state: string, flow?: string): Promise<void>;
   /** Deletes the pending rows of `flows` created before `cutoff`; returns the count. */
   deletePendingBefore(flows: readonly string[], cutoff: string): Promise<number>;
+
+  /** The appIds of the pending rows of `flow` created before `cutoff`. Order: appId. */
+  listPendingAppIdsBefore(flow: string, cutoff: string): Promise<string[]>;
+
+  /**
+   * The MCP authorization of a server for `userId` (null: the shared one).
+   * The oldest by `createdAt`, then `id`.
+   */
+  findMcpToken(mcpServerId: string, userId: string | null): Promise<McpOAuthTokenRow | null>;
+  findMcpTokenById(id: string): Promise<McpOAuthTokenRow | null>;
+  /** Order: `createdAt`, then `id`. */
+  listMcpTokens(mcpServerId: string): Promise<McpOAuthTokenRow[]>;
+  insertMcpApp(id: string, mcpServerId: string, app: McpOAuthAppWrite): Promise<void>;
+  updateMcpApp(id: string, app: McpOAuthAppWrite): Promise<void>;
+  /** Writes an app's metadata by id and stamps `updatedAt`. */
+  setAppMetadataById(id: string, metadata: string): Promise<void>;
+  /** The newest MCP pending attempt's appId for the server and user (ties: the first inserted). */
+  findLatestMcpPendingAppId(mcpServerId: string, userId: string | null): Promise<string | null>;
+  findMcpPending(state: string): Promise<McpOAuthPendingJoinRow | null>;
+  /** Deletes an MCP app that no authorization and no pending row references. */
+  deleteOrphanMcpApp(appId: string): Promise<void>;
 
   /** Takes or steals an expired refresh lock; returns the current owner. */
   acquireRefreshLock(
@@ -408,13 +492,21 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
     return result.changes === 1;
   }
 
-  async revokeAuthorization(id: string, emptyCiphertext: string): Promise<void> {
-    await this.db.run(sql`
+  async revokeAuthorization(id: string, emptyCiphertext: string): Promise<boolean> {
+    const result = await this.db.run(sql`
       UPDATE oauth_authorizations SET
         "accessToken" = ${emptyCiphertext}, "refreshToken" = NULL, "expiresAt" = NULL, scope = NULL,
         "tokensEncrypted" = ${true}, "tokenVersion" = "tokenVersion" + 1,
         status = 'revoked', "lastErrorMessage" = NULL, "lastRefreshedAt" = NULL,
         "updatedAt" = ${nowIso}
+      WHERE id = ${id}`);
+    return result.changes === 1;
+  }
+
+  async setAuthorizationStatus(id: string, status: string, message: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE oauth_authorizations
+      SET status = ${status}, "lastErrorMessage" = ${message}, "updatedAt" = ${nowIso}
       WHERE id = ${id}`);
   }
 
@@ -454,14 +546,113 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
       WHERE state = ${state} AND flow IN (${sqlList(flows)})`);
   }
 
-  async deletePending(state: string): Promise<void> {
-    await this.db.run(sql`DELETE FROM oauth_pending WHERE state = ${state}`);
+  async deletePending(state: string, flow?: string): Promise<void> {
+    await this.db.run(
+      flow === undefined
+        ? sql`DELETE FROM oauth_pending WHERE state = ${state}`
+        : sql`DELETE FROM oauth_pending WHERE state = ${state} AND flow = ${flow}`,
+    );
   }
 
   async deletePendingBefore(flows: readonly string[], cutoff: string): Promise<number> {
     const result = await this.db.run(sql`
       DELETE FROM oauth_pending WHERE flow IN (${sqlList(flows)}) AND "createdAt" < ${cutoff}`);
     return result.changes;
+  }
+
+  async listPendingAppIdsBefore(flow: string, cutoff: string): Promise<string[]> {
+    const rows = await this.db.query<{ appId: string }>(sql`
+      SELECT DISTINCT "appId" FROM oauth_pending
+      WHERE flow = ${flow} AND "createdAt" < ${cutoff}
+      ORDER BY "appId"`);
+    return rows.map((row) => row.appId);
+  }
+
+  protected mcpTokenSelect(where: SqlQuery): SqlQuery {
+    return sql`SELECT
+        z.id, z."appId", a."mcpServerId", z."userId",
+        z."accessToken", z."refreshToken", z."tokenType", z."expiresAt", z.scope,
+        z."tokensEncrypted", z."tokenVersion", z.status, z."lastErrorMessage", z."lastRefreshedAt",
+        z."connectedByUserId", z."createdAt", z."updatedAt",
+        a."authorizeUrl", a."tokenUrl", a."revocationUrl", a."clientId", a."clientSecret",
+        a."clientSecretEncrypted", a.scopes, a.source, a.metadata
+      FROM oauth_authorizations z
+      JOIN oauth_apps a ON a.id = z."appId"
+      WHERE a."mcpServerId" IS NOT NULL AND ${where}`;
+  }
+
+  findMcpToken(mcpServerId: string, userId: string | null): Promise<McpOAuthTokenRow | null> {
+    const user = userId == null ? sql`z."userId" IS NULL` : sql`z."userId" = ${userId}`;
+    return this.db.get<McpOAuthTokenRow>(
+      sql`${this.mcpTokenSelect(
+        sql`a."mcpServerId" = ${mcpServerId} AND ${user}`,
+      )} ORDER BY z."createdAt" ASC, z.id ASC LIMIT 1`,
+    );
+  }
+
+  findMcpTokenById(id: string): Promise<McpOAuthTokenRow | null> {
+    return this.db.get<McpOAuthTokenRow>(this.mcpTokenSelect(sql`z.id = ${id}`));
+  }
+
+  listMcpTokens(mcpServerId: string): Promise<McpOAuthTokenRow[]> {
+    return this.db.query<McpOAuthTokenRow>(
+      sql`${this.mcpTokenSelect(
+        sql`a."mcpServerId" = ${mcpServerId}`,
+      )} ORDER BY z."createdAt" ASC, z.id ASC`,
+    );
+  }
+
+  async insertMcpApp(id: string, mcpServerId: string, app: McpOAuthAppWrite): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO oauth_apps (
+        id, provider, "clientId", "clientSecret", "clientSecretEncrypted",
+        "authorizeUrl", "tokenUrl", "revocationUrl", "redirectUri", scopes,
+        "scopeSeparator", "tokenAuthStyle", "tokenBodyFormat",
+        "requiresRefreshTokenRotation", source, "mcpServerId", metadata
+      ) VALUES (${id}, ${app.provider}, ${app.clientId}, ${app.clientSecretCiphertext}, ${true},
+        ${app.authorizeUrl}, ${app.tokenUrl}, ${app.revocationUrl}, ${app.redirectUri}, ${app.scopes},
+        ' ', 'body', 'form', ${false}, ${app.source}, ${mcpServerId}, ${app.metadata})`);
+  }
+
+  async updateMcpApp(id: string, app: McpOAuthAppWrite): Promise<void> {
+    await this.db.run(sql`
+      UPDATE oauth_apps SET
+        provider = ${app.provider}, "clientId" = ${app.clientId},
+        "clientSecret" = ${app.clientSecretCiphertext}, "clientSecretEncrypted" = ${true},
+        "authorizeUrl" = ${app.authorizeUrl}, "tokenUrl" = ${app.tokenUrl},
+        "revocationUrl" = ${app.revocationUrl}, "redirectUri" = ${app.redirectUri},
+        scopes = ${app.scopes}, source = ${app.source}, metadata = ${app.metadata},
+        "updatedAt" = ${nowIso}
+      WHERE id = ${id}`);
+  }
+
+  async setAppMetadataById(id: string, metadata: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE oauth_apps SET metadata = ${metadata}, "updatedAt" = ${nowIso} WHERE id = ${id}`,
+    );
+  }
+
+  abstract findLatestMcpPendingAppId(
+    mcpServerId: string,
+    userId: string | null,
+  ): Promise<string | null>;
+
+  findMcpPending(state: string): Promise<McpOAuthPendingJoinRow | null> {
+    return this.db.get<McpOAuthPendingJoinRow>(sql`
+      SELECT p.state, a."mcpServerId", p."userId", p."codeVerifier", p.nonce,
+        p."redirectUri", p."finalRedirect", p."createdAt",
+        p."appId", p."contextJson"
+      FROM oauth_pending p
+      JOIN oauth_apps a ON a.id = p."appId"
+      WHERE p.state = ${state} AND p.flow = 'mcp'`);
+  }
+
+  async deleteOrphanMcpApp(appId: string): Promise<void> {
+    await this.db.run(sql`
+      DELETE FROM oauth_apps
+      WHERE id = ${appId} AND "mcpServerId" IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM oauth_authorizations WHERE "appId" = oauth_apps.id)
+        AND NOT EXISTS (SELECT 1 FROM oauth_pending WHERE "appId" = oauth_apps.id)`);
   }
 
   async acquireRefreshLock(

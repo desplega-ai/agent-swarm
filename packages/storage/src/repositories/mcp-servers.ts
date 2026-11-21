@@ -1,3 +1,4 @@
+import { nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, sql } from "../sql";
 
@@ -51,6 +52,10 @@ export type McpEventSubscriptionRenewal = {
 };
 
 export interface McpServersRepository {
+  /** `mcp_servers.authMethod`; null when the server does not exist. */
+  getAuthMethod(mcpServerId: string): Promise<string | null>;
+  /** Sets `authMethod` and stamps `lastUpdatedAt`. */
+  setAuthMethod(mcpServerId: string, authMethod: string): Promise<void>;
   findSubscription(id: string): Promise<McpEventSubscriptionRow | null>;
   /** Subscriptions of `userId` that expire after `now`, `excludeId` aside. */
   countLiveSubscriptions(userId: string, now: string, excludeId?: string): Promise<number>;
@@ -79,6 +84,19 @@ export interface McpServersRepository {
 
 export abstract class BaseMcpServersRepository implements McpServersRepository {
   constructor(protected readonly db: SqlExecutor) {}
+
+  async getAuthMethod(mcpServerId: string): Promise<string | null> {
+    const row = await this.db.get<{ authMethod: string }>(
+      sql`SELECT "authMethod" FROM mcp_servers WHERE id = ${mcpServerId}`,
+    );
+    return row?.authMethod ?? null;
+  }
+
+  async setAuthMethod(mcpServerId: string, authMethod: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE mcp_servers SET "authMethod" = ${authMethod}, "lastUpdatedAt" = ${nowIso}
+      WHERE id = ${mcpServerId}`);
+  }
 
   findSubscription(id: string): Promise<McpEventSubscriptionRow | null> {
     return this.db.get<McpEventSubscriptionRow>(

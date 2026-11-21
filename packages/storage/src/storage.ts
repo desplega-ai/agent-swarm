@@ -11,6 +11,7 @@ import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SlackRepository } from "./repositories/slack";
 import type { TrackersRepository } from "./repositories/trackers";
 
 /** Every domain repository, by domain name. */
@@ -25,6 +26,7 @@ export type Repositories = {
   events: EventsRepository;
   chat: ChatRepository;
   oauth: OAuthRepository;
+  slack: SlackRepository;
 };
 
 /**

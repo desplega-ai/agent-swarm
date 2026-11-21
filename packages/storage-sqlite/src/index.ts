@@ -15,6 +15,7 @@ import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteSlackRepository } from "./repositories/slack";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 
 export {
@@ -56,6 +57,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       events: new SqliteEventsRepository(executor),
       chat: new SqliteChatRepository(executor),
       oauth: new SqliteOAuthRepository(executor),
+      slack: new SqliteSlackRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

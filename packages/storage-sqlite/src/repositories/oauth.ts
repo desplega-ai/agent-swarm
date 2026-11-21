@@ -54,4 +54,19 @@ export class SqliteOAuthRepository extends BaseOAuthRepository {
         )
       ORDER BY a.provider ASC, z.label ASC, a.rowid ASC`);
   }
+
+  async findLatestMcpPendingAppId(
+    mcpServerId: string,
+    userId: string | null,
+  ): Promise<string | null> {
+    // Equal createdAt values: the first inserted wins, as the sort over the
+    // pending scan returned before the move.
+    const user = userId == null ? sql`p."userId" IS NULL` : sql`p."userId" = ${userId}`;
+    const row = await this.db.get<{ appId: string }>(sql`
+      SELECT p."appId" FROM oauth_pending p
+      JOIN oauth_apps a ON a.id = p."appId"
+      WHERE p.flow = 'mcp' AND a."mcpServerId" = ${mcpServerId} AND ${user}
+      ORDER BY p."createdAt" DESC, p.rowid ASC LIMIT 1`);
+    return row?.appId ?? null;
+  }
 }

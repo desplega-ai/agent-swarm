@@ -7,4 +7,5 @@ export * from "./mcp-servers";
 export * from "./models";
 export * from "./oauth";
 export * from "./runtime-pools";
+export * from "./slack";
 export * from "./trackers";
