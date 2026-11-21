@@ -17,7 +17,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
-| M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-key or registration sites still above 5% (open, see D7 section) | `74403ae87` |
+| M5 Contract on Postgres | in progress (part 8): D7 applied to the poll claim (87.5% -> 0%) and task finish (71.7% -> 0%); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
 
@@ -406,7 +406,12 @@ Measurement: same command, seed and host as part 7. Before = `bc73e306e`, after 
 
 Accepted exception to the 5% target: keyed creation stays SERIALIZABLE; 90% retry rate comes from a scenario that races one key on purpose; approved by Daniel 2026-11-21.
 
-Open (no change applied, needs Daniel): four other sites are above 5%. Three come from `divergence-concurrent-schedule-claim`, which fires 10 identical requests at one row on purpose: run-now on one schedule (`scheduler.ts:297`), increments of one KV key (`kv.ts:663`), and one workflow idempotency key (`engine.ts:350`). Agent registration (`agents.ts:758`) is different: `stress-poll-claim` registers 25 distinct agents at once, and 59% of them retry.
+Accepted exceptions (Daniel, 2026-11-21, part 9; no code change on these paths):
+
+- Run-now on one schedule (`scheduler.ts:297`, 90.1%), increments of one KV key (`kv.ts:663`, 85.0%), one workflow idempotency key (`engine.ts:350`, 90.0%): the scenario fires 10 identical requests at one row on purpose; exhausted retries 0, 5xx 0; approved by Daniel 2026-11-21.
+- Agent registration (`agents.ts:758`): 25 agents registering at once, 59.3% retry; runs once per worker start; a fix needs a new lock design; exhausted retries 0, 5xx 0; approved by Daniel 2026-11-21.
+
+With these and the keyed-creation exception, the retry-rate part of check 21 passes with recorded exceptions.
 
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
@@ -437,6 +442,7 @@ Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metada
 - Check 11 mechanism (needs human review): dependency-cruiser cannot reject `Bun.SQL` (a named export of the built-in `bun` module, also a global). `check:dep-graph` now runs depcruise and then an AST scan (`check-driver-imports.ts`) that rejects `import { SQL } from "bun"` and `Bun.SQL` outside `packages/storage-postgres`. One allowed file, reason on the line: `src/be/sql-connections.ts` (user-configured script databases, present at the base commit).
 - E2E Postgres runner pre-applies the migration chain (part 6): the reader role needs the tables before the SUT starts. The SUT's own migration run is then a no-op; a fresh-database boot is covered by the contract tests and the manual boot proof (M3 results).
 - Keyed task creation (`POST /api/tasks` with an idempotency key) stays SERIALIZABLE above the 5% target: keyed creation stays SERIALIZABLE; 90% retry rate comes from a scenario that races one key on purpose; approved by Daniel 2026-11-21.
+- Four more sites stay SERIALIZABLE above the 5% target (approved by Daniel 2026-11-21): schedule run-now, KV increment and keyed workflow creation (single-row races on purpose in the scenario), and agent registration (25 at once, 59.3%, once per worker start). Exhausted retries 0, 5xx 0. See the D7 section.
 - JSON key order, approved by Daniel 2026-11-21 (exception to section 10 for these assertions only): for jsonb columns, the byte-order JSON comparison became a parsed strict deep-equal. Scenarios: `divergence-values` (`users.metadata`), `platform-users-lifecycle` (`user_identity_events.afterJson`, avatar change) and `platform-users-access` (`beforeJson`/`afterJson`, role change). No value or key assertion was removed.
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
