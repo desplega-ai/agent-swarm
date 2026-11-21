@@ -16,7 +16,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
-| M4 Engine-specific domains | steps 1 and 2 done (part 5, full text and vector search in the repositories); steps 3 to 5 not started | |
+| M4 Engine-specific domains | steps 1 to 3 done; step 4 D10 reader done (part 6), seeded scripts in progress (`m4/seed-scripts`); step 5 in progress (`m4/own-handles`) | |
 | M5 Contract on Postgres | not started | |
 | M6 Data copy | not started | |
 | M7 Delivery | not started | |
@@ -319,6 +319,20 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - D15 parity is asserted on a fixed corpus by contract tests on both engines: same id set, ranked FTS at least 4 of the first 5 equal (memory bm25 port: top 5 equal and in order), vectors in the same order.
 - Not yet: M4 steps 3 (remaining `json_each`/`json_extract` sites outside repositories, if any), 4 (`db-query` on Postgres, D10, and the 235 seeded-script sites) and 5 (own-handle readers, the memory search worker, a Postgres `MemoryStore`).
 
+## M4 results (part 6, steps 3 and 4)
+
+- Step 3: no `json_each`/`json_extract` call is left outside the repositories and the seeded scripts (repository methods that use them are abstract in the base class with one override per engine). The seeded scripts are step 4.
+- D10 reader (`packages/storage-postgres/src/query-reader.ts`): `DATABASE_QUERY_URL` opens a second pool after the migrations. The start probe refuses a role that is a superuser, has BYPASSRLS, CREATEROLE or CREATEDB, has CREATE on the database or a schema, owns any relation or schema, has any write privilege on a table, view or sequence (catalog), can read a denied table (table or column grant, catalog), is not refused a real `SELECT` on each denied table (SQLSTATE 42501), can read a view that reaches a denied table through any chain of views, can run a SECURITY DEFINER function, or is not refused a real `INSERT` (42501). A failed probe or no URL leaves `dbQuery` off; the log line names the reason (URL scrubbed). There is no `SET ROLE` and no SQL text filter.
+- Each query: `BEGIN READ ONLY`, `SET LOCAL statement_timeout` to the remaining budget before each statement, `DECLARE ... NO SCROLL CURSOR FOR <user sql>`, `FETCH FORWARD maxRows`, `MOVE FORWARD ALL` (exact `total` without holding the rows). Only queries open a cursor; user SQL cannot lift the timeout of the running statement (test). Values go through the read codec (SQLite shape). 42501 on a denied table maps to the existing 400 message; 57014 to the 408 timeout. The concurrency cap of the bounded SQLite path also covers the reader.
+- The tool description and the `db-query-guidance` skill follow the capabilities (dialect sections in the skill; the seeder keeps the active one). Every db-query response states `dialect` (the only OpenAPI change, an engine field, check 17).
+- Proof: `packages/storage-postgres/test/query-reader.test.ts` (12 tests: probe refusals for superuser, table grant, column grant, view chain, write grant, SECURITY DEFINER, schema CREATE; queries, denial, writes refused, timeout). Live API: denied tables 400, `UPDATE` 400, `pg_sleep(20)` 408, a superuser URL leaves db-query off with the reason logged.
+- E2E on Postgres: the runner creates each per-run database with `LC_COLLATE 'C' LC_CTYPE 'C'`, applies the migration chain, creates a reader role (SELECT on all tables, the 7 denied revoked) and passes `DATABASE_QUERY_URL`, the order the runbook gives an operator. The SUT guard now asserts a boot seed row (`seed_state`), since the schema exists before the SUT starts.
+- CHECK failure text: SQLite reports the expression, Postgres the constraint name. The baseline generator now names each CHECK `<table>_check_<n>` and writes `check-messages.json` (SQLite source text by name); the error mapper uses it. Baseline regenerated (only the 153 CHECK lines changed); the generator keeps ordinal 367.
+
+## Open decision (needs Taras): JSON key order in API responses
+
+`divergence-values` (M1) asserts that user metadata comes back byte-equal, key order included. On Postgres `users.metadata` is `jsonb` (D8), which reorders keys, so the scenario fails: `user metadata text changed`. The same holds for every API-visible `jsonb` column (83); the scenario tests one. The values are equal as JSON; only the text differs. Options: (a) keep D8 and accept reordered keys in API JSON (the scenario's byte-order assertion for jsonb columns would have to go, which section 10 forbids without a decision); (b) store API-visible JSON as `json` (keeps the text, still JSON-typed) instead of `jsonb`; (c) keep such columns `text` (as done for the 5 columns whose text code compares). Recommendation: (b) for columns the API returns, `jsonb` where SQL reads into the JSON. Until decided, check 2 fails on this assertion.
+
 ## Decisions inside my authority
 
 - Text search configurations (M4). Skills: `english` (SQLite uses the porter tokenizer). Tasks: `simple` (SQLite `agent_tasks_fts` is unicode61 without porter, so ids and numbers match exactly). Memory: `memory_english`, english with a snowball stemmer that keeps stop words (FTS5 indexes every word and the memory query ORs its terms). A SQL function turns ASCII and common Unicode punctuation into spaces before `to_tsvector`, so words split as unicode61 splits them; task text is cut at 100,000 characters (a 1.3 MB task otherwise fails to insert: a tsvector over 1 MB errors).
@@ -342,6 +356,7 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - Milestone order (part 5): M4 steps 1 and 2 (full text and vector search in the repositories) landed before M3 closed, because the contract suite (M3 step 5) has search tests that only pass with them.
 - `onAttemptRollback` (needs human review): a third storage-client hook that D6 does not name. It runs when any attempt rolls back and only undoes in-process state (the successor-walk hold, the executing-step mark). Without it, runs never finalized under `--tx-replay`. Details under "Decisions inside my authority". The Postgres client implements it.
 - Check 11 mechanism (needs human review): dependency-cruiser cannot reject `Bun.SQL` (a named export of the built-in `bun` module, also a global). `check:dep-graph` now runs depcruise and then an AST scan (`check-driver-imports.ts`) that rejects `import { SQL } from "bun"` and `Bun.SQL` outside `packages/storage-postgres`. One allowed file, reason on the line: `src/be/sql-connections.ts` (user-configured script databases, present at the base commit).
+- E2E Postgres runner pre-applies the migration chain (part 6): the reader role needs the tables before the SUT starts. The SUT's own migration run is then a no-op; a fresh-database boot is covered by the contract tests and the manual boot proof (M3 results).
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
@@ -376,6 +391,8 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 ## Edited scenarios
 
 See "M1 results / Edited scenarios".
+
+- `divergence-db-query-denial` (part 6): the parameterized query binds with `$1` instead of `?` (both dialects accept `$1`; SQL portability, no assertion change).
 
 ## New scenarios after M1
 
