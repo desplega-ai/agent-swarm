@@ -196,7 +196,7 @@ describe("seed-scripts catalog", () => {
     expect(listArgs?.limit).toBe(500);
     expect(projectionCalls).toBe(1);
     expect(projectionArgs?.sql).toBe(
-      "SELECT id, failureReason FROM agent_tasks WHERE id IN (?, ?, ?, ?)",
+      'SELECT id, "failureReason" FROM agent_tasks WHERE id IN ($1, $2, $3, $4)',
     );
     expect(projectionArgs?.params).toEqual([...reasons.keys()]);
     expect(result.groups).toEqual(
