@@ -605,16 +605,16 @@ export function tasksContract(engine: ContractEngine): void {
     });
 
     test("the FTS backfill indexes in batches up to the complete mark", async () => {
-      await seedTask(storage, { id: "f1", task: "alpha" });
-      await seedTask(storage, { id: "f2", task: "beta" });
-      await seedTask(storage, { id: "f3", task: "gamma" });
-      await storage.executor.run(
-        sql`INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')`,
-      );
+      // Rows written while the mark is 0 are past it: not indexed yet.
       await storage.executor.run(
         sql`UPDATE agent_tasks_fts_state SET "indexedThrough" = 0 WHERE id = 1`,
       );
+      await seedTask(storage, { id: "f1", task: "alpha" });
+      await seedTask(storage, { id: "f2", task: "beta" });
+      await seedTask(storage, { id: "f3", task: "gamma" });
       expect(await repo.getTaskFtsIndexedThrough()).toBe(0);
+      // Until the mark is complete, search is the substring match.
+      expect(await repo.countTasks({ search: "lph" })).toBe(1);
       expect(await storage.transaction(() => repo.indexTaskFtsBatch(2))).toEqual({
         changes: 2,
         done: false,
@@ -631,6 +631,49 @@ export function tasksContract(engine: ContractEngine): void {
         ),
       ).toEqual(["f3"]);
       expect(await repo.countTasks({ search: "alp" })).toBe(1);
+      // Then it is the token index: a word prefix matches, a substring does not.
+      expect(await repo.countTasks({ search: "lph" })).toBe(0);
+    });
+
+    test("task search: a phrase with a prefix on the last word, in one column, or an id prefix", async () => {
+      const corpus: Record<string, string> = {
+        t1: "amber falcon crosses the river",
+        t2: "amber falcon nests near cliffs",
+        t3: "falcon amber sleeps at noon",
+        t4: "silver river flows past cliffs",
+        t5: "the riverbank hosts amber reeds",
+        t6: "Amberly visits silver cliffs",
+        t7: "copper kettle boils water",
+        t8: "falcons circle the copper tower",
+        t9: "fix src/be/db.ts: deploy-helper's v1.2 run_id",
+      };
+      for (const [id, task] of Object.entries(corpus)) await seedTask(storage, { id, task });
+      await seedTask(storage, { id: "ab-title", task: "ends with copper", title: "kettle lid" });
+      const found = async (search: string) =>
+        ((await repo.listTasks({ search }, { limit: 50, offset: 0 }, "full")) as TaskRow[])
+          .map((row) => row.id)
+          .sort();
+      expect(await found("falcon")).toEqual(["t1", "t2", "t3", "t8"]);
+      expect(await found("amber falcon")).toEqual(["t1", "t2"]);
+      expect(await found("river")).toEqual(["t1", "t4", "t5"]);
+      expect(await found("AMBER")).toEqual(["t1", "t2", "t3", "t5", "t6"]);
+      expect(await found("falc")).toEqual(["t1", "t2", "t3", "t8"]);
+      expect(await found("kettle boils")).toEqual(["t7"]);
+      expect(await found("alcon")).toEqual([]);
+      expect(await found("cliffs silver")).toEqual([]);
+      expect(await found("%")).toEqual([]);
+      expect(await found("_")).toEqual([]);
+      // Punctuation splits words: paths, hyphens, apostrophes, dots, underscores.
+      expect(await found("db")).toEqual(["t9"]);
+      expect(await found("be db ts")).toEqual(["t9"]);
+      expect(await found("helper s v1")).toEqual(["t9"]);
+      expect(await found("2 run id")).toEqual(["t9"]);
+      // The title is searched too, but a phrase never runs from the task into it.
+      expect(await found("kettle lid")).toEqual(["ab-title"]);
+      expect(await found("copper kettle")).toEqual(["t7"]);
+      // A task id prefix.
+      expect(await found("ab-t")).toEqual(["ab-title"]);
+      expect(await repo.countTasks({ search: "falcon" })).toBe(4);
     });
 
     test("human-free: classify, walk, apply and the queue", async () => {

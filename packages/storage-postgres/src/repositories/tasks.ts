@@ -83,17 +83,22 @@ function idRows(ids: readonly string[]): SqlQuery {
 }
 
 /**
- * The FTS5 query `"<search>"*` as a tsquery: the search's letter/digit runs as
- * a phrase, the last one a prefix. ASCII letters fold to lowercase, as the
- * C-ctype `to_tsvector('simple', ...)` does.
+ * The FTS5 query `"<search>"*` as a tsquery: the words of the search (as
+ * fts_words splits them) as one phrase, the last one a prefix. NULL when the
+ * search has no word.
  */
-function taskTsQuery(search: string): string | null {
-  const tokens = search.match(/[\p{L}\p{N}]+/gu);
-  if (!tokens) return null;
-  return `${tokens.map((t) => `'${t.replace(/[A-Z]+/g, (s) => s.toLowerCase())}'`).join(" <-> ")}:*`;
+function taskTsQuery(search: string): SqlQuery {
+  return sql`to_tsquery('simple', (
+    SELECT string_agg(quote_literal(w), ' <-> ') || ':*'
+    FROM regexp_split_to_table(btrim(fts_words(CAST(${search} AS text))), ' +') AS w
+    WHERE w <> ''))`;
 }
 
-const TASK_TSVECTOR = sql`to_tsvector('simple', agent_tasks.task || ' ' || COALESCE(agent_tasks.title, ''))`;
+// The agent_tasks_fts expressions of migration 368 (indexes agent_tasks_fts_task
+// and agent_tasks_fts_title), word for word: the planner uses an index only for
+// an equal expression. One vector per column, as an FTS5 phrase never spans two.
+export const TASK_TEXT_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.task))`;
+export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.title))`;
 
 const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
   (tag) => `COALESCE(CAST(task.tags AS text), '[]') ILIKE '%"${tag}"%' ESCAPE ''`,
@@ -237,7 +242,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   /**
    * A phrase-prefix match on the task text and title, or a prefix of the task
    * id. Until the backfill mark is complete it is the old substring LIKE, as on
-   * SQLite. The match reads `agent_tasks` directly (no index yet: milestone M4).
+   * SQLite. The match uses the tsvector expression indexes of migration 368.
    */
   protected async taskSearchCondition(
     search: string,
@@ -248,10 +253,13 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       const pattern = sql`${`%${search}%`}`;
       return sql`(${likeAsciiCi(sql`agent_tasks.task`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.title`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.id`, pattern)})`;
     }
-    const query = taskTsQuery(search);
     const idLow = search.trim().toLowerCase();
     const terms: SqlQuery[] = [];
-    if (query) terms.push(sql`${TASK_TSVECTOR} @@ to_tsquery('simple', ${query})`);
+    if (/[\p{L}\p{N}]/u.test(search)) {
+      terms.push(
+        sql`(${TASK_TEXT_TSVECTOR} @@ ${taskTsQuery(search)} OR ${TASK_TITLE_TSVECTOR} @@ ${taskTsQuery(search)})`,
+      );
+    }
     if (idLow) {
       terms.push(sql`(agent_tasks.id >= ${idLow} AND agent_tasks.id < ${`${idLow}\uffff`})`);
     }

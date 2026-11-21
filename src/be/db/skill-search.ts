@@ -1,7 +1,7 @@
 import { getStorage } from "../storage";
 
 // The ranked query (bm25 weights, the skills_meta_fts score multiple) lives in
-// the skills repository (SQLite override). On the live catalog, meta score
+// the skills repository (one per engine). On the live catalog, meta score
 // multiples from 2 to 10 rank the same; 3 is mid-range.
 
 // English function words that agents put in natural-language queries. Each
@@ -16,19 +16,18 @@ const STOPWORDS = new Set(
 );
 
 /**
- * Build a skills_fts MATCH expression from free text. Every term is quoted as
- * an FTS5 string, so user text cannot inject operators (NEAR, AND, -, *, ^,
- * column filters). Stopwords are dropped and the remaining terms are OR-ed:
- * ranked recall, ordered by bm25. Returns null when no term is left, so the
- * caller falls back to the substring match.
+ * The search terms of free text, for the skills repository's ranked search
+ * (each engine builds its own full-text query from them, so user text cannot
+ * inject query syntax). Stopwords are dropped and at most 12 terms are kept;
+ * the terms are OR-ed: ranked recall. Returns null when no term is left, so
+ * the caller falls back to the substring match.
  */
-export function buildSkillsFtsMatch(query: string): string | null {
+export function buildSkillSearchTerms(query: string): string[] | null {
   const terms = query
     .split(/[^\p{L}\p{N}_-]+/u)
     .filter((term) => /[\p{L}\p{N}]/u.test(term) && !STOPWORDS.has(term.toLowerCase()))
     .slice(0, 12);
-  if (terms.length === 0) return null;
-  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+  return terms.length === 0 ? null : terms;
 }
 
 /**
@@ -46,11 +45,11 @@ export async function searchSkillRowsRanked<T>(
   limit: number,
   columns: string,
 ): Promise<T[]> {
-  const match = buildSkillsFtsMatch(query);
-  if (!match) return [];
+  const terms = buildSkillSearchTerms(query);
+  if (!terms) return [];
   const exactName = query.trim();
   try {
-    return await getStorage().repos.skills.searchRankedSkills<T>(match, exactName, limit, columns);
+    return await getStorage().repos.skills.searchRankedSkills<T>(terms, exactName, limit, columns);
   } catch (err) {
     console.warn(
       "[skills-fts] ranked query failed, using substring match:",

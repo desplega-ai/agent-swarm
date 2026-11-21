@@ -52,11 +52,15 @@ export class SqliteSkillsRepository extends BaseSkillsRepository {
   }
 
   searchRankedSkills<T>(
-    match: string,
+    terms: readonly string[],
     exactName: string,
     limit: number,
     columns: string,
   ): Promise<T[]> {
+    if (terms.length === 0) return Promise.resolve([]);
+    // Every term is quoted as an FTS5 string, so it cannot inject operators
+    // (NEAR, AND, -, *, ^, column filters); the terms are OR-ed.
+    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
     // `columns` is a select list written by code (src/be/db.ts), never input.
     const selectList = new SqlQuery([columns], []);
     return this.db.query<T>(sql`
