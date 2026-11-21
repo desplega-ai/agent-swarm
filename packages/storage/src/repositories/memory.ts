@@ -1,5 +1,5 @@
 import type { DbParam } from "../client";
-import { likeAsciiCi, nowText } from "../dialect";
+import { jsonText, likeAsciiCi, nowText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -653,7 +653,7 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
   insertMemory(r: NewMemory): Promise<AgentMemoryRow | null> {
     return this.db.get<AgentMemoryRow>(sql`
       INSERT INTO agent_memory (id, "agentId", scope, key, name, content, summary, source, "sourceTaskId", "sourcePath", "chunkIndex", "totalChunks", tags, "createdAt", "updatedAt", "accessedAt", "expiresAt", "accessCount", "embeddingModel", "contextKey", "contentHash", version)
-      VALUES (${r.id}, ${r.agentId}, ${r.scope}, ${r.key}, ${r.name}, ${r.content}, ${r.summary}, ${r.source}, ${r.sourceTaskId}, ${r.sourcePath}, ${r.chunkIndex}, ${r.totalChunks}, ${r.tags}, ${r.now}, ${r.now}, ${r.now}, ${r.expiresAt}, ${0}, ${null}, ${r.contextKey}, ${r.contentHash}, ${r.version}) RETURNING *`);
+      VALUES (${r.id}, ${r.agentId}, ${r.scope}, ${r.key}, ${r.name}, ${r.content}, ${r.summary}, ${r.source}, ${r.sourceTaskId}, ${r.sourcePath}, ${r.chunkIndex}, ${r.totalChunks}, ${jsonText(r.tags)}, ${r.now}, ${r.now}, ${r.now}, ${r.expiresAt}, ${0}, ${null}, ${r.contextKey}, ${r.contentHash}, ${r.version}) RETURNING *`);
   }
 
   async insertMemoryVersion(v: NewMemoryVersion): Promise<void> {
@@ -836,9 +836,10 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
     if (filter.ownerAgentId) conditions.push(sql`"agentId" = ${filter.ownerAgentId}`);
     if (filter.source) conditions.push(sql`source = ${filter.source}`);
     if (filter.sourcePathNeedle) {
-      conditions.push(
-        sql`instr(lower(coalesce("sourcePath", '')), ${filter.sourcePathNeedle}) > 0`,
-      );
+      // A substring test: the needle's LIKE wildcards are escaped. Both engines
+      // fold ASCII case only, as SQLite's lower() does.
+      const pattern = `%${filter.sourcePathNeedle.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      conditions.push(sql`${likeAsciiCi(sql`coalesce("sourcePath", '')`, sql`${pattern}`, "\\")}`);
     }
     return sqlWhere(conditions);
   }
@@ -1299,7 +1300,7 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
       )
       SELECT d.key AS key,
              d.scope AS scope,
-             d."agentId" AS "agentId",
+             MAX(d."agentId") AS "agentId",
              MAX(CASE WHEN d.rn = 1 THEN d.id END) AS "memoryId",
              MAX(CASE WHEN d.rn = 1 THEN d.name END) AS name,
              MAX(CASE WHEN d.rn = 1 THEN d.source END) AS source,

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  jsonText,
   type Storage,
   sql,
   sqlIdent,
   sqlJoin,
-  sqlList,
   TASK_FTS_COMPLETE,
   type TaskRow,
   type TasksRepository,
@@ -27,12 +27,37 @@ export function seedTask(storage: Storage, t: { id: string } & Record<string, Se
     ...t,
   };
   const columns = Object.keys(row);
+  // Flags bind as booleans and JSON columns go through jsonText, so the seed
+  // stores the same values on every engine.
+  const value = (c: string) => {
+    const v = row[c] ?? null;
+    if (TASK_FLAG_COLUMNS.has(c) && v !== null) return sql`${Boolean(v)}`;
+    if (TASK_JSON_COLUMNS.has(c)) return sql`${jsonText(v as string | null)}`;
+    return sql`${v}`;
+  };
   return storage.executor.run(sql`
     INSERT INTO agent_tasks (${sqlJoin(
       columns.map((c) => sql`${sqlIdent(c)}`),
       sql`, `,
-    )}) VALUES (${sqlList(columns.map((c) => row[c] ?? null))})`);
+    )}) VALUES (${sqlJoin(columns.map(value), sql`, `)})`);
 }
+
+const TASK_FLAG_COLUMNS = new Set([
+  "isHumanFree",
+  "requestedByUserIdInherited",
+  "slackReplySent",
+  "was_paused",
+]);
+const TASK_JSON_COLUMNS = new Set([
+  "dependsOn",
+  "fallbackHops",
+  "followUpConfig",
+  "harnessVariantMeta",
+  "outputSchema",
+  "providerMeta",
+  "slackParticipants",
+  "tags",
+]);
 
 export function tasksContract(engine: ContractEngine): void {
   describe(`tasks repository [${engine.name}]`, () => {
