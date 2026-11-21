@@ -236,6 +236,8 @@
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "stress-task-finish",
+        "stress-task-create",
+        "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
         "divergence-list-order",

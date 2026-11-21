@@ -297,6 +297,7 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
+  isLinearTrackerContextKey,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
@@ -1925,6 +1926,12 @@ function logRoutingDecisionFailure(taskId: string, stage: "capture" | "write", e
 export async function createTaskExtended(
   task: string,
   options?: CreateTaskOptions,
+  /**
+   * `readCommitted`: run the INSERT transaction at READ COMMITTED on Postgres
+   * when it is the outermost transaction (decision D7 opt-down). Only the
+   * unkeyed REST create sets it; see the comment at the transaction.
+   */
+  txMode?: { readCommitted?: boolean },
 ): Promise<AgentTask> {
   if (typeof task !== "string" || task.trim().length === 0) {
     throw new Error("createTaskExtended: 'task' must be a non-empty string");
@@ -2346,141 +2353,160 @@ export async function createTaskExtended(
   // observes the winner's committed row. Pre-checks at the call sites
   // (src/tools/send-task.ts, src/linear/sync.ts) stay a fast path only.
   const tasks = getStorage().repos.tasks;
+  // Decision D7 opt-down, for the caller that asks (the unkeyed REST create):
+  // on Postgres this transaction runs at READ COMMITTED. Reason: under
+  // SERIALIZABLE, 58% of unkeyed creates retried in the seeded bench (ledger
+  // part 9), from predicate reads of agent_tasks and agents (routing snapshot,
+  // human-free class). What SERIALIZABLE guarded, and how each holds here:
+  // the Linear tracker dedup and the workflow step check have no row to lock,
+  // so a create that needs either stays SERIALIZABLE; the parent key re-read
+  // locks the parent row first (`FOR UPDATE`), so an in-flight chain move
+  // commits before the read. Scenario: stress-task-create.
+  const readCommitted =
+    txMode?.readCommitted === true &&
+    !options?.workflowRunStepId &&
+    (options?.bypassTrackerContextDedup || !isLinearTrackerContextKey(options?.contextKey));
   const claim = await getStorage().transaction<
     { existing: ExistingTrackerContextWork } | { row: AgentTaskRow }
-  >(async () => {
-    // A workflow step's task commits only while the step may still start
-    // work. Checked in the INSERT's transaction: a cascade cancel of the
-    // step's run tree either commits first and is seen here, or sees and
-    // cancels this task.
-    if (options?.workflowRunStepId) {
-      const blocked = await getStepExecutionBlock(options.workflowRunStepId);
-      if (blocked) throw new WorkflowStepNotExecutableError(options.workflowRunStepId, blocked);
-    }
-    const existingTrackerWork = options?.bypassTrackerContextDedup
-      ? null
-      : await findExistingLinearTrackerContextWork(options?.contextKey);
-    if (existingTrackerWork) return { existing: existingTrackerWork };
-
-    // A chain move (a user move, the source key backfill) can commit between
-    // the parent read above and this write lock. Its chain query did not see
-    // this child, so take the parent's key as it is now.
-    const parentKey =
-      keyInherited && options?.parentTaskId
-        ? ((await tasks.findTaskKey(options.parentTaskId)) ?? undefined)
-        : undefined;
-    const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
-
-    let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
-    try {
-      routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
-    } catch (error) {
-      logRoutingDecisionFailure(id, "capture", error);
-    }
-
-    const isHumanFree = await classifyTaskHumanFree({
-      taskType: options?.taskType,
-      tags: JSON.stringify(options?.tags ?? []),
-      source: options?.source ?? "mcp",
-      requestedByUserId: options?.requestedByUserId,
-      requestedByUserIdInherited,
-      parentTaskId: options?.parentTaskId,
-      workflowRunId: options?.workflowRunId,
-    });
-
-    const provenance = getCurrentRunProvenance();
-    const inserted = (await tasks.insertTask({
-      id,
-      key: insertKey,
-      agentId: options?.agentId ?? null,
-      creatorAgentId: options?.creatorAgentId ?? null,
-      // Free text from every task source; scrub at the single INSERT.
-      task: scrubSecrets(task),
-      status,
-      source: options?.source ?? "mcp",
-      routing_reason: options?.routingReason ?? null,
-      routing_source: options?.routingSource ?? null,
-      routing_note: options?.routingNote ?? null,
-      taskType: options?.taskType ?? null,
-      tags: JSON.stringify(options?.tags ?? []),
-      priority: options?.priority ?? 50,
-      dependsOn: JSON.stringify(options?.dependsOn ?? []),
-      offeredTo: options?.offeredTo ?? null,
-      offeredAt: options?.offeredTo ? now : null,
-      slackChannelId: options?.slackChannelId ?? null,
-      slackThreadTs: options?.slackThreadTs ?? null,
-      slackTriggerMessageTs: options?.slackTriggerMessageTs ?? null,
-      slackUserId: options?.slackUserId ?? null,
-      slackParticipants: options?.slackParticipants
-        ? JSON.stringify(options.slackParticipants)
-        : null,
-      vcsProvider: options?.vcsProvider ?? null,
-      vcsRepo: options?.vcsRepo ?? null,
-      vcsEventType: options?.vcsEventType ?? null,
-      vcsNumber: options?.vcsNumber ?? null,
-      vcsCommentId: options?.vcsCommentId ?? null,
-      vcsAuthor: options?.vcsAuthor ?? null,
-      vcsUrl: options?.vcsUrl ?? null,
-      vcsInstallationId: options?.vcsInstallationId ?? null,
-      vcsNodeId: options?.vcsNodeId ?? null,
-      agentmailInboxId: options?.agentmailInboxId ?? null,
-      agentmailMessageId: options?.agentmailMessageId ?? null,
-      agentmailThreadId: options?.agentmailThreadId ?? null,
-      mentionMessageId: options?.mentionMessageId ?? null,
-      mentionChannelId: options?.mentionChannelId ?? null,
-      dir: options?.dir ?? null,
-      parentTaskId: options?.parentTaskId ?? null,
-      dispatchedByTaskId: options?.dispatchedByTaskId ?? null,
-      model: options?.model ?? null,
-      modelTier: options?.modelTier ?? null,
-      effort: options?.effort ?? null,
-      profile: options?.profile?.trim() || null,
-      modelGroup: options?.modelGroup?.trim() || null,
-      fallbackHops: options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
-      scheduleId: options?.scheduleId ?? null,
-      workflowRunId: options?.workflowRunId ?? null,
-      workflowRunStepId: options?.workflowRunStepId ?? null,
-      outputSchema: options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
-      followUpConfig: options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
-      requestedByUserId: options?.requestedByUserId ?? null,
-      requestedByUserIdInherited,
-      contextKey: options?.contextKey ?? null,
-      routingAffinity: options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
-      swarmVersion: pkg.version,
-      createdAt: now,
-      lastUpdatedAt: now,
-      created_by: auditUserId,
-      updated_by: auditUserId,
-      isHumanFree,
-      // A task a workflow node owns keeps only its workflowRunId: the engine
-      // can run that node inside the request of the script that triggered it.
-      sourceStepId: options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
-      sourceScriptRunId: options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
-    })) as AgentTaskRow | null;
-    if (!inserted) throw new Error("Failed to create task");
-
-    if (routingDecisionSnapshot) {
-      try {
-        // A nested transaction (a SAVEPOINT): this write may fail without
-        // failing the task, and on Postgres a failed statement aborts the
-        // whole transaction unless it ran inside a savepoint.
-        await getStorage().transaction(() =>
-          tasks.insertRoutingDecision({
-            task_id: id,
-            selected_agent_id: options.offeredTo ?? options.agentId ?? null,
-            captured_at: routingDecisionSnapshot.capturedAt,
-            worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
-            continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
-            created_by: auditUserId,
-            updated_by: auditUserId,
-          }),
-        );
-      } catch (error) {
-        logRoutingDecisionFailure(id, "write", error);
+  >(
+    async () => {
+      // A workflow step's task commits only while the step may still start
+      // work. Checked in the INSERT's transaction: a cascade cancel of the
+      // step's run tree either commits first and is seen here, or sees and
+      // cancels this task.
+      if (options?.workflowRunStepId) {
+        const blocked = await getStepExecutionBlock(options.workflowRunStepId);
+        if (blocked) throw new WorkflowStepNotExecutableError(options.workflowRunStepId, blocked);
       }
-    }
-    return { row: inserted };
-  });
+      const existingTrackerWork = options?.bypassTrackerContextDedup
+        ? null
+        : await findExistingLinearTrackerContextWork(options?.contextKey);
+      if (existingTrackerWork) return { existing: existingTrackerWork };
+
+      // A chain move (a user move, the source key backfill) can commit between
+      // the parent read above and this write lock. Its chain query did not see
+      // this child, so take the parent's key as it is now.
+      if (readCommitted && keyInherited && options?.parentTaskId) {
+        await tasks.lockTask(options.parentTaskId);
+      }
+      const parentKey =
+        keyInherited && options?.parentTaskId
+          ? ((await tasks.findTaskKey(options.parentTaskId)) ?? undefined)
+          : undefined;
+      const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
+
+      let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
+      try {
+        routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
+      } catch (error) {
+        logRoutingDecisionFailure(id, "capture", error);
+      }
+
+      const isHumanFree = await classifyTaskHumanFree({
+        taskType: options?.taskType,
+        tags: JSON.stringify(options?.tags ?? []),
+        source: options?.source ?? "mcp",
+        requestedByUserId: options?.requestedByUserId,
+        requestedByUserIdInherited,
+        parentTaskId: options?.parentTaskId,
+        workflowRunId: options?.workflowRunId,
+      });
+
+      const provenance = getCurrentRunProvenance();
+      const inserted = (await tasks.insertTask({
+        id,
+        key: insertKey,
+        agentId: options?.agentId ?? null,
+        creatorAgentId: options?.creatorAgentId ?? null,
+        // Free text from every task source; scrub at the single INSERT.
+        task: scrubSecrets(task),
+        status,
+        source: options?.source ?? "mcp",
+        routing_reason: options?.routingReason ?? null,
+        routing_source: options?.routingSource ?? null,
+        routing_note: options?.routingNote ?? null,
+        taskType: options?.taskType ?? null,
+        tags: JSON.stringify(options?.tags ?? []),
+        priority: options?.priority ?? 50,
+        dependsOn: JSON.stringify(options?.dependsOn ?? []),
+        offeredTo: options?.offeredTo ?? null,
+        offeredAt: options?.offeredTo ? now : null,
+        slackChannelId: options?.slackChannelId ?? null,
+        slackThreadTs: options?.slackThreadTs ?? null,
+        slackTriggerMessageTs: options?.slackTriggerMessageTs ?? null,
+        slackUserId: options?.slackUserId ?? null,
+        slackParticipants: options?.slackParticipants
+          ? JSON.stringify(options.slackParticipants)
+          : null,
+        vcsProvider: options?.vcsProvider ?? null,
+        vcsRepo: options?.vcsRepo ?? null,
+        vcsEventType: options?.vcsEventType ?? null,
+        vcsNumber: options?.vcsNumber ?? null,
+        vcsCommentId: options?.vcsCommentId ?? null,
+        vcsAuthor: options?.vcsAuthor ?? null,
+        vcsUrl: options?.vcsUrl ?? null,
+        vcsInstallationId: options?.vcsInstallationId ?? null,
+        vcsNodeId: options?.vcsNodeId ?? null,
+        agentmailInboxId: options?.agentmailInboxId ?? null,
+        agentmailMessageId: options?.agentmailMessageId ?? null,
+        agentmailThreadId: options?.agentmailThreadId ?? null,
+        mentionMessageId: options?.mentionMessageId ?? null,
+        mentionChannelId: options?.mentionChannelId ?? null,
+        dir: options?.dir ?? null,
+        parentTaskId: options?.parentTaskId ?? null,
+        dispatchedByTaskId: options?.dispatchedByTaskId ?? null,
+        model: options?.model ?? null,
+        modelTier: options?.modelTier ?? null,
+        effort: options?.effort ?? null,
+        profile: options?.profile?.trim() || null,
+        modelGroup: options?.modelGroup?.trim() || null,
+        fallbackHops: options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
+        scheduleId: options?.scheduleId ?? null,
+        workflowRunId: options?.workflowRunId ?? null,
+        workflowRunStepId: options?.workflowRunStepId ?? null,
+        outputSchema: options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+        followUpConfig: options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
+        requestedByUserId: options?.requestedByUserId ?? null,
+        requestedByUserIdInherited,
+        contextKey: options?.contextKey ?? null,
+        routingAffinity: options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
+        swarmVersion: pkg.version,
+        createdAt: now,
+        lastUpdatedAt: now,
+        created_by: auditUserId,
+        updated_by: auditUserId,
+        isHumanFree,
+        // A task a workflow node owns keeps only its workflowRunId: the engine
+        // can run that node inside the request of the script that triggered it.
+        sourceStepId: options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
+        sourceScriptRunId: options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
+      })) as AgentTaskRow | null;
+      if (!inserted) throw new Error("Failed to create task");
+
+      if (routingDecisionSnapshot) {
+        try {
+          // A nested transaction (a SAVEPOINT): this write may fail without
+          // failing the task, and on Postgres a failed statement aborts the
+          // whole transaction unless it ran inside a savepoint.
+          await getStorage().transaction(() =>
+            tasks.insertRoutingDecision({
+              task_id: id,
+              selected_agent_id: options.offeredTo ?? options.agentId ?? null,
+              captured_at: routingDecisionSnapshot.capturedAt,
+              worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
+              continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
+              created_by: auditUserId,
+              updated_by: auditUserId,
+            }),
+          );
+        } catch (error) {
+          logRoutingDecisionFailure(id, "write", error);
+        }
+      }
+      return { row: inserted };
+    },
+    readCommitted ? { isolation: "read committed" } : {},
+  );
 
   if ("existing" in claim) {
     console.log(

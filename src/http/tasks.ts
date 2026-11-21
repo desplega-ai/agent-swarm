@@ -1385,7 +1385,9 @@ export async function handleTasks(
             await recordAcceptedTaskCreate(claim, created.id);
             return created;
           })
-        : await createTaskExtended(prepared.description, prepared.options);
+        : await createTaskExtended(prepared.description, prepared.options, {
+            readCommitted: true,
+          });
 
       ensure({
         id: "created",
