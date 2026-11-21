@@ -763,10 +763,6 @@
     "reason": "M2 move: schedules",
     "sites": 2
   },
-  "src/scheduler/scheduler.ts": {
-    "reason": "M2 move: schedules",
-    "sites": 1
-  },
   "src/tasks/follow-up-gate.ts": {
     "reason": "M2 move: tasks",
     "sites": 1
