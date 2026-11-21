@@ -6,6 +6,7 @@ import {
   type TransactionOptions,
 } from "@desplega/storage";
 import { sqliteDialect } from "./dialect";
+import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
 
@@ -40,6 +41,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     repos: {
       extensions: new SqliteExtensionsRepository(executor),
       config: new SqliteConfigRepository(executor),
+      agents: new SqliteAgentsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

@@ -101,11 +101,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 427
-  },
-  "src/be/db/active-sessions.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
+    "sites": 419
   },
   "src/be/db/agents.ts": {
     "reason": "M2 move: agents",
@@ -118,10 +114,6 @@
   "src/be/db/codex-oauth-device-flows.ts": {
     "reason": "M2 move: integrations",
     "sites": 5
-  },
-  "src/be/db/context-versions.ts": {
-    "reason": "M2 move: agents",
-    "sites": 6
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

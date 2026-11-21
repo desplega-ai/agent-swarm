@@ -2,6 +2,7 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { AgentsRepository } from "./repositories/agents";
 import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 
@@ -9,6 +10,7 @@ import type { ExtensionsRepository } from "./repositories/extensions";
 export type Repositories = {
   extensions: ExtensionsRepository;
   config: ConfigRepository;
+  agents: AgentsRepository;
 };
 
 /**

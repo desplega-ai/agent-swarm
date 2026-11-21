@@ -1,0 +1,63 @@
+import {
+  type AgentHistoryRow,
+  type AgentRow,
+  BaseAgentsRepository,
+  type ContextVersionRow,
+  sql,
+} from "@desplega/storage";
+
+export class SqliteAgentsRepository extends BaseAgentsRepository {
+  listAgents(opts: { includeExtensions: boolean }): Promise<AgentRow[]> {
+    return this.db.query<AgentRow>(
+      opts.includeExtensions
+        ? sql`SELECT * FROM agents ORDER BY name, rowid`
+        : sql`SELECT * FROM agents WHERE ${this.notExtensionAgent()} ORDER BY name, rowid`,
+    );
+  }
+
+  listAgentsByHarnessProvider(provider: string): Promise<AgentRow[]> {
+    return this.db.query<AgentRow>(
+      sql`SELECT * FROM agents WHERE harness_provider = ${provider} ORDER BY name, rowid`,
+    );
+  }
+
+  async listAgentColumns(): Promise<string[]> {
+    const rows = await this.db.query<{ name: string }>(
+      sql`SELECT name FROM pragma_table_info('agents')`,
+    );
+    return rows.map((row) => row.name);
+  }
+
+  latestHistory(agentId: string): Promise<AgentHistoryRow | null> {
+    return this.db.get<AgentHistoryRow>(sql`
+      SELECT * FROM agent_history WHERE agent_id = ${agentId}
+      ORDER BY created_at DESC, rowid DESC LIMIT 1`);
+  }
+
+  listHistory(agentId: string | undefined, limit: number): Promise<AgentHistoryRow[]> {
+    const where = agentId === undefined ? sql`` : sql` WHERE agent_id = ${agentId}`;
+    return this.db.query<AgentHistoryRow>(sql`
+      SELECT * FROM agent_history${where}
+      ORDER BY created_at DESC, rowid DESC LIMIT ${limit}`);
+  }
+
+  latestContextVersion(agentId: string, field: string): Promise<ContextVersionRow | null> {
+    return this.db.get<ContextVersionRow>(sql`
+      SELECT * FROM context_versions WHERE "agentId" = ${agentId} AND field = ${field}
+      ORDER BY version DESC, rowid ASC LIMIT 1`);
+  }
+
+  listContextVersions(
+    agentId: string,
+    field: string | undefined,
+    limit: number,
+  ): Promise<ContextVersionRow[]> {
+    return field === undefined
+      ? this.db.query<ContextVersionRow>(sql`
+          SELECT * FROM context_versions WHERE "agentId" = ${agentId}
+          ORDER BY "createdAt" DESC, rowid ASC LIMIT ${limit}`)
+      : this.db.query<ContextVersionRow>(sql`
+          SELECT * FROM context_versions WHERE "agentId" = ${agentId} AND field = ${field}
+          ORDER BY version DESC, rowid ASC LIMIT ${limit}`);
+  }
+}

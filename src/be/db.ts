@@ -6548,8 +6548,6 @@ export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
 // Swarm Config Operations (Centralized Environment/Config Management)
 // ============================================================================
 
-const configRepo = () => getStorage().repos.config;
-
 const RESERVED_CONFIG_PLACEHOLDER = "[reserved key stored in swarm_config; delete this row]";
 
 function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
@@ -6677,7 +6675,7 @@ export async function getSwarmConfigs(filters?: {
   scopeId?: string;
   key?: string;
 }): Promise<SwarmConfig[]> {
-  const rows = await configRepo().listConfigs(filters ?? {});
+  const rows = await getStorage().repos.config.listConfigs(filters ?? {});
   return rows.map(rowToSwarmConfig);
 }
 
@@ -6688,7 +6686,7 @@ export async function getSwarmConfigs(filters?: {
  * (`isApiProcessControlEnvKey`) and keys that cannot be env names stay out too.
  */
 export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
-  const rows = await configRepo().listGlobalConfigsExcept([
+  const rows = await getStorage().repos.config.listGlobalConfigsExcept([
     "API_KEY",
     "SECRETS_ENCRYPTION_KEY",
     "CORS_ALLOW_ANY_ORIGIN",
@@ -6710,7 +6708,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
  * Get a single config entry by ID.
  */
 export async function getSwarmConfigById(id: string): Promise<SwarmConfig | null> {
-  const row = await configRepo().findConfigById(id);
+  const row = await getStorage().repos.config.findConfigById(id);
   return row ? rowToSwarmConfig(row) : null;
 }
 
@@ -6726,7 +6724,7 @@ export async function getSwarmConfigLookupById(id: string): Promise<{
   isSecret: boolean;
   encrypted: boolean;
 } | null> {
-  const row = await configRepo().findConfigById(id);
+  const row = await getStorage().repos.config.findConfigById(id);
   if (!row) return null;
   return {
     id: row.id,
@@ -6854,7 +6852,7 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const row = await configRepo().deleteConfig(id);
+  const row = await getStorage().repos.config.deleteConfig(id);
   if (row?.scope === "agent" && row.scopeId) {
     await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key, row, null);
   }
@@ -6877,7 +6875,11 @@ export async function deleteSwarmConfigByKey(
   key: string,
 ): Promise<boolean> {
   const resolvedScopeId = scope === "global" ? null : scopeId;
-  const existing = await configRepo().findConfigByScopeKey(scope, resolvedScopeId, key);
+  const existing = await getStorage().repos.config.findConfigByScopeKey(
+    scope,
+    resolvedScopeId,
+    key,
+  );
   if (!existing) return false;
   return await deleteSwarmConfig(existing.id);
 }
@@ -6943,22 +6945,22 @@ export async function getSwarmRepos(filters?: {
   autoClone?: boolean;
   name?: string;
 }): Promise<SwarmRepo[]> {
-  const rows = await configRepo().listRepos(filters ?? {});
+  const rows = await getStorage().repos.config.listRepos(filters ?? {});
   return rows.map(rowToSwarmRepo);
 }
 
 export async function getSwarmRepoById(id: string): Promise<SwarmRepo | null> {
-  const row = await configRepo().findRepoById(id);
+  const row = await getStorage().repos.config.findRepoById(id);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByName(name: string): Promise<SwarmRepo | null> {
-  const row = await configRepo().findRepoByName(name);
+  const row = await getStorage().repos.config.findRepoByName(name);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByUrl(url: string): Promise<SwarmRepo | null> {
-  const row = await configRepo().findRepoByUrl(url);
+  const row = await getStorage().repos.config.findRepoByUrl(url);
   return row ? rowToSwarmRepo(row) : null;
 }
 
@@ -6977,7 +6979,7 @@ export async function createSwarmRepo(data: {
   const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
-  const row = await configRepo().insertRepo({
+  const row = await getStorage().repos.config.insertRepo({
     id,
     url: data.url,
     name: data.name,
@@ -7020,13 +7022,13 @@ export async function updateSwarmRepo(
 
   if (Object.keys(columns).length === 0) return await getSwarmRepoById(id);
 
-  const row = await configRepo().updateRepo(id, columns, new Date().toISOString());
+  const row = await getStorage().repos.config.updateRepo(id, columns, new Date().toISOString());
 
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function deleteSwarmRepo(id: string): Promise<boolean> {
-  return (await configRepo().deleteRepo(id)) > 0;
+  return (await getStorage().repos.config.deleteRepo(id)) > 0;
 }
 
 // ============================================================================
@@ -7132,36 +7134,28 @@ export async function insertActiveSession(session: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ActiveSession>(
-    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      session.agentId,
-      session.taskId ?? null,
-      session.triggerType,
-      session.inboxMessageId ?? null,
-      session.taskDescription ?? null,
-      session.runnerSessionId ?? null,
-      session.runtimeInstanceId ?? null,
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertActiveSession({
+    id,
+    agentId: session.agentId,
+    taskId: session.taskId ?? null,
+    triggerType: session.triggerType,
+    inboxMessageId: session.inboxMessageId ?? null,
+    taskDescription: session.taskDescription ?? null,
+    runnerSessionId: session.runnerSessionId ?? null,
+    runtimeInstanceId: session.runtimeInstanceId ?? null,
+    now,
+  })) as ActiveSession | null;
 
   if (!row) throw new Error("Failed to insert active session");
   return row;
 }
 
 export async function deleteActiveSession(taskId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionByTask(taskId)) > 0;
 }
 
 export async function deleteActiveSessionById(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionById(id)) > 0;
 }
 
 export async function getActiveSessions(
@@ -7190,26 +7184,16 @@ export async function getActiveSessions(
 
 export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
-    [now, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.heartbeatActiveSession(taskId, now)) > 0;
 }
 
 export async function cleanupStaleSessions(maxAgeMinutes = 30): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?", [
-    cutoff,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsBefore(cutoff);
 }
 
 export async function cleanupAgentSessions(agentId: string): Promise<number> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE agentId = ?", [
-    agentId,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsByAgent(agentId);
 }
 
 /** Update providerSessionId on an active session identified by taskId */
@@ -7217,11 +7201,10 @@ export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
-    [providerSessionId, taskId],
+  return (
+    (await getStorage().repos.agents.setActiveSessionProviderSessionId(taskId, providerSessionId)) >
+    0
   );
-  return result.changes > 0;
 }
 
 /**
@@ -7229,12 +7212,7 @@ export async function updateActiveSessionProviderSessionId(
  * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
  */
 export async function getActiveSessionForTask(taskId: string): Promise<ActiveSession | null> {
-  return (
-    (await getDbClient().get<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1",
-      [taskId],
-    )) ?? null
-  );
+  return (await getStorage().repos.agents.findActiveSessionByTask(taskId)) as ActiveSession | null;
 }
 
 /**
