@@ -1,5 +1,4 @@
-import { BaseMcpServersRepository, type McpEventSubscriptionRow } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import { BaseMcpServersRepository, type McpEventSubscriptionRow, sql } from "@desplega/storage";
 
 export class PostgresMcpServersRepository extends BaseMcpServersRepository {
   listLiveSubscriptions(
@@ -7,6 +6,11 @@ export class PostgresMcpServersRepository extends BaseMcpServersRepository {
     eventName: string,
     now: string,
   ): Promise<McpEventSubscriptionRow[]> {
-    return notOnPostgresYet("PostgresMcpServersRepository.listLiveSubscriptions");
+    // The SQLite order: idx_mcp_event_subscriptions_user_event (userId,
+    // eventName, expiresAt), then insertion order. expiresAt is NOT NULL.
+    return this.db.query<McpEventSubscriptionRow>(sql`
+      SELECT * FROM mcp_event_subscriptions
+      WHERE "userId" = ${userId} AND "eventName" = ${eventName} AND "expiresAt" > ${now}
+      ORDER BY "expiresAt", "_rowid"`);
   }
 }
