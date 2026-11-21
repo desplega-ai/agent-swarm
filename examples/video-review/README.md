@@ -71,6 +71,12 @@ It prints each comment with its time range and writes one frame for each comment
 needs `ffmpeg`. An export from a chosen file holds only the file name, so give the path with `--video`, or keep
 the export next to the video. An agent that reads the marked frames sees what the words do not say.
 
+### A skill for the agent that edits the video
+
+[skill/SKILL.md](skill/SKILL.md) is the agent's side of the loop, as a skill a coding agent can load: what to ask
+before a build, how to read a round, the checks before a render, how to present options, and what to say it could
+not check.
+
 ### Export format
 
 ```json
