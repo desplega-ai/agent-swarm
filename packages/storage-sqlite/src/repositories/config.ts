@@ -84,4 +84,10 @@ export class SqliteConfigRepository extends BaseConfigRepository {
        ORDER BY rowid`);
     return rows.map((row) => row.scopeId);
   }
+
+  listRepoNamesAndUrls(): Promise<{ name: string | null; url: string | null }[]> {
+    return this.db.query<{ name: string | null; url: string | null }>(
+      sql`SELECT name, url FROM swarm_repos ORDER BY rowid`,
+    );
+  }
 }

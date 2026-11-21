@@ -6,6 +6,7 @@ import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { eventsContract } from "./events";
 import { extensionsContract } from "./extensions";
+import { improvementsContract } from "./improvements";
 import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
@@ -48,4 +49,5 @@ export function runStorageContract(engine: ContractEngine): void {
   kvContract(engine);
   schedulesContract(engine);
   agentFsWebhooksContract(engine);
+  improvementsContract(engine);
 }

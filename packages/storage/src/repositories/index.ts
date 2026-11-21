@@ -5,6 +5,7 @@ export * from "./chat";
 export * from "./config";
 export * from "./events";
 export * from "./extensions";
+export * from "./improvements";
 export * from "./kv";
 export * from "./maintenance";
 export * from "./mcp-servers";

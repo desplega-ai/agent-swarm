@@ -355,6 +355,8 @@ export interface AgentsRepository {
   installSkillIfAbsent(id: string, agentId: string, skillId: string, now: string): Promise<boolean>;
   /** Active installs per MCP server id; servers with no active install are absent. Ordered by server id. */
   countActiveMcpServerInstalls(): Promise<{ mcpServerId: string; installs: number }[]>;
+  /** Every agent name (extension rows too). Insertion order. */
+  listAgentNames(): Promise<(string | null)[]>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -850,4 +852,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
        GROUP BY "mcpServerId"
        ORDER BY "mcpServerId"`);
   }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listAgentNames(): Promise<(string | null)[]>;
 }

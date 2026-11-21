@@ -9,6 +9,7 @@ import type { ChatRepository } from "./repositories/chat";
 import type { ConfigRepository } from "./repositories/config";
 import type { EventsRepository } from "./repositories/events";
 import type { ExtensionsRepository } from "./repositories/extensions";
+import type { ImprovementsRepository } from "./repositories/improvements";
 import type { KvRepository } from "./repositories/kv";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { McpServersRepository } from "./repositories/mcp-servers";
@@ -49,6 +50,7 @@ export type Repositories = {
   kv: KvRepository;
   schedules: SchedulesRepository;
   agentFsWebhooks: AgentFsWebhooksRepository;
+  improvements: ImprovementsRepository;
 };
 
 /**

@@ -408,5 +408,11 @@ export function agentsContract(engine: ContractEngine): void {
         { mcpServerId: "s2", installs: 2 },
       ]);
     });
+
+    test("listAgentNames returns every name in insertion order", async () => {
+      await repo.insertAgent(newAgent({ id: "n2", name: "zed" }));
+      await repo.insertAgent(newAgent({ id: "n1", name: "amy" }));
+      expect(await repo.listAgentNames()).toEqual(["zed", "amy"]);
+    });
   });
 }

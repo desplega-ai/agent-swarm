@@ -13,6 +13,7 @@ import { SqliteChatRepository } from "./repositories/chat";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteEventsRepository } from "./repositories/events";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
+import { SqliteImprovementsRepository } from "./repositories/improvements";
 import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
@@ -80,6 +81,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       kv: new SqliteKvRepository(executor),
       schedules: new SqliteSchedulesRepository(executor),
       agentFsWebhooks: new SqliteAgentFsWebhooksRepository(executor),
+      improvements: new SqliteImprovementsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

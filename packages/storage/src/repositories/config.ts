@@ -369,6 +369,8 @@ export interface ConfigRepository {
   ): Promise<string[]>;
   /** Deletes the exact `(scope, scopeId, key)` rows; a null `scopeId` matches NULL. Returns the count. */
   deleteConfigByScopeKey(scope: string, scopeId: string | null, key: string): Promise<number>;
+  /** Name and url of every repo. Insertion order. */
+  listRepoNamesAndUrls(): Promise<{ name: string | null; url: string | null }[]>;
 }
 
 const scopeIdIs = (scopeId: string | null): SqlQuery =>
@@ -910,4 +912,7 @@ export abstract class BaseConfigRepository implements ConfigRepository {
       )
     ).changes;
   }
+
+  /** Insertion order differs per engine (SQLite `rowid`). */
+  abstract listRepoNamesAndUrls(): Promise<{ name: string | null; url: string | null }[]>;
 }

@@ -143,10 +143,6 @@
     "reason": "M2 move: models",
     "sites": 2
   },
-  "src/be/improvements.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 11
-  },
   "src/be/key-window-usage.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2

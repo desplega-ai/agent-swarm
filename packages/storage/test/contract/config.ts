@@ -551,5 +551,25 @@ export function configContract(engine: ContractEngine): void {
       expect(await repo.deleteConfigByScopeKey("global", null, "CT_P")).toBe(1);
       expect(await repo.findConfigByScopeKey("agent", "z-agent", "CT_P")).not.toBeNull();
     });
+
+    test("listRepoNamesAndUrls returns every repo in insertion order", async () => {
+      for (const name of ["zeta", "alpha"]) {
+        await repo.insertRepo({
+          id: `id-${name}`,
+          url: `https://x/${name}`,
+          name,
+          clonePath: `/w/${name}`,
+          defaultBranch: "main",
+          autoClone: false,
+          hooks: "{}",
+          guidelines: null,
+          now: T0,
+        });
+      }
+      expect(await repo.listRepoNamesAndUrls()).toEqual([
+        { name: "zeta", url: "https://x/zeta" },
+        { name: "alpha", url: "https://x/alpha" },
+      ]);
+    });
   });
 }
