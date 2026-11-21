@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient, listInboxState, upsertInboxState } from "../be/db";
+import { listInboxState, upsertInboxState } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
+import { getStorage } from "../be/storage";
 import { isRbacEnabled } from "../rbac";
 import { InboxItemStateSchema, InboxItemStatusSchema, InboxItemTypeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -131,7 +132,7 @@ export async function handleInboxState(
       return true;
     }
     try {
-      const items = await getDbClient().transaction(async () => {
+      const items = await getStorage().transaction(async () => {
         const rows = [];
         for (const item of parsed.body.items) {
           rows.push(await upsertInboxState({ ...item, userId: parsed.body.userId }));
