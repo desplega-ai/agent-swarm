@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isConstraintViolation } from "@desplega/storage";
 import { z } from "zod";
 import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
@@ -831,7 +832,9 @@ export async function handleWorkflows(
       });
     } catch (err) {
       // A concurrent request with this key committed first; nothing of this one did.
-      if (err instanceof IdempotencyKeyTakenError) {
+      // On an engine with concurrent writers the loser can also fail on the
+      // winner's workflow name (a unique violation) before it sees the key.
+      if (err instanceof IdempotencyKeyTakenError || isConstraintViolation(err, "unique")) {
         if (await replayAcceptedOperation(res, claim, replayCreate)) return true;
       }
       throw err;

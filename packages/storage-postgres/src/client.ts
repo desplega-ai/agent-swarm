@@ -56,9 +56,9 @@ export type PostgresRetryOptions = {
 };
 
 export const DEFAULT_POSTGRES_RETRY: PostgresRetryOptions = {
-  maxAttempts: 8,
+  maxAttempts: 16,
   baseBackoffMs: 5,
-  maxBackoffMs: 250,
+  maxBackoffMs: 1000,
 };
 
 export type PostgresClientOptions = {
