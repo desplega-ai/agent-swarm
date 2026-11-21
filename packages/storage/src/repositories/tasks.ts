@@ -2864,7 +2864,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
          mime_type, size_bytes, sha256, intent, description, is_primary,
          created_by, updated_by)
       VALUES (${r.id}, ${r.task_id}, ${r.agent_id}, ${r.name}, ${r.kind}, ${r.url}, ${r.path},
-        ${r.page_id}, ${r.provider_id}, ${r.provider_key}, ${r.capabilities}, ${r.agent_fs_org_id},
+        ${r.page_id}, ${r.provider_id}, ${r.provider_key}, ${jsonText(r.capabilities)}, ${r.agent_fs_org_id},
         ${r.agent_fs_drive_id}, ${r.mime_type}, ${r.size_bytes}, ${r.sha256}, ${r.intent},
         ${r.description}, ${r.is_primary}, ${r.created_by}, ${r.updated_by})
       RETURNING *`);
@@ -2875,7 +2875,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       UPDATE task_attachments
       SET agent_id = ${r.agent_id}, name = ${r.name}, kind = ${r.kind}, url = ${r.url},
         path = ${r.path}, page_id = ${r.page_id}, provider_id = ${r.provider_id},
-        provider_key = ${r.provider_key}, capabilities = ${r.capabilities},
+        provider_key = ${r.provider_key}, capabilities = ${jsonText(r.capabilities)},
         agent_fs_org_id = ${r.agent_fs_org_id}, agent_fs_drive_id = ${r.agent_fs_drive_id},
         mime_type = ${r.mime_type}, size_bytes = ${r.size_bytes}, sha256 = ${r.sha256},
         intent = ${r.intent}, description = ${r.description}, is_primary = ${r.is_primary},
@@ -3234,7 +3234,8 @@ export abstract class BaseTasksRepository implements TasksRepository {
   abstract listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]>;
 
   listStalePinnedResumes(cutoff: string): Promise<TaskRow[]> {
-    const tagged = (tag: string) => likeAsciiCi(sql`tags`, sql`${`%"${tag}"%`}`);
+    // CAST: `tags` is jsonb on Postgres; on SQLite it is TEXT, so the cast changes nothing.
+    const tagged = (tag: string) => likeAsciiCi(sql`CAST(tags AS text)`, sql`${`%"${tag}"%`}`);
     return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
       WHERE status = 'pending'

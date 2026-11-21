@@ -1,5 +1,6 @@
 import {
   BaseTasksRepository,
+  greatestStrict,
   HUMAN_FREE_TAGS,
   type HumanFreeClassifyInput,
   jsonText,
@@ -19,7 +20,6 @@ import {
   type TaskListPage,
   type TaskRow,
 } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
 
 /** Raw SQL text written by this file (never input). */
 const raw = (text: string) => new SqlQuery([text], []);
@@ -70,6 +70,11 @@ const LINEAGE_COLUMNS = `${LIST_COLUMNS.slim}, agent_tasks."workflowRunId", ${TO
 /** The text elements of a jsonb array; no rows for NULL or a non-array value. */
 function jsonArrayElements(value: SqlQuery): SqlQuery {
   return sql`jsonb_array_elements_text(CASE WHEN jsonb_typeof(${value}) = 'array' THEN ${value} END)`;
+}
+
+/** A Postgres array literal of text elements, every element quoted. */
+function textArrayLiteral(items: readonly string[]): string {
+  return `{${items.map((item) => `"${item.replace(/[\\"]/g, "\\$&")}"`).join(",")}}`;
 }
 
 /** The elements of a bound id list, as `(value)` rows. */
@@ -531,7 +536,14 @@ export class PostgresTasksRepository extends BaseTasksRepository {
     capabilityKey: string,
     source: string,
   ): Promise<{ id: string; name: string; url: string }[]> {
-    return notOnPostgresYet("PostgresTasksRepository.listGeneratedUrlAttachments");
+    // json_extract(capabilities, '$.<key>'): the key is a dotted path chosen by code.
+    return this.db.query<{ id: string; name: string; url: string }>(sql`
+      SELECT id, name, url FROM task_attachments
+      WHERE task_id = ${taskId}
+        AND kind = 'url'
+        AND url IS NOT NULL
+        AND capabilities #>> CAST(${textArrayLiteral(capabilityKey.split("."))} AS text[]) = ${source}
+      ORDER BY "_rowid"`);
   }
 
   listRoutingWorkerStatuses(
@@ -539,61 +551,299 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   ): Promise<
     { agentId: string; status: string; activeTaskCount: number; openTaskCount: number }[]
   > {
-    return notOnPostgresYet("PostgresTasksRepository.listRoutingWorkerStatuses");
+    return this.db.query(sql`
+      WITH open_task AS MATERIALIZED (
+        SELECT id, "agentId", "offeredTo", status FROM agent_tasks
+        WHERE status IN (${sqlList(openStatuses)})
+      )
+      SELECT agent.id AS "agentId", agent.status,
+        COUNT(task.id) AS "openTaskCount",
+        SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS "activeTaskCount"
+      FROM agents agent
+      LEFT JOIN open_task task ON task."agentId" = agent.id OR task."offeredTo" = agent.id
+      WHERE agent."isLead" = ${false}
+      GROUP BY agent.id, agent.status
+      ORDER BY agent.id`);
   }
 
   listDependentTasks(parentId: string): Promise<TaskRow[]> {
-    return notOnPostgresYet("PostgresTasksRepository.listDependentTasks");
+    return this.db.query<TaskRow>(sql`
+      SELECT t.* FROM agent_tasks t, ${jsonArrayElements(sql`t."dependsOn"`)} AS dep(value)
+      WHERE dep.value = ${parentId}
+      ORDER BY t."_rowid"`);
   }
 
   listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
-    return notOnPostgresYet("PostgresTasksRepository.listStalledInProgressTasks");
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE status = 'in_progress' AND "lastUpdatedAt" < ${cutoff}
+      ORDER BY "lastUpdatedAt" ASC, "_rowid" ASC`);
   }
 
-  countTasksCreatedLastDay(): Promise<number> {
-    return notOnPostgresYet("PostgresTasksRepository.countTasksCreatedLastDay");
+  async countTasksCreatedLastDay(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM agent_tasks
+      WHERE "createdAt" >= statement_timestamp() - interval '24 hours'`);
+    return Number(row?.count ?? 0);
   }
 
   listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
-    return notOnPostgresYet("PostgresTasksRepository.listRootTaskChain");
+    return this.db.query<TaskRow>(sql`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
+        UNION ALL
+        SELECT t.id FROM agent_tasks t
+        JOIN chain c ON t."parentTaskId" = c.id
+      )
+      SELECT t.*,
+        (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
+      FROM chain
+      JOIN agent_tasks t ON t.id = chain.id
+      ORDER BY t."createdAt", t."_rowid"`);
   }
 
-  repointTaskDependency(
+  async repointTaskDependency(
     taskId: string,
     status: string,
     fromTaskId: string,
     dependsOnJson: string,
   ): Promise<boolean> {
-    return notOnPostgresYet("PostgresTasksRepository.repointTaskDependency");
+    // Status + membership predicates make the re-point a no-op if the
+    // dependent was claimed or re-pointed since it was read.
+    const row = await this.db.get<{ id: string }>(sql`
+      UPDATE agent_tasks
+         SET "dependsOn" = ${jsonText(dependsOnJson)}, "lastUpdatedAt" = ${nowIso}
+       WHERE id = ${taskId} AND status = ${status}
+         AND EXISTS (SELECT 1 FROM ${jsonArrayElements(sql`agent_tasks."dependsOn"`)} AS dep(value)
+                      WHERE dep.value = ${fromTaskId})
+       RETURNING id`);
+    return row != null;
   }
 
-  findOpenHeartbeatChecklistTask(
+  async findOpenHeartbeatChecklistTask(
     agentId: string,
     openStatuses: readonly string[],
   ): Promise<string | null> {
-    return notOnPostgresYet("PostgresTasksRepository.findOpenHeartbeatChecklistTask");
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_tasks
+       WHERE status IN (${sqlList(openStatuses)})
+         AND "agentId" = ${agentId}
+         AND "taskType" = 'heartbeat-checklist'
+       LIMIT 1`);
+    return row?.id ?? null;
   }
 
-  countInProgressAmong(taskIds: readonly string[]): Promise<number> {
-    return notOnPostgresYet("PostgresTasksRepository.countInProgressAmong");
+  async countInProgressAmong(taskIds: readonly string[]): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const row = await this.db.get<{ n: number }>(sql`
+      SELECT count(*) AS n FROM agent_tasks
+       WHERE status = 'in_progress' AND id IN (SELECT value FROM ${idRows(taskIds)})`);
+    return Number(row?.n ?? 0);
   }
 
-  queueStallOldest(): Promise<{
+  async queueStallOldest(): Promise<{
     claimableCount: number;
     oldestTaskId: string | null;
     oldestClaimableAt: string | null;
   } | null> {
-    return notOnPostgresYet("PostgresTasksRepository.queueStallOldest");
+    const deps = (alias: string) =>
+      jsonArrayElements(sql`COALESCE(${raw(alias)}."dependsOn", '[]'::jsonb)`);
+    const row = await this.db.get<{
+      claimableCount: number;
+      oldestTaskId: string | null;
+      oldestClaimableAt: string | null;
+    }>(sql`
+      WITH queued AS (
+          SELECT
+            t.id,
+            t."dependsOn",
+            COALESCE(
+              (
+                SELECT MAX(entry."createdAt")
+                FROM agent_log entry
+                WHERE entry."taskId" = t.id
+                  AND entry."newValue" = t.status
+                  AND entry."eventType" IN (
+                    'task_created',
+                    'task_status_change',
+                    'task_released',
+                    'task_accepted',
+                    'task_rejected'
+                  )
+              ),
+              t."createdAt"
+            ) AS "queueEnteredAt"
+          FROM agent_tasks t
+          WHERE t.status IN ('pending', 'unassigned')
+        ),
+        claimable AS (
+          SELECT
+            queued.id,
+            ${greatestStrict(
+              sql`queued."queueEnteredAt"`,
+              sql`COALESCE(
+                (
+                  SELECT MAX(COALESCE(prerequisite."finishedAt", prerequisite."createdAt"))
+                  FROM ${deps("queued")} AS dep(value)
+                  JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+                ),
+                queued."queueEnteredAt"
+              )`,
+            )} AS "claimableAt"
+          FROM queued
+          WHERE NOT EXISTS (
+              SELECT 1
+              FROM ${deps("queued")} AS dep(value)
+              LEFT JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+              WHERE prerequisite.id IS NULL OR prerequisite.status != 'completed'
+            )
+        ),
+        oldest AS (
+          SELECT id, "claimableAt" FROM claimable ORDER BY "claimableAt" ASC LIMIT 1
+        )
+        SELECT
+          (SELECT COUNT(*) FROM claimable) AS "claimableCount",
+          (SELECT id FROM oldest) AS "oldestTaskId",
+          (SELECT "claimableAt" FROM oldest) AS "oldestClaimableAt"`);
+    return row ? { ...row, claimableCount: Number(row.claimableCount) } : null;
   }
 
-  listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]> {
-    return notOnPostgresYet("PostgresTasksRepository.listDependedOnTaskIds");
+  async listDependedOnTaskIds(terminalStatuses: readonly string[]): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT DISTINCT dep.value AS id
+        FROM agent_tasks t, ${jsonArrayElements(sql`t."dependsOn"`)} AS dep(value)
+       WHERE t.status NOT IN (${sqlList(terminalStatuses)})
+         AND t."dependsOn" IS NOT NULL AND t."dependsOn" != '[]'::jsonb`);
+    return rows.map((row) => row.id);
   }
 
   shippingEvidenceSql(
     alias: string,
     host: string,
   ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery } {
-    return notOnPostgresYet("PostgresTasksRepository.shippingEvidenceSql");
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+      throw new Error(`Invalid task SQL alias: ${alias}`);
+    }
+    if (!/^[a-z0-9._:-]+$/.test(host)) throw new Error(`Invalid GitHub host for SQL: ${host}`);
+    const t = alias;
+    const outputHasPullRequest = githubPullRequestExistsSql(`${t}.output`, host);
+    const hasAnyAttachment = `EXISTS (
+    SELECT 1 FROM task_attachments ta WHERE ta.task_id = ${t}.id
+  )`;
+    const hasPullRequestAttachment = `EXISTS (
+    SELECT 1 FROM task_attachments ta
+    WHERE ta.task_id = ${t}.id
+      AND ta.kind = 'url'
+      AND ${githubPullRequestExistsSql("ta.url", host)}
+  )`;
+    return {
+      hasArtifact: raw(
+        `CASE WHEN ${hasAnyAttachment} THEN 1 WHEN ${outputHasPullRequest} THEN 1 ELSE 0 END`,
+      ),
+      hasPullRequest: raw(
+        `CASE WHEN ${hasPullRequestAttachment} THEN 1 WHEN ${outputHasPullRequest} THEN 1 ELSE 0 END`,
+      ),
+    };
   }
+}
+
+// ECMAScript whitespace plus prose wrappers that terminate URL-like tokens
+// (the SQLite list, unchanged).
+const githubTokenDelimiterCodePoints = [
+  9, 10, 11, 12, 13, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+  8232, 8233, 8239, 8287, 12288, 65279, 40, 41, 91, 93, 123, 125, 60, 62, 34, 39, 96,
+];
+
+function githubTokenDelimitersSql(): string {
+  return githubTokenDelimiterCodePoints.map((code, index) => `(${index + 1}, ${code})`).join(", ");
+}
+
+/**
+ * The SQLite `githubPullRequestExistsSql`, step for step: GLOB 'p*' is
+ * starts_with, GLOB character classes are anchored regular expressions (byte
+ * ranges under the C collation, as GLOB compares), instr is strpos, char is
+ * chr. `value` is a column reference chosen by code; `host` is a checked
+ * lower-case host. Both are inlined as text.
+ */
+function githubPullRequestExistsSql(value: string, host: string): string {
+  return `EXISTS (
+    WITH RECURSIVE
+    token_delimiters(pos, code_point) AS (
+      VALUES ${githubTokenDelimitersSql()}
+    ),
+    normalized(value, pos) AS (
+      SELECT coalesce(${value}, ''), 0
+
+      UNION ALL
+
+      SELECT replace(normalized.value, chr(code_point), ' '), normalized.pos + 1
+      FROM normalized
+      JOIN token_delimiters ON token_delimiters.pos = normalized.pos + 1
+    ),
+    tokens(remaining, token) AS (
+      SELECT trim(value) || ' ', CAST(NULL AS text)
+      FROM normalized
+      WHERE pos = (SELECT max(pos) FROM token_delimiters)
+
+      UNION ALL
+
+      SELECT
+        ltrim(substr(remaining, strpos(remaining, ' ') + 1)),
+        substr(remaining, 1, strpos(remaining, ' ') - 1)
+      FROM tokens
+      WHERE remaining <> ''
+    ),
+    github_paths(path) AS (
+      SELECT CASE
+        WHEN starts_with(lower(token), 'https://${host}/')
+          THEN substr(token, length('https://${host}/') + 1)
+        WHEN starts_with(lower(token), 'http://${host}/')
+          THEN substr(token, length('http://${host}/') + 1)
+        ELSE substr(token, length('${host}/') + 1)
+      END
+      FROM tokens
+      WHERE starts_with(lower(token), 'https://${host}/')
+         OR starts_with(lower(token), 'http://${host}/')
+         OR starts_with(lower(token), '${host}/')
+    ),
+    github_segments(owner, repo, remainder) AS (
+      SELECT
+        substr(path, 1, strpos(path, '/') - 1),
+        substr(
+          substr(path, strpos(path, '/') + 1),
+          1,
+          strpos(substr(path, strpos(path, '/') + 1), '/') - 1
+        ),
+        substr(
+          substr(path, strpos(path, '/') + 1),
+          strpos(substr(path, strpos(path, '/') + 1), '/') + 1
+        )
+      FROM github_paths
+      WHERE strpos(path, '/') > 1
+        AND strpos(substr(path, strpos(path, '/') + 1), '/') > 1
+    ),
+    github_pull_numbers(remainder, pos) AS (
+      SELECT remainder, length('pull/') + 1
+      FROM github_segments
+      WHERE owner !~ '[^A-Za-z0-9._-]'
+        AND repo !~ '[^A-Za-z0-9._-]'
+        AND owner NOT IN ('.', '..')
+        AND repo NOT IN ('.', '..')
+        AND lower(remainder) ~ '^pull/[0-9]'
+
+      UNION ALL
+
+      SELECT remainder, pos + 1
+      FROM github_pull_numbers
+      WHERE substr(remainder, pos, 1) ~ '^[0-9]$'
+    )
+    SELECT 1
+    FROM github_pull_numbers
+    WHERE substr(remainder, pos, 1) !~ '^[0-9]$'
+      AND (
+        substr(remainder, pos, 1) = ''
+        OR substr(remainder, pos, 1) IN ('/', '?', '#')
+        OR btrim(substr(remainder, pos), ')]},.;:!') = ''
+      )
+    LIMIT 1
+  )`;
 }
