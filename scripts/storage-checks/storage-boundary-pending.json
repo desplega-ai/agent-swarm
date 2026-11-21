@@ -27,10 +27,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/be/agent-history.ts": {
-    "reason": "M2 move: agents",
-    "sites": 15
-  },
   "src/be/api-drain.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
