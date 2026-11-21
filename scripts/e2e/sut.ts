@@ -213,7 +213,7 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
   throw new Error(`API server did not become healthy within 60 seconds\n${tail}`);
 }
 
-async function stopSutProcess(sut: Sut): Promise<void> {
+export async function stopSutProcess(sut: Sut): Promise<void> {
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGTERM");
     // Under --coverage, Bun writes lcov for every loaded file after the API exits. A cleared

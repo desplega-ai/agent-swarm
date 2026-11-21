@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
-import { calledCliCommands, cleanupCliTemp, setCliCoverageDir } from "./cli";
+import {
+  type CliResult,
+  calledCliCommands,
+  cleanupCliTemp,
+  runCli,
+  setCliCoverageDir,
+} from "./cli";
 import {
   type CoverageManifest,
   coverageFrom,
@@ -49,12 +55,14 @@ import { loadScenarios } from "./scenarios/registry";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import {
+  copySutKey,
   repoRoot,
   restartSut,
   type Sut,
   startFixtureSut,
   startSut,
   stopSut,
+  stopSutProcess,
   sutDbTarget,
   tailLog,
 } from "./sut";
@@ -100,7 +108,24 @@ export type ScenarioContext = {
    * main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
    */
   startFixtureSut: (fixture: string) => Promise<FixtureSut>;
+  /**
+   * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
+   * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
+   * Postgres database (needs E2E_POSTGRES_URL) and boots a target API on the copy with
+   * the source's encryption key. The runner stops both otherwise.
+   */
+  startDataCopy: () => Promise<DataCopyPair>;
   nonce: string;
+};
+export type DataCopyPair = {
+  source: ApiClient;
+  copy: () => Promise<{
+    cli: CliResult;
+    target: ApiClient;
+    /** The same copy again into the target database, while the target API holds it. */
+    recopy: () => Promise<CliResult>;
+  }>;
+  stop: () => Promise<void>;
 };
 export type SlackJournal = { file: string; path: string };
 export type FixtureSut = {
@@ -330,6 +355,54 @@ async function bootStack(
           db: fixtureDb,
           meta: fixture.meta,
           stop: () => stopStack(fixtureStack, options.keep),
+        };
+      },
+      async startDataCopy() {
+        const sourceStack: Stack = {};
+        const targetStack: Stack = {};
+        stacks.add(sourceStack);
+        const source = await startSut(
+          options.keep,
+          { SLACK_DISABLE: "true" },
+          options.sutEnv,
+          undefined,
+          "sqlite",
+        );
+        sourceStack.sut = source;
+        const copyCli = (databaseUrl: string) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
+            env: { DESPLEGA_TELEMETRY_ENV: "test" },
+            timeoutMs: 300_000,
+          });
+        return {
+          source: createApiClient(source.baseUrl, source.apiKey),
+          async copy() {
+            await stopSutProcess(source);
+            stacks.add(targetStack);
+            let cli: CliResult | undefined;
+            const target = await startSut(
+              options.keep,
+              { SLACK_DISABLE: "true" },
+              options.sutEnv,
+              undefined,
+              "postgres",
+              async (prepared) => {
+                await copySutKey(source, prepared);
+                cli = await copyCli(prepared.databaseUrl ?? "");
+              },
+            );
+            targetStack.sut = target;
+            if (!cli) throw new Error("db-copy did not run");
+            return {
+              cli,
+              target: createApiClient(target.baseUrl, target.apiKey),
+              recopy: () => copyCli(target.databaseUrl ?? ""),
+            };
+          },
+          async stop() {
+            await stopStack(targetStack, options.keep);
+            await stopStack(sourceStack, options.keep);
+          },
         };
       },
       async restartSut(options) {
