@@ -7,6 +7,7 @@ import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { ModelsRepository } from "./repositories/models";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SessionsRepository } from "./repositories/sessions";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
@@ -15,6 +16,7 @@ export type Repositories = {
   runtimePools: RuntimePoolsRepository;
   config: ConfigRepository;
   agents: AgentsRepository;
+  sessions: SessionsRepository;
 };
 
 /**

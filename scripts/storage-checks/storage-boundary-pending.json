@@ -97,7 +97,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 397
+    "sites": 370
   },
   "src/be/db/approvals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -127,10 +127,6 @@
     "reason": "M2 move: pages, metrics, apps",
     "sites": 2
   },
-  "src/be/db/request-composition.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 6
-  },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 31
@@ -145,23 +141,15 @@
   },
   "src/be/db/session-costs.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 6
+    "sites": 1
   },
   "src/be/db/session-labels.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
-  },
-  "src/be/db/session-log-reasoning.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 3
   },
   "src/be/db/session-moves.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 7
-  },
-  "src/be/db/session-summaries.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
   },
   "src/be/db/session-tree.ts": {
     "reason": "M2 move: sessions and cost",

@@ -4,7 +4,6 @@ import {
   type CreateSessionCostInput,
   insertSessionCost,
   rowToSessionCost,
-  type SessionCostRow,
 } from "./db/session-costs";
 
 export {
@@ -17,6 +16,10 @@ import type { Database } from "bun:sqlite";
 import type {
   ApiKeyRef,
   ApiKeyStatusRow,
+  BudgetRefusalNotificationRow as BudgetRefusalNotificationRowDb,
+  BudgetRow as BudgetRowDb,
+  PricingRowDb,
+  SessionLogRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -4820,16 +4823,7 @@ export async function deleteServicesByAgentId(agentId: string): Promise<number> 
 // Session Log Operations (raw CLI output)
 // ============================================================================
 
-type SessionLogRow = {
-  id: string;
-  taskId: string | null;
-  sessionId: string;
-  iteration: number;
-  cli: string;
-  content: string;
-  lineNumber: number;
-  createdAt: string;
-};
+const sessionsRepo = () => getStorage().repos.sessions;
 
 function rowToSessionLog(row: SessionLogRow): SessionLog {
   return {
@@ -4874,45 +4868,35 @@ export async function createSessionLogs(logs: {
       // Parsed here, next to the scrub, so the write lock covers inserts only.
       batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
     }
-    await getDbClient().transaction(async (tx) => {
+    await getStorage().transaction(async () => {
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting
-      // at the POST's index. Reading the newest row by rowid walks the
-      // sessionId index backwards and stops at the first hit, where MAX()
-      // would scan the whole session. Rows written here are monotonic in
-      // rowid, so this equals MAX + 1 for them.
-      const last = await tx.get<{ lineNumber: number }>(
-        `SELECT lineNumber FROM session_logs WHERE sessionId = ? AND iteration = ?
-         ORDER BY rowid DESC LIMIT 1`,
-        [logs.sessionId, logs.iteration],
-      );
-      let lineNumber = last ? last.lineNumber + 1 : 0;
+      // at the POST's index. Rows written here are monotonic in insert order,
+      // so this equals MAX + 1 for them.
+      const last = await sessionsRepo().lastLogLineNumber(logs.sessionId, logs.iteration);
+      let lineNumber = last !== null ? last + 1 : 0;
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
       for (const [index, { content, reasoning }] of batch.entries()) {
-        await tx.run(
-          `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt, reasoningChars, reasoningKind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)`,
-          [
-            crypto.randomUUID(),
-            logs.taskId ?? null,
-            logs.sessionId,
-            logs.iteration,
-            logs.cli,
-            content,
-            lineNumber,
-            reasoning.reasoning?.chars ?? null,
-            reasoning.reasoning ? "reasoning" : null,
-          ],
-        );
+        await sessionsRepo().insertLog({
+          id: crypto.randomUUID(),
+          taskId: logs.taskId ?? null,
+          sessionId: logs.sessionId,
+          iteration: logs.iteration,
+          cli: logs.cli,
+          content,
+          lineNumber,
+          reasoningChars: reasoning.reasoning?.chars ?? null,
+          reasoningKind: reasoning.reasoning ? "reasoning" : null,
+        });
         const toolMessageId = reasoning.toolUseMessageId;
         if (toolMessageId) {
           const before = runMessageId === toolMessageId ? run : 0;
           // Only a run of 2+ can hold an update. A run that reaches the batch
           // start may continue in an earlier POST, so the DB decides that case.
           if (before >= 2 || before === index) {
-            await classifyClaudeUpdate(tx, logs.sessionId, toolMessageId, lineNumber);
+            await classifyClaudeUpdate(logs.sessionId, toolMessageId, lineNumber);
           }
         }
         const messageId = reasoning.reasoning?.messageId;
@@ -4929,29 +4913,16 @@ export async function createSessionLogs(logs: {
   }
 }
 
-// Session log reads order by rowid, which is insert order. Rows written before
+// Session log reads are in insert order (rowid on SQLite). Rows written before
 // lineNumber was assigned server-side restart at 0 on every worker flush, so
-// only rowid orders them. The API never runs VACUUM (runbooks/db-retention.md);
-// a manual VACUUM may renumber rowids but copies rows in rowid order.
+// only the insert order orders them. The API never runs VACUUM
+// (runbooks/db-retention.md); a manual VACUUM may renumber rowids but copies
+// rows in rowid order.
 export async function getSessionLogsByTaskId(
   taskId: string,
   limit?: number,
 ): Promise<SessionLog[]> {
-  if (typeof limit === "number" && limit > 0) {
-    const rows = await getDbClient().query<SessionLogRow>(
-      `SELECT * FROM (
-         SELECT rowid AS seq, * FROM session_logs WHERE taskId = ?
-         ORDER BY rowid DESC
-         LIMIT ?
-       ) ORDER BY seq ASC`,
-      [taskId, limit],
-    );
-    return rows.map(rowToSessionLog);
-  }
-  const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE taskId = ? ORDER BY rowid ASC",
-    [taskId],
-  );
+  const rows = await sessionsRepo().listLogsByTask(taskId, limit);
   return rows.map(rowToSessionLog);
 }
 
@@ -4959,10 +4930,7 @@ export async function getSessionLogsBySession(
   sessionId: string,
   iteration: number,
 ): Promise<SessionLog[]> {
-  const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY rowid ASC",
-    [sessionId, iteration],
-  );
+  const rows = await sessionsRepo().listLogsBySession(sessionId, iteration);
   return rows.map(rowToSessionLog);
 }
 
@@ -4975,10 +4943,7 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
 }
 
 export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = await sessionsRepo().listSessionCostsByTask(taskId, limit);
   return rows.map(rowToSessionCost);
 }
 
@@ -4986,18 +4951,12 @@ export async function getSessionCostsByAgentId(
   agentId: string,
   limit = 100,
 ): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
-    [agentId, limit],
-  );
+  const rows = await sessionsRepo().listSessionCostsByAgent(agentId, limit);
   return rows.map(rowToSessionCost);
 }
 
 export async function getAllSessionCosts(limit = 100): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
-    [limit],
-  );
+  const rows = await sessionsRepo().listSessionCosts({ limit });
   return rows.map(rowToSessionCost);
 }
 
@@ -5009,30 +4968,12 @@ export async function getSessionCostsFiltered(opts: {
   endDate?: string;
   limit?: number;
 }): Promise<SessionCost[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (opts.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts.startDate) {
-    conditions.push("createdAt >= ?");
-    params.push(opts.startDate);
-  }
-  if (opts.endDate) {
-    conditions.push("createdAt <= ?");
-    params.push(opts.endDate);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = opts.limit ?? 100;
-  params.push(limit);
-
-  const rows = await getDbClient().query<SessionCostRow>(
-    `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
-    params,
-  );
+  const rows = await sessionsRepo().listSessionCosts({
+    agentId: opts.agentId,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    limit: opts.limit ?? 100,
+  });
   return rows.map(rowToSessionCost);
 }
 
@@ -12883,34 +12824,7 @@ export async function countSessions(opts: SessionFilters = {}): Promise<number> 
 // 044). All inserts here use `Date.now()` accordingly.
 // ============================================================================
 
-interface BudgetRow {
-  scope: string;
-  scope_id: string;
-  daily_budget_usd: number;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
-
-interface BudgetRefusalNotificationRow {
-  task_id: string;
-  date: string;
-  agent_id: string;
-  cause: string;
-  agent_spend_usd: number | null;
-  agent_budget_usd: number | null;
-  global_spend_usd: number | null;
-  global_budget_usd: number | null;
-  user_spend_usd: number | null;
-  user_budget_usd: number | null;
-  follow_up_task_id: string | null;
-  createdAt: number;
-}
-
-interface CoalesceSumRow {
-  total: number;
-}
-
-function rowToBudget(row: BudgetRow): Budget {
+function rowToBudget(row: BudgetRowDb): Budget {
   return {
     scope: row.scope as BudgetScope,
     scopeId: row.scope_id,
@@ -12921,7 +12835,7 @@ function rowToBudget(row: BudgetRow): Budget {
 }
 
 function rowToBudgetRefusalNotification(
-  row: BudgetRefusalNotificationRow,
+  row: BudgetRefusalNotificationRowDb,
 ): BudgetRefusalNotification {
   return {
     taskId: row.task_id,
@@ -12944,10 +12858,7 @@ function rowToBudgetRefusalNotification(
  * exists — callers treat that as "unlimited / no budget configured".
  */
 export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Budget | null> {
-  const row = await getDbClient().get<BudgetRow>(
-    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
-    [scope, scopeId],
-  );
+  const row = await sessionsRepo().findBudget(scope, scopeId);
   return row ? rowToBudget(row) : null;
 }
 
@@ -12956,9 +12867,7 @@ export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Bu
  * Order is `(scope, scope_id)` for stable output across calls.
  */
 export async function getBudgets(): Promise<Budget[]> {
-  const rows = await getDbClient().query<BudgetRow>(
-    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
-  );
+  const rows = await sessionsRepo().listBudgets();
   return rows.map(rowToBudget);
 }
 
@@ -12973,14 +12882,7 @@ export async function upsertBudget(
   dailyBudgetUsd: number,
 ): Promise<Budget> {
   const now = Date.now();
-  await getDbClient().run(
-    `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(scope, scope_id) DO UPDATE SET
-         daily_budget_usd = excluded.daily_budget_usd,
-         lastUpdatedAt = excluded.lastUpdatedAt`,
-    [scope, scopeId, dailyBudgetUsd, now, now],
-  );
+  await sessionsRepo().upsertBudget(scope, scopeId, dailyBudgetUsd, now);
 
   const updated = await getBudget(scope, scopeId);
   if (!updated) {
@@ -12996,11 +12898,7 @@ export async function upsertBudget(
  * if `(scope, scopeId)` did not exist.
  */
 export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM budgets WHERE scope = ? AND scope_id = ?", [
-    scope,
-    scopeId,
-  ]);
-  return result.changes > 0;
+  return (await sessionsRepo().deleteBudget(scope, scopeId)) > 0;
 }
 
 // ============================================================================
@@ -13013,16 +12911,6 @@ export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise
 // `effective_from <= atEpochMs`, which is the correct "what price was in
 // effect at time T" semantics regardless of insertion order.
 // ============================================================================
-
-interface PricingRowDb {
-  provider: string;
-  model: string;
-  token_class: string;
-  effective_from: number;
-  price_per_million_usd: number;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
 
 function rowToPricingRow(row: PricingRowDb): PricingRow {
   return {
@@ -13038,9 +12926,7 @@ function rowToPricingRow(row: PricingRowDb): PricingRow {
 
 /** Phase 6: list every pricing row, latest-effective first. */
 export async function getAllPricingRows(): Promise<PricingRow[]> {
-  const rows = await getDbClient().query<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
-  );
+  const rows = await sessionsRepo().listPricingRows();
   return rows.map(rowToPricingRow);
 }
 
@@ -13053,10 +12939,7 @@ export async function getPricingRows(
   model: string,
   tokenClass: PricingTokenClass,
 ): Promise<PricingRow[]> {
-  const rows = await getDbClient().query<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
-    [provider, model, tokenClass],
-  );
+  const rows = await sessionsRepo().listPricingRowsFor(provider, model, tokenClass);
   return rows.map(rowToPricingRow);
 }
 
@@ -13072,10 +12955,7 @@ export async function getActivePricingRow(
   tokenClass: PricingTokenClass,
   atEpochMs: number,
 ): Promise<PricingRow | null> {
-  const row = await getDbClient().get<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
-    [provider, model, tokenClass, atEpochMs],
-  );
+  const row = await sessionsRepo().findActivePricingRow(provider, model, tokenClass, atEpochMs);
   return row ? rowToPricingRow(row) : null;
 }
 
@@ -13094,19 +12974,15 @@ export interface InsertPricingRowInput {
  */
 export async function insertPricingRow(input: InsertPricingRowInput): Promise<PricingRow> {
   const now = Date.now();
-  await getDbClient().run(
-    `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      input.provider,
-      input.model,
-      input.tokenClass,
-      input.effectiveFrom,
-      input.pricePerMillionUsd,
-      now,
-      now,
-    ],
-  );
+  await sessionsRepo().insertPricingRow({
+    provider: input.provider,
+    model: input.model,
+    token_class: input.tokenClass,
+    effective_from: input.effectiveFrom,
+    price_per_million_usd: input.pricePerMillionUsd,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
   return {
     provider: input.provider,
     model: input.model,
@@ -13129,11 +13005,7 @@ export async function deletePricingRow(
   tokenClass: PricingTokenClass,
   effectiveFrom: number,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
-    [provider, model, tokenClass, effectiveFrom],
-  );
-  return result.changes > 0;
+  return (await sessionsRepo().deletePricingRow(provider, model, tokenClass, effectiveFrom)) > 0;
 }
 
 /**
@@ -13150,11 +13022,7 @@ export async function deletePricingRow(
  * in the test suite).
  */
 export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
-    [agentId, dateUtc],
-  );
-  return row?.total ?? 0;
+  return sessionsRepo().dailySpendForAgent(agentId, dateUtc);
 }
 
 /**
@@ -13170,11 +13038,7 @@ export async function getDailySpendForAgent(agentId: string, dateUtc: string): P
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
 export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
-    [dateUtc],
-  );
-  return row?.total ?? 0;
+  return sessionsRepo().dailySpendGlobal(dateUtc);
 }
 
 /**
@@ -13184,14 +13048,7 @@ export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
 export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
-       FROM session_costs sc
-       JOIN agent_tasks t ON sc.taskId = t.id
-       WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
-    [userId, dateUtc],
-  );
-  return row?.total ?? 0;
+  return sessionsRepo().dailySpendForUser(userId, dateUtc);
 }
 
 export interface RecordBudgetRefusalNotificationInput {
@@ -13220,31 +13077,22 @@ export async function recordBudgetRefusalNotification(
   inserted: boolean;
   row: BudgetRefusalNotification;
 }> {
-  const client = getDbClient();
   const now = Date.now();
-  const result = await client.run(
-    `INSERT OR IGNORE INTO budget_refusal_notifications
-       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    [
-      input.taskId,
-      input.date,
-      input.agentId,
-      input.cause,
-      input.agentSpendUsd ?? null,
-      input.agentBudgetUsd ?? null,
-      input.globalSpendUsd ?? null,
-      input.globalBudgetUsd ?? null,
-      input.userSpendUsd ?? null,
-      input.userBudgetUsd ?? null,
-      now,
-    ],
-  );
+  const inserted = await sessionsRepo().insertBudgetRefusalNotification({
+    task_id: input.taskId,
+    date: input.date,
+    agent_id: input.agentId,
+    cause: input.cause,
+    agent_spend_usd: input.agentSpendUsd ?? null,
+    agent_budget_usd: input.agentBudgetUsd ?? null,
+    global_spend_usd: input.globalSpendUsd ?? null,
+    global_budget_usd: input.globalBudgetUsd ?? null,
+    user_spend_usd: input.userSpendUsd ?? null,
+    user_budget_usd: input.userBudgetUsd ?? null,
+    createdAt: now,
+  });
 
-  const existing = await client.get<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    [input.taskId, input.date],
-  );
+  const existing = await sessionsRepo().findBudgetRefusalNotification(input.taskId, input.date);
 
   if (!existing) {
     // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
@@ -13255,7 +13103,7 @@ export async function recordBudgetRefusalNotification(
   }
 
   return {
-    inserted: result.changes > 0,
+    inserted: inserted > 0,
     row: rowToBudgetRefusalNotification(existing),
   };
 }
@@ -13267,10 +13115,7 @@ export async function getBudgetRefusalNotification(
   taskId: string,
   date: string,
 ): Promise<BudgetRefusalNotification | null> {
-  const row = await getDbClient().get<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    [taskId, date],
-  );
+  const row = await sessionsRepo().findBudgetRefusalNotification(taskId, date);
   return row ? rowToBudgetRefusalNotification(row) : null;
 }
 
@@ -13282,10 +13127,7 @@ export async function getBudgetRefusalNotification(
 export async function getRecentBudgetRefusalNotifications(
   limit = 50,
 ): Promise<BudgetRefusalNotification[]> {
-  const rows = await getDbClient().query<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
-    [limit],
-  );
+  const rows = await sessionsRepo().listRecentBudgetRefusalNotifications(limit);
   return rows.map(rowToBudgetRefusalNotification);
 }
 
@@ -13297,11 +13139,7 @@ export async function hasBudgetRefusalNotificationToday(
   taskId: string,
   date: string,
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ one: number }>(
-    "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
-    [taskId, date],
-  );
-  return row !== null;
+  return sessionsRepo().hasBudgetRefusalNotification(taskId, date);
 }
 
 /**
@@ -13318,10 +13156,7 @@ export async function setBudgetRefusalFollowUpTaskId(
   date: string,
   followUpTaskId: string,
 ): Promise<void> {
-  await getDbClient().run(
-    "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
-    [followUpTaskId, taskId, date],
-  );
+  await sessionsRepo().setBudgetRefusalFollowUpTaskId(taskId, date, followUpTaskId);
 }
 
 // ============================================================================
