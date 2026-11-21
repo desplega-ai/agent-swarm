@@ -1,4 +1,7 @@
-import { BasePagesRepository } from "@desplega/storage";
+import { BasePagesRepository, SqlQuery } from "@desplega/storage";
 
-/** Every pages statement is portable: the SQLite engine adds nothing. */
-export class SqlitePagesRepository extends BasePagesRepository {}
+export class SqlitePagesRepository extends BasePagesRepository {
+  protected insertionOrder(): SqlQuery {
+    return new SqlQuery(["rowid"], []);
+  }
+}

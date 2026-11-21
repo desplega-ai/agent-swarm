@@ -150,5 +150,67 @@ export function mcpServersContract(engine: ContractEngine): void {
       expect(row?.lastUpdatedAt).not.toBe(T0);
       expect(row?.lastUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     });
+
+    const server = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      name: id,
+      description: null,
+      scope: "agent",
+      ownerAgentId: null,
+      transport: "stdio",
+      command: "run",
+      args: null,
+      url: null,
+      headers: null,
+      envConfigKeys: null,
+      headerConfigKeys: null,
+      extraAuthorizeParams: null,
+      createdAt: "2026-11-21T10:00:00.000Z",
+      lastUpdatedAt: "2026-11-21T10:00:00.000Z",
+      ...extra,
+    });
+
+    test("MCP server CRUD: version bumps on config, lists, cascade delete", async () => {
+      const before = await repo.countMcpServers();
+      expect(await repo.insertMcpServer(server("zb"))).toMatchObject({
+        isEnabled: 1,
+        version: 1,
+        authMethod: "static",
+      });
+      await repo.insertMcpServer(server("za", { scope: "swarm", description: "Find THINGS" }));
+      expect(await repo.countMcpServers()).toBe(before + 2);
+      const named = await repo.updateMcpServer(
+        "zb",
+        { description: "d", isEnabled: false },
+        "2026-11-21T11:00:00.000Z",
+      );
+      expect([named?.version, named?.isEnabled, named?.lastUpdatedAt]).toEqual([
+        1,
+        0,
+        "2026-11-21T11:00:00.000Z",
+      ]);
+      expect(
+        (await repo.updateMcpServer("zb", { url: null }, "2026-11-21T12:00:00.000Z"))?.version,
+      ).toBe(2);
+      expect((await repo.findMcpServerByName("za", "swarm", ""))?.id).toBe("za");
+      const ids = async (f: object) =>
+        (await repo.listMcpServers(f)).map((r) => r.id).filter((id) => id.startsWith("z"));
+      expect(await ids({})).toEqual(["za", "zb"]);
+      expect(await ids({ isEnabled: true })).toEqual(["za"]);
+      expect(await ids({ search: "things" })).toEqual(["za"]);
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', 'idle', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      await storage.executor.run(sql`
+        INSERT INTO agent_mcp_servers (id, "agentId", "mcpServerId", "isActive", "installedAt")
+        VALUES ('i1', 'ag', 'za', ${true}, 'x'), ('i2', 'ag', 'zb', ${true}, 'y')`);
+      expect((await repo.listAgentMcpServers("ag", true)).map((r) => [r.id, r.isActive])).toEqual([
+        ["za", 1],
+      ]);
+      await repo.updateMcpServer("zb", { isEnabled: true }, "2026-11-21T12:00:00.000Z");
+      expect((await repo.listAgentMcpServers("ag", false)).map((r) => r.id)).toEqual(["za", "zb"]);
+      expect(await repo.deleteMcpServerCascade("zb")).toEqual({ servers: 1, scriptConnections: 0 });
+      expect(await repo.findMcpServerById("zb")).toBeNull();
+    });
   });
 }

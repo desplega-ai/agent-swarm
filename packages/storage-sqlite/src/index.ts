@@ -18,9 +18,11 @@ import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteMemoryRepository } from "./repositories/memory";
+import { SqliteMessagingRepository } from "./repositories/messaging";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
+import { SqlitePromptTemplatesRepository } from "./repositories/prompt-templates";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRetentionRepository } from "./repositories/retention";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
@@ -92,6 +94,8 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       sessions: new SqliteSessionsRepository(executor),
       savings: new SqliteSavingsRepository(executor),
       retention: new SqliteRetentionRepository(executor),
+      messaging: new SqliteMessagingRepository(executor),
+      promptTemplates: new SqlitePromptTemplatesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

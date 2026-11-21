@@ -47,6 +47,10 @@ function dayModifier(tzOffsetMinutes: number): string {
 }
 
 export class SqliteSkillsRepository extends BaseSkillsRepository {
+  protected insertionOrder(): SqlQuery {
+    return new SqlQuery(["rowid"], []);
+  }
+
   searchRankedSkills<T>(
     match: string,
     exactName: string,

@@ -569,4 +569,80 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
       )`);
   }
+
+  listGeneratedUrlAttachments(
+    taskId: string,
+    capabilityKey: string,
+    source: string,
+  ): Promise<{ id: string; name: string; url: string }[]> {
+    return this.db.query<{ id: string; name: string; url: string }>(sql`
+      SELECT id, name, url FROM task_attachments
+      WHERE task_id = ${taskId}
+        AND kind = 'url'
+        AND url IS NOT NULL
+        AND json_extract(capabilities, ${`$.${capabilityKey}`}) = ${source}
+      ORDER BY rowid`);
+  }
+
+  listRoutingWorkerStatuses(
+    openStatuses: readonly string[],
+  ): Promise<
+    { agentId: string; status: string; activeTaskCount: number; openTaskCount: number }[]
+  > {
+    // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
+    // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
+    // over agentId/offeredTo that reads each agent's whole task history.
+    return this.db.query(sql`
+      WITH open_task AS MATERIALIZED (
+        SELECT id, "agentId", "offeredTo", status FROM agent_tasks
+        WHERE status IN (${sqlList(openStatuses)})
+      )
+      SELECT agent.id AS "agentId", agent.status,
+        COUNT(task.id) AS "openTaskCount",
+        SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS "activeTaskCount"
+      FROM agents agent
+      LEFT JOIN open_task task ON task."agentId" = agent.id OR task."offeredTo" = agent.id
+      WHERE agent."isLead" = 0
+      GROUP BY agent.id, agent.status
+      ORDER BY agent.id`);
+  }
+
+  listDependentTasks(parentId: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT t.* FROM agent_tasks t, json_each(t."dependsOn") AS dep
+      WHERE dep.value = ${parentId}
+      ORDER BY t.rowid`);
+  }
+
+  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
+    // The condition text stays as written before the move: the
+    // heartbeat-checklist test intercepts this read by its text.
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE ${raw("status = 'in_progress' AND lastUpdatedAt < ")}${cutoff}
+      ORDER BY "lastUpdatedAt" ASC, rowid ASC`);
+  }
+
+  async countTasksCreatedLastDay(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM agent_tasks
+      WHERE "createdAt" >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`);
+    return row?.count ?? 0;
+  }
+
+  listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
+    // `CROSS JOIN` keeps the chain as the outer loop: with a plain JOIN, SQLite
+    // scanned all of agent_tasks to skip the sort.
+    return this.db.query<TaskRow>(sql`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
+        UNION ALL
+        SELECT t.id FROM agent_tasks t
+        JOIN chain c ON t."parentTaskId" = c.id
+      )
+      SELECT t.*,
+        (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
+      FROM chain
+      CROSS JOIN agent_tasks t ON t.id = chain.id
+      ORDER BY t."createdAt", t.rowid`);
+  }
 }

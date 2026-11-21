@@ -39,24 +39,3 @@ export type ScriptRunFilter = {
   /** Exact object id; pair it with `objectScriptId`. */
   objectId?: string;
 };
-
-export function scriptRunFilterSql(opts?: ScriptRunFilter): {
-  conditions: string[];
-  params: string[];
-} {
-  const conditions: string[] = [];
-  const params: string[] = [];
-  const columns = [
-    ["status", opts?.status],
-    ["agentId", opts?.agentId],
-    ["scriptName", opts?.scriptName],
-    ["objectScriptId", opts?.objectScriptId],
-    ["objectId", opts?.objectId],
-  ] as const;
-  for (const [column, value] of columns) {
-    if (!value) continue;
-    conditions.push(`${column} = ?`);
-    params.push(value);
-  }
-  return { conditions, params };
-}

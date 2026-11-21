@@ -17,7 +17,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 292
+    "sites": 19
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -26,10 +26,6 @@
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 5
-  },
-  "src/be/db/script-run-sources.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
   },
   "src/be/db/session-labels.ts": {
     "reason": "M2 move: sessions and cost",
@@ -50,10 +46,6 @@
   "src/be/db/slack-trees.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
-  },
-  "src/be/db/tasks/read.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 11
   },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",
@@ -278,10 +270,6 @@
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
-  },
-  "src/scheduler/deferred-task-waits.ts": {
-    "reason": "M2 move: schedules",
-    "sites": 2
   },
   "src/telemetry-snapshot.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

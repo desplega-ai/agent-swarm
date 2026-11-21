@@ -1,9 +1,14 @@
 import {
   BaseScriptsRepository,
+  type NewScriptRunJournalStep,
   type ScriptApiRow,
   type ScriptCredentialBindingRow,
   type ScriptEmbeddingCandidateRow,
   type ScriptRow,
+  type ScriptRunJournalRow,
+  type ScriptRunListFilter,
+  type ScriptRunListRow,
+  type ScriptRunRow,
   type ScriptSearchScope,
   sql,
 } from "@desplega/storage";
@@ -68,5 +73,38 @@ export class SqliteScriptsRepository extends BaseScriptsRepository {
 
   async deferForeignKeys(): Promise<void> {
     await this.db.run(sql`PRAGMA defer_foreign_keys = ON`);
+  }
+
+  listScriptRuns(
+    f: ScriptRunListFilter,
+    limit: number,
+    offset: number,
+  ): Promise<ScriptRunListRow[]> {
+    return this.db.query<ScriptRunListRow>(sql`
+      SELECT id, "agentId", "scriptName", kind, status, pid, "startedAt", "finishedAt", error,
+        last_heartbeat_at, "idempotencyKey", "requestedByUserId", "objectScriptId", "objectId",
+        "objectMethod"
+      FROM script_runs${this.scriptRunWhere(f)}
+      ORDER BY "startedAt" DESC, rowid DESC
+      LIMIT ${limit} OFFSET ${offset}`);
+  }
+
+  listActiveScriptRuns(): Promise<ScriptRunRow[]> {
+    return this.db.query<ScriptRunRow>(
+      sql`${this.scriptRunSelect} WHERE r.status IN ('running', 'paused') ORDER BY r.rowid`,
+    );
+  }
+
+  async insertScriptRunJournalStep(r: NewScriptRunJournalStep): Promise<void> {
+    await this.db.run(sql`
+      INSERT OR IGNORE INTO script_run_journal
+        (id, "runId", "stepKey", "stepType", config, status, result, error, "durationMs", "completedAt")
+      VALUES (${r.id}, ${r.runId}, ${r.stepKey}, ${r.stepType}, ${r.config}, ${r.status}, ${r.result},
+        ${r.error}, ${r.durationMs}, datetime('now'))`);
+  }
+
+  listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalRow[]> {
+    return this.db.query<ScriptRunJournalRow>(sql`
+      SELECT * FROM script_run_journal WHERE "runId" = ${runId} ORDER BY "startedAt" ASC, rowid ASC`);
   }
 }

@@ -11,9 +11,11 @@ import { kvContract } from "./kv";
 import { maintenanceContract } from "./maintenance";
 import { mcpServersContract } from "./mcp-servers";
 import { memoryContract } from "./memory";
+import { messagingContract } from "./messaging";
 import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
+import { promptTemplatesContract } from "./prompt-templates";
 import { rbacContract } from "./rbac";
 import { retentionContract } from "./retention";
 import { runtimePoolsContract } from "./runtime-pools";
@@ -62,4 +64,6 @@ export function runStorageContract(engine: ContractEngine): void {
   savingsContract(engine);
   retentionContract(engine);
   userReferencesContract(engine);
+  messagingContract(engine);
+  promptTemplatesContract(engine);
 }

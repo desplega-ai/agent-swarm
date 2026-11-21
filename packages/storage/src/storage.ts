@@ -14,9 +14,11 @@ import type { KvRepository } from "./repositories/kv";
 import type { MaintenanceRepository } from "./repositories/maintenance";
 import type { McpServersRepository } from "./repositories/mcp-servers";
 import type { MemoryRepository } from "./repositories/memory";
+import type { MessagingRepository } from "./repositories/messaging";
 import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
+import type { PromptTemplatesRepository } from "./repositories/prompt-templates";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RetentionRepository } from "./repositories/retention";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
@@ -61,6 +63,8 @@ export type Repositories = {
   sessions: SessionsRepository;
   savings: SavingsRepository;
   retention: RetentionRepository;
+  messaging: MessagingRepository;
+  promptTemplates: PromptTemplatesRepository;
 };
 
 /**

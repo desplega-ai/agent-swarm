@@ -321,6 +321,8 @@ export interface UsersRepository {
     itemIds?: string[];
   }): Promise<UserFavoriteRow[]>;
   deleteFavorite(favoriteScope: string, itemType: string, itemId: string): Promise<void>;
+  /** Deletes every user's favorite of one item (favorites carry no FK to the item). */
+  deleteFavoritesOfItem(itemType: string, itemId: string): Promise<void>;
   /** Insert, or refresh `lastUpdatedAt`/`updated_by` of the existing star. */
   upsertFavorite(row: {
     favoriteScope: string;
@@ -767,6 +769,11 @@ export abstract class BaseUsersRepository implements UsersRepository {
     if (opts.itemIds && opts.itemIds.length > 0)
       conditions.push(sql`"itemId" IN (${sqlList(opts.itemIds)})`);
     return sqlWhere(conditions);
+  }
+
+  async deleteFavoritesOfItem(itemType: string, itemId: string): Promise<void> {
+    await this.db.run(sql`
+      DELETE FROM user_favorites WHERE "itemType" = ${itemType} AND "itemId" = ${itemId}`);
   }
 
   async deleteFavorite(favoriteScope: string, itemType: string, itemId: string): Promise<void> {

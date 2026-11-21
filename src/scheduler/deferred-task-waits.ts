@@ -1,10 +1,4 @@
-import {
-  createLogEntry,
-  getDbClient,
-  getScheduledTaskById,
-  getUserById,
-  updateScheduledTask,
-} from "@/be/db";
+import { createLogEntry, getScheduledTaskById, getUserById, updateScheduledTask } from "@/be/db";
 import { getStorage } from "@/be/storage";
 import {
   type ConfirmResult,
@@ -301,21 +295,7 @@ export const SPENT_DEFERRED_SCHEDULE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export async function reapSpentDeferredSchedules(now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - SPENT_DEFERRED_SCHEDULE_RETENTION_MS).toISOString();
-  const result = await getDbClient().run(
-    `DELETE FROM scheduled_tasks
-     WHERE taskType = 'deferred' AND scheduleType = 'one_time' AND enabled = 0
-       AND lastRunAt IS NOT NULL AND lastRunAt < ?
-       AND NOT EXISTS (
-         SELECT 1 FROM deferred_task_waits w
-         WHERE w.scheduleId = scheduled_tasks.id AND w.status = 'pending'
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM deferred_event_waits e
-         WHERE e.scheduleId = scheduled_tasks.id AND e.status = 'pending'
-       )`,
-    [cutoff],
-  );
-  return result.changes;
+  return await getStorage().repos.schedules.deleteSpentDeferredSchedules(cutoff);
 }
 
 /**

@@ -5,10 +5,28 @@ import {
   BaseAgentsRepository,
   type ContextVersionRow,
   type ServiceRow,
+  SqlQuery,
   sql,
 } from "@desplega/storage";
 
 export class SqliteAgentsRepository extends BaseAgentsRepository {
+  protected logOrder(): SqlQuery {
+    return new SqlQuery(["rowid"], []);
+  }
+
+  countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null> {
+    return this.db.get(sql`
+      SELECT
+        SUM(CASE WHEN "isLead" = 1 THEN 1 ELSE 0 END) AS leads_alive,
+        SUM(CASE WHEN "isLead" = 0 THEN 1 ELSE 0 END) AS workers_alive
+      FROM agents
+      WHERE "lastActivityAt" IS NOT NULL
+        AND "lastActivityAt" >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ${minutes} || ' minutes')
+        AND status != 'offline'`);
+  }
+
   listAgents(opts: { includeExtensions: boolean }): Promise<AgentRow[]> {
     return this.db.query<AgentRow>(
       opts.includeExtensions
