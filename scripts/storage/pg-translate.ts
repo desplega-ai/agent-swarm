@@ -10,7 +10,6 @@
 import {
   closeParen,
   type PgClass,
-  renderTokens,
   splitTopLevel,
   type TimestampFormat,
   type Tok,
@@ -350,9 +349,4 @@ export function translateDefault(dflt: string | null, cls: PgClass, where: strin
     fail(where, `string default ${d} on a ${cls} column`);
   }
   fail(where, `default ${d} has no translation rule`);
-}
-
-/** Normalizes an expression for comparison: tokens re-rendered, keywords upper-cased. */
-export function normalizeSql(expr: string): string {
-  return renderTokens(tokenize(expr)).toLowerCase();
 }

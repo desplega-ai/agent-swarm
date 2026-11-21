@@ -372,7 +372,9 @@ export function tokenize(sql: string): Tok[] {
       i += id[0].length;
       continue;
     }
-    const op = /^(\|\||<>|!=|==|<=|>=|<<|>>|[-+*/%<>=(),.;&|~])/.exec(sql.slice(i));
+    const op = /^(#>>|#>|->>|->|\|\||<>|!=|==|<=|>=|<<|>>|::|[-+*/%<>=(),.;&|~:])/.exec(
+      sql.slice(i),
+    );
     if (op) {
       out.push({ k: "op", v: op[0] });
       i += op[0].length;
