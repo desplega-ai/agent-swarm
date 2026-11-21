@@ -5,6 +5,7 @@ import {
   sqlIdent,
   sqlJoin,
   sqlList,
+  TASK_FTS_COMPLETE,
   type TaskRow,
   type TasksRepository,
 } from "../../src";
@@ -408,6 +409,203 @@ export function tasksContract(engine: ContractEngine): void {
       });
       expect(await repo.hasChildOutside(["r", "m"])).toBe(true);
       expect(await repo.hasChildOutside(["r", "m", "l1", "l2"])).toBe(false);
+    });
+
+    test("insertSimpleTask stores flags as 0/1 and now timestamps", async () => {
+      const row = await repo.insertSimpleTask({
+        id: "n1",
+        key: "shared/task:n1/",
+        agentId: "ag",
+        task: "do",
+        status: "pending",
+        source: "mcp",
+        slackChannelId: null,
+        slackThreadTs: null,
+        slackUserId: null,
+        swarmVersion: "1.0.0",
+        isHumanFree: true,
+      });
+      expect(row).toMatchObject({
+        id: "n1",
+        key: "shared/task:n1/",
+        status: "pending",
+        swarmVersion: "1.0.0",
+      });
+      expect((row as unknown as { isHumanFree: number }).isHumanFree).toBe(1);
+      expect(row?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      expect(row?.lastUpdatedAt).toBe(row?.createdAt as string);
+    });
+
+    test("terminal moves are conditional and compare-and-swap", async () => {
+      await seedTask(storage, { id: "a", status: "in_progress", lastUpdatedAt: T0 });
+      expect(
+        await repo.finishTask("a", {
+          status: "failed",
+          statusKind: "error",
+          failureReason: "boom",
+          finishedAt: T1,
+          expectedLastUpdatedAt: "2026-01-01T00:00:00.000Z",
+        }),
+      ).toBeNull();
+      const failed = await repo.finishTask("a", {
+        status: "failed",
+        statusKind: "error",
+        failureReason: "boom",
+        finishedAt: T1,
+        expectedLastUpdatedAt: T0,
+      });
+      expect(failed).toMatchObject({
+        status: "failed",
+        statusKind: "error",
+        failureReason: "boom",
+      });
+      expect(
+        await repo.finishTask("a", { status: "completed", statusKind: null, finishedAt: T1 }),
+      ).toBeNull();
+      expect(await repo.overwriteTerminalResultText("a", "out", "boom")).toMatchObject({
+        output: "out",
+        failureReason: "boom",
+      });
+      await seedTask(storage, { id: "b", status: "pending" });
+      expect(await repo.overwriteTerminalResultText("b", "out", null)).toBeNull();
+      expect(await repo.markWorkflowStepTaskSuperseded("a", "other")).toBeNull();
+      expect(await repo.markWorkflowStepTaskSuperseded("a", "boom")).toMatchObject({
+        status: "superseded",
+        statusKind: "workflow_retry",
+      });
+      expect(await repo.updateTaskProgress("b", "half")).toMatchObject({
+        status: "in_progress",
+        progress: "half",
+      });
+      expect(await repo.updateTaskProgress("a", "late")).toMatchObject({ status: "superseded" });
+      expect(await repo.startTask("a")).toBeNull();
+      expect(await repo.pauseTask("b")).toMatchObject({ status: "paused", was_paused: 1 });
+      expect(await repo.pauseTask("b")).toBeNull();
+      expect(await repo.resumePausedTask("b")).toMatchObject({ status: "in_progress" });
+    });
+
+    test("titles, tags, session columns and provider", async () => {
+      await seedTask(storage, { id: "a", tags: '["x"]' });
+      expect(await repo.setTaskTitleIfUnset("a", "first")).toMatchObject({ title: "first" });
+      expect(await repo.setTaskTitleIfUnset("a", "second")).toBeNull();
+      expect(await repo.setTaskTitle("a", null)).toMatchObject({ title: null, lastUpdatedAt: T0 });
+      expect(await repo.findTaskTags("a")).toEqual({ tags: '["x"]' });
+      expect(await repo.findTaskTags("missing")).toBeNull();
+      expect(await repo.setTaskTags("a", '["y"]', false)).toMatchObject({
+        tags: '["y"]',
+        lastUpdatedAt: T0,
+      });
+      expect((await repo.setTaskTags("a", '["z"]', true))?.lastUpdatedAt).not.toBe(T0);
+      expect(
+        await repo.setTaskSessionColumns("a", { claudeSessionId: "s1", model: undefined }, T1),
+      ).toMatchObject({ claudeSessionId: "s1", model: null, lastUpdatedAt: T1 });
+      await repo.setTaskProviderIfUnset("a", "codex");
+      await repo.setTaskProviderIfUnset("a", "claude");
+      expect((await repo.findTaskById("a"))?.provider).toBe("codex");
+    });
+
+    test("assignUnassignedTask re-checks status, snapshots and capacity", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, "isLead", status, "maxTasks", "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', ${false}, 'idle', 1, ${T0}, ${T0})`);
+      await seedTask(storage, { id: "u1", status: "unassigned", lastUpdatedAt: T0 });
+      await seedTask(storage, { id: "u2", status: "unassigned", lastUpdatedAt: T0 });
+      const base = { agentId: "ag", now: T1, poolWakeAt: null };
+      const snapshot = { taskLastUpdatedAt: T0, agentLastUpdatedAt: T0 };
+      expect(
+        await repo.assignUnassignedTask({
+          ...base,
+          taskId: "u1",
+          guards: { snapshot: { ...snapshot, taskLastUpdatedAt: T1 } },
+        }),
+      ).toBeNull();
+      expect(
+        await repo.assignUnassignedTask({ ...base, taskId: "u1", guards: { snapshot } }),
+      ).toMatchObject({ status: "pending", agentId: "ag", lastUpdatedAt: T1 });
+      // The agent is now at capacity.
+      expect(
+        await repo.assignUnassignedTask({ ...base, taskId: "u2", guards: { snapshot } }),
+      ).toBeNull();
+      expect(await repo.assignUnassignedTask({ ...base, taskId: "u2", guards: {} })).toMatchObject({
+        status: "pending",
+      });
+      expect(await repo.assignUnassignedTask({ ...base, taskId: "u2", guards: {} })).toBeNull();
+    });
+
+    test("dependents re-point to the resume, deduplicated in first position", async () => {
+      await seedTask(storage, { id: "s" });
+      await seedTask(storage, { id: "r" });
+      await seedTask(storage, { id: "d1", dependsOn: '["x","s","r"]' });
+      await seedTask(storage, { id: "d2", dependsOn: '["s"]', status: "in_progress" });
+      const changed = await repo.repointDependents("s", "r", ["pending"]);
+      expect(changed).toEqual([{ id: "d1", agentId: null }]);
+      expect((await repo.findTaskById("d1"))?.dependsOn).toBe('["x","r"]');
+      expect((await repo.findTaskById("d2"))?.dependsOn).toBe('["s"]');
+    });
+
+    test("agent lists: pending, paused, orphaned, cancelled; delete", async () => {
+      await seedTask(storage, { id: "p1", agentId: "ag", priority: 10 });
+      await seedTask(storage, { id: "p2", agentId: "ag", priority: 90 });
+      expect(ids(await repo.listPendingTasksForAgent("ag"))).toEqual(["p2", "p1"]);
+      await seedTask(storage, { id: "z2", agentId: "ag", status: "paused" });
+      await seedTask(storage, { id: "z1", agentId: "ag", status: "paused" });
+      expect(ids(await repo.listPausedTasksForAgent("ag"))).toEqual(["z2", "z1"]);
+      await seedTask(storage, {
+        id: "o1",
+        agentId: "ag",
+        status: "in_progress",
+        lastUpdatedAt: T0,
+      });
+      await seedTask(storage, {
+        id: "o2",
+        agentId: "ag",
+        status: "in_progress",
+        lastUpdatedAt: T0,
+        claudeSessionId: "s",
+      });
+      expect(ids(await repo.listOrphanedInProgressTasks("ag", T1))).toEqual(["o1"]);
+      expect(ids(await repo.listOrphanedInProgressTasks("ag", T0))).toEqual([]);
+      expect(ids(await repo.resetOrphanedInProgressTasks("ag", T1))).toEqual(["o1"]);
+      expect((await repo.findTaskById("o1"))?.status).toBe("pending");
+      await seedTask(storage, { id: "c1", agentId: "ag", status: "cancelled", finishedAt: T1 });
+      await seedTask(storage, { id: "c0", agentId: "ag", status: "cancelled", finishedAt: T0 });
+      expect(ids(await repo.listRecentlyCancelledTasks("ag", "2026-11-21T09:00:00.000Z"))).toEqual([
+        "c1",
+        "c0",
+      ]);
+      await seedTask(storage, { id: "kid", parentTaskId: "p1" });
+      expect(await repo.listChildTaskIds("p1")).toEqual(["kid"]);
+      expect(await repo.deleteTask("kid")).toBe(1);
+      expect(await repo.deleteTask("kid")).toBe(0);
+    });
+
+    test("the FTS backfill indexes in batches up to the complete mark", async () => {
+      await seedTask(storage, { id: "f1", task: "alpha" });
+      await seedTask(storage, { id: "f2", task: "beta" });
+      await seedTask(storage, { id: "f3", task: "gamma" });
+      await storage.executor.run(
+        sql`INSERT INTO agent_tasks_fts(agent_tasks_fts) VALUES ('delete-all')`,
+      );
+      await storage.executor.run(
+        sql`UPDATE agent_tasks_fts_state SET "indexedThrough" = 0 WHERE id = 1`,
+      );
+      expect(await repo.getTaskFtsIndexedThrough()).toBe(0);
+      expect(await storage.transaction(() => repo.indexTaskFtsBatch(2))).toEqual({
+        changes: 2,
+        done: false,
+      });
+      expect(await storage.transaction(() => repo.indexTaskFtsBatch(2))).toEqual({
+        changes: 1,
+        done: true,
+      });
+      expect(await repo.getTaskFtsIndexedThrough()).toBe(TASK_FTS_COMPLETE);
+      expect(await repo.indexTaskFtsBatch(2)).toEqual({ changes: 0, done: true });
+      expect(
+        ids(
+          (await repo.listTasks({ search: "gamma" }, { limit: 5, offset: 0 }, "full")) as TaskRow[],
+        ),
+      ).toEqual(["f3"]);
+      expect(await repo.countTasks({ search: "alp" })).toBe(1);
     });
 
     test("appendDraftTaskText changes only a draft", async () => {

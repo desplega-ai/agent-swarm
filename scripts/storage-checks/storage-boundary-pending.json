@@ -201,7 +201,7 @@
   },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",
-    "sites": 35
+    "sites": 3
   },
   "src/be/db/user-references.ts": {
     "reason": "M2 move: users and RBAC",

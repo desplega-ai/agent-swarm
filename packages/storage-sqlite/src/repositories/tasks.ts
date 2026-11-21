@@ -339,4 +339,26 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     );
     return main?.file ? main.file : null;
   }
+
+  repointDependents(
+    supersededId: string,
+    resumeTaskId: string,
+    statuses: readonly string[],
+  ): Promise<{ id: string; agentId: string | null }[]> {
+    // One statement: the new array is built from the row's current
+    // `dependsOn`, so settlements of a shared dependent compose, and the
+    // status predicate is evaluated at write time.
+    return this.db.query<{ id: string; agentId: string | null }>(sql`
+      UPDATE agent_tasks
+          SET "dependsOn" = (
+                SELECT json_group_array(value ORDER BY k) FROM (
+                  SELECT CASE WHEN j.value = ${supersededId} THEN ${resumeTaskId} ELSE j.value END AS value,
+                         MIN(j.key) AS k
+                    FROM json_each(agent_tasks."dependsOn") AS j
+                   GROUP BY 1)),
+              "lastUpdatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE status IN (${sqlList(statuses)})
+          AND EXISTS (SELECT 1 FROM json_each(agent_tasks."dependsOn") WHERE value = ${supersededId})
+        RETURNING id, "agentId"`);
+  }
 }

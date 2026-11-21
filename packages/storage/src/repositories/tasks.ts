@@ -1,6 +1,6 @@
-import { likeAsciiCi } from "../dialect";
+import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { EMPTY, SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: tasks (`agent_tasks`, `agent_tasks_fts*`, `task_attachments`,
@@ -249,6 +249,50 @@ export type TaskLineageRow = Record<string, unknown> & {
   workflowRunId: string | null;
 };
 
+/** A plain task row `createTask` inserts. */
+export type NewSimpleTask = {
+  id: string;
+  key: string;
+  agentId: string;
+  task: string;
+  status: string;
+  source: string;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  slackUserId: string | null;
+  swarmVersion: string;
+  isHumanFree: boolean;
+};
+
+/** Columns the session-init path may set on a task. */
+export type TaskSessionColumn =
+  | "claudeSessionId"
+  | "provider"
+  | "providerMeta"
+  | "model"
+  | "harnessVariant"
+  | "harnessVariantMeta"
+  | "resolvedEffort";
+
+/** A move to a terminal status. */
+export type TaskFinish = {
+  status: "completed" | "failed" | "cancelled" | "skipped" | "superseded";
+  statusKind: string | null;
+  finishedAt: string;
+  /** Written when set; left as stored when undefined. */
+  failureReason?: string;
+  /** Compare-and-swap on the observed `lastUpdatedAt`. */
+  expectedLastUpdatedAt?: string;
+};
+
+/** Optional guards of a pool assignment, re-checked in the write itself. */
+export type TaskAssignGuards = {
+  /** The task and agent `lastUpdatedAt` the router read; also checks the agent's capacity. */
+  snapshot?: { taskLastUpdatedAt: string; agentLastUpdatedAt: string };
+  /** The pool must be unchanged, enabled and not circuit-open at `at`. */
+  pool?: { id: string; updatedAt: string; at: string };
+};
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -468,6 +512,91 @@ export interface TasksRepository {
   indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }>;
   /** Path of the main database file, or null (in-memory). */
   mainDatabaseFile(): Promise<string | null>;
+
+  // ---- agent_tasks: lifecycle writes ----
+  /** Inserts a plain task with `createdAt` = `lastUpdatedAt` = now. */
+  insertSimpleTask(task: NewSimpleTask): Promise<TaskRow | null>;
+  /** The agent's pending tasks, priority desc then createdAt asc (ties: engine order, as today). */
+  listPendingTasksForAgent(agentId: string): Promise<TaskRow[]>;
+  /** Moves an `unassigned` task to `pending` for `agentId`, when the guards still hold. */
+  assignUnassignedTask(args: {
+    taskId: string;
+    agentId: string;
+    now: string;
+    poolWakeAt: string | null;
+    guards: TaskAssignGuards;
+  }): Promise<TaskRow | null>;
+  /** Moves a non-terminal task to `in_progress`. */
+  startTask(taskId: string): Promise<TaskRow | null>;
+  /** Sets session columns (undefined keeps a column) and `lastUpdatedAt`. */
+  setTaskSessionColumns(
+    taskId: string,
+    values: Partial<Record<TaskSessionColumn, string | null>>,
+    now: string,
+  ): Promise<TaskRow | null>;
+  setTaskProviderIfUnset(taskId: string, provider: string): Promise<void>;
+  /** Sets the title without touching `lastUpdatedAt`. */
+  setTaskTitle(taskId: string, title: string | null): Promise<TaskRow | null>;
+  /** Sets the title only while it is NULL. */
+  setTaskTitleIfUnset(taskId: string, title: string): Promise<TaskRow | null>;
+  /** The stored tags JSON; null for an unknown task. */
+  findTaskTags(taskId: string): Promise<{ tags: string | null } | null>;
+  /** Sets the tags JSON; `touch` also sets `lastUpdatedAt` to now. */
+  setTaskTags(taskId: string, tagsJson: string, touch: boolean): Promise<TaskRow | null>;
+  /** Moves a non-terminal task to a terminal status; `lastUpdatedAt` = now. */
+  finishTask(id: string, finish: TaskFinish): Promise<TaskRow | null>;
+  /** Sets `output` and `lastUpdatedAt` = now. */
+  setTaskOutput(id: string, output: string): Promise<TaskRow | null>;
+  setTaskDeferral(
+    id: string,
+    deferredAt: string,
+    deferredUntil: string | null,
+  ): Promise<TaskRow | null>;
+  /** Rewrites output and failure reason of a terminal task; no timestamp moves. */
+  overwriteTerminalResultText(
+    id: string,
+    output: string | null,
+    failureReason: string | null,
+  ): Promise<TaskRow | null>;
+  /** `failed` with `reason` to `superseded` (`workflow_retry`); null when it was not that failure. */
+  markWorkflowStepTaskSuperseded(id: string, reason: string): Promise<TaskRow | null>;
+  /**
+   * In every task in `statuses` whose `dependsOn` holds `supersededId`,
+   * replaces it with `resumeTaskId` (deduplicated, first position kept).
+   * Returns the changed tasks in no particular order.
+   */
+  repointDependents(
+    supersededId: string,
+    resumeTaskId: string,
+    statuses: readonly string[],
+  ): Promise<{ id: string; agentId: string | null }[]>;
+  /** `in_progress` to `paused` (sets `was_paused`). */
+  pauseTask(id: string): Promise<TaskRow | null>;
+  /** `paused` to `in_progress`. */
+  resumePausedTask(id: string): Promise<TaskRow | null>;
+  /** The agent's paused tasks, oldest first (ties: insertion order). */
+  listPausedTasksForAgent(
+    agentId: string,
+    readableBy?: { userId: string | null },
+  ): Promise<TaskRow[]>;
+  /**
+   * The agent's in-progress tasks with no session id, no active session and
+   * no finish, last updated before `cutoff`; oldest first (ties: insertion order).
+   */
+  listOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]>;
+  /** Moves those orphans back to `pending`; returns them in no particular order. */
+  resetOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]>;
+  /** The agent's tasks cancelled after `since`, last finished first (ties: engine order). */
+  listRecentlyCancelledTasks(
+    agentId: string,
+    since: string,
+    readableBy?: { userId: string | null },
+  ): Promise<TaskRow[]>;
+  /** Ids of the direct children, in no particular order. */
+  listChildTaskIds(parentId: string): Promise<string[]>;
+  deleteTask(id: string): Promise<number>;
+  /** Sets progress; a non-terminal task moves to `in_progress`. */
+  updateTaskProgress(id: string, progress: string): Promise<TaskRow | null>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -1061,6 +1190,254 @@ export abstract class BaseTasksRepository implements TasksRepository {
   abstract indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }>;
   /** Reads `pragma_database_list`. */
   abstract mainDatabaseFile(): Promise<string | null>;
+
+  // ---- agent_tasks: lifecycle writes ----
+
+  insertSimpleTask(t: NewSimpleTask): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      INSERT INTO agent_tasks (id, "key", "agentId", task, status, source, "slackChannelId", "slackThreadTs",
+        "slackUserId", "swarmVersion", "isHumanFree", "createdAt", "lastUpdatedAt")
+      VALUES (${t.id}, ${t.key}, ${t.agentId}, ${t.task}, ${t.status}, ${t.source}, ${t.slackChannelId},
+        ${t.slackThreadTs}, ${t.slackUserId}, ${t.swarmVersion}, ${t.isHumanFree}, ${nowIso}, ${nowIso})
+      RETURNING *`);
+  }
+
+  listPendingTasksForAgent(agentId: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE "agentId" = ${agentId} AND status = 'pending'
+      ORDER BY priority DESC, "createdAt" ASC`);
+  }
+
+  assignUnassignedTask(args: {
+    taskId: string;
+    agentId: string;
+    now: string;
+    poolWakeAt: string | null;
+    guards: TaskAssignGuards;
+  }): Promise<TaskRow | null> {
+    const { snapshot, pool } = args.guards;
+    const snapshotGuard = snapshot
+      ? sql` AND "lastUpdatedAt" = ${snapshot.taskLastUpdatedAt}
+        AND EXISTS (SELECT 1 FROM agents WHERE id = ${args.agentId} AND "lastUpdatedAt" = ${snapshot.agentLastUpdatedAt}
+          AND (SELECT COUNT(*) FROM agent_tasks WHERE "agentId" = agents.id
+            AND status IN ('pending', 'in_progress')) < COALESCE("maxTasks", 1))`
+      : EMPTY;
+    const poolGuard = pool
+      ? sql` AND EXISTS (SELECT 1 FROM runtime_pools WHERE id = ${pool.id} AND updated_at = ${pool.updatedAt}
+        AND enabled = ${true} AND (circuit_open_until IS NULL OR circuit_open_until <= ${pool.at}))`
+      : EMPTY;
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET "agentId" = ${args.agentId}, status = 'pending', "lastUpdatedAt" = ${args.now},
+        pool_wake_at = ${args.poolWakeAt}
+      WHERE id = ${args.taskId} AND status = 'unassigned'${snapshotGuard}${poolGuard} RETURNING *`);
+  }
+
+  startTask(taskId: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET status = 'in_progress', "lastUpdatedAt" = ${nowIso}
+      WHERE id = ${taskId} AND status NOT IN ${TERMINAL} RETURNING *`);
+  }
+
+  setTaskSessionColumns(
+    taskId: string,
+    values: Partial<Record<TaskSessionColumn, string | null>>,
+    now: string,
+  ): Promise<TaskRow | null> {
+    const sets: SqlQuery[] = [sql`"lastUpdatedAt" = ${now}`];
+    for (const [column, value] of Object.entries(values)) {
+      if (value === undefined) continue;
+      sets.push(sql`${sqlIdent(column)} = ${value}`);
+    }
+    return this.db.get<TaskRow>(
+      sql`UPDATE agent_tasks SET ${sqlJoin(sets, sql`, `)} WHERE id = ${taskId} RETURNING *`,
+    );
+  }
+
+  async setTaskProviderIfUnset(taskId: string, provider: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE agent_tasks SET provider = ${provider} WHERE id = ${taskId} AND provider IS NULL`,
+    );
+  }
+
+  setTaskTitle(taskId: string, title: string | null): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(
+      sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} RETURNING *`,
+    );
+  }
+
+  setTaskTitleIfUnset(taskId: string, title: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(
+      sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} AND title IS NULL RETURNING *`,
+    );
+  }
+
+  findTaskTags(taskId: string): Promise<{ tags: string | null } | null> {
+    return this.db.get<{ tags: string | null }>(
+      sql`SELECT tags FROM agent_tasks WHERE id = ${taskId}`,
+    );
+  }
+
+  setTaskTags(taskId: string, tagsJson: string, touch: boolean): Promise<TaskRow | null> {
+    const touched = touch ? sql`, "lastUpdatedAt" = ${nowIso}` : EMPTY;
+    return this.db.get<TaskRow>(
+      sql`UPDATE agent_tasks SET tags = ${tagsJson}${touched} WHERE id = ${taskId} RETURNING *`,
+    );
+  }
+
+  finishTask(id: string, f: TaskFinish): Promise<TaskRow | null> {
+    const reason =
+      f.failureReason === undefined ? EMPTY : sql`, "failureReason" = ${f.failureReason}`;
+    const cas =
+      f.expectedLastUpdatedAt === undefined
+        ? EMPTY
+        : sql` AND "lastUpdatedAt" = ${f.expectedLastUpdatedAt}`;
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET status = ${f.status}, "statusKind" = ${f.statusKind}${reason},
+        "finishedAt" = ${f.finishedAt}, "lastUpdatedAt" = ${nowIso}
+      WHERE id = ${id} AND status NOT IN ${TERMINAL}${cas} RETURNING *`);
+  }
+
+  setTaskOutput(id: string, output: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET output = ${output}, "lastUpdatedAt" = ${nowIso} WHERE id = ${id} RETURNING *`);
+  }
+
+  setTaskDeferral(
+    id: string,
+    deferredAt: string,
+    deferredUntil: string | null,
+  ): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET "deferredAt" = ${deferredAt}, "deferredUntil" = ${deferredUntil},
+        "lastUpdatedAt" = ${nowIso}
+      WHERE id = ${id} RETURNING *`);
+  }
+
+  overwriteTerminalResultText(
+    id: string,
+    output: string | null,
+    failureReason: string | null,
+  ): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET output = ${output}, "failureReason" = ${failureReason}
+      WHERE id = ${id} AND status IN ${TERMINAL}
+      RETURNING *`);
+  }
+
+  markWorkflowStepTaskSuperseded(id: string, reason: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks
+        SET status = 'superseded',
+            "statusKind" = 'workflow_retry',
+            "lastUpdatedAt" = ${nowIso}
+        WHERE id = ${id} AND status = 'failed' AND "failureReason" = ${reason}
+        RETURNING *`);
+  }
+
+  /** Rewrites the `dependsOn` JSON array (SQLite `json_each`, `json_group_array`). */
+  abstract repointDependents(
+    supersededId: string,
+    resumeTaskId: string,
+    statuses: readonly string[],
+  ): Promise<{ id: string; agentId: string | null }[]>;
+
+  pauseTask(id: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks
+        SET status = 'paused',
+            was_paused = ${true},
+            "lastUpdatedAt" = ${nowIso}
+        WHERE id = ${id} AND status = 'in_progress'
+        RETURNING *`);
+  }
+
+  resumePausedTask(id: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks
+        SET status = 'in_progress',
+            was_paused = ${true},
+            "lastUpdatedAt" = ${nowIso}
+        WHERE id = ${id} AND status = 'paused'
+        RETURNING *`);
+  }
+
+  listPausedTasksForAgent(
+    agentId: string,
+    readableBy?: { userId: string | null },
+  ): Promise<TaskRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
+      : EMPTY;
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "agentId" = ${agentId} AND status = 'paused'${readable}
+        ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  protected orphanedInProgress(agentId: string, cutoff: string): SqlQuery {
+    return sql`t."agentId" = ${agentId}
+          AND t.status = 'in_progress'
+          AND t."claudeSessionId" IS NULL
+          AND t."lastUpdatedAt" < ${cutoff}
+          AND s.id IS NULL
+          AND t."finishedAt" IS NULL`;
+  }
+
+  listOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT t.* FROM agent_tasks t
+        LEFT JOIN active_sessions s ON s."taskId" = t.id
+        WHERE ${this.orphanedInProgress(agentId, cutoff)}
+        ORDER BY t."createdAt" ASC, ${this.insertionOrder("t")} ASC`);
+  }
+
+  resetOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      UPDATE agent_tasks
+        SET status = 'pending',
+            "lastUpdatedAt" = ${nowIso}
+        WHERE id IN (
+          SELECT t.id FROM agent_tasks t
+          LEFT JOIN active_sessions s ON s."taskId" = t.id
+          WHERE ${this.orphanedInProgress(agentId, cutoff)}
+        )
+        RETURNING *`);
+  }
+
+  listRecentlyCancelledTasks(
+    agentId: string,
+    since: string,
+    readableBy?: { userId: string | null },
+  ): Promise<TaskRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
+      : EMPTY;
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "agentId" = ${agentId}
+        AND status = 'cancelled'
+        AND "finishedAt" > ${since}${readable}
+        ORDER BY "finishedAt" DESC`);
+  }
+
+  async listChildTaskIds(parentId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${parentId}`,
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async deleteTask(id: string): Promise<number> {
+    return (await this.db.run(sql`DELETE FROM agent_tasks WHERE id = ${id}`)).changes;
+  }
+
+  updateTaskProgress(id: string, progress: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      UPDATE agent_tasks SET progress = ${progress},
+        status = CASE WHEN status IN ${TERMINAL} THEN status ELSE 'in_progress' END,
+        "lastUpdatedAt" = ${nowIso}
+        WHERE id = ${id} RETURNING *`);
+  }
 
   // ---- task_idempotency_keys ----
 
