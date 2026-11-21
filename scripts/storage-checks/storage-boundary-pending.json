@@ -191,14 +191,6 @@
     "reason": "M2 move: integrations",
     "sites": 19
   },
-  "src/be/db/task-idempotency.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
-  },
-  "src/be/db/tasks/draft-text.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 2
-  },
   "src/be/db/tasks/human-free.ts": {
     "reason": "M2 move: tasks",
     "sites": 14
@@ -210,10 +202,6 @@
   "src/be/db/tasks/search-index.ts": {
     "reason": "M2 move: tasks",
     "sites": 10
-  },
-  "src/be/db/tasks/slack-fold.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 3
   },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",

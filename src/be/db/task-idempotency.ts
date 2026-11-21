@@ -1,5 +1,5 @@
 import { getCurrentRequestUserId } from "../../utils/request-auth-context";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 import { IdempotencyKeyTakenError, sha256 } from "./workflow-idempotency";
 
 /**
@@ -20,9 +20,9 @@ export interface TaskIdempotencyClaim {
 export async function findAcceptedTaskCreate(
   claim: TaskIdempotencyClaim,
 ): Promise<{ fingerprint: string; taskId: string } | null> {
-  const row = await getDbClient().get<{ requestFingerprint: string; taskId: string }>(
-    "SELECT requestFingerprint, taskId FROM task_idempotency_keys WHERE principal = ? AND keyHash = ?",
-    [claim.principal, sha256(claim.key)],
+  const row = await getStorage().repos.tasks.findTaskIdempotencyKey(
+    claim.principal,
+    sha256(claim.key),
   );
   return row ? { fingerprint: row.requestFingerprint, taskId: row.taskId } : null;
 }
@@ -39,21 +39,16 @@ export async function recordAcceptedTaskCreate(
 ): Promise<void> {
   const actor = getCurrentRequestUserId() ?? null;
   try {
-    await getDbClient().run(
-      `INSERT INTO task_idempotency_keys
-         (id, principal, keyHash, requestFingerprint, taskId, createdAt, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        claim.principal,
-        sha256(claim.key),
-        claim.fingerprint,
-        taskId,
-        new Date().toISOString(),
-        actor,
-        actor,
-      ],
-    );
+    await getStorage().repos.tasks.insertTaskIdempotencyKey({
+      id: crypto.randomUUID(),
+      principal: claim.principal,
+      keyHash: sha256(claim.key),
+      requestFingerprint: claim.fingerprint,
+      taskId,
+      createdAt: new Date().toISOString(),
+      created_by: actor,
+      updated_by: actor,
+    });
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
       throw new IdempotencyKeyTakenError();

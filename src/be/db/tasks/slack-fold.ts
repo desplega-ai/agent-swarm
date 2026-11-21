@@ -1,7 +1,7 @@
 import type { PreparedTaskCreate } from "../../../tasks/sibling-awareness";
 import type { AgentTask, TaskSlackParticipants } from "../../../types";
 import { createLogEntry, createTaskExtended } from "../../db";
-import { getDbClient } from "../runtime";
+import { getStorage } from "../../storage";
 
 /**
  * Slack message timestamps a task in this thread already carries: each task's
@@ -14,18 +14,8 @@ export async function getDeliveredSlackMessageTs(
   channelId: string,
   threadTs: string,
 ): Promise<Set<string>> {
-  const rows = await getDbClient().query<{ ts: string | null }>(
-    `SELECT slackTriggerMessageTs AS ts FROM agent_tasks
-       WHERE slackChannelId = ? AND slackThreadTs = ? AND slackTriggerMessageTs IS NOT NULL
-     UNION
-     SELECT CASE WHEN json_valid(l.metadata) THEN json_extract(l.metadata, '$.slackMessageTs') END AS ts
-       FROM agent_log l
-       JOIN agent_tasks t ON t.id = l.taskId
-       WHERE t.slackChannelId = ? AND t.slackThreadTs = ?
-         AND l.eventType = 'task_steering' AND l.newValue = 'slack_reaction'`,
-    [channelId, threadTs, channelId, threadTs],
-  );
-  return new Set(rows.flatMap((row) => (row.ts ? [row.ts] : [])));
+  const rows = await getStorage().repos.tasks.listDeliveredSlackMessageTs(channelId, threadTs);
+  return new Set(rows.flatMap((ts) => (ts ? [ts] : [])));
 }
 
 /**
@@ -47,24 +37,17 @@ export async function foldIntoPendingSlackTask(args: {
   messageTs: readonly string[];
   slackParticipants?: TaskSlackParticipants;
 }): Promise<boolean> {
-  return await getDbClient().transaction(async (tx) => {
-    const result = await tx.run(
-      `UPDATE agent_tasks
-         SET task = ?,
-             status = CASE WHEN ? THEN 'draft' ELSE status END,
-             slackParticipants = COALESCE(?, slackParticipants),
-             lastUpdatedAt = ?
-         WHERE id = ? AND status = 'pending' AND task = ?`,
-      [
-        args.nextTask,
-        args.toDraft ? 1 : 0,
-        args.slackParticipants ? JSON.stringify(args.slackParticipants) : null,
-        new Date().toISOString(),
-        args.taskId,
-        args.expectedTask,
-      ],
-    );
-    if (result.changes === 0) return false;
+  const tasks = getStorage().repos.tasks;
+  return await getStorage().transaction(async () => {
+    const changes = await tasks.foldPendingTaskText({
+      taskId: args.taskId,
+      expectedTask: args.expectedTask,
+      nextTask: args.nextTask,
+      toDraft: args.toDraft,
+      slackParticipants: args.slackParticipants ? JSON.stringify(args.slackParticipants) : null,
+      now: new Date().toISOString(),
+    });
+    if (changes === 0) return false;
     if (args.toDraft) {
       await createLogEntry({
         eventType: "task_status_change",
@@ -97,7 +80,7 @@ export async function createSlackTaskCarryingMessages(
   prepared: PreparedTaskCreate,
   carried: { slackChannelId: string; messageTs: readonly string[] },
 ): Promise<AgentTask> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const task = await createTaskExtended(prepared.description, prepared.options);
     for (const messageTs of carried.messageTs) {
       await createLogEntry({
