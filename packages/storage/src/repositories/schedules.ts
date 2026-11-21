@@ -1,4 +1,4 @@
-import { likeAsciiCi } from "../dialect";
+import { jsonText, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin } from "../sql";
 
@@ -68,6 +68,15 @@ export type ScheduledTaskColumnUpdate = Partial<
 > & { enabled?: boolean };
 
 /** Order and columns of the `ScheduledTaskColumnUpdate` SET list. */
+/** The columns that hold JSON text (bound through `jsonText`: jsonb on Postgres). */
+const SCHEDULE_JSON_COLUMNS: ReadonlySet<string> = new Set([
+  "tags",
+  "scriptArgs",
+  "params",
+  "requiredParams",
+  "requires",
+]);
+
 const UPDATE_COLUMNS = [
   "key",
   "name",
@@ -261,11 +270,11 @@ export abstract class BaseSchedulesRepository implements SchedulesRepository {
         created_by, updated_by, "updatedByAgentId"
       ) VALUES (
         ${r.id}, ${r.key}, ${r.name}, ${r.description}, ${r.cronExpression}, ${r.intervalMs},
-        ${r.taskTemplate}, ${r.taskType}, ${r.tags}, ${r.priority}, ${r.targetAgentId}, ${r.enabled},
+        ${r.taskTemplate}, ${r.taskType}, ${jsonText(r.tags)}, ${r.priority}, ${r.targetAgentId}, ${r.enabled},
         ${r.nextRunAt}, ${r.createdByAgentId}, ${r.parentTaskId}, ${r.requestedDelayMs},
         ${r.requestedRunAt}, ${r.timezone}, ${r.model}, ${r.modelTier}, ${r.profile}, ${r.modelGroup},
-        ${r.scheduleType}, ${r.targetType}, ${r.workflowId}, ${r.scriptName}, ${r.scriptArgs},
-        ${r.params}, ${r.requiredParams}, ${r.requires}, ${r.createdAt}, ${r.lastUpdatedAt},
+        ${r.scheduleType}, ${r.targetType}, ${r.workflowId}, ${r.scriptName}, ${jsonText(r.scriptArgs)},
+        ${jsonText(r.params)}, ${jsonText(r.requiredParams)}, ${jsonText(r.requires)}, ${r.createdAt}, ${r.lastUpdatedAt},
         ${r.created_by}, ${r.updated_by}, ${r.updatedByAgentId}
       ) RETURNING *`);
   }
@@ -278,7 +287,12 @@ export abstract class BaseSchedulesRepository implements SchedulesRepository {
     const sets: SqlQuery[] = [];
     for (const column of UPDATE_COLUMNS) {
       const value = u[column];
-      if (value !== undefined) sets.push(sql`${sqlIdent(column)} = ${value}`);
+      if (value === undefined) continue;
+      const bound =
+        SCHEDULE_JSON_COLUMNS.has(column) && (typeof value === "string" || value === null)
+          ? sql`${jsonText(value)}`
+          : sql`${value}`;
+      sets.push(sql`${sqlIdent(column)} = ${bound}`);
     }
     sets.push(sql`"lastUpdatedAt" = ${lastUpdatedAt}`);
     return this.db.get<ScheduledTaskRow>(

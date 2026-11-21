@@ -383,7 +383,7 @@ function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations 
   }
   const nodeTypes = new Set(
     db
-      .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+      .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
       .map((row) => row.nodeType),
   );
   return { nodeTypes, stateValues };
@@ -580,7 +580,7 @@ async function main(): Promise<number> {
       nodeTypes: [
         ...new Set([
           ...db
-            .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+            .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
             .map((row) => row.nodeType),
           ...rerunObserved.nodeTypes,
         ]),

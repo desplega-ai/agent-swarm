@@ -30,7 +30,6 @@ ALLOWLIST=(
   src/be/storage-root.ts                        # composition root: the engine-handle identity and the prompt-template seed inside initDb (SQLite start path)
   src/be/asset-key-audit.ts                     # boot: startup audit (raw handle param)
   src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
-  src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)
   src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
   src/http/db-query-shared.ts                   # same columnNames guard (in-process fallback path)
   src/http/db-query-bounded.ts                  # child process opens its own connection outside the seam; parent only reads getDb().filename

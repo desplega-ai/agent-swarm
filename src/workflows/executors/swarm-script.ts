@@ -138,8 +138,8 @@ export class SwarmScriptExecutor extends BaseExecutor<
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
+        apiConnections: await getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
+        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
         timeoutMs: config.timeoutMs,
         // The step watchdog aborts this when the node budget runs out, which
         // kills the script process: a step reported as timed out must not go

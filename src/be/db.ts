@@ -233,7 +233,7 @@ import {
   planAllowsModelFamily,
   SUBSCRIPTION_KEY_TYPES,
 } from "../utils/subscription-plans";
-import { auditAssetKeys } from "./asset-key-audit";
+import { auditAssetKeys, auditAssetKeysAsync } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import {
@@ -270,7 +270,7 @@ import {
   resetPromptTemplateRows,
   rowToPromptTemplate,
 } from "./db/prompt-templates";
-import { getDb, getDbClient } from "./db/runtime";
+import { getDb, getDbClient, isPostgresEngine } from "./db/runtime";
 import { storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
@@ -434,12 +434,16 @@ configureAgentDependencies({
 
 export {
   __resetSqliteVecExtensionPathCacheForTests,
+  closeDatabase,
   closeDb,
   getDb,
   getDbClient,
   initDb,
+  isPostgresEngine,
   isSqliteVecAvailable,
+  isVectorSearchAvailable,
   resolveSqliteVecExtensionPath,
+  startPostgres,
 } from "./db/runtime";
 
 export {
@@ -543,7 +547,7 @@ configureTaskWriteDependencies({
 });
 
 configureSessionMoveDependencies({
-  auditAssetKeys: () => auditAssetKeys(getDb()),
+  auditAssetKeys: () => (isPostgresEngine() ? auditAssetKeysAsync() : auditAssetKeys(getDb())),
   insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
 });
 
@@ -2458,15 +2462,20 @@ export async function createTaskExtended(
 
     if (routingDecisionSnapshot) {
       try {
-        await tasks.insertRoutingDecision({
-          task_id: id,
-          selected_agent_id: options.offeredTo ?? options.agentId ?? null,
-          captured_at: routingDecisionSnapshot.capturedAt,
-          worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
-          continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
-          created_by: auditUserId,
-          updated_by: auditUserId,
-        });
+        // A nested transaction (a SAVEPOINT): this write may fail without
+        // failing the task, and on Postgres a failed statement aborts the
+        // whole transaction unless it ran inside a savepoint.
+        await getStorage().transaction(() =>
+          tasks.insertRoutingDecision({
+            task_id: id,
+            selected_agent_id: options.offeredTo ?? options.agentId ?? null,
+            captured_at: routingDecisionSnapshot.capturedAt,
+            worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
+            continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
+            created_by: auditUserId,
+            updated_by: auditUserId,
+          }),
+        );
       } catch (error) {
         logRoutingDecisionFailure(id, "write", error);
       }

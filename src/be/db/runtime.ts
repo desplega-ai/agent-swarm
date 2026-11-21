@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 import { configureDbResolver } from "../../prompts/resolver";
 import { VersionableFieldSchema } from "../../types";
-import { enforceAssetKeyStartupAudit } from "../asset-key-audit";
+import { scrubSecrets } from "../../utils/secret-scrubber";
+import { enforceAssetKeyStartupAudit, enforceAssetKeyStartupAuditAsync } from "../asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "../connection-bindings-blob-migration";
 import { resolveEncryptionKey } from "../crypto";
 import { createBunSqliteClient, type DbClient } from "../db-client";
@@ -14,13 +15,32 @@ import {
   applySqliteTemplatePragmas,
   ensureAgentProfileColumns,
   hasEncryptedSecretRows,
+  ignoredDatabaseUrl,
   isEmptySqliteDatabase,
+  openPostgresEngine,
+  type PostgresEngine,
   removeLegacyTaskStatusCheck,
+  selectStorageEngine,
 } from "../storage-root";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
 let dbCreatedThisBoot = false;
+
+// The Postgres engine of this process (DATABASE_URL, Postgres brief D1), once started.
+let postgres: PostgresEngine | null = null;
+let postgresStarting: Promise<PostgresEngine> | null = null;
+
+/** True when DATABASE_URL selects the Postgres engine. */
+export function isPostgresEngine(): boolean {
+  return selectStorageEngine() === "postgres";
+}
+
+function postgresNotStarted(): Error {
+  return new Error(
+    "[db] the Postgres engine is selected (DATABASE_URL) but not started: await startPostgres() first",
+  );
+}
 
 /**
  * True when this process opened a database file that held no schema object
@@ -29,12 +49,21 @@ let dbCreatedThisBoot = false;
  * install, a restored backup and the test template all report false.
  */
 export function wasDbCreatedThisBoot(): boolean {
+  if (isPostgresEngine()) {
+    if (!postgres) throw postgresNotStarted();
+    return postgres.createdThisBoot;
+  }
   getDb();
   return dbCreatedThisBoot;
 }
 
 export function isSqliteVecAvailable(): boolean {
   return sqliteVecAvailable;
+}
+
+/** Vector search capability of the active engine: sqlite-vec loaded, or pgvector present. */
+export function isVectorSearchAvailable(): boolean {
+  return postgres ? postgres.vectorSearch : sqliteVecAvailable;
 }
 
 /**
@@ -95,6 +124,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) {
     return db;
   }
+  if (isPostgresEngine()) throw rawHandleUnavailable();
 
   // Load facade callbacks only after module evaluation. Boot stays synchronous,
   // while the runtime has no static dependency back through the facade.
@@ -123,6 +153,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
+  const ignoredUrl = ignoredDatabaseUrl();
+  if (ignoredUrl) {
+    console.warn(
+      `[db] DATABASE_URL is set but has no postgres:// or postgresql:// scheme; it is ignored and SQLite runs at ${dbPath} (DATABASE_URL=${ignoredUrl})`,
+    );
+  }
 
   // Boot must finish before getDb() hands this handle out. A step below can
   // throw SQLITE_BUSY while another connection holds the file, and the
@@ -260,8 +296,15 @@ function bootOpenedDb(
   return database;
 }
 
+function rawHandleUnavailable(): Error {
+  return new Error(
+    "[db] the raw bun:sqlite handle does not exist on the Postgres engine (DATABASE_URL): use getStorage() repositories or getDbClient()",
+  );
+}
+
 export function getDb(path?: string): Database {
   if (!db) {
+    if (isPostgresEngine()) throw rawHandleUnavailable();
     return initDb(path ?? process.env.DATABASE_PATH);
   }
   return db;
@@ -274,6 +317,88 @@ export function closeDb(): void {
   }
   sqliteVecAvailable = false;
   dbCreatedThisBoot = false;
+  if (postgres) {
+    const engine = postgres;
+    postgres = null;
+    postgresStarting = null;
+    engine.close().catch((err) => console.error("[db] Postgres close failed:", errorText(err)));
+  }
+}
+
+/**
+ * Close the database and wait for it: the Postgres pool drains and the
+ * one-process lock is released. On SQLite the same as `closeDb()`.
+ */
+export async function closeDatabase(): Promise<void> {
+  if (!postgres) {
+    closeDb();
+    return;
+  }
+  const engine = postgres;
+  postgres = null;
+  postgresStarting = null;
+  closeDb();
+  await engine.close();
+}
+
+function errorText(err: unknown): string {
+  return scrubSecrets(err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * The Postgres start (decision D1): open the engine (one-process lock,
+ * migration chain, read codec, pool), then run the engine-neutral steps of the
+ * SQLite start through the repositories. The legacy repairs of the SQLite
+ * start are not run: they exist only for upgraded SQLite files, and a Postgres
+ * database starts from the baseline or from a copy of a file that ran them.
+ * Idempotent: later calls wait for the same start.
+ */
+export function startPostgres(): Promise<void> {
+  if (postgres) return Promise.resolve();
+  if (!postgresStarting) {
+    const url = process.env.DATABASE_URL?.trim() ?? "";
+    postgresStarting = bootPostgres(url).catch((err) => {
+      postgresStarting = null;
+      throw err;
+    });
+  }
+  return postgresStarting.then(() => undefined);
+}
+
+async function bootPostgres(url: string): Promise<PostgresEngine> {
+  const engine = await openPostgresEngine(url);
+  postgres = engine;
+  try {
+    const { resolvePromptTemplate } = require("../db") as typeof import("../db");
+
+    // Mandatory namespace invariant, as on SQLite: fatal before the API listens.
+    await enforceAssetKeyStartupAuditAsync();
+
+    // Seed v1 for existing agents that don't have any context versions yet.
+    await seedContextVersionsAsync();
+
+    configureDbResolver(resolvePromptTemplate);
+
+    const { seedDefaultTemplatesAsync } =
+      require("../seed-prompt-templates") as typeof import("../seed-prompt-templates");
+    await seedDefaultTemplatesAsync();
+
+    const hasExistingEncryptedSecrets = await engine.hasEncryptedSecretRows(
+      SEALED_REPLAY_COLUMNS,
+      SEALED_PREFIX,
+    );
+    // The key file lives in the data directory (SWARM_DATA_DIR, decision D2),
+    // which defaults to the directory of DATABASE_PATH on both engines.
+    resolveEncryptionKey(process.env.DATABASE_PATH || "./agent-swarm-db.sqlite", {
+      allowGenerate: !hasExistingEncryptedSecrets,
+    });
+    return engine;
+  } catch (err) {
+    if (postgres === engine) postgres = null;
+    await engine.close().catch(() => {});
+    console.error(`[db] Postgres start failed: ${errorText(err)}`);
+    throw err;
+  }
 }
 
 // Async seam over the shared connection. The client resolves the underlying
@@ -281,6 +406,8 @@ export function closeDb(): void {
 let dbClientInstance: DbClient | null = null;
 
 export function getDbClient(): DbClient {
+  if (postgres) return postgres.client;
+  if (isPostgresEngine()) throw postgresNotStarted();
   if (!dbClientInstance) {
     dbClientInstance = createBunSqliteClient(() => getDb());
   }
@@ -288,6 +415,34 @@ export function getDbClient(): DbClient {
 }
 
 const VERSIONABLE_FIELDS = VersionableFieldSchema.options;
+
+/** `seedContextVersions` through the repositories (the Postgres start). */
+async function seedContextVersionsAsync(): Promise<void> {
+  const { computeContentHash } = require("../db") as typeof import("../db");
+  const { getStorage } = require("../storage") as typeof import("../storage");
+  const agentsRepo = getStorage().repos.agents;
+  const agents = await agentsRepo.listAgents({ includeExtensions: true });
+  for (const agent of agents) {
+    for (const field of VERSIONABLE_FIELDS) {
+      const content = agent[field];
+      if (!content) continue;
+      if (await agentsRepo.latestContextVersion(agent.id, field)) continue;
+      await agentsRepo.insertContextVersion({
+        id: crypto.randomUUID(),
+        agentId: agent.id,
+        field,
+        content,
+        version: 1,
+        changeSource: "system",
+        changedByAgentId: null,
+        changeReason: null,
+        contentHash: computeContentHash(content),
+        previousVersionId: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+}
 
 /**
  * Seed v1 context versions for existing agents that don't have any versions yet.

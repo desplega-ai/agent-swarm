@@ -110,7 +110,7 @@ async function startMirroredSession(ctx: ScenarioContext, label: string) {
   // scenarios' asks away from the leads they registered.
   const liveLeads =
     ctx.db.get<{ n: number }>(
-      sql`SELECT COUNT(*) AS n FROM agents WHERE "isLead" = 1 AND status != 'offline'`,
+      sql`SELECT COUNT(*) AS n FROM agents WHERE "isLead" = ${true} AND status != 'offline'`,
     )?.n ?? 0;
   if (liveLeads === 0) await registerLead(ctx, `e2e-lead-${label}-${ctx.nonce}`);
   const { ts: threadTs } = await ask(ctx, `${label} root ${ctx.nonce}`);

@@ -10,9 +10,11 @@ import { initAgentMail } from "../agentmail";
 import { initAzureDevOps, initAzureDevOpsOutbound } from "../azure-devops";
 import { drainApi, isApiDraining } from "../be/api-drain";
 import {
-  closeDb,
+  closeDatabase,
   emitBuiltInIntegrationConnectedOnce,
   getSwarmConfigs,
+  isPostgresEngine,
+  startPostgres,
   upsertSwarmConfig,
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
@@ -626,7 +628,7 @@ async function shutdown() {
     httpServer.close((error) => (error ? reject(error) : resolve()));
   });
   await closeRooms();
-  closeDb();
+  await closeDatabase();
   console.log("MCP HTTP server closed, and database connection closed");
   process.exit(0);
 }
@@ -671,6 +673,21 @@ startEventLoopLagProbe();
 // credential saved only in swarm_config silently reverts to the stale env
 // value on the next deploy (2026-09-16 prod Slack outage). Reserved keys
 // (API_KEY, SECRETS_ENCRYPTION_KEY, ...) stay env-only regardless.
+// DATABASE_URL with a postgres:// scheme selects the Postgres engine (decision D1).
+// Its start is asynchronous, so it runs here, before the first database access.
+// The SQLite engine opens lazily on first use, as before.
+if (isPostgresEngine()) {
+  try {
+    await startPostgres();
+  } catch (err) {
+    console.error(
+      "[startup] Postgres start failed:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+    process.exit(1);
+  }
+}
+
 // New-install seed: a database created by this boot gets the default
 // retention values as global config rows. Runs before the load below so the
 // rows are injected. Non-fatal: a failed seed leaves retention off.

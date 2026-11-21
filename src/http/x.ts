@@ -266,8 +266,8 @@ export async function handleX(
     failedBindings: credentials.failedBindings,
     userConfig: credentials.userConfig,
     agentFs: credentials.agentFs,
-    apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
+    apiConnections: await getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
+    mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
   });
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;

@@ -904,8 +904,8 @@ export async function handleScripts(
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
       agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
+      mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     };
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
@@ -1133,8 +1133,8 @@ export async function handleScripts(
   // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
-    const apiTypes = getScriptApiTypes();
-    const mcpTypes = getScriptMcpTypes();
+    const apiTypes = await getScriptApiTypes();
+    const mcpTypes = await getScriptMcpTypes();
     const appTypes = await getScriptAppTypes();
     typeDefsRoute.respond(res, 200, {
       sdkTypes: await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
@@ -1192,13 +1192,13 @@ export async function handleScripts(
         ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
         : null,
       sdkTypes: await scriptSdkTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
       stdlibTypes: await scriptStdlibTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
     });

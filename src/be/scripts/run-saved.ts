@@ -56,8 +56,8 @@ export async function runSavedScriptAsAgent(
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
+        apiConnections: await getScriptApiConnectionDescriptors({ agentId: args.agentId }),
+        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
         ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
         ...(args.signal ? { signal: args.signal } : {}),
       });

@@ -164,7 +164,15 @@ function evaluateAssetKeyAudit(
 }
 
 export function enforceAssetKeyStartupAudit(db: Database): AssetKeyAuditResult {
-  const result = auditAssetKeys(db);
+  return enforceStartupAuditResult(auditAssetKeys(db));
+}
+
+/** The startup audit through the storage repositories (the Postgres start). */
+export async function enforceAssetKeyStartupAuditAsync(): Promise<AssetKeyAuditResult> {
+  return enforceStartupAuditResult(await auditAssetKeysAsync());
+}
+
+function enforceStartupAuditResult(result: AssetKeyAuditResult): AssetKeyAuditResult {
   if (result.warningCount > 0) {
     console.warn(`[asset-keys] Startup audit found ${result.warningCount} repairable warning(s)`);
   }
