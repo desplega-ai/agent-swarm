@@ -14,7 +14,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
-| M2 Storage packages on SQLite | in progress (packages, checks 11/12/13/15, test:storage, --tx-replay done; domain moves running) | see git log |
+| M2 Storage packages on SQLite | in progress: packages, checks 11/12/13/15, test:storage and --tx-replay done; replay-unsafe callbacks fixed; domain moves at 218 files / 1,906 sites pending | see git log |
 | M3 Postgres engine | not started | |
 | M4 Engine-specific domains | not started | |
 | M5 Contract on Postgres | not started | |
@@ -219,7 +219,7 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 | 11 | `bun run check:dep-graph` (now cruises `packages/storage*`) | pass, 0 errors. New rules: packages never import `src/`; `bun:sqlite` only in `packages/storage-sqlite` (plus the transitional `PENDING_SQLITE_IMPORTERS`, 9 entries, each with a reason; empty by end of M2/M4); a Postgres driver module only in `packages/storage-postgres`; engine packages only from the composition root; the contracts package imports no engine. Probe: a temporary file that broke each rule produced 3 errors. |
 | 12 | `bun run check:storage-boundary` | pass with a shrinking pending list: `scripts/storage-checks/storage-boundary-pending.json`, seeded once with `--init` at 246 files / 2,193 sites (SQL literals by uppercase statement shape, plus imports of `DbClient`/`getDbClient`/`getDb`). Each entry names its domain. `--update` only shrinks it. Permanent exceptions with reasons: `src/be/sql-connections.ts` (user external databases for scripts, Bun.SQL to the user's own DB, never the swarm DB), `src/be/storage-root.ts` (composition root). The `.sql` migration files stay under `src/be/migrations` (section 4 forbids renaming them); the check reads code only. |
 | 13 | `bun run check:sql-portability` | pass (48 sql templates). Rejects unquoted mixed-case identifiers in any `sql` template (D8) and 22 SQLite-only forms outside `packages/storage-sqlite`. Probe: an unquoted `createdAt` and a `rowid` in the base class both failed. |
-| 15 | `bun run check:tx-callbacks` | pass (291 callbacks). One reasoned exception: `emitRunFinished` (it schedules through afterCommit itself, `src/be/db/workflow-runs.ts`). |
+| 15 | `bun run check:tx-callbacks` | pass (291 callbacks). Two rule sets: known side effects (one reasoned exception: `emitRunFinished`, it schedules through afterCommit itself), and writes to state declared outside the callback (assignment, `++`/`--`, `push`/`add`/`set`/`delete`/`splice`/`clear`). A write that the callback resets at its start may carry `// tx-replay-safe: <reason>`; the check prints each one (9 today, see "New allowlist, exclusion or quarantine entries"). |
 | 18 | `bun run test:storage` | SQLite side passes (extensions contract, 8 tests). Postgres side arrives in M3. |
 
 ### --tx-replay (step 6)
@@ -231,6 +231,22 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 | Domain | State |
 |---|---|
 | extensions | moved (`src/be/extensions/db.ts`, the `extension_assets` SQL in `assets.ts`); its workflow/skill lookups move with those domains |
+| models | moved (`src/be/db/model-*.ts`) |
+| runtime pools | moved (`src/be/runtime-pools/`) |
+| config | moved (`swarm_config`, `swarm_repos`, `api_key_status`, `seed_state` in `src/be/db.ts`); `src/be/import/seeders.ts` is mislabeled config in the pending list: its SQL is `import_items`, skills and workflows, and moves with those domains |
+| agents | moved: agents, agent history, context versions, active sessions, agent log, services, installs, capacity and daily counts, `src/http/agents.ts` transactions |
+| messaging | started: `src/http/inbox-state.ts` transaction goes through storage |
+
+### Replay-unsafe callbacks found and fixed (M2 step 6)
+
+The stronger check 15 found 44 writes to outer state in 20 files. Real defects under a replayed or retried attempt, now fixed:
+
+- `updateAgentProfile`, `recordKeyUsage`: reassigned their own parameters; a Codex Pro plan report lost its raw identity on the second attempt.
+- Runtime supervisor: an agent marked counted inside the callback skipped its retry and circuit update on the second attempt (the claim now happens before the transaction).
+- `send-task`: the second attempt ran its dedup guards with the first attempt's bypass flag set.
+- `store-progress`: a retry that returned early kept a learning promise whose afterCommit hook was discarded, so the call would wait forever.
+- Approval config answers ran each config side effect twice; user-merge progress, re-embed counts and foreach fail-fast counted twice.
+- `checkpointStep` kept stored context keys from the first attempt; a successor walk leaked the hold of the rolled-back attempt; the telemetry anchor cache took the value of an attempt that could roll back.
 
 ## Decisions inside my authority
 
@@ -251,7 +267,11 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 
 ## New allowlist, exclusion or quarantine entries
 
-None.
+`// tx-replay-safe:` comments (check 15), each with its reason on the same line:
+
+- `src/tools/store-progress.ts`: a fresh per-attempt object replaces the previous attempt's.
+- `src/workflows/foreach-driver.ts` (6 lines): the per-process claim set must change under the write lock; the callback first gives back the previous attempt's claims.
+- `src/workflows/successor-routing.ts` (2 lines): the callback releases the previous attempt's hold first, so each attempt holds at most one debt.
 
 ## Edited scenarios
 
