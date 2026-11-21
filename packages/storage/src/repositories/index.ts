@@ -11,6 +11,7 @@ export * from "./messaging";
 export * from "./models";
 export * from "./oauth";
 export * from "./pages";
+export * from "./prompt-templates";
 export * from "./rbac";
 export * from "./runtime-pools";
 export * from "./schedules";

@@ -19,6 +19,7 @@ import { SqliteMessagingRepository } from "./repositories/messaging";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
+import { SqlitePromptTemplatesRepository } from "./repositories/prompt-templates";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteSchedulesRepository } from "./repositories/schedules";
@@ -82,6 +83,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       tasks: new SqliteTasksRepository(executor),
       messaging: new SqliteMessagingRepository(executor),
       schedules: new SqliteSchedulesRepository(executor),
+      promptTemplates: new SqlitePromptTemplatesRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

@@ -15,6 +15,7 @@ import type { MessagingRepository } from "./repositories/messaging";
 import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
+import type { PromptTemplatesRepository } from "./repositories/prompt-templates";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { SchedulesRepository } from "./repositories/schedules";
@@ -51,6 +52,7 @@ export type Repositories = {
   tasks: TasksRepository;
   messaging: MessagingRepository;
   schedules: SchedulesRepository;
+  promptTemplates: PromptTemplatesRepository;
 };
 
 /**

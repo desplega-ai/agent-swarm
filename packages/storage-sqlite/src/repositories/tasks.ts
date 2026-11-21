@@ -614,6 +614,14 @@ export class SqliteTasksRepository extends BaseTasksRepository {
       ORDER BY t.rowid`);
   }
 
+  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
+    // The condition text stays as written before the move: the
+    // heartbeat-checklist test intercepts this read by its text.
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE ${raw("status = 'in_progress' AND lastUpdatedAt < ")}${cutoff}
+      ORDER BY "lastUpdatedAt" ASC, rowid ASC`);
+  }
+
   async countTasksCreatedLastDay(): Promise<number> {
     const row = await this.db.get<{ count: number }>(sql`
       SELECT COUNT(*) AS count FROM agent_tasks

@@ -3084,11 +3084,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC LIMIT 1`);
   }
 
-  listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
-    return this.db.query<TaskRow>(sql`
-      SELECT * FROM agent_tasks WHERE status = 'in_progress' AND "lastUpdatedAt" < ${cutoff}
-      ORDER BY "lastUpdatedAt" ASC, ${this.insertionOrder()} ASC`);
-  }
+  abstract listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]>;
 
   listStalePinnedResumes(cutoff: string): Promise<TaskRow[]> {
     const tagged = (tag: string) => likeAsciiCi(sql`tags`, sql`${`%"${tag}"%`}`);

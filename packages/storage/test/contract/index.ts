@@ -12,6 +12,7 @@ import { messagingContract } from "./messaging";
 import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
+import { promptTemplatesContract } from "./prompt-templates";
 import { rbacContract } from "./rbac";
 import { runtimePoolsContract } from "./runtime-pools";
 import { schedulesContract } from "./schedules";
@@ -50,4 +51,5 @@ export function runStorageContract(engine: ContractEngine): void {
   tasksContract(engine);
   messagingContract(engine);
   schedulesContract(engine);
+  promptTemplatesContract(engine);
 }

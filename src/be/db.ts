@@ -7998,10 +7998,7 @@ export function getPromptTemplates(filters?: {
  * Get a single prompt template by ID.
  */
 export async function getPromptTemplateById(id: string): Promise<PromptTemplate | null> {
-  const row = await getDbClient().get<PromptTemplateRow>(
-    "SELECT * FROM prompt_templates WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.promptTemplates.findPromptTemplate(id);
   return row ? rowToPromptTemplate(row) : null;
 }
 
@@ -8140,10 +8137,7 @@ export function upsertPromptTemplate(data: {
  * Does NOT delete history rows (intentional for audit trail).
  */
 export async function deletePromptTemplate(id: string): Promise<boolean> {
-  const existing = await getDbClient().get<PromptTemplateRow>(
-    "SELECT * FROM prompt_templates WHERE id = ?",
-    [id],
-  );
+  const existing = await getStorage().repos.promptTemplates.findPromptTemplate(id);
 
   if (!existing) return false;
   if (existing.isDefault === 1) {
@@ -8152,8 +8146,7 @@ export async function deletePromptTemplate(id: string): Promise<boolean> {
     );
   }
 
-  const result = await getDbClient().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.promptTemplates.deletePromptTemplate(id)) > 0;
 }
 
 /**
@@ -8209,10 +8202,7 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
 export async function getPromptTemplateHistory(
   templateId: string,
 ): Promise<PromptTemplateHistory[]> {
-  const rows = await getDbClient().query<PromptTemplateHistoryRow>(
-    "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
-    [templateId],
-  );
+  const rows = await getStorage().repos.promptTemplates.listPromptTemplateHistory(templateId);
   return rows.map(rowToPromptTemplateHistory);
 }
 
@@ -8331,45 +8321,38 @@ export async function checkoutPromptTemplate(
   // prompt_template_history rows at one version (no UNIQUE on
   // (templateId, version)) so a later checkout restores whichever body the
   // index scan reaches first.
-  const row = await getDbClient().transaction(async () => {
-    const existing = await getDbClient().get<PromptTemplateRow>(
-      "SELECT * FROM prompt_templates WHERE id = ?",
-      [id],
-    );
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    const existing = await templates.findPromptTemplate(id);
     if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-    const historyEntry = await getDbClient().get<PromptTemplateHistoryRow>(
-      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
-      [id, targetVersion],
-    );
+    const historyEntry = await templates.findPromptTemplateHistoryVersion(id, targetVersion);
     if (!historyEntry)
       throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
 
     const newVersion = existing.version + 1;
 
-    const updated = await getDbClient().get<PromptTemplateRow>(
-      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
-       WHERE id = ? RETURNING *`,
-      [historyEntry.body, historyEntry.state, newVersion, now, id],
-    );
+    const updated = await templates.setPromptTemplateContent(id, {
+      body: historyEntry.body,
+      state: historyEntry.state,
+      version: newVersion,
+      updatedAt: now,
+    });
 
     if (!updated) throw new Error("Failed to checkout prompt template");
 
     // Create history entry for the checkout
-    await getDbClient().run(
-      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        id,
-        newVersion,
-        historyEntry.body,
-        historyEntry.state,
-        null,
-        now,
-        `Checked out from version ${targetVersion}`,
-      ],
-    );
+    await templates.insertPromptTemplateHistory({
+      id: crypto.randomUUID(),
+      templateId: id,
+      version: newVersion,
+      body: historyEntry.body,
+      state: historyEntry.state,
+      changedBy: null,
+      changedAt: now,
+      changeReason: `Checked out from version ${targetVersion}`,
+    });
 
     return updated;
   });
