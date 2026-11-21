@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPostgresClient, MIGRATION_LOCK_KEY, runPostgresMigrations } from "../src";
+import {
+  createPostgresClient,
+  loadPostgresMigrations,
+  MIGRATION_LOCK_KEY,
+  runPostgresMigrations,
+} from "../src";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 
 // The Postgres migration runner on the real chain (src/be/migrations/postgres):
@@ -10,6 +15,8 @@ import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 // no-op, a second runner waits on the advisory lock, a changed file warns.
 
 const CHAIN_DIR = join(import.meta.dir, "..", "..", "..", "src", "be", "migrations", "postgres");
+/** Files in the chain: the baseline and each migration after it. */
+const CHAIN_LENGTH = loadPostgresMigrations(CHAIN_DIR).length;
 const quiet = { log: () => {}, warn: () => {} };
 // Applying the full baseline takes seconds; two at once, more. A budget, not a retry.
 const APPLY_TIMEOUT_MS = 60_000;
@@ -100,7 +107,7 @@ describe("runPostgresMigrations", () => {
         await held.unsafe("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
         held.release();
         const result = await run;
-        expect(result.applied.length).toBe(1);
+        expect(result.applied.length).toBe(CHAIN_LENGTH);
       } finally {
         await client.close();
         await holder.close();
@@ -121,9 +128,9 @@ describe("runPostgresMigrations", () => {
           runPostgresMigrations(a, { migrationsDir: CHAIN_DIR, ...quiet }),
           runPostgresMigrations(b, { migrationsDir: CHAIN_DIR, ...quiet }),
         ]);
-        expect([ra.applied.length, rb.applied.length].sort()).toEqual([0, 1]);
+        expect([ra.applied.length, rb.applied.length].sort()).toEqual([0, CHAIN_LENGTH]);
         const n = await a.get<{ n: string }>("SELECT count(*) AS n FROM _migrations");
-        expect(Number(n?.n)).toBe(1);
+        expect(Number(n?.n)).toBe(CHAIN_LENGTH);
       } finally {
         await a.close();
         await b.close();

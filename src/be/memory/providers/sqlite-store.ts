@@ -64,6 +64,16 @@ const FTS_POPULATE_BATCH_SIZE = 500;
 
 const memoryRepo = () => getStorage().repos.memory;
 
+/** The full-text query terms of `queryText` (at most 12); the repository ORs them as phrases. */
+function ftsTerms(queryText: string): string[] {
+  return queryText
+    .trim()
+    .split(/[^\p{L}\p{N}_-]+/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0)
+    .slice(0, 12);
+}
+
 type SearchArmOptions = {
   scope: string;
   limit: number;
@@ -796,15 +806,15 @@ export class SqliteMemoryStore implements MemoryStore {
       excludeReviewTaskCompletions?: boolean;
     },
   ): Promise<MemoryCandidate[]> {
-    const match = this.buildFtsMatch(queryText);
-    if (!match) return [];
+    const terms = ftsTerms(queryText);
+    if (terms.length === 0) return [];
 
     const { limit } = options;
     const filter = searchFilter(agentId, options);
 
     try {
       const sqlLimit = armFetchLimit(limit);
-      const rows = await memoryRepo().searchFtsRows(match, filter, sqlLimit, memorySearchReader);
+      const rows = await memoryRepo().searchFtsRows(terms, filter, sqlLimit, memorySearchReader);
 
       const now = new Date();
       return rows
@@ -827,17 +837,6 @@ export class SqliteMemoryStore implements MemoryStore {
       console.warn("[memory-fts] query failed:", (err as Error).message);
       return [];
     }
-  }
-
-  private buildFtsMatch(queryText: string): string | null {
-    const terms = queryText
-      .trim()
-      .split(/[^\p{L}\p{N}_-]+/u)
-      .map((term) => term.trim())
-      .filter((term) => term.length > 0)
-      .slice(0, 12);
-    if (terms.length === 0) return null;
-    return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
   }
 
   private async searchWithVec(

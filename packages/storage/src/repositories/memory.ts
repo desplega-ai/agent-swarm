@@ -379,9 +379,13 @@ export interface MemoryRepository {
   recordAccesses(ids: string[], now: string): Promise<void>;
 
   // ---- search arms (read through `reader` when given) ----
-  /** FTS arm: bm25 rank ascending. Throws on a bad MATCH expression. */
+  /**
+   * FTS arm: rows that match any of `terms` (each term a phrase), best first
+   * (`rank` ascending: bm25 on SQLite, minus ts_rank on Postgres). Each engine
+   * builds its own query from the terms; no terms match nothing.
+   */
   searchFtsRows(
-    match: string,
+    terms: string[],
     filter: MemorySearchFilter,
     limit: number,
     reader?: MemoryReadExecutor,
@@ -444,9 +448,16 @@ export interface MemoryRepository {
   ): Promise<{ id: string; taskType: string | null; tags: string | null }[]>;
 
   // ---- run-time search indexes ----
-  /** The CREATE text of the full-text index table, or null when it does not exist. */
+  /**
+   * The definition of the full-text index (the FTS5 CREATE text on SQLite, the
+   * GIN index definition on Postgres), or null when it does not exist.
+   */
   ftsTableSchema(): Promise<string | null>;
-  /** One batch of index rows after `afterRowid`, index order. Orphan: its memory is gone. */
+  /**
+   * One batch of index rows after `afterRowid`, index order. Orphan: its memory
+   * is gone. An index with no rows of its own (Postgres: an expression index on
+   * agent_memory) returns none, and the FTS row writes below are no-ops there.
+   */
   scanFtsBatch(
     afterRowid: number,
     limit: number,
@@ -919,7 +930,7 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
   // ---- search arms ----
 
   abstract searchFtsRows(
-    match: string,
+    terms: string[],
     filter: MemorySearchFilter,
     limit: number,
     reader?: MemoryReadExecutor,
