@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { MemoryRepository, MemorySearchFilter, NewMemory, Storage } from "../../src";
-import { sql } from "../../src";
+import { jsonText, sql } from "../../src";
 import type { ContractEngine } from "./env";
 
 const AGENT = "aaaa0000-0000-4000-8000-00000000a001";
@@ -55,7 +55,7 @@ export function memoryContract(engine: ContractEngine): void {
     const insertTask = async (id: string, taskType: string | null, tags: string) => {
       await storage.executor.run(sql`
         INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "taskType", tags)
-        VALUES (${id}, 'task', 'completed', ${T0}, ${T0}, ${taskType}, ${tags})`);
+        VALUES (${id}, 'task', 'completed', ${T0}, ${T0}, ${taskType}, ${jsonText(tags)})`);
     };
 
     test("insertMemory returns the stored row in the SQLite value shape", async () => {
@@ -293,7 +293,8 @@ export function memoryContract(engine: ContractEngine): void {
     test("search filter: expiry and the review-task exclusion", async () => {
       await insertTask("review-task", "review", "[]");
       await insertTask("tagged-task", null, '["re-review"]');
-      await insertTask("plain-task", null, "not json");
+      // A JSON scalar that equals a rule tag is not a tag list (jsonb cannot hold invalid JSON).
+      await insertTask("plain-task", null, '"re-review"');
       const add = async (id: string, sourceTaskId: string | null, expiresAt: string | null) => {
         await repo.insertMemory(memory({ id, source: "task_completion", sourceTaskId, expiresAt }));
         await repo.setEmbedding(id, new Uint8Array(4), "m");
@@ -431,6 +432,11 @@ export function memoryContract(engine: ContractEngine): void {
       await repo.insertLinkIfAbsent(link("l1", "private", T1));
       await repo.insertLinkIfAbsent(link("dup", "to", T2));
       await repo.insertLinkIfAbsent(link("seq", "to", T0, "sequel"));
+      // A row the linkType CHECK refuses is skipped, inside a transaction too.
+      await storage.transaction(async () => {
+        await repo.insertLinkIfAbsent(link("bad", "to", T1, "not-a-link-type"));
+        expect(await repo.memoryExists("from")).toBe(true);
+      });
       expect((await repo.listOutgoingLinks("from")).map((r) => r.id)).toEqual(["seq", "l1", "l2"]);
       expect((await repo.listContentLinks("from")).map((r) => r.id).sort()).toEqual(["l1", "l2"]);
       const back = await repo.listBacklinks("to", { isLead: false, viewerAgentId: AGENT });
