@@ -95,7 +95,7 @@ Command: `PG_URL=postgres://postgres@127.0.0.1:55432/postgres bun thoughts/taras
 
 Facts the client and the codec must handle:
 
-- Pool runs queries in parallel (8 x `pg_sleep(0.3)` in 303 ms).
+- Pool runs queries in parallel (8 queries that each sleep 0.3 s finish in 303 ms).
 - `connection: { default_transaction_isolation: "serializable", TimeZone: "UTC" }` sets the session default (D6).
 - `sql.begin` pins one backend for the callback, also with parallel calls inside.
 - `tx.savepoint` after a unique violation (errno `23505`) keeps the outer transaction usable. Without a savepoint the next statement fails with `25P02`.
@@ -219,7 +219,7 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 | 11 | `bun run check:dep-graph` (now cruises `packages/storage*`) | pass, 0 errors. New rules: packages never import `src/`; `bun:sqlite` only in `packages/storage-sqlite` (plus the transitional `PENDING_SQLITE_IMPORTERS`, 9 entries, each with a reason; empty by end of M2/M4); a Postgres driver module only in `packages/storage-postgres`; engine packages only from the composition root; the contracts package imports no engine. Probe: a temporary file that broke each rule produced 3 errors. |
 | 12 | `bun run check:storage-boundary` | pass with a shrinking pending list: `scripts/storage-checks/storage-boundary-pending.json`, seeded once with `--init` at 246 files / 2,193 sites (SQL literals by uppercase statement shape, plus imports of `DbClient`/`getDbClient`/`getDb`). Each entry names its domain. `--update` only shrinks it. Permanent exceptions with reasons: `src/be/sql-connections.ts` (user external databases for scripts, Bun.SQL to the user's own DB, never the swarm DB), `src/be/storage-root.ts` (composition root). The `.sql` migration files stay under `src/be/migrations` (section 4 forbids renaming them); the check reads code only. |
 | 13 | `bun run check:sql-portability` | pass (48 sql templates). Rejects unquoted mixed-case identifiers in any `sql` template (D8) and 22 SQLite-only forms outside `packages/storage-sqlite`. Probe: an unquoted `createdAt` and a `rowid` in the base class both failed. |
-| 15 | `bun run check:tx-callbacks` | pass (291 callbacks). Two rule sets: known side effects (one reasoned exception: `emitRunFinished`, it schedules through afterCommit itself), and writes to state declared outside the callback (assignment, `++`/`--`, `push`/`add`/`set`/`delete`/`splice`/`clear`). A write that the callback resets at its start may carry `// tx-replay-safe: <reason>`; the check prints each one (9 today, see "New allowlist, exclusion or quarantine entries"). |
+| 15 | `bun run check:tx-callbacks` | pass (292 callbacks, including callbacks passed by name). Two rule sets: known side effects (one reasoned exception: `emitRunFinished`, it schedules through afterCommit itself), and writes to state declared outside the callback (assignment, `++`/`--`, `push`/`add`/`set`/`delete`/`splice`/`clear`). A write that the callback resets at its start may carry `// tx-replay-safe: <reason>`; the check prints each one (8 today, see "New allowlist, exclusion or quarantine entries"). |
 | 18 | `bun run test:storage` | SQLite side passes (extensions contract, 8 tests). Postgres side arrives in M3. |
 
 ### --tx-replay (step 6)
@@ -236,6 +236,18 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 | config | moved (`swarm_config`, `swarm_repos`, `api_key_status`, `seed_state` in `src/be/db.ts`); `src/be/import/seeders.ts` is mislabeled config in the pending list: its SQL is `import_items`, skills and workflows, and moves with those domains |
 | agents | moved: agents, agent history, context versions, active sessions, agent log, services, installs, capacity and daily counts, `src/http/agents.ts` transactions |
 | messaging | started: `src/http/inbox-state.ts` transaction goes through storage |
+| schedules | started: `src/scheduler/scheduler.ts` transactions go through storage; `deferred-task-waits.ts` and `schedule-task.ts` hold tasks-domain SQL and move with tasks |
+
+### Strict suite with --tx-replay on SQLite (M2 step 6)
+
+Run 1 (head `a7d0a8482`, `bun run e2e:strict --tx-replay`): exit 1. 231 passed, 5 failed, 1 flaky (`model-group-resolution`, pre-existing). The 5 failures were real replay defects, each fixed and its scenario re-run alone with `--tx-replay` (pass):
+
+- `core-agent-profile`: `updateAgentProfile` reported each compare-and-set conflict once per attempt (two events). Conflicts are now reported after commit.
+- `knowledge-apps`: the app sync chunk kept `seen`/`mine`/warnings from the rolled-back attempt. Each chunk attempt now undoes them (`src/apps/sync.ts`, `ChunkState`).
+- `workflow-approvals`, `workflow-engine-async-nodes`: the successor-walk hold of a rolled-back attempt leaked. Fixed with `onAttemptRollback`.
+- `workflow-agent-task-crash-window`: `claimStep` (passed by name, so check 15 missed it) kept its executing-step mark across attempts; recovery read it as another walker's claim. Fixed with `onAttemptRollback`; check 15 now also scans a callback passed by name.
+
+The other strict-gate errors of run 1 (11 routes, 17 MCP tools, 2 exclusions covered anyway) came from the failed scenarios, plus the pre-existing `in_progress` gap.
 
 ### Replay-unsafe callbacks found and fixed (M2 step 6)
 
@@ -249,6 +261,8 @@ The stronger check 15 found 44 writes to outer state in 20 files. Real defects u
 - `checkpointStep` kept stored context keys from the first attempt; a successor walk leaked the hold of the rolled-back attempt; the telemetry anchor cache took the value of an attempt that could roll back.
 
 ## Decisions inside my authority
+
+- `onAttemptRollback` (M2 step 6). D6 discards the afterRollback hooks of an attempt that the client runs again. In-process state that an attempt sets up (the successor-walk hold, the executing-step mark) then leaked, and runs never finalized under `--tx-replay`. The storage client now has a third hook, `onAttemptRollback(fn)`: it runs synchronously when any attempt rolls back (replayed, retried or last) and is dropped on commit. It is only for undoing in-process state, never for a side effect; side effects stay in `afterCommit`/`afterRollback` as D6 says. The D6 rules for the two existing hooks are unchanged. The Postgres client (M3) must implement it.
 
 - D4 entity types: decided in M2 (see "M2 results").
 - Driver: `Bun.SQL` (spike above).
@@ -271,7 +285,7 @@ The stronger check 15 found 44 writes to outer state in 20 files. Real defects u
 
 - `src/tools/store-progress.ts`: a fresh per-attempt object replaces the previous attempt's.
 - `src/workflows/foreach-driver.ts` (6 lines): the per-process claim set must change under the write lock; the callback first gives back the previous attempt's claims.
-- `src/workflows/successor-routing.ts` (2 lines): the callback releases the previous attempt's hold first, so each attempt holds at most one debt.
+- `src/workflows/successor-routing.ts` (1 line): a rolled-back attempt releases its own hold through `onAttemptRollback`.
 
 ## Edited scenarios
 
