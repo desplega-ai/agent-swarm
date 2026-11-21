@@ -370,8 +370,11 @@ export async function startSut(
 
 /**
  * Boot a second, independent SUT on a database fixture (for example the database file a
- * base commit made). SQLite restores the dump into the SUT's file. Other engines get the
- * fixture through the data copy command (ledger M6), which does not exist yet.
+ * base commit made). SQLite restores the dump into the SUT's file. Postgres takes the
+ * operator path of the runbook: an API of this build starts once on the SQLite file (it
+ * applies the newer migrations) and stops, then `agent-swarm db-copy` (decision D11)
+ * copies the file into the SUT's new database, and the SUT boots on the copy with the
+ * same encryption key.
  */
 export async function startFixtureSut(
   keep: boolean,
@@ -380,25 +383,92 @@ export async function startFixtureSut(
   engine: Engine,
 ): Promise<{ sut: Sut; fixture: DbFixture }> {
   const fixture = await loadDbFixture(fixtureName);
-  if (engine !== "sqlite") {
-    throw new Error(
-      `fixture ${fixtureName}: boot on engine ${engine} needs the data copy command (ledger M6)`,
+  const restore = async (prepared: Sut) => {
+    await restoreSqliteFixture(prepared.dbPath, fixture);
+    const keyFile = prepared.env.SECRETS_ENCRYPTION_KEY_FILE;
+    if (keyFile && typeof fixture.meta.secretsKey === "string")
+      await Bun.write(keyFile, fixture.meta.secretsKey);
+  };
+  if (engine === "sqlite") {
+    const sut = await startSut(
+      keep,
+      { SLACK_DISABLE: "true" },
+      extraEnv,
+      undefined,
+      engine,
+      restore,
     );
+    return { sut, fixture };
   }
-  const sut = await startSut(
+  const staging = await startSut(
     keep,
     { SLACK_DISABLE: "true" },
     extraEnv,
     undefined,
-    engine,
-    async (prepared) => {
-      await restoreSqliteFixture(prepared.dbPath, fixture);
-      const keyFile = prepared.env.SECRETS_ENCRYPTION_KEY_FILE;
-      if (keyFile && typeof fixture.meta.secretsKey === "string")
-        await Bun.write(keyFile, fixture.meta.secretsKey);
+    "sqlite",
+    restore,
+  );
+  try {
+    await stopSutProcess(staging);
+    const sut = await startSut(
+      keep,
+      { SLACK_DISABLE: "true" },
+      extraEnv,
+      undefined,
+      engine,
+      async (prepared) => {
+        await copySutKey(staging, prepared);
+        const copy = await runDataCopyCli(staging.dbPath, prepared.databaseUrl ?? "");
+        if (copy.exitCode !== 0) {
+          throw new Error(
+            `fixture ${fixtureName}: db-copy exited ${copy.exitCode}\n${copy.output.slice(-3000)}`,
+          );
+        }
+      },
+    );
+    return { sut, fixture };
+  } finally {
+    await stopSut(staging, keep);
+  }
+}
+
+/** Give `target` the encryption key file of `source`, so copied secrets decrypt. */
+export async function copySutKey(source: Sut, target: Sut): Promise<void> {
+  const from = source.env.SECRETS_ENCRYPTION_KEY_FILE;
+  const to = target.env.SECRETS_ENCRYPTION_KEY_FILE;
+  if (from && to) await Bun.write(to, await Bun.file(from).text());
+}
+
+/** `agent-swarm db-copy --from <file> --to <url>` with the SUT's minimal environment. */
+export async function runDataCopyCli(
+  sqlitePath: string,
+  databaseUrl: string,
+): Promise<{ exitCode: number; output: string }> {
+  const child = Bun.spawn(
+    [
+      "bun",
+      "--no-orphans",
+      "run",
+      `${repoRoot}/src/cli.tsx`,
+      "db-copy",
+      "--from",
+      sqlitePath,
+      "--to",
+      databaseUrl,
+    ],
+    {
+      cwd: repoRoot,
+      env: { ...minimalEnv(), DESPLEGA_TELEMETRY_ENV: "test" },
+      stdout: "pipe",
+      stderr: "pipe",
     },
   );
-  return { sut, fixture };
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { exitCode, output: `${stdout}\n${stderr}` };
 }
 
 /**
