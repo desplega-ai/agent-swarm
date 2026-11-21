@@ -422,18 +422,21 @@ class BunSqliteClient implements DbClient {
       }
       began = true;
       if (this.options.txReplay) {
-        // --tx-replay (decision D6): run the callback once and roll it back,
-        // with its hooks discarded, then run it again for real. A callback
-        // that is not safe to run twice fails here instead of on Postgres.
+        // --tx-replay (decision D6): run the callback once, roll the whole
+        // transaction back with its hooks discarded, begin again, and run it
+        // for real. A full ROLLBACK, not a savepoint: virtual tables (FTS5,
+        // sqlite-vec) do not all undo a savepoint, and Postgres retries the
+        // whole transaction too.
         const replayCtx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
-        db.run("SAVEPOINT db_client_tx_replay");
         try {
           await txContext.run(replayCtx, () => fn(this.boundExecutor(replayCtx)));
         } finally {
           replayCtx.closed = true;
-          db.run("ROLLBACK TO SAVEPOINT db_client_tx_replay");
-          db.run("RELEASE SAVEPOINT db_client_tx_replay");
         }
+        began = false;
+        db.run("ROLLBACK");
+        db.run(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
+        began = true;
         this.replayedTransactions += 1;
       }
       const result = await txContext.run(ctx, () => fn(tx));
