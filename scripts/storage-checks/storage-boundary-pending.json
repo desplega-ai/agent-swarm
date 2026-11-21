@@ -747,13 +747,9 @@
     "reason": "M2 move: tasks",
     "sites": 1
   },
-  "src/telemetry-identity.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 3
-  },
   "src/telemetry-snapshot.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 9
+    "sites": 3
   },
   "src/telemetry-trigger.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

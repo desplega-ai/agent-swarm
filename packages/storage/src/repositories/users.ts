@@ -169,6 +169,27 @@ export interface UsersRepository {
   markUserMergedInto(sourceId: string, targetId: string, now: string): Promise<void>;
   /** Deletes the user row. Returns the changed row count. */
   deleteUser(id: string): Promise<number>;
+  /**
+   * `metadata.jobFunction` of the user: undefined when the user is missing or
+   * its metadata is not valid JSON, null when the key is absent.
+   */
+  getUserJobFunction(id: string): Promise<string | null | undefined>;
+  /**
+   * Emails of active users with a non-blank email, for the org domain: users
+   * holding a grant-all role first, then by `createdAt`, then id. At most `limit`.
+   */
+  listOrgDomainCandidateEmails(limit: number): Promise<string[]>;
+
+  // ---- telemetry snapshot counts ----
+  countUsersByStatus(status: string): Promise<number>;
+  /** Active users holding a grant-all role. */
+  countActiveGrantAllUsers(): Promise<number>;
+  /** Active users with a non-blank email or an unrevoked user token. */
+  countActiveUsersWithLogin(): Promise<number>;
+  /** Active users with an external id of `kind`. */
+  countActiveUsersLinked(kind: string): Promise<number>;
+  /** Active users with an external id whose kind is not in `kinds`. */
+  countActiveUsersLinkedOutside(kinds: readonly string[]): Promise<number>;
 
   // ---- user_external_ids ----
   findUserByExternalId(kind: string, externalId: string): Promise<UserRow | null>;
@@ -371,6 +392,67 @@ export abstract class BaseUsersRepository implements UsersRepository {
 
   async deleteUser(id: string): Promise<number> {
     return (await this.db.run(sql`DELETE FROM users WHERE id = ${id}`)).changes;
+  }
+
+  /** JSON path access differs per engine. */
+  abstract getUserJobFunction(id: string): Promise<string | null | undefined>;
+
+  async listOrgDomainCandidateEmails(limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ email: string }>(sql`
+      SELECT u.email AS email
+      FROM users u
+      WHERE u.status = 'active' AND u.email IS NOT NULL AND TRIM(u.email) <> ''
+      ORDER BY EXISTS (
+                 SELECT 1 FROM principal_roles pr JOIN roles r ON r.id = pr."roleId"
+                 WHERE pr."principalType" = 'user' AND pr."principalId" = u.id AND r."grantsAll" = ${true}
+               ) DESC,
+               u."createdAt" ASC, u.id ASC
+      LIMIT ${limit}`);
+    return rows.map((row) => row.email);
+  }
+
+  // ---- telemetry snapshot counts ----
+
+  protected async count(query: SqlQuery): Promise<number> {
+    const row = await this.db.get<{ n: number | string }>(query);
+    return Number(row?.n ?? 0);
+  }
+
+  countUsersByStatus(status: string): Promise<number> {
+    return this.count(sql`SELECT COUNT(*) AS n FROM users WHERE status = ${status}`);
+  }
+
+  countActiveGrantAllUsers(): Promise<number> {
+    return this.count(sql`
+      SELECT COUNT(DISTINCT u.id) AS n
+      FROM users u
+      JOIN principal_roles pr ON pr."principalType" = 'user' AND pr."principalId" = u.id
+      JOIN roles r ON r.id = pr."roleId"
+      WHERE u.status = 'active' AND r."grantsAll" = ${true}`);
+  }
+
+  countActiveUsersWithLogin(): Promise<number> {
+    return this.count(sql`
+      SELECT COUNT(*) AS n
+      FROM users u
+      WHERE u.status = 'active'
+        AND ((u.email IS NOT NULL AND TRIM(u.email) <> '')
+             OR EXISTS (SELECT 1 FROM user_tokens t WHERE t."userId" = u.id AND t."revokedAt" IS NULL))`);
+  }
+
+  countActiveUsersLinked(kind: string): Promise<number> {
+    return this.count(sql`
+      SELECT COUNT(DISTINCT x."userId") AS n
+      FROM user_external_ids x JOIN users u ON u.id = x."userId"
+      WHERE u.status = 'active' AND x.kind = ${kind}`);
+  }
+
+  countActiveUsersLinkedOutside(kinds: readonly string[]): Promise<number> {
+    const outside = kinds.length === 0 ? sql`` : sql` AND x.kind NOT IN (${sqlList(kinds)})`;
+    return this.count(sql`
+      SELECT COUNT(DISTINCT x."userId") AS n
+      FROM user_external_ids x JOIN users u ON u.id = x."userId"
+      WHERE u.status = 'active'${outside}`);
   }
 
   // ---- user_external_ids ----

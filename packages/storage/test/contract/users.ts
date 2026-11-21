@@ -125,6 +125,50 @@ export function usersContract(engine: ContractEngine): void {
       expect(await repo.findUserByPrimaryEmail("bob@example.com")).toBeNull();
     });
 
+    test("job function, org domain candidates and snapshot counts", async () => {
+      await repo.insertUser(newUser({ id: "u1", metadata: '{"jobFunction":"eng"}' }));
+      await repo.insertUser(newUser({ id: "u2", metadata: "not json" }));
+      await repo.insertUser(newUser({ id: "u3", metadata: '{"other":1}' }));
+      expect(await repo.getUserJobFunction("u1")).toBe("eng");
+      expect(await repo.getUserJobFunction("u2")).toBeUndefined();
+      expect(await repo.getUserJobFunction("u3")).toBeNull();
+      expect(await repo.getUserJobFunction("missing")).toBeUndefined();
+
+      // Migration 109's trigger attaches the grant-all admin role to every new user.
+      await repo.insertUser(newUser({ id: "m2", email: "m@b.io", now: T1 }));
+      await repo.insertUser(newUser({ id: "m1", email: "m@a.io", now: T1 }));
+      await repo.insertUser(newUser({ id: "old", email: "o@c.io", now: T0 }));
+      await repo.insertUser(newUser({ id: "blank", email: "  ", now: T0 }));
+      await repo.insertUser(newUser({ id: "off", email: "s@d.io", status: "suspended" }));
+      await storage.executor.run(
+        sql`DELETE FROM principal_roles WHERE "principalId" = 'old' AND "principalType" = 'user'`,
+      );
+      expect(await repo.listOrgDomainCandidateEmails(20)).toEqual(["m@a.io", "m@b.io", "o@c.io"]);
+      expect(await repo.listOrgDomainCandidateEmails(1)).toEqual(["m@a.io"]);
+
+      await repo.insertUserToken({
+        id: "t1",
+        userId: "u1",
+        label: null,
+        tokenHash: "h1",
+        tokenPreview: "t1",
+        createdAt: T0,
+        expiresAt: null,
+      });
+      await repo.insertExternalId("u1", "slack", "S1");
+      await repo.insertExternalId("u1", "slack", "S2");
+      await repo.insertExternalId("u2", "discord", "D1");
+      await repo.insertExternalId("off", "slack", "S3");
+      expect(await repo.countUsersByStatus("active")).toBe(7);
+      expect(await repo.countUsersByStatus("suspended")).toBe(1);
+      expect(await repo.countActiveGrantAllUsers()).toBe(6);
+      // u1 by token; m1, m2, old by email.
+      expect(await repo.countActiveUsersWithLogin()).toBe(4);
+      expect(await repo.countActiveUsersLinked("slack")).toBe(1);
+      expect(await repo.countActiveUsersLinkedOutside(["slack", "github"])).toBe(1);
+      expect(await repo.countActiveUsersLinkedOutside([])).toBe(2);
+    });
+
     test("external ids: lookup, primary-key conflict and order", async () => {
       await repo.insertUser(newUser({ id: "u1" }));
       await repo.insertExternalId("u1", "slack", "U2");

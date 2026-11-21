@@ -40,6 +40,13 @@ export class SqliteUsersRepository extends BaseUsersRepository {
       ORDER BY rowid`);
   }
 
+  async getUserJobFunction(id: string): Promise<string | null | undefined> {
+    const row = await this.db.get<{ jobFunction: string | null }>(sql`
+      SELECT json_extract(metadata, '$.jobFunction') AS "jobFunction"
+      FROM users WHERE id = ${id} AND json_valid(metadata)`);
+    return row ? row.jobFunction : undefined;
+  }
+
   // ---- user_identity_events ----
 
   listIdentityEvents(
