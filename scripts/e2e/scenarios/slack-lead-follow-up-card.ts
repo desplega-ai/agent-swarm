@@ -25,6 +25,29 @@ import {
 const GENERAL = "C0GENERAL0";
 
 type DelegatedAsk = { leadId: string; threadTs: string; askTaskId: string; followUpId: string };
+type WorkerAttachment =
+  | { kind: "url"; url: string; name: string }
+  | { kind: "page"; pageId: string; name: string };
+type WorkerResult = { output: string; attachments: WorkerAttachment[] };
+
+/**
+ * How many times `needle` appears in the captions (context blocks) of the
+ * thread's messages that contain `anchor`. The answer itself is not counted:
+ * a card carries it both as text and in its blocks.
+ */
+function captionOccurrences(
+  ctx: ScenarioContext,
+  channel: string,
+  threadTs: string,
+  anchor: string,
+  needle: string,
+): number {
+  return threadMessages(ctx, channel, threadTs, anchor)
+    .flatMap((message) => (message.blocks ?? []) as { type?: string }[])
+    .filter((block) => block.type === "context")
+    .map((block) => JSON.stringify(block).split(needle).length - 1)
+    .reduce((total, count) => total + count, 0);
+}
 
 function threadMessages(
   ctx: ScenarioContext,
@@ -84,6 +107,7 @@ async function delegatedAsk(
   channel: string,
   workerId: string,
   label: string,
+  workerResult?: WorkerResult,
 ): Promise<DelegatedAsk> {
   const message = await ctx.slack.postMessage({
     channel,
@@ -107,10 +131,27 @@ async function delegatedAsk(
   );
   expect(askCard, `The ${label} ask's own outcome card never posted in ${channel}`);
 
-  await finish(ctx, workerId, childId, {
-    status: "completed",
-    output: `${label} worker result ${ctx.nonce}`,
-  });
+  if (workerResult) {
+    // store-progress, not the finish route: only it records attachments.
+    const workerConn = await ctx.connectMcp(workerId);
+    try {
+      expectToolOk(
+        await callTool(workerConn, "store-progress", {
+          taskId: childId,
+          status: "completed",
+          ...workerResult,
+        }),
+        `complete the ${label} worker task with deliverables`,
+      );
+    } finally {
+      await workerConn.close();
+    }
+  } else {
+    await finish(ctx, workerId, childId, {
+      status: "completed",
+      output: `${label} worker result ${ctx.nonce}`,
+    });
+  }
   const followUpId = await findWorkerFollowUp(ctx, leadId, childId);
   await claim(ctx, leadId, followUpId);
   return { leadId, threadTs: message.ts, askTaskId, followUpId };
@@ -125,18 +166,92 @@ export const slackLeadFollowUpCard: Scenario = {
     await registerLead(ctx, "e2e-lead-follow-up-card");
     const workerId = await registerWorker(ctx, "e2e-specialist-follow-up-card");
 
-    // 1. The follow-up's output posts once in the ask's thread.
-    const posted = await delegatedAsk(ctx, GENERAL, workerId, "posted");
-    const postedOutput = `follow-up review posted ${ctx.nonce}`;
-    await finish(ctx, posted.leadId, posted.followUpId, {
-      status: "completed",
-      output: postedOutput,
+    // 1. The follow-up's output posts once in the ask's thread, with the
+    // worker's deliverables under it: worker cards do not post while
+    // delegation is off, so this card is the only place people see them. A
+    // link the Lead's answer already carries is not repeated.
+    const reportUrl = `https://docs.example.test/report-${ctx.nonce}`;
+    const prUrl = `https://github.com/example/repo-${ctx.nonce}/pull/42`;
+    const quotedUrl = `https://docs.example.test/quoted-${ctx.nonce}`;
+    const fileUrl = `https://app.example.test/file/~/org/drive/reports/summary-${ctx.nonce}.md`;
+    const videoUrl = `https://cdn.example.test/demo-${ctx.nonce}.mp4`;
+    const postedShareUrl = `https://live.agent-fs.dev/share/posted${ctx.nonce}`;
+    const pageId = crypto.randomUUID();
+    const posted = await delegatedAsk(ctx, GENERAL, workerId, "posted", {
+      output: `posted worker result ${ctx.nonce}: opened ${prUrl}. Notes at ${quotedUrl}. File ${fileUrl}, demo ${videoUrl}, share ${postedShareUrl}`,
+      attachments: [
+        { kind: "url", url: reportUrl, name: `report ${ctx.nonce}` },
+        { kind: "page", pageId, name: "Review notes" },
+      ],
     });
+    // The Lead cites the worker's PR and attaches the worker's report: each
+    // URL still shows once on the card. A bare URL in the answer becomes a
+    // short `<url|label>` link; one in a code span stays as written.
+    const postedOutput = `follow-up review posted ${ctx.nonce}`;
+    const codeUrl = `https://docs.example.test/code-${ctx.nonce}`;
+    const leadConn = await ctx.connectMcp(posted.leadId);
+    try {
+      expectToolOk(
+        await callTool(leadConn, "store-progress", {
+          taskId: posted.followUpId,
+          status: "completed",
+          output: `${postedOutput}. Merged the PR [citation:1]. Notes: ${quotedUrl}. Repro: \`${codeUrl}\``,
+          citations: [{ index: 1, kind: "url", ref: prUrl, label: "Merged PR" }],
+          attachments: [{ kind: "url", url: reportUrl, name: `report ${ctx.nonce}` }],
+        }),
+        "complete the Lead review with a citation and an attachment",
+      );
+    } finally {
+      await leadConn.close();
+    }
     const landed = await pollUntil(
       () => threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length > 0,
       30_000,
     );
     expect(landed, "The Lead follow-up's outcome card never posted in the ask's thread");
+    const deliverables = await pollUntil(
+      () =>
+        captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, reportUrl) === 1 &&
+        captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, prUrl) === 1,
+      15_000,
+    );
+    expect(
+      deliverables,
+      `The follow-up card does not list the worker's attachment and output link once each: ${JSON.stringify(threadMessages(ctx, GENERAL, posted.threadTs, postedOutput))}`,
+    );
+    // Each link is a short label with a type icon under a "Links:" heading.
+    for (const needle of [
+      `Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`,
+      `/pages/${pageId}|Review notes>`,
+      "📃 <http",
+      `Sources: <${prUrl}|[1]> Merged PR`,
+      `📄 <${fileUrl}|summary-${ctx.nonce}.md>`,
+      `🎬 <${videoUrl}|demo-${ctx.nonce}.mp4>`,
+      `🔗 <${postedShareUrl}|Shared file>`,
+    ]) {
+      const shown = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, needle);
+      expect(
+        shown === 1,
+        `The follow-up card shows ${JSON.stringify(needle)} ${shown} times, expected 1`,
+      );
+    }
+    // A cited link stays a source: it is not listed again under "Links:".
+    const prAsLink = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, "🔀");
+    expect(prAsLink === 0, `The cited PR is also listed under "Links:" ${prAsLink} times`);
+    const quoted = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, quotedUrl);
+    expect(
+      quoted === 0,
+      `A link already in the Lead's answer is repeated ${quoted} times in captions`,
+    );
+    const answer = JSON.stringify(
+      threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).map((message) => message.text),
+    );
+    expect(
+      answer.includes(`<${quotedUrl}|docs.example.test/quoted-`) &&
+        answer.includes(`\`${codeUrl}\``) &&
+        !answer.includes(`<${codeUrl}`),
+      `The answer does not link its bare URL and keep its code span as written: ${answer}`,
+    );
     // Watch several ticks: the card must not repeat.
     await pollUntil(() => false, slackAbsenceWindowMs(ctx));
     const copies = threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length;
@@ -458,7 +573,19 @@ export const slackLeadFollowUpCard: Scenario = {
       name: `ext-${ctx.nonce.toLowerCase()}`,
       members: [alice],
     });
-    const external = await delegatedAsk(ctx, externalId, workerId, "external");
+    // Only a public share link the worker made reaches a Slack Connect
+    // thread; its app file link and internal attachment do not. A `/share/`
+    // path on a host that does not serve agent-fs shares is dropped too:
+    // worker output is free text. The SUT leaves AGENT_FS_LIVE_URL unset, so
+    // the default live host serves the shares.
+    const shareUrl = `https://live.agent-fs.dev/share/tok${ctx.nonce}`;
+    const spoofedShareUrl = `https://internal.example.test/share/tok${ctx.nonce}`;
+    const appFileUrl = `https://app.example.test/file/~/org/drive/notes-${ctx.nonce}.md`;
+    const internalUrl = `https://docs.example.test/internal-${ctx.nonce}`;
+    const external = await delegatedAsk(ctx, externalId, workerId, "external", {
+      output: `external worker result ${ctx.nonce}: public ${shareUrl}, app ${appFileUrl}, other ${spoofedShareUrl}`,
+      attachments: [{ kind: "url", url: internalUrl, name: `internal ${ctx.nonce}` }],
+    });
     // A message after the ask's card stops a merge into it: as in production,
     // where the follow-up ended past the merge window, it posts its own card.
     await ctx.slack.postMessage({
@@ -485,6 +612,20 @@ export const slackLeadFollowUpCard: Scenario = {
       );
       expect(delivered, "The Lead follow-up's card never reached the Slack Connect thread");
       await expectFinalizedCard(ctx, external.followUpId, external.threadTs, "external follow-up");
+      const count = (url: string) =>
+        captionOccurrences(ctx, externalId, external.threadTs, externalOutput, url);
+      expect(
+        count(shareUrl) === 1 &&
+          count(appFileUrl) === 0 &&
+          count(internalUrl) === 0 &&
+          count(spoofedShareUrl) === 0,
+        `The Slack Connect card must list only the share link: share=${count(shareUrl)} app=${count(appFileUrl)} internal=${count(internalUrl)} spoofed=${count(spoofedShareUrl)}`,
+      );
+      const shareLabel = `Links: 🔗 <${shareUrl}|Shared file>`;
+      expect(
+        count(shareLabel) === 1,
+        `The Slack Connect card does not label the share link as ${JSON.stringify(shareLabel)}`,
+      );
       const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
         "SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
         [external.followUpId],

@@ -57,18 +57,30 @@ Start from the closest one.
 | Mode | Who sees it |
 |---|---|
 | `authed` (default) | Signed-in dashboard users. A direct `api_url` needs the page's session cookie (`POST /api/pages/:id/launch`). |
-| `public` | Anyone with the URL. Set it explicitly, and only when the page is safe for anyone to read. Its browser SDK calls to authed endpoints get 401. |
+| `public` | Anyone with the `api_url` (`/p/:id`); `app_url` still needs a dashboard login. Set it explicitly, and only when the page is safe for anyone to read. Its browser SDK calls to authed endpoints get 401. |
 | `password` | Anyone with the password (`password` field, hashed at rest). Unlock with `?key=<password>` or HTTP Basic on `/p/:id`. Viewers are anonymous guests that reach only the page record and its KV. Review the body before you share it outside the swarm. |
 
 ### URLs
 
 | Field | Shape | Use |
 |---|---|---|
-| `app_url` | `${APP_URL}/pages/:id` | The default share link. Add `?mode=full` to hide the dashboard chrome. |
-| `api_url` | `${MCP_BASE_URL}/p/:id` | A direct render with no dashboard, for example for a Slack unfurl. JSON pages redirect to `app_url`. |
+| `app_url` | `${APP_URL}/pages/:id` | The share link for signed-in dashboard users. A logged-out visitor is sent to `/setup`. Add `?mode=full` to hide the dashboard chrome. |
+| `api_url` | `${PUBLIC_MCP_BASE_URL}/p/:id` | A direct render with no dashboard: the share link for a `public` or `password` page read by anyone without a dashboard login, and for a Slack unfurl. JSON pages redirect to `app_url`, so publish HTML for those readers. |
 
 Read `APP_URL`, `MCP_BASE_URL` and `SWARM_URL` from your environment. Never
 hardcode a host. If one is missing, say so instead of guessing.
+`MCP_BASE_URL` can be an internal host (for example `http://api:3013`). The
+server builds `api_url` from `PUBLIC_MCP_BASE_URL`, falling back to
+`MCP_BASE_URL`, so share the `api_url` that `create_page` returns, never one
+you joined yourself. If it is an internal host, say so instead of sharing it.
+
+**A `200` on `app_url` is not an access check.** Logged out, the SPA returns
+the same `200` shell for every id, then redirects to `/setup`. To prove a
+public page is readable, fetch `api_url` with no cookies and check the body:
+
+```bash
+curl -s "<api_url>" | grep -c "<a phrase from your page>"   # 0: not readable
+```
 
 ### The org design system: ask once
 
