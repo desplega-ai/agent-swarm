@@ -222,5 +222,125 @@ export function skillsContract(engine: ContractEngine): void {
       // t1 completed and invoked a skill; t2 never started.
       expect(await repo.taskAdoption(T0)).toEqual({ tasks: 1, tasksWithSkill: 1 });
     });
+
+    const newSkill = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      name: id,
+      description: `desc ${id}`,
+      content: `content ${id}`,
+      type: "personal",
+      scope: "agent",
+      ownerAgentId: null,
+      sourceUrl: null,
+      sourceRepo: null,
+      sourcePath: null,
+      sourceBranch: "main",
+      sourceHash: null,
+      isComplex: false,
+      allowedTools: null,
+      model: null,
+      effort: null,
+      context: null,
+      agent: null,
+      disableModelInvocation: false,
+      userInvocable: true,
+      isEnabled: true,
+      systemDefault: false,
+      createdAt: "2026-11-21T10:00:00.000Z",
+      lastUpdatedAt: "2026-11-21T10:00:00.000Z",
+      createdByAgentId: null,
+      updatedByAgentId: null,
+      created_by: null,
+      updated_by: null,
+      ...extra,
+    });
+
+    test("skill CRUD: flags, version bump on content, lookups and lists", async () => {
+      await storage.executor.run(sql`DELETE FROM skills`);
+      const s = await repo.insertSkill(newSkill("zz-b", { isComplex: true }));
+      expect(s).toMatchObject({ version: 1, isComplex: 1, userInvocable: 1, invocationCount: 0 });
+      await repo.insertSkill(newSkill("zz-a", { scope: "swarm", type: "remote" }));
+      await repo.insertSkill(newSkill("zz-c", { isEnabled: false, systemDefault: true }));
+      const u = await repo.updateSkill(
+        "zz-b",
+        { description: "x", isEnabled: false },
+        "2026-11-21T11:00:00.000Z",
+      );
+      expect([u?.version, u?.isEnabled, u?.description]).toEqual([1, 0, "x"]);
+      const c = await repo.updateSkill(
+        "zz-b",
+        { content: "new", model: null },
+        "2026-11-21T12:00:00.000Z",
+      );
+      expect([c?.version, c?.lastUpdatedAt]).toEqual([2, "2026-11-21T12:00:00.000Z"]);
+      await repo.bumpSkillVersion("zz-b", "2026-11-21T12:00:00.000Z");
+      expect((await repo.findSkillById("zz-b"))?.version).toBe(3);
+      expect((await repo.findSkillByName("zz-a", "swarm", ""))?.id).toBe("zz-a");
+      expect(await repo.findSkillByName("zz-a", "agent", "")).toBeNull();
+      const names = async (f: object) =>
+        (await repo.listSkills({ slim: false, ...f })).map((r) => r.id);
+      expect(await names({})).toEqual(["zz-a", "zz-b", "zz-c"]);
+      expect(await names({ isEnabled: false })).toEqual(["zz-b", "zz-c"]);
+      expect(await names({ search: "DESC ZZ-A" })).toEqual(["zz-a"]);
+      expect(await names({ limit: 1, scope: "agent" })).toEqual(["zz-b"]);
+      expect((await repo.listSkills({ slim: true }))[0]?.content).toBe("");
+      expect(
+        (await repo.searchSkillsBySubstring(["content"], "zz-a", 10, false)).map((r) => r.id),
+      ).toEqual(["zz-a"]);
+      await repo.updateSkill("zz-b", { isEnabled: true }, "2026-11-21T12:00:00.000Z");
+      expect(
+        (await repo.searchSkillsBySubstring(["zz"], "ZZ-B", 10, true)).map((r) => r.id),
+      ).toEqual(["zz-b", "zz-a"]);
+      expect(await repo.listSystemDefaultSkills()).toEqual([]);
+      expect(await repo.deleteSkill("zz-c")).toBe(1);
+    });
+
+    test("agent skills: installed first, personal before others; skill files upsert by path", async () => {
+      await storage.executor.run(sql`DELETE FROM skills`);
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', 'idle', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      await repo.insertSkill(newSkill("mine"));
+      await repo.insertSkill(newSkill("off"));
+      await repo.insertSkill(newSkill("sw", { scope: "swarm", type: "remote" }));
+      await repo.insertSkill(newSkill("sw2", { scope: "swarm" }));
+      await storage.executor.run(sql`
+        INSERT INTO agent_skills (id, "agentId", "skillId", "isActive", "installedAt")
+        VALUES ('i1', 'ag', 'mine', ${true}, 'x'), ('i2', 'ag', 'off', ${false}, 'y')`);
+      const rows = await repo.listAgentSkills("ag", true);
+      expect(rows.map((r) => [r.id, r.sourceRank, r.typeRank, r.isActive])).toEqual([
+        ["mine", 0, 0, 1],
+        ["sw2", 1, 0, 1],
+        ["sw", 1, 1, 1],
+      ]);
+      expect((await repo.listAgentSkills("ag", false)).map((r) => r.id)).toEqual([
+        "mine",
+        "off",
+        "sw2",
+        "sw",
+      ]);
+      const file = (path: string, content: string) => ({
+        id: `f-${path}-${content}`,
+        skillId: "mine",
+        path,
+        content,
+        mimeType: "text/plain",
+        isBinary: false,
+        size: content.length,
+        createdAt: "2026-11-21T10:00:00.000Z",
+        lastUpdatedAt: "2026-11-21T10:00:00.000Z",
+      });
+      expect(await repo.upsertSkillFile(file("b.md", "1"))).toMatchObject({
+        isBinary: 0,
+        path: "b.md",
+      });
+      await repo.upsertSkillFile(file("a.md", "1"));
+      const again = await repo.upsertSkillFile(file("b.md", "22"));
+      expect([again?.id, again?.content, again?.size]).toEqual(["f-b.md-1", "22", 2]);
+      expect((await repo.listSkillFiles("mine")).map((f) => f.path)).toEqual(["a.md", "b.md"]);
+      expect((await repo.findSkillFile("mine", "a.md"))?.content).toBe("1");
+      expect(await repo.deleteSkillFile("mine", "a.md")).toBe(1);
+      expect(await repo.deleteSkillFile("mine", "a.md")).toBe(0);
+    });
   });
 }

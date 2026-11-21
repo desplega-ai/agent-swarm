@@ -33,6 +33,9 @@ import type {
   RoutingCandidateMatch,
   ScheduledTaskColumnUpdate,
   ScheduledTaskRow,
+  SkillFileRow,
+  SkillRow,
+  SkillWithInstallRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -40,6 +43,7 @@ import type {
   TaskSteeringMessageRow,
   TaskTemplateRow,
 } from "@desplega/storage";
+import { SKILL_SLIM_COLUMNS } from "@desplega/storage";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -8724,41 +8728,6 @@ export async function getStuckWaitRuns(): Promise<StuckWaitRun[]> {
 // Skills
 // ============================================================================
 
-type SkillRow = {
-  id: string;
-  name: string;
-  description: string;
-  content: string;
-  type: string;
-  scope: string;
-  ownerAgentId: string | null;
-  sourceUrl: string | null;
-  sourceRepo: string | null;
-  sourcePath: string | null;
-  sourceBranch: string;
-  sourceHash: string | null;
-  isComplex: number;
-  allowedTools: string | null;
-  model: string | null;
-  effort: string | null;
-  context: string | null;
-  agent: string | null;
-  disableModelInvocation: number;
-  userInvocable: number;
-  version: number;
-  isEnabled: number;
-  systemDefault: number;
-  invocationCount: number;
-  lastInvokedAt: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  lastFetchedAt: string | null;
-};
-
 function rowToSkill(row: SkillRow): Skill {
   return {
     id: row.id,
@@ -8814,13 +8783,6 @@ function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
   };
 }
 
-type SkillWithInstallRow = SkillRow & {
-  isActive: number;
-  installedAt: string;
-  sourceRank?: number;
-  typeRank?: number;
-};
-
 function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   return {
     ...rowToSkill(row),
@@ -8828,18 +8790,6 @@ function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
     installedAt: row.installedAt,
   };
 }
-
-type SkillFileRow = {
-  id: string;
-  skillId: string;
-  path: string;
-  content: string;
-  mimeType: string;
-  isBinary: number;
-  size: number | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 function rowToSkillFile(row: SkillFileRow): SkillFile {
   return {
@@ -8983,45 +8933,36 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<SkillRow>(
-    `INSERT INTO skills (
-        id, name, description, content, type, scope, ownerAgentId,
-        sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
-        allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
-        version, isEnabled, systemDefault, createdAt, lastUpdatedAt,
-        createdByAgentId, updatedByAgentId, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.description,
-      data.content,
-      data.type ?? "personal",
-      data.scope ?? "agent",
-      data.ownerAgentId ?? null,
-      data.sourceUrl ?? null,
-      data.sourceRepo ?? null,
-      data.sourcePath ?? null,
-      data.sourceBranch ?? "main",
-      data.sourceHash ?? null,
-      data.isComplex ? 1 : 0,
-      data.allowedTools ?? null,
-      data.model ?? null,
-      data.effort ?? null,
-      data.context ?? null,
-      data.agent ?? null,
-      data.disableModelInvocation ? 1 : 0,
-      data.userInvocable === false ? 0 : 1,
-      data.isEnabled === false ? 0 : 1,
-      data.systemDefault ? 1 : 0,
-      now,
-      now,
-      data.createdByAgentId ?? null,
-      data.createdByAgentId ?? null,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-    ],
-  );
+  const row = await getStorage().repos.skills.insertSkill({
+    id,
+    name: data.name,
+    description: data.description,
+    content: data.content,
+    type: data.type ?? "personal",
+    scope: data.scope ?? "agent",
+    ownerAgentId: data.ownerAgentId ?? null,
+    sourceUrl: data.sourceUrl ?? null,
+    sourceRepo: data.sourceRepo ?? null,
+    sourcePath: data.sourcePath ?? null,
+    sourceBranch: data.sourceBranch ?? "main",
+    sourceHash: data.sourceHash ?? null,
+    isComplex: !!data.isComplex,
+    allowedTools: data.allowedTools ?? null,
+    model: data.model ?? null,
+    effort: data.effort ?? null,
+    context: data.context ?? null,
+    agent: data.agent ?? null,
+    disableModelInvocation: !!data.disableModelInvocation,
+    userInvocable: data.userInvocable !== false,
+    isEnabled: data.isEnabled !== false,
+    systemDefault: !!data.systemDefault,
+    createdAt: now,
+    lastUpdatedAt: now,
+    createdByAgentId: data.createdByAgentId ?? null,
+    updatedByAgentId: data.createdByAgentId ?? null,
+    created_by: data.createdBy ?? null,
+    updated_by: data.createdBy ?? null,
+  });
 
   if (!row) throw new Error("Failed to create skill");
   return rowToSkill(row);
@@ -9058,127 +8999,48 @@ export async function updateSkill(
   if (!existing) return null;
 
   const now = new Date().toISOString();
-  const sets: string[] = ["lastUpdatedAt = ?"];
-  const params: (string | number | null)[] = [now];
-
-  if (updates.name !== undefined) {
-    sets.push("name = ?");
-    params.push(updates.name);
-  }
-  if (updates.description !== undefined) {
-    sets.push("description = ?");
-    params.push(updates.description);
-  }
-  if (updates.content !== undefined) {
-    sets.push("content = ?");
-    params.push(updates.content);
-  }
-  if (updates.scope !== undefined) {
-    sets.push("scope = ?");
-    params.push(updates.scope);
-  }
-  if (updates.isEnabled !== undefined) {
-    sets.push("isEnabled = ?");
-    params.push(updates.isEnabled ? 1 : 0);
-  }
-  if (updates.systemDefault !== undefined) {
-    sets.push("systemDefault = ?");
-    params.push(updates.systemDefault ? 1 : 0);
-  }
-  if (updates.allowedTools !== undefined) {
-    sets.push("allowedTools = ?");
-    params.push(updates.allowedTools ?? null);
-  }
-  if (updates.model !== undefined) {
-    sets.push("model = ?");
-    params.push(updates.model ?? null);
-  }
-  if (updates.effort !== undefined) {
-    sets.push("effort = ?");
-    params.push(updates.effort ?? null);
-  }
-  if (updates.context !== undefined) {
-    sets.push("context = ?");
-    params.push(updates.context ?? null);
-  }
-  if (updates.agent !== undefined) {
-    sets.push("agent = ?");
-    params.push(updates.agent ?? null);
-  }
-  if (updates.disableModelInvocation !== undefined) {
-    sets.push("disableModelInvocation = ?");
-    params.push(updates.disableModelInvocation ? 1 : 0);
-  }
-  if (updates.userInvocable !== undefined) {
-    sets.push("userInvocable = ?");
-    params.push(updates.userInvocable ? 1 : 0);
-  }
-  if (updates.sourceUrl !== undefined) {
-    sets.push("sourceUrl = ?");
-    params.push(updates.sourceUrl ?? null);
-  }
-  if (updates.sourceRepo !== undefined) {
-    sets.push("sourceRepo = ?");
-    params.push(updates.sourceRepo ?? null);
-  }
-  if (updates.sourcePath !== undefined) {
-    sets.push("sourcePath = ?");
-    params.push(updates.sourcePath ?? null);
-  }
-  if (updates.sourceBranch !== undefined) {
-    sets.push("sourceBranch = ?");
-    params.push(updates.sourceBranch ?? "main");
-  }
-  if (updates.sourceHash !== undefined) {
-    sets.push("sourceHash = ?");
-    params.push(updates.sourceHash ?? null);
-  }
-  if (updates.isComplex !== undefined) {
-    sets.push("isComplex = ?");
-    params.push(updates.isComplex ? 1 : 0);
-  }
-  if (updates.lastFetchedAt !== undefined) {
-    sets.push("lastFetchedAt = ?");
-    params.push(updates.lastFetchedAt);
-  }
-  if (updates.updatedBy !== undefined) {
-    sets.push("updated_by = ?");
-    params.push(updates.updatedBy);
-  }
-  if (updates.updatedByAgentId !== undefined) {
-    sets.push("updatedByAgentId = ?");
-    params.push(updates.updatedByAgentId);
-  }
-
-  // Bump version when content changes
-  if (updates.content !== undefined) {
-    sets.push("version = version + 1");
-  }
-
-  params.push(id);
-  const row = await getDbClient().get<SkillRow>(
-    `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const nullable = (value: string | null | undefined) =>
+    value === undefined ? undefined : (value ?? null);
+  // Bumps the version when content changes.
+  const row = await getStorage().repos.skills.updateSkill(
+    id,
+    {
+      name: updates.name,
+      description: updates.description,
+      content: updates.content,
+      scope: updates.scope,
+      isEnabled: updates.isEnabled,
+      systemDefault: updates.systemDefault,
+      allowedTools: nullable(updates.allowedTools),
+      model: nullable(updates.model),
+      effort: nullable(updates.effort),
+      context: nullable(updates.context),
+      agent: nullable(updates.agent),
+      disableModelInvocation: updates.disableModelInvocation,
+      userInvocable: updates.userInvocable,
+      sourceUrl: nullable(updates.sourceUrl),
+      sourceRepo: nullable(updates.sourceRepo),
+      sourcePath: nullable(updates.sourcePath),
+      sourceBranch:
+        updates.sourceBranch === undefined ? undefined : (updates.sourceBranch ?? "main"),
+      sourceHash: nullable(updates.sourceHash),
+      isComplex: updates.isComplex,
+      lastFetchedAt: updates.lastFetchedAt,
+      updated_by: updates.updatedBy,
+      updatedByAgentId: updates.updatedByAgentId,
+    },
+    now,
   );
 
   return row ? rowToSkill(row) : null;
 }
 
 async function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
-  await getDbClient().run(
-    "UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?",
-    [now, skillId],
-  );
+  await getStorage().repos.skills.bumpSkillVersion(skillId, now);
 }
 
 export async function listSkillFileManifest(skillId: string): Promise<SkillFileManifestEntry[]> {
-  const rows = await getDbClient().query<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ?
-       ORDER BY path ASC`,
-    [skillId],
-  );
+  const rows = await getStorage().repos.skills.listSkillFiles(skillId);
   return rows.map((row) => {
     const { content: _content, ...manifest } = rowToSkillFile(row);
     return manifest;
@@ -9186,24 +9048,13 @@ export async function listSkillFileManifest(skillId: string): Promise<SkillFileM
 }
 
 export async function getSkillFiles(skillId: string): Promise<SkillFile[]> {
-  const rows = await getDbClient().query<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ?
-       ORDER BY path ASC`,
-    [skillId],
-  );
+  const rows = await getStorage().repos.skills.listSkillFiles(skillId);
   return rows.map(rowToSkillFile);
 }
 
 export async function getSkillFile(skillId: string, path: string): Promise<SkillFile | null> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const row = await getDbClient().get<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ? AND path = ?`,
-    [skillId, normalizedPath],
-  );
+  const row = await getStorage().repos.skills.findSkillFile(skillId, normalizedPath);
   return row ? rowToSkillFile(row) : null;
 }
 
@@ -9227,29 +9078,17 @@ async function upsertSkillFileUnchecked(
   now: string,
   bumpVersion: boolean,
 ): Promise<SkillFile> {
-  const row = await getDbClient().get<SkillFileRow>(
-    `INSERT INTO skill_files (
-        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(skillId, path) DO UPDATE SET
-        content = excluded.content,
-        mimeType = excluded.mimeType,
-        isBinary = excluded.isBinary,
-        size = excluded.size,
-        lastUpdatedAt = excluded.lastUpdatedAt
-      RETURNING *`,
-    [
-      id,
-      skillId,
-      payload.path,
-      payload.content,
-      payload.mimeType,
-      payload.isBinary ? 1 : 0,
-      payload.size,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.skills.upsertSkillFile({
+    id,
+    skillId,
+    path: payload.path,
+    content: payload.content,
+    mimeType: payload.mimeType,
+    isBinary: !!payload.isBinary,
+    size: payload.size,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
 
   if (!row) throw new Error("Failed to upsert skill file");
   if (bumpVersion) await bumpSkillVersion(skillId, now);
@@ -9265,7 +9104,7 @@ export async function upsertSkillFiles(
   await assertSkillFileLimits(skillId, normalized, false);
 
   const now = new Date().toISOString();
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const rows: SkillFile[] = [];
     for (const file of normalized) {
       rows.push(await upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false));
@@ -9277,11 +9116,8 @@ export async function upsertSkillFiles(
 
 export async function deleteSkillFile(skillId: string, path: string): Promise<boolean> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const result = await getDbClient().run("DELETE FROM skill_files WHERE skillId = ? AND path = ?", [
-    skillId,
-    normalizedPath,
-  ]);
-  if (result.changes > 0) {
+  const changes = await getStorage().repos.skills.deleteSkillFile(skillId, normalizedPath);
+  if (changes > 0) {
     await bumpSkillVersion(skillId);
     return true;
   }
@@ -9289,12 +9125,11 @@ export async function deleteSkillFile(skillId: string, path: string): Promise<bo
 }
 
 export async function deleteSkill(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM skills WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.skills.deleteSkill(id)) > 0;
 }
 
 export async function getSkillById(id: string): Promise<Skill | null> {
-  const row = await getDbClient().get<SkillRow>("SELECT * FROM skills WHERE id = ?", [id]);
+  const row = await getStorage().repos.skills.findSkillById(id);
   return row ? rowToSkill(row) : null;
 }
 
@@ -9303,10 +9138,7 @@ export async function getSkillByName(
   scope: SkillScope,
   ownerAgentId?: string,
 ): Promise<Skill | null> {
-  const row = await getDbClient().get<SkillRow>(
-    "SELECT * FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-    [name, scope, ownerAgentId ?? ""],
-  );
+  const row = await getStorage().repos.skills.findSkillByName(name, scope, ownerAgentId ?? "");
   return row ? rowToSkill(row) : null;
 }
 
@@ -9320,49 +9152,16 @@ export interface SkillFilters {
   includeContent?: boolean;
 }
 
-/**
- * Explicit column list used when `includeContent: false` — selects every
- * skill column except the heavy `content` (the full SKILL.md, avg ~10 KB),
- * which is replaced with an empty string so the row still satisfies `Skill`.
- */
-const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdByAgentId, updatedByAgentId, created_by, updated_by, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
-
 export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
-  const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
-  let query = `SELECT ${columns} FROM skills WHERE 1=1`;
-  const params: (string | number)[] = [];
-
-  if (filters?.type) {
-    query += " AND type = ?";
-    params.push(filters.type);
-  }
-  if (filters?.scope) {
-    query += " AND scope = ?";
-    params.push(filters.scope);
-  }
-  if (filters?.ownerAgentId) {
-    query += " AND ownerAgentId = ?";
-    params.push(filters.ownerAgentId);
-  }
-  if (filters?.isEnabled !== undefined) {
-    query += " AND isEnabled = ?";
-    params.push(filters.isEnabled ? 1 : 0);
-  }
-  if (filters?.search) {
-    query += " AND (name LIKE ? OR description LIKE ?)";
-    const term = `%${filters.search}%`;
-    params.push(term, term);
-  }
-
-  query += " ORDER BY name ASC";
-
-  if (filters?.limit) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-
-  const rows = await getDbClient().query<SkillRow>(query, params);
+  const rows = await getStorage().repos.skills.listSkills({
+    type: filters?.type,
+    scope: filters?.scope,
+    ownerAgentId: filters?.ownerAgentId,
+    isEnabled: filters?.isEnabled,
+    search: filters?.search,
+    limit: filters?.limit,
+    slim: filters?.includeContent === false,
+  });
   return rows.map(rowToSkill);
 }
 
@@ -9384,15 +9183,11 @@ export async function searchSkills(
   if (ranked.length > 0) return ranked.map(rowToSkill);
 
   const tokens = query.split(/\s+/).filter(Boolean);
-  const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
-  const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
-  const params = tokens.flatMap((token) => {
-    const term = `%${token}%`;
-    return [term, term, term];
-  });
-  const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY lower(name) = lower(?) DESC, name ASC LIMIT ?`,
-    [...params, query.trim(), limit],
+  const rows = await getStorage().repos.skills.searchSkillsBySubstring(
+    tokens,
+    query.trim(),
+    limit,
+    includeContent === false,
   );
   return rows.map(rowToSkill);
 }
@@ -9408,9 +9203,7 @@ export async function installSkill(agentId: string, skillId: string): Promise<Ag
 }
 
 export async function getSystemDefaultSkills(): Promise<Skill[]> {
-  const rows = await getDbClient().query<SkillRow>(
-    "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
-  );
+  const rows = await getStorage().repos.skills.listSystemDefaultSkills();
   return rows.map(rowToSkill);
 }
 
@@ -9431,27 +9224,7 @@ export async function getAgentSkills(
   agentId: string,
   activeOnly = true,
 ): Promise<SkillWithInstallInfo[]> {
-  const query = `
-    SELECT s.*, as2.isActive, as2.installedAt, 0 as sourceRank,
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
-    FROM skills s
-    JOIN agent_skills as2 ON s.id = as2.skillId
-    WHERE as2.agentId = ?
-      ${activeOnly ? "AND as2.isActive = 1" : ""}
-      AND s.isEnabled = 1
-    UNION ALL
-    SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
-    FROM skills s
-    WHERE (s.systemDefault = 1 OR s.scope = 'swarm')
-      AND s.isEnabled = 1
-    ORDER BY
-      sourceRank,
-      typeRank,
-      name
-  `;
-
-  const rows = await getDbClient().query<SkillWithInstallRow>(query, [agentId]);
+  const rows = await getStorage().repos.skills.listAgentSkills(agentId, activeOnly);
 
   // Deduplicate by name — personal skills take precedence (already sorted first)
   const seen = new Set<string>();
