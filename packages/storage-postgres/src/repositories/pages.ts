@@ -1,9 +1,7 @@
-import type { SqlQuery } from "@desplega/storage";
-import { BasePagesRepository } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import { BasePagesRepository, SqlQuery } from "@desplega/storage";
 
 export class PostgresPagesRepository extends BasePagesRepository {
   protected insertionOrder(): SqlQuery {
-    return notOnPostgresYet("PostgresPagesRepository.insertionOrder");
+    return new SqlQuery(['"_rowid"'], []);
   }
 }
