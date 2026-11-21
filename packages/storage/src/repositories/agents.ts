@@ -1,4 +1,4 @@
-import { jsonText, likeAsciiCi, nowIso } from "../dialect";
+import { forUpdate, jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 import { readableSessionSql } from "./tasks";
@@ -351,6 +351,11 @@ export interface AgentsRepository {
   /** Tasks in one of the agent's slots: its in-progress tasks and the offers it is reviewing. */
   countActiveTasks(agentId: string): Promise<number>;
   /**
+   * Locks the agent row for the rest of the transaction (Postgres `FOR UPDATE`).
+   * Serializes the transactions that hold it for one agent. True when the row exists.
+   */
+  lockAgent(agentId: string): Promise<boolean>;
+  /**
    * Tasks created per UTC day (`YYYY-MM-DD`) on or after `sinceDay`, oldest
    * first. Days with no task are absent.
    */
@@ -452,6 +457,12 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   protected notExtensionAgent(): SqlQuery {
     return notExtension;
+  }
+
+  async lockAgent(agentId: string): Promise<boolean> {
+    return (
+      (await this.db.get(sql`SELECT id FROM agents WHERE id = ${agentId}${forUpdate}`)) !== null
+    );
   }
 
   async countActiveTasks(agentId: string): Promise<number> {

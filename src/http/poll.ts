@@ -400,6 +400,11 @@ export async function handlePoll(
       // same body run again under BEGIN IMMEDIATE, where every claim and its
       // capacity/budget check stay atomic exactly as before.
       const pollBody = async (probe: boolean): Promise<PollTxnResult | typeof NEEDS_WRITE> => {
+        // The write pass runs at READ COMMITTED (see below). Its first statement
+        // locks this agent's row, so the write passes of one agent run one at a
+        // time: capacity, offers, pending tasks, mentions and runtime rows are
+        // all keyed by the agent.
+        if (!probe) await getStorage().repos.agents.lockAgent(myAgentId);
         const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
@@ -462,6 +467,8 @@ export async function handlePoll(
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
           if (probe) return NEEDS_WRITE;
+          // Lock the offer before claimOfferedTask re-reads it (READ COMMITTED).
+          await getStorage().repos.tasks.lockTask(firstOfferedTask.id);
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
@@ -487,6 +494,12 @@ export async function handlePoll(
           const pendingTask = await getPendingTaskForAgent(myAgentId, pendingProbe);
           if (pendingProbe && (pendingTask || pendingProbe.skipLogDue)) return NEEDS_WRITE;
           if (pendingTask) {
+            // READ COMMITTED: lock the task, then confirm it is still this agent's
+            // and unchanged; a concurrent reassignment waits for the next poll.
+            const locked = await getStorage().repos.tasks.lockTask(pendingTask.id);
+            if (locked?.status !== pendingTask.status || locked.agentId !== myAgentId) {
+              return { trigger: null };
+            }
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
@@ -797,9 +810,18 @@ export async function handlePoll(
       };
       const probed = await getStorage().transaction(() => pollBody(true), { readOnly: true });
       // The write pass never returns NEEDS_WRITE: every guard above is `if (probe)`.
+      // Decision D7 opt-down: on Postgres the write pass runs at READ COMMITTED.
+      // Reason: under SERIALIZABLE, concurrent polls retried in 92% of write
+      // passes (stress-poll-claim, ledger part 6), because every poll reads the
+      // same pool rows. Locks that keep the old invariants: the agent row
+      // (one write pass per agent), the offered or pending task row before its
+      // claim, and `FOR UPDATE SKIP LOCKED` plus the status guard on the pool
+      // claim (a held candidate is skipped, never claimed twice).
       result =
         probed === NEEDS_WRITE
-          ? ((await getStorage().transaction(() => pollBody(false))) as PollTxnResult)
+          ? ((await getStorage().transaction(() => pollBody(false), {
+              isolation: "read committed",
+            })) as PollTxnResult)
           : probed;
     } catch (error) {
       console.error("[/api/poll] Database error:", error);

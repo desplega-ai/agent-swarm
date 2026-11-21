@@ -28,4 +28,6 @@ export const postgresDialect: Dialect = {
   leastStrict: (a: SqlQuery, b: SqlQuery) =>
     sql`(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL ELSE LEAST(${a}, ${b}) END)`,
   jsonText: (text: SqlQuery) => sql`CAST(${text} AS text)::jsonb`,
+  forUpdate: (skipLocked: boolean) =>
+    skipLocked ? sql` FOR UPDATE SKIP LOCKED` : sql` FOR UPDATE`,
 };

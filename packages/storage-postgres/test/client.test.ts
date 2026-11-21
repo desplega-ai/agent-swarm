@@ -56,6 +56,30 @@ describe("postgres client", () => {
     expect(pids[0]).toBe(pids[1]);
   });
 
+  test("isolation: SERIALIZABLE by default, READ COMMITTED on opt-down (D7)", async () => {
+    const level = () =>
+      client.transaction(async () =>
+        String(
+          (await client.get<{ l: string }>(`SELECT current_setting('transaction_isolation') AS l`))
+            ?.l,
+        ),
+      );
+    expect(await level()).toBe("serializable");
+    expect(
+      await client.transaction(
+        async () =>
+          String(
+            (
+              await client.get<{ l: string }>(
+                `SELECT current_setting('transaction_isolation') AS l`,
+              )
+            )?.l,
+          ),
+        { isolation: "read committed" },
+      ),
+    ).toBe("read committed");
+  });
+
   test("a nested transaction is a savepoint: its failure keeps the outer one usable", async () => {
     await client.transaction(async () => {
       await client.run(`INSERT INTO t VALUES ('s1', 'x', 0)`);

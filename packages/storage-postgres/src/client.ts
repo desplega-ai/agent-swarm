@@ -251,7 +251,8 @@ export class PostgresClient implements DbClient {
       let ctx: TxContext | undefined;
       try {
         const value = await this.pool.begin(
-          opts.readOnly ? "read only" : "read write",
+          (opts.isolation === "read committed" ? "isolation level read committed " : "") +
+            (opts.readOnly ? "read only" : "read write"),
           async (handle) => {
             ctx = {
               closed: false,

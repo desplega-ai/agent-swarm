@@ -9,6 +9,8 @@ export {
 } from "./client";
 export {
   type Dialect,
+  forUpdate,
+  forUpdateSkipLocked,
   greatestStrict,
   isoTimestampText,
   jsonText,

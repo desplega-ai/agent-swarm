@@ -1,4 +1,11 @@
-import { greatestStrict, jsonText, likeAsciiCi, nowIso } from "../dialect";
+import {
+  forUpdate,
+  forUpdateSkipLocked,
+  greatestStrict,
+  jsonText,
+  likeAsciiCi,
+  nowIso,
+} from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -1186,7 +1193,14 @@ export interface TasksRepository {
   insertTask(row: NewTaskRow): Promise<TaskRow | null>;
   insertRoutingDecision(row: RoutingDecisionRow): Promise<void>;
   /** unassigned -> in_progress for `agentId`. */
+  /**
+   * unassigned -> in_progress for `agentId`. The row is taken with
+   * `FOR UPDATE SKIP LOCKED` (Postgres): a row another transaction holds is
+   * skipped (null) instead of waited on, so the caller moves to its next candidate.
+   */
   claimUnassignedTask(taskId: string, agentId: string, now: string): Promise<TaskRow | null>;
+  /** Locks the task row for the rest of the transaction (Postgres `FOR UPDATE`) and returns it. */
+  lockTask(taskId: string): Promise<TaskRow | null>;
   /**
    * pending/in_progress -> unassigned. With `wake`, only a pending, non-human-pinned
    * task still held by `wake.agentId` with the same `pool_wake_at`.
@@ -3098,7 +3112,13 @@ export abstract class BaseTasksRepository implements TasksRepository {
   claimUnassignedTask(taskId: string, agentId: string, now: string): Promise<TaskRow | null> {
     return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET "agentId" = ${agentId}, status = 'in_progress', "lastUpdatedAt" = ${now}
-      WHERE id = ${taskId} AND status = 'unassigned' RETURNING *`);
+      WHERE id = (
+        SELECT id FROM agent_tasks WHERE id = ${taskId} AND status = 'unassigned'${forUpdateSkipLocked}
+      ) AND status = 'unassigned' RETURNING *`);
+  }
+
+  lockTask(taskId: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`SELECT * FROM agent_tasks WHERE id = ${taskId}${forUpdate}`);
   }
 
   releaseTaskToPool(

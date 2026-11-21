@@ -32,6 +32,14 @@ export type TransactionOptions = {
    * `DbTransactionDeadlineError`.
    */
   deadlineAt?: number;
+  /**
+   * Decision D7 opt-down: run this transaction at READ COMMITTED instead of
+   * SERIALIZABLE (Postgres). Allowed only for a site whose stress scenario
+   * measured a retry rate above 5%; the call site must take explicit row
+   * locks for every read-then-write invariant and state the reason in a
+   * comment. SQLite ignores it: its write transactions are serial.
+   */
+  isolation?: "read committed";
 };
 
 export class DbTransactionDeadlineError extends Error {

@@ -41,6 +41,12 @@ export interface Dialect {
    * SQLite stores that text already; Postgres formats its timestamptz.
    */
   isoTimestampText(column: SqlQuery): SqlQuery;
+  /**
+   * Row-lock clause appended to a SELECT (decision D7). Postgres: `FOR UPDATE`,
+   * or `FOR UPDATE SKIP LOCKED` with `skipLocked`. SQLite: empty, because a
+   * write transaction there already holds the database write lock.
+   */
+  forUpdate(skipLocked: boolean): SqlQuery;
 }
 
 /** `${nowIso}` inside a `sql` template. */
@@ -70,6 +76,11 @@ export function leastStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
 export function isoTimestampText(column: SqlQuery): DialectFragment {
   return dialectFragment((d) => d.isoTimestampText(column));
 }
+
+/** `${forUpdate}` at the end of a SELECT: lock the selected rows (Postgres). */
+export const forUpdate: DialectFragment = dialectFragment((d) => d.forUpdate(false));
+/** `${forUpdateSkipLocked}` at the end of a SELECT: lock the rows no other transaction holds. */
+export const forUpdateSkipLocked: DialectFragment = dialectFragment((d) => d.forUpdate(true));
 
 /** `${jsonText(value)}` inside a `sql` template: the bound JSON text, parsed on Postgres. */
 export function jsonText(text: string | null): DialectFragment {

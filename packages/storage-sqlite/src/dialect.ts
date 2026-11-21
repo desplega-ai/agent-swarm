@@ -15,4 +15,6 @@ export const sqliteDialect: Dialect = {
   isoTimestampText: (column: SqlQuery) => column,
   leastStrict: (a: SqlQuery, b: SqlQuery) => sql`min(${a}, ${b})`,
   jsonText: (text: SqlQuery) => text,
+  // A SQLite write transaction holds the database write lock: no row locks.
+  forUpdate: () => sql``,
 };
