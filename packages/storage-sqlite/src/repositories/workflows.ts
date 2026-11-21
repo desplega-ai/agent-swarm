@@ -1,4 +1,6 @@
 import {
+  type ApprovalListFilter,
+  type ApprovalRequestSummaryRow,
   BaseWorkflowsRepository,
   type SqlQuery,
   type StuckWorkflowRunRow,
@@ -145,5 +147,13 @@ export class SqliteWorkflowsRepository extends BaseWorkflowsRepository {
          AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ${afterStepId})
        LIMIT 1`);
     return row != null;
+  }
+  listApprovalSummaries(f: ApprovalListFilter): Promise<ApprovalRequestSummaryRow[]> {
+    // Project in SQL so the heavy JSON columns are never read or parsed.
+    return this.db.query<ApprovalRequestSummaryRow>(sql`
+      SELECT id, title, "workflowRunId", "workflowRunStepId", "sourceTaskId", status, "resolvedBy",
+             "resolvedAt", "timeoutSeconds", "expiresAt", created_by, "createdAt", "updatedAt",
+             json_array_length(questions) AS "questionCount"
+        FROM approval_requests${this.approvalListTail(f)}`);
   }
 }

@@ -221,7 +221,7 @@ import {
 import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
-  approvalRequestListClause,
+  approvalListFilter,
   scheduleApprovalCardUpdates,
   scrubApprovalVotesJson,
 } from "./db/approvals";
@@ -9320,28 +9320,7 @@ export interface ApprovalRequest {
   updatedAt: string;
 }
 
-interface ApprovalRequestRow {
-  id: string;
-  title: string;
-  questions: string;
-  workflowRunId: string | null;
-  workflowRunStepId: string | null;
-  sourceTaskId: string | null;
-  approvers: string;
-  status: string;
-  responses: string | null;
-  approvals: string | null;
-  resolvedBy: string | null;
-  resolvedAt: string | null;
-  resolutionReason: string | null;
-  cancellationNotificationClaims: string | null;
-  timeoutSeconds: number | null;
-  expiresAt: string | null;
-  notificationChannels: string | null;
-  created_by: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+type ApprovalRequestRow = NonNullable<Awaited<ReturnType<WorkflowsRepo["findApprovalById"]>>>;
 
 function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
   return {
@@ -9386,7 +9365,7 @@ export async function createApprovalRequest(data: {
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = await getDbClient().transaction(async () => {
+  const row = await getStorage().transaction(async () => {
     let status: ApprovalRequest["status"] = "pending";
     let resolutionReason: string | null = null;
     // A request linked to an existing run, with or without a step, is born
@@ -9415,42 +9394,32 @@ export async function createApprovalRequest(data: {
       }
     }
 
-    return getDbClient().get<ApprovalRequestRow>(
-      `INSERT INTO approval_requests
-         (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId,
-          approvers, status, resolutionReason, resolvedAt, timeoutSeconds, expiresAt,
-          notificationChannels, created_by, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        scrubSecrets(data.title),
-        scrubJsonValue(data.questions),
-        data.workflowRunId ?? null,
-        data.workflowRunStepId ?? null,
-        data.sourceTaskId ?? null,
-        JSON.stringify(data.approvers),
-        status,
-        resolutionReason == null ? null : scrubSecrets(resolutionReason),
-        status === "cancelled" ? now : null,
-        data.timeoutSeconds ?? null,
-        expiresAt,
-        data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
-        data.createdBy ?? null,
-        now,
-        now,
-      ],
-    );
+    return getStorage().repos.workflows.insertApproval({
+      id: data.id,
+      title: scrubSecrets(data.title),
+      questions: scrubJsonValue(data.questions),
+      workflowRunId: data.workflowRunId ?? null,
+      workflowRunStepId: data.workflowRunStepId ?? null,
+      sourceTaskId: data.sourceTaskId ?? null,
+      approvers: JSON.stringify(data.approvers),
+      status,
+      resolutionReason: resolutionReason == null ? null : scrubSecrets(resolutionReason),
+      resolvedAt: status === "cancelled" ? now : null,
+      timeoutSeconds: data.timeoutSeconds ?? null,
+      expiresAt,
+      notificationChannels: data.notificationChannels
+        ? JSON.stringify(data.notificationChannels)
+        : null,
+      createdBy: data.createdBy ?? null,
+      now,
+    });
   });
 
   return rowToApprovalRequest(row!);
 }
 
 export async function getApprovalRequestById(id: string): Promise<ApprovalRequest | null> {
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    "SELECT * FROM approval_requests WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.workflows.findApprovalById(id);
   return row ? rowToApprovalRequest(row) : null;
 }
 
@@ -9466,43 +9435,19 @@ export async function resolveApprovalRequest(
   options?: { requireActionableWorkflow?: boolean },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const actionableWorkflowClause = options?.requireActionableWorkflow
-    ? `AND (
-         workflowRunId IS NULL
-         OR (
-           EXISTS (
-             SELECT 1 FROM workflow_runs
-             WHERE id = approval_requests.workflowRunId
-               AND status IN ('running', 'waiting')
-           )
-           AND EXISTS (
-           SELECT 1 FROM workflow_run_steps
-             WHERE id = approval_requests.workflowRunStepId
-               AND runId = approval_requests.workflowRunId
-               AND status = 'waiting'
-           )
-         )
-       )`
-    : "";
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = ?, responses = ?, approvals = COALESCE(?, approvals), resolvedBy = ?,
-           resolutionReason = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-         ${actionableWorkflowClause}
-       RETURNING *`,
-    [
-      data.status,
+  const row = await getStorage().repos.workflows.resolveApproval(
+    id,
+    {
+      status: data.status,
       // Sealed, not scrubbed: recovery resumes the workflow from this answer,
       // so it must stay byte-exact. Votes are diagnostic and get redacted.
-      data.responses ? sealJson(data.responses) : null,
-      data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
-      data.resolvedBy ?? null,
-      data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
+      responses: data.responses ? sealJson(data.responses) : null,
+      approvals: data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
+      resolvedBy: data.resolvedBy ?? null,
+      resolutionReason: data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
       now,
-      now,
-      id,
-    ],
+    },
+    options?.requireActionableWorkflow === true,
   );
   if (!row) return null;
   const resolved = rowToApprovalRequest(row);
@@ -9517,12 +9462,11 @@ export async function cancelApprovalRequestById(
   data: { reason: string; resolvedBy: string | null },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = 'cancelled', resolutionReason = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
+  const row = await getStorage().repos.workflows.cancelApproval(
+    id,
+    scrubSecrets(data.reason),
+    data.resolvedBy,
+    now,
   );
   if (!row) return null;
   const cancelled = rowToApprovalRequest(row);
@@ -9535,12 +9479,10 @@ export async function cancelPendingApprovalRequestsForRun(
   reason: string,
 ): Promise<ApprovalRequest[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
-       WHERE workflowRunId = ? AND status = 'pending'
-       RETURNING *`,
-    [scrubSecrets(reason), now, now, workflowRunId],
+  const rows = await getStorage().repos.workflows.cancelPendingApprovalsOfRun(
+    workflowRunId,
+    scrubSecrets(reason),
+    now,
   );
   const cancelled = rows.map(rowToApprovalRequest);
   scheduleApprovalCardUpdates(cancelled);
@@ -9550,22 +9492,14 @@ export async function cancelPendingApprovalRequestsForRun(
 export async function listCancelledApprovalRequestsForRun(
   workflowRunId: string,
 ): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE workflowRunId = ? AND status = 'cancelled'`,
-    [workflowRunId],
-  );
+  const rows = await getStorage().repos.workflows.listCancelledApprovalsOfRun(workflowRunId);
   return rows.map(rowToApprovalRequest);
 }
 
 export async function listCancelledApprovalRequestsForStep(
   workflowRunStepId: string,
 ): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE workflowRunStepId = ? AND status = 'cancelled'`,
-    [workflowRunStepId],
-  );
+  const rows = await getStorage().repos.workflows.listCancelledApprovalsOfStep(workflowRunStepId);
   return rows.map(rowToApprovalRequest);
 }
 
@@ -9580,12 +9514,10 @@ export async function claimApprovalCancellationNotification(
   notificationKey: string,
   options?: { anyTerminal?: boolean },
 ): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
-  const statusClause = options?.anyTerminal ? "status <> 'pending'" : "status = 'cancelled'";
-  return getDbClient().transaction(async () => {
-    const row = await getDbClient().get<ApprovalRequestRow>(
-      `SELECT * FROM approval_requests WHERE id = ? AND ${statusClause}`,
-      [id],
-    );
+  const anyTerminal = options?.anyTerminal === true;
+  const workflows = getStorage().repos.workflows;
+  return getStorage().transaction(async () => {
+    const row = await workflows.findSettledApproval(id, anyTerminal);
     if (!row) return null;
     const claims = row.cancellationNotificationClaims
       ? (JSON.parse(row.cancellationNotificationClaims) as Record<
@@ -9606,12 +9538,7 @@ export async function claimApprovalCancellationNotification(
     const now = new Date().toISOString();
     const leaseToken = crypto.randomUUID();
     claims[notificationKey] = { claimedAt: now, leaseToken };
-    await getDbClient().run(
-      `UPDATE approval_requests
-         SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND ${statusClause}`,
-      [JSON.stringify(claims), now, id],
-    );
+    await workflows.setApprovalNotificationClaims(id, JSON.stringify(claims), now, anyTerminal);
     return { approval: rowToApprovalRequest(row), leaseToken };
   });
 }
@@ -9638,11 +9565,9 @@ async function updateApprovalCancellationNotificationClaim(
   leaseToken: string,
   value: "delivered" | null,
 ): Promise<void> {
-  await getDbClient().transaction(async () => {
-    const row = await getDbClient().get<{ claims: string | null }>(
-      "SELECT cancellationNotificationClaims AS claims FROM approval_requests WHERE id = ?",
-      [id],
-    );
+  const workflows = getStorage().repos.workflows;
+  await getStorage().transaction(async () => {
+    const row = await workflows.getApprovalNotificationClaims(id);
     const claims = row?.claims
       ? (JSON.parse(row.claims) as Record<
           string,
@@ -9655,11 +9580,11 @@ async function updateApprovalCancellationNotificationClaim(
     }
     if (value === null) delete claims[notificationKey];
     else claims[notificationKey] = value;
-    await getDbClient().run(
-      `UPDATE approval_requests
-         SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status <> 'pending'`,
-      [JSON.stringify(claims), new Date().toISOString(), id],
+    await workflows.setApprovalNotificationClaims(
+      id,
+      JSON.stringify(claims),
+      new Date().toISOString(),
+      true,
     );
   });
 }
@@ -9669,20 +9594,17 @@ export async function updateApprovalRequestNotifications(
   notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    "UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?",
-    [JSON.stringify(notificationChannels), now, id],
+  await getStorage().repos.workflows.setApprovalNotificationChannels(
+    id,
+    JSON.stringify(notificationChannels),
+    now,
   );
 }
 
 export async function listApprovalRequests(
   filters?: ApprovalRequestListFilters,
 ): Promise<ApprovalRequest[]> {
-  const { sql, params } = approvalRequestListClause(filters);
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests ${sql}`,
-    params,
-  );
+  const rows = await getStorage().repos.workflows.listApprovals(approvalListFilter(filters));
   return rows.map(rowToApprovalRequest);
 }
 
@@ -9698,23 +9620,7 @@ export interface StuckApprovalRun {
 }
 
 export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
-  const rows = await getDbClient().query<StuckApprovalRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        wr.workflowId,
-        ar.id as approvalId,
-        ar.status as approvalStatus,
-        ar.responses as approvalResponses,
-        ar.expiresAt
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
-      JOIN approval_requests ar ON ar.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
-        AND (ar.status IN ('approved', 'rejected', 'timeout')
-             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
-  );
+  const rows = await getStorage().repos.workflows.listStuckApprovalRuns();
   return rows.map((row) => ({
     ...row,
     approvalResponses:
@@ -9723,10 +9629,7 @@ export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
 }
 
 export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
-    [stepId],
-  );
+  const row = await getStorage().repos.workflows.findApprovalByStepId(stepId);
   return row ? rowToApprovalRequest(row) : null;
 }
 
@@ -9734,13 +9637,8 @@ export async function getApprovalRequestByStepId(stepId: string): Promise<Approv
 export async function getExpiredPendingApprovals(opts?: {
   now?: string;
 }): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE status = 'pending'
-         AND expiresAt IS NOT NULL
-         AND expiresAt < ?
-       ORDER BY expiresAt ASC`,
-    [opts?.now ?? new Date().toISOString()],
+  const rows = await getStorage().repos.workflows.listExpiredPendingApprovals(
+    opts?.now ?? new Date().toISOString(),
   );
   return rows.map(rowToApprovalRequest);
 }
@@ -9751,14 +9649,7 @@ export async function getExpiredPendingApprovals(opts?: {
 export async function getStaleApprovalRequests(opts: {
   cutoff: string;
 }): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE status = 'pending'
-         AND expiresAt IS NULL
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [opts.cutoff],
-  );
+  const rows = await getStorage().repos.workflows.listStalePendingApprovals(opts.cutoff);
   return rows.map(rowToApprovalRequest);
 }
 
@@ -9772,22 +9663,7 @@ export async function getStaleApprovalRequests(opts: {
 // race-safe transition gate — concurrent callers (poller + bus listener)
 // rely on `WHERE status='pending'` so only the first one wins.
 
-interface WaitStateRowDb {
-  id: string;
-  workflowRunId: string;
-  workflowRunStepId: string;
-  mode: string;
-  wakeUpAt: string | null;
-  eventName: string | null;
-  eventFilter: string | null;
-  expiresAt: string | null;
-  status: string;
-  firedPayload: string | null;
-  resolvedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  eventScope: string;
-}
+type WaitStateRowDb = NonNullable<Awaited<ReturnType<WorkflowsRepo["findWaitStateById"]>>>;
 
 function rowToWaitState(row: WaitStateRowDb): WaitStateRow {
   let parsedFilter: WaitStateRow["eventFilter"] = null;
@@ -9835,34 +9711,26 @@ export interface CreateWaitStateInput {
 
 export async function createWaitState(input: CreateWaitStateInput): Promise<WaitStateRow> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WaitStateRowDb>(
-    `INSERT INTO wait_states
-         (id, workflowRunId, workflowRunStepId, mode, wakeUpAt, eventName, eventFilter, expiresAt, eventScope, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      input.id,
-      input.workflowRunId,
-      input.workflowRunStepId,
-      input.mode,
-      input.wakeUpAt ?? null,
-      input.eventName ?? null,
+  const row = await getStorage().repos.workflows.insertWaitState({
+    id: input.id,
+    workflowRunId: input.workflowRunId,
+    workflowRunStepId: input.workflowRunStepId,
+    mode: input.mode,
+    wakeUpAt: input.wakeUpAt ?? null,
+    eventName: input.eventName ?? null,
+    eventFilter:
       input.eventFilter !== undefined && input.eventFilter !== null
         ? JSON.stringify(input.eventFilter)
         : null,
-      input.expiresAt ?? null,
-      input.scope ?? "run",
-      now,
-      now,
-    ],
-  );
+    expiresAt: input.expiresAt ?? null,
+    eventScope: input.scope ?? "run",
+    now,
+  });
   return rowToWaitState(row!);
 }
 
 export async function getWaitStateById(id: string): Promise<WaitStateRow | null> {
-  const row = await getDbClient().get<WaitStateRowDb>("SELECT * FROM wait_states WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.workflows.findWaitStateById(id);
   return row ? rowToWaitState(row) : null;
 }
 
@@ -9871,10 +9739,7 @@ export async function getWaitStateById(id: string): Promise<WaitStateRow | null>
  * the same wait node finds its existing row instead of inserting a duplicate.
  */
 export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow | null> {
-  const row = await getDbClient().get<WaitStateRowDb>(
-    "SELECT * FROM wait_states WHERE workflowRunStepId = ?",
-    [stepId],
-  );
+  const row = await getStorage().repos.workflows.findWaitStateByStepId(stepId);
   return row ? rowToWaitState(row) : null;
 }
 
@@ -9884,17 +9749,7 @@ export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow
  *   - mode='event' with non-null `expiresAt <= now` (timeout branch).
  */
 export async function getDueWaitStates(): Promise<WaitStateRow[]> {
-  const rows = await getDbClient().query<WaitStateRowDb>(
-    `SELECT * FROM wait_states
-       WHERE status = 'pending'
-         AND (
-           (mode = 'time' AND wakeUpAt IS NOT NULL
-              AND wakeUpAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           OR
-           (mode = 'event' AND expiresAt IS NOT NULL
-              AND expiresAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         )`,
-  );
+  const rows = await getStorage().repos.workflows.listDueWaitStates();
   return rows.map(rowToWaitState);
 }
 
@@ -9903,11 +9758,7 @@ export async function getDueWaitStates(): Promise<WaitStateRow[]> {
  * by the wait-bus subscription system to register one listener per event name.
  */
 export async function getPendingEventWaitNames(): Promise<string[]> {
-  const rows = await getDbClient().query<{ eventName: string }>(
-    `SELECT DISTINCT eventName FROM wait_states
-       WHERE status = 'pending' AND eventName IS NOT NULL`,
-  );
-  return rows.map((r) => r.eventName);
+  return getStorage().repos.workflows.listPendingEventWaitNames();
 }
 
 /**
@@ -9919,19 +9770,7 @@ export async function getPendingWaitsByEvent(
   eventName: string,
   runId?: string,
 ): Promise<WaitStateRow[]> {
-  if (runId !== undefined) {
-    const rows = await getDbClient().query<WaitStateRowDb>(
-      `SELECT * FROM wait_states
-         WHERE status = 'pending' AND mode = 'event' AND eventName = ? AND workflowRunId = ?`,
-      [eventName, runId],
-    );
-    return rows.map(rowToWaitState);
-  }
-  const rows = await getDbClient().query<WaitStateRowDb>(
-    `SELECT * FROM wait_states
-       WHERE status = 'pending' AND mode = 'event' AND eventName = ?`,
-    [eventName],
-  );
+  const rows = await getStorage().repos.workflows.listPendingWaitsByEvent(eventName, runId);
   return rows.map(rowToWaitState);
 }
 
@@ -9945,18 +9784,11 @@ export async function resolveWaitState(
   data: { status: Exclude<WaitStateStatus, "pending">; firedPayload?: unknown },
 ): Promise<{ updated: boolean; row: WaitStateRow | null }> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WaitStateRowDb>(
-    `UPDATE wait_states
-       SET status = ?, firedPayload = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [
-      data.status,
-      data.firedPayload !== undefined ? JSON.stringify(data.firedPayload) : null,
-      now,
-      now,
-      id,
-    ],
+  const row = await getStorage().repos.workflows.resolveWaitState(
+    id,
+    data.status,
+    data.firedPayload !== undefined ? JSON.stringify(data.firedPayload) : null,
+    now,
   );
   return { updated: row !== null, row: row ? rowToWaitState(row) : null };
 }
@@ -9984,36 +9816,7 @@ export interface StuckWaitRun {
  * recovery avoids the up-to-5s startup latency window for stuck runs.
  */
 export async function getStuckWaitRuns(): Promise<StuckWaitRun[]> {
-  return getDbClient().query<StuckWaitRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        wr.workflowId,
-        ws.id as waitId,
-        ws.mode as waitMode,
-        ws.status as waitStatus,
-        ws.wakeUpAt as wakeUpAt,
-        ws.expiresAt as expiresAt,
-        ws.firedPayload as firedPayload
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting' AND wrs.nodeType = 'wait'
-      JOIN wait_states ws ON ws.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
-        AND (
-          ws.status IN ('fired', 'timeout')
-          OR (
-            ws.status = 'pending'
-            AND (
-              (ws.wakeUpAt IS NOT NULL
-                AND ws.wakeUpAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-              OR
-              (ws.expiresAt IS NOT NULL
-                AND ws.expiresAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-          )
-        )`,
-  );
+  return getStorage().repos.workflows.listStuckWaitRuns();
 }
 
 // ============================================================================

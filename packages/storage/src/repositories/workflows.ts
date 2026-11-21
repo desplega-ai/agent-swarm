@@ -1,4 +1,4 @@
-import { likeAsciiCi } from "../dialect";
+import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -272,6 +272,134 @@ export type StuckWorkflowRunRow = {
   workflowId: string;
 };
 
+export type ApprovalRequestRow = {
+  id: string;
+  title: string;
+  questions: string;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: string;
+  status: string;
+  responses: string | null;
+  approvals: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  resolutionReason: string | null;
+  cancellationNotificationClaims: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: string | null;
+  created_by: string | null;
+  updated_by?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Slim approval list row: `questionCount` replaces the JSON columns. */
+export type ApprovalRequestSummaryRow = {
+  id: string;
+  title: string;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  status: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  created_by: string | null;
+  createdAt: string;
+  updatedAt: string;
+  questionCount: number | null;
+};
+
+export type NewApprovalRequest = {
+  id: string;
+  title: string;
+  questions: string;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: string;
+  status: string;
+  resolutionReason: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: string | null;
+  createdBy: string | null;
+  now: string;
+};
+
+export type ApprovalResolution = {
+  status: string;
+  /** Sealed JSON text. */
+  responses: string | null;
+  /** Scrubbed votes JSON; null keeps the stored votes. */
+  approvals: string | null;
+  resolvedBy: string | null;
+  resolutionReason: string | null;
+  now: string;
+};
+
+/** `listApprovals` filters. Newest first. */
+export type ApprovalListFilter = { status?: string; workflowRunId?: string; limit: number };
+
+export type StuckApprovalRunRow = {
+  runId: string;
+  stepId: string;
+  nodeId: string;
+  workflowId: string;
+  approvalId: string;
+  approvalStatus: string;
+  approvalResponses: string | null;
+  expiresAt: string | null;
+};
+
+export type WaitStateRow = {
+  id: string;
+  workflowRunId: string;
+  workflowRunStepId: string;
+  mode: string;
+  wakeUpAt: string | null;
+  eventName: string | null;
+  eventFilter: string | null;
+  expiresAt: string | null;
+  status: string;
+  firedPayload: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  eventScope: string;
+};
+
+export type NewWaitState = {
+  id: string;
+  workflowRunId: string;
+  workflowRunStepId: string;
+  mode: string;
+  wakeUpAt: string | null;
+  eventName: string | null;
+  eventFilter: string | null;
+  expiresAt: string | null;
+  eventScope: string;
+  now: string;
+};
+
+export type StuckWaitRunRow = {
+  runId: string;
+  stepId: string;
+  nodeId: string;
+  workflowId: string;
+  waitId: string;
+  waitMode: string;
+  waitStatus: string;
+  wakeUpAt: string | null;
+  expiresAt: string | null;
+  firedPayload: string | null;
+};
+
 /**
  * Every `workflow_runs` column but `context` and `context_replay`. `triggerData`
  * stays: it is small, and stored scripts read it off list rows (dedupe by
@@ -509,6 +637,105 @@ export interface WorkflowsRepository {
   /** Newest version first. */
   listVersions(workflowId: string): Promise<WorkflowVersionRow[]>;
   getVersion(workflowId: string, version: number): Promise<WorkflowVersionRow | null>;
+  // --- approval requests -------------------------------------------------
+
+  insertApproval(approval: NewApprovalRequest): Promise<ApprovalRequestRow | null>;
+  findApprovalById(id: string): Promise<ApprovalRequestRow | null>;
+  /** The step's first request by insertion order. */
+  findApprovalByStepId(stepId: string): Promise<ApprovalRequestRow | null>;
+  /**
+   * Settles a pending request. `requireActionableWorkflow` also requires a
+   * linked run to be running or waiting with the step still waiting.
+   */
+  resolveApproval(
+    id: string,
+    resolution: ApprovalResolution,
+    requireActionableWorkflow: boolean,
+  ): Promise<ApprovalRequestRow | null>;
+  /** Cancels one pending request. */
+  cancelApproval(
+    id: string,
+    reason: string,
+    resolvedBy: string | null,
+    now: string,
+  ): Promise<ApprovalRequestRow | null>;
+  /** Cancels the run's pending requests, returned in the engine's update order. */
+  cancelPendingApprovalsOfRun(
+    runId: string,
+    reason: string,
+    now: string,
+  ): Promise<ApprovalRequestRow[]>;
+  /** Cancelled requests of the run, in insertion order. */
+  listCancelledApprovalsOfRun(runId: string): Promise<ApprovalRequestRow[]>;
+  /** Cancelled requests of the step, in insertion order. */
+  listCancelledApprovalsOfStep(stepId: string): Promise<ApprovalRequestRow[]>;
+  /** The request when it is settled: cancelled, or any terminal status with `anyTerminal`. */
+  findSettledApproval(id: string, anyTerminal: boolean): Promise<ApprovalRequestRow | null>;
+  /** Writes the notification claims while the request is settled (as in `findSettledApproval`). */
+  setApprovalNotificationClaims(
+    id: string,
+    claims: string,
+    now: string,
+    anyTerminal: boolean,
+  ): Promise<void>;
+  /** The stored notification claims, or null when the request is missing. */
+  getApprovalNotificationClaims(id: string): Promise<{ claims: string | null } | null>;
+  setApprovalNotificationChannels(id: string, channels: string, now: string): Promise<void>;
+  /** Newest `createdAt` first, ties in insertion order. */
+  listApprovals(filter: ApprovalListFilter): Promise<ApprovalRequestRow[]>;
+  /** `listApprovals` projected to summary rows, same order. */
+  listApprovalSummaries(filter: ApprovalListFilter): Promise<ApprovalRequestSummaryRow[]>;
+  /**
+   * Waiting steps of waiting runs whose request is answered, timed out, or
+   * past its deadline. Ordered by step insertion order, then request insertion order.
+   */
+  listStuckApprovalRuns(): Promise<StuckApprovalRunRow[]>;
+  /** Pending requests past `expiresAt`, earliest deadline first, ties in insertion order. */
+  listExpiredPendingApprovals(now: string): Promise<ApprovalRequestRow[]>;
+  /** Pending requests without a deadline created before `cutoff`, oldest first, ties in insertion order. */
+  listStalePendingApprovals(cutoff: string): Promise<ApprovalRequestRow[]>;
+  /** Approvers and votes of the given pending requests, ordered by id. */
+  listPendingApprovalVotes(
+    ids: readonly string[],
+  ): Promise<{ id: string; approvers: string; approvals: string | null }[]>;
+  /** Stores the votes of a pending request. True when it was pending. */
+  recordApprovalVotes(id: string, approvals: string, now: string): Promise<boolean>;
+  /** Pending requests of the given source tasks, ordered by `createdAt`, then id. */
+  listPendingApprovalsForTasks(
+    taskIds: readonly string[],
+  ): Promise<{ id: string; status: "pending"; sourceTaskId: string; title: string }[]>;
+  /** Cancelled requests of the runs that have notification channels, in insertion order. */
+  listCancelledNotifiedApprovals(
+    runIds: readonly string[],
+  ): Promise<{ id: string; notificationChannels: string; claims: string | null }[]>;
+
+  // --- wait states -------------------------------------------------------
+
+  insertWaitState(wait: NewWaitState): Promise<WaitStateRow | null>;
+  findWaitStateById(id: string): Promise<WaitStateRow | null>;
+  /** The step's first wait by insertion order. */
+  findWaitStateByStepId(stepId: string): Promise<WaitStateRow | null>;
+  /**
+   * Pending time waits past `wakeUpAt` and event waits past `expiresAt`.
+   * Ordered by `expiresAt` (NULL first on SQLite), then insertion order.
+   */
+  listDueWaitStates(): Promise<WaitStateRow[]>;
+  /** Distinct event names of pending waits, ordered by name. */
+  listPendingEventWaitNames(): Promise<string[]>;
+  /** Pending event waits on `eventName` (of `runId` when given), in insertion order. */
+  listPendingWaitsByEvent(eventName: string, runId?: string): Promise<WaitStateRow[]>;
+  /** pending → `status`. Null when the wait was not pending. */
+  resolveWaitState(
+    id: string,
+    status: string,
+    firedPayload: string | null,
+    now: string,
+  ): Promise<WaitStateRow | null>;
+  /**
+   * Waiting `wait` steps of waiting runs whose wait fired, timed out or is
+   * overdue. Ordered by step insertion order, then wait insertion order.
+   */
+  listStuckWaitRuns(): Promise<StuckWaitRunRow[]>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1119,5 +1346,314 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
   getVersion(workflowId: string, version: number): Promise<WorkflowVersionRow | null> {
     return this.db.get<WorkflowVersionRow>(sql`
       SELECT * FROM workflow_versions WHERE "workflowId" = ${workflowId} AND version = ${version}`);
+  }
+  insertApproval(a: NewApprovalRequest): Promise<ApprovalRequestRow | null> {
+    return this.db.get<ApprovalRequestRow>(sql`
+      INSERT INTO approval_requests
+        (id, title, questions, "workflowRunId", "workflowRunStepId", "sourceTaskId",
+         approvers, status, "resolutionReason", "resolvedAt", "timeoutSeconds", "expiresAt",
+         "notificationChannels", created_by, "createdAt", "updatedAt")
+      VALUES (${a.id}, ${a.title}, ${a.questions}, ${a.workflowRunId}, ${a.workflowRunStepId},
+        ${a.sourceTaskId}, ${a.approvers}, ${a.status}, ${a.resolutionReason}, ${a.resolvedAt},
+        ${a.timeoutSeconds}, ${a.expiresAt}, ${a.notificationChannels}, ${a.createdBy}, ${a.now},
+        ${a.now})
+      RETURNING *`);
+  }
+
+  findApprovalById(id: string): Promise<ApprovalRequestRow | null> {
+    return this.db.get<ApprovalRequestRow>(sql`SELECT * FROM approval_requests WHERE id = ${id}`);
+  }
+
+  findApprovalByStepId(stepId: string): Promise<ApprovalRequestRow | null> {
+    return this.db.get<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests WHERE "workflowRunStepId" = ${stepId}
+       ORDER BY ${this.insertionOrder()} LIMIT 1`);
+  }
+
+  resolveApproval(
+    id: string,
+    r: ApprovalResolution,
+    requireActionableWorkflow: boolean,
+  ): Promise<ApprovalRequestRow | null> {
+    const actionable = requireActionableWorkflow
+      ? sql` AND (
+          "workflowRunId" IS NULL
+          OR (
+            EXISTS (
+              SELECT 1 FROM workflow_runs
+              WHERE id = approval_requests."workflowRunId"
+                AND status IN ('running', 'waiting')
+            )
+            AND EXISTS (
+              SELECT 1 FROM workflow_run_steps
+              WHERE id = approval_requests."workflowRunStepId"
+                AND "runId" = approval_requests."workflowRunId"
+                AND status = 'waiting'
+            )
+          )
+        )`
+      : EMPTY;
+    return this.db.get<ApprovalRequestRow>(sql`
+      UPDATE approval_requests
+         SET status = ${r.status}, responses = ${r.responses},
+             approvals = COALESCE(${r.approvals}, approvals), "resolvedBy" = ${r.resolvedBy},
+             "resolutionReason" = ${r.resolutionReason}, "resolvedAt" = ${r.now}, "updatedAt" = ${r.now}
+       WHERE id = ${id} AND status = 'pending'${actionable}
+       RETURNING *`);
+  }
+
+  cancelApproval(
+    id: string,
+    reason: string,
+    resolvedBy: string | null,
+    now: string,
+  ): Promise<ApprovalRequestRow | null> {
+    return this.db.get<ApprovalRequestRow>(sql`
+      UPDATE approval_requests
+         SET status = 'cancelled', "resolutionReason" = ${reason}, "resolvedBy" = ${resolvedBy},
+             "resolvedAt" = ${now}, "updatedAt" = ${now}
+       WHERE id = ${id} AND status = 'pending'
+       RETURNING *`);
+  }
+
+  cancelPendingApprovalsOfRun(
+    runId: string,
+    reason: string,
+    now: string,
+  ): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(sql`
+      UPDATE approval_requests
+         SET status = 'cancelled', "resolutionReason" = ${reason}, "resolvedAt" = ${now}, "updatedAt" = ${now}
+       WHERE "workflowRunId" = ${runId} AND status = 'pending'
+       RETURNING *`);
+  }
+
+  listCancelledApprovalsOfRun(runId: string): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests
+       WHERE "workflowRunId" = ${runId} AND status = 'cancelled'
+       ORDER BY ${this.insertionOrder()}`);
+  }
+
+  listCancelledApprovalsOfStep(stepId: string): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests
+       WHERE "workflowRunStepId" = ${stepId} AND status = 'cancelled'
+       ORDER BY ${this.insertionOrder()}`);
+  }
+
+  private settledClause(anyTerminal: boolean): SqlQuery {
+    return anyTerminal ? sql`status <> 'pending'` : sql`status = 'cancelled'`;
+  }
+
+  findSettledApproval(id: string, anyTerminal: boolean): Promise<ApprovalRequestRow | null> {
+    return this.db.get<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests WHERE id = ${id} AND ${this.settledClause(anyTerminal)}`);
+  }
+
+  async setApprovalNotificationClaims(
+    id: string,
+    claims: string,
+    now: string,
+    anyTerminal: boolean,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE approval_requests
+         SET "cancellationNotificationClaims" = ${claims}, "updatedAt" = ${now}
+       WHERE id = ${id} AND ${this.settledClause(anyTerminal)}`);
+  }
+
+  getApprovalNotificationClaims(id: string): Promise<{ claims: string | null } | null> {
+    return this.db.get<{ claims: string | null }>(sql`
+      SELECT "cancellationNotificationClaims" AS claims FROM approval_requests WHERE id = ${id}`);
+  }
+
+  async setApprovalNotificationChannels(id: string, channels: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE approval_requests SET "notificationChannels" = ${channels}, "updatedAt" = ${now}
+       WHERE id = ${id}`);
+  }
+
+  protected approvalListTail(f: ApprovalListFilter): SqlQuery {
+    const conditions: SqlQuery[] = [];
+    if (f.status) conditions.push(sql`status = ${f.status}`);
+    if (f.workflowRunId) conditions.push(sql`"workflowRunId" = ${f.workflowRunId}`);
+    return sql`${sqlWhere(conditions)} ORDER BY "createdAt" DESC, ${this.insertionOrder()} ASC LIMIT ${f.limit}`;
+  }
+
+  listApprovals(f: ApprovalListFilter): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(
+      sql`SELECT * FROM approval_requests${this.approvalListTail(f)}`,
+    );
+  }
+
+  abstract listApprovalSummaries(filter: ApprovalListFilter): Promise<ApprovalRequestSummaryRow[]>;
+
+  listStuckApprovalRuns(): Promise<StuckApprovalRunRow[]> {
+    return this.db.query<StuckApprovalRunRow>(sql`
+      SELECT
+          wr.id as "runId",
+          wrs.id as "stepId",
+          wrs."nodeId",
+          wr."workflowId",
+          ar.id as "approvalId",
+          ar.status as "approvalStatus",
+          ar.responses as "approvalResponses",
+          ar."expiresAt"
+        FROM workflow_runs wr
+        JOIN workflow_run_steps wrs ON wrs."runId" = wr.id AND wrs.status = 'waiting'
+        JOIN approval_requests ar ON ar."workflowRunStepId" = wrs.id
+       WHERE wr.status = 'waiting'
+         AND (ar.status IN ('approved', 'rejected', 'timeout')
+              OR (ar.status = 'pending' AND ar."expiresAt" IS NOT NULL AND ar."expiresAt" < ${nowIso}))
+       ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ar`)}`);
+  }
+
+  listExpiredPendingApprovals(now: string): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests
+       WHERE status = 'pending' AND "expiresAt" IS NOT NULL AND "expiresAt" < ${now}
+       ORDER BY "expiresAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  listStalePendingApprovals(cutoff: string): Promise<ApprovalRequestRow[]> {
+    return this.db.query<ApprovalRequestRow>(sql`
+      SELECT * FROM approval_requests
+       WHERE status = 'pending' AND "expiresAt" IS NULL AND "createdAt" < ${cutoff}
+       ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  listPendingApprovalVotes(
+    ids: readonly string[],
+  ): Promise<{ id: string; approvers: string; approvals: string | null }[]> {
+    return this.db.query<{ id: string; approvers: string; approvals: string | null }>(sql`
+      SELECT id, approvers, approvals FROM approval_requests
+       WHERE status = 'pending' AND id IN (${sqlList(ids)})
+       ORDER BY id`);
+  }
+
+  async recordApprovalVotes(id: string, approvals: string, now: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(sql`
+      UPDATE approval_requests SET approvals = ${approvals}, "updatedAt" = ${now}
+       WHERE id = ${id} AND status = 'pending'
+       RETURNING id`);
+    return row != null;
+  }
+
+  listPendingApprovalsForTasks(
+    taskIds: readonly string[],
+  ): Promise<{ id: string; status: "pending"; sourceTaskId: string; title: string }[]> {
+    return this.db.query<{
+      id: string;
+      status: "pending";
+      sourceTaskId: string;
+      title: string;
+    }>(sql`
+      SELECT id, status, "sourceTaskId", title FROM approval_requests
+       WHERE "sourceTaskId" IN (${sqlList(taskIds)}) AND status = 'pending'
+       ORDER BY "createdAt", id`);
+  }
+
+  listCancelledNotifiedApprovals(
+    runIds: readonly string[],
+  ): Promise<{ id: string; notificationChannels: string; claims: string | null }[]> {
+    return this.db.query<{ id: string; notificationChannels: string; claims: string | null }>(sql`
+      SELECT id, "notificationChannels", "cancellationNotificationClaims" AS claims
+        FROM approval_requests
+       WHERE "workflowRunId" IN (${sqlList(runIds)})
+         AND status = 'cancelled' AND "notificationChannels" IS NOT NULL
+       ORDER BY ${this.insertionOrder()}`);
+  }
+
+  insertWaitState(w: NewWaitState): Promise<WaitStateRow | null> {
+    return this.db.get<WaitStateRow>(sql`
+      INSERT INTO wait_states
+        (id, "workflowRunId", "workflowRunStepId", mode, "wakeUpAt", "eventName", "eventFilter",
+         "expiresAt", "eventScope", "createdAt", "updatedAt")
+      VALUES (${w.id}, ${w.workflowRunId}, ${w.workflowRunStepId}, ${w.mode}, ${w.wakeUpAt},
+        ${w.eventName}, ${w.eventFilter}, ${w.expiresAt}, ${w.eventScope}, ${w.now}, ${w.now})
+      RETURNING *`);
+  }
+
+  findWaitStateById(id: string): Promise<WaitStateRow | null> {
+    return this.db.get<WaitStateRow>(sql`SELECT * FROM wait_states WHERE id = ${id}`);
+  }
+
+  findWaitStateByStepId(stepId: string): Promise<WaitStateRow | null> {
+    return this.db.get<WaitStateRow>(sql`
+      SELECT * FROM wait_states WHERE "workflowRunStepId" = ${stepId}
+       ORDER BY ${this.insertionOrder()} LIMIT 1`);
+  }
+
+  listDueWaitStates(): Promise<WaitStateRow[]> {
+    return this.db.query<WaitStateRow>(sql`
+      SELECT * FROM wait_states
+       WHERE status = 'pending'
+         AND (
+           (mode = 'time' AND "wakeUpAt" IS NOT NULL AND "wakeUpAt" <= ${nowIso})
+           OR
+           (mode = 'event' AND "expiresAt" IS NOT NULL AND "expiresAt" <= ${nowIso})
+         )
+       ORDER BY "expiresAt", ${this.insertionOrder()}`);
+  }
+
+  async listPendingEventWaitNames(): Promise<string[]> {
+    const rows = await this.db.query<{ eventName: string }>(sql`
+      SELECT DISTINCT "eventName" FROM wait_states
+       WHERE status = 'pending' AND "eventName" IS NOT NULL
+       ORDER BY "eventName"`);
+    return rows.map((row) => row.eventName);
+  }
+
+  listPendingWaitsByEvent(eventName: string, runId?: string): Promise<WaitStateRow[]> {
+    const run = runId !== undefined ? sql` AND "workflowRunId" = ${runId}` : EMPTY;
+    return this.db.query<WaitStateRow>(sql`
+      SELECT * FROM wait_states
+       WHERE status = 'pending' AND mode = 'event' AND "eventName" = ${eventName}${run}
+       ORDER BY ${this.insertionOrder()}`);
+  }
+
+  resolveWaitState(
+    id: string,
+    status: string,
+    firedPayload: string | null,
+    now: string,
+  ): Promise<WaitStateRow | null> {
+    return this.db.get<WaitStateRow>(sql`
+      UPDATE wait_states
+         SET status = ${status}, "firedPayload" = ${firedPayload}, "resolvedAt" = ${now}, "updatedAt" = ${now}
+       WHERE id = ${id} AND status = 'pending'
+       RETURNING *`);
+  }
+
+  listStuckWaitRuns(): Promise<StuckWaitRunRow[]> {
+    return this.db.query<StuckWaitRunRow>(sql`
+      SELECT
+          wr.id as "runId",
+          wrs.id as "stepId",
+          wrs."nodeId",
+          wr."workflowId",
+          ws.id as "waitId",
+          ws.mode as "waitMode",
+          ws.status as "waitStatus",
+          ws."wakeUpAt" as "wakeUpAt",
+          ws."expiresAt" as "expiresAt",
+          ws."firedPayload" as "firedPayload"
+        FROM workflow_runs wr
+        JOIN workflow_run_steps wrs ON wrs."runId" = wr.id AND wrs.status = 'waiting' AND wrs."nodeType" = 'wait'
+        JOIN wait_states ws ON ws."workflowRunStepId" = wrs.id
+       WHERE wr.status = 'waiting'
+         AND (
+           ws.status IN ('fired', 'timeout')
+           OR (
+             ws.status = 'pending'
+             AND (
+               (ws."wakeUpAt" IS NOT NULL AND ws."wakeUpAt" <= ${nowIso})
+               OR
+               (ws."expiresAt" IS NOT NULL AND ws."expiresAt" <= ${nowIso})
+             )
+           )
+         )
+       ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ws`)}`);
   }
 }

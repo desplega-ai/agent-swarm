@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type NewWorkflow, type Storage, sql, type WorkflowsRepository } from "../../src";
+import {
+  type NewApprovalRequest,
+  type NewWaitState,
+  type NewWorkflow,
+  type Storage,
+  sql,
+  type WorkflowsRepository,
+} from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
 const T1 = "2026-11-21T11:00:00.000Z";
 const T2 = "2026-11-21T12:00:00.000Z";
+/** Before the wall clock, for the scans that compare with the current time. */
+const PAST = "2020-01-01T00:00:00.000Z";
 
 export function workflowsContract(engine: ContractEngine): void {
   describe(`workflows repository [${engine.name}]`, () => {
@@ -833,6 +842,312 @@ export function workflowsContract(engine: ContractEngine): void {
           changedByAgentId: null,
         }),
       ).rejects.toThrow();
+    });
+
+    const approval = (id: string, o: Partial<NewApprovalRequest> = {}): NewApprovalRequest => ({
+      id,
+      title: "t",
+      questions: '[{"q":1},{"q":2}]',
+      workflowRunId: null,
+      workflowRunStepId: null,
+      sourceTaskId: null,
+      approvers: '{"policy":"any"}',
+      status: "pending",
+      resolutionReason: null,
+      resolvedAt: null,
+      timeoutSeconds: null,
+      expiresAt: null,
+      notificationChannels: null,
+      createdBy: null,
+      now: T0,
+      ...o,
+    });
+
+    test("approval insert, lookups and conditional settles", async () => {
+      await workflow("w1");
+      await run("r1", { status: "waiting" });
+      await step("s1", "r1", { status: "waiting" });
+      const row = await repo.insertApproval(
+        approval("a1", { workflowRunId: "r1", workflowRunStepId: "s1", timeoutSeconds: 60 }),
+      );
+      expect(row).toMatchObject({
+        id: "a1",
+        status: "pending",
+        responses: null,
+        approvals: null,
+        timeoutSeconds: 60,
+        createdAt: T0,
+        updatedAt: T0,
+        cancellationNotificationClaims: null,
+      });
+      expect(await repo.findApprovalById("a1")).toEqual(row);
+      await repo.insertApproval(approval("a0", { workflowRunStepId: "s1" }));
+      expect((await repo.findApprovalByStepId("s1"))?.id).toBe("a1");
+
+      const resolution = {
+        status: "approved",
+        responses: "sealed",
+        approvals: null,
+        resolvedBy: "u1",
+        resolutionReason: null,
+        now: T1,
+      };
+      // The step is no longer waiting: an actionable resolve refuses.
+      await storage.executor.run(
+        sql`UPDATE workflow_run_steps SET status = 'running' WHERE id = 's1'`,
+      );
+      expect(await repo.resolveApproval("a1", resolution, true)).toBeNull();
+      await storage.executor.run(
+        sql`UPDATE workflow_run_steps SET status = 'waiting' WHERE id = 's1'`,
+      );
+      await repo.recordApprovalVotes("a1", '[{"v":1}]', T0);
+      const resolved = await repo.resolveApproval("a1", resolution, true);
+      expect(resolved).toMatchObject({
+        status: "approved",
+        responses: "sealed",
+        approvals: '[{"v":1}]',
+        resolvedBy: "u1",
+        resolvedAt: T1,
+        updatedAt: T1,
+      });
+      expect(await repo.resolveApproval("a1", resolution, false)).toBeNull();
+      expect(await repo.recordApprovalVotes("a1", "[]", T2)).toBe(false);
+      expect(await repo.cancelApproval("a1", "late", null, T2)).toBeNull();
+      expect(await repo.cancelApproval("a0", "stop", "u2", T2)).toMatchObject({
+        status: "cancelled",
+        resolutionReason: "stop",
+        resolvedBy: "u2",
+        resolvedAt: T2,
+      });
+    });
+
+    test("run cancels and cancelled lists keep insertion order", async () => {
+      await repo.insertApproval(approval("b", { workflowRunId: "r1", workflowRunStepId: "s1" }));
+      await repo.insertApproval(approval("a", { workflowRunId: "r1", workflowRunStepId: "s1" }));
+      await repo.insertApproval(approval("done", { workflowRunId: "r1", status: "approved" }));
+      const cancelled = await repo.cancelPendingApprovalsOfRun("r1", "stop", T1);
+      expect(cancelled.map((r) => r.id).sort()).toEqual(["a", "b"]);
+      expect(cancelled[0]).toMatchObject({ status: "cancelled", resolutionReason: "stop" });
+      expect((await repo.listCancelledApprovalsOfRun("r1")).map((r) => r.id)).toEqual(["b", "a"]);
+      expect((await repo.listCancelledApprovalsOfStep("s1")).map((r) => r.id)).toEqual(["b", "a"]);
+    });
+
+    test("notification claims only on settled requests; channels; notified cancelled list", async () => {
+      await repo.insertApproval(approval("p"));
+      await repo.insertApproval(approval("x", { status: "approved" }));
+      await repo.insertApproval(
+        approval("c2", { status: "cancelled", workflowRunId: "r1", notificationChannels: "[2]" }),
+      );
+      await repo.insertApproval(
+        approval("c1", { status: "cancelled", workflowRunId: "r1", notificationChannels: "[1]" }),
+      );
+      await repo.insertApproval(approval("c0", { status: "cancelled", workflowRunId: "r1" }));
+      expect(await repo.findSettledApproval("p", true)).toBeNull();
+      expect(await repo.findSettledApproval("x", false)).toBeNull();
+      expect((await repo.findSettledApproval("x", true))?.id).toBe("x");
+      await repo.setApprovalNotificationClaims("x", '{"k":"delivered"}', T1, false);
+      expect(await repo.getApprovalNotificationClaims("x")).toEqual({ claims: null });
+      await repo.setApprovalNotificationClaims("x", '{"k":"delivered"}', T1, true);
+      expect(await repo.getApprovalNotificationClaims("x")).toEqual({
+        claims: '{"k":"delivered"}',
+      });
+      await repo.setApprovalNotificationClaims("p", "{}", T1, true);
+      expect(await repo.getApprovalNotificationClaims("p")).toEqual({ claims: null });
+      expect(await repo.getApprovalNotificationClaims("missing")).toBeNull();
+      await repo.setApprovalNotificationChannels("p", '[{"channel":"slack"}]', T2);
+      expect(await repo.findApprovalById("p")).toMatchObject({
+        notificationChannels: '[{"channel":"slack"}]',
+        updatedAt: T2,
+      });
+      await repo.setApprovalNotificationClaims("c1", '{"a":1}', T1, false);
+      expect(await repo.listCancelledNotifiedApprovals(["r1", "r9"])).toEqual([
+        { id: "c2", notificationChannels: "[2]", claims: null },
+        { id: "c1", notificationChannels: "[1]", claims: '{"a":1}' },
+      ]);
+    });
+
+    test("approval lists: newest first with ties in insertion order, filters, summaries", async () => {
+      await repo.insertApproval(approval("old", { now: T0 }));
+      await repo.insertApproval(approval("tie-b", { now: T1, workflowRunId: "r1" }));
+      await repo.insertApproval(approval("tie-a", { now: T1, status: "approved" }));
+      await repo.insertApproval(approval("new", { now: T2, questions: "[]" }));
+      expect((await repo.listApprovals({ limit: 10 })).map((r) => r.id)).toEqual([
+        "new",
+        "tie-b",
+        "tie-a",
+        "old",
+      ]);
+      expect((await repo.listApprovals({ limit: 2 })).map((r) => r.id)).toEqual(["new", "tie-b"]);
+      expect((await repo.listApprovals({ status: "pending", limit: 10 })).map((r) => r.id)).toEqual(
+        ["new", "tie-b", "old"],
+      );
+      expect(
+        (await repo.listApprovals({ status: "pending", workflowRunId: "r1", limit: 10 })).map(
+          (r) => r.id,
+        ),
+      ).toEqual(["tie-b"]);
+      const summaries = await repo.listApprovalSummaries({ limit: 10 });
+      expect(summaries.map((r) => [r.id, r.questionCount])).toEqual([
+        ["new", 0],
+        ["tie-b", 2],
+        ["tie-a", 2],
+        ["old", 2],
+      ]);
+      expect(summaries[0]).not.toHaveProperty("questions");
+      expect(summaries[0]).toMatchObject({ status: "pending", created_by: null, createdAt: T2 });
+    });
+
+    test("deadline scans, votes and task approvals", async () => {
+      await repo.insertApproval(approval("late", { expiresAt: T1 }));
+      await repo.insertApproval(approval("e-b", { expiresAt: T0 }));
+      await repo.insertApproval(approval("e-a", { expiresAt: T0 }));
+      await repo.insertApproval(approval("future", { expiresAt: "2099-01-01T00:00:00.000Z" }));
+      await repo.insertApproval(approval("gone", { expiresAt: T0, status: "approved" }));
+      await repo.insertApproval(approval("s-b", { now: T1 }));
+      await repo.insertApproval(approval("s-a", { now: T0 }));
+      expect((await repo.listExpiredPendingApprovals(T2)).map((r) => r.id)).toEqual([
+        "e-b",
+        "e-a",
+        "late",
+      ]);
+      expect((await repo.listStalePendingApprovals(T2)).map((r) => r.id)).toEqual(["s-a", "s-b"]);
+      expect(await repo.listPendingApprovalVotes(["s-b", "gone", "e-a"])).toEqual([
+        { id: "e-a", approvers: '{"policy":"any"}', approvals: null },
+        { id: "s-b", approvers: '{"policy":"any"}', approvals: null },
+      ]);
+      await storage.executor.run(sql`
+        INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt")
+        VALUES ('t1', 't', 'pending', ${T0}, ${T0}), ('t2', 't', 'pending', ${T0}, ${T0})`);
+      await repo.insertApproval(approval("q-z", { sourceTaskId: "t1", now: T0 }));
+      await repo.insertApproval(approval("q-a", { sourceTaskId: "t2", now: T0 }));
+      await repo.insertApproval(approval("q-new", { sourceTaskId: "t1", now: T1 }));
+      await repo.insertApproval(approval("q-done", { sourceTaskId: "t1", status: "approved" }));
+      expect(await repo.listPendingApprovalsForTasks(["t1", "t2"])).toEqual([
+        { id: "q-a", status: "pending", sourceTaskId: "t2", title: "t" },
+        { id: "q-z", status: "pending", sourceTaskId: "t1", title: "t" },
+        { id: "q-new", status: "pending", sourceTaskId: "t1", title: "t" },
+      ]);
+    });
+
+    test("listStuckApprovalRuns: answered or overdue requests of waiting steps", async () => {
+      await workflow("w1");
+      await run("r1", { status: "waiting" });
+      await run("r2", { status: "running" });
+      await step("s-b", "r1", { status: "waiting" });
+      await step("s-a", "r1", { status: "waiting" });
+      await step("s-c", "r1", { status: "waiting" });
+      await step("s-r", "r2", { status: "waiting" });
+      await repo.insertApproval(approval("a-a", { workflowRunStepId: "s-a", status: "timeout" }));
+      await repo.insertApproval(
+        approval("a-b", { workflowRunStepId: "s-b", responses: null, expiresAt: PAST }),
+      );
+      await repo.insertApproval(
+        approval("a-c", { workflowRunStepId: "s-c", expiresAt: "2099-01-01T00:00:00.000Z" }),
+      );
+      await repo.insertApproval(approval("a-r", { workflowRunStepId: "s-r", status: "approved" }));
+      expect(await repo.listStuckApprovalRuns()).toEqual([
+        {
+          runId: "r1",
+          stepId: "s-b",
+          nodeId: "s-b",
+          workflowId: "w1",
+          approvalId: "a-b",
+          approvalStatus: "pending",
+          approvalResponses: null,
+          expiresAt: PAST,
+        },
+        {
+          runId: "r1",
+          stepId: "s-a",
+          nodeId: "s-a",
+          workflowId: "w1",
+          approvalId: "a-a",
+          approvalStatus: "timeout",
+          approvalResponses: null,
+          expiresAt: null,
+        },
+      ]);
+    });
+
+    const wait = (id: string, o: Partial<NewWaitState> = {}): NewWaitState => ({
+      id,
+      workflowRunId: "r1",
+      workflowRunStepId: `step-${id}`,
+      mode: "event",
+      wakeUpAt: null,
+      eventName: null,
+      eventFilter: null,
+      expiresAt: null,
+      eventScope: "run",
+      now: T0,
+      ...o,
+    });
+
+    test("wait states: insert, lookups, conditional resolve", async () => {
+      const row = await repo.insertWaitState(
+        wait("w1", { eventName: "e", eventFilter: '{"a":1}', eventScope: "global" }),
+      );
+      expect(row).toMatchObject({
+        id: "w1",
+        status: "pending",
+        eventFilter: '{"a":1}',
+        eventScope: "global",
+        firedPayload: null,
+        resolvedAt: null,
+        createdAt: T0,
+      });
+      expect(await repo.findWaitStateById("w1")).toEqual(row);
+      await repo.insertWaitState(wait("w2", { workflowRunStepId: "step-w1" }));
+      expect((await repo.findWaitStateByStepId("step-w1"))?.id).toBe("w1");
+      expect(await repo.resolveWaitState("w1", "fired", '{"p":1}', T1)).toMatchObject({
+        status: "fired",
+        firedPayload: '{"p":1}',
+        resolvedAt: T1,
+        updatedAt: T1,
+      });
+      expect(await repo.resolveWaitState("w1", "timeout", null, T2)).toBeNull();
+    });
+
+    test("wait scans: due, event names, by event", async () => {
+      const future = "2099-01-01T00:00:00.000Z";
+      await repo.insertWaitState(wait("t-due", { mode: "time", wakeUpAt: PAST }));
+      await repo.insertWaitState(wait("t-later", { mode: "time", wakeUpAt: future }));
+      await repo.insertWaitState(wait("e-due", { eventName: "b", expiresAt: PAST }));
+      await repo.insertWaitState(wait("e-open", { eventName: "a" }));
+      await repo.insertWaitState(wait("e-r2", { eventName: "a", workflowRunId: "r2" }));
+      await repo.insertWaitState(wait("e-fired", { eventName: "c", expiresAt: T0 }));
+      await repo.resolveWaitState("e-fired", "fired", null, T1);
+      expect((await repo.listDueWaitStates()).map((r) => r.id)).toEqual(["t-due", "e-due"]);
+      expect(await repo.listPendingEventWaitNames()).toEqual(["a", "b"]);
+      expect((await repo.listPendingWaitsByEvent("a")).map((r) => r.id)).toEqual([
+        "e-open",
+        "e-r2",
+      ]);
+      expect((await repo.listPendingWaitsByEvent("a", "r2")).map((r) => r.id)).toEqual(["e-r2"]);
+    });
+
+    test("listStuckWaitRuns: fired, timed out or overdue waits of waiting wait steps", async () => {
+      await workflow("w1");
+      await run("r1", { status: "waiting" });
+      await step("s-b", "r1", { status: "waiting", nodeType: "wait" });
+      await step("s-a", "r1", { status: "waiting", nodeType: "wait" });
+      await step("s-c", "r1", { status: "waiting", nodeType: "wait" });
+      await step("s-x", "r1", { status: "waiting", nodeType: "agent-task" });
+      await repo.insertWaitState(wait("wa", { workflowRunStepId: "s-a" }));
+      await repo.resolveWaitState("wa", "timeout", null, T1);
+      await repo.insertWaitState(
+        wait("wb", { workflowRunStepId: "s-b", mode: "time", wakeUpAt: PAST }),
+      );
+      await repo.insertWaitState(
+        wait("wc", { workflowRunStepId: "s-c", expiresAt: "2099-01-01T00:00:00.000Z" }),
+      );
+      await repo.insertWaitState(wait("wx", { workflowRunStepId: "s-x", expiresAt: PAST }));
+      expect(
+        (await repo.listStuckWaitRuns()).map((r) => [r.stepId, r.waitId, r.waitStatus]),
+      ).toEqual([
+        ["s-b", "wb", "pending"],
+        ["s-a", "wa", "timeout"],
+      ]);
     });
   });
 }
