@@ -108,9 +108,7 @@ export function resetPromptTemplateRows(
  * `getPromptTemplates` on the synchronous SQLite start path: the default
  * template seed (src/be/seed-prompt-templates.ts) runs inside `initDb`.
  */
-export function getPromptTemplatesOnSqliteStart(
-  filters?: PromptTemplateFilters,
-): PromptTemplate[] {
+export function getPromptTemplatesOnSqliteStart(filters?: PromptTemplateFilters): PromptTemplate[] {
   return promptTemplateSqliteStart.list(filters ?? {}).map(rowToPromptTemplate);
 }
 
@@ -143,4 +141,3 @@ export function resetPromptTemplateToDefaultOnSqliteStart(
   promptTemplateSqliteStart.insertHistory(reset.history);
   return rowToPromptTemplate(row);
 }
-
