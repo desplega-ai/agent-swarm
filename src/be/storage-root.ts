@@ -72,6 +72,7 @@ export {
   backfillScriptRunSources,
   ensureAgentProfileColumns,
   findDefaultOAuthAuthorization,
+  hasEncryptedSecretRows,
   isEmptySqliteDatabase,
   type LegacyCredentialBinding,
   listCredentialBindingBlobs,

@@ -16,7 +16,7 @@ import { scrubJsonValue } from "./scrub-json";
  * plain JSON and both readers still accept them.
  */
 
-const SEALED_PREFIX = "sealed:v1:";
+export const SEALED_PREFIX = "sealed:v1:";
 
 /**
  * Every column a writer fills with `sealJson`. Boot counts a sealed value here
@@ -32,13 +32,6 @@ export const SEALED_REPLAY_COLUMNS: readonly { table: string; column: string }[]
   { table: "approval_requests", column: "responses" },
   { table: "workflow_idempotency_keys", column: "responseBody" },
 ];
-
-/** SQL `EXISTS` arms matching a sealed value in each `SEALED_REPLAY_COLUMNS` entry. */
-export function sealedReplayExistsSql(): string[] {
-  return SEALED_REPLAY_COLUMNS.map(
-    ({ table, column }) => `SELECT 1 FROM ${table} WHERE ${column} GLOB '${SEALED_PREFIX}*'`,
-  );
-}
 
 export function sealJson(value: unknown): string {
   return SEALED_PREFIX + encryptSecret(JSON.stringify(value), getEncryptionKey());

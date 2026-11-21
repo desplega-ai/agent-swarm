@@ -8,11 +8,12 @@ import { createBunSqliteClient, type DbClient } from "../db-client";
 import { runMigrations } from "../migrations/runner";
 import { assertScriptRunSourceSchema } from "../migrations/script-run-sources";
 import { autoEncryptLegacyOAuthSecrets } from "../oauth-encryption-backfill";
-import { sealedReplayExistsSql } from "../sealed-json";
+import { SEALED_PREFIX, SEALED_REPLAY_COLUMNS } from "../sealed-json";
 import {
   applySqliteFilePragmas,
   applySqliteTemplatePragmas,
   ensureAgentProfileColumns,
+  hasEncryptedSecretRows,
   isEmptySqliteDatabase,
   removeLegacyTaskStatusCheck,
 } from "../storage-root";
@@ -200,22 +201,11 @@ function bootOpenedDb(
     require("../seed-prompt-templates") as typeof import("../seed-prompt-templates");
   seedDefaultTemplates();
 
-  const hasExistingEncryptedSecrets =
-    (database
-      .prepare<{ present: number }, []>(
-        `SELECT EXISTS(
-           SELECT 1 FROM swarm_config WHERE isSecret = 1 AND encrypted = 1
-           UNION ALL
-           SELECT 1 FROM oauth_apps
-             WHERE clientSecretEncrypted = 1 AND clientSecret IS NOT NULL
-           UNION ALL
-           SELECT 1 FROM oauth_authorizations WHERE tokensEncrypted = 1
-           ${sealedReplayExistsSql()
-             .map((arm) => `UNION ALL ${arm}`)
-             .join("\n           ")}
-         ) AS present`,
-      )
-      .get()?.present ?? 0) === 1;
+  const hasExistingEncryptedSecrets = hasEncryptedSecretRows(
+    database,
+    SEALED_REPLAY_COLUMNS,
+    SEALED_PREFIX,
+  );
 
   // Track whether user provided the key (for backup decision)
   const userProvidedKey = !!(

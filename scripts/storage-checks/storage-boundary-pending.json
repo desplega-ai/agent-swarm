@@ -125,7 +125,7 @@
   },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 6
+    "sites": 5
   },
   "src/be/db/script-run-sources.ts": {
     "reason": "M2 move: scripts",
@@ -453,10 +453,6 @@
   },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
-    "sites": 1
-  },
-  "src/be/sealed-json.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
   "src/be/seed-model-profiles.ts": {
