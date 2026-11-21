@@ -47,10 +47,14 @@ async function waitForStarToasts(count: number) {
   }
   expect(starToasts()).toHaveLength(count);
 }
-const close = () =>
-  act(async () =>
+// Wait for the toast first: under load it can land after render()'s tick, and
+// a click on a missing toast would silently do nothing.
+async function close() {
+  await waitForStarToasts(1);
+  await act(async () =>
     starToasts()[0]?.querySelector<HTMLButtonElement>("button[aria-label=Close]")?.click(),
   );
+}
 
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
