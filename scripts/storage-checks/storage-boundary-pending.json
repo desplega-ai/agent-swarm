@@ -197,11 +197,7 @@
   },
   "src/be/db/tasks/read.ts": {
     "reason": "M2 move: tasks",
-    "sites": 57
-  },
-  "src/be/db/tasks/search-index.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 10
+    "sites": 11
   },
   "src/be/db/tasks/write.ts": {
     "reason": "M2 move: tasks",

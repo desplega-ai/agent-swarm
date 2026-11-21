@@ -1,5 +1,6 @@
+import { likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { sql } from "../sql";
+import { EMPTY, SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: tasks (`agent_tasks`, `agent_tasks_fts*`, `task_attachments`,
@@ -115,6 +116,139 @@ export type TaskIdempotencyKeyRow = {
   updated_by: string | null;
 };
 
+/** VCS scope of a task lookup. `includeNullProvider` also matches legacy rows with no provider. */
+export type TaskVcsScope = {
+  repo: string;
+  number: number;
+  provider: string;
+  includeNullProvider: boolean;
+};
+
+export type TaskStatsRow = {
+  total: number;
+  unassigned: number;
+  offered: number;
+  reviewing: number;
+  pending: number;
+  in_progress: number;
+  paused: number;
+  completed: number;
+  failed: number;
+};
+
+/** Statuses after which a task never runs again (the SQL twin of `TERMINAL_TASK_STATUSES`). */
+const TERMINAL = sql`('completed', 'failed', 'cancelled', 'superseded', 'skipped')`;
+
+/**
+ * The SQL twin of `sessionAccessForRoot` (src/be/session-shares). A session's
+ * root is its topmost existing task; the session is hidden when the root has an
+ * owner other than the user, is not a schedule run, and no active share names
+ * the user or everyone. `taskIdColumn` is a column chosen by code. With
+ * `nullable`, task-less rows (NULL column) stay.
+ */
+export function readableSessionSql(
+  userId: string | null,
+  taskIdColumn: SqlQuery,
+  opts: { nullable?: boolean } = {},
+): SqlQuery {
+  const otherOwner = userId
+    ? sql`r."requestedByUserId" IS NOT NULL AND r."requestedByUserId" != ${userId}`
+    : sql`r."requestedByUserId" IS NOT NULL`;
+  const shareMatch = userId
+    ? sql`(s."userId" IS NULL OR s."userId" = ${userId})`
+    : sql`s."userId" IS NULL`;
+  const notHidden = sql`${taskIdColumn} NOT IN (
+      WITH RECURSIVE hidden(id) AS (
+        SELECT r.id FROM agent_tasks r
+        WHERE (r."parentTaskId" IS NULL
+            OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r."parentTaskId"))
+          AND ${otherOwner}
+          AND r."scheduleId" IS NULL
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s."rootTaskId" = r.id AND s."revokedAt" IS NULL AND ${shareMatch})
+        UNION ALL
+        SELECT c.id FROM agent_tasks c JOIN hidden ON c."parentTaskId" = hidden.id
+      )
+      SELECT id FROM hidden
+    )`;
+  return opts.nullable ? sql`(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden;
+}
+
+/** A column reference chosen by code (`agent_tasks.id`, `events."taskId"`). Never input. */
+export function sqlColumnRef(text: string): SqlQuery {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.("?)[A-Za-z_][A-Za-z0-9_]*\2)?$/.test(text)) {
+    throw new Error(`Not a column reference: ${text}`);
+  }
+  return new SqlQuery([text], []);
+}
+
+/** Preview length of a task's `task` text in the list projections. */
+export const TASK_PREVIEW_LENGTH = 300;
+
+/**
+ * The generated `<sibling_tasks_in_progress>` block a task text may start
+ * with (`src/tasks/sibling-block.ts`); list previews start after it.
+ */
+export const TASK_SIBLING_BLOCK = {
+  open: "<sibling_tasks_in_progress>",
+  close: "</sibling_tasks_in_progress>",
+} as const;
+
+/** `agent_tasks_fts_state.indexedThrough` once every row is indexed (migration 256). */
+export const TASK_FTS_COMPLETE = Number.MAX_SAFE_INTEGER;
+
+/**
+ * The agent_tasks_fts MATCH expression for free text: the whole input as one
+ * FTS5 phrase, so user text cannot inject operators (NEAR, AND, -, ^, column
+ * filters), with a prefix match on its last token. Returns null when the input
+ * has no indexable token (the phrase would match nothing).
+ */
+export function buildTaskFtsMatch(search: string): string | null {
+  if (!/[\p{L}\p{N}]/u.test(search)) return null;
+  return `"${search.replaceAll('"', '""')}"*`;
+}
+
+/** Normalized list filters (`src/` resolves keys and prefix patterns first). */
+export type TaskListFilters = {
+  statuses?: readonly string[];
+  statusKind?: string;
+  agentId?: string;
+  search?: string;
+  unassigned?: boolean;
+  offeredTo?: string;
+  taskType?: string;
+  tags?: readonly string[];
+  scheduleId?: string;
+  workflowRunId?: string;
+  /** Exact, already normalized asset key. */
+  key?: string;
+  /** LIKE pattern with `\` escapes for a key subtree. */
+  keyPrefixPattern?: string;
+  sources?: readonly string[];
+  createdAfter?: string;
+  createdBefore?: string;
+  requestedByUserId?: string;
+  requestedByUserIdIsNull?: boolean;
+  includeHeartbeat?: boolean;
+  readableBy?: { userId: string | null };
+};
+
+/** Which columns a task list returns. */
+export type TaskListFields = "full" | "slim" | "timeline";
+
+/** A task list page. */
+export type TaskListPage = {
+  orderBy?: "lastUpdatedAt" | "createdAt";
+  limit: number;
+  offset: number;
+};
+
+/** One row of a lineage walk: the slim list columns, the workflow run and the cost. */
+export type TaskLineageRow = Record<string, unknown> & {
+  id: string;
+  workflowRunId: string | null;
+};
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -138,6 +272,202 @@ export interface TasksRepository {
    * `slackMessageTs`. Distinct values in no particular order (callers build a set).
    */
   listDeliveredSlackMessageTs(channelId: string, threadTs: string): Promise<(string | null)[]>;
+
+  // ---- agent_tasks: reads ----
+  findTaskById(id: string): Promise<TaskRow | null>;
+  /** Children of a task, oldest first (ties: insertion order). */
+  listChildTasks(parentTaskId: string): Promise<TaskRow[]>;
+  /** True when the task has a non-terminal child of `taskType`. */
+  hasOpenChildOfType(parentId: string, taskType: string): Promise<boolean>;
+  /**
+   * Superseded tasks finished in `(finishedAfter, finishedBefore)` with no
+   * workflow step, a failure reason other than `workflowReason`, and no resume
+   * child. Oldest finish first (ties: engine order, as today).
+   */
+  listSupersededWithoutResume(
+    finishedBefore: string,
+    finishedAfter: string,
+    workflowReason: string,
+  ): Promise<TaskRow[]>;
+  /**
+   * Superseded tasks finished in the window with a resume child and a
+   * dependent in one of `neverStartedStatuses`, paired with the latest resume.
+   * Oldest finish first (ties: engine order, as today).
+   */
+  listSupersededWithUnsettledDependents(
+    finishedBefore: string,
+    finishedAfter: string,
+    neverStartedStatuses: readonly string[],
+  ): Promise<{ taskId: string; resumeTaskId: string }[]>;
+  /** The agent's tasks, newest first (ties: engine order, as today). */
+  listTasksByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<TaskRow[]>;
+  /**
+   * Tasks dispatched by one of `taskIds` and not in `taskIds`, with
+   * `totalCostUsd`; oldest first (ties: insertion order). Empty input: no rows.
+   */
+  listTasksDispatchedFrom(taskIds: readonly string[]): Promise<TaskRow[]>;
+  /** The agent's most recently updated in-progress task. */
+  findAgentCurrentTask(agentId: string): Promise<TaskRow | null>;
+  /** Tasks in `status`, newest first (ties: engine order, as today). */
+  listTasksByStatus(status: string): Promise<TaskRow[]>;
+  /** Newest non-terminal task of a VCS entity. */
+  findActiveTaskByVcs(scope: TaskVcsScope): Promise<TaskRow | null>;
+  /** Every non-terminal task of a VCS entity, newest first (ties: engine order, as today). */
+  listActiveTasksByVcs(scope: TaskVcsScope): Promise<TaskRow[]>;
+  /** Counts of all tasks and of the main statuses. */
+  taskStats(): Promise<TaskStatsRow | null>;
+  /** Up to 200 completed/failed Slack tasks, last updated first (ties: engine order, as today). */
+  listFinishedSlackTasks(): Promise<TaskRow[]>;
+  /**
+   * Up to 50 finished, un-notified tasks of non-lead (or no) agents, last
+   * finished first (ties: engine order, as today).
+   */
+  listUnnotifiedFinishedWorkerTasks(): Promise<TaskRow[]>;
+  /** Sets `notifiedAt` on the given tasks that have none. Returns the changed count. */
+  markTasksNotified(taskIds: readonly string[], now: string): Promise<number>;
+  /** Clears `notifiedAt` on the given tasks that have one. Returns the changed count. */
+  resetTasksNotified(taskIds: readonly string[]): Promise<number>;
+  /** Up to 200 in-progress Slack tasks, last updated first (ties: engine order, as today). */
+  listInProgressSlackTasks(): Promise<TaskRow[]>;
+  /** Up to 200 tasks of a contextKey in `statuses`, last updated first (ties: engine order). */
+  listTasksByContextKey(contextKey: string, statuses: readonly string[]): Promise<TaskRow[]>;
+  /**
+   * Latest-updated task of a Linear tracker contextKey outside the lineage of
+   * `delegatingParentTaskId` (its root and every descendant). `active`: any
+   * non-terminal task; `linkedPr`: a completed task with full VCS PR metadata.
+   */
+  findTrackerContextTask(
+    contextKey: string,
+    delegatingParentTaskId: string | null,
+    kind: "active" | "linkedPr",
+  ): Promise<TaskRow | null>;
+  /**
+   * Newest task of a contextKey. `requestedByUserId` keeps that user's tasks;
+   * `notRequestedByUserId` keeps everyone else's, unowned tasks included.
+   */
+  findLatestTaskByContextKey(
+    contextKey: string,
+    opts: { requestedByUserId?: string; notRequestedByUserId?: string },
+  ): Promise<TaskRow | null>;
+  /** Newest `script-run-step` task of a contextKey (ties: the later insert). */
+  findLatestScriptRunStepTask(contextKey: string): Promise<TaskRow | null>;
+  /** Newest Slack-ingress task of a thread. */
+  findLatestSlackIngressTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null>;
+  /** Newest pending/in-progress Slack-ingress task of a thread (ties: the later insert). */
+  findLatestActiveSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null>;
+  /** Newest Slack-ingress task of a thread assigned to a lead (ties: the later insert). */
+  findLatestLeadSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null>;
+  /**
+   * The agent of the newest task of a contextKey (ties: the later insert).
+   * `source` narrows as the contextKey lookups do; with `endedSince`, only
+   * tasks still open or finished at or after it count.
+   */
+  findLatestAgentIdOnContextKey(
+    contextKey: string,
+    source: string | null,
+    endedSince: string | null,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null>;
+  /** Newest task with `lower <= contextKey < upper` (ties: the later insert). */
+  findLatestTaskInContextKeyRange(
+    lower: string,
+    upper: string,
+    opts: { source: string | null; activeOnly: boolean; requestedByUserId?: string },
+  ): Promise<TaskRow | null>;
+  /** Newest pending/in-progress task of a contextKey (ties: the later insert). */
+  findLatestActiveTaskByContextKey(
+    contextKey: string,
+    source: string | null,
+    requestedByUserId?: string,
+  ): Promise<TaskRow | null>;
+  /** Newest task of a contextKey assigned to a lead (ties: the later insert). */
+  findLatestLeadTaskByContextKey(
+    contextKey: string,
+    source: string | null,
+  ): Promise<TaskRow | null>;
+  /** Oldest task of a Slack thread, any source. */
+  findFirstTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null>;
+  /** Newest task of a Slack thread, any source. */
+  findMostRecentTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null>;
+  /**
+   * One page of completed non-`follow-up` tasks of a thread updated after
+   * `since`, keyset-paged by `before`; last updated first, then id descending.
+   */
+  listCompletedTasksInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    limit: number,
+    before?: { lastUpdatedAt: string; id: string },
+  ): Promise<TaskRow[]>;
+  /** Newest failed task of a thread updated after `since`. */
+  findRecentFailedTaskInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+  ): Promise<TaskRow | null>;
+  /** Newest cancelled (or failed as cancelled / exit 130) task of a thread updated after `since`. */
+  findRecentCancelledTaskInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+  ): Promise<TaskRow | null>;
+  /**
+   * Dispatches one agent made into a thread since `since`: each `mcp` task
+   * once, each script run (shared `script-run:<id>:` contextKey) once, dated by
+   * its first step.
+   */
+  countAgentDispatchesInThread(
+    channelId: string,
+    threadTs: string,
+    creatorAgentId: string,
+    since: string,
+  ): Promise<number>;
+
+  // ---- agent_tasks: lists, counts, lineage ----
+  /**
+   * One page of tasks matching `filters`, with `totalCostUsd`. `fields` picks
+   * the projection; slim and timeline cut `task` to a UTF-8 byte prefix (a
+   * `Uint8Array`) of at least `TASK_PREVIEW_LENGTH + 1` chars past a leading
+   * sibling block. Order: `lastUpdatedAt` desc, priority desc (or `createdAt`
+   * desc), then insertion order desc.
+   */
+  listTasks(
+    filters: TaskListFilters,
+    page: TaskListPage,
+    fields: TaskListFields,
+  ): Promise<Record<string, unknown>[]>;
+  /** Count of the tasks matching `filters`. */
+  countTasks(filters: TaskListFilters): Promise<number>;
+  /**
+   * The ancestor path of a task, at most `maxAncestors` hops up, nearest
+   * first. Empty for an unknown task.
+   */
+  listTaskAncestors(
+    taskId: string,
+    maxAncestors: number,
+  ): Promise<{ id: string; parentTaskId: string | null; hops: number }[]>;
+  /**
+   * Breadth-first descendants of `startId` (the start included) at most
+   * `maxDepth` levels down, at most `limit` rows; by depth, then createdAt,
+   * then insertion order.
+   */
+  listTaskDescendants(startId: string, maxDepth: number, limit: number): Promise<TaskLineageRow[]>;
+  /** Lineage rows of the given tasks, in no particular order. */
+  listTaskLineageRows(ids: readonly string[]): Promise<TaskLineageRow[]>;
+  /** True when a task outside `ids` has its parent in `ids`. */
+  hasChildOutside(ids: readonly string[]): Promise<boolean>;
+
+  // ---- agent_tasks_fts ----
+  /** The backfill watermark, or null when the state row is missing. */
+  getTaskFtsIndexedThrough(): Promise<number | null>;
+  /**
+   * Index the next `batchSize` rows past the watermark and advance it (to
+   * `TASK_FTS_COMPLETE` with the last batch). Run inside a transaction.
+   */
+  indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }>;
+  /** Path of the main database file, or null (in-memory). */
+  mainDatabaseFile(): Promise<string | null>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -180,6 +510,557 @@ export abstract class BaseTasksRepository implements TasksRepository {
     channelId: string,
     threadTs: string,
   ): Promise<(string | null)[]>;
+
+  /**
+   * The insertion-order column of `agent_tasks` (SQLite `rowid`), for ORDER BY
+   * tiebreaks only. `alias` is a table alias chosen by code, or empty.
+   */
+  protected abstract insertionOrder(alias?: string): SqlQuery;
+
+  /**
+   * The contextKey `source` filter: none for a null `source`; `'chat'` also
+   * matches a deferred wake-up of a chat task (`source = 'schedule'`,
+   * `taskType = 'deferred'`). `alias` is a table alias prefix chosen by code.
+   */
+  protected contextKeySource(source: string | null, alias = ""): SqlQuery {
+    if (source === null) return sql`1 = 1`;
+    const col = (name: string) => new SqlQuery([`${alias}${name}`], []);
+    if (source !== "chat") return sql`${col("source")} = ${source}`;
+    return sql`(${col("source")} = ${source}
+          OR (${col("source")} = 'schedule' AND ${col('"taskType"')} = 'deferred'))`;
+  }
+
+  // ---- agent_tasks: reads ----
+
+  findTaskById(id: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`SELECT * FROM agent_tasks WHERE id = ${id}`);
+  }
+
+  listChildTasks(parentTaskId: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE "parentTaskId" = ${parentTaskId}
+      ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
+  }
+
+  async hasOpenChildOfType(parentId: string, taskType: string): Promise<boolean> {
+    const row = await this.db.get(sql`
+      SELECT 1 FROM agent_tasks
+        WHERE "parentTaskId" = ${parentId}
+          AND "taskType" = ${taskType}
+          AND status NOT IN ${TERMINAL}
+        LIMIT 1`);
+    return row !== undefined && row !== null;
+  }
+
+  listSupersededWithoutResume(
+    finishedBefore: string,
+    finishedAfter: string,
+    workflowReason: string,
+  ): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks t
+        WHERE t.status = 'superseded'
+          AND t."workflowRunStepId" IS NULL
+          AND t."failureReason" IS DISTINCT FROM ${workflowReason}
+          AND t."finishedAt" < ${finishedBefore}
+          AND t."finishedAt" > ${finishedAfter}
+          AND NOT EXISTS (
+            SELECT 1 FROM agent_tasks c WHERE c."parentTaskId" = t.id AND c."taskType" = 'resume'
+          )
+        ORDER BY t."finishedAt" ASC`);
+  }
+
+  /** Expands the `dependsOn` JSON array (SQLite `json_each`). */
+  abstract listSupersededWithUnsettledDependents(
+    finishedBefore: string,
+    finishedAfter: string,
+    neverStartedStatuses: readonly string[],
+  ): Promise<{ taskId: string; resumeTaskId: string }[]>;
+
+  listTasksByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<TaskRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
+      : EMPTY;
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE "agentId" = ${agentId}${readable} ORDER BY "createdAt" DESC`);
+  }
+
+  /** Reads the id list as a JSON array (SQLite `json_each`). */
+  abstract listTasksDispatchedFrom(taskIds: readonly string[]): Promise<TaskRow[]>;
+
+  findAgentCurrentTask(agentId: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE "agentId" = ${agentId} AND status = 'in_progress'
+      ORDER BY "lastUpdatedAt" DESC LIMIT 1`);
+  }
+
+  listTasksByStatus(status: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(
+      sql`SELECT * FROM agent_tasks WHERE status = ${status} ORDER BY "createdAt" DESC`,
+    );
+  }
+
+  protected vcsScope(v: TaskVcsScope): SqlQuery {
+    const provider = v.includeNullProvider
+      ? sql`("vcsProvider" = ${v.provider} OR "vcsProvider" IS NULL)`
+      : sql`"vcsProvider" = ${v.provider}`;
+    return sql`"vcsRepo" = ${v.repo} AND "vcsNumber" = ${v.number} AND ${provider}
+       AND status NOT IN ${TERMINAL}`;
+  }
+
+  findActiveTaskByVcs(scope: TaskVcsScope): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE ${this.vcsScope(scope)}
+      ORDER BY "createdAt" DESC LIMIT 1`);
+  }
+
+  listActiveTasksByVcs(scope: TaskVcsScope): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks WHERE ${this.vcsScope(scope)}
+      ORDER BY "createdAt" DESC`);
+  }
+
+  async taskStats(): Promise<TaskStatsRow | null> {
+    const row = await this.db.get<Record<keyof TaskStatsRow, number | string | null>>(sql`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned,
+        SUM(CASE WHEN status = 'offered' THEN 1 ELSE 0 END) as offered,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM agent_tasks`);
+    return row as TaskStatsRow | null;
+  }
+
+  listFinishedSlackTasks(): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" IS NOT NULL
+        AND status IN ('completed', 'failed')
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 200`);
+  }
+
+  listUnnotifiedFinishedWorkerTasks(): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT t.* FROM agent_tasks t
+        LEFT JOIN agents a ON t."agentId" = a.id
+        WHERE t.status IN ('completed', 'failed')
+        AND t."finishedAt" IS NOT NULL
+        AND t."notifiedAt" IS NULL
+        AND (a."isLead" = ${false} OR a."isLead" IS NULL)
+        ORDER BY t."finishedAt" DESC LIMIT 50`);
+  }
+
+  async markTasksNotified(taskIds: readonly string[], now: string): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const result = await this.db.run(sql`
+      UPDATE agent_tasks SET "notifiedAt" = ${now}
+      WHERE id IN (${sqlList(taskIds)}) AND "notifiedAt" IS NULL`);
+    return result.changes;
+  }
+
+  async resetTasksNotified(taskIds: readonly string[]): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const result = await this.db.run(sql`
+      UPDATE agent_tasks SET "notifiedAt" = NULL
+      WHERE id IN (${sqlList(taskIds)}) AND "notifiedAt" IS NOT NULL`);
+    return result.changes;
+  }
+
+  listInProgressSlackTasks(): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" IS NOT NULL
+        AND status = 'in_progress'
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 200`);
+  }
+
+  listTasksByContextKey(contextKey: string, statuses: readonly string[]): Promise<TaskRow[]> {
+    if (statuses.length === 0) return Promise.resolve([]);
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}
+        AND status IN (${sqlList(statuses)})
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 200`);
+  }
+
+  findTrackerContextTask(
+    contextKey: string,
+    delegatingParentTaskId: string | null,
+    kind: "active" | "linkedPr",
+  ): Promise<TaskRow | null> {
+    const filter =
+      kind === "active"
+        ? sql`status NOT IN ${TERMINAL}`
+        : sql`status = 'completed'
+          AND "vcsProvider" IS NOT NULL
+          AND "vcsRepo" IS NOT NULL
+          AND "vcsNumber" IS NOT NULL
+          AND "vcsUrl" IS NOT NULL`;
+    return this.db.get<TaskRow>(sql`
+      WITH RECURSIVE
+        ancestors(id, "parentTaskId") AS (
+          SELECT id, "parentTaskId" FROM agent_tasks
+            WHERE id = ${delegatingParentTaskId} AND "contextKey" = ${contextKey}
+          UNION
+          SELECT parent.id, parent."parentTaskId" FROM agent_tasks parent
+          JOIN ancestors child ON parent.id = child."parentTaskId"
+          WHERE parent."contextKey" = ${contextKey}
+        ),
+        lineage(id) AS (
+          SELECT id FROM ancestors
+          WHERE "parentTaskId" IS NULL OR "parentTaskId" NOT IN (SELECT id FROM ancestors)
+          UNION
+          SELECT child.id FROM agent_tasks child
+          JOIN lineage parent ON child."parentTaskId" = parent.id
+        )
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}
+        AND id NOT IN (SELECT id FROM lineage)
+        AND ${filter}
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 1`);
+  }
+
+  findLatestTaskByContextKey(
+    contextKey: string,
+    opts: { requestedByUserId?: string; notRequestedByUserId?: string },
+  ): Promise<TaskRow | null> {
+    const mine =
+      opts.requestedByUserId !== undefined
+        ? sql` AND "requestedByUserId" = ${opts.requestedByUserId}`
+        : EMPTY;
+    const others =
+      opts.notRequestedByUserId !== undefined
+        ? sql` AND "requestedByUserId" IS DISTINCT FROM ${opts.notRequestedByUserId}`
+        : EMPTY;
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}${mine}${others}
+        ORDER BY "createdAt" DESC
+        LIMIT 1`);
+  }
+
+  findLatestScriptRunStepTask(contextKey: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}
+        AND "taskType" = 'script-run-step'
+        ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC
+        LIMIT 1`);
+  }
+
+  findLatestSlackIngressTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE source = 'slack'
+        AND "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        ORDER BY "createdAt" DESC
+        LIMIT 1`);
+  }
+
+  findLatestActiveSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE source = 'slack'
+        AND "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        AND status IN ('in_progress', 'pending')
+        ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC
+        LIMIT 1`);
+  }
+
+  findLatestLeadSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT t.*
+        FROM agent_tasks t
+        JOIN agents a ON a.id = t."agentId"
+        WHERE t.source = 'slack'
+          AND t."slackChannelId" = ${channelId}
+          AND t."slackThreadTs" = ${threadTs}
+          AND a."isLead" = ${true}
+        ORDER BY t."createdAt" DESC, ${this.insertionOrder("t")} DESC
+        LIMIT 1`);
+  }
+
+  async findLatestAgentIdOnContextKey(
+    contextKey: string,
+    source: string | null,
+    endedSince: string | null,
+    terminalStatuses: readonly string[],
+  ): Promise<string | null> {
+    const row = await this.db.get<{ agentId: string | null }>(sql`
+      SELECT "agentId" FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}
+        AND ${this.contextKeySource(source)}
+        AND ${
+          endedSince === null
+            ? sql`1 = 1`
+            : sql`(status NOT IN (${sqlList(terminalStatuses)}) OR "finishedAt" >= ${endedSince})`
+        }
+        ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC
+        LIMIT 1`);
+    return row?.agentId ?? null;
+  }
+
+  findLatestTaskInContextKeyRange(
+    lower: string,
+    upper: string,
+    opts: { source: string | null; activeOnly: boolean; requestedByUserId?: string },
+  ): Promise<TaskRow | null> {
+    const active = opts.activeOnly ? sql` AND status IN ('in_progress', 'pending')` : EMPTY;
+    const mine =
+      opts.requestedByUserId !== undefined
+        ? sql` AND "requestedByUserId" = ${opts.requestedByUserId}`
+        : EMPTY;
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" >= ${lower} AND "contextKey" < ${upper}
+        AND ${this.contextKeySource(opts.source)}${active}${mine}
+        ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC
+        LIMIT 1`);
+  }
+
+  findLatestActiveTaskByContextKey(
+    contextKey: string,
+    source: string | null,
+    requestedByUserId?: string,
+  ): Promise<TaskRow | null> {
+    const mine =
+      requestedByUserId !== undefined
+        ? sql` AND "requestedByUserId" = ${requestedByUserId}`
+        : EMPTY;
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "contextKey" = ${contextKey}
+        AND ${this.contextKeySource(source)}
+        AND status IN ('in_progress', 'pending')${mine}
+        ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC
+        LIMIT 1`);
+  }
+
+  findLatestLeadTaskByContextKey(
+    contextKey: string,
+    source: string | null,
+  ): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT t.*
+        FROM agent_tasks t
+        JOIN agents a ON a.id = t."agentId"
+        WHERE t."contextKey" = ${contextKey}
+          AND ${this.contextKeySource(source, "t.")}
+          AND a."isLead" = ${true}
+        ORDER BY t."createdAt" DESC, ${this.insertionOrder("t")} DESC
+        LIMIT 1`);
+  }
+
+  findFirstTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        ORDER BY "createdAt" ASC
+        LIMIT 1`);
+  }
+
+  findMostRecentTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        ORDER BY "createdAt" DESC
+        LIMIT 1`);
+  }
+
+  listCompletedTasksInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+    limit: number,
+    before?: { lastUpdatedAt: string; id: string },
+  ): Promise<TaskRow[]> {
+    const cursor = before
+      ? sql` AND ("lastUpdatedAt" < ${before.lastUpdatedAt} OR ("lastUpdatedAt" = ${before.lastUpdatedAt} AND id < ${before.id}))`
+      : EMPTY;
+    return this.db.query<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        AND status = 'completed'
+        AND COALESCE("taskType", '') != 'follow-up'
+        AND "lastUpdatedAt" > ${since}${cursor}
+        ORDER BY "lastUpdatedAt" DESC, id DESC
+        LIMIT ${limit}`);
+  }
+
+  findRecentFailedTaskInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+  ): Promise<TaskRow | null> {
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        AND status = 'failed'
+        AND "lastUpdatedAt" > ${since}
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 1`);
+  }
+
+  findRecentCancelledTaskInThread(
+    channelId: string,
+    threadTs: string,
+    since: string,
+  ): Promise<TaskRow | null> {
+    const reason = sql`"failureReason"`;
+    return this.db.get<TaskRow>(sql`
+      SELECT * FROM agent_tasks
+        WHERE "slackChannelId" = ${channelId}
+        AND "slackThreadTs" = ${threadTs}
+        AND "lastUpdatedAt" > ${since}
+        AND (
+          status = 'cancelled'
+          OR (
+            status = 'failed'
+            AND "failureReason" IS NOT NULL
+            AND (
+              ${likeAsciiCi(reason, sql`'cancelled%'`)}
+              OR ${likeAsciiCi(reason, sql`'exit 130%'`)}
+              OR ${likeAsciiCi(reason, sql`'%cancelled%'`)}
+            )
+          )
+        )
+        ORDER BY "lastUpdatedAt" DESC
+        LIMIT 1`);
+  }
+
+  /** Cuts the run prefix out of a contextKey (SQLite `instr`). */
+  abstract countAgentDispatchesInThread(
+    channelId: string,
+    threadTs: string,
+    creatorAgentId: string,
+    since: string,
+  ): Promise<number>;
+
+  // ---- agent_tasks: lists, counts, lineage ----
+
+  /** Pages through the insertion-order column and builds list projections (SQLite `rowid`, BLOB cuts). */
+  abstract listTasks(
+    filters: TaskListFilters,
+    page: TaskListPage,
+    fields: TaskListFields,
+  ): Promise<Record<string, unknown>[]>;
+
+  /**
+   * The WHERE term of a free-text task search (SQLite FTS5 MATCH). `purpose`
+   * picks the plan: a page stops at its LIMIT, a count reads every row.
+   */
+  protected abstract taskSearchCondition(
+    search: string,
+    purpose: "page" | "count",
+  ): Promise<SqlQuery>;
+
+  /**
+   * The selective filter terms, in today's order. The heartbeat and
+   * readability terms are separate: a page plans differently without
+   * selective terms.
+   */
+  protected async taskFilterConditions(
+    f: TaskListFilters,
+    purpose: "page" | "count",
+  ): Promise<SqlQuery[]> {
+    const c: SqlQuery[] = [];
+    if (f.statuses && f.statuses.length === 1) c.push(sql`status = ${f.statuses[0] as string}`);
+    else if (f.statuses && f.statuses.length > 1) c.push(sql`status IN (${sqlList(f.statuses)})`);
+    if (f.statusKind) c.push(sql`"statusKind" = ${f.statusKind}`);
+    if (f.agentId) c.push(sql`"agentId" = ${f.agentId}`);
+    if (f.search) c.push(await this.taskSearchCondition(f.search, purpose));
+    if (f.unassigned) c.push(sql`("agentId" IS NULL OR status = 'unassigned')`);
+    if (f.offeredTo) c.push(sql`"offeredTo" = ${f.offeredTo}`);
+    if (f.taskType) c.push(sql`"taskType" = ${f.taskType}`);
+    if (f.tags && f.tags.length > 0) {
+      const tags = f.tags.map((tag) => sql`${likeAsciiCi(sql`tags`, sql`${`%"${tag}"%`}`)}`);
+      c.push(sql`(${sqlJoin(tags, sql` OR `)})`);
+    }
+    if (f.scheduleId) c.push(sql`"scheduleId" = ${f.scheduleId}`);
+    if (f.workflowRunId) c.push(sql`"workflowRunId" = ${f.workflowRunId}`);
+    if (f.key) c.push(sql`"key" = ${f.key}`);
+    else if (f.keyPrefixPattern) {
+      c.push(sql`${likeAsciiCi(sql`"key"`, sql`${f.keyPrefixPattern}`, "\\")}`);
+    }
+    if (f.sources && f.sources.length > 0) c.push(sql`source IN (${sqlList(f.sources)})`);
+    if (f.createdAfter) c.push(sql`"createdAt" >= ${f.createdAfter}`);
+    if (f.createdBefore) c.push(sql`"createdAt" < ${f.createdBefore}`);
+    if (f.requestedByUserIdIsNull) c.push(sql`"requestedByUserId" IS NULL`);
+    else if (f.requestedByUserId) c.push(sql`"requestedByUserId" = ${f.requestedByUserId}`);
+    return c;
+  }
+
+  /** Leaves out heartbeat, heartbeat-checklist and boot-triage tasks. */
+  protected notHeartbeat(): SqlQuery {
+    return sql`(COALESCE("taskType", '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND NOT ${likeAsciiCi(sql`tags`, sql`'%"heartbeat"%'`)})`;
+  }
+
+  async countTasks(filters: TaskListFilters): Promise<number> {
+    const conditions = await this.taskFilterConditions(filters, "count");
+    if (!filters.includeHeartbeat) conditions.push(this.notHeartbeat());
+    if (filters.readableBy) {
+      conditions.push(readableSessionSql(filters.readableBy.userId, sql`agent_tasks.id`));
+    }
+    const row = await this.db.get<{ count: number | string }>(
+      sql`SELECT COUNT(*) as count FROM agent_tasks${sqlWhere(conditions)}`,
+    );
+    return Number(row?.count ?? 0);
+  }
+
+  listTaskAncestors(
+    taskId: string,
+    maxAncestors: number,
+  ): Promise<{ id: string; parentTaskId: string | null; hops: number }[]> {
+    return this.db.query(sql`
+      WITH RECURSIVE up(id, "parentTaskId", hops) AS (
+          SELECT id, "parentTaskId", 0 FROM agent_tasks WHERE id = ${taskId}
+          UNION ALL
+          SELECT t.id, t."parentTaskId", up.hops + 1 FROM agent_tasks t
+          JOIN up ON t.id = up."parentTaskId"
+          WHERE up.hops < ${maxAncestors}
+        )
+        SELECT id, "parentTaskId", hops FROM up ORDER BY hops`);
+  }
+
+  /** LIMIT inside the recursive term and the slim projection are SQLite-specific. */
+  abstract listTaskDescendants(
+    startId: string,
+    maxDepth: number,
+    limit: number,
+  ): Promise<TaskLineageRow[]>;
+  /** The slim projection is SQLite-specific (BLOB prefix). */
+  abstract listTaskLineageRows(ids: readonly string[]): Promise<TaskLineageRow[]>;
+
+  async hasChildOutside(ids: readonly string[]): Promise<boolean> {
+    const row = await this.db.get(sql`
+      SELECT 1 FROM agent_tasks
+      WHERE "parentTaskId" IN (${sqlList(ids)}) AND id NOT IN (${sqlList(ids)}) LIMIT 1`);
+    return row !== undefined && row !== null;
+  }
+
+  // ---- agent_tasks_fts ----
+
+  /** The FTS state table is SQLite-specific (FTS5 backfill). */
+  abstract getTaskFtsIndexedThrough(): Promise<number | null>;
+  /** Writes FTS5 rows keyed by `rowid`. */
+  abstract indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }>;
+  /** Reads `pragma_database_list`. */
+  abstract mainDatabaseFile(): Promise<string | null>;
 
   // ---- task_idempotency_keys ----
 
