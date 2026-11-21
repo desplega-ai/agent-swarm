@@ -77,8 +77,10 @@ export function mcpServersContract(engine: ContractEngine): void {
       expect(await repo.countLiveSubscriptions("u1", T1)).toBe(2);
       expect(await repo.countLiveSubscriptions("u1", T1, "s1")).toBe(1);
       expect(await repo.countLiveSubscriptions("nobody", T0)).toBe(0);
-      expect(await repo.latestVerification("u1", "https://hook.example/a", "2000", T0)).toBe(T1);
-      expect(await repo.latestVerification("u1", "https://hook.example/a", "2000", T1)).toBe(T0);
+      // Callers pass an ISO lower bound (verifiedAt is timestamptz on Postgres).
+      const SINCE = "2000-01-01T00:00:00.000Z";
+      expect(await repo.latestVerification("u1", "https://hook.example/a", SINCE, T0)).toBe(T1);
+      expect(await repo.latestVerification("u1", "https://hook.example/a", SINCE, T1)).toBe(T0);
       expect(await repo.latestVerification("u1", "https://hook.example/a", T0, T1)).toBeNull();
       expect(await repo.deleteExpiredSubscriptions(T1)).toBe(1);
       expect(await repo.findSubscription("s3")).toBeNull();

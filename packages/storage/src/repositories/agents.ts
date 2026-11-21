@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -448,13 +448,14 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
       ) RETURNING *`);
   }
 
-  async insertAgentSnapshot(columns: string[], values: (string | number | null)[]): Promise<void> {
-    const names = sqlJoin(
-      columns.map((column) => sql`${sqlIdent(column)}`),
-      sql`, `,
-    );
-    await this.db.run(sql`INSERT INTO agents (${names}) VALUES (${sqlList(values)})`);
-  }
+  /**
+   * Values come in the SQLite value shape (flags 0/1, JSON as text): the
+   * conversion to each column's type differs per engine.
+   */
+  abstract insertAgentSnapshot(
+    columns: string[],
+    values: (string | number | null)[],
+  ): Promise<void>;
 
   /** Catalog query differs per engine (SQLite `pragma_table_info`). */
   abstract listAgentColumns(): Promise<string[]>;
@@ -480,7 +481,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
         name = COALESCE(${u.name}, name),
         description = COALESCE(${u.description}, description),
         role = COALESCE(${u.role}, role),
-        capabilities = COALESCE(${u.capabilities}, capabilities),
+        capabilities = COALESCE(${jsonText(u.capabilities)}, capabilities),
         "claudeMd" = COALESCE(${u.claudeMd}, "claudeMd"),
         "soulMd" = COALESCE(${u.soulMd}, "soulMd"),
         "identityMd" = COALESCE(${u.identityMd}, "identityMd"),
@@ -547,7 +548,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   insertHistory(r: AgentHistoryRow): Promise<AgentHistoryRow | null> {
     return this.db.get<AgentHistoryRow>(sql`
       INSERT INTO agent_history (id, agent_id, event, actor_ref, reason, snapshot_json, created_at)
-      VALUES (${r.id}, ${r.agent_id}, ${r.event}, ${r.actor_ref}, ${r.reason}, ${r.snapshot_json}, ${r.created_at})
+      VALUES (${r.id}, ${r.agent_id}, ${r.event}, ${r.actor_ref}, ${r.reason}, ${jsonText(r.snapshot_json)}, ${r.created_at})
       RETURNING *`);
   }
 
@@ -593,7 +594,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
         interpreter, args, env, metadata, "createdAt", "lastUpdatedAt"
       ) VALUES (
         ${s.id}, ${s.agentId}, ${s.name}, ${s.port}, ${s.description}, ${s.url}, ${s.healthCheckPath}, 'starting',
-        ${s.script}, ${s.cwd}, ${s.interpreter}, ${s.args}, ${s.env}, ${s.metadata}, ${s.now}, ${s.now}
+        ${s.script}, ${s.cwd}, ${s.interpreter}, ${jsonText(s.args)}, ${jsonText(s.env)}, ${jsonText(s.metadata)}, ${s.now}, ${s.now}
       ) RETURNING *`);
   }
 
@@ -648,8 +649,8 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
     return this.db.get<ServiceRow>(sql`
       UPDATE services SET
         port = ${d.port}, description = ${d.description}, url = ${d.url}, "healthCheckPath" = ${d.healthCheckPath},
-        script = ${d.script}, cwd = ${d.cwd}, interpreter = ${d.interpreter}, args = ${d.args}, env = ${d.env},
-        metadata = ${d.metadata}, "lastUpdatedAt" = ${now}
+        script = ${d.script}, cwd = ${d.cwd}, interpreter = ${d.interpreter}, args = ${jsonText(d.args)}, env = ${jsonText(d.env)},
+        metadata = ${jsonText(d.metadata)}, "lastUpdatedAt" = ${now}
       WHERE id = ${id} RETURNING *`);
   }
 

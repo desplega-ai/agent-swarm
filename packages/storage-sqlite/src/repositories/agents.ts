@@ -6,6 +6,9 @@ import {
   type ContextVersionRow,
   type ServiceRow,
   sql,
+  sqlIdent,
+  sqlJoin,
+  sqlList,
 } from "@desplega/storage";
 
 export class SqliteAgentsRepository extends BaseAgentsRepository {
@@ -21,6 +24,14 @@ export class SqliteAgentsRepository extends BaseAgentsRepository {
     return this.db.query<AgentRow>(
       sql`SELECT * FROM agents WHERE harness_provider = ${provider} ORDER BY name, rowid`,
     );
+  }
+
+  async insertAgentSnapshot(columns: string[], values: (string | number | null)[]): Promise<void> {
+    const names = sqlJoin(
+      columns.map((column) => sql`${sqlIdent(column)}`),
+      sql`, `,
+    );
+    await this.db.run(sql`INSERT INTO agents (${names}) VALUES (${sqlList(values)})`);
   }
 
   async listAgentColumns(): Promise<string[]> {

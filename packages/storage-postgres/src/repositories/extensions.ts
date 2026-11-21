@@ -1,12 +1,22 @@
-import { BaseExtensionsRepository, type ExtensionRunRow } from "@desplega/storage";
-import { notOnPostgresYet } from "./not-yet";
+import { BaseExtensionsRepository, type ExtensionRunRow, sql } from "@desplega/storage";
 
 export class PostgresExtensionsRepository extends BaseExtensionsRepository {
-  pruneRuns(extensionId: string, keep: number): Promise<void> {
-    return notOnPostgresYet("PostgresExtensionsRepository.pruneRuns");
+  async pruneRuns(extensionId: string, keep: number): Promise<void> {
+    await this.db.run(sql`
+      DELETE FROM extension_runs
+      WHERE "extensionId" = ${extensionId} AND id IN (
+        SELECT id FROM extension_runs
+        WHERE "extensionId" = ${extensionId}
+        ORDER BY "createdAt" DESC, "_rowid" DESC
+        OFFSET ${keep}
+      )`);
   }
 
   listRuns(extensionId: string, limit: number): Promise<ExtensionRunRow[]> {
-    return notOnPostgresYet("PostgresExtensionsRepository.listRuns");
+    return this.db.query<ExtensionRunRow>(sql`
+      SELECT * FROM extension_runs
+      WHERE "extensionId" = ${extensionId}
+      ORDER BY "createdAt" DESC, "_rowid" DESC
+      LIMIT ${limit}`);
   }
 }

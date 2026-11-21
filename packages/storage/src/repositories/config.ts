@@ -1,4 +1,4 @@
-import { greatestStrict } from "../dialect";
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -682,10 +682,16 @@ export abstract class BaseConfigRepository implements ConfigRepository {
       benchThreshold: number;
     },
   ): Promise<void> {
-    const extended = greatestStrict(
-      sql`COALESCE(api_key_status."rateLimitedUntil", '')`,
-      sql`excluded."rateLimitedUntil"`,
-    );
+    // SQLite's max(COALESCE(current, ''), incoming), written without the ''
+    // sentinel (not a timestamp on Postgres): NULL when the incoming value is
+    // NULL, else the later of the two, the incoming one when none is stored.
+    const extended = sql`CASE
+      WHEN excluded."rateLimitedUntil" IS NULL THEN NULL
+      WHEN api_key_status."rateLimitedUntil" IS NULL
+        OR excluded."rateLimitedUntil" > api_key_status."rateLimitedUntil"
+      THEN excluded."rateLimitedUntil"
+      ELSE api_key_status."rateLimitedUntil"
+    END`;
     await this.db.run(sql`
       INSERT INTO api_key_status (
         "keyType", "keySuffix", "keyIndex", scope, "scopeId", status, "rateLimitedUntil",
@@ -761,7 +767,7 @@ export abstract class BaseConfigRepository implements ConfigRepository {
       INSERT INTO api_key_status (
         "keyType", "keySuffix", "keyIndex", scope, "scopeId", "rateLimitWindows", "providerAccount", provider, "updatedAt"
       ) VALUES (
-        ${ref.keyType}, ${ref.keySuffix}, ${v.keyIndex}, ${ref.scope}, ${ref.scopeId}, ${v.rateLimitWindows},
+        ${ref.keyType}, ${ref.keySuffix}, ${v.keyIndex}, ${ref.scope}, ${ref.scopeId}, ${jsonText(v.rateLimitWindows)},
         ${v.providerAccount}, ${v.provider}, ${v.now}
       )
       ON CONFLICT ("keyType", "keySuffix", scope, "scopeId")

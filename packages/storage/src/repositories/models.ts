@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -317,7 +318,7 @@ export abstract class BaseModelsRepository implements ModelsRepository {
       INSERT INTO model_profiles (${MODEL_PROFILE_COLUMNS})
       VALUES (
         ${p.id}, ${p.name}, ${p.harness}, ${p.model}, ${p.effort}, ${p.allowCustomModel},
-        ${p.description}, ${p.seededFrom}, ${p.credentialAllowlist}, ${p.fallbacks},
+        ${p.description}, ${p.seededFrom}, ${jsonText(p.credentialAllowlist)}, ${jsonText(p.fallbacks)},
         ${p.now}, ${p.now}, ${p.actor}, ${p.actor}
       )
       ON CONFLICT (name) DO NOTHING
@@ -336,8 +337,8 @@ export abstract class BaseModelsRepository implements ModelsRepository {
       sets.push(sql`"allowCustomModel" = ${u.allowCustomModel}`);
     if (u.description !== undefined) sets.push(sql`description = ${u.description}`);
     if (u.credentialAllowlist !== undefined)
-      sets.push(sql`"credentialAllowlist" = ${u.credentialAllowlist}`);
-    if (u.fallbacks !== undefined) sets.push(sql`fallbacks = ${u.fallbacks}`);
+      sets.push(sql`"credentialAllowlist" = ${jsonText(u.credentialAllowlist)}`);
+    if (u.fallbacks !== undefined) sets.push(sql`fallbacks = ${jsonText(u.fallbacks)}`);
     sets.push(sql`"lastUpdatedAt" = ${audit.now}`, sql`updated_by = ${audit.actor}`);
     return this.db.get<ModelProfileRow>(
       sql`UPDATE model_profiles SET ${sqlJoin(sets, sql`, `)} WHERE name = ${name} RETURNING *`,

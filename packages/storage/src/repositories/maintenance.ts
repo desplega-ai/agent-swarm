@@ -1,5 +1,5 @@
 import type { DbParam } from "../client";
-import { likeAsciiCi, nowText } from "../dialect";
+import { likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlIdent, sqlJoin } from "../sql";
 
@@ -60,12 +60,11 @@ export abstract class BaseMaintenanceRepository implements MaintenanceRepository
     return row?.seededHash ?? null;
   }
 
-  async setState(key: string, value: string): Promise<void> {
-    await this.db.run(sql`
-      INSERT INTO seed_state (kind, key, "seededHash", "seededAt")
-      VALUES ('maintenance', ${key}, ${value}, ${nowText})
-      ON CONFLICT (kind, key) DO UPDATE SET "seededHash" = excluded."seededHash", "seededAt" = ${nowText}`);
-  }
+  /**
+   * `seededAt` is a TEXT column on every engine: the engine time rendered as
+   * `YYYY-MM-DD HH:MM:SS` text differs per engine.
+   */
+  abstract setState(key: string, value: string): Promise<void>;
 
   async deleteStatesLike(pattern: string): Promise<void> {
     await this.db.run(

@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlJoin } from "../sql";
 
@@ -228,6 +229,11 @@ export interface ExtensionsRepository {
   listRuns(extensionId: string, limit: number): Promise<ExtensionRunRow[]>;
 }
 
+/** A nullable 0/1 flag bound as a JS boolean (SQLite stores 1/0, Postgres a boolean). */
+function flag(value: number | null): boolean | null {
+  return value === null ? null : value !== 0;
+}
+
 export abstract class BaseExtensionsRepository implements ExtensionsRepository {
   constructor(protected readonly db: SqlExecutor) {}
 
@@ -253,7 +259,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
         "consecutiveFailures", "lastError", "agentId", "createdByAgentId",
         created_by, updated_by, "createdAt", "updatedAt"
       ) VALUES (
-        ${e.id}, ${e.name}, ${e.description}, ${e.runtime}, ${e.manifestJson}, ${e.contentHash}, 1,
+        ${e.id}, ${e.name}, ${e.description}, ${e.runtime}, ${jsonText(e.manifestJson)}, ${e.contentHash}, 1,
         1, ${false}, ${e.priority}, ${e.configJson}, 'disabled',
         0, NULL, NULL, ${e.createdByAgentId},
         ${e.actor}, ${e.actor}, ${e.now}, ${e.now}
@@ -285,7 +291,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
   ): Promise<ExtensionRow | null> {
     return this.db.get<ExtensionRow>(sql`
       UPDATE extensions SET
-        description = ${u.description}, runtime = ${u.runtime}, "manifestJson" = ${u.manifestJson},
+        description = ${u.description}, runtime = ${u.runtime}, "manifestJson" = ${jsonText(u.manifestJson)},
         "contentHash" = ${u.contentHash}, version = ${u.version}, "activeVersion" = ${u.activeVersion},
         priority = ${u.priority}, "configJson" = ${u.configJson}, updated_by = ${u.actor},
         "updatedAt" = ${u.now}
@@ -296,7 +302,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
   activateSnapshot(id: string, u: ExtensionContentUpdate): Promise<ExtensionRow | null> {
     return this.db.get<ExtensionRow>(sql`
       UPDATE extensions SET
-        description = ${u.description}, runtime = ${u.runtime}, "manifestJson" = ${u.manifestJson},
+        description = ${u.description}, runtime = ${u.runtime}, "manifestJson" = ${jsonText(u.manifestJson)},
         "contentHash" = ${u.contentHash}, "activeVersion" = ${u.activeVersion},
         updated_by = ${u.actor}, "updatedAt" = ${u.now}
       WHERE id = ${id}
@@ -396,7 +402,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
         id, "extensionId", version, "manifestJson", "filesJson", "contentHash",
         "changedByAgentId", "changedAt", "changeReason", created_by, updated_by
       ) VALUES (
-        ${v.id}, ${v.extensionId}, ${v.version}, ${v.manifestJson}, ${v.filesJson}, ${v.contentHash},
+        ${v.id}, ${v.extensionId}, ${v.version}, ${jsonText(v.manifestJson)}, ${jsonText(v.filesJson)}, ${v.contentHash},
         ${v.changedByAgentId}, ${v.changedAt}, ${v.changeReason}, ${v.actor}, ${v.actor}
       )`);
   }
@@ -413,7 +419,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
         id, "extensionId", kind, "assetId", name, "seededHash", "enabledBefore",
         created_by, updated_by, "createdAt", "updatedAt"
       ) VALUES (
-        ${a.id}, ${a.extensionId}, ${a.kind}, ${a.assetId}, ${a.name}, ${a.seededHash}, ${a.enabledBefore},
+        ${a.id}, ${a.extensionId}, ${a.kind}, ${a.assetId}, ${a.name}, ${a.seededHash}, ${flag(a.enabledBefore)},
         ${a.actor}, ${a.actor}, ${a.now}, ${a.now}
       )
       ON CONFLICT ("extensionId", kind, name) DO UPDATE SET
@@ -429,7 +435,7 @@ export abstract class BaseExtensionsRepository implements ExtensionsRepository {
     now: string,
   ): Promise<void> {
     await this.db.run(sql`
-      UPDATE extension_assets SET "enabledBefore" = ${enabledBefore}, updated_by = ${actor}, "updatedAt" = ${now}
+      UPDATE extension_assets SET "enabledBefore" = ${flag(enabledBefore)}, updated_by = ${actor}, "updatedAt" = ${now}
       WHERE id = ${id}`);
   }
 

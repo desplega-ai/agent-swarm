@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { sql } from "../sql";
 
@@ -142,7 +143,7 @@ export abstract class BaseAssetsRepository implements AssetsRepository {
       INSERT INTO import_pending_assignments
         ("sourceId", "agentKey", "agentId", "agentName", instructions, "instructionsHash", "skillKeys", "createdAt")
       VALUES (${r.sourceId}, ${r.agentKey}, ${r.agentId}, ${r.agentName}, ${r.instructions},
-              ${r.instructionsHash}, ${r.skillKeys}, ${r.now})`);
+              ${r.instructionsHash}, ${jsonText(r.skillKeys)}, ${r.now})`);
   }
 
   /** Insertion order differs per engine (SQLite `rowid`). */

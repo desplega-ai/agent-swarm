@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type NewRuntimePool, type RuntimePoolsRepository, type Storage, sql } from "../../src";
+import {
+  jsonText,
+  type NewRuntimePool,
+  type RuntimePoolsRepository,
+  type Storage,
+  sql,
+} from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
@@ -587,6 +593,17 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       expect(await repo.listPendingTaskIds("a1")).toEqual(["t-old", "t-low", "t-b", "t-a"]);
     });
 
+    test("pending work: a NULL priority sorts after every priority", async () => {
+      await agent("a1");
+      await task("t-null", { agentId: "a1" });
+      await storage.executor.run(sql`UPDATE agent_tasks SET priority = NULL WHERE id = 't-null'`);
+      await task("t-low", { agentId: "a1", priority: 0 });
+      expect((await repo.listPendingWork<{ id: string }>("a1")).map((t) => t.id)).toEqual([
+        "t-low",
+        "t-null",
+      ]);
+    });
+
     test("unread mention channels count once per channel", async () => {
       await agent("a1");
       const channel = (id: string) =>
@@ -596,7 +613,7 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       const message = (id: string, channelId: string, mentions: string, createdAt = T1) =>
         storage.executor.run(sql`
           INSERT INTO channel_messages (id, "channelId", content, mentions, "createdAt")
-          VALUES (${id}, ${channelId}, 'hi', ${mentions}, ${createdAt})`);
+          VALUES (${id}, ${channelId}, 'hi', ${jsonText(mentions)}, ${createdAt})`);
       await channel("ch1");
       await channel("ch2");
       await channel("ch3");
