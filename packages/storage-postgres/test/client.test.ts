@@ -150,6 +150,27 @@ describe("postgres client", () => {
     expect(attemptRollbacks).toBe(client.retriedAttempts - before);
   });
 
+  test("a statement outside a transaction that loses a serialization race runs again", async () => {
+    await client.run(`INSERT INTO t VALUES ('solo', 'x', 0)`);
+    const before = client.retriedAttempts;
+    const updated = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const holder = client.transaction(async () => {
+      await client.run(`UPDATE t SET n = n + 1 WHERE id = 'solo'`);
+      updated.resolve();
+      await release.promise;
+    });
+    await updated.promise;
+    // Its snapshot predates the holder's commit, so it fails with 40001 once the holder commits.
+    const solo = client.run(`UPDATE t SET n = n + 10 WHERE id = 'solo'`);
+    await tick();
+    release.resolve();
+    await holder;
+    expect((await solo).changes).toBe(1);
+    expect((await client.get<{ n: number }>(`SELECT n FROM t WHERE id = 'solo'`))?.n).toBe(11);
+    expect(client.retriedAttempts).toBe(before + 1);
+  });
+
   test("tx-replay runs each outermost callback twice and keeps only the second run", async () => {
     const replay = createPostgresClient(scratch.url, { max: 2, txReplay: true });
     try {

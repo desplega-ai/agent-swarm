@@ -21,7 +21,9 @@ import { mapPostgresError, SQLSTATE } from "./errors";
  *   fails with SQLSTATE 40001 or 40P01 runs again, whole, with a bounded
  *   jittered backoff. The hooks of a failed attempt are discarded:
  *   `onAttemptRollback` hooks run at once, `afterRollback` hooks run only when
- *   the last attempt fails, `afterCommit` hooks run only after COMMIT.
+ *   the last attempt fails, `afterCommit` hooks run only after COMMIT. A
+ *   statement outside a transaction that fails with 40001 or 40P01 changed
+ *   nothing and runs again, with the same backoff.
  * - `txReplay` (the `--tx-replay` e2e mode) rolls back the first attempt of
  *   every outermost transaction and runs the callback again.
  */
@@ -147,13 +149,27 @@ export class PostgresClient implements DbClient {
   }
 
   private async execute(text: string, params: DbParam[] | undefined): Promise<PgResult> {
-    const started = performance.now();
-    try {
-      return await this.handle().unsafe(text, bindParams(params));
-    } catch (err) {
-      throw mapPostgresError(err);
-    } finally {
-      this.options.observer?.onStatement?.(text, performance.now() - started);
+    const ctx = txContext.getStore();
+    const inTransaction = ctx !== undefined && !ctx.closed;
+    for (let attempt = 1; ; attempt++) {
+      const started = performance.now();
+      try {
+        return await this.handle().unsafe(text, bindParams(params));
+      } catch (err) {
+        // A statement outside a transaction is its own transaction (D6): one
+        // that loses a serialization race changed nothing, so it runs again,
+        // with the same bounded backoff. Inside a transaction the whole
+        // callback retries instead.
+        if (!inTransaction && isRetryable(err) && attempt < this.retry.maxAttempts) {
+          this.retriedAttempts += 1;
+          this.options.onRetry?.(sqlstateOf(err) ?? "", attempt);
+          await Bun.sleep(this.backoffMs(attempt));
+          continue;
+        }
+        throw mapPostgresError(err);
+      } finally {
+        this.options.observer?.onStatement?.(text, performance.now() - started);
+      }
     }
   }
 

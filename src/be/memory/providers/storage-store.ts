@@ -1,8 +1,9 @@
-import type {
-  AgentMemoryRow,
-  MemoryListFilter,
-  MemoryReadExecutor,
-  MemorySearchFilter,
+import {
+  type AgentMemoryRow,
+  type MemoryListFilter,
+  type MemoryReadExecutor,
+  type MemorySearchFilter,
+  SerializationFailureError,
 } from "@desplega/storage";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import { getStorage } from "@/be/storage";
@@ -68,6 +69,14 @@ const memoryRepo = () => getStorage().repos.memory;
 const searchReader = (): MemoryReadExecutor | undefined => getStorage().memoryIndexes.searchReader;
 /** The engine has vector search (sqlite-vec loaded, or pgvector installed). */
 const vectorSearch = () => getStorage().capabilities.vectorSearch;
+
+/**
+ * A serialization failure must reach the transaction that retries it
+ * (decision D6): the store's catch-and-continue sites rethrow it.
+ */
+function rethrowIfRetryable(err: unknown): void {
+  if (err instanceof SerializationFailureError) throw err;
+}
 
 /** The full-text query terms of `queryText` (at most 12); the repository ORs them as phrases. */
 function ftsTerms(queryText: string): string[] {
@@ -256,7 +265,8 @@ export class StorageMemoryStore implements MemoryStore {
   private async getFtsTableSchema(): Promise<string | null> {
     try {
       return await memoryRepo().ftsTableSchema();
-    } catch {
+    } catch (err) {
+      rethrowIfRetryable(err);
       return null;
     }
   }
@@ -341,6 +351,7 @@ export class StorageMemoryStore implements MemoryStore {
         await storage.repos.memory.insertFtsRow(memoryId, name, content);
       });
     } catch (err) {
+      rethrowIfRetryable(err);
       console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
     }
   }
@@ -373,7 +384,8 @@ export class StorageMemoryStore implements MemoryStore {
   private async getVecTableSchema(reader?: MemoryReadExecutor): Promise<string | null> {
     try {
       return await memoryRepo().vecTableSchema(reader);
-    } catch {
+    } catch (err) {
+      rethrowIfRetryable(err);
       return null;
     }
   }
@@ -720,6 +732,7 @@ export class StorageMemoryStore implements MemoryStore {
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
     } catch (err) {
+      rethrowIfRetryable(err);
       console.warn("[memory-fts] query failed:", (err as Error).message);
       return [];
     }
@@ -1193,9 +1206,12 @@ export class StorageMemoryStore implements MemoryStore {
         }
         try {
           await repo.deleteVecRow(id);
-          await repo.insertVecRow(id, vecBuffer);
+          // A savepoint: on Postgres a failed statement aborts the whole
+          // transaction, so the embedding update could not commit after it.
+          await storage.transaction(() => repo.insertVecRow(id, vecBuffer));
           this.noteVecWrite();
         } catch (err) {
+          rethrowIfRetryable(err);
           console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
           // The row now misses from memory_vec: search must see the fallback.
           this.invalidateSearchHealth();
