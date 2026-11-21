@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { appendFileSync } from "node:fs";
+
 const write = (message: unknown) => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 };
@@ -39,6 +41,27 @@ function handle(message: Record<string, unknown>): void {
   }
 
   switch (message.method) {
+    case "thread/start":
+    case "turn/start": {
+      if (process.env.FAKE_CODEX_REQUESTS) {
+        appendFileSync(process.env.FAKE_CODEX_REQUESTS, `${JSON.stringify(message.params)}\n`);
+      }
+      if (message.method === "thread/start") {
+        write({
+          id: message.id,
+          result: {
+            thread: { id: "thread-1" },
+            model: "thread-model-fixture",
+            reasoningEffort: "low",
+          },
+        });
+      } else {
+        const turn = { id: "turn-1", status: "completed" };
+        write({ id: message.id, result: { turn } });
+        write({ method: "turn/completed", params: { threadId: "thread-1", turn } });
+      }
+      break;
+    }
     case "echo":
       write({ id: message.id, result: { params: message.params, initialized } });
       break;

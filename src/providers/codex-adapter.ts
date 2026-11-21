@@ -69,6 +69,7 @@ import {
   type RateLimitReplacement,
   scrubProviderQuotaReport,
 } from "../utils/provider-account-telemetry";
+import { type RuntimeCatalog, runtimeCatalogModel } from "../utils/runtime-model-catalog";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
@@ -86,7 +87,11 @@ import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import { readPkgVersion } from "./harness-version";
 import { buildOtelTraceparentEnv } from "./otel-env";
-import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
+import {
+  applyReasoningEffort,
+  effectiveReasoningEffort,
+  type ReasoningEffort,
+} from "./reasoning-effort";
 import type {
   CostData,
   CredCheckOptions,
@@ -196,8 +201,15 @@ export const CODEX_REASONING_SUMMARY = "detailed";
 type TodoListItem = Extract<ThreadItem, { type: "todo_list" }>;
 type WebSearchItem = Extract<ThreadItem, { type: "web_search" }>;
 
+type ThreadStarted = {
+  type: "thread.started";
+  thread_id: string;
+  model?: string;
+  reasoningEffort?: string | null;
+};
+
 export type ThreadEvent =
-  | { type: "thread.started"; thread_id: string }
+  | ThreadStarted
   | { type: "turn.started"; turn_id?: string }
   | { type: "item.started" | "item.updated" | "item.completed"; item: ThreadItem }
   | { type: "message.delta"; item_id: string; delta: string }
@@ -596,6 +608,13 @@ export async function buildCodexConfig(
   const reasoningConfig =
     reasoningApplication.kind === "codex-config" ? reasoningApplication.config : {};
 
+  if (config.reasoningEffort && reasoningApplication.kind === "noop") {
+    emit({
+      type: "raw_stderr",
+      content: `[codex] Cannot apply reasoning effort ${config.reasoningEffort} to ${model}. Using the harness default.\n`,
+    });
+  }
+
   // (1) Baseline overrides. Keep these aligned with the Dockerfile baseline
   // at `~/.codex/config.toml` (Phase 6). Repeating them here makes local dev
   // (no baseline file) behave identically to the Docker worker.
@@ -787,7 +806,6 @@ class AppServerCodexThread implements CodexThread {
   private activeFail: ((error: Error) => void) | null = null;
   private latestTotalUsage: Usage | undefined;
   private completedTotalUsage: Usage | undefined;
-  private emittedThreadStart = false;
   private readonly unsubscribe: () => void;
   private readonly unsubscribeClose: () => void;
   private readonly turnWaiters: Array<{
@@ -798,6 +816,7 @@ class AppServerCodexThread implements CodexThread {
   constructor(
     private readonly client: CodexAppServerClient,
     threadId: string,
+    private readonly effort?: string,
   ) {
     this.id = threadId;
     this.unsubscribe = client.onNotification((notification) =>
@@ -831,14 +850,11 @@ class AppServerCodexThread implements CodexThread {
       this.activeFinish = null;
       finish();
     };
-    if (!this.emittedThreadStart) {
-      this.emittedThreadStart = true;
-      push({ type: "thread.started", thread_id: this.id });
-    }
     try {
       const response = await this.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.id,
         input: textInput(input),
+        ...(this.effort !== undefined ? { effort: this.effort } : {}),
         // The bundled model catalog defaults the reasoning summary to `none`,
         // so reasoning items arrived with empty `summary` and `content`.
         summary: CODEX_REASONING_SUMMARY,
@@ -1043,6 +1059,7 @@ export class CodexSession implements ProviderSession {
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
+  private hasExternalListener = false;
   private readonly logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   private readonly startedAt = Date.now();
   private readonly completionPromise: Promise<ProviderResult>;
@@ -1071,8 +1088,6 @@ export class CodexSession implements ProviderSession {
   private settled = false;
   private acceptsSteering = true;
   private readonly errorTracker = new SessionErrorTracker();
-  /** Reasoning/effort level actually applied (Phase 4) — null when `applyReasoningEffort()` returned noop. */
-  private readonly appliedReasoningEffort: ReasoningEffort | null;
   /**
    * Result captured by `settle` but held back from `resolveCompletion` until
    * `runSession`'s `finally` block has fully cleaned up (log writer flush,
@@ -1091,6 +1106,12 @@ export class CodexSession implements ProviderSession {
     initialEvents: ProviderEvent[] = [],
     skillsDir?: string,
     summarizeDeps: SummarizeSessionForCodexDeps = {},
+    threadStart?: ThreadStarted,
+    private readonly appliedReasoningEffort: ReasoningEffort | null = effectiveReasoningEffort(
+      "codex",
+      resolvedModel,
+      config.reasoningEffort,
+    ),
   ) {
     this.thread = thread;
     this.config = config;
@@ -1110,18 +1131,6 @@ export class CodexSession implements ProviderSession {
       canDeliver: () => this.acceptsSteering && !this.settled && !this.aborted,
       inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
     });
-    // Mirrors the resolution `buildCodexConfig` already applied when
-    // constructing `mergedConfig` — cheap, pure, and keeps the applied-level
-    // feedback co-located with `settle()` rather than threading an extra
-    // constructor param through `createInProcessCodexSession`.
-    const reasoningApplication = applyReasoningEffort(
-      "codex",
-      resolvedModel,
-      config.reasoningEffort,
-    );
-    this.appliedReasoningEffort =
-      reasoningApplication.kind === "codex-config" ? (config.reasoningEffort ?? null) : null;
-
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.resolveCompletion = resolve;
     });
@@ -1151,6 +1160,8 @@ export class CodexSession implements ProviderSession {
       this.emit(event);
     }
 
+    if (threadStart) this.handleEvent(threadStart);
+
     // Kick the event loop asynchronously so the constructor can return.
     void this.runSession();
   }
@@ -1160,6 +1171,7 @@ export class CodexSession implements ProviderSession {
   }
 
   onEvent(listener: (event: ProviderEvent) => void): void {
+    this.hasExternalListener = true;
     this.listeners.push(listener);
     // Flush any events that fired before a listener was attached.
     for (const event of this.eventQueue) {
@@ -1220,16 +1232,15 @@ export class CodexSession implements ProviderSession {
     } catch {
       // Log writer failure must not break the event stream.
     }
-    if (this.listeners.length > 0) {
-      for (const listener of this.listeners) {
-        try {
-          listener(scrubbed);
-        } catch {
-          // Swallow listener errors — a bad listener must not kill the session.
-        }
+    // The internal swarm hooks subscribe during construction. Keep startup
+    // events for the runner until its own listener attaches.
+    if (!this.hasExternalListener) this.eventQueue.push(scrubbed);
+    for (const listener of this.listeners) {
+      try {
+        listener(scrubbed);
+      } catch {
+        // Swallow listener errors — a bad listener must not kill the session.
       }
-    } else {
-      this.eventQueue.push(scrubbed);
     }
   }
 
@@ -1382,7 +1393,13 @@ export class CodexSession implements ProviderSession {
           type: "session_init",
           sessionId: event.thread_id,
           provider: "codex",
-          ...(codexVersion ? { harnessVariantMeta: { version: codexVersion } } : {}),
+          harnessVariantMeta: {
+            ...(codexVersion ? { version: codexVersion } : {}),
+            ...(event.model !== undefined ? { observedModel: event.model } : {}),
+            ...(event.reasoningEffort !== undefined
+              ? { observedReasoningEffort: event.reasoningEffort }
+              : {}),
+          },
         });
         break;
       }
@@ -2056,7 +2073,7 @@ export async function createInProcessCodexSession(
 
   const routeEnv = config.env ?? process.env;
   const gateway = deriveDefaultRoute("codex", routeEnv);
-  const mergedConfig = {
+  const mergedConfig: CodexConfig = {
     ...(await buildCodexConfig(config, resolvedModel, bufferedEmit)),
     ...(gateway ? codexGatewayConfig(gateway) : {}),
   };
@@ -2113,6 +2130,9 @@ export async function createInProcessCodexSession(
       "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
     );
   }
+  const effort = mergedConfig.model_reasoning_effort;
+  const turnEffort = typeof effort === "string" ? effort : undefined;
+  let threadStart: ThreadStarted | undefined;
   let thread: CodexThread;
   let liveSession: CodexSession | undefined;
   if (opts.threadFactory) {
@@ -2134,7 +2154,11 @@ export async function createInProcessCodexSession(
       },
     });
     try {
-      const response = await client.request<{ thread: { id: string } }>("thread/start", {
+      const response = await client.request<{
+        thread: { id: string };
+        model?: string;
+        reasoningEffort?: string | null;
+      }>("thread/start", {
         model: resolvedModel,
         cwd: config.cwd,
         developerInstructions: config.systemPrompt,
@@ -2147,7 +2171,23 @@ export async function createInProcessCodexSession(
         ephemeral: false,
       });
       void pruneCodexRollouts(env).catch(() => {});
-      const appThread = new AppServerCodexThread(client, response.thread.id);
+      threadStart = {
+        type: "thread.started",
+        thread_id: response.thread.id,
+        model: response.model,
+        reasoningEffort: response.reasoningEffort,
+      };
+      if (
+        turnEffort &&
+        response.reasoningEffort !== undefined &&
+        response.reasoningEffort !== turnEffort
+      ) {
+        bufferedEmit({
+          type: "raw_stderr",
+          content: `[codex] Thread reported reasoning effort ${response.reasoningEffort ?? "default"}. Requesting ${turnEffort} on each turn.\n`,
+        });
+      }
+      const appThread = new AppServerCodexThread(client, response.thread.id, turnEffort);
       await appThread.readInitialQuota();
       thread = appThread;
     } catch (error) {
@@ -2163,6 +2203,8 @@ export async function createInProcessCodexSession(
     preSessionEvents,
     opts.skillsDir,
     opts.summarizeDeps ?? {},
+    threadStart,
+    turnEffort ? (config.reasoningEffort ?? null) : null,
   );
   liveSession = session;
   return session;
@@ -2208,7 +2250,9 @@ export function resolveCodexRunnerArgv(): string[] {
 }
 
 /** JSON payload passed to the codex subprocess runner via stdin. */
-interface CodexSubprocessInput {
+export interface CodexSubprocessInput {
+  /** Only the selected row crosses the process boundary, including live overlays. */
+  modelCatalog?: RuntimeCatalog;
   config: ProviderSessionConfig;
   skillsDir?: string;
   /**
@@ -2250,8 +2294,11 @@ class CodexSubprocessSession implements ProviderSession {
 
   constructor(config: ProviderSessionConfig, skillsDir: string | undefined) {
     const argv = resolveCodexRunnerArgv();
+    const model = resolveCodexModel(config.model);
+    const row = runtimeCatalogModel("openai", model);
     const payload: CodexSubprocessInput = {
       config,
+      ...(row ? { modelCatalog: { openai: { models: { [model]: row } } } } : {}),
       skillsDir,
       // Capture the parent's OTel TRACEPARENT here, in the span context the
       // runner established. The subprocess can't reconstruct it on its own

@@ -1945,12 +1945,17 @@ describe("buildCodexConfig", () => {
 
   test("reasoningEffort: 'xhigh' on gpt-5.1-codex (non-max) is rejected — noop, no model_reasoning_effort key", async () => {
     globalThis.fetch = stubFetch({ servers: [] });
+    const events: ProviderEvent[] = [];
     const merged = await buildCodexConfig(
       cfg({ reasoningEffort: "xhigh" }),
       "gpt-5.1-codex",
-      () => {},
+      (event) => events.push(event),
     );
     expect(merged.model_reasoning_effort).toBeUndefined();
+    expect(events).toContainEqual({
+      type: "raw_stderr",
+      content: expect.stringContaining("Cannot apply reasoning effort xhigh to gpt-5.1-codex"),
+    });
   });
 
   test("undefined reasoningEffort leaves config unchanged (no model_reasoning_effort key)", async () => {
