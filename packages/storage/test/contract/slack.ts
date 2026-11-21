@@ -348,7 +348,9 @@ export function slackContract(engine: ContractEngine): void {
       await tree("tz", "pending:z", "C2", T1);
       await tree("ta", "pending:a", "C3", T1);
       await tree("posted", "9.9", "C4", T1);
-      const window = { finishedAfter: "", closureActiveAfter: "", delegationEnabled: false };
+      // Callers pass ISO instants; the epoch admits every row.
+      const EPOCH = "1970-01-01T00:00:00.000Z";
+      const window = { finishedAfter: EPOCH, closureActiveAfter: EPOCH, delegationEnabled: false };
       expect((await repo.listTreesNeedingRender()).map((row) => row.id)).toEqual(["tz", "ta"]);
       expect(
         (await repo.listTreesNeedingRender({ channelId: "C3", threadTs: "1.0" })).map((r) => r.id),
