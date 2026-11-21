@@ -211,8 +211,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "2.8.0",
     "@ai-sdk/openai": "^3.0.142",
-    "@anthropic-ai/claude-agent-sdk": "0.3.329",
-    "@anthropic-ai/sdk": "^1.11.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.330",
+    "@anthropic-ai/sdk": "^1.12.0",
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@aws-sdk/client-bedrock": "3.1168.0",
     "@boxd-sh/sdk": "0.3.2",
