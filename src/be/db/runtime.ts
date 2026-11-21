@@ -15,9 +15,12 @@ import {
   applySqliteFilePragmas,
   applySqliteTemplatePragmas,
   ensureAgentProfileColumns,
+  hasContextVersion,
   hasEncryptedSecretRows,
   ignoredDatabaseUrl,
+  insertFirstContextVersion,
   isEmptySqliteDatabase,
+  listAgentProfileFields,
   openPostgresEngine,
   type PostgresEngine,
   removeLegacyTaskStatusCheck,
@@ -457,20 +460,7 @@ async function seedContextVersionsAsync(): Promise<void> {
 function seedContextVersions(): void {
   const { computeContentHash } = require("../db") as typeof import("../db");
   const database = getDb();
-  const agents = database
-    .prepare<
-      {
-        id: string;
-        soulMd: string | null;
-        identityMd: string | null;
-        toolsMd: string | null;
-        claudeMd: string | null;
-        setupScript: string | null;
-        heartbeatMd: string | null;
-      },
-      []
-    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript, heartbeatMd FROM agents`)
-    .all();
+  const agents = listAgentProfileFields(database);
 
   for (const agent of agents) {
     for (const field of VERSIONABLE_FIELDS) {
@@ -478,23 +468,13 @@ function seedContextVersions(): void {
       if (!content) continue;
 
       // Check if a version already exists for this agent+field
-      const existing = database
-        .prepare<{ id: string }, [string, string]>(
-          `SELECT id FROM context_versions WHERE agentId = ? AND field = ? LIMIT 1`,
-        )
-        .get(agent.id, field);
-      if (existing) continue;
+      if (hasContextVersion(database, agent.id, field)) continue;
 
       const id = crypto.randomUUID();
       const hash = computeContentHash(content);
       const now = new Date().toISOString();
 
-      database
-        .prepare(
-          `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, contentHash, createdAt)
-           VALUES (?, ?, ?, ?, 1, 'system', ?, ?)`,
-        )
-        .run(id, agent.id, field, content, hash, now);
+      insertFirstContextVersion(database, { id, agentId: agent.id, field, content, hash, now });
     }
   }
 }

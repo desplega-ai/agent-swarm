@@ -168,3 +168,72 @@ export function replaceCredentialBindingBlob(
     database.prepare<unknown, [string]>("DELETE FROM swarm_config WHERE key = ?").run(configKey);
   })();
 }
+
+// ---- swarm_config secrets stored as plaintext before encryption existed ----
+
+export type PlaintextSecretConfig = { id: string; key: string; value: string };
+
+/** Secret config rows still stored as plaintext. */
+export function listPlaintextSecretConfigs(database: Database): PlaintextSecretConfig[] {
+  return database
+    .prepare<PlaintextSecretConfig, []>(
+      "SELECT id, key, value FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
+    )
+    .all();
+}
+
+/** Store the ciphertext of each row and flag it encrypted, in one transaction. */
+export function storeEncryptedSecretConfigs(
+  database: Database,
+  rows: { id: string; value: string }[],
+): void {
+  const txn = database.transaction((items: { id: string; value: string }[]) => {
+    const stmt = database.prepare<unknown, [string, string]>(
+      "UPDATE swarm_config SET value = ?, encrypted = 1 WHERE id = ?",
+    );
+    for (const r of items) stmt.run(r.value, r.id);
+  });
+  txn(rows);
+}
+
+// ---- first context version of each agent profile field (SQLite start) ----
+
+export type AgentProfileFields = {
+  id: string;
+  soulMd: string | null;
+  identityMd: string | null;
+  toolsMd: string | null;
+  claudeMd: string | null;
+  setupScript: string | null;
+  heartbeatMd: string | null;
+};
+
+export function listAgentProfileFields(database: Database): AgentProfileFields[] {
+  return database
+    .prepare<AgentProfileFields, []>(
+      `SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript, heartbeatMd FROM agents`,
+    )
+    .all();
+}
+
+export function hasContextVersion(database: Database, agentId: string, field: string): boolean {
+  return (
+    database
+      .prepare<{ id: string }, [string, string]>(
+        `SELECT id FROM context_versions WHERE agentId = ? AND field = ? LIMIT 1`,
+      )
+      .get(agentId, field) !== null
+  );
+}
+
+export function insertFirstContextVersion(
+  database: Database,
+  v: { id: string; agentId: string; field: string; content: string; hash: string; now: string },
+): void {
+  database
+    .prepare(
+      `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, contentHash, createdAt)
+           VALUES (?, ?, ?, ?, 1, 'system', ?, ?)`,
+    )
+    .run(v.id, v.agentId, v.field, v.content, v.hash, v.now);
+}

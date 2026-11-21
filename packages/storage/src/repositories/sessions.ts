@@ -697,6 +697,8 @@ export interface SessionsRepository {
   legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery;
   /** `SELECT COUNT(*) AS count`: over the summaries when `chain`, else over the root filter. */
   sessionCountSql(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): SqlQuery;
+  /** The count {@link sessionCountSql} selects. */
+  countSessions(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): Promise<number>;
   /** Owned roots per source thread key. Unordered: the caller indexes them by key. */
   listThreadRootCounts(rules: SessionTreeRules): Promise<{ key: string; threadRoots: number }[]>;
   /** {@link sessionThreadRootsSql} of one task, or null without the task. */
@@ -1271,6 +1273,15 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
     spec: SessionSummarySpec,
     chain: boolean,
   ): SqlQuery;
+
+  async countSessions(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    chain: boolean,
+  ): Promise<number> {
+    const row = await this.db.get<{ count: number }>(this.sessionCountSql(rules, spec, chain));
+    return row?.count ?? 0;
+  }
 
   listThreadRootCounts(rules: SessionTreeRules): Promise<{ key: string; threadRoots: number }[]> {
     return this.db.query(this.threadRootCountsSql(rules));

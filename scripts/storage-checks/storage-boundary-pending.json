@@ -1,18 +1,1 @@
-{
-  "src/be/db.ts": {
-    "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 4
-  },
-  "src/be/db/runtime.ts": {
-    "reason": "M2 move: boot path (M2 step 7)",
-    "sites": 5
-  },
-  "src/be/scripts/typecheck.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
-  },
-  "src/be/storage.ts": {
-    "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
-    "sites": 1
-  }
-}
+{}

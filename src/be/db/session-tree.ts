@@ -381,6 +381,11 @@ export async function getSessionReadState(
 }
 
 /** Count roots directly unless a filter needs chain activity or participants. */
+/** Count roots directly unless a filter needs chain activity or participants. */
+export async function countSessionRoots(opts: SessionFilters = {}): Promise<number> {
+  return sessionsRepo().countSessions(treeRules(), summarySpec(opts), hasSessionChainFilter(opts));
+}
+
 export function sessionCountQuery(opts: SessionFilters = {}): SqlFragment {
   return rendered(
     sessionsRepo().sessionCountSql(treeRules(), summarySpec(opts), hasSessionChainFilter(opts)),

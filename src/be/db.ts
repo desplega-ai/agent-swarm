@@ -270,7 +270,7 @@ import {
   resetPromptTemplateRows,
   rowToPromptTemplate,
 } from "./db/prompt-templates";
-import { getDb, getDbClient, isPostgresEngine } from "./db/runtime";
+import { isPostgresEngine } from "./db/runtime";
 import { storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
@@ -279,11 +279,11 @@ import {
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
 import {
+  countSessionRoots,
   listSessionPageRows,
   type SessionFilters,
   type SessionReadState,
   type SessionRowFields,
-  sessionCountQuery,
   sessionPageFields,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
@@ -321,6 +321,11 @@ import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { getStorage } from "./storage";
+import {
+  currentEngineHandle,
+  listPlaintextSecretConfigs,
+  storeEncryptedSecretConfigs,
+} from "./storage-root";
 import {
   invalidConfigKeyError,
   isApiProcessControlEnvKey,
@@ -538,7 +543,10 @@ configureTaskWriteDependencies({
 });
 
 configureSessionMoveDependencies({
-  auditAssetKeys: () => (isPostgresEngine() ? auditAssetKeysAsync() : auditAssetKeys(getDb())),
+  auditAssetKeys: () =>
+    isPostgresEngine()
+      ? auditAssetKeysAsync()
+      : auditAssetKeys(currentEngineHandle() as Parameters<typeof auditAssetKeys>[0]),
   insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
 });
 
@@ -572,7 +580,7 @@ function emitTaskLifecycleTelemetryAfterCommit<S extends TaskTelemetryEvent>(
   // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read could observe
   // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     // `trigger_surface` is resolved (one read up the parent chain) and
     // `source` renamed to `task_source` inside emitTaskTelemetry, so every
     // lifecycle event of a task reports the same root surface.
@@ -1677,7 +1685,7 @@ export async function getAgentWithTasks(
   id: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentWithTasks | null> {
-  return await getDbClient().transaction(
+  return await getStorage().transaction(
     async () => {
       const agent = await getAgentById(id);
       if (!agent) return null;
@@ -1693,7 +1701,7 @@ export async function getAllAgentsWithTasks(opts?: {
   slim?: boolean;
   readableBy?: { userId: string | null };
 }): Promise<AgentWithTasks[]> {
-  return await getDbClient().transaction(
+  return await getStorage().transaction(
     async () => {
       const agents = await getAllAgents({ slim: opts?.slim ?? false });
       return await Promise.all(
@@ -2513,7 +2521,7 @@ export async function createTaskExtended(
     row.requestedByUserId,
   );
 
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     import("../workflows/event-bus")
       .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.created", {
@@ -5119,11 +5127,7 @@ export function autoEncryptLegacyPlaintextSecrets(
   dbPath: string,
   options: { createBackup?: boolean } = {},
 ): void {
-  const rows = database
-    .prepare<{ id: string; key: string; value: string }, []>(
-      "SELECT id, key, value FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
-    )
-    .all();
+  const rows = listPlaintextSecretConfigs(database);
   if (rows.length === 0) return;
 
   const key = getEncryptionKey();
@@ -5157,15 +5161,10 @@ export function autoEncryptLegacyPlaintextSecrets(
 
   console.log(`[secrets] Encrypting ${rows.length} legacy plaintext secret(s)...`);
 
-  const txn = database.transaction((items: { id: string; value: string }[]) => {
-    const stmt = database.prepare<unknown, [string, string]>(
-      "UPDATE swarm_config SET value = ?, encrypted = 1 WHERE id = ?",
-    );
-    for (const r of items) {
-      stmt.run(encryptSecret(r.value, key), r.id);
-    }
-  });
-  txn(rows);
+  storeEncryptedSecretConfigs(
+    database,
+    rows.map((r) => ({ id: r.id, value: encryptSecret(r.value, key) })),
+  );
   console.log(`[secrets] Auto-migrated ${rows.length} secret(s) to encrypted storage.`);
 }
 
@@ -9814,9 +9813,7 @@ export async function listRecentSessions(
 
 /** Count roots directly unless a filter needs chain activity or participants. */
 export async function countSessions(opts: SessionFilters = {}): Promise<number> {
-  const query = sessionCountQuery(opts);
-  const row = await getDbClient().get<{ count: number }>(query.sql, query.params);
-  return row?.count ?? 0;
+  return countSessionRoots(opts);
 }
 
 // ============================================================================

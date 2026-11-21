@@ -26,6 +26,12 @@ const PERMANENT: Record<string, string> = {
     "the composition root (brief D4): builds the engine client and storage, so it names DbClient",
   "src/be/sql-connections.ts":
     "user-configured external databases for scripts (ctx.sql); never the swarm database",
+  "src/be/db/runtime.ts":
+    "the engine-handle owner: opens the SQLite handle or starts the Postgres engine, so it names DbClient",
+  "src/be/storage.ts":
+    "builds the process Storage over the engine client from src/be/db/runtime.ts (the composition root's caller)",
+  "src/be/scripts/typecheck.ts":
+    "not SQL: the script SDK type declarations document db_query with example SQL in comments",
 };
 
 /** Directories whose SQL text is not storage access. Reason on each line. */
