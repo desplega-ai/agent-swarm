@@ -128,3 +128,40 @@ export class ClassifiedTimestampFormats implements TimestampFormats {
     return this.names.get(name) ?? undefined;
   }
 }
+
+/** The column classification file (`src/be/migrations/postgres/column-types.json`). */
+export type ColumnClassification = {
+  tables: Record<string, Record<string, { class: string; format?: TimestampFormat }>>;
+};
+
+/** Timestamp formats from the classification, bound to this database's OIDs. */
+export async function loadTimestampFormats(
+  db: { query<T>(text: string, params?: unknown[]): Promise<T[]> },
+  classification: ColumnClassification,
+): Promise<ClassifiedTimestampFormats> {
+  const entries: { table: string; column: string; format: TimestampFormat }[] = [];
+  for (const [table, columns] of Object.entries(classification.tables)) {
+    for (const [column, entry] of Object.entries(columns)) {
+      if (entry.class === "timestamptz") {
+        entries.push({ table, column, format: entry.format ?? "iso-ms-z" });
+      }
+    }
+  }
+  const formats = new ClassifiedTimestampFormats(entries);
+  const rows = await db.query<{ oid: number; attnum: number; relname: string; attname: string }>(
+    `SELECT c.oid::int AS oid, a.attnum::int AS attnum, c.relname, a.attname
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = current_schema() AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.atttypid = 'timestamptz'::regtype`,
+  );
+  const byKey = new Map(entries.map((e) => [`${e.table}.${e.column}`, e.format]));
+  formats.resolve(
+    rows.flatMap((row) => {
+      const format = byKey.get(`${row.relname}.${row.attname}`);
+      return format ? [{ oid: row.oid, attnum: row.attnum, format }] : [];
+    }),
+  );
+  return formats;
+}

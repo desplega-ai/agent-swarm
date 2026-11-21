@@ -9,8 +9,10 @@ export {
 } from "./client";
 export {
   ClassifiedTimestampFormats,
+  type ColumnClassification,
   decodeRows,
   formatTimestamp,
+  loadTimestampFormats,
   OID,
   type ResultColumn,
   type TimestampFormat,
@@ -25,3 +27,4 @@ export {
   type PostgresMigrationResult,
   runPostgresMigrations,
 } from "./migrations";
+export { createPostgresStorage, type PostgresStorageOptions } from "./storage";
