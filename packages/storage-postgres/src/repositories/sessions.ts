@@ -15,6 +15,7 @@ import {
   type BudgetRefusalNotificationRow,
   EMPTY,
   type KeyCostSummaryRow,
+  type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
   type RequestCompositionRow,
   type SessionCostAgentSummaryRow,
@@ -518,5 +519,26 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
 
   listSourceBackfillRoots(afterId: string, limit: number): Promise<SourceBackfillRootRow[]> {
     return notOnPostgresYet("PostgresSessionsRepository.listSourceBackfillRoots");
+  }
+  listKeyWindowUsageRows(
+    _credentials: { keyType: string; keySuffix: string }[],
+    _start: string,
+    _through: string,
+  ): Promise<KeyWindowUsageRow[]> {
+    return notOnPostgresYet("PostgresSessionsRepository.listKeyWindowUsageRows");
+  }
+
+  async insertPricingSeedRow(
+    provider: string,
+    model: string,
+    tokenClass: string,
+    pricePerMillionUsd: number,
+  ): Promise<boolean> {
+    const result = await this.db.run(sql`
+      INSERT INTO pricing
+        (provider, model, token_class, effective_from, price_per_million_usd, "createdAt", "lastUpdatedAt")
+      VALUES (${provider}, ${model}, ${tokenClass}, 0, ${pricePerMillionUsd}, 0, 0)
+      ON CONFLICT DO NOTHING`);
+    return result.changes > 0;
   }
 }
