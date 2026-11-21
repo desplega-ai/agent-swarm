@@ -25,6 +25,7 @@ import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
 import { tasksContract } from "./tasks";
 import { trackersContract } from "./trackers";
+import { userReferencesContract } from "./user-references";
 import { usersContract } from "./users";
 import { workflowsContract } from "./workflows";
 
@@ -60,4 +61,5 @@ export function runStorageContract(engine: ContractEngine): void {
   sessionsContract(engine);
   savingsContract(engine);
   retentionContract(engine);
+  userReferencesContract(engine);
 }

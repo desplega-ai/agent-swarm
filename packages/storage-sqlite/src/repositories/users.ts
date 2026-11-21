@@ -1,12 +1,34 @@
 import {
   BaseUsersRepository,
+  type DbParam,
   type IdentityEventRow,
+  SqlQuery,
   sql,
   type UserFavoriteRow,
   type UserMergeJobRow,
+  type UserReferenceColumn,
+  type UserReferenceRow,
   type UserRow,
   type UserTokenSummaryRow,
 } from "@desplega/storage";
+import {
+  removeRunsContextRequesterSql,
+  sealedContextsOfRunsByRequesterSql,
+  setRunsContextRequesterSql,
+  TABLE_PRIMARY_KEY_SQL,
+  TABLE_WITHOUT_ROWID_SQL,
+  USER_REFERENCE_COLUMNS_SQL,
+  userReferenceBatchRewriteSql,
+  userReferenceRewriteSql,
+  WORKFLOW_RUNS_REQUESTED_BY_SQL,
+} from "./user-references";
+
+/** A `?`-placeholder statement as a query, so the executed text is exactly the exported text. */
+function fromPlaceholders(text: string, values: DbParam[]): SqlQuery {
+  const strings = text.split("?");
+  if (strings.length !== values.length + 1) throw new Error("placeholder count mismatch");
+  return new SqlQuery(strings, values);
+}
 
 export class SqliteUsersRepository extends BaseUsersRepository {
   // ---- users ----
@@ -139,5 +161,90 @@ export class SqliteUsersRepository extends BaseUsersRepository {
     return this.db.query<UserFavoriteRow>(
       sql`SELECT * FROM user_favorites${this.favoriteFilters(opts)} ORDER BY "lastUpdatedAt" DESC, ${tiebreak}`,
     );
+  }
+
+  // ---- retained user references (statement texts in ./user-references) ----
+
+  async listUserReferenceColumns(): Promise<UserReferenceColumn[]> {
+    const rows = await this.db.query<UserReferenceRow>(
+      fromPlaceholders(USER_REFERENCE_COLUMNS_SQL, []),
+    );
+    const withoutRowidByTable = new Map<string, boolean>();
+    const references: UserReferenceColumn[] = [];
+    for (const row of rows) {
+      let withoutRowid = withoutRowidByTable.get(row.tableName);
+      if (withoutRowid === undefined) {
+        const table = await this.db.get<{ withoutRowid: number }>(
+          fromPlaceholders(TABLE_WITHOUT_ROWID_SQL, [row.tableName]),
+        );
+        withoutRowid = Boolean(table?.withoutRowid);
+        withoutRowidByTable.set(row.tableName, withoutRowid);
+      }
+      let keyColumns = ["rowid"];
+      if (withoutRowid) {
+        const pk = await this.db.query<{ name: string }>(
+          fromPlaceholders(TABLE_PRIMARY_KEY_SQL, [row.tableName]),
+        );
+        keyColumns = pk.map((column) => column.name);
+      }
+      references.push({ ...row, withoutRowid, keyColumns });
+    }
+    return references;
+  }
+
+  async rewriteUserReferenceColumn(
+    reference: UserReferenceColumn,
+    userId: string,
+    replacementUserId: string | null,
+    limit?: number,
+  ): Promise<number> {
+    const result =
+      limit === undefined
+        ? await this.db.run(
+            fromPlaceholders(userReferenceRewriteSql(reference), [replacementUserId, userId]),
+          )
+        : await this.db.run(
+            fromPlaceholders(userReferenceBatchRewriteSql(reference), [
+              replacementUserId,
+              userId,
+              limit,
+            ]),
+          );
+    return result.changes;
+  }
+
+  async listWorkflowRunIdsRequestedBy(userId: string, limit?: number): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      fromPlaceholders(WORKFLOW_RUNS_REQUESTED_BY_SQL, [userId, limit ?? -1]),
+    );
+    return rows.map((row) => row.id);
+  }
+
+  listSealedWorkflowContextsRequestedBy(
+    runIds: string[],
+    userId: string,
+  ): Promise<{ id: string; context_replay: string }[]> {
+    return this.db.query(
+      fromPlaceholders(sealedContextsOfRunsByRequesterSql(runIds.length), [...runIds, userId]),
+    );
+  }
+
+  async rewriteWorkflowRunContextRequester(
+    runIds: string[],
+    userId: string,
+    replacementUserId: string | null,
+  ): Promise<number> {
+    const result = replacementUserId
+      ? await this.db.run(
+          fromPlaceholders(setRunsContextRequesterSql(runIds.length), [
+            replacementUserId,
+            ...runIds,
+            userId,
+          ]),
+        )
+      : await this.db.run(
+          fromPlaceholders(removeRunsContextRequesterSql(runIds.length), [...runIds, userId]),
+        );
+    return result.changes;
   }
 }

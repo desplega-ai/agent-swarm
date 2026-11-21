@@ -133,3 +133,12 @@ export {
   workflowRetentionCandidatesSql,
   workflowRunRetentionStatements,
 } from "./repositories/retention";
+export {
+  quoteSqlIdentifier,
+  USER_REFERENCE_COLUMNS_SQL,
+  userReferenceRewriteSql,
+  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_REQUESTER_SQL,
+  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
+  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
+} from "./repositories/user-references";

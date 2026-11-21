@@ -140,6 +140,21 @@ export type UserFavoriteRow = {
   updated_by: string | null;
 };
 
+/** A retained user reference: a column that keeps its value when the user is deleted. */
+export type UserReferenceRow = {
+  tableName: string;
+  columnName: string;
+};
+
+/**
+ * A retained reference with its batch key: the row id, or the primary key
+ * columns of a table without one (`withoutRowid`).
+ */
+export type UserReferenceColumn = UserReferenceRow & {
+  withoutRowid: boolean;
+  keyColumns: string[];
+};
+
 export interface UsersRepository {
   // ---- users ----
   findUserById(id: string): Promise<UserRow | null>;
@@ -317,6 +332,42 @@ export interface UsersRepository {
   }): Promise<UserFavoriteRow | null>;
   /** Every non-null user email. Ordered by email. */
   listUserEmails(): Promise<string[]>;
+
+  // ---- retained user references (deleteUser and the merge job) ----
+  /**
+   * Every nullable column with a FOREIGN KEY to users(id) and no ON DELETE
+   * action (plus the scheduled_tasks audit columns), each with its batch key.
+   * Order: the engine's schema order (tables, then foreign keys).
+   */
+  listUserReferenceColumns(): Promise<UserReferenceColumn[]>;
+  /**
+   * Set `reference` from `userId` to `replacementUserId` (or NULL). Without
+   * `limit` every matching row; with it at most `limit` rows. Returns the
+   * changed row count.
+   */
+  rewriteUserReferenceColumn(
+    reference: UserReferenceColumn,
+    userId: string,
+    replacementUserId: string | null,
+    limit?: number,
+  ): Promise<number>;
+  /** Ids of the workflow runs whose context names `userId` as the requester, ordered by id. */
+  listWorkflowRunIdsRequestedBy(userId: string, limit?: number): Promise<string[]>;
+  /** Sealed replay copies of the given runs whose context names `userId` (no order). */
+  listSealedWorkflowContextsRequestedBy(
+    runIds: string[],
+    userId: string,
+  ): Promise<{ id: string; context_replay: string }[]>;
+  setWorkflowRunContextReplay(runId: string, contextReplay: string): Promise<void>;
+  /**
+   * In the given runs whose context names `userId`, set the context requester
+   * to `replacementUserId`, or remove it when null. Returns the changed row count.
+   */
+  rewriteWorkflowRunContextRequester(
+    runIds: string[],
+    userId: string,
+    replacementUserId: string | null,
+  ): Promise<number>;
 }
 
 export abstract class BaseUsersRepository implements UsersRepository {
@@ -749,4 +800,31 @@ export abstract class BaseUsersRepository implements UsersRepository {
     );
     return rows.map((row) => row.email);
   }
+
+  // ---- retained user references: schema discovery and JSON paths are engine-specific ----
+
+  abstract listUserReferenceColumns(): Promise<UserReferenceColumn[]>;
+  abstract rewriteUserReferenceColumn(
+    reference: UserReferenceColumn,
+    userId: string,
+    replacementUserId: string | null,
+    limit?: number,
+  ): Promise<number>;
+  abstract listWorkflowRunIdsRequestedBy(userId: string, limit?: number): Promise<string[]>;
+  abstract listSealedWorkflowContextsRequestedBy(
+    runIds: string[],
+    userId: string,
+  ): Promise<{ id: string; context_replay: string }[]>;
+
+  async setWorkflowRunContextReplay(runId: string, contextReplay: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE workflow_runs SET context_replay = ${contextReplay} WHERE id = ${runId}`,
+    );
+  }
+
+  abstract rewriteWorkflowRunContextRequester(
+    runIds: string[],
+    userId: string,
+    replacementUserId: string | null,
+  ): Promise<number>;
 }
