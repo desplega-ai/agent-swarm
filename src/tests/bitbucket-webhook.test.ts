@@ -79,6 +79,8 @@ afterAll(async () => {
 beforeEach(() => {
   process.env.BITBUCKET_WEBHOOK_SECRET = SECRET;
   process.env.BITBUCKET_BOT_ACCOUNT_ID = "557058:00000000-0000-4000-8000-0000000000b0";
+  // The fixture comment author is unlinked; mentions need a linked or allowed sender.
+  process.env.BITBUCKET_ALLOWED_SENDERS = "557058:11111111-1111-4111-8111-111111111111";
   initBitbucket();
   emitted = [];
   originalEmit = workflowEventBus.emit.bind(workflowEventBus);
@@ -92,6 +94,7 @@ afterEach(() => {
   workflowEventBus.emit = originalEmit;
   delete process.env.BITBUCKET_WEBHOOK_SECRET;
   delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
+  delete process.env.BITBUCKET_ALLOWED_SENDERS;
   delete process.env.BITBUCKET_DISABLE;
   resetBitbucket();
   resetBitbucketBotCache();
