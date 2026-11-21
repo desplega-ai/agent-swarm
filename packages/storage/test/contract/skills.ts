@@ -172,6 +172,43 @@ export function skillsContract(engine: ContractEngine): void {
       expect(await ids(["release-guard"])).toEqual([]);
     });
 
+    test("ranked search: the divergence corpus (same set and top hit on every engine)", async () => {
+      // scripts/e2e/scenarios/divergence-fulltext-search.ts, with a fixed nonce.
+      const w = (stem: string) => `${stem}x7f3a9c`;
+      const [A, B, C, D] = [w("zephyr"), w("quokka"), w("marlin"), w("tundra")];
+      const filler =
+        "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore";
+      const corpus: Record<string, { description: string; body: string }> = {
+        d1: { description: `${A} ${B} handbook`, body: `Use ${A} carefully.` },
+        d2: { description: `${B} reference`, body: `${filler} ${A} ${filler}` },
+        d3: { description: `${C} notes`, body: `${A} ${C}` },
+        d4: { description: `${D} ${B} guide`, body: "Nothing else here." },
+        d5: { description: "plain words only", body: `${C} ${C} ${C}` },
+      };
+      for (const [id, spec] of Object.entries(corpus)) {
+        const name = `div-fts-7f3a9c-${id}`;
+        await skill({
+          id,
+          name,
+          description: spec.description,
+          content: `---\nname: ${name}\ndescription: ${spec.description}\n---\n\n${spec.body}\n`,
+        });
+      }
+      const search = async (terms: string[], exact: string) =>
+        (await repo.searchRankedSkills<{ id: string }>(terms, exact, 10, "skills.id")).map(
+          (row) => row.id,
+        );
+      const a = await search([A], A);
+      expect([...a].sort()).toEqual(["d1", "d2", "d3"]);
+      expect(a[0]).toBe("d1");
+      const bd = await search([B, D], `${B} ${D}`);
+      expect([...bd].sort()).toEqual(["d1", "d2", "d4"]);
+      expect(bd[0]).toBe("d4");
+      const exact = "DIV-FTS-7F3A9C-D5";
+      expect(await search([exact], exact)).toEqual(["d5"]);
+      expect(await search([A.slice(0, -3)], A.slice(0, -3))).toEqual([]);
+    });
+
     test("usage analytics: totals, local days, harness and skill groups, agents, unused", async () => {
       await agent("a1", "Ann");
       await agent("a2", "Bob", "offline");
