@@ -624,7 +624,7 @@ export abstract class BaseSkillsRepository implements SkillsRepository {
       WHERE as2."agentId" = ${agentId}${active}
         AND s."isEnabled" = ${true}
       UNION ALL
-      SELECT s.*, 1 as "isActive", s."createdAt" as "installedAt", 1 as "sourceRank",
+      SELECT s.*, ${true} as "isActive", s."createdAt" as "installedAt", 1 as "sourceRank",
         CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as "typeRank"
       FROM skills s
       WHERE (s."systemDefault" = ${true} OR s.scope = 'swarm')

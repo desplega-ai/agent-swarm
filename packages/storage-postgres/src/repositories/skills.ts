@@ -7,7 +7,7 @@ import {
   type SkillUsageSkillRow,
   type SkillUsageTotalsRow,
   type SkillUsageUnusedSkillRow,
-  type SqlQuery,
+  SqlQuery,
   sql,
 } from "@desplega/storage";
 import { notOnPostgresYet } from "./not-yet";
@@ -170,6 +170,6 @@ export class PostgresSkillsRepository extends BaseSkillsRepository {
   }
 
   protected insertionOrder(): SqlQuery {
-    return notOnPostgresYet("PostgresSkillsRepository.insertionOrder");
+    return new SqlQuery(['"_rowid"'], []);
   }
 }

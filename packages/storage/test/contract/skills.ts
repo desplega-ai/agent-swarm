@@ -325,7 +325,7 @@ export function skillsContract(engine: ContractEngine): void {
       await repo.insertSkill(newSkill("sw2", { scope: "swarm" }));
       await storage.executor.run(sql`
         INSERT INTO agent_skills (id, "agentId", "skillId", "isActive", "installedAt")
-        VALUES ('i1', 'ag', 'mine', ${true}, 'x'), ('i2', 'ag', 'off', ${false}, 'y')`);
+        VALUES ('i1', 'ag', 'mine', ${true}, '2026-11-21T10:00:00.000Z'), ('i2', 'ag', 'off', ${false}, '2026-11-21T10:00:01.000Z')`);
       const rows = await repo.listAgentSkills("ag", true);
       expect(rows.map((r) => [r.id, r.sourceRank, r.typeRank, r.isActive])).toEqual([
         ["mine", 0, 0, 1],
