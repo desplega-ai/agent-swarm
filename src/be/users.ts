@@ -27,12 +27,11 @@ import type { ScriptRunProvenance } from "../utils/request-auth-context";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { randomChars } from "../utils/short-id";
-import { getDbClient } from "./db";
-import type { DbExecutor } from "./db-client";
 import { getStorage } from "./storage";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 
 const usersRepo = () => getStorage().repos.users;
+const sessionsRepo = () => getStorage().repos.sessions;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -591,27 +590,23 @@ export async function mintSessionToken(
   parent?: { tokenId: string; runtimeId: string | null },
 ): Promise<{ tokenId: string; plaintext: string }> {
   if (parent) {
-    return await getDbClient().transaction(async (client) => {
+    return await getStorage().transaction(async () => {
       // A runtime parent is matched by its runtime; an agent parent has no
       // binding but its agent, so it is matched by the empty binding columns.
-      const row = await client.get<{ expiresAt: string }>(
-        parent.runtimeId
-          ? `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND runtimeId = ?
-             AND revokedAt IS NULL AND expiresAt > ?`
-          : `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND ${AGENT_TOKEN_BINDING}
-             AND revokedAt IS NULL AND expiresAt > ?`,
-        parent.runtimeId
-          ? [parent.tokenId, agentId, parent.runtimeId, new Date().toISOString()]
-          : [parent.tokenId, agentId, new Date().toISOString()],
+      const parentExpiresAt = await sessionsRepo().findLiveParentTokenExpiry(
+        parent.tokenId,
+        agentId,
+        parent.runtimeId,
+        new Date().toISOString(),
       );
-      if (!row) throw new InvalidRuntimeTokenError();
+      if (parentExpiresAt === null) throw new InvalidRuntimeTokenError();
       return await insertSessionToken(
         agentId,
         taskId,
         null,
         ttlMs,
         parent.runtimeId,
-        row.expiresAt,
+        parentExpiresAt,
         null,
         parent.runtimeId ? null : parent.tokenId,
       );
@@ -667,27 +662,20 @@ export async function mintScriptRunToken(
     provenance.objectChain !== undefined ||
     provenance.depth !== undefined
   ) {
-    await getDbClient().run(
-      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ?, objectChain = ?, depth = ? WHERE id = ?",
-      [
-        provenance.sourceStepId ?? null,
-        provenance.sourceScriptRunId ?? null,
+    await sessionsRepo().setSessionTokenProvenance(token.tokenId, {
+      sourceStepId: provenance.sourceStepId ?? null,
+      sourceScriptRunId: provenance.sourceScriptRunId ?? null,
+      objectChain:
         provenance.objectChain === undefined ? null : JSON.stringify(provenance.objectChain),
-        provenance.depth ?? 0,
-        token.tokenId,
-      ],
-    );
+      depth: provenance.depth ?? 0,
+    });
   }
   return token;
 }
 
 /** Whether a session token was minted by `mintScriptRunToken`. */
 export async function isScriptRunToken(tokenId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ scriptRun: number }>(
-    "SELECT scriptRun FROM session_tokens WHERE id = ?",
-    [tokenId],
-  );
-  return row?.scriptRun === 1;
+  return (await sessionsRepo().findSessionTokenScriptRun(tokenId)) === 1;
 }
 
 export async function insertSessionToken(
@@ -710,78 +698,55 @@ export async function insertSessionToken(
     Math.min(now.getTime() + ttlMs, expiresAtCeiling ? Date.parse(expiresAtCeiling) : Infinity),
   ).toISOString();
 
-  await getDbClient().run(
-    `INSERT INTO session_tokens
-     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId, parentTokenId, scriptRun)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      tokenId,
-      hash,
-      preview,
-      agentId,
-      taskId,
-      runtimeId,
-      parentRuntimeId,
-      expiresAt,
-      now.toISOString(),
-      controllerId,
-      parentTokenId,
-      scriptRun ? 1 : 0,
-    ],
-  );
+  await sessionsRepo().insertSessionToken({
+    id: tokenId,
+    tokenHash: hash,
+    tokenPreview: preview,
+    agentId,
+    taskId,
+    runtimeId,
+    parentRuntimeId,
+    expiresAt,
+    createdAt: now.toISOString(),
+    controllerId,
+    parentTokenId,
+    scriptRun,
+  });
 
   return { tokenId, plaintext };
 }
 
 /** Revoke a session token by id. No-op if already revoked. */
 export async function revokeSessionToken(tokenId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const row = await client.get<{ runtimeId: string | null }>(
-      "SELECT runtimeId FROM session_tokens WHERE id = ?",
-      [tokenId],
-    );
+  await getStorage().transaction(async () => {
+    const row = await sessionsRepo().findSessionTokenRuntime(tokenId);
     if (row?.runtimeId) {
       await revokeRuntimeTokensForRuntime(row.runtimeId);
     } else {
-      await revokeTokensWithChildren(client, [tokenId]);
+      await revokeTokensWithChildren([tokenId]);
     }
   });
 }
 
 /** Revoke tokens and the child task tokens an agent token minted. */
-async function revokeTokensWithChildren(client: DbExecutor, tokenIds: string[]) {
+async function revokeTokensWithChildren(tokenIds: string[]) {
   if (tokenIds.length === 0) return;
-  const placeholders = tokenIds.map(() => "?").join(", ");
-  const children = await client.query<{ id: string }>(
-    `SELECT id FROM session_tokens WHERE parentTokenId IN (${placeholders})`,
-    tokenIds,
-  );
-  const ids = [...tokenIds, ...children.map((row) => row.id)];
-  await client.run(
-    `UPDATE session_tokens SET revokedAt = ?
-     WHERE id IN (${ids.map(() => "?").join(", ")}) AND revokedAt IS NULL`,
-    [new Date().toISOString(), ...ids],
-  );
-  getDbClient().afterCommit(() => {
+  const children = await sessionsRepo().listChildSessionTokenIds(tokenIds);
+  const ids = [...tokenIds, ...children];
+  await sessionsRepo().revokeSessionTokens(ids, new Date().toISOString());
+  getStorage().afterCommit(() => {
     for (const id of tokenIds) unregisterVolatileSecret(`agent-token:${id}`);
     closeSessionTokenConnections(ids);
   });
 }
 
 export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE runtimeId = ? OR parentRuntimeId = ?",
-      [runtimeId, runtimeId],
-    );
-    await client.run(
-      `UPDATE session_tokens SET revokedAt = ?
-       WHERE (runtimeId = ? OR parentRuntimeId = ?) AND revokedAt IS NULL`,
-      [new Date().toISOString(), runtimeId, runtimeId],
-    );
-    getDbClient().afterCommit(() => {
+  await getStorage().transaction(async () => {
+    const ids = await sessionsRepo().listRuntimeSessionTokenIds(runtimeId);
+    await sessionsRepo().revokeRuntimeSessionTokens(runtimeId, new Date().toISOString());
+    getStorage().afterCommit(() => {
       unregisterVolatileSecret(`runtime:${runtimeId}`);
-      closeSessionTokenConnections(rows.map((row) => row.id));
+      closeSessionTokenConnections(ids);
     });
   });
 }
@@ -790,14 +755,12 @@ export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<
 // Agent tokens (long-lived, one agent, no runtime)
 // ---------------------------------------------------------------------------
 
-/**
- * SQL predicate for an agent (worker) token: bound to its agent and nothing
- * else. `scriptRun = 0` excludes a script run's ephemeral token, which shares
- * the same all-null binding shape but has its own lifecycle (see migration 233
- * and `mintScriptRunToken`).
+/*
+ * An agent (worker) token is bound to its agent and nothing else. A script
+ * run's ephemeral token shares the same all-null binding shape but has its own
+ * lifecycle (see migration 233 and `mintScriptRunToken`): the sessions
+ * repository's agent-token reads (its `AGENT_TOKEN_BINDING`) leave it out.
  */
-const AGENT_TOKEN_BINDING =
-  "taskId IS NULL AND runtimeId IS NULL AND controllerId IS NULL AND parentRuntimeId IS NULL AND scriptRun = 0";
 
 /** Stored expiry of a token that does not expire. `expiresAt` is NOT NULL. */
 export const AGENT_TOKEN_NO_EXPIRY = "9999-12-31T23:59:59.999Z";
@@ -830,13 +793,8 @@ function publicExpiry(expiresAt: string): string | null {
   return expiresAt === AGENT_TOKEN_NO_EXPIRY ? null : expiresAt;
 }
 
-async function activeAgentTokenIds(client: DbExecutor, agentId: string) {
-  const rows = await client.query<{ id: string }>(
-    `SELECT id FROM session_tokens WHERE agentId = ? AND ${AGENT_TOKEN_BINDING}
-     AND revokedAt IS NULL AND expiresAt > ?`,
-    [agentId, new Date().toISOString()],
-  );
-  return rows.map((row) => row.id);
+async function activeAgentTokenIds(agentId: string) {
+  return await sessionsRepo().listActiveAgentTokenIds(agentId, new Date().toISOString());
 }
 
 async function insertAgentToken(
@@ -854,7 +812,7 @@ async function insertAgentToken(
     null,
     expiresAt,
   );
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     registerVolatileSecret(token.plaintext, `agent-token:${token.tokenId}`),
   );
   return { ...token, expiresAt: publicExpiry(expiresAt) };
@@ -869,8 +827,8 @@ export async function mintAgentToken(
   agentId: string,
   ttlMs: number | null = AGENT_TOKEN_DEFAULT_TTL_MS,
 ): Promise<AgentTokenCredential> {
-  return await getDbClient().transaction(async (client) => {
-    if ((await activeAgentTokenIds(client, agentId)).length > 0) {
+  return await getStorage().transaction(async () => {
+    if ((await activeAgentTokenIds(agentId)).length > 0) {
       throw new AgentTokenExistsError();
     }
     return await insertAgentToken(agentId, ttlMs);
@@ -888,25 +846,20 @@ export async function rotateAgentToken(
   graceMs: number,
   ttlMs: number | null = AGENT_TOKEN_DEFAULT_TTL_MS,
 ): Promise<(AgentTokenCredential & { previousExpiresAt: string }) | null> {
-  return await getDbClient().transaction(async (client) => {
-    const previous = await activeAgentTokenIds(client, agentId);
+  return await getStorage().transaction(async () => {
+    const previous = await activeAgentTokenIds(agentId);
     if (previous.length === 0) return null;
     const previousExpiresAt = new Date(Date.now() + graceMs).toISOString();
-    const placeholders = previous.map(() => "?").join(", ");
-    await client.run(
-      `UPDATE session_tokens SET expiresAt = ?
-       WHERE (id IN (${placeholders}) OR parentTokenId IN (${placeholders})) AND expiresAt > ?`,
-      [previousExpiresAt, ...previous, ...previous, previousExpiresAt],
-    );
+    await sessionsRepo().expireSessionTokensWithChildren(previous, previousExpiresAt);
     return { ...(await insertAgentToken(agentId, ttlMs)), previousExpiresAt };
   });
 }
 
 /** Revoke every active agent token of `agentId` and their child task tokens. */
 export async function revokeAgentTokens(agentId: string): Promise<number> {
-  return await getDbClient().transaction(async (client) => {
-    const ids = await activeAgentTokenIds(client, agentId);
-    await revokeTokensWithChildren(client, ids);
+  return await getStorage().transaction(async () => {
+    const ids = await activeAgentTokenIds(agentId);
+    await revokeTokensWithChildren(ids);
     return ids.length;
   });
 }
@@ -917,16 +870,10 @@ export async function revokeAgentTokens(agentId: string): Promise<number> {
  * controller, not the agent, and stay. Joins the caller's transaction.
  */
 export async function revokeAllAgentSessionTokens(agentId: string): Promise<number> {
-  return await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE agentId = ? AND controllerId IS NULL AND revokedAt IS NULL",
-      [agentId],
-    );
-    await revokeTokensWithChildren(
-      client,
-      rows.map((row) => row.id),
-    );
-    return rows.length;
+  return await getStorage().transaction(async () => {
+    const ids = await sessionsRepo().listUnrevokedAgentSessionTokenIds(agentId);
+    await revokeTokensWithChildren(ids);
+    return ids.length;
   });
 }
 
@@ -970,27 +917,7 @@ export async function resolveSessionToken(
 > {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
-  const client = getDbClient();
-
-  const row = await client.get<{
-    id: string;
-    agentId: string;
-    taskId: string | null;
-    runtimeId: string | null;
-    controllerId: string | null;
-    placement: string | null;
-    expiresAt: string;
-    revokedAt: string | null;
-    sourceStepId: string | null;
-    sourceScriptRunId: string | null;
-    objectChain: string | null;
-    depth: number;
-  }>(
-    `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     s.sourceStepId, s.sourceScriptRunId, s.objectChain, s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
-     WHERE s.tokenHash = ?`,
-    [hash],
-  );
+  const row = await sessionsRepo().findSessionTokenByHash(hash);
   if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 
@@ -1007,10 +934,7 @@ export async function resolveSessionToken(
 
   if (options.touch !== false) {
     try {
-      await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        row.id,
-      ]);
+      await sessionsRepo().touchSessionToken(row.id, new Date().toISOString());
     } catch {
       // best-effort
     }

@@ -1,6 +1,6 @@
 import { nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlIdent, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: sessions and cost (`session_logs`, `session_costs`,
@@ -270,6 +270,188 @@ export type PricingRowDb = {
   lastUpdatedAt: number;
 };
 
+// ---- session tree (session_summaries roots, inbox_item_state, session_shares, session_members) ----
+
+/** A `[lo, hi)` range of canonical asset keys. */
+export type SessionKeyRange = { lo: string; hi: string };
+export type SessionSourceRange = SessionKeyRange & { source: string };
+
+/**
+ * The key and status rules the session tree SQL applies, resolved by the
+ * caller (the asset key grammar lives in the application).
+ */
+export type SessionTreeRules = {
+  /** The `shared/<source>/` key range of each session source. */
+  sourceRanges: readonly SessionSourceRange[];
+  /** A source thread with at least this many owned roots nests as its own group. */
+  nestedThreadMinRoots: number;
+  /** Terminal task statuses. Plain lower-case words: written into the SQL as literals. */
+  terminalStatuses: readonly string[];
+  /** Task sources agents and the server create. Plain lower-case words, written as literals. */
+  agentTaskSources: readonly string[];
+  /** Root sources a machine starts. */
+  machineSources: readonly string[];
+  /** `system` task types a person starts. */
+  humanSystemTaskTypes: readonly string[];
+};
+
+/** One group's roots: the group key itself and its direct resource leaves. */
+export type SessionGroupSpec = SessionKeyRange & {
+  /** Keep the key index out of the range: a broad prefix reads faster as one pass. */
+  scan: boolean;
+  /** 1-based code point position right after the group prefix. */
+  start: number;
+  /** GLOB patterns a direct leaf segment matches (`<kind>:?*` + `/`). */
+  leafPatterns: readonly string[];
+};
+
+/** The roots the Inbox holds: the source and resource key ranges, plus No group. */
+export type SessionInboxScope = {
+  ranges: readonly SessionKeyRange[];
+  noGroup: readonly SessionGroupSpec[];
+};
+
+/** Session-list visibility: see `sessionViewerSql`. */
+export type SessionViewerSpec = {
+  userId: string | null;
+  scope: "all" | "mine" | "shared";
+  readAll?: boolean;
+};
+
+/** Conditions on a session root `r` (a `session_summaries` row or a root task). */
+export type SessionRootFilterSpec = {
+  /** Schedule runs pass the shown-source, tree-owner and Mine conditions. */
+  includeScheduleRuns?: boolean;
+  rootId?: string;
+  /** An empty list matches no root. */
+  rootIds?: readonly string[];
+  exceptRootIds?: readonly string[];
+  /** Raw task sources. */
+  sources?: readonly string[];
+  /** Effective sources to leave out. */
+  hideSources?: readonly string[];
+  /** Effective sources to keep; an empty list matches no root. */
+  showSources?: readonly string[];
+  /** Lower-case `%text%` matched against the root task text and title. */
+  textLike?: string;
+  requestedByUserId?: string;
+  /** LIKE pattern on `contextKey`, escaped with backslash. */
+  contextKeyPattern?: string;
+  viewer?: SessionViewerSpec;
+  /** With a viewer: owned roots only. */
+  tree?: boolean;
+  /** With a viewer: the Mine view. */
+  mine?: boolean;
+  keyRange?: SessionKeyRange;
+  keyRanges?: readonly SessionKeyRange[];
+  group?: SessionGroupSpec;
+  /** No group: any of these groups. */
+  noGroup?: readonly SessionGroupSpec[];
+  /** Triage inbox or working: roots in the Inbox scope. */
+  inbox?: SessionInboxScope;
+  /** Triage later or done: the user's marked roots, or (`orInbox`) auto-Done Inbox roots. */
+  marked?: { triage: "later" | "done"; userId: string | null; orInbox?: SessionInboxScope };
+};
+
+/** The viewer read-state rule's bound times. */
+export type SessionReadStateSpec = {
+  now: string;
+  /** Activity after this reads unread on a root with no triage row. */
+  unreadSince: string;
+  /** Auto-Done quiet bound: last activity and triage write at or before it. */
+  quietBefore: string;
+  inbox: SessionInboxScope;
+};
+
+/** One row per visible session root, filtered after aggregation. */
+export type SessionSummarySpec = {
+  root: SessionRootFilterSpec;
+  /** The viewer's read state; NULL readState without it. */
+  read?: SessionReadStateSpec;
+  viewerUserId: string | null;
+  withUserId?: string;
+  triage?: "inbox" | "working" | "later" | "done" | "unread";
+  status?: "running" | "failed" | "needs";
+  /** Leave the viewer's Later and Done rows out (a group list). */
+  excludesTriaged?: boolean;
+};
+
+export type SessionPageMemberRow = {
+  root_id: string;
+  id: string | null;
+  name: string | null;
+  preview: string | null;
+};
+
+export type SessionPageShareRow = {
+  root_id: string;
+  id: string | null;
+  name: string | null;
+  access: "read" | "write";
+};
+
+export type SessionTreeRow = {
+  root_id: string;
+  key: string;
+  source: string;
+  slackChannelId: string | null;
+  lastActivityAt: string;
+  latestStatus: string;
+  readState: string | null;
+  needsYou: number;
+  scheduleId: string | null;
+  defaultVisible: number;
+};
+
+export type SessionThreadLabelRow = { key: string; title: string | null; prompt: string };
+
+/** One triage write applied to every root of a list. */
+export type SessionListTriageWrite = {
+  userId: string;
+  status: "done" | "open";
+  doneAt: string | null;
+  readAt: string | null;
+  now: string;
+  /** Move the read cursor: to each root's newest activity, or to a fixed time. Omitted: keep it. */
+  lastReadAt?: { kind: "activity" } | { kind: "value"; value: string };
+};
+
+/** Resource kinds a session group names (`getResourceSessionLabels`). */
+export type SessionResourceKind = "page" | "workflow" | "schedule" | "app" | "script" | "fs";
+
+// ---- session_tokens ----
+
+export type NewSessionToken = {
+  id: string;
+  tokenHash: string;
+  tokenPreview: string;
+  agentId: string;
+  taskId: string | null;
+  runtimeId: string | null;
+  parentRuntimeId: string | null;
+  expiresAt: string;
+  createdAt: string;
+  controllerId: string | null;
+  parentTokenId: string | null;
+  scriptRun: boolean;
+};
+
+/** A session token by hash, with its controller's placement. */
+export type SessionTokenLookupRow = {
+  id: string;
+  agentId: string;
+  taskId: string | null;
+  runtimeId: string | null;
+  controllerId: string | null;
+  placement: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+  sourceStepId: string | null;
+  sourceScriptRunId: string | null;
+  objectChain: string | null;
+  depth: number;
+};
+
 export interface SessionsRepository {
   // ---- session_logs ----
   /** `lineNumber` of the newest stored line of `(sessionId, iteration)`, by insert order. */
@@ -438,7 +620,170 @@ export interface SessionsRepository {
     tokenClass: string,
     effectiveFrom: number,
   ): Promise<number>;
+  // ---- session tree ----
+  /**
+   * Owned roots at the source thread key of the root `r` (0 off a thread
+   * key), as a correlated SQL expression.
+   */
+  sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery;
+  /** The root conditions as one SQL condition on `r` (`1` when none). */
+  sessionRootFilterSql(rules: SessionTreeRules, spec: SessionRootFilterSpec): SqlQuery;
+  /**
+   * One row per visible session root over `session_summaries`, with its chain
+   * aggregates, read state and `needsYou` (a SELECT to wrap; rows unordered).
+   */
+  sessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery;
+  /** The chain walk {@link sessionSummarySql} replaces (tests compare the two). */
+  legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery;
+  /** `SELECT COUNT(*) AS count`: over the summaries when `chain`, else over the root filter. */
+  sessionCountSql(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): SqlQuery;
+  /** Owned roots per source thread key. Unordered: the caller indexes them by key. */
+  listThreadRootCounts(rules: SessionTreeRules): Promise<{ key: string; threadRoots: number }[]>;
+  /** {@link sessionThreadRootsSql} of one task, or null without the task. */
+  findTaskThreadRoots(rules: SessionTreeRules, taskId: string): Promise<number | null>;
+  /** Read state and last activity of the one root the spec matches. */
+  findSessionReadState(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+  ): Promise<{ readState: string | null; lastActivityAt: string } | null>;
+  /**
+   * Chain tasks of the roots with requester name and output preview, newest
+   * activity first, then newest created, then id descending.
+   */
+  listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]>;
+  /** Active shares of the roots with the user name, oldest first, then id. */
+  listSessionPageShares(rootIds: readonly string[]): Promise<SessionPageShareRow[]>;
+  /**
+   * Summary rows of the tree with each root's schedule and whether the default
+   * owner (and, with `mine`, Mine) rule shows it. `visibleRule` null: every row is
+   * visible. Unordered: the caller aggregates them.
+   */
+  listSessionTreeRows(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    visibleRule: { mine: boolean; userId: string | null; readAll?: boolean } | null,
+  ): Promise<SessionTreeRow[]>;
+  /**
+   * The oldest root (created time, then insert order) of each key among the
+   * given roots: its trimmed title and its prompt without the first thread
+   * context block, cut to `promptChars`. Unordered: one row per key.
+   */
+  listThreadLabels(
+    rootIds: readonly string[],
+    promptChars: number,
+  ): Promise<SessionThreadLabelRow[]>;
+  /** Upsert the user's triage row of every root the spec matches. Returns the rows written. */
+  triageSessionList(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    write: SessionListTriageWrite,
+  ): Promise<number>;
+
+  // ---- session moves ----
+  /**
+   * File mappings attached to a task: those sourced by one of its attachments,
+   * and those with no attachment source. Unordered (DISTINCT, as before).
+   */
+  listTaskAttachmentMappings(taskId: string): Promise<{ id: string; key: string }[]>;
+  /** Set a task's namespace key; `lastUpdatedAt` stays (it tracks activity). */
+  setTaskKey(taskId: string, key: string, changedBy: string | null): Promise<void>;
+  setAssetMappingKey(id: string, key: string, now: string, changedBy: string | null): Promise<void>;
+  /**
+   * Point `key` and `hidden-key` favorites in `[range.lo, range.hi)` at `to` +
+   * the rest of the item id; a principal that already has the new item keeps
+   * it and the old row goes. `scope` limits it to one favorite scope.
+   */
+  moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void>;
+  /** Root tasks in a key range (optionally of one requester), ordered by id. */
+  listPrefixRoots(filter: {
+    range: SessionKeyRange;
+    userId?: string | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ id: string; key: string }[]>;
+  /** Root task ids in a key range visible to the viewer, ordered by id. */
+  listVisiblePrefixRoots(
+    range: SessionKeyRange,
+    viewer: SessionViewerSpec,
+  ): Promise<{ id: string }[]>;
+  /** A task's key and parent, or null. */
+  findTaskKeyAndParent(
+    taskId: string,
+  ): Promise<{ key: string; parentTaskId: string | null } | null>;
+  /** The task and all its descendants, each once. Unordered. */
+  listChainTaskIds(rootId: string): Promise<string[]>;
+
+  // ---- session labels ----
+  /** Live (`expires_at` NULL or after `nowMs`) kv values of the keys. Unordered. */
+  listLiveKvValues(
+    namespace: string,
+    keys: readonly string[],
+    nowMs: number,
+  ): Promise<{ key: string; value: string }[]>;
+  /** Lower-cased id and trimmed name (NULL when empty) of the resources. Unordered. */
+  listResourceNames(
+    kind: SessionResourceKind,
+    ids: readonly string[],
+  ): Promise<{ id: string; name: string | null }[]>;
+
+  // ---- session_tokens (minting, revocation, resolution) ----
+  /**
+   * Expiry of a live (unrevoked, `expiresAt > now`) parent token of `agentId`:
+   * bound to `runtimeId`, or (runtimeId null) an agent token with no binding.
+   */
+  findLiveParentTokenExpiry(
+    tokenId: string,
+    agentId: string,
+    runtimeId: string | null,
+    now: string,
+  ): Promise<string | null>;
+  insertSessionToken(token: NewSessionToken): Promise<void>;
+  setSessionTokenProvenance(
+    tokenId: string,
+    provenance: {
+      sourceStepId: string | null;
+      sourceScriptRunId: string | null;
+      objectChain: string | null;
+      depth: number;
+    },
+  ): Promise<void>;
+  /** The token's `scriptRun` flag (0/1), or null without the token. */
+  findSessionTokenScriptRun(tokenId: string): Promise<number | null>;
+  /** The token's runtime binding, or null without the token. */
+  findSessionTokenRuntime(tokenId: string): Promise<{ runtimeId: string | null } | null>;
+  /** Ids of tokens minted by any of the parent tokens. Unordered. */
+  listChildSessionTokenIds(parentTokenIds: readonly string[]): Promise<string[]>;
+  /** Stamp `revokedAt` on the unrevoked tokens among `ids`. */
+  revokeSessionTokens(ids: readonly string[], now: string): Promise<void>;
+  /** Ids of the tokens bound to, or minted for, a runtime (revoked ones too). Unordered. */
+  listRuntimeSessionTokenIds(runtimeId: string): Promise<string[]>;
+  /** Stamp `revokedAt` on the unrevoked tokens bound to, or minted for, a runtime. */
+  revokeRuntimeSessionTokens(runtimeId: string, now: string): Promise<void>;
+  /** Live agent (worker) tokens of `agentId`: no binding, not a script run. Unordered. */
+  listActiveAgentTokenIds(agentId: string, now: string): Promise<string[]>;
+  /** Cut the expiry of the tokens and their children to `expiresAt` where it is later. */
+  expireSessionTokensWithChildren(ids: readonly string[], expiresAt: string): Promise<void>;
+  /** Unrevoked tokens that authenticate as `agentId` (not controller tokens). Unordered. */
+  listUnrevokedAgentSessionTokenIds(agentId: string): Promise<string[]>;
+  findSessionTokenByHash(tokenHash: string): Promise<SessionTokenLookupRow | null>;
+  touchSessionToken(id: string, now: string): Promise<void>;
 }
+
+/** The table and name column of each resource kind a session group can name. */
+const RESOURCE_NAMES: Record<SessionResourceKind, { table: string; column: string }> = {
+  page: { table: "pages", column: "title" },
+  workflow: { table: "workflows", column: "name" },
+  schedule: { table: "scheduled_tasks", column: "name" },
+  app: { table: "apps", column: "name" },
+  script: { table: "scripts", column: "name" },
+  fs: { table: "asset_key_mappings", column: "provider_key" },
+};
+
+/**
+ * An agent (worker) token: bound to its agent and nothing else. `scriptRun = 0`
+ * leaves out a script run's ephemeral token (same all-null binding shape).
+ */
+const AGENT_TOKEN_BINDING = sql`"taskId" IS NULL AND "runtimeId" IS NULL AND "controllerId" IS NULL AND "parentRuntimeId" IS NULL AND "scriptRun" = 0`;
 
 const PRICING_COLUMNS = sql`provider, model, token_class, effective_from, price_per_million_usd, "createdAt", "lastUpdatedAt"`;
 const COMPOSITION_COLUMNS = sql`id, "taskId", "agentId", "sessionId", seq, provider, model, source, parts, "staticEstTokens", "tokenRatio", "createdAt"`;
@@ -807,5 +1152,265 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
       WHERE provider = ${provider} AND model = ${model} AND token_class = ${tokenClass}
         AND effective_from = ${effectiveFrom}`);
     return result.changes;
+  }
+
+  // ---- session tree (SQLite syntax throughout: kept per engine) ----
+
+  abstract sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery;
+  abstract sessionRootFilterSql(rules: SessionTreeRules, spec: SessionRootFilterSpec): SqlQuery;
+  abstract sessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery;
+  abstract legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery;
+  abstract sessionCountSql(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    chain: boolean,
+  ): SqlQuery;
+
+  listThreadRootCounts(rules: SessionTreeRules): Promise<{ key: string; threadRoots: number }[]> {
+    return this.db.query(this.threadRootCountsSql(rules));
+  }
+
+  /** The grouped thread-root count statement (thread key match is per engine). */
+  protected abstract threadRootCountsSql(rules: SessionTreeRules): SqlQuery;
+
+  async findTaskThreadRoots(rules: SessionTreeRules, taskId: string): Promise<number | null> {
+    const row = await this.db.get<{ threadRoots: number }>(
+      sql`SELECT ${this.sessionThreadRootsSql(rules)} AS "threadRoots" FROM agent_tasks r WHERE r.id = ${taskId}`,
+    );
+    return row ? row.threadRoots : null;
+  }
+
+  findSessionReadState(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+  ): Promise<{ readState: string | null; lastActivityAt: string } | null> {
+    return this.db.get(
+      sql`SELECT "readState", "lastActivityAt" FROM (${this.sessionSummarySql(rules, spec)})`,
+    );
+  }
+
+  abstract listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]>;
+
+  listSessionPageShares(rootIds: readonly string[]): Promise<SessionPageShareRow[]> {
+    return this.db.query<SessionPageShareRow>(sql`
+      SELECT sh."rootTaskId" AS root_id, sh."userId" AS id, u.name, sh.access FROM session_shares sh
+      LEFT JOIN users u ON u.id = sh."userId"
+      WHERE sh."revokedAt" IS NULL AND sh."rootTaskId" IN (${sqlList(rootIds)})
+      ORDER BY sh."createdAt", sh.id`);
+  }
+
+  abstract listSessionTreeRows(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    visibleRule: { mine: boolean; userId: string | null; readAll?: boolean } | null,
+  ): Promise<SessionTreeRow[]>;
+  abstract listThreadLabels(
+    rootIds: readonly string[],
+    promptChars: number,
+  ): Promise<SessionThreadLabelRow[]>;
+  abstract triageSessionList(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    write: SessionListTriageWrite,
+  ): Promise<number>;
+
+  // ---- session moves ----
+
+  listTaskAttachmentMappings(taskId: string): Promise<{ id: string; key: string }[]> {
+    return this.db.query(sql`
+      SELECT DISTINCT m.id, m."key" AS key
+       FROM asset_key_mappings m
+       JOIN task_attachments a
+         ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
+        AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
+        AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
+        AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
+       WHERE a.task_id = ${taskId}
+         AND (m.source_entity_type IS DISTINCT FROM 'task-attachment'
+           OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ${taskId}))`);
+  }
+
+  async setTaskKey(taskId: string, key: string, changedBy: string | null): Promise<void> {
+    await this.db.run(
+      sql`UPDATE agent_tasks SET "key" = ${key}, updated_by = COALESCE(${changedBy}, updated_by) WHERE id = ${taskId}`,
+    );
+  }
+
+  async setAssetMappingKey(
+    id: string,
+    key: string,
+    now: string,
+    changedBy: string | null,
+  ): Promise<void> {
+    await this.db.run(
+      sql`UPDATE asset_key_mappings SET "key" = ${key}, updated_at = ${now}, updated_by = COALESCE(${changedBy}, updated_by) WHERE id = ${id}`,
+    );
+  }
+
+  /** `UPDATE OR IGNORE`: kept per engine. */
+  abstract moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void>;
+
+  listPrefixRoots(filter: {
+    range: SessionKeyRange;
+    userId?: string | null;
+    limit: number;
+    offset: number;
+  }): Promise<{ id: string; key: string }[]> {
+    return this.db.query(sql`
+      SELECT r.id, r."key" FROM agent_tasks r
+      WHERE r."parentTaskId" IS NULL AND r."key" >= ${filter.range.lo} AND r."key" < ${filter.range.hi}
+        ${filter.userId !== undefined ? sql`AND r."requestedByUserId" = ${filter.userId}` : EMPTY}
+      ORDER BY r.id LIMIT ${filter.limit} OFFSET ${filter.offset}`);
+  }
+
+  /** The viewer condition uses `IS NOT <value>`: kept per engine. */
+  abstract listVisiblePrefixRoots(
+    range: SessionKeyRange,
+    viewer: SessionViewerSpec,
+  ): Promise<{ id: string }[]>;
+
+  findTaskKeyAndParent(
+    taskId: string,
+  ): Promise<{ key: string; parentTaskId: string | null } | null> {
+    return this.db.get(sql`SELECT "key", "parentTaskId" FROM agent_tasks WHERE id = ${taskId}`);
+  }
+
+  async listChainTaskIds(rootId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM agent_tasks WHERE id = ${rootId}
+        UNION
+        SELECT t.id FROM agent_tasks t JOIN chain c ON t."parentTaskId" = c.id
+      ) SELECT id FROM chain`);
+    return rows.map((row) => row.id);
+  }
+
+  // ---- session labels ----
+
+  listLiveKvValues(
+    namespace: string,
+    keys: readonly string[],
+    nowMs: number,
+  ): Promise<{ key: string; value: string }[]> {
+    return this.db.query(sql`
+      SELECT key, value FROM kv_entries
+      WHERE namespace = ${namespace} AND key IN (${sqlList(keys)})
+        AND (expires_at IS NULL OR expires_at > ${nowMs})`);
+  }
+
+  listResourceNames(
+    kind: SessionResourceKind,
+    ids: readonly string[],
+  ): Promise<{ id: string; name: string | null }[]> {
+    const { table, column } = RESOURCE_NAMES[kind];
+    // Keys are lower case, and so are generated ids: `id IN` keeps the primary key index.
+    return this.db.query(sql`
+      SELECT lower(id) AS id, NULLIF(trim(${sqlIdent(column)}), '') AS name FROM ${sqlIdent(table)}
+      WHERE id IN (${sqlList(ids)})`);
+  }
+
+  // ---- session_tokens (minting, revocation, resolution) ----
+
+  async findLiveParentTokenExpiry(
+    tokenId: string,
+    agentId: string,
+    runtimeId: string | null,
+    now: string,
+  ): Promise<string | null> {
+    const binding = runtimeId ? sql`"runtimeId" = ${runtimeId}` : AGENT_TOKEN_BINDING;
+    const row = await this.db.get<{ expiresAt: string }>(sql`
+      SELECT "expiresAt" FROM session_tokens WHERE id = ${tokenId} AND "agentId" = ${agentId} AND ${binding}
+      AND "revokedAt" IS NULL AND "expiresAt" > ${now}`);
+    return row?.expiresAt ?? null;
+  }
+
+  async insertSessionToken(t: NewSessionToken): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO session_tokens
+      (id, "tokenHash", "tokenPreview", "agentId", "taskId", "runtimeId", "parentRuntimeId", "expiresAt", "createdAt", "controllerId", "parentTokenId", "scriptRun")
+      VALUES (${t.id}, ${t.tokenHash}, ${t.tokenPreview}, ${t.agentId}, ${t.taskId}, ${t.runtimeId},
+        ${t.parentRuntimeId}, ${t.expiresAt}, ${t.createdAt}, ${t.controllerId}, ${t.parentTokenId}, ${t.scriptRun})`);
+  }
+
+  async setSessionTokenProvenance(
+    tokenId: string,
+    p: {
+      sourceStepId: string | null;
+      sourceScriptRunId: string | null;
+      objectChain: string | null;
+      depth: number;
+    },
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE session_tokens SET "sourceStepId" = ${p.sourceStepId}, "sourceScriptRunId" = ${p.sourceScriptRunId},
+        "objectChain" = ${p.objectChain}, depth = ${p.depth}
+      WHERE id = ${tokenId}`);
+  }
+
+  async findSessionTokenScriptRun(tokenId: string): Promise<number | null> {
+    const row = await this.db.get<{ scriptRun: number }>(
+      sql`SELECT "scriptRun" FROM session_tokens WHERE id = ${tokenId}`,
+    );
+    return row ? row.scriptRun : null;
+  }
+
+  findSessionTokenRuntime(tokenId: string): Promise<{ runtimeId: string | null } | null> {
+    return this.db.get(sql`SELECT "runtimeId" FROM session_tokens WHERE id = ${tokenId}`);
+  }
+
+  async listChildSessionTokenIds(parentTokenIds: readonly string[]): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      sql`SELECT id FROM session_tokens WHERE "parentTokenId" IN (${sqlList(parentTokenIds)})`,
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async revokeSessionTokens(ids: readonly string[], now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE session_tokens SET "revokedAt" = ${now}
+      WHERE id IN (${sqlList(ids)}) AND "revokedAt" IS NULL`);
+  }
+
+  async listRuntimeSessionTokenIds(runtimeId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(
+      sql`SELECT id FROM session_tokens WHERE "runtimeId" = ${runtimeId} OR "parentRuntimeId" = ${runtimeId}`,
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async revokeRuntimeSessionTokens(runtimeId: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE session_tokens SET "revokedAt" = ${now}
+      WHERE ("runtimeId" = ${runtimeId} OR "parentRuntimeId" = ${runtimeId}) AND "revokedAt" IS NULL`);
+  }
+
+  async listActiveAgentTokenIds(agentId: string, now: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT id FROM session_tokens WHERE "agentId" = ${agentId} AND ${AGENT_TOKEN_BINDING}
+      AND "revokedAt" IS NULL AND "expiresAt" > ${now}`);
+    return rows.map((row) => row.id);
+  }
+
+  async expireSessionTokensWithChildren(ids: readonly string[], expiresAt: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE session_tokens SET "expiresAt" = ${expiresAt}
+      WHERE (id IN (${sqlList(ids)}) OR "parentTokenId" IN (${sqlList(ids)})) AND "expiresAt" > ${expiresAt}`);
+  }
+
+  async listUnrevokedAgentSessionTokenIds(agentId: string): Promise<string[]> {
+    const rows = await this.db.query<{ id: string }>(sql`
+      SELECT id FROM session_tokens WHERE "agentId" = ${agentId} AND "controllerId" IS NULL AND "revokedAt" IS NULL`);
+    return rows.map((row) => row.id);
+  }
+
+  findSessionTokenByHash(tokenHash: string): Promise<SessionTokenLookupRow | null> {
+    return this.db.get<SessionTokenLookupRow>(sql`
+      SELECT s.id, s."agentId", s."taskId", s."runtimeId", s."controllerId", s."expiresAt", s."revokedAt",
+      s."sourceStepId", s."sourceScriptRunId", s."objectChain", s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s."controllerId"
+      WHERE s."tokenHash" = ${tokenHash}`);
+  }
+
+  async touchSessionToken(id: string, now: string): Promise<void> {
+    await this.db.run(sql`UPDATE session_tokens SET "lastUsedAt" = ${now} WHERE id = ${id}`);
   }
 }

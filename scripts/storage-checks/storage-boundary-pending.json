@@ -35,22 +35,6 @@
     "reason": "M2 move: scripts",
     "sites": 1
   },
-  "src/be/db/session-labels.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
-  },
-  "src/be/db/session-moves.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 7
-  },
-  "src/be/db/session-tree.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 20
-  },
-  "src/be/db/session-visibility.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
   "src/be/db/slack-trees.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
@@ -233,7 +217,7 @@
   },
   "src/be/session-source-backfill.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 9
+    "sites": 2
   },
   "src/be/skill-invocations.ts": {
     "reason": "M2 move: skills",
@@ -254,10 +238,6 @@
   "src/be/task-ui-spec.ts": {
     "reason": "M2 move: tasks",
     "sites": 2
-  },
-  "src/be/users.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 17
   },
   "src/heartbeat/heartbeat.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

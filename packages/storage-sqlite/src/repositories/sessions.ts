@@ -13,15 +13,36 @@ import {
   type SessionCostSummaryFilter,
   type SessionCostTotalsRow,
   type SessionCostUserSummaryRow,
+  type SessionKeyRange,
+  type SessionListTriageWrite,
   type SessionLogRow,
+  type SessionPageMemberRow,
+  type SessionRootFilterSpec,
   type SessionShareRow,
   type SessionSummaryDriftRow,
+  type SessionSummarySpec,
+  type SessionThreadLabelRow,
+  type SessionTreeRow,
+  type SessionTreeRules,
+  type SessionViewerSpec,
   type SqlQuery,
   sql,
   sqlList,
   sqlWhere,
   type TaskAncestorRow,
 } from "@desplega/storage";
+import {
+  legacySessionSummarySql,
+  SESSION_ROOTS,
+  sessionCountSql,
+  sessionMineSql,
+  sessionRootFilterSql,
+  sessionSummarySql,
+  sessionViewerSql,
+  sourceThreadKeySql,
+  threadPromptSql,
+  threadRootsSql,
+} from "./session-tree";
 
 type SumRow = { total: number };
 
@@ -412,5 +433,124 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     // No index on createdAt: the sort keeps ties in rowid order.
     return this.db.query<BudgetRefusalNotificationRow>(sql`
       SELECT * FROM budget_refusal_notifications ORDER BY "createdAt" DESC, rowid ASC LIMIT ${limit}`);
+  }
+
+  // ---- session tree ----
+
+  sessionThreadRootsSql(rules: SessionTreeRules): SqlQuery {
+    return threadRootsSql(rules);
+  }
+
+  sessionRootFilterSql(rules: SessionTreeRules, spec: SessionRootFilterSpec): SqlQuery {
+    return sessionRootFilterSql(rules, spec);
+  }
+
+  sessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
+    return sessionSummarySql(rules, spec);
+  }
+
+  legacySessionSummarySql(rules: SessionTreeRules, spec: SessionSummarySpec): SqlQuery {
+    return legacySessionSummarySql(rules, spec);
+  }
+
+  sessionCountSql(rules: SessionTreeRules, spec: SessionSummarySpec, chain: boolean): SqlQuery {
+    return sessionCountSql(rules, spec, chain);
+  }
+
+  protected threadRootCountsSql(rules: SessionTreeRules): SqlQuery {
+    return sql`SELECT r."key", COUNT(*) AS "threadRoots" FROM session_summaries r
+    WHERE r."requestedByUserId" IS NOT NULL AND ${sourceThreadKeySql(rules)} GROUP BY r."key"`;
+  }
+
+  listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]> {
+    return this.db.query<SessionPageMemberRow>(sql`
+      SELECT m."rootId" AS root_id, t."requestedByUserId" AS id, u.name,
+        CASE WHEN t.source = 'system' AND t."taskType" = 'follow-up' THEN NULL ELSE NULLIF(trim(substr(t.output, 1, 200)), '') END AS preview
+      FROM session_members m CROSS JOIN agent_tasks t ON t.id = m."taskId"
+      LEFT JOIN users u ON u.id = t."requestedByUserId"
+      WHERE m."rootId" IN (${sqlList(rootIds)})
+      ORDER BY t."lastUpdatedAt" DESC, t."createdAt" DESC, t.id DESC`);
+  }
+
+  listSessionTreeRows(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    visibleRule: { mine: boolean; userId: string | null; readAll?: boolean } | null,
+  ): Promise<SessionTreeRow[]> {
+    const visible = visibleRule
+      ? sql`(r."requestedByUserId" IS NOT NULL${
+          visibleRule.mine
+            ? sql` AND ${sessionMineSql(rules, visibleRule.userId, visibleRule.readAll)}`
+            : EMPTY
+        })`
+      : sql`1`;
+    return this.db.query<SessionTreeRow>(sql`
+      SELECT a.root_id, a."key", a.source, a."slackChannelId", a."lastActivityAt", a."latestStatus",
+        a."readState", a."needsYou", r."scheduleId", (${visible}) AS "defaultVisible"
+      FROM (${sessionSummarySql(rules, spec)}) a JOIN ${SESSION_ROOTS} r ON r.id = a.root_id`);
+  }
+
+  listThreadLabels(
+    rootIds: readonly string[],
+    promptChars: number,
+  ): Promise<SessionThreadLabelRow[]> {
+    return this.db.query<SessionThreadLabelRow>(sql`
+      SELECT "key", title, prompt FROM (
+        SELECT r."key", NULLIF(trim(r.title), '') AS title, ${threadPromptSql(promptChars)} AS prompt,
+          ROW_NUMBER() OVER (PARTITION BY r."key" ORDER BY r."createdAt", r.rowid) AS ordinal
+        FROM agent_tasks r WHERE r.id IN (${sqlList(rootIds)})
+      ) WHERE ordinal = 1`);
+  }
+
+  async triageSessionList(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    write: SessionListTriageWrite,
+  ): Promise<number> {
+    const lastReadAt = !write.lastReadAt
+      ? sql`NULL`
+      : write.lastReadAt.kind === "activity"
+        ? sql`a."lastActivityAt"`
+        : sql`${write.lastReadAt.value}`;
+    // Sticky readAt, lastReadAt only when the write sets it, snooze and dismiss
+    // cleared (the rules of the single-row inbox upsert). `WHERE true` is
+    // required: SQLite cannot parse INSERT ... SELECT ... ON CONFLICT when the
+    // SELECT has no WHERE clause.
+    const result = await this.db.run(sql`
+      INSERT INTO inbox_item_state
+        ("userId", "itemType", "itemId", status, "snoozeUntil", "dismissedAt", "doneAt", "readAt", "lastReadAt", "createdAt", "lastUpdatedAt")
+      SELECT ${write.userId}, 'to_read', a.root_id, ${write.status}, NULL, NULL, ${write.doneAt}, ${write.readAt}, ${lastReadAt}, ${write.now}, ${write.now}
+      FROM (${sessionSummarySql(rules, spec)}) a WHERE true
+      ON CONFLICT("userId", "itemType", "itemId") DO UPDATE SET
+        status = excluded.status,
+        "snoozeUntil" = NULL,
+        "dismissedAt" = NULL,
+        "doneAt" = excluded."doneAt",
+        "readAt" = COALESCE(inbox_item_state."readAt", excluded."readAt"),
+        "lastReadAt" = ${write.lastReadAt ? sql`excluded."lastReadAt"` : sql`inbox_item_state."lastReadAt"`},
+        "lastUpdatedAt" = excluded."lastUpdatedAt"`);
+    return result.changes;
+  }
+
+  // ---- session moves ----
+
+  async moveKeyFavorites(range: SessionKeyRange, to: string, scope?: string): Promise<void> {
+    const inRange = sql`"itemType" IN ('key','hidden-key') AND "itemId" >= ${range.lo} AND "itemId" < ${range.hi}${
+      scope !== undefined ? sql` AND "favoriteScope" = ${scope}` : EMPTY
+    }`;
+    await this.db.run(
+      sql`UPDATE OR IGNORE user_favorites SET "itemId" = ${to} || substr("itemId", ${range.lo.length + 1}) WHERE ${inRange}`,
+    );
+    await this.db.run(sql`DELETE FROM user_favorites WHERE ${inRange}`);
+  }
+
+  listVisiblePrefixRoots(
+    range: SessionKeyRange,
+    viewer: SessionViewerSpec,
+  ): Promise<{ id: string }[]> {
+    return this.db.query(sql`
+      SELECT r.id FROM agent_tasks r
+      WHERE r."parentTaskId" IS NULL AND r."key" >= ${range.lo} AND r."key" < ${range.hi}
+        AND ${sessionViewerSql(viewer)} ORDER BY r.id`);
   }
 }
