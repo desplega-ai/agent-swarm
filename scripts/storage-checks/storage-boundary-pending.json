@@ -27,10 +27,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
   },
-  "src/be/approval-sweeps.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/be/automation-preflight.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 7
@@ -61,11 +57,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 386
-  },
-  "src/be/db/approvals.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 6
+    "sites": 323
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -183,25 +175,13 @@
     "reason": "M2 move: users and RBAC",
     "sites": 10
   },
-  "src/be/db/workflow-idempotency.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 5
-  },
-  "src/be/db/workflow-run-definitions.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 4
-  },
   "src/be/db/workflow-run-retention.ts": {
     "reason": "M2 move: workflows",
     "sites": 12
   },
   "src/be/db/workflow-runs.ts": {
     "reason": "M2 move: workflows",
-    "sites": 29
-  },
-  "src/be/db/workflows/read.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 2
+    "sites": 4
   },
   "src/be/design-system.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -563,10 +543,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 5
   },
-  "src/http/approval-requests.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 1
-  },
   "src/http/budgets.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 1
@@ -639,10 +615,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/http/workflows.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
@@ -709,54 +681,6 @@
   },
   "src/ui-spec/script-actions.ts": {
     "reason": "M2 move: scripts",
-    "sites": 1
-  },
-  "src/workflows/approval-cancel.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/checkpoint.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 3
-  },
-  "src/workflows/engine.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/foreach-driver.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 4
-  },
-  "src/workflows/foreach-join.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 2
-  },
-  "src/workflows/patch-definition.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/recovery.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 3
-  },
-  "src/workflows/resume.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/retry-poller.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 3
-  },
-  "src/workflows/successor-routing.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/task-step-routing.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 1
-  },
-  "src/workflows/version.ts": {
-    "reason": "M2 move: workflows",
     "sites": 1
   }
 }

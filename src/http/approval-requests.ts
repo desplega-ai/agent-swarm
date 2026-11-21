@@ -21,7 +21,6 @@ import {
   type ApprovalVote,
   createApprovalRequest,
   getApprovalRequestById,
-  getDbClient,
   getPendingApprovalVoteState,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -31,6 +30,7 @@ import {
   resolveApprovalRequest,
 } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
+import { getStorage } from "../be/storage";
 import { findUserById } from "../be/users";
 import { can, isRbacEnabled, type RbacPrincipal } from "../rbac";
 import type { User } from "../types";
@@ -589,7 +589,7 @@ export async function answerApprovalRequest(
   // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
   if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
     // The status change and the follow-up task commit together.
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
       const timedOut = await resolveApprovalRequest(existing.id, {
         status: "timeout",
         resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
@@ -669,7 +669,7 @@ export async function answerApprovalRequest(
   // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
   // `all` / `{ min: N }` request append in turn and never drop each other.
   // Config writes share it, so a lost race writes nothing.
-  const outcome = await getDbClient()
+  const outcome = await getStorage()
     .transaction(async () => {
       // Local to the attempt: a replayed attempt (decision D6) collects its own.
       const configWrites: ConfigWrite[] = [];

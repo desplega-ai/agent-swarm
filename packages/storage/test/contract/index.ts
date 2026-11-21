@@ -14,6 +14,7 @@ import { runtimePoolsContract } from "./runtime-pools";
 import { slackContract } from "./slack";
 import { trackersContract } from "./trackers";
 import { usersContract } from "./users";
+import { workflowsContract } from "./workflows";
 
 export type { ContractEngine } from "./env";
 
@@ -34,4 +35,5 @@ export function runStorageContract(engine: ContractEngine): void {
   chatContract(engine);
   oauthContract(engine);
   slackContract(engine);
+  workflowsContract(engine);
 }

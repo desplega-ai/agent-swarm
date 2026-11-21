@@ -21,6 +21,7 @@ import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteSlackRepository } from "./repositories/slack";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
+import { SqliteWorkflowsRepository } from "./repositories/workflows";
 
 export {
   type BusyRetryOptions,
@@ -66,6 +67,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       chat: new SqliteChatRepository(executor),
       oauth: new SqliteOAuthRepository(executor),
       slack: new SqliteSlackRepository(executor),
+      workflows: new SqliteWorkflowsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),

@@ -1,3 +1,4 @@
+import type { WorkflowRow } from "@desplega/storage";
 import type {
   AutomationIntegrationId,
   CooldownConfig,
@@ -7,31 +8,9 @@ import type {
   WorkflowDefinition,
 } from "../../../types";
 import { normalizeDateRequired } from "../../date-utils";
-import { getDbClient } from "../runtime";
+import { getStorage } from "../../storage";
 
-export type WorkflowRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  enabled: number;
-  definition: string;
-  triggers: string;
-  cooldown: string | null;
-  input: string | null;
-  triggerSchema: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  dir: string | null;
-  vcs_repo: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
+export type { WorkflowRow };
 
 export function rowToWorkflow(row: WorkflowRow): Workflow {
   return {
@@ -63,17 +42,6 @@ export function rowToWorkflow(row: WorkflowRow): Workflow {
 
 /** Find enabled event subscribers in workflow-list order, returning each workflow once. */
 export async function getWorkflowsByEventName(eventName: string): Promise<Workflow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    `SELECT w.* FROM workflows w
-       WHERE w.enabled = 1
-         AND EXISTS (
-           SELECT 1 FROM json_each(w.triggers) AS t
-           WHERE t.type = 'object'
-             AND json_extract(t.value, '$.type') = 'event'
-             AND json_extract(t.value, '$.eventName') = ?
-         )
-       ORDER BY w.lastUpdatedAt DESC`,
-    [eventName],
-  );
+  const rows = await getStorage().repos.workflows.listEnabledByEventName(eventName);
   return rows.map(rowToWorkflow);
 }

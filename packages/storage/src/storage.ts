@@ -17,6 +17,7 @@ import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { SlackRepository } from "./repositories/slack";
 import type { TrackersRepository } from "./repositories/trackers";
 import type { UsersRepository } from "./repositories/users";
+import type { WorkflowsRepository } from "./repositories/workflows";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
@@ -35,6 +36,7 @@ export type Repositories = {
   chat: ChatRepository;
   oauth: OAuthRepository;
   slack: SlackRepository;
+  workflows: WorkflowsRepository;
 };
 
 /**
