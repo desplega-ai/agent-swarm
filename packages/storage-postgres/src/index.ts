@@ -32,7 +32,7 @@ export {
   type TimestampFormats,
 } from "./codec";
 export { postgresDialect } from "./dialect";
-export { mapPostgresError, SQLSTATE } from "./errors";
+export { type CheckMessages, mapPostgresError, SQLSTATE } from "./errors";
 export {
   loadPostgresMigrations,
   MIGRATION_LOCK_KEY,

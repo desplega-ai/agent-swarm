@@ -35,6 +35,7 @@ import {
 } from "./pg-translate";
 import {
   type ColumnTypes,
+  extractCheckSourceTexts,
   HEX32,
   type HeadSchema,
   type HeadTable,
@@ -58,12 +59,50 @@ import {
 const PG_MAX_IDENT = 63;
 
 export function baselineOrdinal(): string {
+  // Once written, the baseline keeps its ordinal: later migrations come as pairs
+  // (D12), so the baseline is never renumbered to the SQLite tail.
+  const existing = readdirSync(POSTGRES_MIGRATIONS_DIR).find((f) => /^\d+_baseline\.sql$/.test(f));
+  if (existing) return existing.split("_")[0] as string;
   const files = readdirSync(SQLITE_MIGRATIONS_DIR)
     .filter((f) => /^\d+_.*\.sql$/.test(f))
     .sort();
   const last = files[files.length - 1];
   if (!last) throw new Error("no SQLite migrations found");
   return last.split("_")[0] as string;
+}
+
+/** SQLite's failure text of each named Postgres CHECK constraint (read by the error mapper). */
+export function checkMessagesPath(): string {
+  return join(POSTGRES_MIGRATIONS_DIR, "check-messages.json");
+}
+
+/** Postgres name of the i-th (0-based) CHECK constraint of a table. */
+export function checkConstraintName(table: string, i: number): string {
+  const name = `${table}_check_${i + 1}`;
+  if (name.length > 63) throw new Error(`CHECK constraint name over 63 bytes: ${name}`);
+  return name;
+}
+
+/**
+ * The SQLite failure text of every baseline CHECK: SQLite reports
+ * `CHECK constraint failed: <expression as written>`; Postgres reports the
+ * constraint name. The Postgres error mapper turns one into the other, so API
+ * error bodies match on both engines.
+ */
+export function checkMessages(schema: HeadSchema): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const t of schema.tables) {
+    const texts = extractCheckSourceTexts(t.sql);
+    if (texts.length !== t.checks.length) {
+      throw new Error(
+        `${t.name}: ${texts.length} CHECK source texts for ${t.checks.length} checks`,
+      );
+    }
+    texts.forEach((text, i) => {
+      out[checkConstraintName(t.name, i)] = text;
+    });
+  }
+  return out;
 }
 
 export function baselinePath(): string {
@@ -126,7 +165,9 @@ function emitTable(types: ColumnTypes, t: HeadTable): string {
   if (pk.length > 0) lines.push(`  PRIMARY KEY (${pk.map((c) => qi(c.name)).join(", ")})`);
   for (const u of t.uniques) lines.push(`  UNIQUE (${u.map(qi).join(", ")})`);
   t.checks.forEach((check, i) => {
-    lines.push(`  CHECK (${translateExpr(check, ctx, `${t.name} CHECK #${i + 1} (${check})`)})`);
+    lines.push(
+      `  CONSTRAINT ${qi(checkConstraintName(t.name, i))} CHECK (${translateExpr(check, ctx, `${t.name} CHECK #${i + 1} (${check})`)})`,
+    );
   });
   return `CREATE TABLE ${qi(t.name)} (\n${lines.join(",\n")}\n);\n`;
 }
@@ -341,7 +382,14 @@ export async function generateBaseline(): Promise<string> {
   sections.push(`${emitViews(schema).join("\n")}\n`);
   sections.push("-- Triggers (hand-written: src/be/migrations/postgres/parts/triggers.sql)\n");
   sections.push(readFileSync(TRIGGERS_PART_PATH, "utf8").trimEnd() + "\n");
+  lastCheckMessages = checkMessages(schema);
   return sections.join("\n");
+}
+
+let lastCheckMessages: Record<string, string> = {};
+
+function messagesJson(): string {
+  return `${JSON.stringify(lastCheckMessages, null, 2)}\n`;
 }
 
 if (import.meta.main) {
@@ -355,7 +403,13 @@ if (import.meta.main) {
     } catch {
       // missing file counts as drift
     }
-    if (current !== sql) {
+    let currentMessages = "";
+    try {
+      currentMessages = readFileSync(checkMessagesPath(), "utf8");
+    } catch {
+      // missing file counts as drift
+    }
+    if (current !== sql || currentMessages !== messagesJson()) {
       console.error(
         `${path} is out of date. Run: bun scripts/storage/generate-postgres-baseline.ts`,
       );
@@ -364,6 +418,7 @@ if (import.meta.main) {
     console.log(`${path} is up to date.`);
   } else {
     writeFileSync(path, sql);
-    console.log(`wrote ${path}`);
+    writeFileSync(checkMessagesPath(), messagesJson());
+    console.log(`wrote ${path} and ${checkMessagesPath()}`);
   }
 }

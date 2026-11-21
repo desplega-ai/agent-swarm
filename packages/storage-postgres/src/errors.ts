@@ -47,6 +47,7 @@ function keyColumns(detail: string | undefined): string[] {
 function sqliteEquivalent(
   kind: ConstraintKind,
   pg: PgServerError,
+  checkMessages: CheckMessages | undefined,
 ): { message: string; code: string } {
   const table = pg.table ?? "";
   switch (kind) {
@@ -64,7 +65,7 @@ function sqliteEquivalent(
       };
     case "check":
       return {
-        message: `CHECK constraint failed: ${pg.constraint ?? table}`,
+        message: `CHECK constraint failed: ${(pg.constraint && checkMessages?.[pg.constraint]) ?? pg.constraint ?? table}`,
         code: "SQLITE_CONSTRAINT_CHECK",
       };
   }
@@ -91,14 +92,21 @@ class PostgresConstraintViolationError extends ConstraintViolationError {
   }
 }
 
+/**
+ * SQLite's failure text of each CHECK constraint, by Postgres constraint name
+ * (`src/be/migrations/postgres/check-messages.json`, written by the baseline
+ * generator). SQLite names the expression; Postgres names the constraint.
+ */
+export type CheckMessages = Readonly<Record<string, string>>;
+
 /** Map a driver error to the typed errors of `@desplega/storage`. Other errors pass through. */
-export function mapPostgresError(err: unknown): unknown {
+export function mapPostgresError(err: unknown, checkMessages?: CheckMessages): unknown {
   if (err instanceof StorageError) return err;
   const pg = asPgError(err);
   if (!pg?.errno) return err;
   const kind = CONSTRAINT_KINDS[pg.errno];
   if (kind) {
-    const { message, code } = sqliteEquivalent(kind, pg);
+    const { message, code } = sqliteEquivalent(kind, pg, checkMessages);
     return new PostgresConstraintViolationError(
       kind,
       message,

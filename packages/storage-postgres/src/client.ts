@@ -8,7 +8,7 @@ import {
   type TransactionOptions,
 } from "@desplega/storage";
 import { decodeRows, type ResultColumn, type TimestampFormats } from "./codec";
-import { mapPostgresError, SQLSTATE } from "./errors";
+import { type CheckMessages, mapPostgresError, SQLSTATE } from "./errors";
 
 /**
  * The Postgres engine client over `Bun.SQL` (decision D14).
@@ -76,6 +76,8 @@ export type PostgresClientOptions = {
    * that inspect the Postgres catalog itself (check:schema-parity).
    */
   rawValues?: boolean;
+  /** SQLite's CHECK failure texts by constraint name, for error messages equal to SQLite's. */
+  checkMessages?: CheckMessages;
   /** Called once per retried attempt, with the SQLSTATE that caused it (bench, diagnostics). */
   onRetry?: (sqlstate: string, attempt: number) => void;
 };
@@ -151,7 +153,7 @@ export class PostgresClient implements DbClient {
     try {
       return await this.handle().unsafe(text, bindParams(params));
     } catch (err) {
-      throw mapPostgresError(err);
+      throw mapPostgresError(err, this.options.checkMessages);
     } finally {
       this.options.observer?.onStatement?.(text, performance.now() - started);
     }
@@ -240,7 +242,7 @@ export class PostgresClient implements DbClient {
           attempt -= 1; // the replayed attempt does not count against retries
           continue;
         }
-        const err = mapPostgresError(rawErr);
+        const err = mapPostgresError(rawErr, this.options.checkMessages);
         if (failed) runHooks(failed.attemptRollback, "onAttemptRollback");
         if (isRetryable(rawErr) && attempt < this.retry.maxAttempts) {
           this.retriedAttempts += 1;
@@ -278,7 +280,7 @@ export class PostgresClient implements DbClient {
         }
       });
     } catch (err) {
-      throw mapPostgresError(err);
+      throw mapPostgresError(err, this.options.checkMessages);
     }
   }
 

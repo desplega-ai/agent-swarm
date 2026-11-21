@@ -19,6 +19,7 @@ import {
 } from "@desplega/storage";
 import {
   acquireProcessLock,
+  type CheckMessages,
   type ColumnClassification,
   createPostgresClient,
   createPostgresStorage,
@@ -217,10 +218,14 @@ export async function openPostgresEngine(
     // Test-only switch set by `bun run e2e --tx-replay` (Postgres brief D6).
     const txReplay = process.env.STORAGE_TX_REPLAY === "1";
     if (txReplay) console.log(TX_REPLAY_BANNER);
+    const checkMessages = JSON.parse(
+      readFileSync(join(migrationsDir, "check-messages.json"), "utf8"),
+    ) as CheckMessages;
     const client = createPostgresClient(url, {
       max: POSTGRES_POOL_MAX,
       timestampFormats,
       txReplay,
+      checkMessages,
     });
     const queryReader = await openQueryReader(queryUrl, timestampFormats);
     console.log(

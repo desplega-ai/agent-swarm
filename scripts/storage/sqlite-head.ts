@@ -306,12 +306,14 @@ function introspectTable(db: Database, name: string, sql: string, master: Master
 // Tokenizer
 // ---------------------------------------------------------------------------
 
-export type Tok = { k: "str" | "qid" | "num" | "id" | "op"; v: string };
+/** `s`/`e`: the token's span in the source text. */
+export type Tok = { k: "str" | "qid" | "num" | "id" | "op"; v: string; s?: number; e?: number };
 
 export function tokenize(sql: string): Tok[] {
   const out: Tok[] = [];
   let i = 0;
   while (i < sql.length) {
+    const start = i;
     const ch = sql[i] as string;
     if (/\s/.test(ch)) {
       i++;
@@ -342,8 +344,8 @@ export function tokenize(sql: string): Tok[] {
         v += sql[j];
         j++;
       }
-      out.push({ k: "str", v });
       i = j + 1;
+      out.push({ k: "str", v, s: start, e: i });
       continue;
     }
     if (ch === '"' || ch === "`" || ch === "[") {
@@ -363,28 +365,28 @@ export function tokenize(sql: string): Tok[] {
         v += sql[j];
         j++;
       }
-      out.push({ k: "qid", v });
       i = j + 1;
+      out.push({ k: "qid", v, s: start, e: i });
       continue;
     }
     const num = /^(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?/.exec(sql.slice(i));
     if (num) {
-      out.push({ k: "num", v: num[0] });
       i += num[0].length;
+      out.push({ k: "num", v: num[0], s: start, e: i });
       continue;
     }
     const id = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(sql.slice(i));
     if (id) {
-      out.push({ k: "id", v: id[0] });
       i += id[0].length;
+      out.push({ k: "id", v: id[0], s: start, e: i });
       continue;
     }
     const op = /^(#>>|#>|->>|->|\|\||<>|!=|==|<=|>=|<<|>>|::|[-+*/%<>=(),.;&|~:])/.exec(
       sql.slice(i),
     );
     if (op) {
-      out.push({ k: "op", v: op[0] });
       i += op[0].length;
+      out.push({ k: "op", v: op[0], s: start, e: i });
       continue;
     }
     throw new Error(`cannot tokenize at: ${sql.slice(i, i + 40)}`);
@@ -441,6 +443,26 @@ export function extractChecks(createSql: string): string[] {
     if (isWord(toks[i], "CHECK") && toks[i + 1]?.v === "(") {
       const end = closeParen(toks, i + 1);
       out.push(renderTokens(toks.slice(i + 2, end)));
+      i = end;
+    }
+  }
+  return out;
+}
+
+/**
+ * The CHECK expressions as SQLite reports them in a failure message
+ * (`CHECK constraint failed: <text>`): the source text between the parentheses,
+ * unchanged. Same order as {@link extractChecks}.
+ */
+export function extractCheckSourceTexts(createSql: string): string[] {
+  const toks = tokenize(createSql);
+  const out: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    if (isWord(toks[i], "CHECK") && toks[i + 1]?.v === "(") {
+      const end = closeParen(toks, i + 1);
+      const from = toks[i + 1]?.e ?? 0;
+      const to = toks[end]?.s ?? from;
+      out.push(createSql.slice(from, to).trim());
       i = end;
     }
   }
