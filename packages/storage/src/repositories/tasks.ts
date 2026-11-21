@@ -873,6 +873,8 @@ export interface TasksRepository {
    * that already watches the resume replaces the old one.
    */
   repointWaitMembers(taskId: string, resumeTaskId: string, now: string): Promise<void>;
+  /** Point members of pending waits from `fromTaskId` to `toTaskId` (plain update). */
+  transferWaitMembers(fromTaskId: string, toTaskId: string, now: string): Promise<void>;
   /**
    * Pending task waits of enabled schedules with a settled, not re-deferred
    * member that matches the wait's event, with that member's status
@@ -2155,6 +2157,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   /** Filters on an output alias in WHERE (SQLite). */
   abstract listSupersededWaitMembers(): Promise<{ taskId: string; resumeTaskId: string }[]>;
+  async transferWaitMembers(fromTaskId: string, toTaskId: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE deferred_task_wait_members SET "taskId" = ${toTaskId}, updated_at = ${now}
+      WHERE "taskId" = ${fromTaskId} AND "scheduleId" IN (
+        SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
+      )`);
+  }
+
   /** `UPDATE OR REPLACE` (SQLite). */
   abstract repointWaitMembers(taskId: string, resumeTaskId: string, now: string): Promise<void>;
 

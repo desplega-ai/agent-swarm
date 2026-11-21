@@ -924,6 +924,7 @@ export function tasksContract(engine: ContractEngine): void {
       expect(await repo.listSupersededWaitMembers()).toEqual([
         { taskId: "m3", resumeTaskId: "m3r" },
       ]);
+      await repo.transferWaitMembers("nobody", "m3r", T1);
       await repo.repointWaitMembers("m3", "m3r", T1);
       expect((await repo.listDeferredWaitMembers("s1", "wf")).map((m) => m.taskId).sort()).toEqual([
         "m1",
@@ -942,6 +943,13 @@ export function tasksContract(engine: ContractEngine): void {
       );
       await repo.setDeferredWaitChild("deferred_task_waits", "s1", "m1");
       expect(await repo.findDeferredTaskWait("s1")).toMatchObject({ status: "fired" });
+      // Fired waits keep their members.
+      await repo.transferWaitMembers("m1", "m2", T1);
+      expect((await repo.listDeferredWaitMembers("s1", "wf")).map((m) => m.taskId).sort()).toEqual([
+        "m1",
+        "m2",
+        "m3r",
+      ]);
 
       await schedule("e1", "waiter");
       await repo.insertDeferredEventWait({

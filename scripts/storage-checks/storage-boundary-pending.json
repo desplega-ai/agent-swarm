@@ -735,10 +735,6 @@
     "reason": "M2 move: schedules",
     "sites": 2
   },
-  "src/scheduler/schedule-task.ts": {
-    "reason": "M2 move: schedules",
-    "sites": 2
-  },
   "src/telemetry-identity.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
