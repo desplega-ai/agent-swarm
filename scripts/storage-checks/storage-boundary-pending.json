@@ -37,7 +37,7 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 121
+    "sites": 109
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -58,10 +58,6 @@
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
     "sites": 5
-  },
-  "src/be/db/script-run-sources.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 1
   },
   "src/be/db/session-costs.ts": {
     "reason": "M2 move: sessions and cost",

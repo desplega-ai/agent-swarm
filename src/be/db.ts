@@ -35,6 +35,10 @@ import type {
   RoutingCandidateMatch,
   ScheduledTaskColumnUpdate,
   ScheduledTaskRow,
+  ScriptRunColumnUpdate,
+  ScriptRunJournalRow,
+  ScriptRunListRow,
+  ScriptRunRow,
   SkillFileRow,
   SkillRow,
   SkillWithInstallRow,
@@ -259,7 +263,7 @@ import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
 import { getDb, getDbClient } from "./db/runtime";
-import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
+import { storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
@@ -396,7 +400,7 @@ export {
   setScriptRunFollowUpGuard,
 } from "./db/script-runs";
 
-import { type ScriptRunFilter, scriptRunFilterSql } from "./db/script-runs";
+import type { ScriptRunFilter } from "./db/script-runs";
 
 export {
   AssetKeyMovesBlockedError,
@@ -11679,50 +11683,6 @@ export async function countKv(namespace: string, opts: { prefix?: string }): Pro
 
 // ─── Script Runs ────────────────────────────────────────────────────────────
 
-type ScriptRunRow = {
-  objectScriptId: string | null;
-  objectId: string | null;
-  objectMethod: string | null;
-  id: string;
-  agentId: string;
-  scriptName: string | null;
-  source: string;
-  storedSource?: string | null;
-  args: string;
-  kind: string;
-  status: string;
-  pid: number | null;
-  startedAt: string;
-  finishedAt: string | null;
-  output: string | null;
-  error: string | null;
-  last_heartbeat_at: string | null;
-  idempotencyKey: string | null;
-  requestedByUserId: string | null;
-  sourceTaskId: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-type ScriptRunListRow = Pick<
-  ScriptRunRow,
-  | "id"
-  | "agentId"
-  | "scriptName"
-  | "kind"
-  | "status"
-  | "pid"
-  | "startedAt"
-  | "finishedAt"
-  | "error"
-  | "last_heartbeat_at"
-  | "idempotencyKey"
-  | "requestedByUserId"
-  | "objectScriptId"
-  | "objectId"
-  | "objectMethod"
->;
-
 function parseJsonColumn(value: string | null): unknown | undefined {
   if (value === null) return undefined;
   return JSON.parse(value);
@@ -11786,41 +11746,33 @@ export async function createScriptRun(data: {
   createdBy?: string;
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
-  const client = getDbClient();
-  return client.transaction(async () => {
+  const storage = getStorage();
+  return storage.transaction(async () => {
     if (data.idempotencyKey) {
-      const existing = await client.get<ScriptRunRow>(
-        `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
-        [data.idempotencyKey],
+      const existing = await storage.repos.scripts.findScriptRunByIdempotencyKey(
+        data.idempotencyKey,
       );
       if (existing) return { run: rowToScriptRun(existing), existing: true };
     }
 
     const sourceHash = await storeScriptRunSource(data.source);
-    const row = await client.get<ScriptRunRow>(
-      `INSERT INTO script_runs
-        (id, agentId, scriptName, source, sourceHash, args, idempotencyKey, requestedByUserId, sourceTaskId,
-         created_by, updated_by, startedAt)
-       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        data.agentId,
-        data.scriptName ?? null,
-        sourceHash,
-        // Sealed, not scrubbed: this is the run's execution input. The supervisor
-        // launches (and relaunches after a restart or pause) from it, so a
-        // redacted value would change what the script receives.
-        sealJson(data.args ?? null),
-        data.idempotencyKey ?? null,
-        data.requestedByUserId ?? null,
-        data.sourceTaskId ?? null,
-        data.createdBy ?? null,
-        data.updatedBy ?? data.createdBy ?? null,
-        // ISO like finishedAt and the inline path, not the column's datetime('now') default.
-        new Date().toISOString(),
-      ],
-    );
+    const row = await storage.repos.scripts.insertScriptRun({
+      id: data.id,
+      agentId: data.agentId,
+      scriptName: data.scriptName ?? null,
+      sourceHash,
+      // Sealed, not scrubbed: this is the run's execution input. The supervisor
+      // launches (and relaunches after a restart or pause) from it, so a
+      // redacted value would change what the script receives.
+      args: sealJson(data.args ?? null),
+      idempotencyKey: data.idempotencyKey ?? null,
+      requestedByUserId: data.requestedByUserId ?? null,
+      sourceTaskId: data.sourceTaskId ?? null,
+      created_by: data.createdBy ?? null,
+      updated_by: data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      startedAt: new Date().toISOString(),
+    });
     if (!row) throw new Error("Failed to create script run");
     return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
   });
@@ -11853,110 +11805,66 @@ export async function recordInlineScriptRun(data: {
   const args = scrubJsonValue(data.args ?? null);
   const output = data.output === undefined ? null : scrubJsonValue(data.output);
   const provenance = getCurrentRunProvenance();
-  const client = getDbClient();
-  return client.transaction(async () => {
+  const storage = getStorage();
+  return storage.transaction(async () => {
     const sourceHash = await storeScriptRunSource(data.source);
-    const row = await client.get<ScriptRunRow>(
-      `INSERT INTO script_runs
-        (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
-         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
-         sourceStepId, parentScriptRunId, objectScriptId, objectId, objectMethod)
-       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        data.agentId,
-        data.scriptName ?? null,
-        sourceHash,
-        args,
-        data.status,
-        output,
-        data.error ?? null,
-        data.startedAt,
-        data.finishedAt,
-        data.requestedByUserId ?? null,
-        data.createdBy ?? null,
-        data.createdBy ?? null,
-        data.apiEndpointId ?? null,
-        // A run called through another script run's token (a nested
-        // ctx.swarm.script_run) records that run and its workflow step.
-        provenance?.sourceStepId ?? null,
-        provenance?.sourceScriptRunId ?? null,
-        data.objectScriptId ?? null,
-        data.objectId ?? null,
-        data.objectMethod ?? null,
-      ],
-    );
+    const row = await storage.repos.scripts.insertInlineScriptRun({
+      id: data.id,
+      agentId: data.agentId,
+      scriptName: data.scriptName ?? null,
+      sourceHash,
+      args,
+      status: data.status,
+      output,
+      error: data.error ?? null,
+      startedAt: data.startedAt,
+      finishedAt: data.finishedAt,
+      requestedByUserId: data.requestedByUserId ?? null,
+      created_by: data.createdBy ?? null,
+      updated_by: data.createdBy ?? null,
+      apiEndpointId: data.apiEndpointId ?? null,
+      // A run called through another script run's token (a nested
+      // ctx.swarm.script_run) records that run and its workflow step.
+      sourceStepId: provenance?.sourceStepId ?? null,
+      parentScriptRunId: provenance?.sourceScriptRunId ?? null,
+      objectScriptId: data.objectScriptId ?? null,
+      objectId: data.objectId ?? null,
+      objectMethod: data.objectMethod ?? null,
+    });
     if (!row) throw new Error("Failed to record inline script run");
     return rowToScriptRun({ ...row, storedSource: data.source });
   });
 }
 
 export async function getScriptRun(id: string): Promise<ScriptRun | null> {
-  const row = await getDbClient().get<ScriptRunRow>(`${SCRIPT_RUN_SELECT} WHERE r.id = ?`, [id]);
+  const row = await getStorage().repos.scripts.findScriptRun(id);
   return row ? rowToScriptRun(row) : null;
 }
 
 export async function getScriptRunByIdempotencyKey(
   idempotencyKey: string,
 ): Promise<ScriptRun | null> {
-  const row = await getDbClient().get<ScriptRunRow>(
-    `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
-    [idempotencyKey],
-  );
+  const row = await getStorage().repos.scripts.findScriptRunByIdempotencyKey(idempotencyKey);
   return row ? rowToScriptRun(row) : null;
 }
 
 export async function listScriptRuns(
   opts?: ScriptRunFilter & { limit?: number; offset?: number },
 ): Promise<ScriptRunListItem[]> {
-  const { conditions, params: filterParams } = scriptRunFilterSql(opts);
-  const params: Array<string | number> = [...filterParams];
-
-  const limit = opts?.limit ?? 50;
-  const offset = opts?.offset ?? 0;
-  params.push(limit, offset);
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<ScriptRunListRow>(
-    `SELECT
-        id,
-        agentId,
-        scriptName,
-        kind,
-        status,
-        pid,
-        startedAt,
-        finishedAt,
-        error,
-        last_heartbeat_at,
-        idempotencyKey,
-        requestedByUserId,
-        objectScriptId,
-        objectId,
-        objectMethod
-       FROM script_runs ${where}
-       ORDER BY startedAt DESC
-       LIMIT ? OFFSET ?`,
-    params,
+  const rows = await getStorage().repos.scripts.listScriptRuns(
+    opts ?? {},
+    opts?.limit ?? 50,
+    opts?.offset ?? 0,
   );
   return rows.map(rowToScriptRunListItem);
 }
 
 export async function countScriptRuns(opts?: ScriptRunFilter): Promise<number> {
-  const { conditions, params } = scriptRunFilterSql(opts);
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM script_runs ${where}`,
-    params,
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countScriptRuns(opts ?? {});
 }
 
 export async function countActiveScriptRuns(): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countActiveScriptRuns();
 }
 
 export type ScriptRunPatch = Partial<{
@@ -11969,51 +11877,33 @@ export type ScriptRunPatch = Partial<{
   updatedBy: string | null;
 }>;
 
-function scriptRunUpdateSets(patch: ScriptRunPatch): {
-  sets: string[];
-  vals: Array<string | number | null>;
-} {
-  const sets: string[] = [];
-  const vals: Array<string | number | null> = [];
-  if (patch.status !== undefined) {
-    sets.push("status = ?");
-    vals.push(patch.status);
-  }
-  if (patch.pid !== undefined) {
-    sets.push("pid = ?");
-    vals.push(patch.pid);
-  }
-  if (patch.finishedAt !== undefined) {
-    sets.push("finishedAt = ?");
-    vals.push(patch.finishedAt);
-  }
-  // Every script_runs UPDATE builds its SET list here, so this is the
-  // chokepoint for the output and error columns. Output is a record of the
-  // finished run (nothing re-reads it as input), so redaction is safe.
-  if ("output" in patch) {
-    sets.push("output = ?");
-    vals.push(patch.output === undefined ? null : scrubJsonValue(patch.output));
-  }
-  if (patch.error !== undefined) {
-    sets.push("error = ?");
-    vals.push(patch.error === null ? null : scrubSecrets(patch.error));
-  }
-  if (patch.lastHeartbeatAt !== undefined) {
-    sets.push("last_heartbeat_at = ?");
-    vals.push(patch.lastHeartbeatAt);
-  }
-  if (patch.updatedBy !== undefined) {
-    sets.push("updated_by = ?");
-    vals.push(patch.updatedBy);
-  }
-  return { sets, vals };
+function scriptRunUpdateSets(patch: ScriptRunPatch): ScriptRunColumnUpdate {
+  return {
+    status: patch.status,
+    pid: patch.pid,
+    finishedAt: patch.finishedAt,
+    // Every script_runs UPDATE builds its SET list here, so this is the
+    // chokepoint for the output and error columns. Output is a record of the
+    // finished run (nothing re-reads it as input), so redaction is safe.
+    output:
+      "output" in patch
+        ? patch.output === undefined
+          ? null
+          : scrubJsonValue(patch.output)
+        : undefined,
+    error:
+      patch.error === undefined
+        ? undefined
+        : patch.error === null
+          ? null
+          : scrubSecrets(patch.error),
+    last_heartbeat_at: patch.lastHeartbeatAt,
+    updated_by: patch.updatedBy,
+  };
 }
 
 export async function updateScriptRun(id: string, patch: ScriptRunPatch): Promise<void> {
-  const { sets, vals } = scriptRunUpdateSets(patch);
-  if (sets.length === 0) return;
-  vals.push(id);
-  await getDbClient().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+  await getStorage().repos.scripts.updateScriptRun(id, scriptRunUpdateSets(patch));
 }
 
 /**
@@ -12031,11 +11921,7 @@ export async function updateScriptRunIfNotTerminal(
   id: string,
   patch: ScriptRunPatch,
 ): Promise<boolean> {
-  return await updateScriptRunGuarded(
-    id,
-    patch,
-    "status NOT IN ('completed', 'failed', 'cancelled', 'aborted_limit')",
-  );
+  return await updateScriptRunGuarded(id, patch, "not-terminal");
 }
 
 /**
@@ -12048,48 +11934,25 @@ export async function updateScriptRunIfRunning(
   id: string,
   patch: ScriptRunPatch,
 ): Promise<boolean> {
-  return await updateScriptRunGuarded(id, patch, "status = 'running'");
+  return await updateScriptRunGuarded(id, patch, "running");
 }
 
 async function updateScriptRunGuarded(
   id: string,
   patch: ScriptRunPatch,
-  predicate: string,
+  guard: "not-terminal" | "running",
 ): Promise<boolean> {
-  const { sets, vals } = scriptRunUpdateSets(patch);
-  if (sets.length === 0) return false;
-  vals.push(id);
-  const result = await getDbClient().run(
-    `UPDATE script_runs SET ${sets.join(", ")} WHERE id = ? AND ${predicate}`,
-    vals,
+  return (
+    (await getStorage().repos.scripts.updateScriptRun(id, scriptRunUpdateSets(patch), guard)) > 0
   );
-  return result.changes > 0;
 }
 
 export async function getRunningScriptRuns(): Promise<ScriptRun[]> {
-  const rows = await getDbClient().query<ScriptRunRow>(
-    `${SCRIPT_RUN_SELECT} WHERE r.status IN ('running', 'paused')`,
-  );
+  const rows = await getStorage().repos.scripts.listActiveScriptRuns();
   return rows.map(rowToScriptRun);
 }
 
 // ─── Script Run Journal ─────────────────────────────────────────────────────
-
-type ScriptRunJournalRow = {
-  id: string;
-  runId: string;
-  stepKey: string;
-  stepType: string;
-  config: string;
-  status: string;
-  result: string | null;
-  error: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 function rowToScriptRunJournalEntry(
   row: ScriptRunJournalRow,
@@ -12119,10 +11982,7 @@ export async function getScriptRunJournalStep(
   runId: string,
   stepKey: string,
 ): Promise<ScriptRunJournalEntry | null> {
-  const row = await getDbClient().get<ScriptRunJournalRow>(
-    "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
-    [runId, stepKey],
-  );
+  const row = await getStorage().repos.scripts.findScriptRunJournalStep(runId, stepKey);
   return row ? rowToScriptRunJournalEntry(row, "replay") : null;
 }
 
@@ -12140,44 +12000,28 @@ export async function upsertScriptRunJournalStep(data: {
   // redacted. `result` is sealed instead: the harness replays it verbatim as
   // the step's return value on resume, so redaction would change what later
   // steps see.
-  await getDbClient().run(
-    `INSERT OR IGNORE INTO script_run_journal
-      (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [
-      crypto.randomUUID(),
-      data.runId,
-      data.stepKey,
-      data.stepType,
-      scrubJsonValue(data.config ?? {}),
-      data.status,
-      data.result !== undefined ? sealJson(data.result) : null,
-      data.error ?? null,
-      data.durationMs ?? null,
-    ],
-  );
+  await getStorage().repos.scripts.insertScriptRunJournalStep({
+    id: crypto.randomUUID(),
+    runId: data.runId,
+    stepKey: data.stepKey,
+    stepType: data.stepType,
+    config: scrubJsonValue(data.config ?? {}),
+    status: data.status,
+    result: data.result !== undefined ? sealJson(data.result) : null,
+    error: data.error ?? null,
+    durationMs: data.durationMs ?? null,
+  });
 }
 
 export async function listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalEntry[]> {
-  const rows = await getDbClient().query<ScriptRunJournalRow>(
-    "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
-    [runId],
-  );
+  const rows = await getStorage().repos.scripts.listScriptRunJournalSteps(runId);
   return rows.map((row) => rowToScriptRunJournalEntry(row));
 }
 
 export async function countScriptRunJournalSteps(runId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
-    [runId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countScriptRunJournalSteps(runId);
 }
 
 export async function countScriptRunJournalAgentTaskSteps(runId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
-    [runId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countScriptRunJournalSteps(runId, "agent-task");
 }
