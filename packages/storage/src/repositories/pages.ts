@@ -96,6 +96,18 @@ export interface PagesRepository {
     appId: string,
   ): Promise<{ id: string; name: string; definition: string }[]>;
 
+  // ---- app_user_config ----
+  /** The stored JSON text of the (app, scope) config, or null. */
+  getAppUserConfig(appId: string, scope: string): Promise<string | null>;
+  /** Insert, or replace the values of, the (app, scope) config. */
+  upsertAppUserConfig(row: {
+    id: string;
+    appId: string;
+    scope: string;
+    valuesJson: string;
+    now: string;
+  }): Promise<void>;
+
   // ---- pages ----
   pageExists(id: string): Promise<boolean>;
 
@@ -250,6 +262,28 @@ export abstract class BasePagesRepository implements PagesRepository {
     return this.db.query<{ id: string; name: string; definition: string }>(
       sql`SELECT id, name, definition FROM apps WHERE id != ${appId} ORDER BY name, id`,
     );
+  }
+
+  // ---- app_user_config ----
+
+  async getAppUserConfig(appId: string, scope: string): Promise<string | null> {
+    const row = await this.db.get<{ storedValues: string }>(sql`
+      SELECT "values" AS "storedValues" FROM app_user_config WHERE "appId" = ${appId} AND scope = ${scope}`);
+    return row ? row.storedValues : null;
+  }
+
+  async upsertAppUserConfig(r: {
+    id: string;
+    appId: string;
+    scope: string;
+    valuesJson: string;
+    now: string;
+  }): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO app_user_config (id, "appId", scope, "values", "createdAt", "updatedAt")
+      VALUES (${r.id}, ${r.appId}, ${r.scope}, ${r.valuesJson}, ${r.now}, ${r.now})
+      ON CONFLICT ("appId", scope) DO UPDATE SET
+        "values" = excluded."values", "updatedAt" = excluded."updatedAt"`);
   }
 
   // ---- pages ----

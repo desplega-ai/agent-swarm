@@ -1,8 +1,4 @@
 {
-  "src/apps/user-config.ts": {
-    "reason": "M2 move: users and RBAC",
-    "sites": 3
-  },
   "src/azure-devops/outbound.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1

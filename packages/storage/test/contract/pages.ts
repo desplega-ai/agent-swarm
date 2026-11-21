@@ -90,6 +90,26 @@ export function pagesContract(engine: ContractEngine): void {
         sql`SELECT COUNT(*) AS n FROM user_favorites`,
       );
       expect(Number(left?.n)).toBe(0);
+      expect(await repo.getAppUserConfig("a", "user:u1")).toBeNull();
+      await repo.upsertAppUserConfig({
+        id: "c1",
+        appId: "a",
+        scope: "user:u1",
+        valuesJson: "{}",
+        now: T0,
+      });
+      await repo.upsertAppUserConfig({
+        id: "c2",
+        appId: "a",
+        scope: "user:u1",
+        valuesJson: '{"x":1}',
+        now: T1,
+      });
+      expect(await repo.getAppUserConfig("a", "user:u1")).toBe('{"x":1}');
+      const config = await storage.executor.get<Record<string, unknown>>(
+        sql`SELECT id, "createdAt", "updatedAt" FROM app_user_config`,
+      );
+      expect(config).toEqual({ id: "c1", createdAt: T0, updatedAt: T1 });
       expect(await repo.deleteApp("a")).toBe(1);
       expect(await repo.deleteApp("a")).toBe(0);
       expect(
