@@ -186,7 +186,7 @@ export type ThreadItem =
       result?: unknown;
       error?: unknown;
     }
-  | { id: string; type: "web_search"; query: string }
+  | { id: string; type: "web_search"; query: string; queries?: string[] }
   | { id: string; type: "unknown"; originalType?: string; value: Record<string, unknown> };
 
 export type AgentMessageItem = Extract<ThreadItem, { type: "agent_message" }>;
@@ -701,8 +701,19 @@ function normalizeAppServerItem(raw: Record<string, unknown>): ThreadItem {
         result: raw.result,
         error: raw.error,
       };
-    case "webSearch":
-      return { id, type: "web_search", query: typeof raw.query === "string" ? raw.query : "" };
+    case "webSearch": {
+      const action = raw.action;
+      const queries =
+        action && typeof action === "object" && "queries" in action && Array.isArray(action.queries)
+          ? action.queries.filter((query): query is string => typeof query === "string")
+          : undefined;
+      return {
+        id,
+        type: "web_search",
+        query: typeof raw.query === "string" ? raw.query : "",
+        ...(queries?.length ? { queries } : {}),
+      };
+    }
     default:
       return {
         id,
@@ -1315,7 +1326,7 @@ export class CodexSession implements ProviderSession {
     }
   }
 
-  /** Arguments for a normalized `tool_start` event. */
+  /** Arguments for a normalized tool call. */
   private toolArgsForItem(item: ThreadItem): unknown {
     switch (item.type) {
       case "command_execution":
@@ -1327,7 +1338,7 @@ export class CodexSession implements ProviderSession {
         return { server: mcpItem.server, tool: mcpItem.tool, arguments: mcpItem.arguments };
       }
       case "web_search":
-        return { query: (item as WebSearchItem).query };
+        return { query: item.query, ...(item.queries ? { queries: item.queries } : {}) };
       default:
         return {};
     }
@@ -1413,6 +1424,7 @@ export class CodexSession implements ProviderSession {
             toolCallId: event.item.id,
             toolName: this.toolNameForItem(event.item),
             args: this.toolArgsForItem(event.item),
+            ...(event.item.type === "web_search" ? { argsPending: true } : {}),
           });
           // Mirror into the transcript buffer for session-end summarization.
           // Tools are the bulk of useful signal in a codex session, so we
@@ -1462,6 +1474,7 @@ export class CodexSession implements ProviderSession {
             toolCallId: item.id,
             toolName: this.toolNameForItem(item),
             result: item,
+            ...(item.type === "web_search" ? { finalArgs: this.toolArgsForItem(item) } : {}),
             ...(item.type === "command_execution"
               ? { isError: item.exit_code !== 0 || item.status === "failed" }
               : {}),

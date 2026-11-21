@@ -248,9 +248,13 @@ export function createSwarmEventHandler(
           if (shouldRun("cancellation", CANCELLATION_THROTTLE_MS)) {
             checkCancelled();
           }
-          checkLoop(event.toolName, event.args);
+          if (!event.argsPending) checkLoop(event.toolName, event.args);
           heartbeat();
           activity();
+          break;
+        }
+        case "tool_end": {
+          if (event.finalArgs !== undefined) checkLoop(event.toolName, event.finalArgs);
           break;
         }
         case "context_usage": {
