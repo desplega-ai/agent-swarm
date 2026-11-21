@@ -14,7 +14,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
-| M2 Storage packages on SQLite | in progress: packages, checks 11/12/13/15, test:storage done; strict suite with --tx-replay passes except the pre-existing `in_progress` gap; domain moves at 218 files / 1,906 sites pending | see git log |
+| M2 Storage packages on SQLite | in progress: packages, checks 11/12/13/15, test:storage done; `in_progress` gap closed by `task-live-claim` (full strict run pending); domain moves at 146 files / 1,271 sites pending (part 4) | see git log |
 | M3 Postgres engine | not started | |
 | M4 Engine-specific domains | not started | |
 | M5 Contract on Postgres | not started | |
@@ -237,6 +237,11 @@ Rule: **repositories return row types declared in `@desplega/storage`, in the SQ
 | agents | moved: agents, agent history, context versions, active sessions, agent log, services, installs, capacity and daily counts, `src/http/agents.ts` transactions |
 | messaging | started: `src/http/inbox-state.ts` transaction goes through storage |
 | schedules | started: `src/scheduler/scheduler.ts` transactions go through storage; `deferred-task-waits.ts` and `schedule-task.ts` hold tasks-domain SQL and move with tasks |
+| users and RBAC | moved (part 4): repositories `users` and `rbac`. Left: `session_tokens` SQL in `src/be/users.ts` (sessions domain); `ensureRbacSeedsSynced` (boot path, creates `trg_users_default_role`); `src/be/db/users/references.ts` and `user-references.ts`, whose SQL text `src/tests/user-delete-perf.test.ts` imports for its query-plan check |
+| integrations | moved (part 4): repositories `mcpServers`, `trackers`, `events`, `chat`, `oauth`, `slack`. Left: sites that read `agent_tasks` or `agent_mcp_servers` |
+| workflows | moved (part 4): repository `workflows`, including approvals and wait states and the `db.ts` workflow functions. Left: `workflow-run-retention.ts` (its SQL text feeds an EXPLAIN test), task-table sites |
+| scripts, pages/apps, skills, kv | moved (part 4): repositories `scripts`, `pages`, `skills`, `kv`. Left: `listScriptConnections` (sync by design), `SCRIPT_RUN_SELECT` used by `db.ts`, `agent_fs_object_webhooks` sites |
+| boot path (step 7, partial) | part 4: the SQLite migration runner, the script-run source backfill, the connection PRAGMAs, the legacy `agent_tasks` CHECK rebuild, the profile-column backfill, the legacy OAuth and credential-blob backfills and the encrypted-secrets probe moved into `packages/storage-sqlite/src/boot/`; `src/` keeps the rules and thin delegates. The asset key audit reads through a new `assets` repository; the boot scrub sweep through a new `maintenance` repository |
 
 ### Strict suite with --tx-replay on SQLite (M2 step 6)
 
@@ -264,6 +269,9 @@ The stronger check 15 found 44 writes to outer state in 20 files. Real defects u
 
 ## Decisions inside my authority
 
+- Boot path (M2 step 7), part 4. The SQLite start stays synchronous and keeps its order of steps. Its SQLite-only statements (PRAGMAs, migration runner, legacy repairs) live in `packages/storage-sqlite/src/boot/` and are reached through the composition root. The one-time data repairs (migration-117 OAuth plaintext, the `SCRIPT_CREDENTIAL_BINDINGS` blob, script-run sources) exist only for upgraded SQLite files: a Postgres database starts from the baseline or from a copy of a SQLite file that already ran them, so they get no Postgres version. Engine-neutral start checks (asset key audit) are a fetch plus one pure evaluation: the SQLite start path runs the fetch synchronously with the same `sql` text rendered for SQLite, the route and the Postgres start (M3) run it through the async repository.
+- `app_user_config` was moved by two parallel domain moves; the `users` repository copy is kept and the `pages` copy dropped.
+
 - `onAttemptRollback` (M2 step 6). D6 discards the afterRollback hooks of an attempt that the client runs again. In-process state that an attempt sets up (the successor-walk hold, the executing-step mark) then leaked, and runs never finalized under `--tx-replay`. The storage client now has a third hook, `onAttemptRollback(fn)`: it runs synchronously when any attempt rolls back (replayed, retried or last) and is dropped on commit. It is only for undoing in-process state, never for a side effect; side effects stay in `afterCommit`/`afterRollback` as D6 says. The D6 rules for the two existing hooks are unchanged. The Postgres client (M3) must implement it.
 
 - D4 entity types: decided in M2 (see "M2 results").
@@ -274,6 +282,9 @@ The stronger check 15 found 44 writes to outer state in 20 files. Real defects u
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
+
+- Unit-test failures blamed on the base commit are partly the container environment: the host shell sets `BOOT_SCRUB_MODE=forward-only` (all 7 boot retro-sweep failures) and `RBAC_ENABLED=false` (5 RBAC HTTP failures). With both unset those tests pass on the base and on the branch. Run check 16 with `env -u BOOT_SCRUB_MODE -u RBAC_ENABLED`.
+- Parallel domain moves share one git stash list across worktrees; two agents popped each other's stash once (restored, verified byte-equal). Rule: no `git stash` in this work.
 
 - Check 1 at the base commit and at M1 head: the strict gate needs an `in_progress` task row at the end of the run. Crash recovery reroutes the claimed tasks of earlier scenarios, so none survive. Fix in M2: add a parity scenario whose worker keeps a heartbeat and a claimed task until the run ends, or document a reasoned exclusion (an exclusion needs Taras-level care under section 10).
 - `slack-lead-follow-up-card` flaked once in four full runs on this host (load average up to 39 during the runs). Watch it in CI.
@@ -292,3 +303,11 @@ The stronger check 15 found 44 writes to outer state in 20 files. Real defects u
 ## Edited scenarios
 
 See "M1 results / Edited scenarios".
+
+## New scenarios after M1
+
+- `task-live-claim` (part 4, order 9990, runs last): a worker claims a task and keeps a heartbeating session on it, so the strict gate's `task-statuses` surface sees `in_progress`. Closes the base-commit coverage gap without an exclusion.
+
+## Edited unit tests (D5 import or SQL-text only)
+
+- `src/tests/skill-usage-cohorts.test.ts`: the query-plan exemption matches `MIN("createdAt")` (identifier now quoted per D8).
