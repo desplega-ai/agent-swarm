@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "@/be/crypto";
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import type { DeliveryErrorCategory } from "./webhook";
 
 export type SubscriptionRow = {
@@ -59,17 +59,11 @@ export function unsealSecret(sealed: string): string {
 }
 
 export async function getSubscription(id: string): Promise<SubscriptionRow | null> {
-  return getDbClient().get<SubscriptionRow>("SELECT * FROM mcp_event_subscriptions WHERE id = ?", [
-    id,
-  ]);
+  return (await getStorage().repos.mcpServers.findSubscription(id)) as SubscriptionRow | null;
 }
 
 export async function countLiveSubscriptions(userId: string, nowIso: string): Promise<number> {
-  const row = await getDbClient().get<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM mcp_event_subscriptions WHERE userId = ? AND expiresAt > ?",
-    [userId, nowIso],
-  );
-  return row?.n ?? 0;
+  return getStorage().repos.mcpServers.countLiveSubscriptions(userId, nowIso);
 }
 
 /**
@@ -83,20 +77,11 @@ export async function latestVerification(
   sinceIso: string,
   nowIso: string,
 ): Promise<string | null> {
-  const row = await getDbClient().get<{ verifiedAt: string | null }>(
-    `SELECT MAX(verifiedAt) AS verifiedAt FROM mcp_event_subscriptions
-     WHERE userId = ? AND url = ? AND verifiedAt > ? AND expiresAt > ?`,
-    [userId, url, sinceIso, nowIso],
-  );
-  return row?.verifiedAt ?? null;
+  return getStorage().repos.mcpServers.latestVerification(userId, url, sinceIso, nowIso);
 }
 
 export async function deleteExpiredSubscriptions(nowIso: string): Promise<number> {
-  const result = await getDbClient().run(
-    "DELETE FROM mcp_event_subscriptions WHERE expiresAt <= ?",
-    [nowIso],
-  );
-  return result.changes;
+  return getStorage().repos.mcpServers.deleteExpiredSubscriptions(nowIso);
 }
 
 export async function upsertSubscription(input: {
@@ -115,84 +100,50 @@ export async function upsertSubscription(input: {
   maxActivePerUser: number;
 }): Promise<SubscriptionRow | "limit"> {
   const sealed = sealSecret(input.secret);
-  return getDbClient().transaction(async (tx) => {
-    const existing = await tx.get<SubscriptionRow>(
-      "SELECT * FROM mcp_event_subscriptions WHERE id = ?",
-      [input.id],
-    );
+  const storage = getStorage();
+  const repo = storage.repos.mcpServers;
+  return storage.transaction(async () => {
+    const existing = (await repo.findSubscription(input.id)) as SubscriptionRow | null;
     if (!existing || existing.expiresAt <= input.nowIso) {
       // Counted inside the write transaction, so concurrent subscribes cannot overshoot.
-      const live = await tx.get<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM mcp_event_subscriptions
-         WHERE userId = ? AND expiresAt > ? AND id != ?`,
-        [input.userId, input.nowIso, input.id],
-      );
-      if ((live?.n ?? 0) >= input.maxActivePerUser) return "limit";
+      const live = await repo.countLiveSubscriptions(input.userId, input.nowIso, input.id);
+      if (live >= input.maxActivePerUser) return "limit";
     }
     if (!existing) {
-      await tx.run(
-        `INSERT INTO mcp_event_subscriptions
-           (id, userId, tokenId, eventName, argumentsJson, url, secretSealed, verifiedAt,
-            expiresAt, createdAt, updatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          input.id,
-          input.userId,
-          input.tokenId,
-          input.eventName,
-          input.argumentsJson,
-          input.url,
-          sealed,
-          input.verifiedAt,
-          input.expiresAt,
-          input.nowIso,
-          input.nowIso,
-          input.userId,
-          input.userId,
-        ],
-      );
+      await repo.insertSubscription({
+        id: input.id,
+        userId: input.userId,
+        tokenId: input.tokenId,
+        eventName: input.eventName,
+        argumentsJson: input.argumentsJson,
+        url: input.url,
+        secretSealed: sealed,
+        verifiedAt: input.verifiedAt,
+        expiresAt: input.expiresAt,
+        now: input.nowIso,
+      });
     } else {
       // A changed secret is a rotation: keep the old one for a dual-signing window.
       const rotated = unsealSecret(existing.secretSealed) !== input.secret;
-      await tx.run(
-        `UPDATE mcp_event_subscriptions
-         SET tokenId = ?,
-             secretSealed = ?,
-             previousSecretSealed = ?,
-             previousSecretUntil = ?,
-             verifiedAt = ?,
-             expiresAt = ?,
-             updatedAt = ?,
-             updated_by = ?
-         WHERE id = ?`,
-        [
-          input.tokenId,
-          sealed,
-          rotated ? existing.secretSealed : existing.previousSecretSealed,
-          rotated ? input.rotationGraceUntil : existing.previousSecretUntil,
-          input.verifiedAt,
-          input.expiresAt,
-          input.nowIso,
-          input.userId,
-          input.id,
-        ],
-      );
+      await repo.renewSubscription(input.id, {
+        tokenId: input.tokenId,
+        secretSealed: sealed,
+        previousSecretSealed: rotated ? existing.secretSealed : existing.previousSecretSealed,
+        previousSecretUntil: rotated ? input.rotationGraceUntil : existing.previousSecretUntil,
+        verifiedAt: input.verifiedAt,
+        expiresAt: input.expiresAt,
+        now: input.nowIso,
+        actor: input.userId,
+      });
     }
-    const row = await tx.get<SubscriptionRow>(
-      "SELECT * FROM mcp_event_subscriptions WHERE id = ?",
-      [input.id],
-    );
+    const row = (await repo.findSubscription(input.id)) as SubscriptionRow | null;
     if (!row) throw new Error(`subscription ${input.id} vanished during upsert`);
     return row;
   });
 }
 
 export async function deleteSubscription(id: string, userId: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM mcp_event_subscriptions WHERE id = ? AND userId = ?",
-    [id, userId],
-  );
-  return result.changes > 0;
+  return getStorage().repos.mcpServers.deleteSubscription(id, userId);
 }
 
 export async function listLiveSubscriptions(
@@ -200,11 +151,11 @@ export async function listLiveSubscriptions(
   eventName: string,
   nowIso: string,
 ): Promise<SubscriptionRow[]> {
-  return getDbClient().query<SubscriptionRow>(
-    `SELECT * FROM mcp_event_subscriptions
-     WHERE userId = ? AND eventName = ? AND expiresAt > ?`,
-    [userId, eventName, nowIso],
-  );
+  return (await getStorage().repos.mcpServers.listLiveSubscriptions(
+    userId,
+    eventName,
+    nowIso,
+  )) as SubscriptionRow[];
 }
 
 export async function recordDeliveryOutcome(
@@ -213,19 +164,10 @@ export async function recordDeliveryOutcome(
     | { ok: true; atIso: string }
     | { ok: false; category: DeliveryErrorCategory; atIso: string },
 ): Promise<void> {
+  const repo = getStorage().repos.mcpServers;
   if (outcome.ok) {
-    await getDbClient().run(
-      `UPDATE mcp_event_subscriptions
-       SET lastDeliveryAt = ?, lastError = NULL, failedSince = NULL
-       WHERE id = ?`,
-      [outcome.atIso, id],
-    );
+    await repo.recordDeliverySuccess(id, outcome.atIso);
     return;
   }
-  await getDbClient().run(
-    `UPDATE mcp_event_subscriptions
-     SET lastError = ?, failedSince = COALESCE(failedSince, ?)
-     WHERE id = ?`,
-    [outcome.category, outcome.atIso, id],
-  );
+  await repo.recordDeliveryFailure(id, outcome.category, outcome.atIso);
 }

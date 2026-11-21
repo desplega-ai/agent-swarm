@@ -291,14 +291,6 @@
     "reason": "M2 move: integrations",
     "sites": 2
   },
-  "src/be/mcp-events/store.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 14
-  },
-  "src/be/mcp-server-checked-update.ts": {
-    "reason": "M2 move: integrations",
-    "sites": 1
-  },
   "src/be/memory/boot-reembed.ts": {
     "reason": "M2 move: memory (M2, engine search parts M4)",
     "sites": 4

@@ -9,6 +9,7 @@ import { sqliteDialect } from "./dialect";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
+import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 
@@ -46,6 +47,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       runtimePools: new SqliteRuntimePoolsRepository(executor),
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),
+      mcpServers: new SqliteMcpServersRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
