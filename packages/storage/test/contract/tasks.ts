@@ -608,6 +608,55 @@ export function tasksContract(engine: ContractEngine): void {
       expect(await repo.countTasks({ search: "alp" })).toBe(1);
     });
 
+    test("human-free: classify, walk, apply and the queue", async () => {
+      const input = {
+        taskType: null,
+        tags: null,
+        source: "mcp",
+        requestedByUserId: null,
+        requestedByUserIdInherited: false,
+        parentTaskId: null,
+        workflowRunId: null,
+      };
+      expect(await repo.classifyHumanFree(input)).toBe(false);
+      expect(await repo.classifyHumanFree({ ...input, taskType: "heartbeat" })).toBe(true);
+      expect(await repo.classifyHumanFree({ ...input, tags: '["HEARTBEAT"]' })).toBe(true);
+      expect(await repo.classifyHumanFree({ ...input, source: "schedule" })).toBe(true);
+
+      await seedTask(storage, { id: "root", taskType: "heartbeat" });
+      await seedTask(storage, { id: "k1", parentTaskId: "root" });
+      await seedTask(storage, { id: "k2", parentTaskId: "root" });
+      await seedTask(storage, { id: "g1", parentTaskId: "k1" });
+      expect(await repo.humanFreeAffected(["root"], 10)).toEqual(["root", "k1", "k2", "g1"]);
+      expect(await repo.humanFreeAffected(["root"], 2)).toHaveLength(2);
+      expect(await repo.applyHumanFreeBatch(["root", "k1", "k2", "g1"])).toBe(4);
+      expect(await repo.applyHumanFreeBatch(["root", "k1", "k2", "g1"])).toBe(0);
+      expect(await repo.humanFreeUnfinished(["root", "k1"])).toEqual(["root", "k1"]);
+      expect(await repo.humanFreeUnfinished(["root", "k1", "k2", "g1"])).toEqual([]);
+      expect(await repo.listChildPage("root", 0, 1)).toHaveLength(1);
+      const page = await repo.listChildPage("root", 0, 5);
+      expect(page.map((r) => r.id)).toEqual(["k1", "k2"]);
+      expect(await repo.listChildPage("root", page[0]?.position ?? 0, 5)).toEqual([page[1]]);
+
+      expect(await repo.countHumanFreeQueue()).toBe(0);
+      await repo.enqueueHumanFreeWork(["k1", "k2"], "self", 3);
+      await repo.enqueueHumanFreeWork(["root"], "children", 1);
+      const head = await repo.humanFreeQueueHead();
+      expect(head).toMatchObject({ taskId: "k1", scope: "self", afterRowid: 0, hops: 3 });
+      await repo.setHumanFreeQueueCursor(head?.seq ?? 0, 7);
+      await repo.enqueueHumanFreeWork(["k1"], "self", 2);
+      expect(
+        (await repo.humanFreeQueueSelfRows(10)).map((r) => [r.taskId, r.afterRowid, r.hops]),
+      ).toEqual([
+        ["k1", 0, 3],
+        ["k2", 0, 3],
+      ]);
+      await repo.deleteHumanFreeQueueRows([head?.seq ?? 0]);
+      expect(await repo.countHumanFreeQueue()).toBe(2);
+      await repo.enqueueHumanFreeWork([], "self", 1);
+      expect(await repo.countHumanFreeQueue()).toBe(2);
+    });
+
     test("appendDraftTaskText changes only a draft", async () => {
       await seedTask(storage, { id: "d1", task: "base", status: "draft" });
       await seedTask(storage, { id: "p1", task: "base", status: "pending" });

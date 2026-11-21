@@ -293,6 +293,31 @@ export type TaskAssignGuards = {
   pool?: { id: string; updatedAt: string; at: string };
 };
 
+/**
+ * The tags the human-free classification reads. Keep each entry to plain word
+ * characters: the SQL matches it with `LIKE`, where `%` and `_` are wildcards.
+ */
+export const HUMAN_FREE_TAGS = ["heartbeat"] as const;
+
+/** The classifying inputs of a task about to be inserted. */
+export type HumanFreeClassifyInput = {
+  taskType: string | null;
+  tags: string | null;
+  source: string | null;
+  requestedByUserId: string | null;
+  requestedByUserIdInherited: boolean;
+  parentTaskId: string | null;
+  workflowRunId: string | null;
+};
+
+export type HumanFreeQueueRow = {
+  seq: number;
+  taskId: string;
+  scope: "self" | "children";
+  afterRowid: number;
+  hops: number;
+};
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -597,6 +622,41 @@ export interface TasksRepository {
   deleteTask(id: string): Promise<number>;
   /** Sets progress; a non-terminal task moves to `in_progress`. */
   updateTaskProgress(id: string, progress: string): Promise<TaskRow | null>;
+
+  // ---- human-free classification (agent_tasks.isHumanFree, human_free_reclassify_queue) ----
+  /** The stored-flag rule for a task about to be inserted (its parent must be stored). */
+  classifyHumanFree(input: HumanFreeClassifyInput): Promise<boolean>;
+  /**
+   * Queue `taskIds` for reclassification. A repeat restarts its row
+   * (`afterRowid` = 0) and keeps the larger `hops`.
+   */
+  enqueueHumanFreeWork(
+    taskIds: readonly string[],
+    scope: "self" | "children",
+    hops: number,
+  ): Promise<void>;
+  /** `seedIds` and their descendants breadth first, at most `limit` ids, in walk order. */
+  humanFreeAffected(seedIds: readonly string[], limit: number): Promise<string[]>;
+  /** Recompute the stored flag of every task in `affected`. Returns the changed count. */
+  applyHumanFreeBatch(affected: readonly string[]): Promise<number>;
+  /** The tasks of `batch` with a child outside it, in batch order. */
+  humanFreeUnfinished(batch: readonly string[]): Promise<string[]>;
+  /** The oldest queue row. */
+  humanFreeQueueHead(): Promise<HumanFreeQueueRow | null>;
+  /** The oldest `self` queue rows, by `seq`, at most `limit`. */
+  humanFreeQueueSelfRows(limit: number): Promise<HumanFreeQueueRow[]>;
+  deleteHumanFreeQueueRows(seqs: readonly number[]): Promise<void>;
+  setHumanFreeQueueCursor(seq: number, afterRowid: number): Promise<void>;
+  countHumanFreeQueue(): Promise<number>;
+  /**
+   * One page of a parent's children past the insertion-order cursor `after`,
+   * in insertion order; `position` is each child's cursor value.
+   */
+  listChildPage(
+    parentId: string,
+    after: number,
+    limit: number,
+  ): Promise<{ id: string; position: number }[]>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -1437,6 +1497,58 @@ export abstract class BaseTasksRepository implements TasksRepository {
         status = CASE WHEN status IN ${TERMINAL} THEN status ELSE 'in_progress' END,
         "lastUpdatedAt" = ${nowIso}
         WHERE id = ${id} RETURNING *`);
+  }
+
+  // ---- human-free classification ----
+
+  /** A VALUES row source and the recursive walk with LIMIT are SQLite-specific. */
+  abstract classifyHumanFree(input: HumanFreeClassifyInput): Promise<boolean>;
+  /** Expands the id list with `json_each` and keeps `MAX(hops, excluded.hops)`. */
+  abstract enqueueHumanFreeWork(
+    taskIds: readonly string[],
+    scope: "self" | "children",
+    hops: number,
+  ): Promise<void>;
+  /** LIMIT inside the recursive term stops the walk (SQLite). */
+  abstract humanFreeAffected(seedIds: readonly string[], limit: number): Promise<string[]>;
+  /** Planner hints (`+task.id`) and `json_each` are SQLite-specific. */
+  abstract applyHumanFreeBatch(affected: readonly string[]): Promise<number>;
+  /** Reads the batch as a JSON array (SQLite `json_each`). */
+  abstract humanFreeUnfinished(batch: readonly string[]): Promise<string[]>;
+  /** Pages by the insertion-order column (SQLite `rowid`). */
+  abstract listChildPage(
+    parentId: string,
+    after: number,
+    limit: number,
+  ): Promise<{ id: string; position: number }[]>;
+
+  humanFreeQueueHead(): Promise<HumanFreeQueueRow | null> {
+    return this.db.get<HumanFreeQueueRow>(
+      sql`SELECT * FROM human_free_reclassify_queue ORDER BY seq LIMIT 1`,
+    );
+  }
+
+  humanFreeQueueSelfRows(limit: number): Promise<HumanFreeQueueRow[]> {
+    return this.db.query<HumanFreeQueueRow>(sql`
+      SELECT * FROM human_free_reclassify_queue WHERE scope = 'self' ORDER BY seq LIMIT ${limit}`);
+  }
+
+  async deleteHumanFreeQueueRows(seqs: readonly number[]): Promise<void> {
+    if (seqs.length === 0) return;
+    await this.db.run(sql`DELETE FROM human_free_reclassify_queue WHERE seq IN (${sqlList(seqs)})`);
+  }
+
+  async setHumanFreeQueueCursor(seq: number, afterRowid: number): Promise<void> {
+    await this.db.run(
+      sql`UPDATE human_free_reclassify_queue SET "afterRowid" = ${afterRowid} WHERE seq = ${seq}`,
+    );
+  }
+
+  async countHumanFreeQueue(): Promise<number> {
+    const row = await this.db.get<{ count: number | string }>(
+      sql`SELECT COUNT(*) AS count FROM human_free_reclassify_queue`,
+    );
+    return Number(row?.count ?? 0);
   }
 
   // ---- task_idempotency_keys ----

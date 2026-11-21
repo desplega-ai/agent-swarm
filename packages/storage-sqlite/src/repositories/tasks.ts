@@ -1,6 +1,8 @@
 import {
   BaseTasksRepository,
   buildTaskFtsMatch,
+  HUMAN_FREE_TAGS,
+  type HumanFreeClassifyInput,
   readableSessionSql,
   SqlQuery,
   sql,
@@ -70,6 +72,50 @@ const READABLE_WALK_MAX_DEPTH = 64;
 // against the index instead: sorting thousands of hits means reading each
 // row's record, and a long task body spills over many overflow pages.
 const ROWID_SET_MAX = 500;
+
+const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
+  (tag) => `COALESCE(task.tags, '[]') LIKE '%"${tag}"%'`,
+).join("\n        OR ");
+
+/**
+ * Non-propagated part of the human-free classification, over the alias `task`
+ * (the row) and `parent` (a LEFT JOIN of `agent_tasks` on `task."parentTaskId"`).
+ */
+const HUMAN_FREE_BASE_SQL = `(
+        COALESCE(task."taskType", '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR ${HUMAN_FREE_TAG_SQL}
+        OR (COALESCE(task.source, '') = 'schedule' AND task."requestedByUserId" IS NULL)
+        OR (
+          task."parentTaskId" IS NULL
+          AND COALESCE(task.source, '') = 'workflow'
+          AND task."requestedByUserId" IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workflow_runs run
+            WHERE run.id = task."workflowRunId"
+              AND run."triggerType" = 'schedule'
+              AND run.created_by IS NULL
+          )
+        )
+        OR (
+          COALESCE(task.source, '') = 'system'
+          AND parent.id IS NOT NULL
+          AND parent."requestedByUserId" IS NULL
+        )
+      )`;
+
+/** A task stays unattributed: no requester, or one copied from the parent. */
+const UNATTRIBUTED_SQL =
+  '(task."requestedByUserId" IS NULL OR task."requestedByUserIdInherited" = 1)';
+
+/** The classification as 0/1; `parentFlag` is the parent's decided flag. */
+function humanFreeCase(parentFlag: string): string {
+  return `CASE
+        WHEN ${HUMAN_FREE_BASE_SQL} THEN 1
+        WHEN ${parentFlag} = 1 AND ${UNATTRIBUTED_SQL} THEN 1
+        ELSE 0
+      END`;
+}
 
 export class SqliteTasksRepository extends BaseTasksRepository {
   async listDeliveredSlackMessageTs(
@@ -360,5 +406,119 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         WHERE status IN (${sqlList(statuses)})
           AND EXISTS (SELECT 1 FROM json_each(agent_tasks."dependsOn") WHERE value = ${supersededId})
         RETURNING id, "agentId"`);
+  }
+
+  async classifyHumanFree(input: HumanFreeClassifyInput): Promise<boolean> {
+    const row = await this.db.get<{ humanFree: number }>(sql`
+      WITH task("taskType", tags, source, "requestedByUserId", "requestedByUserIdInherited", "parentTaskId", "workflowRunId") AS (
+          VALUES (${input.taskType}, ${input.tags}, ${input.source}, ${input.requestedByUserId},
+            ${input.requestedByUserIdInherited ? 1 : 0}, ${input.parentTaskId}, ${input.workflowRunId})
+        )
+        SELECT ${raw(humanFreeCase('parent."isHumanFree"'))} AS "humanFree"
+        FROM task
+        LEFT JOIN agent_tasks parent ON parent.id = task."parentTaskId"`);
+    return row?.humanFree === 1;
+  }
+
+  async enqueueHumanFreeWork(
+    taskIds: readonly string[],
+    scope: "self" | "children",
+    hops: number,
+  ): Promise<void> {
+    if (taskIds.length === 0) return;
+    // `WHERE true` keeps the parser from reading ON CONFLICT as a join clause.
+    await this.db.run(sql`
+      INSERT INTO human_free_reclassify_queue ("taskId", scope, "afterRowid", hops)
+        SELECT value, ${scope}, 0, ${hops} FROM json_each(${JSON.stringify(taskIds)}) WHERE true
+        ON CONFLICT ("taskId", scope) DO UPDATE SET
+          "afterRowid" = 0,
+          hops = MAX(hops, excluded.hops)`);
+  }
+
+  async humanFreeAffected(seedIds: readonly string[], limit: number): Promise<string[]> {
+    // The recursive walk over task ids alone, like the rule itself, so it still
+    // terminates on a parent cycle. LIMIT stops the recursion once the batch is full.
+    const rows = await this.db.query<{ id: string }>(sql`
+      WITH RECURSIVE affected(id) AS (
+          SELECT value FROM json_each(${JSON.stringify(seedIds)})
+
+          UNION
+
+          SELECT task.id
+          FROM affected
+          JOIN agent_tasks task ON task."parentTaskId" = affected.id
+          LIMIT ${limit}
+        )
+        SELECT id FROM affected`);
+    return rows.map((row) => row.id);
+  }
+
+  async applyHumanFreeBatch(affected: readonly string[]): Promise<number> {
+    // The "WITH RECURSIVE affected" prefix is what the tests count subtree
+    // recomputations by. The unary plus in the recursive step keeps the planner
+    // from probing `task` by id once per batch member for every free row; it
+    // walks the `parentTaskId` index instead, and the IN only filters.
+    const result = await this.db.run(sql`
+      WITH RECURSIVE affected(id) AS (
+          SELECT value FROM json_each(${JSON.stringify(affected)})
+        ),
+        free(id) AS (
+          SELECT task.id
+          FROM agent_tasks task
+          LEFT JOIN agent_tasks parent ON parent.id = task."parentTaskId"
+          WHERE task.id IN (SELECT id FROM affected)
+            AND (
+              ${raw(HUMAN_FREE_BASE_SQL)}
+              OR (
+                parent."isHumanFree" = 1
+                AND parent.id NOT IN (SELECT id FROM affected)
+                AND ${raw(UNATTRIBUTED_SQL)}
+              )
+            )
+
+          UNION
+
+          SELECT task.id
+          FROM free
+          JOIN agent_tasks task ON task."parentTaskId" = free.id
+          WHERE +task.id IN (SELECT id FROM affected)
+            AND ${raw(UNATTRIBUTED_SQL)}
+        )
+        UPDATE agent_tasks
+        SET "isHumanFree" = CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END
+        WHERE id IN (SELECT id FROM affected)
+          AND "isHumanFree" != CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END`);
+    return result.changes;
+  }
+
+  async humanFreeUnfinished(batch: readonly string[]): Promise<string[]> {
+    // EXISTS stops at the first such child, so the cost tracks the batch, not the fan-out.
+    const rows = await this.db.query<{ id: string }>(sql`
+      WITH batch(id) AS (
+          SELECT value FROM json_each(${JSON.stringify(batch)})
+        )
+        SELECT batch.id
+        FROM batch
+        WHERE EXISTS (
+          SELECT 1
+          FROM agent_tasks child
+          WHERE child."parentTaskId" = batch.id
+            AND child.id NOT IN (SELECT id FROM batch)
+        )`);
+    return rows.map((row) => row.id);
+  }
+
+  listChildPage(
+    parentId: string,
+    after: number,
+    limit: number,
+  ): Promise<{ id: string; position: number }[]> {
+    // The parentTaskId index is ordered by rowid, so each page is an index range scan.
+    return this.db.query<{ id: string; position: number }>(sql`
+      SELECT id, rowid AS position
+        FROM agent_tasks
+        WHERE "parentTaskId" = ${parentId} AND rowid > ${after}
+        ORDER BY rowid
+        LIMIT ${limit}`);
   }
 }

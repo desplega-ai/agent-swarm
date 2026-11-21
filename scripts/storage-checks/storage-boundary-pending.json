@@ -191,10 +191,6 @@
     "reason": "M2 move: integrations",
     "sites": 19
   },
-  "src/be/db/tasks/human-free.ts": {
-    "reason": "M2 move: tasks",
-    "sites": 14
-  },
   "src/be/db/tasks/read.ts": {
     "reason": "M2 move: tasks",
     "sites": 11
