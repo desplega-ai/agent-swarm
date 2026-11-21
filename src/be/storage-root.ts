@@ -1,0 +1,57 @@
+/**
+ * Storage composition root: the only `src/` file that imports an engine
+ * package (check:dep-graph). Everything else in `src/` imports the contracts
+ * package `@desplega/storage` and asks `getStorage()` for repositories.
+ */
+import type { DbClient, StatementObserver, Storage } from "@desplega/storage";
+import {
+  type BusyRetryOptions,
+  createBunSqliteClient,
+  createSqliteStorage,
+  isInTransaction as sqliteIsInTransaction,
+} from "@desplega/storage-sqlite";
+import { scrubSecrets } from "../utils/secret-scrubber";
+import { currentLoopPath, recordStatement } from "./event-loop-lag";
+
+export type { BusyRetryOptions };
+
+const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
+
+/** Params are never logged: they can carry secrets and user content. */
+const serverObserver: StatementObserver = {
+  onStatement: (sql, durationMs) => recordStatement(sql, durationMs),
+  onSlowStatement: (sql, durationMs) => {
+    // Scrub the complete SQL before truncation, so a secret that straddles the
+    // cut cannot leave a partial token, then scrub the complete line at egress.
+    const flat = scrubSecrets(sql.replace(/\s+/g, " ").trim());
+    const shown =
+      flat.length > SLOW_STATEMENT_SQL_MAX_CHARS
+        ? `${flat.slice(0, SLOW_STATEMENT_SQL_MAX_CHARS)}…`
+        : flat;
+    console.warn(
+      scrubSecrets(
+        `[db-client] slow sync statement blocked the event loop for ${Math.round(durationMs)}ms path=${currentLoopPath()}: ${shown}`,
+      ),
+    );
+  },
+};
+
+/**
+ * Wrap a lazily-resolved bun:sqlite handle in the async DbClient seam, with the
+ * server's statement accounting. `busyRetry` overrides the cross-process
+ * SQLITE_BUSY retry posture (tests use tiny values).
+ */
+export function createSqliteClient(
+  getDatabase: Parameters<typeof createBunSqliteClient>[0],
+  busyRetry?: BusyRetryOptions,
+): DbClient {
+  return createBunSqliteClient(getDatabase, busyRetry, serverObserver);
+}
+
+export function isInTransaction(): boolean {
+  return sqliteIsInTransaction();
+}
+
+export function createStorage(client: DbClient, options: { vectorSearch: boolean }): Storage {
+  return createSqliteStorage(client, options);
+}
