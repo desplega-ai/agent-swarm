@@ -10003,9 +10003,7 @@ export async function listTaskTemplates(opts?: {
  * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
-  const rows = (await getStorage().repos.sessions.listChainWithCosts(
-    rootTaskId,
-  )) as unknown as AgentTaskRow[];
+  const rows = (await getStorage().repos.sessions.listChainWithCosts(rootTaskId)) as AgentTaskRow[];
   return rows.map(rowToAgentTask);
 }
 

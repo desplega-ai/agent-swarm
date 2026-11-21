@@ -469,11 +469,7 @@ export async function getTaskLineage(
   let truncated = top.hops === maxAncestors && top.parentTaskId !== null;
 
   const descendants = async (startId: string) =>
-    (await repo.listTaskDescendants(
-      startId,
-      maxDepth,
-      maxNodes + 1,
-    )) as unknown as TaskLineageRow[];
+    (await repo.listTaskDescendants(startId, maxDepth, maxNodes + 1)) as TaskLineageRow[];
 
   const byId = new Map<string, TaskLineageNode>();
   const add = (rows: TaskLineageRow[]) => {
@@ -489,7 +485,7 @@ export async function getTaskLineage(
   // The path root → task is always present, even past the depth or node cap.
   const missing = path.map((row) => row.id).filter((id) => !byId.has(id));
   if (missing.length > 0) {
-    add((await repo.listTaskLineageRows(missing)) as unknown as TaskLineageRow[]);
+    add((await repo.listTaskLineageRows(missing)) as TaskLineageRow[]);
   }
 
   // The caps cut the walk at many points (depth, node count, either walk), so
@@ -785,7 +781,7 @@ export async function getAllTasks(
   );
 
   if (fields === "timeline") {
-    return (rows as unknown as AgentTaskTimelineRow[]).map(rowToAgentTaskTimelineItem);
+    return (rows as AgentTaskTimelineRow[]).map(rowToAgentTaskTimelineItem);
   }
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
@@ -803,12 +799,12 @@ export async function getAllTasks(
   };
 
   if (fields === "slim") {
-    let tasks = (rows as unknown as AgentTaskSummaryRow[]).map(rowToAgentTaskSummary);
+    let tasks = (rows as AgentTaskSummaryRow[]).map(rowToAgentTaskSummary);
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }
 
-  let tasks = (rows as unknown as AgentTaskRow[]).map(rowToAgentTask);
+  let tasks = (rows as AgentTaskRow[]).map(rowToAgentTask);
   if (filters?.readyOnly) tasks = await filterReady(tasks);
   return tasks;
 }

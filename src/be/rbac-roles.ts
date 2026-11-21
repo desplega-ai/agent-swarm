@@ -104,16 +104,7 @@ export type UserRole = {
   createdAt: string;
 };
 
-type RoleIdentityRow = {
-  id: string;
-  name: string;
-};
-
 type UserRoleRow = RoleRow;
-
-type PermissionRow = {
-  verb: string;
-};
 
 type RbacRoleSummaryRow = RoleSummaryRow;
 

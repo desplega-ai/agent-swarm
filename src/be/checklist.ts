@@ -106,9 +106,7 @@ async function seedChecklist(userId: string | null): Promise<void> {
 
 /** Stored rows plus any default not stored yet, in list order. */
 async function checklistRows(userId: string | null): Promise<ChecklistRow[]> {
-  const rows = (await getStorage().repos.tasks.listChecklistRows(
-    userId,
-  )) as unknown as ChecklistRow[];
+  const rows = (await getStorage().repos.tasks.listChecklistRows(userId)) as ChecklistRow[];
   const stored = new Set(rows.map((row) => row.id));
   const all = [...rows, ...defaultRows(userId).filter((row) => !stored.has(row.id))];
   // Same order as `ORDER BY sortOrder, createdAt, id`.
@@ -234,7 +232,7 @@ export async function mutateChecklist(
     const row =
       action.action === "add"
         ? action
-        : ((await repo.findChecklistItem(id)) as unknown as ChecklistRow | null);
+        : ((await repo.findChecklistItem(id)) as ChecklistRow | null);
     if (!row) throw new ChecklistError("Checklist item not found", 404);
     if (row.scope === "swarm" && !actor.canEditSwarm) {
       throw new ChecklistError("Swarm checklist items require config.write.any", 403);

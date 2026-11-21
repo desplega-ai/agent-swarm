@@ -34,12 +34,12 @@ export type InstallExtensionResult = {
 
 function rowToExtension(row: ExtensionRow): Extension {
   return {
-    ...(row as unknown as Extension),
+    ...row,
     enabled: row.enabled === 1,
     lastError: row.lastError ?? null,
     agentId: row.agentId ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
-  };
+  } as Extension;
 }
 
 function canonicalFiles(files: Record<string, string>): Record<string, string> {

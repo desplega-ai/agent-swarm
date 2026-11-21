@@ -52,14 +52,14 @@ function rowToController(row: ControllerRow): RuntimeController {
 function rowToPool(row: PoolRow): RuntimePool {
   const cache = row.cache ? JSON.parse(row.cache) : null;
   return {
-    ...(row as unknown as RuntimePool),
+    ...row,
     placements: JSON.parse(row.placements),
     env: JSON.parse(row.env),
     resources: row.resources ? JSON.parse(row.resources) : null,
     cache: cache ? { mountPath: cache.mountPath } : null,
     workspace: row.workspace ? JSON.parse(row.workspace) : null,
     enabled: row.enabled === 1,
-  };
+  } as RuntimePool;
 }
 function parseInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
   const result = schema.safeParse(input);
