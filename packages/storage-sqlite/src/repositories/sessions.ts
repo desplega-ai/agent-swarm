@@ -86,6 +86,11 @@ const subscription = (filter: SessionCostSummaryFilter) =>
   sql`${CREDENTIAL_TYPE} IN (${sqlList(filter.subscriptionKeyTypes)})`;
 
 export class SqliteSessionsRepository extends BaseSessionsRepository {
+  /** CROSS JOIN pins the loop order: page rows outer, the root primary key inner. */
+  protected override sessionPageJoin(): SqlQuery {
+    return sql`CROSS JOIN`;
+  }
+
   // ---- session_logs ----
   // Session log reads order by rowid, which is insert order. Rows written
   // before lineNumber was assigned server-side restart at 0 on every worker

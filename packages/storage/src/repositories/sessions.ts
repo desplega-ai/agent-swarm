@@ -709,6 +709,19 @@ export interface SessionsRepository {
   /** True when any session row of the summary has read state `read`. */
   hasReadSession(rules: SessionTreeRules, spec: SessionSummarySpec): Promise<boolean>;
   /**
+   * One page of the session list: the summary rows paged first, then each page
+   * root's `agent_tasks` row (`r.*`) with the summary columns as `__chainCount`,
+   * `__lastActivityAt`, `__latestStatus`, `__readState`, `__snoozeUntil`,
+   * `__needsYou` and `__threadRoots`. Order: with `snoozeFirst`, snooze time
+   * ascending (no snooze first); then last activity, root creation and root id,
+   * each descending.
+   */
+  listSessionPage<T>(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    page: { snoozeFirst: boolean; limit: number; offset: number },
+  ): Promise<T[]>;
+  /**
    * Chain tasks of the roots with requester name and output preview, newest
    * activity first, then newest created, then id descending.
    */
@@ -1287,6 +1300,32 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
       sql`SELECT 1 AS found FROM (${this.sessionSummarySql(rules, spec)}) WHERE "readState" = 'read' LIMIT 1`,
     );
     return row !== null;
+  }
+
+  listSessionPage<T>(
+    rules: SessionTreeRules,
+    spec: SessionSummarySpec,
+    page: { snoozeFirst: boolean; limit: number; offset: number },
+  ): Promise<T[]> {
+    const order = (alias: string) => {
+      const a = sqlIdent(alias);
+      return sql`${page.snoozeFirst ? sql`${a}."snoozeUntil" ASC NULLS FIRST,` : EMPTY}
+        ${a}."lastActivityAt" DESC, ${a}."rootCreatedAt" DESC, ${a}.root_id DESC`;
+    };
+    // Page first on the summaries, then read agent_tasks for the page roots only.
+    return this.db.query<T>(sql`SELECT r.*, a."chainCount" AS "__chainCount",
+        a."lastActivityAt" AS "__lastActivityAt", a."latestStatus" AS "__latestStatus",
+        a."readState" AS "__readState", a."snoozeUntil" AS "__snoozeUntil",
+        a."needsYou" AS "__needsYou", ${this.sessionThreadRootsSql(rules)} AS "__threadRoots"
+      FROM (SELECT * FROM (${this.sessionSummarySql(rules, spec)}) page
+            ORDER BY ${order("page")} LIMIT ${page.limit} OFFSET ${page.offset}) a
+      ${this.sessionPageJoin()} agent_tasks r ON r.id = a.root_id
+      ORDER BY ${order("a")}`);
+  }
+
+  /** The join from the page to its roots (SQLite pins the loop order with CROSS JOIN). */
+  protected sessionPageJoin(): SqlQuery {
+    return sql`JOIN`;
   }
 
   abstract listSessionPageMembers(rootIds: readonly string[]): Promise<SessionPageMemberRow[]>;

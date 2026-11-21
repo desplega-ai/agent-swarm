@@ -166,6 +166,7 @@ value:claimTask
 value:cleanupAgentSessions
 value:cleanupStaleSessions
 value:clearKeyRateLimit
+value:closeDatabase
 value:closeDb
 value:completeApprovalCancellationNotificationClaim
 value:completeTask
@@ -498,9 +499,11 @@ value:isExtensionAgent
 value:isLinearTrackerContextKey
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
+value:isPostgresEngine
 value:isSettledSlackMessage
 value:isSlackThreadAwaitingHuman
 value:isSqliteVecAvailable
+value:isVectorSearchAvailable
 value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
@@ -608,6 +611,7 @@ value:setUserFavorite
 value:settleSupersededTaskDependents
 value:shouldBlockPolling
 value:skipTask
+value:startPostgres
 value:startTask
 value:supersedeTask
 value:sweepExpiredKv

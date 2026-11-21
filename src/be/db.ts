@@ -279,13 +279,12 @@ import {
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
 import {
+  listSessionPageRows,
   type SessionFilters,
   type SessionReadState,
   type SessionRowFields,
   sessionCountQuery,
   sessionPageFields,
-  sessionSummaryQuery,
-  threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
 import { taskAttachmentWrite } from "./db/tasks/attachment-write";
@@ -9878,12 +9877,7 @@ export async function listRecentSessions(
 export async function listRecentSessions(
   opts: ListRecentSessionsOpts = {},
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
-  const query = sessionSummaryQuery(opts);
-  const threadRoots = threadRootsSql();
-  const order = (a: string) =>
-    `${opts.triage === "later" ? `${a}.snoozeUntil ASC,` : ""}
-    ${a}.lastActivityAt DESC, ${a}.rootCreatedAt DESC, ${a}.root_id DESC`;
-  const rootRows = await getDbClient().query<
+  const rootRows = await listSessionPageRows<
     AgentTaskRow & {
       __chainCount: number;
       __lastActivityAt: string;
@@ -9893,17 +9887,7 @@ export async function listRecentSessions(
       __needsYou: number;
       __threadRoots: number;
     }
-  >(
-    // Page first on the summaries, then read agent_tasks for the page roots only.
-    `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
-      a.latestStatus AS __latestStatus, a.readState AS __readState,
-      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
-      ${threadRoots.sql} AS __threadRoots
-    FROM (SELECT * FROM (${query.sql}) page ORDER BY ${order("page")} LIMIT ? OFFSET ?) a
-    CROSS JOIN agent_tasks r ON r.id = a.root_id
-    ORDER BY ${order("a")}`,
-    [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
-  );
+  >(opts);
   const fields = await sessionPageFields(
     rootRows.map((row) => ({
       id: row.id,

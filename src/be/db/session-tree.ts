@@ -345,6 +345,17 @@ export function legacySessionSummaryQuery(opts: SessionFilters = {}): SqlFragmen
   return rendered(sessionsRepo().legacySessionSummarySql(treeRules(), summarySpec(opts)));
 }
 
+/** One page of the session list: root rows with their summary columns (see the repository). */
+export function listSessionPageRows<T>(
+  opts: SessionFilters & { triage?: string; limit?: number; offset?: number },
+): Promise<T[]> {
+  return sessionsRepo().listSessionPage<T>(treeRules(), summarySpec(opts), {
+    snoozeFirst: opts.triage === "later",
+    limit: opts.limit ?? 25,
+    offset: opts.offset ?? 0,
+  });
+}
+
 /** True when a row of the session summary for `opts` has read state `read`. */
 export async function hasReadSession(opts: SessionFilters): Promise<boolean> {
   return sessionsRepo().hasReadSession(treeRules(), summarySpec(opts));
