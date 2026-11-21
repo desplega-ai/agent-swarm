@@ -1,6 +1,6 @@
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { getDbClient } from "../be/db";
+import { getStorage } from "../be/storage";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { realtimeBus } from "./bus";
 import {
@@ -294,22 +294,17 @@ async function loadRoom(
   if (state.rooms.size >= MAX_ACTIVE_ROOMS) {
     throw new Error(`server has reached its ${MAX_ACTIVE_ROOMS}-active-room limit`);
   }
-  const client = getDbClient();
-  return await client.transaction(
-    async (tx) => {
+  const storage = getStorage();
+  return await storage.transaction(
+    async () => {
       const pageId = pageIdForNamespace(namespace);
       if (pageId) {
-        const page = await tx.get<{ present: number }>(
-          "SELECT 1 AS present FROM pages WHERE id = ?",
-          [pageId],
-        );
-        if (!page) throw new Error("page room owner does not exist");
+        if (!(await storage.repos.pages.pageExists(pageId))) {
+          throw new Error("page room owner does not exist");
+        }
       }
 
-      const persisted = await tx.get<{ value: string; value_type: string }>(
-        "SELECT value, value_type FROM kv_entries WHERE namespace = ? AND key = ?",
-        [namespace, roomKey(name)],
-      );
+      const persisted = await storage.repos.kv.getValue(namespace, roomKey(name));
       if (persisted) {
         if (persisted.value_type !== "json") throw new Error("stored room snapshot is not JSON");
         const envelope = parseEnvelope(persisted.value);
@@ -328,11 +323,8 @@ async function loadRoom(
 
       if (!create) throw new Error("room does not exist");
 
-      const persistedRows = await tx.query<{ key: string }>(
-        "SELECT key FROM kv_entries WHERE namespace = ? AND key LIKE '\\_room/%' ESCAPE '\\'",
-        [namespace],
-      );
-      const names = new Set(persistedRows.map((row) => row.key.slice(ROOM_KEY_PREFIX.length)));
+      const persistedKeys = await storage.repos.kv.listKeysLike(namespace, "\\_room/%");
+      const names = new Set(persistedKeys.map((key) => key.slice(ROOM_KEY_PREFIX.length)));
       for (const room of state.rooms.values()) {
         if (room.namespace === namespace) names.add(room.name);
       }
@@ -480,30 +472,19 @@ async function flushRoom(room: ManagedRoom): Promise<boolean> {
         `room snapshot is ${bytes} bytes and exceeds the ${MAX_ENVELOPE_BYTES}-byte limit`,
       );
     }
-    const client = getDbClient();
-    await client.transaction(async (tx) => {
+    const storage = getStorage();
+    await storage.transaction(async () => {
       const pageId = pageIdForNamespace(room.namespace);
       if (pageId) {
-        const page = await tx.get<{ present: number }>(
-          "SELECT 1 AS present FROM pages WHERE id = ?",
-          [pageId],
-        );
-        if (!page) throw new Error("page room owner was deleted before snapshot flush");
+        if (!(await storage.repos.pages.pageExists(pageId))) {
+          throw new Error("page room owner was deleted before snapshot flush");
+        }
       }
       if (state.rooms.get(roomId(room.namespace, room.name)) !== room) {
         throw new Error("room generation changed before snapshot flush");
       }
       const now = Date.now();
-      await tx.run(
-        `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-           VALUES (?, ?, ?, 'json', NULL, ?, ?)
-         ON CONFLICT(namespace, key) DO UPDATE SET
-           value = excluded.value,
-           value_type = excluded.value_type,
-           expires_at = NULL,
-           updated_at = excluded.updated_at`,
-        [room.namespace, roomKey(room.name), encoded, now, now],
-      );
+      await storage.repos.kv.upsertJsonValue(room.namespace, roomKey(room.name), encoded, now);
     });
     room.persistedVersion = version;
     if (

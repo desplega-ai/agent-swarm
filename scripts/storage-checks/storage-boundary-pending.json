@@ -1,8 +1,4 @@
 {
-  "src/apps/row-store.ts": {
-    "reason": "M2 move: pages, metrics, apps",
-    "sites": 5
-  },
   "src/apps/user-config.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 3
@@ -94,10 +90,6 @@
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 4
-  },
-  "src/be/db/kv-windows.ts": {
-    "reason": "M2 move: kv",
-    "sites": 2
   },
   "src/be/db/model-groups.ts": {
     "reason": "M2 move: models",
@@ -403,10 +395,6 @@
     "reason": "M2 move: scripts",
     "sites": 5
   },
-  "src/be/scripts/durable.ts": {
-    "reason": "M2 move: scripts",
-    "sites": 2
-  },
   "src/be/scripts/typecheck.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
@@ -670,10 +658,6 @@
   "src/queue-stall-alarm.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
-  },
-  "src/realtime/rooms.ts": {
-    "reason": "M2 move: kv",
-    "sites": 6
   },
   "src/scheduler/deferred-task-waits.ts": {
     "reason": "M2 move: schedules",

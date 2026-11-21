@@ -96,6 +96,9 @@ export interface PagesRepository {
     appId: string,
   ): Promise<{ id: string; name: string; definition: string }[]>;
 
+  // ---- pages ----
+  pageExists(id: string): Promise<boolean>;
+
   // ---- page_versions ----
   /** The highest stored version of the page, or null before the first snapshot. */
   latestPageVersion(pageId: string): Promise<number | null>;
@@ -247,6 +250,12 @@ export abstract class BasePagesRepository implements PagesRepository {
     return this.db.query<{ id: string; name: string; definition: string }>(
       sql`SELECT id, name, definition FROM apps WHERE id != ${appId} ORDER BY name, id`,
     );
+  }
+
+  // ---- pages ----
+
+  async pageExists(id: string): Promise<boolean> {
+    return (await this.db.get(sql`SELECT 1 AS present FROM pages WHERE id = ${id}`)) !== null;
   }
 
   // ---- page_versions ----

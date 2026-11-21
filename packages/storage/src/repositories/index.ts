@@ -1,6 +1,7 @@
 export * from "./agents";
 export * from "./config";
 export * from "./extensions";
+export * from "./kv";
 export * from "./models";
 export * from "./pages";
 export * from "./runtime-pools";

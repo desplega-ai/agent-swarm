@@ -9,7 +9,8 @@ import type { RunScriptInput, RunScriptOutput } from "../../scripts-runtime/load
 import type { ScriptRecord } from "../../types";
 import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { claimKv, deleteKv, getDbClient, getKv, upsertKv } from "../db";
+import { claimKv, deleteKv, getKv, upsertKv } from "../db";
+import { getStorage } from "../storage";
 import { runScriptWithRunCredential } from "./run-credential";
 
 type DurableState = { codeVersion: number; stateVersion: number; state: unknown };
@@ -105,7 +106,7 @@ export async function callDurableObject({
     if (Date.now() >= deadline) return { ok: false, code: "busy", message: "object busy" };
   }
 
-  const client = getDbClient();
+  const client = getStorage();
   const release = async () => {
     await client.transaction(async () => {
       const lease = await getKv(namespace, leaseKey);
@@ -178,12 +179,9 @@ export async function callDurableObject({
         });
       } else if (idleTtlSec !== null) {
         const expiresAt = Date.now() + idleTtlSec * 1000;
-        const refreshed = await client.run(
-          "UPDATE kv_entries SET expires_at = ? WHERE namespace = ? AND key = ?",
-          [expiresAt, namespace, stateKey],
-        );
+        const refreshed = await client.repos.kv.setExpiresAt(namespace, stateKey, expiresAt);
         // A generic KV read can remove the expired row while the method runs.
-        if (refreshed.changes === 0) {
+        if (refreshed === 0) {
           await upsertKv({ namespace, key: stateKey, value: stored, valueType: "json", expiresAt });
         }
       }

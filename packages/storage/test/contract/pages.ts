@@ -113,6 +113,8 @@ export function pagesContract(engine: ContractEngine): void {
           VALUES (${`v${version}`}, ${"p1"}, ${version}, ${"{}"})`);
       }
       expect(await repo.latestPageVersion("p1")).toBe(3);
+      expect(await repo.pageExists("p1")).toBe(true);
+      expect(await repo.pageExists("missing")).toBe(false);
     });
 
     test("objects: upsert keeps the title, onlyNewer skips older reads, path swap", async () => {

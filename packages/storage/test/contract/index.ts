@@ -2,6 +2,7 @@ import { agentsContract } from "./agents";
 import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { extensionsContract } from "./extensions";
+import { kvContract } from "./kv";
 import { modelsContract } from "./models";
 import { pagesContract } from "./pages";
 import { runtimePoolsContract } from "./runtime-pools";
@@ -20,4 +21,5 @@ export function runStorageContract(engine: ContractEngine): void {
   scriptsContract(engine);
   pagesContract(engine);
   skillsContract(engine);
+  kvContract(engine);
 }

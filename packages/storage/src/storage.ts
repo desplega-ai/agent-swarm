@@ -5,6 +5,7 @@ import type { SqlExecutor } from "./executor";
 import type { AgentsRepository } from "./repositories/agents";
 import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
+import type { KvRepository } from "./repositories/kv";
 import type { ModelsRepository } from "./repositories/models";
 import type { PagesRepository } from "./repositories/pages";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
@@ -21,6 +22,7 @@ export type Repositories = {
   scripts: ScriptsRepository;
   pages: PagesRepository;
   skills: SkillsRepository;
+  kv: KvRepository;
 };
 
 /**
