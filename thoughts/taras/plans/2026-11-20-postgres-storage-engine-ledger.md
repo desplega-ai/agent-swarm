@@ -380,3 +380,4 @@ See "M1 results / Edited scenarios".
 ## Edited unit tests (D5 import or SQL-text only)
 
 - `src/tests/skill-usage-cohorts.test.ts`: the query-plan exemption matches `MIN("createdAt")` (identifier now quoted per D8).
+- `src/tests/claude-managed-adapter.test.ts` (part 5, timing only): the fake event stream waits 20 ms before each event. With the resolver async through storage, the in-process note render takes a few async reads; back-to-back fake events settled the session first. No assertion changed.
