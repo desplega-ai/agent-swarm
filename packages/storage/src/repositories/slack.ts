@@ -1,4 +1,4 @@
-import { likeAsciiCi } from "../dialect";
+import { greatestStrict, likeAsciiCi } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlList } from "../sql";
 
@@ -219,6 +219,96 @@ export interface SlackRepository {
   findOutcomeHost(id: string): Promise<SlackOutcomeHostRow | null>;
   /** Inserts the finalized merged outcome row; false when the task already has an outcome row. */
   insertMergedOutcome(row: NewMergedSlackOutcome): Promise<boolean>;
+
+  // ---- slack_render_v2_state ----
+  getRenderV2State(): Promise<{
+    activated_at: string;
+    delegation_activated_at: string | null;
+  } | null>;
+  /** Sets `activated_at` once (first write wins). */
+  ensureRenderV2Activation(activatedAt: string): Promise<void>;
+  /** Sets `delegation_activated_at` once (first write wins); creates the row if needed. */
+  ensureDelegationActivation(activatedAt: string): Promise<void>;
+
+  // ---- slack_messages ----
+  /**
+   * Insert, or merge into the row at (channel_id, ts): task, permalink,
+   * finalized time and conclusion keep the stored value when the new one is
+   * NULL; the chunk count keeps the larger.
+   */
+  recordSlackMessage(row: {
+    id: string;
+    context_key: string;
+    channel_id: string;
+    thread_ts: string;
+    ts: string;
+    kind: string;
+    task_id: string | null;
+    permalink: string | null;
+    finalized_at: string | null;
+    stream_chunks_appended: number;
+    conclusion_kind: string | null;
+    now: string;
+    actor: string | null;
+  }): Promise<SlackMessageRow | null>;
+  /** Inserts a reservation row unless any unique key is taken (then null). */
+  reserveSlackMessage(row: {
+    id: string;
+    context_key: string;
+    channel_id: string;
+    thread_ts: string;
+    ts: string;
+    kind: string;
+    task_id: string | null;
+    now: string;
+    actor: string | null;
+  }): Promise<SlackMessageRow | null>;
+  /** Binds the real ts of a still-pending row (ts `pending:*`). */
+  bindSlackMessageTimestamp(
+    id: string,
+    ts: string,
+    streamChunksAppended: number,
+    updatedAt: string,
+  ): Promise<SlackMessageRow | null>;
+  updateSlackMessageRecord(
+    id: string,
+    u: {
+      permalink: string | null;
+      finalize: boolean;
+      streamChunksAppended: number | null;
+      conclusionKind: string | null;
+      touch: boolean;
+      actor: string | null;
+      now: string;
+    },
+  ): Promise<SlackMessageRow | null>;
+  /** Sets a tree row's `updated_at`. */
+  markSlackTreeRendered(id: string, renderedThrough: string): Promise<SlackMessageRow | null>;
+  deleteSlackMessage(id: string): Promise<number>;
+  findSlackTreeByContextKey(contextKey: string): Promise<SlackMessageRow | null>;
+  findSlackTreeByThread(channelId: string, threadTs: string): Promise<SlackMessageRow | null>;
+  findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null>;
+  findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null>;
+  /**
+   * Finalized deferral outcome cards whose latest wake-up task is terminal and
+   * not yet written into the card: by the wake's `finishedAt`, then insertion order.
+   */
+  listResolvableDeferralOutcomes(
+    limit: number,
+  ): Promise<(SlackMessageRow & { wake_task_id: string })[]>;
+  markSlackDeferralResolved(id: string, now: string, abandoned: boolean): Promise<void>;
+  /** Counts a failed delivery of a task's outcome card that is not abandoned. */
+  noteSlackOutcomeDeliveryFailure(
+    taskId: string,
+    lastError: string,
+    now: string,
+  ): Promise<SlackMessageRow | null>;
+  /** Abandons the outcome card; returns the row only on the first abandon. */
+  abandonSlackOutcomeDelivery(
+    taskId: string,
+    lastError: string,
+    now: string,
+  ): Promise<SlackMessageRow | null>;
 }
 
 export abstract class BaseSlackRepository implements SlackRepository {
@@ -521,5 +611,204 @@ export abstract class BaseSlackRepository implements SlackRepository {
       ON CONFLICT DO NOTHING
       RETURNING id`);
     return !!inserted;
+  }
+
+  // ---- slack_render_v2_state ----
+
+  getRenderV2State(): Promise<{
+    activated_at: string;
+    delegation_activated_at: string | null;
+  } | null> {
+    return this.db.get(sql`
+      SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
+  }
+
+  async ensureRenderV2Activation(activatedAt: string): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO slack_render_v2_state (id, activated_at) VALUES (1, ${activatedAt})
+      ON CONFLICT(id) DO NOTHING`);
+  }
+
+  async ensureDelegationActivation(activatedAt: string): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO slack_render_v2_state (id, activated_at, delegation_activated_at)
+      VALUES (1, ${activatedAt}, ${activatedAt})
+      ON CONFLICT(id) DO UPDATE SET
+        delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at,
+          excluded.delegation_activated_at)`);
+  }
+
+  // ---- slack_messages ----
+
+  recordSlackMessage(r: {
+    id: string;
+    context_key: string;
+    channel_id: string;
+    thread_ts: string;
+    ts: string;
+    kind: string;
+    task_id: string | null;
+    permalink: string | null;
+    finalized_at: string | null;
+    stream_chunks_appended: number;
+    conclusion_kind: string | null;
+    now: string;
+    actor: string | null;
+  }): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      INSERT INTO slack_messages (
+        id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
+        finalized_at, stream_chunks_appended, conclusion_kind, created_at, updated_at, created_by, updated_by
+      ) VALUES (${r.id}, ${r.context_key}, ${r.channel_id}, ${r.thread_ts}, ${r.ts}, ${r.kind},
+        ${r.task_id}, ${r.permalink}, ${r.finalized_at}, ${r.stream_chunks_appended},
+        ${r.conclusion_kind}, ${r.now}, ${r.now}, ${r.actor}, ${r.actor})
+      ON CONFLICT(channel_id, ts) DO UPDATE SET
+        context_key = excluded.context_key,
+        kind = excluded.kind,
+        task_id = COALESCE(excluded.task_id, slack_messages.task_id),
+        permalink = COALESCE(excluded.permalink, slack_messages.permalink),
+        finalized_at = COALESCE(excluded.finalized_at, slack_messages.finalized_at),
+        stream_chunks_appended = ${greatestStrict(
+          sql`excluded.stream_chunks_appended`,
+          sql`slack_messages.stream_chunks_appended`,
+        )},
+        conclusion_kind = COALESCE(excluded.conclusion_kind, slack_messages.conclusion_kind),
+        updated_at = excluded.updated_at,
+        updated_by = excluded.updated_by
+      RETURNING *`);
+  }
+
+  reserveSlackMessage(r: {
+    id: string;
+    context_key: string;
+    channel_id: string;
+    thread_ts: string;
+    ts: string;
+    kind: string;
+    task_id: string | null;
+    now: string;
+    actor: string | null;
+  }): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      INSERT INTO slack_messages (
+        id, context_key, channel_id, thread_ts, ts, kind, task_id,
+        stream_chunks_appended, created_at, updated_at, created_by, updated_by
+      ) VALUES (${r.id}, ${r.context_key}, ${r.channel_id}, ${r.thread_ts}, ${r.ts}, ${r.kind},
+        ${r.task_id}, 0, ${r.now}, ${r.now}, ${r.actor}, ${r.actor})
+      ON CONFLICT DO NOTHING
+      RETURNING *`);
+  }
+
+  bindSlackMessageTimestamp(
+    id: string,
+    ts: string,
+    streamChunksAppended: number,
+    updatedAt: string,
+  ): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      UPDATE slack_messages SET
+        ts = ${ts},
+        stream_chunks_appended = ${greatestStrict(sql`stream_chunks_appended`, sql`${streamChunksAppended}`)},
+        updated_at = ${updatedAt}
+      WHERE id = ${id} AND ${likeAsciiCi(sql`ts`, sql`'pending:%'`)}
+      RETURNING *`);
+  }
+
+  updateSlackMessageRecord(
+    id: string,
+    u: {
+      permalink: string | null;
+      finalize: boolean;
+      streamChunksAppended: number | null;
+      conclusionKind: string | null;
+      touch: boolean;
+      actor: string | null;
+      now: string;
+    },
+  ): Promise<SlackMessageRow | null> {
+    const finalized = u.finalize ? sql`COALESCE(finalized_at, ${u.now})` : sql`finalized_at`;
+    const updated = u.touch ? sql`${u.now}` : sql`updated_at`;
+    return this.db.get<SlackMessageRow>(sql`
+      UPDATE slack_messages SET
+        permalink = COALESCE(${u.permalink}, permalink),
+        finalized_at = ${finalized},
+        stream_chunks_appended = COALESCE(${u.streamChunksAppended}, stream_chunks_appended),
+        conclusion_kind = COALESCE(${u.conclusionKind}, conclusion_kind),
+        updated_at = ${updated},
+        updated_by = COALESCE(${u.actor}, updated_by)
+      WHERE id = ${id}
+      RETURNING *`);
+  }
+
+  markSlackTreeRendered(id: string, renderedThrough: string): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      UPDATE slack_messages SET updated_at = ${renderedThrough}
+      WHERE id = ${id} AND kind = 'tree'
+      RETURNING *`);
+  }
+
+  async deleteSlackMessage(id: string): Promise<number> {
+    return (await this.db.run(sql`DELETE FROM slack_messages WHERE id = ${id}`)).changes;
+  }
+
+  findSlackTreeByContextKey(contextKey: string): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages WHERE context_key = ${contextKey} AND kind = 'tree' LIMIT 1`);
+  }
+
+  findSlackTreeByThread(channelId: string, threadTs: string): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages
+      WHERE channel_id = ${channelId} AND thread_ts = ${threadTs} AND kind = 'tree'
+      LIMIT 1`);
+  }
+
+  findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages WHERE task_id = ${taskId} AND kind = 'outcome' LIMIT 1`);
+  }
+
+  findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages WHERE channel_id = ${channelId} AND ts = ${ts} LIMIT 1`);
+  }
+
+  abstract listResolvableDeferralOutcomes(
+    limit: number,
+  ): Promise<(SlackMessageRow & { wake_task_id: string })[]>;
+
+  async markSlackDeferralResolved(id: string, now: string, abandoned: boolean): Promise<void> {
+    await this.db.run(sql`
+      UPDATE slack_messages SET deferral_resolved_at = ${now},
+        deferral_abandoned_at = ${abandoned ? now : null}
+      WHERE id = ${id}`);
+  }
+
+  noteSlackOutcomeDeliveryFailure(
+    taskId: string,
+    lastError: string,
+    now: string,
+  ): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      UPDATE slack_messages SET
+        delivery_attempts = delivery_attempts + 1,
+        delivery_last_error = ${lastError},
+        updated_at = ${now}
+      WHERE task_id = ${taskId} AND kind = 'outcome' AND delivery_abandoned_at IS NULL
+      RETURNING *`);
+  }
+
+  abandonSlackOutcomeDelivery(
+    taskId: string,
+    lastError: string,
+    now: string,
+  ): Promise<SlackMessageRow | null> {
+    return this.db.get<SlackMessageRow>(sql`
+      UPDATE slack_messages SET
+        delivery_abandoned_at = ${now},
+        delivery_last_error = ${lastError},
+        updated_at = ${now}
+      WHERE task_id = ${taskId} AND kind = 'outcome' AND delivery_abandoned_at IS NULL
+      RETURNING *`);
   }
 }

@@ -736,6 +736,11 @@ export interface WorkflowsRepository {
    * overdue. Ordered by step insertion order, then wait insertion order.
    */
   listStuckWaitRuns(): Promise<StuckWaitRunRow[]>;
+
+  // ---- approval_requests: Slack threads waiting on a person ----
+  /** Distinct Slack threads with an unexpired pending request raised by one of their tasks. In no particular order. */
+  listSlackThreadsAwaitingHuman(): Promise<{ channelId: string; threadTs: string }[]>;
+  isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1655,5 +1660,31 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
            )
          )
        ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ws`)}`);
+  }
+
+  // ---- approval_requests: Slack threads waiting on a person ----
+
+  listSlackThreadsAwaitingHuman(): Promise<{ channelId: string; threadTs: string }[]> {
+    return this.db.query<{ channelId: string; threadTs: string }>(sql`
+      SELECT DISTINCT task."slackChannelId" AS "channelId", task."slackThreadTs" AS "threadTs"
+      FROM approval_requests request
+      JOIN agent_tasks task ON task.id = request."sourceTaskId"
+      WHERE request.status = 'pending'
+        AND (request."expiresAt" IS NULL OR request."expiresAt" > ${nowIso})
+        AND task."slackChannelId" IS NOT NULL
+        AND task."slackThreadTs" IS NOT NULL`);
+  }
+
+  async isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean> {
+    const row = await this.db.get<{ waiting: number }>(sql`
+      SELECT 1 AS waiting
+      FROM approval_requests request
+      JOIN agent_tasks task ON task.id = request."sourceTaskId"
+      WHERE request.status = 'pending'
+        AND (request."expiresAt" IS NULL OR request."expiresAt" > ${nowIso})
+        AND task."slackChannelId" = ${channelId}
+        AND task."slackThreadTs" = ${threadTs}
+      LIMIT 1`);
+    return !!row;
   }
 }

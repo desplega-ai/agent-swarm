@@ -250,4 +250,40 @@ export class SqliteSlackRepository extends BaseSlackRepository {
       FROM candidates tree, slack_render_v2_state state WHERE state.id = 1 ORDER BY tree.id`);
     }
   }
+
+  listResolvableDeferralOutcomes(
+    limit: number,
+  ): Promise<(SlackMessageRow & { wake_task_id: string })[]> {
+    // CROSS JOIN and `+wake."taskType"` pin the join order to the small chain:
+    // without them the planner drives the outer join from every terminal task.
+    // The anchor drives from the partial index idx_agent_tasks_deferred.
+    return this.db.query<SlackMessageRow & { wake_task_id: string }>(sql`
+      WITH RECURSIVE chain(card_id, task_id) AS (
+        SELECT card.id, deferred.id FROM agent_tasks deferred
+        CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
+        WHERE deferred."deferredAt" IS NOT NULL
+          AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
+          AND card.ts NOT LIKE 'pending:%'
+        UNION
+        SELECT chain.card_id, wake.id FROM chain
+        CROSS JOIN agent_tasks parent ON parent.id = chain.task_id AND parent."deferredAt" IS NOT NULL
+        CROSS JOIN agent_tasks wake ON wake."parentTaskId" = parent.id AND +wake."taskType" = 'deferred'
+      )
+      SELECT card.*, wake.id AS wake_task_id
+      FROM chain
+      CROSS JOIN slack_messages card ON card.id = chain.card_id
+      CROSS JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
+      WHERE card.kind = 'outcome'
+        AND card.finalized_at IS NOT NULL
+        AND card.deferral_resolved_at IS NULL
+        AND card.ts NOT LIKE 'pending:%'
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks child
+          WHERE child."parentTaskId" = wake.id AND +child."taskType" = 'deferred'
+        )
+        AND (wake."deferredAt" IS NULL OR wake."finishedAt" > card.updated_at)
+        AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
+      ORDER BY wake."finishedAt" ASC, card.rowid ASC, wake.rowid ASC
+      LIMIT ${limit}`);
+  }
 }

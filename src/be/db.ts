@@ -42,6 +42,7 @@ import type {
   SkillFileRow,
   SkillRow,
   SkillWithInstallRow,
+  SlackMessageRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -628,41 +629,26 @@ const BUDGETED_IDENTITY_FIELDS: BudgetedIdentityField[] = [
 // ============================================================================
 
 export async function getSlackRenderV2ActivatedAt(): Promise<string | null> {
-  const row = await getDbClient().get<{ activated_at: string }>(
-    `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
-  );
+  const row = await getStorage().repos.slack.getRenderV2State();
   return row?.activated_at ?? null;
 }
 
 export async function ensureSlackRenderV2Activation(): Promise<string> {
   const activatedAt = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO slack_render_v2_state (id, activated_at)
-     VALUES (1, ?)
-     ON CONFLICT(id) DO NOTHING`,
-    [activatedAt],
-  );
+  await getStorage().repos.slack.ensureRenderV2Activation(activatedAt);
   const persisted = await getSlackRenderV2ActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
   return persisted;
 }
 
 export async function getSlackDelegationActivatedAt(): Promise<string | null> {
-  const row = await getDbClient().get<{ delegation_activated_at: string | null }>(
-    `SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1`,
-  );
+  const row = await getStorage().repos.slack.getRenderV2State();
   return row?.delegation_activated_at ?? null;
 }
 
 export async function ensureSlackDelegationActivation(): Promise<string> {
   const activatedAt = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO slack_render_v2_state (id, activated_at, delegation_activated_at)
-     VALUES (1, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at, excluded.delegation_activated_at)`,
-    [activatedAt, activatedAt],
-  );
+  await getStorage().repos.slack.ensureDelegationActivation(activatedAt);
   const persisted = await getSlackDelegationActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 delegation activation");
   return persisted;
@@ -710,28 +696,6 @@ export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
   return !!record.finalizedAt || !!record.deliveryAbandonedAt;
 }
 
-type SlackMessageRow = {
-  id: string;
-  context_key: string;
-  channel_id: string;
-  thread_ts: string;
-  ts: string;
-  kind: SlackMessageKind;
-  task_id: string | null;
-  permalink: string | null;
-  finalized_at: string | null;
-  stream_chunks_appended: number;
-  conclusion_kind: SlackConclusionKind | null;
-  deferral_resolved_at: string | null;
-  deferral_abandoned_at: string | null;
-  delivery_attempts: number;
-  delivery_abandoned_at: string | null;
-  delivery_last_error: string | null;
-  closed_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
   return {
     id: row.id,
@@ -739,12 +703,12 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     channelId: row.channel_id,
     threadTs: row.thread_ts,
     ts: row.ts,
-    kind: row.kind,
+    kind: row.kind as SlackMessageKind,
     taskId: row.task_id ?? undefined,
     permalink: row.permalink ?? undefined,
     finalizedAt: row.finalized_at ?? undefined,
     streamChunksAppended: row.stream_chunks_appended,
-    conclusionKind: row.conclusion_kind ?? undefined,
+    conclusionKind: (row.conclusion_kind as SlackConclusionKind | null) ?? undefined,
     deferralResolvedAt: row.deferral_resolved_at ?? undefined,
     deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
     deliveryAttempts: row.delivery_attempts,
@@ -771,43 +735,21 @@ export async function recordSlackMessage(input: {
 }): Promise<SlackMessageRecord> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `INSERT INTO slack_messages (
-         id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
-         finalized_at, stream_chunks_appended, conclusion_kind, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(channel_id, ts) DO UPDATE SET
-         context_key = excluded.context_key,
-         kind = excluded.kind,
-         task_id = COALESCE(excluded.task_id, slack_messages.task_id),
-         permalink = COALESCE(excluded.permalink, slack_messages.permalink),
-         finalized_at = COALESCE(excluded.finalized_at, slack_messages.finalized_at),
-         stream_chunks_appended = MAX(
-           excluded.stream_chunks_appended,
-           slack_messages.stream_chunks_appended
-         ),
-         conclusion_kind = COALESCE(excluded.conclusion_kind, slack_messages.conclusion_kind),
-         updated_at = excluded.updated_at,
-         updated_by = excluded.updated_by
-       RETURNING *`,
-    [
-      id,
-      input.contextKey,
-      input.channelId,
-      input.threadTs,
-      input.ts,
-      input.kind,
-      input.taskId ?? null,
-      input.permalink ?? null,
-      input.finalized ? now : null,
-      input.streamChunksAppended ?? 0,
-      input.conclusionKind ?? null,
-      now,
-      now,
-      input.actorId ?? null,
-      input.actorId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.slack.recordSlackMessage({
+    id,
+    context_key: input.contextKey,
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ts: input.ts,
+    kind: input.kind,
+    task_id: input.taskId ?? null,
+    permalink: input.permalink ?? null,
+    finalized_at: input.finalized ? now : null,
+    stream_chunks_appended: input.streamChunksAppended ?? 0,
+    conclusion_kind: input.conclusionKind ?? null,
+    now,
+    actor: input.actorId ?? null,
+  });
   if (!row) throw new Error("Failed to record Slack message");
   return rowToSlackMessage(row);
 }
@@ -827,27 +769,17 @@ export async function reserveSlackMessage(input: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const pendingTs = `${PENDING_SLACK_MESSAGE_TS_PREFIX}${id}`;
-  const inserted = await getDbClient().get<SlackMessageRow>(
-    `INSERT INTO slack_messages (
-         id, context_key, channel_id, thread_ts, ts, kind, task_id,
-         stream_chunks_appended, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-       ON CONFLICT DO NOTHING
-       RETURNING *`,
-    [
-      id,
-      input.contextKey,
-      input.channelId,
-      input.threadTs,
-      pendingTs,
-      input.kind,
-      input.taskId ?? null,
-      now,
-      now,
-      input.actorId ?? null,
-      input.actorId ?? null,
-    ],
-  );
+  const inserted = await getStorage().repos.slack.reserveSlackMessage({
+    id,
+    context_key: input.contextKey,
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ts: pendingTs,
+    kind: input.kind,
+    task_id: input.taskId ?? null,
+    now,
+    actor: input.actorId ?? null,
+  });
   if (inserted) return { record: rowToSlackMessage(inserted), created: true };
 
   const existing =
@@ -864,14 +796,11 @@ export async function bindSlackMessageTimestamp(
   options: { streamChunksAppended?: number; renderedThrough?: string } = {},
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         ts = ?,
-         stream_chunks_appended = MAX(stream_chunks_appended, ?),
-         updated_at = COALESCE(?, ?)
-       WHERE id = ? AND ts LIKE 'pending:%'
-       RETURNING *`,
-    [ts, options.streamChunksAppended ?? 0, options.renderedThrough ?? null, now, id],
+  const row = await getStorage().repos.slack.bindSlackMessageTimestamp(
+    id,
+    ts,
+    options.streamChunksAppended ?? 0,
+    options.renderedThrough ?? now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -888,28 +817,15 @@ export async function updateSlackMessageRecord(
   },
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         permalink = COALESCE(?, permalink),
-         finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
-         stream_chunks_appended = COALESCE(?, stream_chunks_appended),
-         conclusion_kind = COALESCE(?, conclusion_kind),
-         updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END,
-         updated_by = COALESCE(?, updated_by)
-       WHERE id = ?
-       RETURNING *`,
-    [
-      updates.permalink ?? null,
-      updates.finalized ? 1 : 0,
-      now,
-      updates.streamChunksAppended ?? null,
-      updates.conclusionKind ?? null,
-      updates.touchUpdatedAt === false ? 0 : 1,
-      now,
-      updates.actorId ?? null,
-      id,
-    ],
-  );
+  const row = await getStorage().repos.slack.updateSlackMessageRecord(id, {
+    permalink: updates.permalink ?? null,
+    finalize: !!updates.finalized,
+    streamChunksAppended: updates.streamChunksAppended ?? null,
+    conclusionKind: updates.conclusionKind ?? null,
+    touch: updates.touchUpdatedAt !== false,
+    actor: updates.actorId ?? null,
+    now,
+  });
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -917,25 +833,16 @@ export async function markSlackTreeRendered(
   id: string,
   renderedThrough: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET updated_at = ?
-       WHERE id = ? AND kind = 'tree'
-       RETURNING *`,
-    [renderedThrough, id],
-  );
+  const row = await getStorage().repos.slack.markSlackTreeRendered(id, renderedThrough);
   return row ? rowToSlackMessage(row) : null;
 }
 
 export async function deleteSlackMessageRecord(id: string): Promise<boolean> {
-  const result = await getDbClient().run(`DELETE FROM slack_messages WHERE id = ?`, [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.slack.deleteSlackMessage(id)) > 0;
 }
 
 export async function getSlackTreeMessage(contextKey: string): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE context_key = ? AND kind = 'tree' LIMIT 1`,
-    [contextKey],
-  );
+  const row = await getStorage().repos.slack.findSlackTreeByContextKey(contextKey);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -943,20 +850,12 @@ export async function getSlackTreeMessageByThread(
   channelId: string,
   threadTs: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages
-       WHERE channel_id = ? AND thread_ts = ? AND kind = 'tree'
-       LIMIT 1`,
-    [channelId, threadTs],
-  );
+  const row = await getStorage().repos.slack.findSlackTreeByThread(channelId, threadTs);
   return row ? rowToSlackMessage(row) : null;
 }
 
 export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome' LIMIT 1`,
-    [taskId],
-  );
+  const row = await getStorage().repos.slack.findSlackOutcomeByTask(taskId);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -982,36 +881,7 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
 export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
-  const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
-    `WITH RECURSIVE chain(card_id, task_id) AS (
-         SELECT card.id, deferred.id FROM agent_tasks deferred
-         CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
-         WHERE deferred.deferredAt IS NOT NULL
-           AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
-           AND card.ts NOT LIKE 'pending:%'
-         UNION
-         SELECT chain.card_id, wake.id FROM chain
-         CROSS JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
-         CROSS JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND +wake.taskType = 'deferred'
-       )
-       SELECT card.*, wake.id AS wake_task_id
-       FROM chain
-       CROSS JOIN slack_messages card ON card.id = chain.card_id
-       CROSS JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
-       WHERE card.kind = 'outcome'
-         AND card.finalized_at IS NOT NULL
-         AND card.deferral_resolved_at IS NULL
-         AND card.ts NOT LIKE 'pending:%'
-         AND NOT EXISTS (
-           SELECT 1 FROM agent_tasks child
-           WHERE child.parentTaskId = wake.id AND +child.taskType = 'deferred'
-         )
-         AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
-       ORDER BY wake.finishedAt ASC
-       LIMIT ?`,
-    [limit],
-  );
+  const rows = await getStorage().repos.slack.listResolvableDeferralOutcomes(limit);
   return rows.map((row) => ({
     card: rowToSlackMessage(row),
     deferredTaskId: row.task_id!,
@@ -1029,10 +899,7 @@ export async function markSlackDeferralResolved(
   options: { abandoned?: boolean } = {},
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    "UPDATE slack_messages SET deferral_resolved_at = ?, deferral_abandoned_at = ? WHERE id = ?",
-    [now, options.abandoned ? now : null, id],
-  );
+  await getStorage().repos.slack.markSlackDeferralResolved(id, now, !!options.abandoned);
 }
 
 export async function noteSlackOutcomeDeliveryFailure(
@@ -1040,14 +907,10 @@ export async function noteSlackOutcomeDeliveryFailure(
   lastError: string,
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         delivery_attempts = delivery_attempts + 1,
-         delivery_last_error = ?,
-         updated_at = ?
-       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
-       RETURNING *`,
-    [lastError.slice(0, 500), now, taskId],
+  const row = await getStorage().repos.slack.noteSlackOutcomeDeliveryFailure(
+    taskId,
+    lastError.slice(0, 500),
+    now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -1062,14 +925,10 @@ export async function abandonSlackOutcomeDelivery(
   lastError: string,
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         delivery_abandoned_at = ?,
-         delivery_last_error = ?,
-         updated_at = ?
-       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
-       RETURNING *`,
-    [now, lastError.slice(0, 500), now, taskId],
+  const row = await getStorage().repos.slack.abandonSlackOutcomeDelivery(
+    taskId,
+    lastError.slice(0, 500),
+    now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -1084,17 +943,14 @@ export async function getSlackTreeMessages(
   options: { thread?: { channelId: string; threadTs: string } } = {},
 ): Promise<SlackMessageRecord[]> {
   const rows = await getStorage().repos.slack.listTreesNeedingRender(options.thread);
-  return (rows as SlackMessageRow[]).map(rowToSlackMessage);
+  return rows.map(rowToSlackMessage);
 }
 
 export async function getSlackMessageByChannelTs(
   channelId: string,
   ts: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE channel_id = ? AND ts = ? LIMIT 1`,
-    [channelId, ts],
-  );
+  const row = await getStorage().repos.slack.findSlackMessageByChannelTs(channelId, ts);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -1115,33 +971,14 @@ export async function getSlackTasksInThread(
 export async function listSlackThreadsAwaitingHuman(): Promise<
   Array<{ channelId: string; threadTs: string }>
 > {
-  return getDbClient().query<{ channelId: string; threadTs: string }>(
-    `SELECT DISTINCT task.slackChannelId AS channelId, task.slackThreadTs AS threadTs
-       FROM approval_requests request
-       JOIN agent_tasks task ON task.id = request.sourceTaskId
-       WHERE request.status = 'pending'
-       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       AND task.slackChannelId IS NOT NULL
-       AND task.slackThreadTs IS NOT NULL`,
-  );
+  return getStorage().repos.workflows.listSlackThreadsAwaitingHuman();
 }
 
 export async function isSlackThreadAwaitingHuman(
   channelId: string,
   threadTs: string,
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ waiting: number }>(
-    `SELECT 1 AS waiting
-       FROM approval_requests request
-       JOIN agent_tasks task ON task.id = request.sourceTaskId
-       WHERE request.status = 'pending'
-       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       AND task.slackChannelId = ?
-       AND task.slackThreadTs = ?
-       LIMIT 1`,
-    [channelId, threadTs],
-  );
-  return !!row;
+  return await getStorage().repos.workflows.isSlackThreadAwaitingHuman(channelId, threadTs);
 }
 
 export async function markTaskSlackReplySent(taskId: string): Promise<void> {
