@@ -1,4 +1,7 @@
 import {
+  type AttributionReachRow,
+  type AttributionRootRow,
+  type AttributionWindow,
   BaseTasksRepository,
   buildTaskFtsMatch,
   HUMAN_FREE_TAGS,
@@ -757,6 +760,19 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     return rows.map((row) => row.id);
   }
 
+  listAttributionRoots(
+    window: AttributionWindow,
+    githubHost: string,
+  ): Promise<AttributionRootRow[]> {
+    if (!/^[a-z0-9._:-]+$/.test(githubHost))
+      throw new Error(`Invalid GitHub host for SQL: ${githubHost}`);
+    return this.db.query<AttributionRootRow>(attributionRootsSqlite(window, githubHost));
+  }
+
+  listAttributionReach(window: AttributionWindow): Promise<AttributionReachRow[]> {
+    return this.db.query<AttributionReachRow>(attributionReachSqlite(window));
+  }
+
   shippingEvidenceSql(
     alias: string,
     host: string,
@@ -884,4 +900,111 @@ function githubPullRequestExistsSql(value: string, host: string): string {
       )
     LIMIT 1
   )`;
+}
+
+// ---- attribution report (moved from src/be/db.ts; text unchanged) ----
+
+function attributionWhereSqlite(window: AttributionWindow): { where: string; params: string[] } {
+  const conditions: string[] = ["t.requestedByUserId IS NOT NULL"];
+  const params: string[] = [];
+  if (window.startDate !== undefined) {
+    conditions.push("t.createdAt >= ?");
+    params.push(window.startDate);
+  }
+  if (window.endBefore !== undefined) {
+    conditions.push("t.createdAt < ?");
+    params.push(window.endBefore);
+  } else if (window.endAtOrBefore !== undefined) {
+    conditions.push("t.createdAt <= ?");
+    params.push(window.endAtOrBefore);
+  }
+  return { where: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
+/** Text with `?` placeholders and its parameters, as a query. */
+function withParams(text: string, params: string[]): SqlQuery {
+  const strings = text.split("?");
+  if (strings.length !== params.length + 1) throw new Error("attribution SQL: placeholder count");
+  return new SqlQuery(strings, params);
+}
+
+export function attributionRootsSqlite(window: AttributionWindow, githubHost: string): SqlQuery {
+  const { where, params } = attributionWhereSqlite(window);
+  return withParams(
+    `WITH RECURSIVE selected_roots(id, requestedByUserId, status) AS (
+        SELECT t.id, t.requestedByUserId, t.status
+        FROM agent_tasks t
+        ${where} AND t.parentTaskId IS NULL AND t.isHumanFree = 0
+      ),
+      -- Ids only: carrying each descendant's \`output\` through the recursion copied
+      -- every task's text into the queue. The output fallback below reads it by id.
+      task_tree(rootId, taskId) AS (
+        SELECT id, id
+        FROM selected_roots
+
+        UNION ALL
+
+        SELECT tree.rootId, child.id
+        FROM agent_tasks child
+        JOIN task_tree tree ON child.parentTaskId = tree.taskId
+      ),
+      -- Every root with shippable evidence anywhere in its tree, computed ONCE for
+      -- the whole window. The old form asked the same question with 3 CORRELATED
+      -- EXISTS subqueries, which SQLite re-entered once per root: 2 of them scanned
+      -- task_attachments whole and the third scanned the whole tree with two
+      -- leading-wildcard LIKEs. That is the O(R x T) shape that took 60 s.
+      --
+      -- Two rules keep this fast and correct, and both are load-bearing:
+      --   1. UNION, never UNION ALL. It makes rootId unique, so the LEFT JOIN below
+      --      cannot duplicate a root and COUNT(*) stays exact.
+      --   2. LEFT JOIN, never a correlated EXISTS against this CTE. The EXISTS form
+      --      returns the same answer but SQLite re-enters the CTE per root:
+      --      measured 4,189 ms for a 2-day window against 460 ms for 30 days.
+      shipped_roots(rootId) AS (
+        SELECT tree.rootId
+        FROM task_tree tree
+        JOIN task_attachments ta ON ta.task_id = tree.taskId
+        WHERE ta.kind = 'page'
+           OR (
+             ta.kind = 'url'
+             AND (
+               ta.url LIKE '%${githubHost}/%/pull/%'
+               OR ta.url LIKE '%/-/merge_requests/%'
+             )
+           )
+
+        UNION
+
+        SELECT tree.rootId
+        FROM task_tree tree
+        -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
+        -- planner scans every task's output and probes the tree instead.
+        CROSS JOIN agent_tasks described ON described.id = tree.taskId
+        WHERE described.output LIKE '%${githubHost}/%/pull/%'
+           OR described.output LIKE '%/-/merge_requests/%'
+      )
+      SELECT
+        t.requestedByUserId as userId,
+        COUNT(*) as initiated,
+        SUM(CASE WHEN t.status = 'completed' AND s.rootId IS NOT NULL THEN 1 ELSE 0 END) as shipped
+      FROM selected_roots t
+      LEFT JOIN shipped_roots s ON s.rootId = t.id
+      GROUP BY t.requestedByUserId`,
+    params,
+  );
+}
+
+export function attributionReachSqlite(window: AttributionWindow): SqlQuery {
+  const { where, params } = attributionWhereSqlite(window);
+  return withParams(
+    `SELECT
+        t.requestedByUserId as userId,
+        COUNT(DISTINCT t.agentId) as agentsReached,
+        COUNT(DISTINCT t.vcsRepo) as reposReached,
+        COUNT(DISTINCT t.source) as surfacesReached
+      FROM agent_tasks t
+      ${where} AND t.isHumanFree = 0
+      GROUP BY t.requestedByUserId`,
+    params,
+  );
 }

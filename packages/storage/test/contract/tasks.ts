@@ -89,6 +89,77 @@ export function tasksContract(engine: ContractEngine): void {
       }
     };
 
+    test("attribution: roots, shipped trees (attachment, output, case) and reach per requester", async () => {
+      await seedUsers("u1", "u2");
+      const at = (h: number) => `2026-11-20T${String(h).padStart(2, "0")}:00:00.000Z`;
+      await seedTask(storage, {
+        id: "r1",
+        requestedByUserId: "u1",
+        status: "completed",
+        agentId: null,
+        source: "api",
+        createdAt: at(1),
+      });
+      await seedTask(storage, {
+        id: "c1",
+        parentTaskId: "r1",
+        requestedByUserId: "u1",
+        status: "completed",
+        source: "mcp",
+        output: "see HTTPS://GITHUB.COM/o/r/PULL/7",
+        createdAt: at(2),
+      });
+      await seedTask(storage, {
+        id: "r2",
+        requestedByUserId: "u1",
+        status: "completed",
+        source: "api",
+        createdAt: at(3),
+      });
+      await seedTask(storage, {
+        id: "r3",
+        requestedByUserId: "u2",
+        status: "completed",
+        source: "slack",
+        vcsRepo: "o/r",
+        createdAt: at(4),
+      });
+      await storage.executor.run(
+        sql`INSERT INTO task_attachments (id, task_id, kind, url, name, created_at) VALUES ('a1', 'r3', 'url', 'https://gitlab.example.com/g/p/-/merge_requests/3', 'mr', ${at(4)})`,
+      );
+      await seedTask(storage, {
+        id: "r4",
+        requestedByUserId: "u2",
+        status: "completed",
+        isHumanFree: 1,
+        createdAt: at(5),
+      });
+      await seedTask(storage, {
+        id: "r5",
+        requestedByUserId: "u2",
+        status: "completed",
+        createdAt: at(9),
+      });
+      const window = { startDate: at(0), endBefore: at(8) };
+      const roots = (await repo.listAttributionRoots(window, "github.com")).sort((a, b) =>
+        a.userId.localeCompare(b.userId),
+      );
+      expect(roots).toEqual([
+        { userId: "u1", initiated: 2, shipped: 1 },
+        { userId: "u2", initiated: 1, shipped: 1 },
+      ]);
+      const reach = (await repo.listAttributionReach(window)).sort((a, b) =>
+        a.userId.localeCompare(b.userId),
+      );
+      expect(reach).toEqual([
+        { userId: "u1", agentsReached: 0, reposReached: 0, surfacesReached: 2 },
+        { userId: "u2", agentsReached: 0, reposReached: 1, surfacesReached: 1 },
+      ]);
+      expect(await repo.listAttributionRoots({ endAtOrBefore: at(1) }, "github.com")).toEqual([
+        { userId: "u1", initiated: 1, shipped: 1 },
+      ]);
+    });
+
     test("findTaskById returns the stored value shape", async () => {
       await seedTask(storage, { id: "t1", tags: '["a"]', slackReplySent: 0 });
       const row = (await repo.findTaskById("t1")) as TaskRow;

@@ -1433,7 +1433,37 @@ export interface TasksRepository {
     alias: string,
     host: string,
   ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery };
+  /**
+   * Per human requester: root tasks in the window and those that shipped (a
+   * page or a PR/MR attachment, or a PR/MR URL in any task output of the root's
+   * tree). Excludes human-free rows. Unordered: the caller indexes by user.
+   */
+  listAttributionRoots(
+    window: AttributionWindow,
+    githubHost: string,
+  ): Promise<AttributionRootRow[]>;
+  /** Per human requester: distinct agents, repos and sources of the window's tasks. Unordered. */
+  listAttributionReach(window: AttributionWindow): Promise<AttributionReachRow[]>;
 }
+
+/** The task window of the attribution report: `createdAt` bounds, ISO text. */
+export type AttributionWindow = {
+  startDate?: string;
+  /** Exclusive upper bound (a date-only end becomes the next day's midnight). */
+  endBefore?: string;
+  /** Inclusive upper bound (an exact instant). */
+  endAtOrBefore?: string;
+};
+
+/** Root tasks per requester in the window, and how many shipped (PR, MR or page). */
+export type AttributionRootRow = { userId: string; initiated: number; shipped: number };
+/** Distinct agents, repos and sources per requester in the window. */
+export type AttributionReachRow = {
+  userId: string;
+  agentsReached: number;
+  reposReached: number;
+  surfacesReached: number;
+};
 
 /** The citation kinds whose target row can be checked. */
 export type TaskCitationTargetKind = "task" | "memory" | "page" | "script-run";
@@ -3688,4 +3718,9 @@ export abstract class BaseTasksRepository implements TasksRepository {
     alias: string,
     host: string,
   ): { hasArtifact: SqlQuery; hasPullRequest: SqlQuery };
+  abstract listAttributionRoots(
+    window: AttributionWindow,
+    githubHost: string,
+  ): Promise<AttributionRootRow[]>;
+  abstract listAttributionReach(window: AttributionWindow): Promise<AttributionReachRow[]>;
 }

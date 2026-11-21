@@ -1,4 +1,7 @@
 import {
+  type AttributionReachRow,
+  type AttributionRootRow,
+  type AttributionWindow,
   BaseTasksRepository,
   greatestStrict,
   HUMAN_FREE_TAGS,
@@ -724,6 +727,59 @@ export class PostgresTasksRepository extends BaseTasksRepository {
     return rows.map((row) => row.id);
   }
 
+  listAttributionRoots(
+    window: AttributionWindow,
+    githubHost: string,
+  ): Promise<AttributionRootRow[]> {
+    if (!/^[a-z0-9._:-]+$/.test(githubHost))
+      throw new Error(`Invalid GitHub host for SQL: ${githubHost}`);
+    // Same shape as SQLite: UNION makes rootId unique, so the LEFT JOIN cannot
+    // duplicate a root. LIKE folds ASCII case only, as on SQLite (C ctype).
+    const pull = `%${githubHost}/%/pull/%`;
+    const mergeRequest = "%/-/merge_requests/%";
+    return this.db.query<AttributionRootRow>(sql`
+      WITH RECURSIVE selected_roots(id, "requestedByUserId", status) AS (
+        SELECT t.id, t."requestedByUserId", t.status
+        FROM agent_tasks t
+        ${attributionWhere(window)} AND t."parentTaskId" IS NULL AND t."isHumanFree" = ${false}
+      ),
+      task_tree("rootId", "taskId") AS (
+        SELECT id, id FROM selected_roots
+        UNION ALL
+        SELECT tree."rootId", child.id
+        FROM agent_tasks child
+        JOIN task_tree tree ON child."parentTaskId" = tree."taskId"
+      ),
+      shipped_roots("rootId") AS (
+        SELECT tree."rootId"
+        FROM task_tree tree
+        JOIN task_attachments ta ON ta.task_id = tree."taskId"
+        WHERE ta.kind = 'page'
+           OR (ta.kind = 'url' AND (ta.url ILIKE ${pull} ESCAPE '' OR ta.url ILIKE ${mergeRequest} ESCAPE ''))
+        UNION
+        SELECT tree."rootId"
+        FROM task_tree tree
+        JOIN agent_tasks described ON described.id = tree."taskId"
+        WHERE described.output ILIKE ${pull} ESCAPE '' OR described.output ILIKE ${mergeRequest} ESCAPE ''
+      )
+      SELECT t."requestedByUserId" AS "userId", COUNT(*) AS initiated,
+        SUM(CASE WHEN t.status = 'completed' AND s."rootId" IS NOT NULL THEN 1 ELSE 0 END) AS shipped
+      FROM selected_roots t
+      LEFT JOIN shipped_roots s ON s."rootId" = t.id
+      GROUP BY t."requestedByUserId"`);
+  }
+
+  listAttributionReach(window: AttributionWindow): Promise<AttributionReachRow[]> {
+    return this.db.query<AttributionReachRow>(sql`
+      SELECT t."requestedByUserId" AS "userId",
+        COUNT(DISTINCT t."agentId") AS "agentsReached",
+        COUNT(DISTINCT t."vcsRepo") AS "reposReached",
+        COUNT(DISTINCT t.source) AS "surfacesReached"
+      FROM agent_tasks t
+      ${attributionWhere(window)} AND t."isHumanFree" = ${false}
+      GROUP BY t."requestedByUserId"`);
+  }
+
   shippingEvidenceSql(
     alias: string,
     host: string,
@@ -854,4 +910,15 @@ function githubPullRequestExistsSql(value: string, host: string): string {
       )
     LIMIT 1
   )`;
+}
+
+// ---- attribution report ----
+
+function attributionWhere(window: AttributionWindow): SqlQuery {
+  const conditions = [sql`t."requestedByUserId" IS NOT NULL`];
+  if (window.startDate !== undefined) conditions.push(sql`t."createdAt" >= ${window.startDate}`);
+  if (window.endBefore !== undefined) conditions.push(sql`t."createdAt" < ${window.endBefore}`);
+  else if (window.endAtOrBefore !== undefined)
+    conditions.push(sql`t."createdAt" <= ${window.endAtOrBefore}`);
+  return sqlWhere(conditions);
 }
