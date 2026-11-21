@@ -17,9 +17,12 @@ import type { Database } from "bun:sqlite";
 import type {
   ApiKeyRef,
   ApiKeyStatusRow,
+  RoutingCandidateMatch,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
+  TaskAttachmentRow,
+  TaskSteeringMessageRow,
 } from "@desplega/storage";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
@@ -251,6 +254,7 @@ import {
   threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { taskAttachmentWrite } from "./db/tasks/attachment-write";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
@@ -1072,13 +1076,8 @@ export async function getSlackTasksInThread(
   channelId: string,
   threadTs: string,
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE slackChannelId = ? AND slackThreadTs = ?
-       ORDER BY createdAt ASC, rowid ASC`,
-    [channelId, threadTs],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listTasksInSlackThread(channelId, threadTs);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 /**
@@ -1120,7 +1119,7 @@ export async function isSlackThreadAwaitingHuman(
 }
 
 export async function markTaskSlackReplySent(taskId: string): Promise<void> {
-  await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+  await getStorage().repos.tasks.markTaskSlackReplySent(taskId);
 }
 
 export async function setSlackMessageTracking(
@@ -1130,21 +1129,7 @@ export async function setSlackMessageTracking(
     slackTreeRootMessageTs?: string | null;
   },
 ): Promise<void> {
-  const sets: string[] = [];
-  const args: (string | null)[] = [];
-
-  if (Object.hasOwn(fields, "slackProgressMessageTs")) {
-    sets.push("slackProgressMessageTs = ?");
-    args.push(fields.slackProgressMessageTs ?? null);
-  }
-  if (Object.hasOwn(fields, "slackTreeRootMessageTs")) {
-    sets.push("slackTreeRootMessageTs = ?");
-    args.push(fields.slackTreeRootMessageTs ?? null);
-  }
-  if (sets.length === 0) return;
-
-  args.push(taskId);
-  await getDbClient().run(`UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = ?`, args);
+  await getStorage().repos.tasks.setTaskSlackTracking(taskId, fields);
 }
 
 export async function updateTaskVcs(
@@ -1156,13 +1141,12 @@ export async function updateTaskVcs(
     vcsUrl: string;
   },
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().transaction(async () => {
-    const updated = await getDbClient().get<AgentTaskRow>(
-      `UPDATE agent_tasks
-       SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
-       WHERE id = ? RETURNING *`,
-      [vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId],
-    );
+  const row = await getStorage().transaction(async () => {
+    const updated = (await getStorage().repos.tasks.setTaskVcs(
+      taskId,
+      vcs,
+      new Date().toISOString(),
+    )) as AgentTaskRow | null;
     if (updated) {
       await reconcileTaskPullRequestAttachments(taskId, updated.agentId, [
         updated.output,
@@ -1184,31 +1168,6 @@ export async function updateTaskVcs(
 // idempotent re-calls don't fan out duplicate rows. The `kind` enum here
 // MUST stay in sync with the SQL CHECK constraint (migration 072) and the
 // `TaskAttachmentKindSchema` zod enum.
-
-type TaskAttachmentRow = {
-  id: string;
-  task_id: string;
-  agent_id: string | null;
-  name: string;
-  kind: string;
-  url: string | null;
-  path: string | null;
-  page_id: string | null;
-  provider_id: string | null;
-  provider_key: string | null;
-  capabilities: string | null;
-  agent_fs_org_id: string | null;
-  agent_fs_drive_id: string | null;
-  mime_type: string | null;
-  size_bytes: number | null;
-  sha256: string | null;
-  intent: string | null;
-  description: string | null;
-  is_primary: number;
-  created_at: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
   return {
@@ -1249,12 +1208,6 @@ function parseAttachmentCapabilities(value: string | null): Record<string, unkno
   }
 }
 
-function stringifyAttachmentCapabilities(
-  value: Record<string, unknown> | undefined,
-): string | null {
-  return value ? JSON.stringify(value) : null;
-}
-
 export interface InsertTaskAttachmentInput {
   taskId: string;
   agentId: string | null;
@@ -1291,7 +1244,7 @@ export interface InsertTaskAttachmentInput {
 export async function insertTaskAttachment(
   input: InsertTaskAttachmentInput,
 ): Promise<TaskAttachment> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const attachment = await insertTaskAttachmentRow(input);
     if (attachment.kind === "agent-fs" && attachment.providerId && attachment.providerKey) {
       const task = await getTaskById(input.taskId);
@@ -1336,12 +1289,9 @@ export async function recordTaskPullRequestAttachments(
   const pullRequests = extractGitHubPullRequestUrls(text);
   if (pullRequests.length === 0) return [];
 
-  const existingRows = await getDbClient().query<{ url: string }>(
-    "SELECT url FROM task_attachments WHERE task_id = ? AND kind = 'url' AND url IS NOT NULL",
-    [taskId],
-  );
+  const existingUrls = await getStorage().repos.tasks.listUrlAttachmentUrls(taskId);
   const existingPullRequests = new Set(
-    existingRows.flatMap((row) => extractGitHubPullRequestUrls(row.url)).map(pullRequestKey),
+    existingUrls.flatMap((url) => extractGitHubPullRequestUrls(url)).map(pullRequestKey),
   );
   const stored: TaskAttachment[] = [];
   for (const pullRequest of pullRequests) {
@@ -1375,14 +1325,10 @@ async function reconcileTaskPullRequestAttachments(
 ): Promise<TaskAttachment[]> {
   const desiredPullRequests = sourceTexts.flatMap(extractGitHubPullRequestUrls);
   const desiredKeys = new Set(desiredPullRequests.map(pullRequestKey));
-  const generatedRows = await getDbClient().query<{ id: string; name: string; url: string }>(
-    `SELECT id, name, url
-     FROM task_attachments
-     WHERE task_id = ?
-       AND kind = 'url'
-       AND url IS NOT NULL
-       AND json_extract(capabilities, '$.${SERVER_GENERATED_ATTACHMENT_CAPABILITY}') = ?`,
-    [taskId, GENERATED_PULL_REQUEST_SOURCE],
+  const generatedRows = await getStorage().repos.tasks.listGeneratedUrlAttachments(
+    taskId,
+    SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+    GENERATED_PULL_REQUEST_SOURCE,
   );
 
   for (const row of generatedRows) {
@@ -1393,7 +1339,7 @@ async function reconcileTaskPullRequestAttachments(
       row.name !== expectedName ||
       !desiredKeys.has(pullRequestKey(pullRequest))
     ) {
-      await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [row.id]);
+      await getStorage().repos.tasks.deleteTaskAttachment(row.id);
     }
   }
 
@@ -1405,81 +1351,34 @@ async function reconcileTaskPullRequestAttachments(
 }
 
 async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promise<TaskAttachment> {
+  const tasks = getStorage().repos.tasks;
   if (input.sha256) {
-    const existing = await getDbClient().get<TaskAttachmentRow>(
-      "SELECT * FROM task_attachments WHERE task_id = ? AND sha256 = ? LIMIT 1",
-      [input.taskId, input.sha256],
-    );
+    const existing = await tasks.findTaskAttachmentBySha256(input.taskId, input.sha256);
     if (existing) return rowToTaskAttachment(existing);
   }
 
-  const tupleExisting = await getDbClient().get<TaskAttachmentRow>(
-    `SELECT * FROM task_attachments
-       WHERE task_id = ?
-         AND kind = ?
-         AND IFNULL(path, '')    = ?
-         AND IFNULL(url, '')     = ?
-         AND IFNULL(page_id, '') = ?
-         AND name = ?
-       ORDER BY created_at ASC
-       LIMIT 1`,
-    [input.taskId, input.kind, input.path ?? "", input.url ?? "", input.pageId ?? "", input.name],
-  );
+  const tupleExisting = await tasks.findTaskAttachmentByTuple({
+    taskId: input.taskId,
+    kind: input.kind,
+    path: input.path ?? "",
+    url: input.url ?? "",
+    pageId: input.pageId ?? "",
+    name: input.name,
+  });
   if (tupleExisting) return rowToTaskAttachment(tupleExisting);
 
-  const id = crypto.randomUUID();
-  const row = await getDbClient().get<TaskAttachmentRow>(
-    `INSERT INTO task_attachments
-         (id, task_id, agent_id, name, kind, url, path, page_id,
-          provider_id, provider_key, capabilities,
-          agent_fs_org_id, agent_fs_drive_id,
-          mime_type, size_bytes, sha256, intent, description, is_primary,
-          created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      input.taskId,
-      input.agentId ?? null,
-      input.name,
-      input.kind,
-      input.url ?? null,
-      input.path ?? null,
-      input.pageId ?? null,
-      input.providerId ?? defaultProviderId(input.kind),
-      input.providerKey ?? defaultProviderKey(input),
-      stringifyAttachmentCapabilities(input.capabilities),
-      input.orgId ?? null,
-      input.driveId ?? null,
-      input.mimeType ?? null,
-      input.sizeBytes ?? null,
-      input.sha256 ?? null,
-      input.intent ?? null,
-      input.description ?? null,
-      input.isPrimary ? 1 : 0,
-      input.createdBy ?? null,
-      input.updatedBy ?? input.createdBy ?? null,
-    ],
-  );
+  const row = await tasks.insertTaskAttachment({
+    id: crypto.randomUUID(),
+    task_id: input.taskId,
+    ...taskAttachmentWrite(input),
+    created_by: input.createdBy ?? null,
+    updated_by: input.updatedBy ?? input.createdBy ?? null,
+  });
 
   if (!row) {
     throw new Error("Failed to insert task attachment");
   }
   return rowToTaskAttachment(row);
-}
-
-function defaultProviderId(kind: TaskAttachment["kind"]): string {
-  if (kind === "agent-fs" || kind === "shared-fs") return "agent-fs";
-  return kind;
-}
-
-function defaultProviderKey(
-  input: Pick<InsertTaskAttachmentInput, "kind" | "path" | "url" | "pageId">,
-): string | null {
-  if (input.kind === "agent-fs" || input.kind === "shared-fs") return input.path ?? null;
-  if (input.kind === "url") return input.url ?? null;
-  if (input.kind === "page") return input.pageId ?? null;
-  return null;
 }
 
 // ============================================================================
@@ -1912,99 +1811,26 @@ export async function moveAssetKey(input: {
 }
 
 export async function deleteTaskAttachment(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.tasks.deleteTaskAttachment(id)) > 0;
 }
 
 export async function replaceTaskAttachment(
   id: string,
   input: Omit<InsertTaskAttachmentInput, "taskId">,
 ): Promise<TaskAttachment | null> {
-  const row = await getDbClient().get<TaskAttachmentRow>(
-    `UPDATE task_attachments
-       SET agent_id = ?,
-           name = ?,
-           kind = ?,
-           url = ?,
-           path = ?,
-           page_id = ?,
-           provider_id = ?,
-           provider_key = ?,
-           capabilities = ?,
-           agent_fs_org_id = ?,
-           agent_fs_drive_id = ?,
-           mime_type = ?,
-           size_bytes = ?,
-           sha256 = ?,
-           intent = ?,
-           description = ?,
-           is_primary = ?,
-           updated_by = ?
-       WHERE id = ?
-       RETURNING *`,
-    [
-      input.agentId ?? null,
-      input.name,
-      input.kind,
-      input.url ?? null,
-      input.path ?? null,
-      input.pageId ?? null,
-      input.providerId ?? defaultProviderId(input.kind),
-      input.providerKey ?? defaultProviderKey(input),
-      stringifyAttachmentCapabilities(input.capabilities),
-      input.orgId ?? null,
-      input.driveId ?? null,
-      input.mimeType ?? null,
-      input.sizeBytes ?? null,
-      input.sha256 ?? null,
-      input.intent ?? null,
-      input.description ?? null,
-      input.isPrimary ? 1 : 0,
-      input.updatedBy ?? null,
-      id,
-    ],
-  );
+  const row = await getStorage().repos.tasks.replaceTaskAttachment(id, taskAttachmentWrite(input));
 
   return row ? rowToTaskAttachment(row) : null;
 }
 
 export async function getTaskAttachments(taskId: string): Promise<TaskAttachment[]> {
-  const rows = await getDbClient().query<TaskAttachmentRow>(
-    "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
-    [taskId],
-  );
+  const rows = await getStorage().repos.tasks.listTaskAttachments(taskId);
   return rows.map(rowToTaskAttachment);
 }
 
 // ============================================================================
 // Task Steering Messages
 // ============================================================================
-
-type TaskSteeringMessageRow = {
-  id: string;
-  task_id: string;
-  body: string;
-  mode: string;
-  status: string;
-  delivered_mode: string | null;
-  source: string;
-  sender_name?: string | null;
-  created_by_kind: string;
-  created_by_user_id: string | null;
-  created_by_agent_id: string | null;
-  promoted_task_id: string | null;
-  created_at: string;
-  delivered_at: string | null;
-  handled_at: string | null;
-  handled_note: string | null;
-};
-
-// Resolve names in the API so workers need no database access or identity lookups.
-const STEERING_MESSAGE_SELECT = `SELECT m.*,
-  CASE m.created_by_kind WHEN 'user' THEN u.name WHEN 'agent' THEN a.name END AS sender_name
-  FROM task_steering_messages m
-  LEFT JOIN users u ON m.created_by_kind = 'user' AND u.id = m.created_by_user_id
-  LEFT JOIN agents a ON m.created_by_kind = 'agent' AND a.id = m.created_by_agent_id`;
 
 function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
   const senderId =
@@ -2047,26 +1873,19 @@ export async function createSteeringMessage(
   args: CreateSteeringMessageArgs,
 ): Promise<SteeringMessage> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `INSERT INTO task_steering_messages
-         (id, task_id, body, mode, source, created_by_kind,
-          created_by_user_id, created_by_agent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      args.taskId,
-      args.body,
-      args.mode,
-      args.source,
-      args.createdByKind,
-      args.createdByUserId ?? null,
-      args.createdByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.tasks.insertSteeringMessage({
+    id,
+    task_id: args.taskId,
+    body: args.body,
+    mode: args.mode,
+    source: args.source,
+    created_by_kind: args.createdByKind,
+    created_by_user_id: args.createdByUserId ?? null,
+    created_by_agent_id: args.createdByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create steering message");
 
-  getDbClient().afterCommit(async () => {
+  getStorage().afterCommit(async () => {
     const task = await getTaskById(args.taskId);
     if (task?.agentId) publishWorkerNudge(task.agentId, { kind: "steer", taskId: args.taskId });
   });
@@ -2092,28 +1911,12 @@ export async function getSteeringMessagesForTask(
   taskId: string,
   opts?: { status?: SteeringStatus },
 ): Promise<SteeringMessage[]> {
-  const rows = opts?.status
-    ? await getDbClient().query<TaskSteeringMessageRow>(
-        `${STEERING_MESSAGE_SELECT}
-           WHERE m.task_id = ? AND m.status = ?
-           ORDER BY m.created_at ASC, m.rowid ASC`,
-        [taskId, opts.status],
-      )
-    : await getDbClient().query<TaskSteeringMessageRow>(
-        `${STEERING_MESSAGE_SELECT}
-           WHERE m.task_id = ?
-           ORDER BY m.created_at ASC, m.rowid ASC`,
-        [taskId],
-      );
+  const rows = await getStorage().repos.tasks.listSteeringMessages(taskId, opts?.status);
   return rows.map(rowToSteeringMessage);
 }
 
 export async function getSteeringMessageById(id: string): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `${STEERING_MESSAGE_SELECT}
-       WHERE m.id = ?`,
-    [id],
-  );
+  const row = await getStorage().repos.tasks.findSteeringMessage(id);
   return row ? rowToSteeringMessage(row) : null;
 }
 
@@ -2125,14 +1928,7 @@ export async function getPendingSteeringForAgent(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<SteeringMessage[]> {
-  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
-  const rows = await getDbClient().query<TaskSteeringMessageRow>(
-    `${STEERING_MESSAGE_SELECT}
-       JOIN agent_tasks t ON t.id = m.task_id
-       WHERE t.agentId = ? AND m.status = 'pending'${readable ? ` AND ${readable.sql}` : ""}
-       ORDER BY m.created_at ASC, m.rowid ASC`,
-    [agentId, ...(readable?.params ?? [])],
-  );
+  const rows = await getStorage().repos.tasks.listPendingSteeringForAgent(agentId, readableBy);
   return rows.map(rowToSteeringMessage);
 }
 
@@ -2145,14 +1941,10 @@ export async function markSteeringDelivered(
   deliveredMode: SteerMode,
   expectedTaskId?: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'delivered',
-           delivered_mode = ?,
-           delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'pending' AND task_id = COALESCE(?, task_id)
-       RETURNING *`,
-    [deliveredMode, id, expectedTaskId ?? null],
+  const row = await getStorage().repos.tasks.markSteeringDelivered(
+    id,
+    deliveredMode,
+    expectedTaskId ?? null,
   );
 
   if (row) {
@@ -2177,15 +1969,7 @@ export async function markSteeringHandled(
   id: string,
   note?: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'handled',
-           handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-           handled_note = ?
-       WHERE id = ? AND status = 'delivered'
-       RETURNING *`,
-    [note ?? null, id],
-  );
+  const row = await getStorage().repos.tasks.markSteeringHandled(id, note ?? null);
   return row ? await getSteeringMessageById(id) : null;
 }
 
@@ -2193,36 +1977,16 @@ export async function markSteeringPromoted(
   id: string,
   promotedTaskId: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'promoted',
-           promoted_task_id = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [promotedTaskId, id],
-  );
+  const row = await getStorage().repos.tasks.markSteeringPromoted(id, promotedTaskId);
   return row ? await getSteeringMessageById(id) : null;
 }
 
 export async function cancelPendingSteeringForTask(taskId: string): Promise<number> {
-  const result = await getDbClient().run(
-    `UPDATE task_steering_messages
-       SET status = 'cancelled'
-       WHERE task_id = ? AND status = 'pending'`,
-    [taskId],
-  );
-  return result.changes;
+  return await getStorage().repos.tasks.cancelPendingSteering(taskId);
 }
 
 export async function hasPendingSteering(taskId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ present: number }>(
-    `SELECT 1 AS present
-         FROM task_steering_messages
-         WHERE task_id = ? AND status = 'pending'
-         LIMIT 1`,
-    [taskId],
-  );
-  return row !== null;
+  return await getStorage().repos.tasks.hasPendingSteering(taskId);
 }
 
 // ============================================================================
@@ -2403,27 +2167,14 @@ export async function findRecentSimilarTasks(opts: {
   limit?: number;
 }): Promise<AgentTask[]> {
   const since = new Date(Date.now() - (opts.windowMinutes ?? 10) * 60 * 1000).toISOString();
-  const conditions: string[] = ["createdAt > ?"];
-  const params: (string | number)[] = [since];
-
-  // Exclude all terminal statuses — only active or recently created.
-  // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
-
-  if (opts.creatorAgentId) {
-    conditions.push("creatorAgentId = ?");
-    params.push(opts.creatorAgentId);
-  }
-  if (opts.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-
-  const limit = opts.limit ?? 50;
-  const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
-
-  const rows = await getDbClient().query<AgentTaskRow>(query, params);
-  return rows.map(rowToAgentTask);
+  // Excludes every terminal status (`TERMINAL_TASK_STATUSES` in src/types.ts).
+  const rows = await getStorage().repos.tasks.listRecentSimilarTasks({
+    since,
+    creatorAgentId: opts.creatorAgentId,
+    agentId: opts.agentId,
+    limit: opts.limit ?? 50,
+  });
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 type RoutingDecisionWorkerStatus = {
@@ -2448,71 +2199,41 @@ type RoutingDecisionSnapshot = {
   };
 };
 
-const ROUTING_HOLDER_SQL = `CASE
-  WHEN status IN ('draft', 'offered', 'reviewing') AND offeredTo IS NOT NULL THEN offeredTo
-  ELSE COALESCE(agentId, offeredTo)
-END`;
-
 async function findLatestRoutingCandidate(
-  where: string,
-  params: Array<string | number>,
+  match: RoutingCandidateMatch,
 ): Promise<RoutingDecisionCandidate | null> {
-  const row = await getDbClient().get<RoutingDecisionCandidate>(
-    `SELECT id AS taskId, ${ROUTING_HOLDER_SQL} AS agentId
-       FROM agent_tasks
-       WHERE ${where}
-         AND ${ROUTING_HOLDER_SQL} IN (SELECT id FROM agents WHERE isLead = 0)
-       ORDER BY createdAt DESC, rowid DESC
-       LIMIT 1`,
-    params,
-  );
-  return row ?? null;
+  return await getStorage().repos.tasks.findLatestRoutingCandidate(match);
 }
 
 async function captureRoutingDecisionSnapshot(
   options: CreateTaskOptions,
 ): Promise<RoutingDecisionSnapshot> {
-  // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
-  // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
-  // over agentId/offeredTo that reads each agent's whole task history.
-  const workerStatuses = await getDbClient().query<RoutingDecisionWorkerStatus>(
-    `WITH open_task AS MATERIALIZED (
-         SELECT id, agentId, offeredTo, status FROM agent_tasks
-          WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
-       )
-       SELECT agent.id AS agentId, agent.status,
-         COUNT(task.id) AS openTaskCount,
-         SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
-       FROM agents agent
-       LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
-       WHERE agent.isLead = 0
-       GROUP BY agent.id, agent.status
-       ORDER BY agent.id`,
-    [...OPEN_TASK_STATUSES],
-  );
+  const workerStatuses = (await getStorage().repos.tasks.listRoutingWorkerStatuses(
+    OPEN_TASK_STATUSES,
+  )) as RoutingDecisionWorkerStatus[];
 
   const samePr =
     options.vcsRepo && options.vcsNumber != null
-      ? await findLatestRoutingCandidate("vcsRepo = ? AND vcsNumber = ?", [
-          options.vcsRepo,
-          options.vcsNumber,
-        ])
+      ? await findLatestRoutingCandidate({
+          vcsRepo: options.vcsRepo,
+          vcsNumber: options.vcsNumber,
+        })
       : null;
 
   let sameThread: RoutingDecisionCandidate | null = null;
   if (options.slackChannelId && options.slackThreadTs) {
-    sameThread = await findLatestRoutingCandidate("slackChannelId = ? AND slackThreadTs = ?", [
-      options.slackChannelId,
-      options.slackThreadTs,
-    ]);
+    sameThread = await findLatestRoutingCandidate({
+      slackChannelId: options.slackChannelId,
+      slackThreadTs: options.slackThreadTs,
+    });
   } else if (options.agentmailThreadId) {
-    sameThread = await findLatestRoutingCandidate("agentmailThreadId = ?", [
-      options.agentmailThreadId,
-    ]);
+    sameThread = await findLatestRoutingCandidate({
+      agentmailThreadId: options.agentmailThreadId,
+    });
   }
 
   const sameRepo = options.vcsRepo
-    ? await findLatestRoutingCandidate("vcsRepo = ?", [options.vcsRepo])
+    ? await findLatestRoutingCandidate({ vcsRepo: options.vcsRepo })
     : null;
 
   return {
@@ -2952,7 +2673,8 @@ export async function createTaskExtended(
   // issue. The FIFO lock serializes whole transactions, so the loser's re-read
   // observes the winner's committed row. Pre-checks at the call sites
   // (src/tools/send-task.ts, src/linear/sync.ts) stay a fast path only.
-  const claim = await getDbClient().transaction<
+  const tasks = getStorage().repos.tasks;
+  const claim = await getStorage().transaction<
     { existing: ExistingTrackerContextWork } | { row: AgentTaskRow }
   >(async () => {
     // A workflow step's task commits only while the step may still start
@@ -2973,11 +2695,7 @@ export async function createTaskExtended(
     // this child, so take the parent's key as it is now.
     const parentKey =
       keyInherited && options?.parentTaskId
-        ? (
-            await getDbClient().get<{ key: string }>('SELECT "key" FROM agent_tasks WHERE id = ?', [
-              options.parentTaskId,
-            ])
-          )?.key
+        ? ((await tasks.findTaskKey(options.parentTaskId)) ?? undefined)
         : undefined;
     const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
 
@@ -2999,104 +2717,87 @@ export async function createTaskExtended(
     });
 
     const provenance = getCurrentRunProvenance();
-    const inserted = await getDbClient().get<AgentTaskRow>(
-      `INSERT INTO agent_tasks (
-        id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
-        taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId, slackParticipants,
-        vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
-        vcsInstallationId, vcsNodeId,
-        agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, modelGroup, fallbackHops, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
-        sourceStepId, sourceScriptRunId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      [
-        id,
-        insertKey,
-        options?.agentId ?? null,
-        options?.creatorAgentId ?? null,
-        // Free text from every task source; scrub at the single INSERT.
-        scrubSecrets(task),
-        status,
-        options?.source ?? "mcp",
-        options?.routingReason ?? null,
-        options?.routingSource ?? null,
-        options?.routingNote ?? null,
-        options?.taskType ?? null,
-        JSON.stringify(options?.tags ?? []),
-        options?.priority ?? 50,
-        JSON.stringify(options?.dependsOn ?? []),
-        options?.offeredTo ?? null,
-        options?.offeredTo ? now : null,
-        options?.slackChannelId ?? null,
-        options?.slackThreadTs ?? null,
-        options?.slackTriggerMessageTs ?? null,
-        options?.slackUserId ?? null,
-        options?.slackParticipants ? JSON.stringify(options.slackParticipants) : null,
-        options?.vcsProvider ?? null,
-        options?.vcsRepo ?? null,
-        options?.vcsEventType ?? null,
-        options?.vcsNumber ?? null,
-        options?.vcsCommentId ?? null,
-        options?.vcsAuthor ?? null,
-        options?.vcsUrl ?? null,
-        options?.vcsInstallationId ?? null,
-        options?.vcsNodeId ?? null,
-        options?.agentmailInboxId ?? null,
-        options?.agentmailMessageId ?? null,
-        options?.agentmailThreadId ?? null,
-        options?.mentionMessageId ?? null,
-        options?.mentionChannelId ?? null,
-        options?.dir ?? null,
-        options?.parentTaskId ?? null,
-        options?.dispatchedByTaskId ?? null,
-        options?.model ?? null,
-        options?.modelTier ?? null,
-        options?.effort ?? null,
-        options?.profile?.trim() || null,
-        options?.modelGroup?.trim() || null,
-        options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
-        options?.scheduleId ?? null,
-        options?.workflowRunId ?? null,
-        options?.workflowRunStepId ?? null,
-        options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
-        options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
-        options?.requestedByUserId ?? null,
-        requestedByUserIdInherited ? 1 : 0,
-        options?.contextKey ?? null,
-        options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
-        pkg.version,
-        now,
-        now,
-        auditUserId,
-        auditUserId,
-        isHumanFree ? 1 : 0,
-        // A task a workflow node owns keeps only its workflowRunId: the engine
-        // can run that node inside the request of the script that triggered it.
-        options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
-        options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
-      ],
-    );
+    const inserted = (await tasks.insertTask({
+      id,
+      key: insertKey,
+      agentId: options?.agentId ?? null,
+      creatorAgentId: options?.creatorAgentId ?? null,
+      // Free text from every task source; scrub at the single INSERT.
+      task: scrubSecrets(task),
+      status,
+      source: options?.source ?? "mcp",
+      routing_reason: options?.routingReason ?? null,
+      routing_source: options?.routingSource ?? null,
+      routing_note: options?.routingNote ?? null,
+      taskType: options?.taskType ?? null,
+      tags: JSON.stringify(options?.tags ?? []),
+      priority: options?.priority ?? 50,
+      dependsOn: JSON.stringify(options?.dependsOn ?? []),
+      offeredTo: options?.offeredTo ?? null,
+      offeredAt: options?.offeredTo ? now : null,
+      slackChannelId: options?.slackChannelId ?? null,
+      slackThreadTs: options?.slackThreadTs ?? null,
+      slackTriggerMessageTs: options?.slackTriggerMessageTs ?? null,
+      slackUserId: options?.slackUserId ?? null,
+      slackParticipants: options?.slackParticipants
+        ? JSON.stringify(options.slackParticipants)
+        : null,
+      vcsProvider: options?.vcsProvider ?? null,
+      vcsRepo: options?.vcsRepo ?? null,
+      vcsEventType: options?.vcsEventType ?? null,
+      vcsNumber: options?.vcsNumber ?? null,
+      vcsCommentId: options?.vcsCommentId ?? null,
+      vcsAuthor: options?.vcsAuthor ?? null,
+      vcsUrl: options?.vcsUrl ?? null,
+      vcsInstallationId: options?.vcsInstallationId ?? null,
+      vcsNodeId: options?.vcsNodeId ?? null,
+      agentmailInboxId: options?.agentmailInboxId ?? null,
+      agentmailMessageId: options?.agentmailMessageId ?? null,
+      agentmailThreadId: options?.agentmailThreadId ?? null,
+      mentionMessageId: options?.mentionMessageId ?? null,
+      mentionChannelId: options?.mentionChannelId ?? null,
+      dir: options?.dir ?? null,
+      parentTaskId: options?.parentTaskId ?? null,
+      dispatchedByTaskId: options?.dispatchedByTaskId ?? null,
+      model: options?.model ?? null,
+      modelTier: options?.modelTier ?? null,
+      effort: options?.effort ?? null,
+      profile: options?.profile?.trim() || null,
+      modelGroup: options?.modelGroup?.trim() || null,
+      fallbackHops: options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
+      scheduleId: options?.scheduleId ?? null,
+      workflowRunId: options?.workflowRunId ?? null,
+      workflowRunStepId: options?.workflowRunStepId ?? null,
+      outputSchema: options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+      followUpConfig: options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
+      requestedByUserId: options?.requestedByUserId ?? null,
+      requestedByUserIdInherited,
+      contextKey: options?.contextKey ?? null,
+      routingAffinity: options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
+      swarmVersion: pkg.version,
+      createdAt: now,
+      lastUpdatedAt: now,
+      created_by: auditUserId,
+      updated_by: auditUserId,
+      isHumanFree,
+      // A task a workflow node owns keeps only its workflowRunId: the engine
+      // can run that node inside the request of the script that triggered it.
+      sourceStepId: options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
+      sourceScriptRunId: options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
+    })) as AgentTaskRow | null;
     if (!inserted) throw new Error("Failed to create task");
 
     if (routingDecisionSnapshot) {
       try {
-        await getDbClient().run(
-          `INSERT INTO routing_decisions (
-             task_id, selected_agent_id, captured_at, worker_statuses,
-             continuity_candidates, created_by, updated_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            options.offeredTo ?? options.agentId ?? null,
-            routingDecisionSnapshot.capturedAt,
-            JSON.stringify(routingDecisionSnapshot.workerStatuses),
-            JSON.stringify(routingDecisionSnapshot.continuityCandidates),
-            auditUserId,
-            auditUserId,
-          ],
-        );
+        await tasks.insertRoutingDecision({
+          task_id: id,
+          selected_agent_id: options.offeredTo ?? options.agentId ?? null,
+          captured_at: routingDecisionSnapshot.capturedAt,
+          worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
+          continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
+          created_by: auditUserId,
+          updated_by: auditUserId,
+        });
       } catch (error) {
         logRoutingDecisionFailure(id, "write", error);
       }
@@ -3196,11 +2897,7 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   // Status goes directly to 'in_progress' because the claiming session is
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.claimUnassignedTask(taskId, agentId, now);
 
   if (row) {
     try {
@@ -3214,7 +2911,7 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
     } catch {}
   }
 
-  const result = row ? rowToAgentTask(row) : null;
+  const result = row ? rowToAgentTask(row as AgentTaskRow) : null;
   // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
   if (result) {
     emitTaskStarted(result);
@@ -3232,16 +2929,12 @@ export async function releaseTask(
   if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?, pool_wake_at = NULL
-       WHERE id = ? AND status IN ('pending', 'in_progress')
-       ${wakeSnapshot ? "AND status = 'pending' AND agentId = ? AND pool_wake_at = ? AND COALESCE(routing_reason, '') != 'human_pinned'" : ""}
-       RETURNING *`,
-    [
-      now,
-      taskId,
-      ...(wakeSnapshot ? [wakeSnapshot.agentId ?? null, wakeSnapshot.poolWakeAt ?? null] : []),
-    ],
+  const row = await getStorage().repos.tasks.releaseTaskToPool(
+    taskId,
+    now,
+    wakeSnapshot
+      ? { agentId: wakeSnapshot.agentId ?? null, poolWakeAt: wakeSnapshot.poolWakeAt ?? null }
+      : undefined,
   );
 
   if (row) {
@@ -3256,7 +2949,7 @@ export async function releaseTask(
     } catch {}
     // The sweep routes released wakes itself, preserving its exclusion of the old agent.
     if (isRuntimePoolsEnabled() && !wakeSnapshot)
-      getDbClient().afterCommit(() => {
+      getStorage().afterCommit(() => {
         void import("../workflows/event-bus")
           .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
           .catch((error) =>
@@ -3265,7 +2958,7 @@ export async function releaseTask(
       });
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
@@ -3298,11 +2991,7 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
     return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    [agentId, now, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.acceptOfferedTask(taskId, agentId, now);
 
   if (row) {
     try {
@@ -3314,10 +3003,10 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
         newValue: "pending",
       });
     } catch {}
-    getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
+    getStorage().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 export async function rejectTask(
@@ -3332,13 +3021,7 @@ export async function rejectTask(
     return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET
-        status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
-        rejectionReason = ?, lastUpdatedAt = ?, pool_wake_at = NULL
-       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    [reason ?? null, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.rejectOfferedTask(taskId, reason ?? null, now);
 
   if (row) {
     try {
@@ -3352,7 +3035,7 @@ export async function rejectTask(
       });
     } catch {}
     if (isRuntimePoolsEnabled())
-      getDbClient().afterCommit(() => {
+      getStorage().afterCommit(() => {
         void import("../workflows/event-bus")
           .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
           .catch((error) =>
@@ -3361,7 +3044,7 @@ export async function rejectTask(
       });
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 /**
@@ -3374,11 +3057,7 @@ export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | nul
   if (task.status !== "unassigned") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "unassigned", "backlog", now);
 
   if (row) {
     try {
@@ -3391,7 +3070,7 @@ export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | nul
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 /**
@@ -3403,11 +3082,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
   if (task.status !== "backlog") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'backlog' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "backlog", "unassigned", now);
 
   if (row) {
     try {
@@ -3420,7 +3095,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 /**
@@ -3436,18 +3111,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
  */
 export async function promoteDraftTask(taskId: string): Promise<AgentTask | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = CASE
-           WHEN offeredTo IS NOT NULL THEN 'offered'
-           WHEN agentId IS NOT NULL THEN 'pending'
-           ELSE 'unassigned'
-         END,
-         lastUpdatedAt = ?
-       WHERE id = ? AND status = 'draft'
-       RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.promoteDraftTask(taskId, now);
 
   if (row) {
     try {
@@ -3461,7 +3125,7 @@ export async function promoteDraftTask(taskId: string): Promise<AgentTask | null
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 /**
@@ -3470,10 +3134,7 @@ export async function promoteDraftTask(taskId: string): Promise<AgentTask | null
  * that outlasts the sweep window is still running. No-op once promoted.
  */
 export async function refreshDraftTaskLease(taskId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ? AND status = 'draft'",
-    [new Date().toISOString(), taskId],
-  );
+  await getStorage().repos.tasks.refreshDraftTaskLease(taskId, new Date().toISOString());
 }
 
 /**
@@ -3489,19 +3150,7 @@ export async function promoteAbandonedDraftTasks(timeoutMinutes: number = 5): Pr
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks
-       SET status = CASE
-           WHEN offeredTo IS NOT NULL THEN 'offered'
-           WHEN agentId IS NOT NULL THEN 'pending'
-           ELSE 'unassigned'
-         END,
-         lastUpdatedAt = ?
-       WHERE status = 'draft' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.promoteDraftsIdleSince(cutoffTime, now);
 }
 
 /**
@@ -3512,13 +3161,7 @@ export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): P
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks SET status = 'offered', lastUpdatedAt = ?
-     WHERE status = 'reviewing' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.releaseReviewingIdleSince(cutoffTime, now);
 }
 
 /**
@@ -3552,27 +3195,12 @@ export async function releaseStaleOfferedTasksForOfflineAgents(
     }
   }
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks
-     SET status = 'unassigned', offeredTo = NULL, offeredAt = NULL, lastUpdatedAt = ?
-     WHERE status = 'offered'
-       AND offeredTo IS NOT NULL
-       ${reachable.length ? `AND offeredTo NOT IN (${reachable.map(() => "?").join(",")})` : ""}
-       AND NOT EXISTS (
-         SELECT 1 FROM agents WHERE agents.id = agent_tasks.offeredTo AND agents.status != 'offline'
-       )`,
-    [now, ...reachable],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.releaseOffersOfOfflineAgents(now, reachable);
 }
 
 export async function getOfferedTasksForAgent(agentId: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
-    [agentId],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listOfferedTasksForAgent(agentId);
+  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
 }
 
 /**
@@ -3606,11 +3234,7 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   }
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'offered' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "offered", "reviewing", now);
 
   if (row) {
     try {
@@ -3625,23 +3249,16 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
       // Log creation is best-effort
     }
   }
-  return row ? rowToAgentTask(row) : null;
+  return row ? rowToAgentTask(row as AgentTaskRow) : null;
 }
 
 export async function getUnassignedTasksCount(): Promise<number> {
-  const result = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-  );
-  return result?.count ?? 0;
+  return await getStorage().repos.tasks.countUnassignedTasks();
 }
 
 /** Get unassigned task IDs, ordered by priority (highest first) then creation time */
 export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
-  const rows = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
-    [limit],
-  );
-  return rows.map((r) => r.id);
+  return await getStorage().repos.tasks.listUnassignedTaskIds(limit);
 }
 
 /**
@@ -3684,14 +3301,11 @@ export async function getUnassignedTaskIdsForAgent(
   let offset = 0;
 
   while (eligible.length < limit && offset < scanCap) {
-    const rows = await getDbClient().query<AgentTaskRow>(
-      "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
-      [batchSize, offset],
-    );
+    const rows = await getStorage().repos.tasks.listUnassignedTasks(batchSize, offset);
     if (rows.length === 0) break;
 
     for (const row of rows) {
-      const task = rowToAgentTask(row);
+      const task = rowToAgentTask(row as AgentTaskRow);
       if (isAgentEligibleForTask(agent, task) && (!accept || (await accept(task)))) {
         eligible.push(task.id);
         if (eligible.length >= limit) break;
@@ -3741,14 +3355,9 @@ export async function getDependentTasks(
   parentId: string,
   opts?: { includeTerminal?: boolean },
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT t.*
-       FROM agent_tasks t, json_each(t.dependsOn) AS dep
-       WHERE dep.value = ?`,
-    [parentId],
-  );
+  const rows = await getStorage().repos.tasks.listDependentTasks(parentId);
 
-  const tasks = rows.map(rowToAgentTask);
+  const tasks = rows.map((row) => rowToAgentTask(row as AgentTaskRow));
   if (opts?.includeTerminal) return tasks;
   return tasks.filter((t) => !isTerminalTaskStatus(t.status));
 }

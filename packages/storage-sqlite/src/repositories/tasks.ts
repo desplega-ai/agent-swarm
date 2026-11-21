@@ -569,4 +569,48 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         SELECT "scheduleId" FROM deferred_task_waits WHERE status = 'pending'
       )`);
   }
+
+  listGeneratedUrlAttachments(
+    taskId: string,
+    capabilityKey: string,
+    source: string,
+  ): Promise<{ id: string; name: string; url: string }[]> {
+    return this.db.query<{ id: string; name: string; url: string }>(sql`
+      SELECT id, name, url FROM task_attachments
+      WHERE task_id = ${taskId}
+        AND kind = 'url'
+        AND url IS NOT NULL
+        AND json_extract(capabilities, ${`$.${capabilityKey}`}) = ${source}
+      ORDER BY rowid`);
+  }
+
+  listRoutingWorkerStatuses(
+    openStatuses: readonly string[],
+  ): Promise<
+    { agentId: string; status: string; activeTaskCount: number; openTaskCount: number }[]
+  > {
+    // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
+    // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
+    // over agentId/offeredTo that reads each agent's whole task history.
+    return this.db.query(sql`
+      WITH open_task AS MATERIALIZED (
+        SELECT id, "agentId", "offeredTo", status FROM agent_tasks
+        WHERE status IN (${sqlList(openStatuses)})
+      )
+      SELECT agent.id AS "agentId", agent.status,
+        COUNT(task.id) AS "openTaskCount",
+        SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS "activeTaskCount"
+      FROM agents agent
+      LEFT JOIN open_task task ON task."agentId" = agent.id OR task."offeredTo" = agent.id
+      WHERE agent."isLead" = 0
+      GROUP BY agent.id, agent.status
+      ORDER BY agent.id`);
+  }
+
+  listDependentTasks(parentId: string): Promise<TaskRow[]> {
+    return this.db.query<TaskRow>(sql`
+      SELECT t.* FROM agent_tasks t, json_each(t."dependsOn") AS dep
+      WHERE dep.value = ${parentId}
+      ORDER BY t.rowid`);
+  }
 }

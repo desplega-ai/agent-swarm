@@ -1065,5 +1065,290 @@ export function tasksContract(engine: ContractEngine): void {
         /UNIQUE|unique/,
       );
     });
+
+    // ---- db.ts move: Slack/VCS tracking, attachments, steering, pool lifecycle ----
+
+    const addAgent = (id: string, isLead: boolean, status = "idle") =>
+      storage.executor.run(sql`
+        INSERT INTO agents (id, name, "isLead", status, "createdAt", "lastUpdatedAt")
+        VALUES (${id}, ${id}, ${isLead}, ${status}, ${T0}, ${T0})`);
+
+    test("Slack tracking sets only the given columns; thread tasks keep insertion order on ties", async () => {
+      await seedTask(storage, { id: "b", slackChannelId: "C", slackThreadTs: "1" });
+      await seedTask(storage, { id: "a", slackChannelId: "C", slackThreadTs: "1" });
+      await seedTask(storage, { id: "z", slackChannelId: "C", slackThreadTs: "1", createdAt: T1 });
+      expect(ids(await repo.listTasksInSlackThread("C", "1"))).toEqual(["b", "a", "z"]);
+      await repo.markTaskSlackReplySent("a");
+      await repo.setTaskSlackTracking("a", { slackProgressMessageTs: "p" });
+      await repo.setTaskSlackTracking("a", {});
+      let row = await repo.findTaskById("a");
+      expect(row?.slackReplySent).toBe(1);
+      expect(row?.slackProgressMessageTs).toBe("p");
+      expect(row?.slackTreeRootMessageTs).toBeNull();
+      await repo.setTaskSlackTracking("a", {
+        slackProgressMessageTs: null,
+        slackTreeRootMessageTs: "r",
+      });
+      row = await repo.findTaskById("a");
+      expect(row?.slackProgressMessageTs).toBeNull();
+      expect(row?.slackTreeRootMessageTs).toBe("r");
+      const vcs = await repo.setTaskVcs(
+        "a",
+        { vcsProvider: "github", vcsRepo: "o/r", vcsNumber: 7, vcsUrl: "u" },
+        T1,
+      );
+      expect([vcs?.vcsNumber, vcs?.lastUpdatedAt]).toEqual([7, T1]);
+      expect(
+        await repo.setTaskVcs(
+          "nope",
+          { vcsProvider: "g", vcsRepo: "r", vcsNumber: 1, vcsUrl: "u" },
+          T1,
+        ),
+      ).toBeNull();
+    });
+
+    test("task attachments: dedup lookups, generated rows, replace and order", async () => {
+      await seedTask(storage, { id: "t" });
+      const write = {
+        agent_id: null,
+        name: "n",
+        kind: "url",
+        url: "https://x/1",
+        path: null,
+        page_id: null,
+        provider_id: "url",
+        provider_key: null,
+        capabilities: JSON.stringify({ gen: "src" }),
+        agent_fs_org_id: null,
+        agent_fs_drive_id: null,
+        mime_type: null,
+        size_bytes: null,
+        sha256: "s1",
+        intent: null,
+        description: null,
+        is_primary: true,
+        updated_by: null,
+      };
+      const a = await repo.insertTaskAttachment({
+        ...write,
+        id: "a1",
+        task_id: "t",
+        created_by: null,
+      });
+      expect(a?.is_primary).toBe(1);
+      expect(typeof a?.created_at).toBe("string");
+      await repo.insertTaskAttachment({
+        ...write,
+        id: "a2",
+        task_id: "t",
+        created_by: null,
+        url: "https://x/2",
+        sha256: null,
+        capabilities: null,
+        is_primary: false,
+      });
+      expect((await repo.findTaskAttachmentBySha256("t", "s1"))?.id).toBe("a1");
+      expect(await repo.findTaskAttachmentBySha256("t", "zz")).toBeNull();
+      const tuple = {
+        taskId: "t",
+        kind: "url",
+        path: "",
+        url: "https://x/2",
+        pageId: "",
+        name: "n",
+      };
+      expect((await repo.findTaskAttachmentByTuple(tuple))?.id).toBe("a2");
+      expect(await repo.findTaskAttachmentByTuple({ ...tuple, path: "p" })).toBeNull();
+      expect(new Set(await repo.listUrlAttachmentUrls("t"))).toEqual(
+        new Set(["https://x/1", "https://x/2"]),
+      );
+      expect(await repo.listGeneratedUrlAttachments("t", "gen", "src")).toEqual([
+        { id: "a1", name: "n", url: "https://x/1" },
+      ]);
+      expect(ids(await repo.listTaskAttachments("t"))).toEqual(["a1", "a2"]);
+      const replaced = await repo.replaceTaskAttachment("a2", {
+        ...write,
+        name: "m",
+        is_primary: false,
+      });
+      expect([replaced?.name, replaced?.is_primary, replaced?.created_by]).toEqual(["m", 0, null]);
+      expect(await repo.replaceTaskAttachment("zz", write)).toBeNull();
+      expect(await repo.deleteTaskAttachment("a1")).toBe(1);
+      expect(await repo.deleteTaskAttachment("a1")).toBe(0);
+    });
+
+    test("steering messages: sender names, guarded transitions, per-agent pending order", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'Ann')`);
+      await addAgent("ag", false);
+      await seedTask(storage, { id: "t", agentId: "ag" });
+      const base = {
+        task_id: "t",
+        body: "b",
+        mode: "queue",
+        source: "ui",
+        created_by_user_id: null,
+        created_by_agent_id: null,
+      };
+      const m1 = await repo.insertSteeringMessage({
+        ...base,
+        id: "m1",
+        created_by_kind: "user",
+        created_by_user_id: "u1",
+      });
+      expect([m1?.status, m1?.delivered_at]).toEqual(["pending", null]);
+      await repo.insertSteeringMessage({
+        ...base,
+        id: "m2",
+        created_by_kind: "agent",
+        created_by_agent_id: "ag",
+      });
+      await repo.insertSteeringMessage({ ...base, id: "m3", created_by_kind: "system" });
+      expect((await repo.findSteeringMessage("m1"))?.sender_name).toBe("Ann");
+      expect((await repo.findSteeringMessage("m2"))?.sender_name).toBe("ag");
+      expect((await repo.findSteeringMessage("m3"))?.sender_name).toBeNull();
+      expect(ids(await repo.listPendingSteeringForAgent("ag"))).toEqual(["m1", "m2", "m3"]);
+      expect(ids(await repo.listPendingSteeringForAgent("ag", { userId: null }))).toEqual([
+        "m1",
+        "m2",
+        "m3",
+      ]);
+      expect(await repo.markSteeringDelivered("m1", "steer", "other")).toBeNull();
+      const delivered = await repo.markSteeringDelivered("m1", "steer", null);
+      expect(delivered?.status).toBe("delivered");
+      expect(delivered?.delivered_at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+      expect(await repo.markSteeringDelivered("m1", "steer", null)).toBeNull();
+      expect(await repo.markSteeringHandled("m2", null)).toBeNull();
+      expect((await repo.markSteeringHandled("m1", "ok"))?.handled_note).toBe("ok");
+      await seedTask(storage, { id: "t2" });
+      expect((await repo.markSteeringPromoted("m2", "t2"))?.promoted_task_id).toBe("t2");
+      expect(ids(await repo.listSteeringMessages("t"))).toEqual(["m1", "m2", "m3"]);
+      expect(ids(await repo.listSteeringMessages("t", "pending"))).toEqual(["m3"]);
+      expect(await repo.hasPendingSteering("t")).toBe(true);
+      expect(await repo.cancelPendingSteering("t")).toBe(1);
+      expect(await repo.hasPendingSteering("t")).toBe(false);
+    });
+
+    test("routing snapshot: candidates skip leads, worker statuses count open tasks", async () => {
+      await addAgent("lead", true);
+      await addAgent("w1", false);
+      await addAgent("w2", false, "busy");
+      await seedTask(storage, {
+        id: "a",
+        agentId: "w1",
+        vcsRepo: "r",
+        vcsNumber: 1,
+        status: "in_progress",
+      });
+      await seedTask(storage, {
+        id: "b",
+        agentId: "lead",
+        vcsRepo: "r",
+        vcsNumber: 1,
+        createdAt: T1,
+      });
+      await seedTask(storage, {
+        id: "c",
+        offeredTo: "w2",
+        agentId: "w1",
+        vcsRepo: "r",
+        status: "offered",
+      });
+      expect(await repo.findLatestRoutingCandidate({ vcsRepo: "r", vcsNumber: 1 })).toEqual({
+        taskId: "a",
+        agentId: "w1",
+      });
+      expect(await repo.findLatestRoutingCandidate({ vcsRepo: "r" })).toEqual({
+        taskId: "c",
+        agentId: "w2",
+      });
+      expect(await repo.findLatestRoutingCandidate({ agentmailThreadId: "x" })).toBeNull();
+      const statuses = await repo.listRoutingWorkerStatuses(["pending", "in_progress", "offered"]);
+      expect(statuses).toEqual([
+        { agentId: "w1", status: "idle", openTaskCount: 2, activeTaskCount: 1 },
+        { agentId: "w2", status: "busy", openTaskCount: 1, activeTaskCount: 0 },
+      ]);
+      expect(await repo.findTaskKey("a")).toBe("shared/");
+      expect(await repo.findTaskKey("zz")).toBeNull();
+    });
+
+    test("pool lifecycle transitions are guarded on the current status", async () => {
+      await seedTask(storage, { id: "u", status: "unassigned" });
+      expect((await repo.claimUnassignedTask("u", "w", T1))?.status).toBe("in_progress");
+      expect(await repo.claimUnassignedTask("u", "w", T1)).toBeNull();
+      const released = await repo.releaseTaskToPool("u", T1);
+      expect([released?.status, released?.agentId]).toEqual(["unassigned", null]);
+      await seedTask(storage, { id: "p", status: "pending", agentId: "w", pool_wake_at: T0 });
+      expect(await repo.releaseTaskToPool("p", T1, { agentId: "w", poolWakeAt: T1 })).toBeNull();
+      expect(
+        (await repo.releaseTaskToPool("p", T1, { agentId: "w", poolWakeAt: T0 }))?.pool_wake_at,
+      ).toBeNull();
+      await seedTask(storage, { id: "o", status: "offered", offeredTo: "w", offeredAt: T0 });
+      const accepted = await repo.acceptOfferedTask("o", "w", T1);
+      expect([accepted?.status, accepted?.acceptedAt]).toEqual(["pending", T1]);
+      await seedTask(storage, { id: "r", status: "reviewing", offeredTo: "w" });
+      const rejected = await repo.rejectOfferedTask("r", null, T1);
+      expect([rejected?.status, rejected?.offeredTo, rejected?.rejectionReason]).toEqual([
+        "unassigned",
+        null,
+        null,
+      ]);
+      expect(await repo.moveTaskStatus("r", "backlog", "unassigned", T1)).toBeNull();
+      expect((await repo.moveTaskStatus("r", "unassigned", "backlog", T1))?.status).toBe("backlog");
+      await seedTask(storage, { id: "d1", status: "draft", offeredTo: "w" });
+      await seedTask(storage, { id: "d2", status: "draft", agentId: "w" });
+      await seedTask(storage, { id: "d3", status: "draft", lastUpdatedAt: T1 });
+      expect((await repo.promoteDraftTask("d1", T1))?.status).toBe("offered");
+      expect(await repo.promoteDraftTask("d1", T1)).toBeNull();
+      await repo.refreshDraftTaskLease("d2", T0);
+      expect(await repo.promoteDraftsIdleSince(T1, T1)).toBe(1);
+      expect((await repo.findTaskById("d2"))?.status).toBe("pending");
+      expect((await repo.findTaskById("d3"))?.status).toBe("draft");
+      await seedTask(storage, { id: "rv", status: "reviewing" });
+      expect(await repo.releaseReviewingIdleSince(T1, T1)).toBe(1);
+      expect((await repo.findTaskById("rv"))?.status).toBe("offered");
+    });
+
+    test("offers to offline or deleted agents return to the pool unless reachable", async () => {
+      await addAgent("on", false);
+      await addAgent("off", false, "offline");
+      await addAgent("off2", false, "offline");
+      await seedTask(storage, { id: "a", status: "offered", offeredTo: "on" });
+      await seedTask(storage, { id: "b", status: "offered", offeredTo: "off" });
+      await seedTask(storage, { id: "c", status: "offered", offeredTo: "gone" });
+      await seedTask(storage, { id: "d", status: "offered", offeredTo: "off2" });
+      expect(await repo.releaseOffersOfOfflineAgents(T1, ["off2"])).toBe(2);
+      expect((await repo.findTaskById("a"))?.status).toBe("offered");
+      expect((await repo.findTaskById("b"))?.offeredTo).toBeNull();
+      expect((await repo.findTaskById("d"))?.status).toBe("offered");
+      expect(await repo.releaseOffersOfOfflineAgents(T1, [])).toBe(1);
+    });
+
+    test("pool order is priority, createdAt, then insertion order", async () => {
+      await seedTask(storage, { id: "b", status: "unassigned" });
+      await seedTask(storage, { id: "a", status: "unassigned" });
+      await seedTask(storage, { id: "h", status: "unassigned", priority: 90, createdAt: T1 });
+      await seedTask(storage, { id: "o", status: "offered", offeredTo: "w" });
+      expect(await repo.listUnassignedTaskIds(10)).toEqual(["h", "b", "a"]);
+      expect(ids(await repo.listUnassignedTasks(2, 1))).toEqual(["b", "a"]);
+      expect(await repo.countUnassignedTasks()).toBe(3);
+      expect(ids(await repo.listOfferedTasksForAgent("w"))).toEqual(["o"]);
+    });
+
+    test("dependents and recent similar tasks", async () => {
+      await seedTask(storage, { id: "p" });
+      await seedTask(storage, { id: "d2", dependsOn: '["p","x"]' });
+      await seedTask(storage, { id: "d1", dependsOn: '["p"]', status: "completed" });
+      await seedTask(storage, { id: "n", dependsOn: "[]" });
+      expect(ids(await repo.listDependentTasks("p"))).toEqual(["d2", "d1"]);
+      await seedTask(storage, { id: "r1", creatorAgentId: "c", createdAt: T1 });
+      await seedTask(storage, { id: "r2", creatorAgentId: "c", createdAt: T1 });
+      await seedTask(storage, { id: "r3", creatorAgentId: "c", createdAt: T1, status: "failed" });
+      expect(
+        ids(await repo.listRecentSimilarTasks({ since: T0, creatorAgentId: "c", limit: 10 })),
+      ).toEqual(["r2", "r1"]);
+      expect(
+        ids(await repo.listRecentSimilarTasks({ since: T0, agentId: "zz", limit: 10 })),
+      ).toEqual([]);
+    });
   });
 }
