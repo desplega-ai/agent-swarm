@@ -229,7 +229,9 @@ export const platformUsersLifecycle: Scenario = {
       (await getUser(ctx, alice.id, "?recentEvents=50")).recentEvents.some(
         (event) =>
           event.eventType === "profile_changed" &&
-          JSON.stringify(event.after) === JSON.stringify({ avatar }),
+          // afterJson is jsonb on Postgres (reorders keys): compare the parsed value
+          // (approved by Daniel, 2026-11-21).
+          Bun.deepEquals(event.after, { avatar }, true),
       ),
       "an avatar change records profile_changed",
     );
@@ -884,8 +886,8 @@ export const platformUsersAccess: Scenario = {
       (await getUser(ctx, other.id)).recentEvents.some(
         (e) =>
           e.eventType === "profile_changed" &&
-          JSON.stringify(e.before) === JSON.stringify({ rbacRoles: ["admin"] }) &&
-          JSON.stringify(e.after) === JSON.stringify({ rbacRoles: ["viewer"] }),
+          Bun.deepEquals(e.before, { rbacRoles: ["admin"] }, true) &&
+          Bun.deepEquals(e.after, { rbacRoles: ["viewer"] }, true),
       ),
       "the role change is on the identity timeline",
     );

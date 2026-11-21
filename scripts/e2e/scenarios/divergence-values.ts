@@ -125,9 +125,13 @@ async function userMetadata(ctx: ScenarioContext): Promise<void> {
   const userId = String(asRecord(asRecord(created.json).user).id);
   const read = await ctx.api("GET", `/api/users/${userId}`);
   expectStatus(read, [200], "read user");
+  // users.metadata is jsonb on Postgres, which reorders object keys. Daniel approved
+  // (2026-11-21) comparing the parsed value instead of the text for jsonb columns.
+  // Every key and value must still match exactly.
+  const metadata = asRecord(asRecord(read.json).user).metadata;
   expect(
-    read.text.includes(`"metadata":${DOCUMENT_TEXT}`),
-    `user metadata text changed:\n  sent ${DOCUMENT_TEXT}\n  got  ${read.text.slice(0, 600)}`,
+    Bun.deepEquals(metadata, DOCUMENT, true),
+    `user metadata value changed:\n  sent ${DOCUMENT_TEXT}\n  got  ${JSON.stringify(metadata)}`,
   );
 }
 

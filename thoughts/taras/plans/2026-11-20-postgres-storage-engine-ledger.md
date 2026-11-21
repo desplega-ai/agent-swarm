@@ -365,9 +365,9 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 
 Measured retry rates far above 5% at the poll write pass and task creation sites (above). D7 permits READ COMMITTED with explicit locks there, each with its own stress scenario. Not applied yet: each site's read-then-write invariants need a lock plan, and the tiny e2e tables make Postgres take relation-level predicate locks (sequential scans), which likely overstates conflicts compared with production-size tables. Recommendation: apply D7 to the poll claim first (`FOR UPDATE SKIP LOCKED`), re-measure on a larger seeded database, then decide the task-creation sites.
 
-## Open decision (needs Taras): JSON key order in API responses
+## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
-`divergence-values` (M1) asserts that user metadata comes back byte-equal, key order included. On Postgres `users.metadata` is `jsonb` (D8), which reorders keys, so the scenario fails: `user metadata text changed`. The same holds for every API-visible `jsonb` column (83); the scenario tests one. The values are equal as JSON; only the text differs. Options: (a) keep D8 and accept reordered keys in API JSON (the scenario's byte-order assertion for jsonb columns would have to go, which section 10 forbids without a decision); (b) store API-visible JSON as `json` (keeps the text, still JSON-typed) instead of `jsonb`; (c) keep such columns `text` (as done for the 5 columns whose text code compares). Recommendation: (b) for columns the API returns, `jsonb` where SQL reads into the JSON. Until decided, check 2 fails on this assertion. Part 6 found a second case: `platform-users` asserts the `profile_changed` event's `after` JSON text (`events.after` is jsonb).
+Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metadata) and `platform-users` (the `profile_changed` event's before/after) failed on JSON text. Daniel chose (a), `accept_reorder`: keep `jsonb` and accept reordered keys. The two scenarios now compare the parsed value with a strict deep-equal (`Bun.deepEquals(..., true)`); every key and value is still asserted. Recorded under "Deviations" and "Edited scenarios". `kv_entries.value` is text and keeps its byte-order assertion.
 
 ## Decisions inside my authority
 
@@ -393,6 +393,7 @@ Measured retry rates far above 5% at the poll write pass and task creation sites
 - `onAttemptRollback` (needs human review): a third storage-client hook that D6 does not name. It runs when any attempt rolls back and only undoes in-process state (the successor-walk hold, the executing-step mark). Without it, runs never finalized under `--tx-replay`. Details under "Decisions inside my authority". The Postgres client implements it.
 - Check 11 mechanism (needs human review): dependency-cruiser cannot reject `Bun.SQL` (a named export of the built-in `bun` module, also a global). `check:dep-graph` now runs depcruise and then an AST scan (`check-driver-imports.ts`) that rejects `import { SQL } from "bun"` and `Bun.SQL` outside `packages/storage-postgres`. One allowed file, reason on the line: `src/be/sql-connections.ts` (user-configured script databases, present at the base commit).
 - E2E Postgres runner pre-applies the migration chain (part 6): the reader role needs the tables before the SUT starts. The SUT's own migration run is then a no-op; a fresh-database boot is covered by the contract tests and the manual boot proof (M3 results).
+- JSON key order, approved by Daniel 2026-11-21 (exception to section 10 for these assertions only): for jsonb columns, the byte-order JSON comparison became a parsed strict deep-equal. Scenarios: `divergence-values` (`users.metadata`), `platform-users-lifecycle` (`user_identity_events.afterJson`, avatar change) and `platform-users-access` (`beforeJson`/`afterJson`, role change). No value or key assertion was removed.
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
@@ -428,6 +429,7 @@ Measured retry rates far above 5% at the poll write pass and task creation sites
 
 See "M1 results / Edited scenarios".
 
+- `divergence-values`, `platform-users-lifecycle`, `platform-users-access` (part 7): jsonb JSON compared by parsed deep-equal, not text (approved deviation, see "Deviations").
 - `divergence-db-query-denial` (part 6): the parameterized query binds with `$1` instead of `?` (both dialects accept `$1`; SQL portability, no assertion change).
 
 ## New scenarios after M1
