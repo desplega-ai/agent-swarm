@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Storage } from "@desplega/storage";
+import * as sqliteVec from "sqlite-vec";
 import { runStorageContract } from "../../storage/test/contract";
 import { createBunSqliteClient, createSqliteStorage } from "../src";
 
@@ -42,5 +43,15 @@ runStorageContract({
   async release(storage) {
     open.get(storage)?.close();
     open.delete(storage);
+  },
+  async prepareMemorySearch(storage, dimensions) {
+    // The tables src/be/memory/providers/sqlite-store.ts creates at run time.
+    const db = open.get(storage);
+    if (!db) throw new Error("prepareMemorySearch: unknown storage");
+    sqliteVec.load(db);
+    db.run(`CREATE VIRTUAL TABLE memory_fts USING fts5(
+      memory_id UNINDEXED, name, content, tokenize='porter unicode61')`);
+    db.run(`CREATE VIRTUAL TABLE memory_vec USING vec0(
+      memory_id TEXT PRIMARY KEY, embedding float[${dimensions}] distance_metric=cosine)`);
   },
 });

@@ -73,4 +73,7 @@ runStorageContract({
       await admin.close();
     }
   },
+  async prepareMemorySearch() {
+    // Migration 369 holds the full-text index and memory_vec (no fixed dimension).
+  },
 });

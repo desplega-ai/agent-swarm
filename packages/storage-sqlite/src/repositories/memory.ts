@@ -60,12 +60,15 @@ export class SqliteMemoryRepository extends BaseMemoryRepository {
 
   // ---- search arms ----
 
-  searchFtsRows(
-    match: string,
+  async searchFtsRows(
+    terms: string[],
     filter: MemorySearchFilter,
     limit: number,
     reader?: MemoryReadExecutor,
   ): Promise<(AgentMemoryRow & { rank: number })[]> {
+    if (terms.length === 0) return [];
+    // Each term is an FTS5 phrase; any phrase matches.
+    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
     const conditions = this.searchConditions([sql`memory_fts MATCH ${match}`], filter, "m");
     return this.via(reader).query<AgentMemoryRow & { rank: number }>(sql`
       SELECT m.*, bm25(memory_fts) AS rank

@@ -495,6 +495,157 @@ export function memoryContract(engine: ContractEngine): void {
       ).toEqual(["o0"]);
     });
 
+    // ---- D15 search parity on a fixed corpus (no engine branches) ----
+
+    const blob = (values: number[]) => new Uint8Array(new Float32Array(values).buffer);
+
+    /** The fixed full-text corpus: name, content, owner. */
+    const FTS_CORPUS: [string, string, string, string][] = [
+      ["d1", "deploy runbook", "Restart the worker pods after a failed deploy.", AGENT],
+      ["d2", "postgres tuning", "Raise shared buffers; vacuum the memory table nightly.", AGENT],
+      ["d3", "slack etiquette", "Reply in the thread, never in the channel.", AGENT],
+      [
+        "d4",
+        "deploy checklist",
+        "Run migrations before the deploy, then deploy the workers.",
+        AGENT,
+      ],
+      [
+        "d5",
+        "vector search",
+        "Embeddings use cosine distance with exact nearest neighbours.",
+        AGENT,
+      ],
+      ["d6", "their deploy", "deploy deploy deploy the workers", OTHER],
+      ["d7", "worker notes", "The workers restarted twice during the deploy window.", AGENT],
+      ["d8", "paths", "See src/be/memory.ts and e-mail ops@example.com about it.", AGENT],
+    ];
+
+    const seedFtsCorpus = async () => {
+      await engine.prepareMemorySearch(storage, 4);
+      for (const [id, name, content, agentId] of FTS_CORPUS) {
+        await repo.insertMemory(memory({ id, name, content, agentId }));
+      }
+      await repo.insertMissingFtsRows(FTS_CORPUS.map(([id]) => id));
+    };
+
+    test("full-text parity: the same id set for each query of a fixed corpus", async () => {
+      await seedFtsCorpus();
+      const ids = async (terms: string[]) =>
+        (await repo.searchFtsRows(terms, searchAll(), 50)).map((r) => r.id).sort();
+      // The filter applies: d6 is another agent's private memory.
+      expect(await ids(["deploy"])).toEqual(["d1", "d4", "d7"]);
+      // Stemming: restarting, restart, restarted; workers, worker.
+      expect(await ids(["restarting"])).toEqual(["d1", "d7"]);
+      expect(await ids(["worker"])).toEqual(["d1", "d4", "d7"]);
+      // Stop words are indexed (FTS5 keeps every word).
+      expect(await ids(["the"])).toEqual(["d1", "d2", "d3", "d4", "d7"]);
+      // Punctuation splits words: src/be/memory.ts, e-mail, ops@example.com.
+      expect(await ids(["memory"])).toEqual(["d2", "d8"]);
+      expect(await ids(["e-mail"])).toEqual(["d8"]);
+      expect(await ids(["example"])).toEqual(["d8"]);
+      // A term is a phrase; terms are ORed; case folds.
+      expect(await ids(["failed deploy"])).toEqual(["d1"]);
+      expect(await ids(["POSTGRES", "cosine"])).toEqual(["d2", "d5"]);
+      expect(await ids(["kubernetes"])).toEqual([]);
+      expect(await ids([])).toEqual([]);
+      // The name is indexed too.
+      expect(await ids(["etiquette"])).toEqual(["d3"]);
+      expect(
+        (await repo.searchFtsRows(["deploy"], { ...searchAll(), isLead: true }, 50))
+          .map((r) => r.id)
+          .sort(),
+      ).toEqual(["d1", "d4", "d6", "d7"]);
+      // A deleted memory leaves the index with its FTS rows.
+      await repo.deleteMemoriesByIds(["d4"]);
+      await repo.deleteFtsRows(["d4"]);
+      expect(await ids(["deploy"])).toEqual(["d1", "d7"]);
+      expect(await repo.ftsTableSchema()).toBeTruthy();
+    });
+
+    test("full-text parity: ranked results share at least 4 of the first 5 ids", async () => {
+      await seedFtsCorpus();
+      const terms = ["deploy", "worker", "the", "memory", "cosine", "thread"];
+      const hits = await repo.searchFtsRows(terms, searchAll(), 50);
+      expect(hits.map((r) => r.id).sort()).toEqual(["d1", "d2", "d3", "d4", "d5", "d7", "d8"]);
+      const top5 = new Set(hits.slice(0, 5).map((r) => r.id));
+      // bm25 order on SQLite: rare terms first (thread, cosine; then memory),
+      // the words in half the corpus (deploy, worker, the) weigh almost nothing.
+      const expected = ["d3", "d5", "d2", "d8", "d4"];
+      expect(expected.filter((id) => top5.has(id)).length).toBeGreaterThanOrEqual(4);
+      // rank ascending is best first.
+      const ranks = hits.map((r) => r.rank);
+      expect([...ranks].sort((a, b) => a - b)).toEqual(ranks);
+      expect((await repo.searchFtsRows(terms, searchAll(), 2)).length).toBe(2);
+    });
+
+    test("vector parity: k-NN order, the k-then-filter width, the engine-scored arm and health", async () => {
+      await engine.prepareMemorySearch(storage, 4);
+      const corpus: [string, number[], string][] = [
+        ["v3", [0.5, 0.5, 0, 0], AGENT],
+        ["v1", [1, 0, 0, 0], AGENT],
+        ["v5", [-1, 0, 0, 0], AGENT],
+        ["v2", [0.9, 0.1, 0, 0], AGENT],
+        ["v4", [0, 1, 0, 0], AGENT],
+        ["theirs", [1, 0, 0, 0.01], OTHER],
+      ];
+      for (const [id, values, agentId] of corpus) {
+        await repo.insertMemory(memory({ id, agentId }));
+        await repo.setEmbedding(id, blob(values), "m");
+        await repo.insertVecRow(id, blob(values));
+      }
+      // Embedded but not in memory_vec: the k-NN arm misses it, the exhaustive arm scores it.
+      await repo.insertMemory(memory({ id: "unindexed", now: T1 }));
+      await repo.setEmbedding("unindexed", blob([0.8, 0.2, 0, 0]), "m");
+      const query = blob([1, 0, 0, 0]);
+
+      const hits = await repo.searchVecRows(query, searchAll(), 10, 10);
+      expect(hits.map((r) => r.id)).toEqual(["v1", "v2", "v3", "v4", "v5"]);
+      const expectedDistances = [0, 1 - 0.9 / Math.sqrt(0.82), 1 - 0.5 / Math.sqrt(0.5), 1, 2];
+      hits.forEach((hit, i) => {
+        expect(hit.distance).toBeCloseTo(expectedDistances[i] as number, 5);
+      });
+      expect((await repo.searchVecRows(query, searchAll(), 10, 2)).map((r) => r.id)).toEqual([
+        "v1",
+        "v2",
+      ]);
+      // k nearest first, then the filter: theirs takes one of the two slots.
+      expect((await repo.searchVecRows(query, searchAll(), 2, 10)).map((r) => r.id)).toEqual([
+        "v1",
+      ]);
+
+      const scored = await repo.scoreCappedRows(query, searchAll(), 10, 0.1, 10);
+      expect(scored.map((r) => r.id)).toEqual(["v1", "v2", "unindexed", "v3"]);
+      expect(scored[0]?.similarity).toBeCloseTo(1, 5);
+      expect(scored[2]?.similarity).toBeCloseTo(0.8 / Math.sqrt(0.68), 5);
+      expect((await repo.scoreCappedRows(query, searchAll(), 10, 0.1, 1)).map((r) => r.id)).toEqual(
+        ["v1"],
+      );
+      // A query of another dimension scores no row.
+      expect(await repo.scoreCappedRows(blob([1, 0]), searchAll(), 10, -2, 10)).toEqual([]);
+
+      await repo.insertVecRow("ghost", blob([0, 0, 1, 0]));
+      expect(await repo.healthCounts(16, true)).toEqual({
+        total: 7,
+        withEmbedding: 7,
+        validEmbedding: 7,
+        invalidEmbedding: 0,
+        searchable: 7,
+        memoryVec: 7,
+        missingFromVec: 1,
+        extraInVec: 1,
+      });
+
+      await repo.deleteVecRow("v1");
+      await repo.deleteVecRows(["v2", "ghost"]);
+      expect((await repo.searchVecRows(query, searchAll(), 10, 10)).map((r) => r.id)).toEqual([
+        "v3",
+        "v4",
+        "v5",
+      ]);
+      expect(await repo.deleteVecRows([])).toBeUndefined();
+    });
+
     if (engine.name === "sqlite") {
       test("full-text index: backfill batches, sync writes, bm25 search with the filter", async () => {
         await storage.executor.run(sql`
@@ -516,11 +667,11 @@ export function memoryContract(engine: ContractEngine): void {
           ["orphan", 1],
         ]);
         await repo.deleteFtsRowsByRowid([scan[3]!.rowid]);
-        const hits = await repo.searchFtsRows('"alpha"', searchAll(), 10);
+        const hits = await repo.searchFtsRows(["alpha"], searchAll(), 10);
         expect(hits.map((r) => r.id)).toEqual(["f2", "f1"]);
         await repo.deleteFtsRow("f2");
         await repo.deleteFtsRows(["f1"]);
-        expect(await repo.searchFtsRows('"alpha"', searchAll(), 10)).toEqual([]);
+        expect(await repo.searchFtsRows(["alpha"], searchAll(), 10)).toEqual([]);
         const counts = await repo.healthCounts(4, false);
         expect(counts).toEqual({
           total: 3,

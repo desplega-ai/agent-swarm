@@ -332,6 +332,11 @@ Check 16 gates at head `91dddd9b7`: `lint`, `lint:slop` (after fixing 11 `as unk
 - `src/workflows/successor-routing.ts` (1 line): a rolled-back attempt releases its own hold through `onAttemptRollback`.
 - `scripts/check-async-db-seam.sh` ALLOWLIST (part 5): `src/be/storage-root.ts`, reason on the line: the composition root owns the engine-handle identity and the prompt-template seed inside `initDb` (SQLite start path).
 
+`check:schema-parity` allowlist (M4 memory search, migration 369):
+
+- `table:memory_vec`: Postgres form of the run-time sqlite-vec table (pgvector, no fixed dimension); SQLite creates its `memory_vec` at run time outside the chain.
+- `index:idx_agent_memory_fts`: Postgres form of the run-time FTS5 table `memory_fts` (expression GIN index on `agent_memory`); SQLite creates `memory_fts` at run time outside the chain.
+
 ## Edited scenarios
 
 See "M1 results / Edited scenarios".
