@@ -8,7 +8,11 @@
 
 import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import { getAllTemplateDefinitions } from "../prompts/registry";
-import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate } from "./db";
+import {
+  getPromptTemplatesOnSqliteStart,
+  insertPromptTemplateOnSqliteStart,
+  resetPromptTemplateToDefaultOnSqliteStart,
+} from "./db/prompt-templates";
 
 // Side-effect imports: register ALL template definitions so they're seeded on API startup.
 // Webhook handler templates (github, gitlab, etc.) are loaded transitively by the API server's
@@ -20,7 +24,8 @@ import "../commands/templates";
 import "../tools/templates";
 
 /**
- * Seed default templates into the DB.
+ * Seed default templates into the DB. Synchronous: it runs on the SQLite
+ * start path inside initDb (src/be/db/runtime.ts).
  *
  * For each registered EventTemplateDefinition:
  * - If no global record exists at all, insert one as default (isDefault=true, state=enabled)
@@ -37,7 +42,7 @@ export function seedDefaultTemplates(): void {
 
   for (const def of definitions) {
     // Look for ALL existing global records for this eventType (both default and customized)
-    const allGlobal = getPromptTemplates({
+    const allGlobal = getPromptTemplatesOnSqliteStart({
       eventType: def.eventType,
       scope: "global",
     });
@@ -46,7 +51,7 @@ export function seedDefaultTemplates(): void {
 
     if (!globalRecord) {
       // No global record at all — seed one with isDefault=true directly.
-      upsertPromptTemplate({
+      insertPromptTemplateOnSqliteStart({
         eventType: def.eventType,
         scope: "global",
         body: def.defaultBody,
@@ -57,7 +62,7 @@ export function seedDefaultTemplates(): void {
     } else if (globalRecord.isDefault && globalRecord.body !== def.defaultBody) {
       // Global default exists but body has drifted from code — update it.
       // Only update if the record is still marked as default (not user-customized).
-      resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
+      resetPromptTemplateToDefaultOnSqliteStart(globalRecord, def.defaultBody);
     } else if (!globalRecord.isDefault) {
       const drift = getPromptTemplateDefaultDrift(globalRecord, def.defaultBody);
       if (drift.defaultDrifted) {
@@ -77,7 +82,7 @@ export function seedDefaultTemplates(): void {
         // The row was marked customized without any content change. Restore default ownership so
         // future code-default updates continue to reconcile it. Non-enabled states are deliberate
         // operator choices, and resetPromptTemplateToDefault would silently enable them.
-        resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
+        resetPromptTemplateToDefaultOnSqliteStart(globalRecord, def.defaultBody);
       }
     }
     // If record exists with isDefault=false and a different body: never overwrite it

@@ -510,7 +510,7 @@ export async function notifySlackFileFailures(
   const failedFiles = [...byFile.values()]
     .map((f) => `\`${f.file.name}\` (${f.reason})`)
     .join(", ");
-  const { text } = resolveTemplate("slack.message.attachment_failed", {
+  const { text } = await resolveTemplate("slack.message.attachment_failed", {
     failed_files: failedFiles,
   });
   try {

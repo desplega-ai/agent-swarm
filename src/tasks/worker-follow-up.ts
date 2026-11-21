@@ -623,7 +623,7 @@ export async function createWorkerTaskFollowUp(args: {
     const outputSummary = output
       ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
       : `(no output)${attachmentsBlock}`;
-    const completedResult = resolveTemplate("task.worker.completed", {
+    const completedResult = await resolveTemplate("task.worker.completed", {
       agent_name: agentName,
       task_desc: taskDesc,
       creator_agent: creatorAgent,
@@ -633,14 +633,16 @@ export async function createWorkerTaskFollowUp(args: {
     });
     followUpDescription = completedResult.text;
     if (chainRejection) {
-      followUpDescription += resolveTemplate("task.worker.chain_rejected", {
-        chained_task_id: chainRejection.chainedTaskId,
-        reason: chainRejection.reason,
-      }).text;
+      followUpDescription += (
+        await resolveTemplate("task.worker.chain_rejected", {
+          chained_task_id: chainRejection.chainedTaskId,
+          reason: chainRejection.reason,
+        })
+      ).text;
     }
   } else {
     const reason = failureReason || "(no reason given)";
-    const failedResult = resolveTemplate("task.worker.failed", {
+    const failedResult = await resolveTemplate("task.worker.failed", {
       agent_name: agentName,
       task_desc: taskDesc,
       creator_agent: creatorAgent,
@@ -1180,7 +1182,7 @@ export async function createRerouteDecisionTask(args: {
     : "(no identity recorded)";
   const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
-  const decision = resolveTemplate("task.reroute.decision", {
+  const decision = await resolveTemplate("task.reroute.decision", {
     original_agent_name: agentName,
     original_agent_identity: identitySlice,
     original_task_id: original.id,
@@ -1270,7 +1272,7 @@ export async function createPoolStarvationDecisionTask(args: {
       : "(none declared)";
   const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
-  const decision = resolveTemplate("task.pool.starved.decision", {
+  const decision = await resolveTemplate("task.pool.starved.decision", {
     original_task_id: original.id,
     task_desc: original.task.slice(0, 200),
     required_role: requiredRole,

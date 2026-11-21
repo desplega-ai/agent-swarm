@@ -739,7 +739,7 @@ try {
   // Guarded per DB handle: `createServer()` (one per MCP session) calls the
   // same helper, so seeding here is what keeps session init off this path.
   const { ensurePricingSeeded } = await import("../be/boot-seeds");
-  ensurePricingSeeded();
+  await ensurePricingSeeded();
   const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
   startPricingRefreshLoop();
 } catch (err) {

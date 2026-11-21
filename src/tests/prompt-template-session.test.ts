@@ -185,8 +185,8 @@ describe("Session templates: role block", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("interpolates name, role, agentId, and persona", () => {
-    const result = resolveTemplate("system.agent.role", {
+  test("interpolates name, role, agentId, and persona", async () => {
+    const result = await resolveTemplate("system.agent.role", {
       name: "Ada",
       role: "worker",
       agentId: "agent-xyz-789",
@@ -199,8 +199,8 @@ describe("Session templates: role block", () => {
     expect(result.text).toContain("Backend worker.");
   });
 
-  test("leaves no dangling text when the persona is empty", () => {
-    const result = resolveTemplate("system.agent.role", {
+  test("leaves no dangling text when the persona is empty", async () => {
+    const result = await resolveTemplate("system.agent.role", {
       name: "Ada",
       role: "worker",
       agentId: "agent-xyz-789",
@@ -218,57 +218,57 @@ describe("Session templates: MUST pointers", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("the worker contract points at the swarm-scripts skill", () => {
-    const result = resolveTemplate("system.agent.worker", {});
+  test("the worker contract points at the swarm-scripts skill", async () => {
+    const result = await resolveTemplate("system.agent.worker", {});
     expect(result.text).toContain("You MUST use the `swarm-scripts` skill for this branch.");
   });
 
-  test("the lead contract points at the heartbeat-runbook skill", () => {
-    const result = resolveTemplate("system.agent.lead", {});
+  test("the lead contract points at the heartbeat-runbook skill", async () => {
+    const result = await resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain(
       "You MUST use the `heartbeat-runbook` skill when you handle a heartbeat checklist task.",
     );
   });
 
-  test("the memory block points at the memory skill", () => {
-    const result = resolveTemplate("system.agent.memory", {});
+  test("the memory block points at the memory skill", async () => {
+    const result = await resolveTemplate("system.agent.memory", {});
     expect(result.text).toContain(
       "You MUST use the `memory` skill before you store, edit, or delete a memory.",
     );
   });
 
-  test("the slack block points at the slack-interaction skill", () => {
-    const result = resolveTemplate("system.agent.slack", {});
+  test("the slack block points at the slack-interaction skill", async () => {
+    const result = await resolveTemplate("system.agent.slack", {});
     expect(result.text).toContain(
       "You MUST use the `slack-interaction` skill before you post to Slack.",
     );
   });
 
-  test("the worker contract names the four task endings", () => {
-    const result = resolveTemplate("system.agent.worker", {});
+  test("the worker contract names the four task endings", async () => {
+    const result = await resolveTemplate("system.agent.worker", {});
     expect(result.text).toContain("The task has four endings.");
     for (const ending of ["`completed`", "`defer-task`", "`request-human-input`", "`failed`"]) {
       expect(result.text).toContain(ending);
     }
   });
 
-  test("the lead contract names the delegation tools", () => {
-    const result = resolveTemplate("system.agent.lead", {});
+  test("the lead contract names the delegation tools", async () => {
+    const result = await resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain(
       "`send-task`: include `routingReason` and `routingNote` (at least 10 characters after trim, maximum 200) with `agentId`. Read results via `get-task-details`.",
     );
   });
 
-  test("the lead contract names the desplega skills, not slash commands", () => {
-    const result = resolveTemplate("system.agent.lead", {});
+  test("the lead contract names the desplega skills, not slash commands", async () => {
+    const result = await resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain("`researching` skill");
     expect(result.text).toContain("`planning` skill");
     expect(result.text).toContain("`implementing` skill");
     expect(result.text).not.toContain("/researching");
   });
 
-  test("the lead contract plans a use case under one key and links its Sessions group", () => {
-    const { text, unresolved } = resolveTemplate("system.agent.lead", {
+  test("the lead contract plans a use case under one key and links its Sessions group", async () => {
+    const { text, unresolved } = await resolveTemplate("system.agent.lead", {
       appUrl: "https://app.example.test",
     });
     expect(unresolved).toEqual([]);
@@ -282,27 +282,27 @@ describe("Session templates: MUST pointers", () => {
     expect(text).toContain("as a `diff` block in your reply");
   });
 
-  test("the channel-thread block keeps the rule and points at the skills", () => {
-    const { text } = resolveTemplate("system.agent.lead.channel_thread", {});
+  test("the channel-thread block keeps the rule and points at the skills", async () => {
+    const { text } = await resolveTemplate("system.agent.lead.channel_thread", {});
     expect(text).toContain("## Use-case channel thread");
     expect(text).toContain("offer once to post a summary of each run to a channel thread");
     expect(text).toContain("`kv-get` with namespace `usecase:<key>` and key `thread`");
     expect(text).toContain("The `slack-interaction` skill (Slack) and the `chat-sdk` skill");
   });
 
-  test("the use-case task note names the key and no link", () => {
-    const { text, unresolved } = resolveTemplate("task.use_case", { key: "shared/acme/" });
+  test("the use-case task note names the key and no link", async () => {
+    const { text, unresolved } = await resolveTemplate("task.use_case", { key: "shared/acme/" });
     expect(unresolved).toEqual([]);
     expect(text).toContain("This task is in the use case with key `shared/acme/`.");
     expect(text).not.toContain("sessions?view=");
   });
 
-  test("the outputs block takes its file-link base from fileLinkBase", () => {
+  test("the outputs block takes its file-link base from fileLinkBase", async () => {
     const definition = getAllTemplateDefinitions().find(
       (d) => d.eventType === "system.agent.outputs",
     );
     expect(definition?.variables.map((v) => v.name)).toEqual(["fileLinkBase", "fileLinkQuery"]);
-    const result = resolveTemplate("system.agent.outputs", {
+    const result = await resolveTemplate("system.agent.outputs", {
       fileLinkBase: "http://localhost:5274",
       fileLinkQuery: "",
     });
@@ -318,8 +318,8 @@ describe("Session templates: MUST pointers", () => {
     expect(result.unresolved).toEqual([]);
   });
 
-  test("the no-agent-fs outputs block keeps the Page rule", () => {
-    const result = resolveTemplate("system.agent.outputs.no_agent_fs", {});
+  test("the no-agent-fs outputs block keeps the Page rule", async () => {
+    const result = await resolveTemplate("system.agent.outputs.no_agent_fs", {});
     expect(result.text).toContain("make a Page only when the requester asks for one");
     expect(result.text).not.toContain("drive path");
     // Sheets and boards are agent-fs files, so this variant does not route to them.
@@ -346,8 +346,8 @@ describe("Session templates: composite resolution", () => {
   };
 
   for (const eventType of SESSION_TEMPLATES) {
-    test(`${eventType} resolves every template reference`, () => {
-      const result = resolveTemplate(eventType, vars);
+    test(`${eventType} resolves every template reference`, async () => {
+      const result = await resolveTemplate(eventType, vars);
       expect(result.skipped).toBe(false);
       expect(result.unresolved.length).toBe(0);
       expect(result.text).not.toContain("{{@template[");
@@ -380,8 +380,8 @@ describe("Session templates: composite resolution", () => {
   }
 
   for (const eventType of ["system.agent.worker", "system.agent.worker.remote"]) {
-    test(`${eventType} pairs completion requirements with the output budget`, () => {
-      const { text } = resolveTemplate(eventType, {});
+    test(`${eventType} pairs completion requirements with the output budget`, async () => {
+      const { text } = await resolveTemplate(eventType, {});
       expect(text).toContain("under 120 words by default");
       expect(text).toContain("Link documents instead of inlining them; omit process narration");
       expect(text).toContain("under 120 words by default, with the exceptions in How you write");
@@ -389,8 +389,11 @@ describe("Session templates: composite resolution", () => {
   }
 
   for (const eventType of ["system.agent.slack", "system.agent.scripts_only_mode.slack"]) {
-    test(`${eventType} applies the output budget to the engine-owned card`, () => {
-      const { text } = resolveTemplate(eventType, { slackChannelId: "C123", slackThreadTs: "1.2" });
+    test(`${eventType} applies the output budget to the engine-owned card`, async () => {
+      const { text } = await resolveTemplate(eventType, {
+        slackChannelId: "C123",
+        slackThreadTs: "1.2",
+      });
       expect(text).toContain("The outcome card publishes your `output` verbatim");
       expect(text).toContain(
         "Keep free-text `output` under 120 words by default, with the exceptions in How you write",
@@ -398,9 +401,9 @@ describe("Session templates: composite resolution", () => {
     });
   }
 
-  test("lead and worker differ only in the contract block", () => {
-    const lead = resolveTemplate("system.session.lead", { ...vars, role: "lead" }).text;
-    const worker = resolveTemplate("system.session.worker", vars).text;
+  test("lead and worker differ only in the contract block", async () => {
+    const lead = (await resolveTemplate("system.session.lead", { ...vars, role: "lead" })).text;
+    const worker = (await resolveTemplate("system.session.worker", vars)).text;
 
     // Shared blocks: workspace, memory, communication, secrets.
     for (const shared of [
@@ -419,9 +422,9 @@ describe("Session templates: composite resolution", () => {
     expect(worker).not.toContain("## How you lead");
   });
 
-  test("the managed composite is the worker composite with the remote workspace", () => {
-    const managed = resolveTemplate("system.session.worker.managed", vars).text;
-    const worker = resolveTemplate("system.session.worker", vars).text;
+  test("the managed composite is the worker composite with the remote workspace", async () => {
+    const managed = (await resolveTemplate("system.session.worker.managed", vars)).text;
+    const worker = (await resolveTemplate("system.session.worker", vars)).text;
 
     expect(managed).toContain("## How you work");
     expect(managed).toContain(
@@ -436,8 +439,8 @@ describe("Session templates: composite resolution", () => {
     }
   });
 
-  test("the remote composite names no swarm tool", () => {
-    const remote = resolveTemplate("system.session.worker.remote", vars).text;
+  test("the remote composite names no swarm tool", async () => {
+    const remote = (await resolveTemplate("system.session.worker.remote", vars)).text;
 
     for (const tool of ["store-progress", "get-swarm", "memory-store", "update-profile"]) {
       expect(remote).not.toContain(tool);
@@ -483,12 +486,14 @@ describe("Session templates: getBasePrompt integration", () => {
   test("a local worker prompt opens with the worker composite verbatim", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
     const agentId = "integration-test-worker";
-    const composite = resolveTemplate("system.session.worker", {
-      name: "an agent",
-      role: "worker",
-      agentId,
-      persona: "",
-    }).text;
+    const composite = (
+      await resolveTemplate("system.session.worker", {
+        name: "an agent",
+        role: "worker",
+        agentId,
+        persona: "",
+      })
+    ).text;
 
     const result = await getBasePrompt({ role: "worker", agentId });
     expect(result).toStartWith(collapse(composite));
@@ -498,13 +503,15 @@ describe("Session templates: getBasePrompt integration", () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
     const agentId = "integration-test-lead";
     const { getAppUrl } = await import("../utils/constants");
-    const composite = resolveTemplate("system.session.lead", {
-      name: "an agent",
-      role: "lead",
-      agentId,
-      persona: "",
-      appUrl: getAppUrl(),
-    }).text;
+    const composite = (
+      await resolveTemplate("system.session.lead", {
+        name: "an agent",
+        role: "lead",
+        agentId,
+        persona: "",
+        appUrl: getAppUrl(),
+      })
+    ).text;
 
     const result = await getBasePrompt({ role: "lead", agentId });
     expect(result).toStartWith(collapse(composite));

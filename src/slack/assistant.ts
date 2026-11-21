@@ -88,7 +88,7 @@ export function createAssistant(
         await saveThreadContext();
 
         if (!isSlackRenderV2Enabled()) {
-          const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+          const greetingResult = await resolveTemplate("slack.assistant.greeting", {});
           await say(greetingResult.text);
         }
 
@@ -393,7 +393,7 @@ export function createAssistant(
           if (isSlackRenderV2Enabled()) {
             await ensureSlackThreadPresentation([task.id]);
           } else {
-            const offlineResult = resolveTemplate("slack.assistant.offline", {});
+            const offlineResult = await resolveTemplate("slack.assistant.offline", {});
             await say(offlineResult.text);
           }
           return;

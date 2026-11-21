@@ -105,7 +105,7 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("bitbucket.comment.mentioned");
   });
 
-  test("Bitbucket templates resolve with no unresolved variables", () => {
+  test("Bitbucket templates resolve with no unresolved variables", async () => {
     const shared = {
       pr_id: 42,
       pr_title: "Fix retry",
@@ -115,13 +115,13 @@ describe("template registration — all sources", () => {
     };
     const pr = { ...shared, source_branch: "feat", target_branch: "main", context_section: "" };
     for (const id of ["bitbucket.pull_request.opened", "bitbucket.pull_request.review_requested"]) {
-      const result = resolveTemplate(id, pr);
+      const result = await resolveTemplate(id, pr);
       expect(result.skipped).toBe(false);
       expect(result.unresolved).toEqual([]);
       expect(result.text).toContain("[Bitbucket PR #42]");
       expect(result.text).toContain("api.bitbucket.org/2.0/repositories/acme-ws/widgets");
     }
-    const comment = resolveTemplate("bitbucket.comment.mentioned", {
+    const comment = await resolveTemplate("bitbucket.comment.mentioned", {
       ...shared,
       location_section: "File: src/a.ts:3\n",
       context: "please fix",
@@ -155,10 +155,10 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("heartbeat.checklist");
   });
 
-  test("Heartbeat checklist puts the live status after the standing orders and instructions", () => {
+  test("Heartbeat checklist puts the live status after the standing orders and instructions", async () => {
     // The status changes every tick; the orders and instructions usually do
     // not, so they lead the text and the status goes last.
-    const { text } = resolveTemplate("heartbeat.checklist", {
+    const { text } = await resolveTemplate("heartbeat.checklist", {
       system_status: "STATUS_MARKER",
       heartbeat_content: "ORDERS_MARKER",
     });
@@ -211,8 +211,8 @@ describe("template registration — all sources", () => {
 // ============================================================================
 
 describe("GitLab — backward compatibility", () => {
-  test("gitlab.merge_request.opened produces expected output", () => {
-    const result = resolveTemplate("gitlab.merge_request.opened", {
+  test("gitlab.merge_request.opened produces expected output", async () => {
+    const result = await resolveTemplate("gitlab.merge_request.opened", {
       mr_iid: 5,
       mr_title: "Add feature",
       repo: "group/project",
@@ -242,8 +242,8 @@ Suggested commands: \`/review-pr\` to review the MR, \`/implement-issue\` to imp
     expect(result.text).toBe(expected);
   });
 
-  test("gitlab.pipeline.failed produces expected output", () => {
-    const result = resolveTemplate("gitlab.pipeline.failed", {
+  test("gitlab.pipeline.failed produces expected output", async () => {
+    const result = await resolveTemplate("gitlab.pipeline.failed", {
       pipeline_id: 999,
       mr_iid: 5,
       repo: "group/project",
@@ -268,8 +268,8 @@ The CI pipeline has failed. Please investigate and fix the issues.
     expect(result.text).toBe(expected);
   });
 
-  test("gitlab.comment.mentioned produces expected output", () => {
-    const result = resolveTemplate("gitlab.comment.mentioned", {
+  test("gitlab.comment.mentioned produces expected output", async () => {
+    const result = await resolveTemplate("gitlab.comment.mentioned", {
       entity_label: "MR #5",
       username: "dev1",
       repo: "group/project",
@@ -297,8 +297,8 @@ _Note: There's an active task (task-abc) for this MR #5._
 });
 
 describe("AgentMail — backward compatibility", () => {
-  test("agentmail.email.followup produces expected output", () => {
-    const result = resolveTemplate("agentmail.email.followup", {
+  test("agentmail.email.followup produces expected output", async () => {
+    const result = await resolveTemplate("agentmail.email.followup", {
       from: "user@example.com",
       subject: "Re: Hello",
       inbox_id: "inbox@mail.example.com",
@@ -320,8 +320,8 @@ Thanks for the reply!`;
     expect(result.text).toBe(expected);
   });
 
-  test("agentmail.email.unmapped produces expected output", () => {
-    const result = resolveTemplate("agentmail.email.unmapped", {
+  test("agentmail.email.unmapped produces expected output", async () => {
+    const result = await resolveTemplate("agentmail.email.unmapped", {
       from: "user@example.com",
       subject: "New request",
       inbox_id: "inbox@mail.example.com",
@@ -347,8 +347,8 @@ Please help with this.`;
 });
 
 describe("Linear — backward compatibility", () => {
-  test("linear.issue.assigned produces expected output", () => {
-    const result = resolveTemplate("linear.issue.assigned", {
+  test("linear.issue.assigned produces expected output", async () => {
+    const result = await resolveTemplate("linear.issue.assigned", {
       issue_identifier: "ENG-123",
       issue_title: "Fix login bug",
       issue_url: "https://linear.app/team/issue/ENG-123",
@@ -373,8 +373,8 @@ Users cannot login with SSO
     expect(result.text).toBe(expected);
   });
 
-  test("linear.issue.assigned places the triggering comment before the description", () => {
-    const result = resolveTemplate("linear.issue.assigned", {
+  test("linear.issue.assigned places the triggering comment before the description", async () => {
+    const result = await resolveTemplate("linear.issue.assigned", {
       issue_identifier: "ENG-123",
       issue_title: "Fix login bug",
       issue_url: "https://linear.app/team/issue/ENG-123",
@@ -399,7 +399,7 @@ Users cannot login with SSO
 `);
   });
 
-  test("linear.issue.reassigned carries the request section, empty when absent", () => {
+  test("linear.issue.reassigned carries the request section, empty when absent", async () => {
     const base = {
       issue_identifier: "ENG-123",
       issue_title: "Fix login bug",
@@ -407,7 +407,7 @@ Users cannot login with SSO
       session_section: "",
       description_section: "\nDescription:\nUsers cannot login with SSO\n",
     };
-    const withRequest = resolveTemplate("linear.issue.reassigned", {
+    const withRequest = await resolveTemplate("linear.issue.reassigned", {
       ...base,
       request_section: "\nRequest (comment that opened this session):\nPlease retry\n",
     });
@@ -416,7 +416,7 @@ Users cannot login with SSO
       "URL: https://linear.app/team/issue/ENG-123\n\nRequest (comment that opened this session):\nPlease retry\n\nDescription:\nUsers cannot login with SSO\n",
     );
 
-    const withoutRequest = resolveTemplate("linear.issue.reassigned", {
+    const withoutRequest = await resolveTemplate("linear.issue.reassigned", {
       ...base,
       request_section: "",
     });
@@ -427,8 +427,8 @@ Users cannot login with SSO
     );
   });
 
-  test("linear.issue.followup produces expected output", () => {
-    const result = resolveTemplate("linear.issue.followup", {
+  test("linear.issue.followup produces expected output", async () => {
+    const result = await resolveTemplate("linear.issue.followup", {
       issue_identifier: "ENG-123",
       issue_title: "Fix login bug",
       issue_url: "https://linear.app/team/issue/ENG-123",
@@ -452,8 +452,8 @@ Original issue: ENG-123 \u2014 Fix login bug`;
 });
 
 describe("Task lifecycle — backward compatibility", () => {
-  test("task.worker.completed produces expected output", () => {
-    const result = resolveTemplate("task.worker.completed", {
+  test("task.worker.completed produces expected output", async () => {
+    const result = await resolveTemplate("task.worker.completed", {
       agent_name: "Worker-1",
       creator_agent: "creator-agent-1",
       task_desc: "Fix the login page CSS",
@@ -482,8 +482,8 @@ Use \`get-task-details\` with taskId "task-abc-123" for full details.`;
     expect(result.text).toBe(expected);
   });
 
-  test("task.worker.failed produces expected output", () => {
-    const result = resolveTemplate("task.worker.failed", {
+  test("task.worker.failed produces expected output", async () => {
+    const result = await resolveTemplate("task.worker.failed", {
       agent_name: "Worker-2",
       creator_agent: "creator-agent-2",
       task_desc: "Deploy to production",
@@ -508,8 +508,8 @@ Decide whether to reassign, retry, or handle the failure. Use \`get-task-details
 });
 
 describe("Runner triggers — backward compatibility", () => {
-  test("task.trigger.assigned produces expected output", () => {
-    const result = resolveTemplate("task.trigger.assigned", {
+  test("task.trigger.assigned produces expected output", async () => {
+    const result = await resolveTemplate("task.trigger.assigned", {
       work_on_task_cmd: "/work-on-task",
       task_id: "abc123",
       task_desc_section: '\n\nTask: "Fix the bug"',
@@ -528,8 +528,8 @@ When done, use \`store-progress\` with status: "completed" and include your outp
     expect(result.text).toBe(expected);
   });
 
-  test("task.trigger.assigned threads attachments_section between task_desc_section and output_instructions", () => {
-    const result = resolveTemplate("task.trigger.assigned", {
+  test("task.trigger.assigned threads attachments_section between task_desc_section and output_instructions", async () => {
+    const result = await resolveTemplate("task.trigger.assigned", {
       work_on_task_cmd: "/work-on-task",
       task_id: "abc123",
       task_desc_section: '\n\nTask: "Read the attached file"',
@@ -553,8 +553,8 @@ When done, use \`store-progress\` with status: "completed" and include your outp
     expect(result.text).toBe(expected);
   });
 
-  test("task.trigger.unread_mentions produces expected output", () => {
-    const result = resolveTemplate("task.trigger.unread_mentions", {
+  test("task.trigger.unread_mentions produces expected output", async () => {
+    const result = await resolveTemplate("task.trigger.unread_mentions", {
       mention_count: 3,
     });
 
@@ -569,8 +569,8 @@ When done, use \`store-progress\` with status: "completed" and include your outp
     expect(result.text).toBe(expected);
   });
 
-  test("task.trigger.pool_available produces expected output", () => {
-    const result = resolveTemplate("task.trigger.pool_available", {
+  test("task.trigger.pool_available produces expected output", async () => {
+    const result = await resolveTemplate("task.trigger.pool_available", {
       task_count: 5,
     });
 
@@ -587,8 +587,8 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
     expect(result.text).toBe(expected);
   });
 
-  test("task.resumption.with_progress produces expected output", () => {
-    const result = resolveTemplate("task.resumption.with_progress", {
+  test("task.resumption.with_progress produces expected output", async () => {
+    const result = await resolveTemplate("task.resumption.with_progress", {
       work_on_task_cmd: "/work-on-task",
       task_id: "task-xyz",
       task_description: "Fix the test suite",
@@ -615,8 +615,8 @@ When done, use \`store-progress\` with status: "completed" and include your outp
     expect(result.text).toBe(expected);
   });
 
-  test("task.resumption.no_progress produces expected output", () => {
-    const result = resolveTemplate("task.resumption.no_progress", {
+  test("task.resumption.no_progress produces expected output", async () => {
+    const result = await resolveTemplate("task.resumption.no_progress", {
       work_on_task_cmd: "/work-on-task",
       task_id: "task-xyz",
       task_description: "Fix the test suite",
@@ -641,22 +641,22 @@ When done, use \`store-progress\` with status: "completed" and include your outp
 });
 
 describe("Slack — backward compatibility", () => {
-  test("slack.assistant.greeting produces expected output", () => {
-    const result = resolveTemplate("slack.assistant.greeting", {});
+  test("slack.assistant.greeting produces expected output", async () => {
+    const result = await resolveTemplate("slack.assistant.greeting", {});
     expect(result.skipped).toBe(false);
     expect(result.text).toBe("Hi! I'm your Agent Swarm assistant. How can I help?");
   });
 
-  test("slack.assistant.offline produces expected output", () => {
-    const result = resolveTemplate("slack.assistant.offline", {});
+  test("slack.assistant.offline produces expected output", async () => {
+    const result = await resolveTemplate("slack.assistant.offline", {});
     expect(result.skipped).toBe(false);
     expect(result.text).toBe(
       "No agents are available right now. Your request has been queued and will be processed when agents come back online.",
     );
   });
 
-  test("slack.message.thread_context produces expected output", () => {
-    const result = resolveTemplate("slack.message.thread_context", {
+  test("slack.message.thread_context produces expected output", async () => {
+    const result = await resolveTemplate("slack.message.thread_context", {
       thread_messages: "Alice: Hello\n[Agent]: Hi there!",
     });
 
@@ -670,8 +670,8 @@ Alice: Hello
     expect(result.text).toBe(expected);
   });
 
-  test("chat.message.thread_context produces the same block as Slack", () => {
-    const result = resolveTemplate("chat.message.thread_context", {
+  test("chat.message.thread_context produces the same block as Slack", async () => {
+    const result = await resolveTemplate("chat.message.thread_context", {
       thread_messages: "Alice: Hello\n[Agent]: Hi there!",
     });
 

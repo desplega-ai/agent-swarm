@@ -174,8 +174,8 @@ describe("patchWorkflowDefinition", () => {
 describe("checkoutPromptTemplate", () => {
   test("two concurrent checkouts take distinct versions", async () => {
     const eventType = `race.checkout.${crypto.randomUUID().slice(0, 8)}`;
-    const created = upsertPromptTemplate({ eventType, scope: "global", body: "v1" });
-    upsertPromptTemplate({ eventType, scope: "global", body: "v2" });
+    const created = await upsertPromptTemplate({ eventType, scope: "global", body: "v1" });
+    await upsertPromptTemplate({ eventType, scope: "global", body: "v2" });
 
     await Promise.all([
       checkoutPromptTemplate(created.id, 1),

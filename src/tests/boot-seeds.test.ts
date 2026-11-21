@@ -53,19 +53,19 @@ afterAll(async () => {
 
 describe("ensurePricingSeeded", () => {
   test("seeds once per database handle, and again for a new handle", async () => {
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     const seeded = await countPricingSeedRows();
     expect(seeded).toBeGreaterThan(0);
 
     // A second call must not touch the table: wipe it and confirm it stays empty.
     await getDbClient().run("DELETE FROM pricing WHERE effective_from = 0");
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     expect(await countPricingSeedRows()).toBe(0);
 
     // Reopening the same file gives a new handle, which is seeded again.
     closeDb();
     initDb(TEST_DB_PATH);
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     expect(await countPricingSeedRows()).toBe(seeded);
   });
 });

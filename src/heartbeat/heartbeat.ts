@@ -1866,13 +1866,13 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   // Shadow mode leaves the prompt untouched so the Lead's own quiet/non-quiet
   // outcome stays an independent check on the gate's verdict.
   if (gateMode === "enforce" && gate?.verdict === "wake" && gate.summary) {
-    const findings = resolveTemplate("heartbeat.checklist.gate_findings", {
+    const findings = await resolveTemplate("heartbeat.checklist.gate_findings", {
       gate_summary: gate.summary,
     });
     if (!findings.skipped && findings.text) systemStatus += `\n\n${findings.text}`;
   }
 
-  const result = resolveTemplate("heartbeat.checklist", {
+  const result = await resolveTemplate("heartbeat.checklist", {
     system_status: systemStatus,
     heartbeat_content: heartbeatMd,
   });
@@ -2141,7 +2141,7 @@ export async function createBootTriageTask(): Promise<void> {
     return `## System status unavailable\n\nStatus gathering failed after this boot (${reason}). Investigate the task, agent, and DB state directly.`;
   });
 
-  const result = resolveTemplate("heartbeat.boot-triage", {
+  const result = await resolveTemplate("heartbeat.boot-triage", {
     system_status: systemStatus,
     heartbeat_content: isEffectivelyEmpty(heartbeatMd)
       ? "_No standing orders configured._"
