@@ -318,6 +318,32 @@ export type HumanFreeQueueRow = {
   hops: number;
 };
 
+export type TaskUiSpecRow = {
+  taskId: string;
+  spec: string;
+  actions: string | null;
+  fallbackText: string;
+};
+
+/** A task UI action run as the lease check reads it. */
+export type TaskUiActionLeaseRow = { lockedUntil: string | null; lastRunAt: string | null };
+
+/** A `checklist_items` row (columns as stored), plus the joined changer name in lists. */
+export type ChecklistItemRow = Record<string, unknown> & { id: string };
+
+export type NewChecklistItem = {
+  id: string;
+  scope: string;
+  userId: string | null;
+  kind: string;
+  label: string;
+  href: string | null;
+  meta: string | null;
+  sortOrder: number;
+  now: string;
+  actor: string;
+};
+
 export interface TasksRepository {
   // ---- agent_tasks: drafts and Slack folds ----
   /** Appends `suffix` to a draft's text. Returns the changed row count (0: not a draft). */
@@ -657,6 +683,75 @@ export interface TasksRepository {
     after: number,
     limit: number,
   ): Promise<{ id: string; position: number }[]>;
+
+  // ---- task_ui_specs / task_ui_action_runs ----
+  findTaskUiSpec(taskId: string): Promise<TaskUiSpecRow | null>;
+  /** Specs of the given tasks (at most a few hundred ids), in no particular order. */
+  listTaskUiSpecs(taskIds: readonly string[]): Promise<TaskUiSpecRow[]>;
+  /** Insert, or replace the spec of the task (`updated_at` = now). */
+  upsertTaskUiSpec(row: TaskUiSpecRow & { userId: string | null }): Promise<void>;
+  /** Inserts the run row unless it exists. Returns the inserted count (0 or 1). */
+  reserveTaskUiActionRun(row: {
+    taskId: string;
+    actionId: string;
+    surface: string;
+    slackUserId: string | null;
+    userId: string | null;
+  }): Promise<number>;
+  /** Deletes the run row while it has no result task. */
+  releaseTaskUiActionRun(taskId: string, actionId: string): Promise<void>;
+  setTaskUiActionResult(taskId: string, actionId: string, resultTaskId: string): Promise<void>;
+  /**
+   * Insert the run row, or take over its lease when it has no result task, no
+   * lease past `now`, and no run at or after `cooldownCutoff`. Returns the
+   * written count (0 or 1).
+   */
+  acquireTaskUiScriptActionRun(row: {
+    taskId: string;
+    actionId: string;
+    surface: string;
+    slackUserId: string | null;
+    userId: string | null;
+    lockedUntil: string;
+    now: string;
+    cooldownCutoff: string;
+  }): Promise<number>;
+  findTaskUiActionLease(taskId: string, actionId: string): Promise<TaskUiActionLeaseRow | null>;
+  /** Frees the lease and records the run. */
+  finishTaskUiScriptActionRun(
+    taskId: string,
+    actionId: string,
+    error: string | null,
+    now: string,
+  ): Promise<void>;
+
+  // ---- checklist_items ----
+  /** Stores the default swarm rows, and the user's default row, unless they exist. */
+  seedChecklistDefaults(userId: string | null): Promise<void>;
+  /**
+   * Swarm rows and the user's rows, with `statusChangedByName` (`Lead` for a
+   * `lead:` changer, else the user's name). In no particular order.
+   */
+  listChecklistRows(userId: string | null): Promise<ChecklistItemRow[]>;
+  findChecklistItem(id: string): Promise<ChecklistItemRow | null>;
+  /** An open channel item of the scope and user whose meta names `adapter`. */
+  findOpenChannelChecklistItem(
+    scope: string,
+    userId: string | null,
+    adapter: string,
+  ): Promise<{ id: string } | null>;
+  /** One past the highest sortOrder of the scope and user (0 when empty). */
+  nextChecklistSortOrder(scope: string, userId: string | null): Promise<number>;
+  insertChecklistItem(item: NewChecklistItem): Promise<void>;
+  setChecklistSortOrder(id: string, sortOrder: number, now: string, actor: string): Promise<void>;
+  setChecklistStatus(
+    id: string,
+    status: string,
+    reason: string | null,
+    now: string,
+    actor: string,
+  ): Promise<void>;
+  markChecklistNudged(id: string, taskId: string, now: string): Promise<void>;
 
   // ---- task_idempotency_keys ----
   findTaskIdempotencyKey(principal: string, keyHash: string): Promise<TaskIdempotencyKeyRow | null>;
@@ -1549,6 +1644,184 @@ export abstract class BaseTasksRepository implements TasksRepository {
       sql`SELECT COUNT(*) AS count FROM human_free_reclassify_queue`,
     );
     return Number(row?.count ?? 0);
+  }
+
+  // ---- task_ui_specs / task_ui_action_runs ----
+
+  findTaskUiSpec(taskId: string): Promise<TaskUiSpecRow | null> {
+    return this.db.get<TaskUiSpecRow>(sql`
+      SELECT task_id AS "taskId", spec, actions, fallback_text AS "fallbackText"
+      FROM task_ui_specs WHERE task_id = ${taskId}`);
+  }
+
+  listTaskUiSpecs(taskIds: readonly string[]): Promise<TaskUiSpecRow[]> {
+    if (taskIds.length === 0) return Promise.resolve([]);
+    return this.db.query<TaskUiSpecRow>(sql`
+      SELECT task_id AS "taskId", spec, actions, fallback_text AS "fallbackText"
+      FROM task_ui_specs WHERE task_id IN (${sqlList(taskIds)})`);
+  }
+
+  async upsertTaskUiSpec(r: TaskUiSpecRow & { userId: string | null }): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO task_ui_specs (task_id, spec, actions, fallback_text, created_by, updated_by)
+      VALUES (${r.taskId}, ${r.spec}, ${r.actions}, ${r.fallbackText}, ${r.userId}, ${r.userId})
+      ON CONFLICT(task_id) DO UPDATE SET
+        spec=excluded.spec, actions=excluded.actions, fallback_text=excluded.fallback_text,
+        updated_by=excluded.updated_by, updated_at=${nowIso}`);
+  }
+
+  async reserveTaskUiActionRun(r: {
+    taskId: string;
+    actionId: string;
+    surface: string;
+    slackUserId: string | null;
+    userId: string | null;
+  }): Promise<number> {
+    const result = await this.db.run(sql`
+      INSERT INTO task_ui_action_runs
+      (task_id, action_id, surface, slack_user_id, created_by, updated_by)
+      VALUES (${r.taskId}, ${r.actionId}, ${r.surface}, ${r.slackUserId}, ${r.userId}, ${r.userId})
+      ON CONFLICT(task_id, action_id) DO NOTHING`);
+    return result.changes;
+  }
+
+  async releaseTaskUiActionRun(taskId: string, actionId: string): Promise<void> {
+    await this.db.run(sql`
+      DELETE FROM task_ui_action_runs
+      WHERE task_id = ${taskId} AND action_id = ${actionId} AND result_task_id IS NULL`);
+  }
+
+  async setTaskUiActionResult(
+    taskId: string,
+    actionId: string,
+    resultTaskId: string,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE task_ui_action_runs SET result_task_id = ${resultTaskId},
+        updated_at = ${nowIso}
+      WHERE task_id = ${taskId} AND action_id = ${actionId}`);
+  }
+
+  async acquireTaskUiScriptActionRun(r: {
+    taskId: string;
+    actionId: string;
+    surface: string;
+    slackUserId: string | null;
+    userId: string | null;
+    lockedUntil: string;
+    now: string;
+    cooldownCutoff: string;
+  }): Promise<number> {
+    const result = await this.db.run(sql`
+      INSERT INTO task_ui_action_runs
+      (task_id, action_id, surface, slack_user_id, created_by, updated_by, locked_until)
+      VALUES (${r.taskId}, ${r.actionId}, ${r.surface}, ${r.slackUserId}, ${r.userId}, ${r.userId}, ${r.lockedUntil})
+      ON CONFLICT(task_id, action_id) DO UPDATE SET
+        locked_until = excluded.locked_until, surface = excluded.surface,
+        slack_user_id = excluded.slack_user_id, updated_by = excluded.updated_by, updated_at = ${r.now}
+      WHERE task_ui_action_runs.result_task_id IS NULL
+        AND (task_ui_action_runs.locked_until IS NULL OR task_ui_action_runs.locked_until < ${r.now})
+        AND (task_ui_action_runs.last_run_at IS NULL OR task_ui_action_runs.last_run_at < ${r.cooldownCutoff})`);
+    return result.changes;
+  }
+
+  findTaskUiActionLease(taskId: string, actionId: string): Promise<TaskUiActionLeaseRow | null> {
+    return this.db.get<TaskUiActionLeaseRow>(sql`
+      SELECT locked_until AS "lockedUntil", last_run_at AS "lastRunAt"
+      FROM task_ui_action_runs WHERE task_id = ${taskId} AND action_id = ${actionId}`);
+  }
+
+  async finishTaskUiScriptActionRun(
+    taskId: string,
+    actionId: string,
+    error: string | null,
+    now: string,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE task_ui_action_runs SET locked_until = NULL, last_run_at = ${now},
+        run_count = run_count + 1, last_error = ${error}, updated_at = ${now}
+      WHERE task_id = ${taskId} AND action_id = ${actionId}`);
+  }
+
+  // ---- checklist_items ----
+
+  async seedChecklistDefaults(userId: string | null): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO checklist_items (id, scope, kind, label, href, "sortOrder")
+      VALUES ('swarm:channel', 'swarm', 'channel', 'Connect a chat channel', '/integrations/channels', 0),
+             ('swarm:tool', 'swarm', 'tool', 'Connect work tools', '/integrations/tools', 1)
+      ON CONFLICT DO NOTHING`);
+    if (userId) {
+      await this.db.run(sql`
+        INSERT INTO checklist_items
+        (id, scope, "userId", kind, label, href, "sortOrder", created_by, updated_by)
+        VALUES (${`user:${userId}:use_case`}, 'user', ${userId}, 'use_case', 'Plan your first use case',
+          '/sessions', 2, ${userId}, ${userId})
+        ON CONFLICT DO NOTHING`);
+    }
+  }
+
+  listChecklistRows(userId: string | null): Promise<ChecklistItemRow[]> {
+    return this.db.query<ChecklistItemRow>(sql`
+      SELECT c.*, CASE WHEN ${likeAsciiCi(sql`c."statusChangedBy"`, sql`'lead:%'`)} THEN 'Lead' ELSE u.name END
+        AS "statusChangedByName"
+      FROM checklist_items c LEFT JOIN users u ON u.id = c."statusChangedBy"
+      WHERE c.scope = 'swarm' OR (c.scope = 'user' AND c."userId" = ${userId})`);
+  }
+
+  findChecklistItem(id: string): Promise<ChecklistItemRow | null> {
+    return this.db.get<ChecklistItemRow>(sql`SELECT * FROM checklist_items WHERE id = ${id}`);
+  }
+
+  /** Reads a JSON field of `meta` (SQLite `json_extract`). */
+  abstract findOpenChannelChecklistItem(
+    scope: string,
+    userId: string | null,
+    adapter: string,
+  ): Promise<{ id: string } | null>;
+
+  async nextChecklistSortOrder(scope: string, userId: string | null): Promise<number> {
+    const row = await this.db.get<{ sortOrder: number | string }>(sql`
+      SELECT COALESCE(MAX("sortOrder"), -1) + 1 AS "sortOrder" FROM checklist_items
+      WHERE scope = ${scope} AND "userId" IS NOT DISTINCT FROM ${userId}`);
+    return Number(row?.sortOrder ?? 0);
+  }
+
+  async insertChecklistItem(i: NewChecklistItem): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO checklist_items
+      (id, scope, "userId", kind, label, href, meta, "sortOrder", "createdAt", "lastUpdatedAt", created_by, updated_by)
+      VALUES (${i.id}, ${i.scope}, ${i.userId}, ${i.kind}, ${i.label}, ${i.href}, ${i.meta}, ${i.sortOrder},
+        ${i.now}, ${i.now}, ${i.actor}, ${i.actor})`);
+  }
+
+  async setChecklistSortOrder(
+    id: string,
+    sortOrder: number,
+    now: string,
+    actor: string,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE checklist_items SET "sortOrder" = ${sortOrder}, "lastUpdatedAt" = ${now}, updated_by = ${actor}
+      WHERE id = ${id}`);
+  }
+
+  async setChecklistStatus(
+    id: string,
+    status: string,
+    reason: string | null,
+    now: string,
+    actor: string,
+  ): Promise<void> {
+    await this.db.run(sql`
+      UPDATE checklist_items SET status = ${status}, "statusChangedAt" = ${now}, "statusChangedBy" = ${actor},
+        "statusReason" = ${reason}, "lastUpdatedAt" = ${now}, updated_by = ${actor} WHERE id = ${id}`);
+  }
+
+  async markChecklistNudged(id: string, taskId: string, now: string): Promise<void> {
+    await this.db.run(sql`
+      UPDATE checklist_items SET "nudgedAt" = ${now}, "nudgedTaskId" = ${taskId}, "lastUpdatedAt" = ${now}
+      WHERE id = ${id}`);
   }
 
   // ---- task_idempotency_keys ----

@@ -521,4 +521,15 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         ORDER BY rowid
         LIMIT ${limit}`);
   }
+
+  findOpenChannelChecklistItem(
+    scope: string,
+    userId: string | null,
+    adapter: string,
+  ): Promise<{ id: string } | null> {
+    return this.db.get<{ id: string }>(sql`
+      SELECT id FROM checklist_items
+      WHERE kind = 'channel' AND status = 'open' AND scope = ${scope} AND "userId" IS ${userId}
+        AND CASE WHEN json_valid(meta) THEN json_extract(meta, '$.adapter') END = ${adapter}`);
+  }
 }

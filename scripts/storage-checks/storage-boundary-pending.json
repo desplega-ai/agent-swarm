@@ -53,7 +53,7 @@
   },
   "src/be/checklist.ts": {
     "reason": "M2 move: tasks",
-    "sites": 7
+    "sites": 3
   },
   "src/be/connection-bindings-blob-migration.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
@@ -585,7 +585,7 @@
   },
   "src/be/task-ui-spec.ts": {
     "reason": "M2 move: tasks",
-    "sites": 11
+    "sites": 2
   },
   "src/be/telemetry-ingest-anchor.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

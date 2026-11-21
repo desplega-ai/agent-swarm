@@ -657,6 +657,115 @@ export function tasksContract(engine: ContractEngine): void {
       expect(await repo.countHumanFreeQueue()).toBe(2);
     });
 
+    test("task UI specs upsert and action runs reserve, lease and release", async () => {
+      await seedTask(storage, { id: "t" });
+      await seedTask(storage, { id: "r" });
+      await repo.upsertTaskUiSpec({
+        taskId: "t",
+        spec: '{"root":"a"}',
+        actions: null,
+        fallbackText: "fb",
+        userId: null,
+      });
+      await repo.upsertTaskUiSpec({
+        taskId: "t",
+        spec: '{"root":"b"}',
+        actions: "{}",
+        fallbackText: "fb2",
+        userId: null,
+      });
+      expect(await repo.findTaskUiSpec("t")).toEqual({
+        taskId: "t",
+        spec: '{"root":"b"}',
+        actions: "{}",
+        fallbackText: "fb2",
+      });
+      expect(await repo.listTaskUiSpecs(["t", "r"])).toHaveLength(1);
+      expect(await repo.listTaskUiSpecs([])).toEqual([]);
+      const run = { taskId: "t", actionId: "go", surface: "web", slackUserId: null, userId: null };
+      expect(await repo.reserveTaskUiActionRun(run)).toBe(1);
+      expect(await repo.reserveTaskUiActionRun(run)).toBe(0);
+      await repo.releaseTaskUiActionRun("t", "go");
+      expect(await repo.reserveTaskUiActionRun(run)).toBe(1);
+      await repo.setTaskUiActionResult("t", "go", "r");
+      await repo.releaseTaskUiActionRun("t", "go");
+      expect(await repo.reserveTaskUiActionRun(run)).toBe(0);
+
+      const lease = {
+        ...run,
+        actionId: "script",
+        lockedUntil: "2026-11-21T10:05:00.000Z",
+        now: T0,
+        cooldownCutoff: "2026-11-21T09:59:00.000Z",
+      };
+      expect(await repo.acquireTaskUiScriptActionRun(lease)).toBe(1);
+      expect(await repo.acquireTaskUiScriptActionRun(lease)).toBe(0);
+      expect(await repo.findTaskUiActionLease("t", "script")).toEqual({
+        lockedUntil: lease.lockedUntil,
+        lastRunAt: null,
+      });
+      await repo.finishTaskUiScriptActionRun("t", "script", null, T0);
+      expect(await repo.findTaskUiActionLease("t", "script")).toEqual({
+        lockedUntil: null,
+        lastRunAt: T0,
+      });
+      // Inside the cooldown, then after it.
+      expect(await repo.acquireTaskUiScriptActionRun(lease)).toBe(0);
+      expect(
+        await repo.acquireTaskUiScriptActionRun({ ...lease, now: T1, cooldownCutoff: T1 }),
+      ).toBe(1);
+      expect(await repo.findTaskUiActionLease("t", "missing")).toBeNull();
+    });
+
+    test("checklist items: defaults, add, lookups and updates", async () => {
+      await seedUsers("u1");
+      await repo.seedChecklistDefaults("u1");
+      await repo.seedChecklistDefaults("u1");
+      const rows = await repo.listChecklistRows("u1");
+      expect(rows.map((r) => r.id).sort()).toEqual([
+        "swarm:channel",
+        "swarm:tool",
+        "user:u1:use_case",
+      ]);
+      expect((await repo.listChecklistRows(null)).map((r) => r.id).sort()).toEqual([
+        "swarm:channel",
+        "swarm:tool",
+      ]);
+      expect(await repo.nextChecklistSortOrder("swarm", null)).toBe(2);
+      expect(await repo.nextChecklistSortOrder("user", "u1")).toBe(3);
+      expect(await repo.nextChecklistSortOrder("user", "nobody")).toBe(0);
+      await repo.insertChecklistItem({
+        id: "c1",
+        scope: "user",
+        userId: "u1",
+        kind: "channel",
+        label: "Slack",
+        href: null,
+        meta: '{"adapter":"slack"}',
+        sortOrder: 3,
+        now: T0,
+        actor: "u1",
+      });
+      expect(await repo.findOpenChannelChecklistItem("user", "u1", "slack")).toEqual({ id: "c1" });
+      expect(await repo.findOpenChannelChecklistItem("user", "u1", "teams")).toBeNull();
+      await repo.setChecklistStatus("c1", "done", "ok", T1, "lead:x");
+      expect(await repo.findOpenChannelChecklistItem("user", "u1", "slack")).toBeNull();
+      const done = (await repo.listChecklistRows("u1")).find((r) => r.id === "c1");
+      expect(done).toMatchObject({
+        status: "done",
+        statusReason: "ok",
+        statusChangedAt: T1,
+        statusChangedByName: "Lead",
+      });
+      await repo.setChecklistSortOrder("c1", 9, T1, "u1");
+      await repo.markChecklistNudged("c1", "task-1", T1);
+      expect(await repo.findChecklistItem("c1")).toMatchObject({
+        sortOrder: 9,
+        nudgedAt: T1,
+        nudgedTaskId: "task-1",
+      });
+    });
+
     test("appendDraftTaskText changes only a draft", async () => {
       await seedTask(storage, { id: "d1", task: "base", status: "draft" });
       await seedTask(storage, { id: "p1", task: "base", status: "pending" });
