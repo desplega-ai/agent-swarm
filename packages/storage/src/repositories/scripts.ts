@@ -1,3 +1,4 @@
+import { jsonText } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -772,7 +773,7 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
         active, auth_kind, oauth_authorization_id, source, managed_by_connection_id,
         created_at, updated_at, created_by, updated_by
       ) VALUES (
-        ${id}, ${b.configKey}, ${b.allowedHostsJson}, ${b.headerTemplate}, ${b.queryTemplate},
+        ${id}, ${b.configKey}, ${jsonText(b.allowedHostsJson)}, ${b.headerTemplate}, ${b.queryTemplate},
         ${b.scope}, ${b.scopeId}, ${b.active}, ${b.authKind}, ${b.oauthAuthorizationId}, ${b.source},
         ${b.managedByConnectionId}, ${b.now}, ${b.now}, ${b.actor}, ${b.actor}
       ) RETURNING *`);
@@ -784,7 +785,7 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
   ): Promise<ScriptCredentialBindingRow | null> {
     return this.db.get<ScriptCredentialBindingRow>(sql`
       UPDATE script_credential_bindings SET
-        config_key = ${b.configKey}, allowed_hosts_json = ${b.allowedHostsJson},
+        config_key = ${b.configKey}, allowed_hosts_json = ${jsonText(b.allowedHostsJson)},
         header_template = ${b.headerTemplate}, query_template = ${b.queryTemplate},
         scope = ${b.scope}, scope_id = ${b.scopeId}, active = ${b.active}, auth_kind = ${b.authKind},
         oauth_authorization_id = ${b.oauthAuthorizationId}, source = ${b.source},
@@ -842,11 +843,11 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
         enabled, created_at, updated_at, created_by, updated_by
       ) VALUES (
         ${id}, ${c.slug}, ${c.displayName}, ${c.kind}, ${c.scope}, ${c.scopeId}, ${c.baseUrl},
-        ${c.baseUrlSource}, ${c.allowedHostsJson}, ${c.credentialBindingId}, ${c.authType},
+        ${c.baseUrlSource}, ${jsonText(c.allowedHostsJson)}, ${c.credentialBindingId}, ${c.authType},
         ${c.authConfigKey}, ${c.authAuthorizationId}, ${c.authParamName}, ${c.authTemplateOverride},
-        ${c.authHostsOverrideJson}, ${c.openapiSpecSourceKind}, ${c.openapiSpecSource},
+        ${jsonText(c.authHostsOverrideJson)}, ${c.openapiSpecSourceKind}, ${c.openapiSpecSource},
         ${c.openapiSpecJson}, ${c.openapiSpecEtag}, ${c.openapiSpecFetchedAt}, ${c.mcpServerId},
-        ${c.generatedTypes}, ${c.generatedRuntimeJson}, ${c.generatedAt}, ${c.generationError},
+        ${c.generatedTypes}, ${jsonText(c.generatedRuntimeJson)}, ${c.generatedAt}, ${c.generationError},
         ${c.enabled}, ${c.now}, ${c.now}, ${c.actor}, ${c.actor}
       ) RETURNING *`);
   }
@@ -860,16 +861,16 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       UPDATE script_connections SET
         slug = ${c.slug}, display_name = ${c.displayName}, kind = ${c.kind}, scope = ${c.scope},
         scope_id = ${c.scopeId}, base_url = ${c.baseUrl}, base_url_source = ${c.baseUrlSource},
-        allowed_hosts_json = ${c.allowedHostsJson}, credential_binding_id = ${c.credentialBindingId},
+        allowed_hosts_json = ${jsonText(c.allowedHostsJson)}, credential_binding_id = ${c.credentialBindingId},
         auth_type = ${c.authType}, auth_config_key = ${c.authConfigKey},
         auth_authorization_id = ${c.authAuthorizationId}, auth_param_name = ${c.authParamName},
         auth_template_override = ${c.authTemplateOverride},
-        auth_hosts_override_json = ${c.authHostsOverrideJson},
+        auth_hosts_override_json = ${jsonText(c.authHostsOverrideJson)},
         openapi_spec_source_kind = ${c.openapiSpecSourceKind},
         openapi_spec_source = ${c.openapiSpecSource}, openapi_spec_json = ${c.openapiSpecJson},
         openapi_spec_etag = ${c.openapiSpecEtag}, openapi_spec_fetched_at = ${c.openapiSpecFetchedAt},
         mcp_server_id = ${c.mcpServerId}, generated_types = ${c.generatedTypes},
-        generated_runtime_json = ${c.generatedRuntimeJson}, generated_at = ${c.generatedAt},
+        generated_runtime_json = ${jsonText(c.generatedRuntimeJson)}, generated_at = ${c.generatedAt},
         generation_error = ${c.generationError}, enabled = ${c.enabled},
         updated_at = ${c.now}, updated_by = ${c.actor}, version = ${expectedVersion + 1}
       WHERE id = ${id} AND version = ${expectedVersion} RETURNING *`);

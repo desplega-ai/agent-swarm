@@ -206,7 +206,10 @@ export function scriptsContract(engine: ContractEngine): void {
       // Case-sensitive prefix: "Scratch-2" is not a scratch-* name.
       expect(await repo.touchScratchScript("s2", T1)).toBe(0);
       expect(await repo.touchScratchScript("s4", T1)).toBe(0);
-      expect(await repo.restoreScratchScriptUpdatedAt("s1", T0, "other")).toBe(0);
+      // A stale fence (an instant other than the stored updatedAt) writes nothing.
+      expect(await repo.restoreScratchScriptUpdatedAt("s1", T0, "2026-01-01T00:00:00.000Z")).toBe(
+        0,
+      );
       expect(await repo.restoreScratchScriptUpdatedAt("s1", T0, T1)).toBe(1);
       expect(await repo.touchScratchScript("s1", T1)).toBe(1);
 
