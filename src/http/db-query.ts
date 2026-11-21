@@ -59,6 +59,8 @@ export type DbQueryInput = z.infer<typeof DbQueryInputSchema>;
 export interface DbQueryResponse extends DbQueryResult {
   truncated: boolean;
   rowLimit: number | null;
+  /** SQL dialect of the engine that ran the query (Postgres brief D10). */
+  dialect: "sqlite" | "postgres";
 }
 
 export function resolveDbQuerySql(input: Pick<DbQueryInput, "sql" | "query">): string {
@@ -116,6 +118,7 @@ export async function executeReadOnlyQueryGated(
     ...result,
     truncated: maxRows !== undefined && result.total > maxRows,
     rowLimit: maxRows ?? null,
+    dialect: getStorage().capabilities.dbQueryDialect,
   };
 }
 
@@ -177,6 +180,9 @@ const dbQueryRoute = route({
         total: z.number(),
         truncated: z.boolean(),
         rowLimit: z.number().nullable(),
+        dialect: z
+          .enum(["sqlite", "postgres"])
+          .describe("SQL dialect of the storage engine that ran the query"),
       }),
     },
     400: {

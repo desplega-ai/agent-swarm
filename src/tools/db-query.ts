@@ -57,6 +57,7 @@ export const registerDbQueryTool = (server: McpServer) => {
         total: z.number().optional(),
         truncated: z.boolean().optional(),
         rowLimit: z.number().optional(),
+        dialect: z.string().optional(),
       }),
     },
     async (input, _requestInfo, _meta) => {

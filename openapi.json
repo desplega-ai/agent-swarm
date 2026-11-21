@@ -12321,6 +12321,14 @@
                         "number",
                         "null"
                       ]
+                    },
+                    "dialect": {
+                      "type": "string",
+                      "enum": [
+                        "sqlite",
+                        "postgres"
+                      ],
+                      "description": "SQL dialect of the storage engine that ran the query"
                     }
                   },
                   "required": [
@@ -12329,7 +12337,8 @@
                     "elapsed",
                     "total",
                     "truncated",
-                    "rowLimit"
+                    "rowLimit",
+                    "dialect"
                   ]
                 }
               }
