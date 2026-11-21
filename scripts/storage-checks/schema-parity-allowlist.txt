@@ -1,0 +1,31 @@
+# check:schema-parity allowlist (scripts/storage-checks/check-schema-parity.ts).
+# One difference per line: <key> -- <reason>. An entry that matches no difference fails the check.
+#
+# Full-text search on Postgres is milestone M4 (decision D15: tsvector). The FTS5 virtual tables,
+# their shadow tables and the triggers that write them have no Postgres counterpart until then.
+table:agent_tasks_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:skills_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:skills_meta_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:agent_tasks_fts_config -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_data -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_docsize -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_idx -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_config -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_content -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_data -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_docsize -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_idx -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_config -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_content -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_data -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_docsize -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_idx -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+trigger:agent_tasks_fts_delete -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:agent_tasks_fts_insert -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:agent_tasks_fts_update -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:skills_fts_delete -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_fts_insert -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_fts_update -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_meta_fts_delete -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
+trigger:skills_meta_fts_insert -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
+trigger:skills_meta_fts_update -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
