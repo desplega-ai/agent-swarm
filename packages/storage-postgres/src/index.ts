@@ -17,6 +17,7 @@ export {
   PostgresClient,
   type PostgresClientOptions,
   type PostgresRetryOptions,
+  type TransactionEndInfo,
 } from "./client";
 export {
   ClassifiedTimestampFormats,

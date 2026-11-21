@@ -4,7 +4,7 @@
  * package `@desplega/storage` and asks `getStorage()` for repositories.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DB_QUERY_DENIED_TABLES,
@@ -33,6 +33,7 @@ import {
   type PostgresSealedColumn,
   runPostgresMigrations,
   type TimestampFormats,
+  type TransactionEndInfo,
 } from "@desplega/storage-postgres";
 import {
   type BusyRetryOptions,
@@ -53,6 +54,71 @@ export type { BusyRetryOptions };
 const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
 
 /** Printed at client creation under --tx-replay; the e2e runner refuses a run without it. */
+// ---- Transaction statistics (bench only, check 21) ----
+
+type SiteStats = {
+  transactions: number;
+  retriedTransactions: number;
+  retries: number;
+  exhausted: number;
+  errors: number;
+  sqlstates: Record<string, number>;
+};
+
+/** Frames that belong to the storage plumbing, not to the code that opened the transaction. */
+const PLUMBING_FRAME =
+  /node:|native|\/packages\/storage(-postgres|-sqlite)?\/src\/(client|storage|executor|index)\.ts|\/src\/be\/(storage|storage-root|db-client|db)\.ts|\/src\/be\/db\/runtime\.ts/;
+
+/** `path:line` of the first caller frame outside the storage plumbing. */
+export function transactionSite(stack: string): string {
+  for (const line of stack.split("\n").slice(1)) {
+    const match = /\(?((?:\/|file:)[^()\s]+?):(\d+):\d+\)?\s*$/.exec(line.trim());
+    if (!match?.[1] || PLUMBING_FRAME.test(match[1])) continue;
+    const path = match[1].replace(/^file:\/\//, "");
+    const at = path.lastIndexOf("/src/") >= 0 ? path.slice(path.lastIndexOf("/src/") + 1) : path;
+    return `${at.replace(/^.*\/(packages\/)/, "$1")}:${match[2]}`;
+  }
+  return "unknown";
+}
+
+/**
+ * `STORAGE_TX_STATS_FILE` (set by `bun run e2e:bench`, never in production):
+ * count transactions, retries and exhausted retries per transaction site and
+ * write them to that file. A test-only diagnostic like `STORAGE_TX_REPLAY`.
+ */
+function transactionStatsSink(): ((info: TransactionEndInfo) => void) | undefined {
+  const file = process.env.STORAGE_TX_STATS_FILE;
+  if (!file) return undefined;
+  const sites = new Map<string, SiteStats>();
+  let pending = 0;
+  const flush = () => {
+    pending = 0;
+    writeFileSync(file, JSON.stringify(Object.fromEntries(sites), null, 1));
+  };
+  process.on("exit", flush);
+  console.log(`[db] transaction statistics go to ${file} (bench)`);
+  return (info) => {
+    const site = transactionSite(info.stack);
+    const stats = sites.get(site) ?? {
+      transactions: 0,
+      retriedTransactions: 0,
+      retries: 0,
+      exhausted: 0,
+      errors: 0,
+      sqlstates: {},
+    };
+    stats.transactions += 1;
+    if (info.retries.length > 0) stats.retriedTransactions += 1;
+    stats.retries += info.retries.length;
+    for (const code of info.retries) stats.sqlstates[code] = (stats.sqlstates[code] ?? 0) + 1;
+    if (info.outcome === "exhausted") stats.exhausted += 1;
+    if (info.outcome === "error") stats.errors += 1;
+    sites.set(site, stats);
+    pending += 1;
+    if (pending >= 200 || info.retries.length > 0) flush();
+  };
+}
+
 export const TX_REPLAY_BANNER =
   "[storage] tx-replay on: every transaction callback runs twice, the first run rolled back";
 
@@ -226,6 +292,7 @@ export async function openPostgresEngine(
       timestampFormats,
       txReplay,
       checkMessages,
+      onTransactionEnd: transactionStatsSink(),
     });
     const queryReader = await openQueryReader(queryUrl, timestampFormats);
     console.log(

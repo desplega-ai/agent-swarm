@@ -80,6 +80,20 @@ export type PostgresClientOptions = {
   checkMessages?: CheckMessages;
   /** Called once per retried attempt, with the SQLSTATE that caused it (bench, diagnostics). */
   onRetry?: (sqlstate: string, attempt: number) => void;
+  /**
+   * Called once per outermost transaction when it ends (bench only: the caller
+   * stack is captured only when this is set). `retries` holds the SQLSTATE of
+   * each retried attempt; `exhausted` means the last attempt failed retryably.
+   */
+  onTransactionEnd?: (info: TransactionEndInfo) => void;
+};
+
+export type TransactionEndInfo = {
+  /** `new Error().stack` at the transaction call. */
+  stack: string;
+  attempts: number;
+  retries: string[];
+  outcome: "commit" | "error" | "exhausted";
 };
 
 type TxContext = {
@@ -198,6 +212,12 @@ export class PostgresClient implements DbClient {
     if (outer && !outer.closed) return this.savepoint(outer, fn);
 
     let replayPending = this.options.txReplay === true;
+    const stats = this.options.onTransactionEnd
+      ? { stack: new Error().stack ?? "", retries: [] as string[] }
+      : null;
+    const end = (attempts: number, outcome: TransactionEndInfo["outcome"]) => {
+      if (stats) this.options.onTransactionEnd?.({ ...stats, attempts, outcome });
+    };
     for (let attempt = 1; ; attempt++) {
       if (opts.deadlineAt !== undefined && Date.now() > opts.deadlineAt) {
         throw new DbTransactionDeadlineError();
@@ -232,6 +252,7 @@ export class PostgresClient implements DbClient {
           committed.closed = true;
           for (const hook of committed.afterCommit) this.scheduleHook(hook);
         }
+        end(attempt, "commit");
         return value;
       } catch (rawErr) {
         const failed = ctx as TxContext | undefined;
@@ -247,10 +268,12 @@ export class PostgresClient implements DbClient {
         if (isRetryable(rawErr) && attempt < this.retry.maxAttempts) {
           this.retriedAttempts += 1;
           this.options.onRetry?.(sqlstateOf(rawErr) ?? "", attempt);
+          stats?.retries.push(sqlstateOf(rawErr) ?? "");
           await Bun.sleep(this.backoffMs(attempt));
           continue;
         }
         if (failed) runHooks(failed.afterRollback, "afterRollback");
+        end(attempt, isRetryable(rawErr) ? "exhausted" : "error");
         throw err;
       }
     }
