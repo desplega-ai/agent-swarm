@@ -21,15 +21,11 @@
   },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
-    "sites": 323
+    "sites": 292
   },
   "src/be/db/instance-signals.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/be/db/request-composition.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 6
   },
   "src/be/db/runtime.ts": {
     "reason": "M2 move: boot path (M2 step 7)",
@@ -39,25 +35,13 @@
     "reason": "M2 move: scripts",
     "sites": 1
   },
-  "src/be/db/session-costs.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 6
-  },
   "src/be/db/session-labels.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
-  },
-  "src/be/db/session-log-reasoning.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 3
   },
   "src/be/db/session-moves.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 7
-  },
-  "src/be/db/session-summaries.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 3
   },
   "src/be/db/session-tree.ts": {
     "reason": "M2 move: sessions and cost",
@@ -147,10 +131,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
   },
-  "src/be/pricing-refresh.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
   "src/be/runtime-pools/routing.ts": {
     "reason": "M2 move: tasks",
     "sites": 3
@@ -169,7 +149,7 @@
   },
   "src/be/savings/rollup.ts": {
     "reason": "M2 move: sessions and cost",
-    "sites": 17
+    "sites": 2
   },
   "src/be/script-connections.ts": {
     "reason": "M2 move: scripts",
@@ -267,10 +247,6 @@
     "reason": "M2 move: seeded db-query scripts (M4 step 4)",
     "sites": 2
   },
-  "src/be/session-shares.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 9
-  },
   "src/be/session-source-backfill.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 9
@@ -303,10 +279,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 5
   },
-  "src/http/budgets.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 1
-  },
   "src/http/db-query-bounded.ts": {
     "reason": "M2 move: own database handle (M4 steps 4 and 5)",
     "sites": 3
@@ -317,14 +289,6 @@
   },
   "src/http/poll.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 2
-  },
-  "src/http/savings-calibration.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 1
-  },
-  "src/http/sessions.ts": {
-    "reason": "M2 move: sessions and cost",
     "sites": 2
   },
   "src/queue-stall-alarm.ts": {

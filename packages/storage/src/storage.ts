@@ -19,8 +19,10 @@ import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
 import type { RbacRepository } from "./repositories/rbac";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
+import type { SavingsRepository } from "./repositories/savings";
 import type { SchedulesRepository } from "./repositories/schedules";
 import type { ScriptsRepository } from "./repositories/scripts";
+import type { SessionsRepository } from "./repositories/sessions";
 import type { SkillsRepository } from "./repositories/skills";
 import type { SlackRepository } from "./repositories/slack";
 import type { TasksRepository } from "./repositories/tasks";
@@ -55,6 +57,8 @@ export type Repositories = {
   schedules: SchedulesRepository;
   agentFsWebhooks: AgentFsWebhooksRepository;
   improvements: ImprovementsRepository;
+  sessions: SessionsRepository;
+  savings: SavingsRepository;
 };
 
 /**

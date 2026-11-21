@@ -16,8 +16,10 @@ import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
 import { rbacContract } from "./rbac";
 import { runtimePoolsContract } from "./runtime-pools";
+import { savingsContract } from "./savings";
 import { schedulesContract } from "./schedules";
 import { scriptsContract } from "./scripts";
+import { sessionsContract } from "./sessions";
 import { skillsContract } from "./skills";
 import { slackContract } from "./slack";
 import { tasksContract } from "./tasks";
@@ -54,4 +56,6 @@ export function runStorageContract(engine: ContractEngine): void {
   schedulesContract(engine);
   agentFsWebhooksContract(engine);
   improvementsContract(engine);
+  sessionsContract(engine);
+  savingsContract(engine);
 }
