@@ -11,7 +11,6 @@
  * timers, a catch-up tick while work is left.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { getDbClient } from "../db";
 import { getStorage } from "../storage";
 import {
   computeScriptWindow,
@@ -102,9 +101,7 @@ function parseDefinition(definition: unknown): unknown {
 }
 
 async function listWorkflows(): Promise<WorkflowRow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    "SELECT id, name, definition FROM workflows ORDER BY name",
-  );
+  const rows = await savingsRepo().listWorkflows();
   return rows.map((w) => ({ ...w, definition: parseDefinition(w.definition) }));
 }
 

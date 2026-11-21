@@ -26,6 +26,33 @@ export function assetsContract(engine: ContractEngine): void {
       expect((await repo.existingUserIds([])).size).toBe(0);
     });
 
+    test("listUserCreatedKeys: distinct keys of the user's resources, newest first, key ties, limit", async () => {
+      const T0 = "2026-11-21T10:00:00.000Z";
+      const T1 = "2026-11-21T11:00:00.000Z";
+      await storage.executor.run(
+        sql`INSERT INTO users (id, name) VALUES ('ct-u1', 'One'), ('ct-u2', 'Two')`,
+      );
+      await storage.executor.run(sql`
+        INSERT INTO scheduled_tasks (id, name, "intervalMs", "taskTemplate", "createdAt", "lastUpdatedAt", "key", created_by)
+        VALUES ('s1', 's1', 60000, 't', ${T0}, ${T0}, 'shared/b/', 'ct-u1'),
+               ('s2', 's2', 60000, 't', ${T0}, ${T0}, 'shared/other/', 'ct-u2')`);
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, triggers, enabled, "createdAt", "lastUpdatedAt", "key", created_by)
+        VALUES ('w1', 'w1', '{"nodes":[]}', '[]', ${true}, ${T1}, ${T1}, 'shared/b/', 'ct-u1'),
+               ('w2', 'w2', '{"nodes":[]}', '[]', ${true}, ${T0}, ${T0}, 'shared/a/', 'ct-u1')`);
+      // shared/b/ has the newest row (T1); shared/a/ and shared/c/ tie at T0 and sort by key.
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, triggers, enabled, "createdAt", "lastUpdatedAt", "key", created_by)
+        VALUES ('w3', 'w3', '{"nodes":[]}', '[]', ${true}, ${T0}, ${T0}, 'shared/c/', 'ct-u1')`);
+      expect(await repo.listUserCreatedKeys("ct-u1", 10)).toEqual([
+        "shared/b/",
+        "shared/a/",
+        "shared/c/",
+      ]);
+      expect(await repo.listUserCreatedKeys("ct-u1", 2)).toEqual(["shared/b/", "shared/a/"]);
+      expect(await repo.listUserCreatedKeys("nobody", 10)).toEqual([]);
+    });
+
     test("audit data lists every keyed table in order, rows in insertion order", async () => {
       const data = await repo.readAssetKeyAuditData();
       expect(data.keyRows.map((entry) => entry.table)).toEqual([...ASSET_KEY_TABLES]);

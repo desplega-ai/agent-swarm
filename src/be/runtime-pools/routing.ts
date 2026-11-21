@@ -8,7 +8,6 @@ import {
   assignUnassignedTaskPending,
   createLogEntry,
   getAllAgents,
-  getDbClient,
   getIdleWorkersWithCapacity,
   getTaskById,
   getUnassignedPoolTasks,
@@ -42,26 +41,9 @@ function positiveEnv(key: string, fallback: number): number {
 }
 
 async function eligibleRuntimeSlots(agentId?: string): Promise<Map<string, number>> {
-  const runtimes = await getDbClient().query<{ agent_id: string; free_slots: number }>(
-    `SELECT r.agent_id, SUM(MAX(0, r.reported_slots - MAX(
-       (SELECT COUNT(*) FROM active_sessions WHERE runtimeInstanceId = r.id),
-       CASE WHEN t.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END
-     ))) AS free_slots
-     FROM runtime_instances r JOIN agents a ON a.id = r.agent_id
-     LEFT JOIN runtime_pools p ON p.id = a.runtime_pool_id
-     LEFT JOIN agent_tasks t ON t.id = r.task_id
-     WHERE r.status = 'active' AND r.draining = 0
-       AND (r.credential_ready IS NULL OR r.credential_ready = 1)
-       AND r.last_seen_at >= ?
-       AND (a.runtime_pool_id IS NULL OR p.enabled = 1)
-       AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
-         OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped'))
-       ${agentId ? "AND r.agent_id = ?" : ""}
-     GROUP BY r.agent_id`,
-    [
-      new Date(Date.now() - runtimeStaleThresholdMinutes() * 60000).toISOString(),
-      ...(agentId ? [agentId] : []),
-    ],
+  const runtimes = await getStorage().repos.runtimePools.listEligibleRuntimeSlots(
+    new Date(Date.now() - runtimeStaleThresholdMinutes() * 60000).toISOString(),
+    agentId,
   );
   return new Map(runtimes.map((runtime) => [runtime.agent_id, runtime.free_slots]));
 }
@@ -76,10 +58,8 @@ export async function routePoolTasks(
   const runtimeSlots = enabled ? await eligibleRuntimeSlots() : new Map<string, number>();
   const provisioning = new Set<string>();
   if (enabled && !opts.taskIds) {
-    const starting = await getDbClient().query<{ agent_id: string }>(
-      "SELECT DISTINCT agent_id FROM runtime_instances WHERE status = 'provisioning' AND draining = 0",
-    );
-    for (const runtime of starting) provisioning.add(runtime.agent_id);
+    const starting = await getStorage().repos.runtimePools.listProvisioningAgentIds();
+    for (const agentId of starting) provisioning.add(agentId);
   }
   const releasedFrom = new Map<string, string>();
   if (enabled && !opts.taskIds) {

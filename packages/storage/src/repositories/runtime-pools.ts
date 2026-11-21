@@ -490,6 +490,31 @@ export interface RuntimePoolsRepository {
   markControllerDisconnected(id: string, now: string): Promise<void>;
   /** Sets the runtime's current task id (scoped to its agent). */
   setRuntimeTask(runtimeId: string, agentId: string, taskId: string): Promise<void>;
+
+  // --- pool routing and auth modes (src/be/runtime-pools/routing.ts, src/be/multi-runtime.ts) ---
+  /**
+   * Free slots per agent over its eligible runtimes: `active`, not draining,
+   * credential ready (or unknown), seen at or after `seenSince`, in an enabled
+   * pool (or none), and not held by a live task of a per-task pool. A runtime's
+   * free slots are its reported slots minus the larger of its session count and
+   * its own live task (never below 0). Only `agentId` when given. One row per
+   * agent, in no particular order.
+   */
+  listEligibleRuntimeSlots(
+    seenSince: string,
+    agentId?: string,
+  ): Promise<{ agent_id: string; free_slots: number }[]>;
+  /** Distinct agents with a `provisioning`, non-draining runtime. In no particular order. */
+  listProvisioningAgentIds(): Promise<string[]>;
+  /**
+   * One row per `active` runtime seen at or after `seenSince`: its agent and
+   * `runtime_token` (1 when an unrevoked token of that runtime and agent expires
+   * after `now`, else 0). In no particular order.
+   */
+  listLiveRuntimeAuthModes(
+    now: string,
+    seenSince: string,
+  ): Promise<{ agent_id: string; runtime_token: number }[]>;
 }
 
 const CONTROLLER_COLUMNS = sql`id, name, kind, placement, config, secret_config AS "secretConfig",
@@ -1241,6 +1266,35 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
     await this.db.run(sql`
       UPDATE runtime_instances SET task_id = ${taskId}
        WHERE id = ${runtimeId} AND agent_id = ${agentId}`);
+  }
+
+  // --- pool routing and auth modes ---
+
+  /** Scalar max of two values: kept per engine (SQLite `MAX(a, b)`). */
+  abstract listEligibleRuntimeSlots(
+    seenSince: string,
+    agentId?: string,
+  ): Promise<{ agent_id: string; free_slots: number }[]>;
+
+  async listProvisioningAgentIds(): Promise<string[]> {
+    const rows = await this.db.query<{ agent_id: string }>(sql`
+      SELECT DISTINCT agent_id FROM runtime_instances
+       WHERE status = 'provisioning' AND draining = ${false}`);
+    return rows.map((row) => row.agent_id);
+  }
+
+  listLiveRuntimeAuthModes(
+    now: string,
+    seenSince: string,
+  ): Promise<{ agent_id: string; runtime_token: number }[]> {
+    return this.db.query<{ agent_id: string; runtime_token: number }>(sql`
+      SELECT r.agent_id, CASE WHEN EXISTS(
+         SELECT 1 FROM session_tokens s
+         WHERE s."runtimeId" = r.id AND s."agentId" = r.agent_id
+           AND s."revokedAt" IS NULL AND s."expiresAt" > ${now}
+       ) THEN 1 ELSE 0 END AS runtime_token
+       FROM runtime_instances r
+       WHERE r.status = 'active' AND r.last_seen_at >= ${seenSince}`);
   }
 }
 

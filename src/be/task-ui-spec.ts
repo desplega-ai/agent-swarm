@@ -2,7 +2,6 @@ import type { TaskUiSpecRow } from "@desplega/storage";
 import * as z from "zod";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type { TaskUiSpec } from "../utils/task-ui-spec";
-import { getDbClient } from "./db";
 import { scrubJsonValue } from "./scrub-json";
 import { getStorage } from "./storage";
 
@@ -207,10 +206,5 @@ export async function finishTaskUiScriptActionRun(
  * an `agent_log` row, so it also shows in the task's activity timeline.
  */
 export async function hasTaskUiSpecCheckRefusal(taskId: string): Promise<boolean> {
-  return Boolean(
-    await getDbClient().get<{ id: string }>(
-      "SELECT id FROM agent_log WHERE taskId = ? AND eventType = 'task_ui_spec_check_refused' LIMIT 1",
-      [taskId],
-    ),
-  );
+  return getStorage().repos.agents.hasTaskLogEvent(taskId, "task_ui_spec_check_refused");
 }

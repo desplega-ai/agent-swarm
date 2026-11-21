@@ -41,6 +41,31 @@ export type EventCountFilters = {
 
 export type EventCount = { event: string; count: number };
 
+/** Filters of `listFiltered`; every given filter must match. */
+export type EventListFilters = {
+  /** Only events outside sessions this user may not read; `userId: null` is a guest. */
+  readableBy?: { userId: string | null };
+  category?: string;
+  event?: string;
+  /** Any of these names (`event IN (...)`). Ignored when empty. */
+  events?: string[];
+  status?: string;
+  source?: string;
+  agentId?: string;
+  taskId?: string;
+  sessionId?: string;
+  /** `data.field` equals this value. */
+  dataField?: string;
+  since?: string;
+  until?: string;
+  limit: number;
+  /**
+   * Only the newest row per (event, data.field) pair over these names and
+   * values: one indexed `ORDER BY createdAt DESC LIMIT 1` lookup per pair.
+   */
+  latestPerDataField?: { events: string[]; dataFields: string[] };
+};
+
 export interface EventsRepository {
   insert(row: NewEvent): Promise<void>;
   /**
@@ -51,6 +76,12 @@ export interface EventsRepository {
   list(limit: number, filter?: { column: EventColumn; value: string }): Promise<EventRow[]>;
   /** Event counts per name. Order: count descending, then event name. */
   countByEvent(filters: EventCountFilters): Promise<EventCount[]>;
+  /**
+   * Events matching the filters, newest first, at most `limit`. Order:
+   * `createdAt` descending; ties come in the order the engine reads them
+   * (unchanged from before the move).
+   */
+  listFiltered(filters: EventListFilters): Promise<EventRow[]>;
 }
 
 export abstract class BaseEventsRepository implements EventsRepository {
@@ -71,6 +102,9 @@ export abstract class BaseEventsRepository implements EventsRepository {
   ): Promise<EventRow[]>;
 
   abstract countByEvent(filters: EventCountFilters): Promise<EventCount[]>;
+
+  /** `data.field` reads `json_extract` (SQLite). */
+  abstract listFiltered(filters: EventListFilters): Promise<EventRow[]>;
 
   protected countFilters(filters: EventCountFilters): SqlQuery {
     const conditions: SqlQuery[] = [];

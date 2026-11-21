@@ -1554,5 +1554,253 @@ export function tasksContract(engine: ContractEngine): void {
       );
       expect(run?.context_replay).toBe("sealed");
     });
+
+    test("cross-module task reads: open children, boot triage, checklist, status, parent", async () => {
+      const terminal = ["completed", "failed", "cancelled", "superseded", "skipped"];
+      await seedTask(storage, { id: "root", source: "slack" });
+      await seedTask(storage, { id: "c1", parentTaskId: "root", status: "completed" });
+      expect(await repo.findOpenChildTaskId("root", terminal)).toBeNull();
+      await seedTask(storage, { id: "c2", parentTaskId: "root", status: "in_progress" });
+      expect(await repo.findOpenChildTaskId("root", terminal)).toBe("c2");
+      await seedTask(storage, {
+        id: "b1",
+        agentId: "lead",
+        taskType: "boot-triage",
+        status: "failed",
+      });
+      expect(await repo.findOpenBootTriageTask("lead", terminal)).toBeNull();
+      await seedTask(storage, { id: "b2", agentId: "lead", taskType: "boot-triage" });
+      expect(await repo.findOpenBootTriageTask("lead", terminal)).toBe("b2");
+      await seedTask(storage, {
+        id: "h1",
+        agentId: "lead",
+        taskType: "heartbeat-checklist",
+        status: "completed",
+      });
+      const open = ["pending", "in_progress"];
+      expect(await repo.findOpenHeartbeatChecklistTask("lead", open)).toBeNull();
+      await seedTask(storage, { id: "h2", agentId: "lead", taskType: "heartbeat-checklist" });
+      expect(await repo.findOpenHeartbeatChecklistTask("lead", open)).toBe("h2");
+      expect(await repo.findOpenHeartbeatChecklistTask("other", open)).toBeNull();
+      expect(await repo.findTaskStatus("c1")).toBe("completed");
+      expect(await repo.findTaskStatus("missing")).toBeNull();
+      expect(await repo.findTaskParentId("c1")).toEqual({ parentTaskId: "root" });
+      expect(await repo.findTaskParentId("root")).toEqual({ parentTaskId: null });
+      expect(await repo.findTaskParentId("missing")).toBeNull();
+      await seedTask(storage, { id: "c3", parentTaskId: "c2", source: "api" });
+      expect(await repo.findRootTaskSource("c3", 10)).toEqual({ source: "slack" });
+      expect(await repo.findRootTaskSource("c3", 1)).toEqual({ source: "mcp" });
+      expect(await repo.findRootTaskSource("missing", 10)).toBeNull();
+    });
+
+    test("repointTaskDependency writes only while status and membership still hold", async () => {
+      await seedTask(storage, { id: "d", dependsOn: '["old","x"]' });
+      expect(await repo.repointTaskDependency("d", "in_progress", "old", '["new","x"]')).toBe(
+        false,
+      );
+      expect(await repo.repointTaskDependency("d", "pending", "gone", '["new","x"]')).toBe(false);
+      expect(await repo.repointTaskDependency("d", "pending", "old", '["new","x"]')).toBe(true);
+      const row = await repo.findTaskById("d");
+      expect(row?.dependsOn).toBe('["new","x"]');
+      expect(row?.lastUpdatedAt).not.toBe(T0);
+    });
+
+    test("runtime instance, model resolution and agentRanModel", async () => {
+      await seedTask(storage, { id: "t", agentId: "ag", model: "opus" });
+      await repo.setTaskRuntimeInstance("t", "other", "rt");
+      await repo.setTaskRuntimeInstance("t", "ag", "rt");
+      expect(
+        await storage.executor.get(sql`SELECT runtime_instance_id FROM agent_tasks WHERE id = 't'`),
+      ).toEqual({ runtime_instance_id: "rt" });
+      expect(await repo.agentRanModel("ag", "opus")).toBe(true);
+      await repo.setTaskModelResolution("t", {
+        resolvedModel: "claude-x",
+        modelSource: "tier",
+        modelAlias: null,
+        resolvedProfile: "p",
+      });
+      expect(await repo.findTaskById("t")).toMatchObject({
+        resolvedModel: "claude-x",
+        modelSource: "tier",
+        modelAlias: null,
+        resolvedProfile: "p",
+      });
+      expect(await repo.agentRanModel("ag", "opus")).toBe(false);
+      expect(await repo.agentRanModel("ag", "claude-x")).toBe(true);
+      expect(await repo.agentRanModel("other", "claude-x")).toBe(false);
+      await repo.clearTaskModelResolution("t");
+      expect(await repo.findTaskById("t")).toMatchObject({
+        resolvedModel: null,
+        modelSource: null,
+        resolvedProfile: null,
+      });
+    });
+
+    test("in-progress reads for the API drain", async () => {
+      const agent = (id: string, status: string, at: string) =>
+        storage.executor.run(sql`
+          INSERT INTO agents (id, name, "isLead", status, "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, ${false}, ${status}, ${T0}, ${at})`);
+      await agent("live", "busy", T1);
+      await agent("stale", "busy", T0);
+      await agent("off", "offline", T1);
+      await seedTask(storage, { id: "a", agentId: "live", status: "in_progress" });
+      await seedTask(storage, { id: "b", agentId: "stale", status: "in_progress" });
+      await seedTask(storage, { id: "c", agentId: "off", status: "in_progress" });
+      await seedTask(storage, { id: "d", agentId: "live", status: "pending" });
+      expect(await repo.listLiveInProgressTaskIds(T1)).toEqual(["a"]);
+      expect(await repo.countInProgressAmong(["a", "b", "d", "zz"])).toBe(2);
+      expect(await repo.countInProgressAmong([])).toBe(0);
+    });
+
+    test("queueStallOldest counts claimable tasks and picks the oldest", async () => {
+      expect(await repo.queueStallOldest()).toEqual({
+        claimableCount: 0,
+        oldestTaskId: null,
+        oldestClaimableAt: null,
+      });
+      await seedTask(storage, { id: "dep", status: "completed", finishedAt: T1 });
+      await seedTask(storage, { id: "open", status: "in_progress" });
+      await seedTask(storage, {
+        id: "q1",
+        status: "unassigned",
+        createdAt: T0,
+        dependsOn: '["dep"]',
+      });
+      await seedTask(storage, { id: "q2", createdAt: "2026-11-21T10:30:00.000Z" });
+      await seedTask(storage, { id: "blocked", dependsOn: '["open"]' });
+      expect(await repo.queueStallOldest()).toEqual({
+        claimableCount: 2,
+        oldestTaskId: "q2",
+        oldestClaimableAt: "2026-11-21T10:30:00.000Z",
+      });
+    });
+
+    test("install and tree aggregates", async () => {
+      expect(await repo.hasUserOrNonSystemTask()).toBe(false);
+      await seedUsers("u1", "u2");
+      expect(await repo.hasUserOrNonSystemTask()).toBe(true);
+      await storage.executor.run(sql`DELETE FROM users`);
+      await seedTask(storage, { id: "boot", taskType: "boot-triage" });
+      expect(await repo.hasUserOrNonSystemTask()).toBe(false);
+      await seedUsers("u1", "u2");
+      await seedTask(storage, {
+        id: "r",
+        status: "completed",
+        finishedAt: T0,
+        requestedByUserId: "u1",
+      });
+      expect(await repo.hasUserOrNonSystemTask()).toBe(true);
+      await seedTask(storage, { id: "k", parentTaskId: "r", status: "failed", finishedAt: T1 });
+      expect(await repo.taskTreeSettlement("r", ["completed", "failed"])).toEqual({
+        open: 0,
+        deferred: 0,
+        lastFinishedAt: T1,
+      });
+      await seedTask(storage, { id: "k2", parentTaskId: "k", requestedByUserId: "u2" });
+      await storage.executor.run(sql`
+        INSERT INTO scheduled_tasks (id, name, "taskTemplate", enabled, "parentTaskId", "taskType",
+          "scheduleType", "nextRunAt", "createdAt", "lastUpdatedAt")
+        VALUES ('s', 's', 't', ${true}, 'k', 'deferred', 'one_time', ${T1}, ${T0}, ${T0})`);
+      expect(await repo.taskTreeSettlement("r", ["completed", "failed"])).toEqual({
+        open: 1,
+        deferred: 1,
+        lastFinishedAt: T1,
+      });
+      expect(await repo.countFinishedTaskOutcomes()).toEqual({ completed: 1, failed: 1 });
+      expect(await repo.countTaskActivitySince(T1)).toEqual({
+        created: 0,
+        completed: 0,
+        failed: 1,
+      });
+      expect(await repo.countDistinctRequestersSince(T0)).toBe(2);
+      expect(await repo.countDistinctRequestersSince(T1)).toBe(0);
+    });
+
+    test("carrySteeringMessages moves pending and delivered rows only", async () => {
+      await seedTask(storage, { id: "from" });
+      await seedTask(storage, { id: "to" });
+      const steer = (id: string, status: string) =>
+        storage.executor.run(sql`
+          INSERT INTO task_steering_messages (id, task_id, body, mode, status, delivered_mode, source,
+            created_by_kind, delivered_at)
+          VALUES (${id}, 'from', 'b', 'steer', ${status}, 'steer', 'api', 'system', ${T0})`);
+      await steer("p", "pending");
+      await steer("d", "delivered");
+      await steer("h", "handled");
+      expect((await repo.carrySteeringMessages("from", "to")).sort()).toEqual(["d", "p"]);
+      expect(
+        await storage.executor.query(sql`
+          SELECT id, task_id, status, delivered_mode, delivered_at FROM task_steering_messages ORDER BY id`),
+      ).toEqual([
+        { id: "d", task_id: "to", status: "pending", delivered_mode: null, delivered_at: null },
+        { id: "h", task_id: "from", status: "handled", delivered_mode: "steer", delivered_at: T0 },
+        { id: "p", task_id: "to", status: "pending", delivered_mode: null, delivered_at: null },
+      ]);
+    });
+
+    test("slack threads, run task probes and depended-on ids", async () => {
+      const terminal = ["completed", "failed", "cancelled"];
+      await seedTask(storage, {
+        id: "s1",
+        slackChannelId: "C",
+        slackThreadTs: "1",
+        taskType: "deferred",
+      });
+      await seedTask(storage, { id: "s2" });
+      const threads = await repo.listTaskSlackThreads(["s1", "s2", "zz"]);
+      expect(threads).toHaveLength(2);
+      expect(threads).toContainEqual({
+        slackChannelId: "C",
+        slackThreadTs: "1",
+        taskType: "deferred",
+      });
+      expect(await repo.listTaskSlackThreads([])).toEqual([]);
+      await storage.executor.run(sql`
+        INSERT INTO workflows (id, name, definition, triggers, enabled, "createdAt", "lastUpdatedAt")
+        VALUES ('wf', 'wf', '{}', '[]', ${true}, ${T0}, ${T0})`);
+      for (const run of ["r1", "r2"]) {
+        await storage.executor.run(sql`
+          INSERT INTO workflow_runs (id, "workflowId", status, "startedAt", "lastUpdatedAt")
+          VALUES (${run}, 'wf', 'running', ${T0}, ${T0})`);
+      }
+      await seedTask(storage, { id: "w1", workflowRunId: "r1", status: "completed" });
+      expect(await repo.hasOpenTaskOfRuns(["r1"], terminal)).toBe(false);
+      expect(await repo.listOpenTaskIdsOfRuns(["r1"], terminal)).toEqual([]);
+      await seedTask(storage, { id: "w2", workflowRunId: "r1", dependsOn: '["w1","x"]' });
+      await seedTask(storage, { id: "w3", status: "completed", dependsOn: '["y"]' });
+      expect(await repo.hasOpenTaskOfRuns(["r1", "r2"], terminal)).toBe(true);
+      expect(await repo.listOpenTaskIdsOfRuns(["r1"], terminal)).toEqual(["w2"]);
+      expect((await repo.listDependedOnTaskIds(terminal)).sort()).toEqual(["w1", "x"]);
+    });
+
+    test("findCitationTarget reads the target of each kind", async () => {
+      await seedTask(storage, { id: "t1" });
+      expect(await repo.findCitationTarget("task", "t1")).toEqual({ id: "t1" });
+      expect(await repo.findCitationTarget("task", "missing")).toBeNull();
+      expect(await repo.findCitationTarget("page", "missing")).toBeNull();
+      expect(await repo.findCitationTarget("script-run", "missing")).toBeNull();
+      expect(await repo.findCitationTarget("memory", "missing")).toBeNull();
+    });
+
+    test("shippingEvidenceSql matches PR attachments and PR output", async () => {
+      await seedTask(storage, { id: "o", output: "Opened https://github.com/o/r/pull/7." });
+      await seedTask(storage, { id: "n", output: "https://notgithub.com/o/r/pull/8" });
+      await seedTask(storage, { id: "a" });
+      await storage.executor.run(sql`
+        INSERT INTO task_attachments (id, task_id, name, kind, url, created_at)
+        VALUES ('x', 'a', 'x', 'url', 'https://example.com/report', ${T0})`);
+      const e = repo.shippingEvidenceSql("t", "github.com");
+      const read = (id: string) =>
+        storage.executor.get(sql`
+          SELECT ${e.hasArtifact} AS "hasArtifact", ${e.hasPullRequest} AS "hasPullRequest"
+          FROM agent_tasks t WHERE t.id = ${id}`);
+      expect(await read("o")).toEqual({ hasArtifact: 1, hasPullRequest: 1 });
+      expect(await read("n")).toEqual({ hasArtifact: 0, hasPullRequest: 0 });
+      expect(await read("a")).toEqual({ hasArtifact: 1, hasPullRequest: 0 });
+      expect(() => repo.shippingEvidenceSql("t; x", "github.com")).toThrow(
+        "Invalid task SQL alias",
+      );
+    });
   });
 }

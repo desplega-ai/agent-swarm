@@ -4,8 +4,8 @@
  * and prices at the requested tier. All of that happens at read time, so a
  * tier or window change needs no recomputation.
  */
-import { getDbClient } from "../db";
-import type { DbParam } from "../db-client";
+import type { SavingsBucketFilter } from "@desplega/storage";
+import { getStorage } from "../storage";
 import {
   computeScriptWindow,
   computeWorkflowWindow,
@@ -36,6 +36,7 @@ import {
 import { dayStartIso, SAVINGS_FACT_COLUMNS, savingsRollupGeneration, utcDay } from "./rollup";
 
 const DAY_MS = 86_400_000;
+const repo = () => getStorage().repos.savings;
 const MINUTE_MS = 60_000;
 
 export type SavingsWindow = { start: string; end: string; days: number };
@@ -205,7 +206,7 @@ function cachedScan<T>(
 function scanSlice(
   workflow: { id: string; definition: unknown },
   slice: { start: string; end: string },
-  sql: SavingsSql,
+  sql: SavingsSql | undefined,
   ttl: number,
 ): Promise<SliceResult> {
   return cachedScan<SliceResult>(
@@ -288,34 +289,23 @@ const yieldLoop = (): Promise<void> => {
  * waits even when most of its days are empty. The slices cover the window
  * end to end, so a day that gains rows after the count is still read.
  *
- * `oneJob` names the index of a one-job filter (`jobKey` or `jobId`): its few
- * rows are read in one query, through that index. Without ANALYZE statistics
- * (production has none) the planner would pick the kind-and-day index and
- * read every job's buckets of the window.
+ * A one-job filter (`jobKey` or `jobId`) reads its few rows in one query,
+ * through that job's index (the repository pins it).
  */
 async function forEachBucketChunk<T>(
-  columns: string,
-  where: string,
-  params: DbParam[],
+  filter: SavingsBucketFilter,
+  columns: readonly string[],
   firstDay: string,
   lastDay: string,
   onRows: (rows: T[]) => void | Promise<void>,
-  oneJob?: "idx_automation_savings_daily_key" | "idx_automation_savings_daily_job",
 ): Promise<void> {
-  const client = getDbClient();
+  const oneJob =
+    filter.kind === "workflow" ? filter.jobKey !== undefined : filter.jobId !== undefined;
   if (oneJob) {
-    await onRows(
-      await client.query<T>(
-        `SELECT ${columns} FROM automation_savings_daily INDEXED BY ${oneJob} WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
-        [...params, firstDay, lastDay],
-      ),
-    );
+    await onRows(await repo().listBuckets<T>(filter, columns, firstDay, lastDay));
     return;
   }
-  const counts = await client.query<{ day: string; n: number }>(
-    `SELECT day, count(*) n FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? GROUP BY day ORDER BY day`,
-    [...params, firstDay, lastDay],
-  );
+  const counts = await repo().countBucketsByDay(filter, firstDay, lastDay);
   // Each slice ends on its last counted day; the next starts the day after.
   const ends: string[] = [];
   let rows = 0;
@@ -336,12 +326,7 @@ async function forEachBucketChunk<T>(
     // Also before the first slice: database calls settle as microtasks, so
     // without it a parallel read's first slice would run in this same turn.
     await yieldLoop();
-    await onRows(
-      await client.query<T>(
-        `SELECT ${columns} FROM automation_savings_daily WHERE ${where} AND day>=? AND day<=? ORDER BY day`,
-        [...params, from, to],
-      ),
-    );
+    await onRows(await repo().listBuckets<T>(filter, columns, from, to));
     from = utcDay(Date.parse(dayStartIso(to)) + DAY_MS);
   }
 }
@@ -426,13 +411,9 @@ export async function readWorkflowSavings(opts: {
   /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
   curve?: CurveSet;
 }): Promise<WorkflowSavingsRead> {
-  const client = getDbClient();
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
   const calendarDays = daysBetween(firstDay, lastDay);
-  const marker = await client.get<{ n: number; at: string | null }>(
-    "SELECT count(CASE WHEN day<? THEN 1 END) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='workflow' AND modelVersion=? AND day>=? AND day<=?",
-    [lastDay, MODEL_VERSION, firstDay, lastDay],
-  );
+  const marker = await repo().summarizeDayMarkers("workflow", MODEL_VERSION, firstDay, lastDay);
   // Today is still open; only closed calendar days need rollup markers.
   const complete = Number(marker?.n) >= calendarDays.length - 1;
   const markerAt = marker?.at ?? null;
@@ -450,10 +431,7 @@ export async function readWorkflowSavings(opts: {
 
   let core: PricedCore<WorkflowSavingsRow>;
   if (opts.workflowId) {
-    const own = await client.get<{ jobKey: string }>(
-      "SELECT jobKey FROM automation_savings_daily WHERE jobKind='workflow' AND jobId=? AND day>=? AND day<=? LIMIT 1",
-      [opts.workflowId, firstDay, lastDay],
-    );
+    const own = await repo().findWorkflowJobKey(opts.workflowId, firstDay, lastDay);
     if (!own) {
       return {
         window,
@@ -503,7 +481,6 @@ async function priceWorkflowBuckets(scope: {
   jobKey?: string;
   workflowId?: string;
 }): Promise<PricedCore<WorkflowSavingsRow>> {
-  const keyFilter = scope.jobKey !== undefined ? "AND jobKey=?" : "";
   let computedAt = scope.markerAt;
   let boundaryEstimated = false;
   const jobs = new Map<string, Job>();
@@ -540,13 +517,11 @@ async function priceWorkflowBuckets(scope: {
     }
   };
   await forEachBucketChunk(
-    `day, jobId, jobKey, jobName, computedAt, ${SAVINGS_FACT_COLUMNS.join(", ")}`,
-    `jobKind='workflow' AND subKind='' AND modelVersion=? ${keyFilter}`,
-    [MODEL_VERSION, ...(scope.jobKey !== undefined ? [scope.jobKey] : [])],
+    { kind: "workflow", modelVersion: MODEL_VERSION, jobKey: scope.jobKey },
+    ["day", "jobId", "jobKey", "jobName", "computedAt", ...SAVINGS_FACT_COLUMNS],
     scope.firstDay,
     scope.lastDay,
     fold,
-    scope.jobKey !== undefined ? "idx_automation_savings_daily_key" : undefined,
   );
 
   // Versions of one job share the schedule cap: the live version first, then
@@ -618,7 +593,7 @@ async function clipFirstDay(
   window: SavingsWindow,
   firstDay: string,
   fleet: boolean,
-  sql: SavingsSql = (q, p) => getDbClient().query(q, p),
+  sql?: SavingsSql,
 ): Promise<boolean> {
   const startMs = Date.parse(window.start);
   // A window starting at midnight keeps the whole first-day bucket.
@@ -629,10 +604,7 @@ async function clipFirstDay(
   const first = buckets.filter((b) => b.day === firstDay);
   if (first.length === 0) return false;
   const ids = [...new Set(first.map((b) => b.jobId))];
-  const defs = await getDbClient().query<{ id: string; definition: unknown }>(
-    `SELECT id, definition FROM workflows WHERE id IN (${ids.map(() => "?").join(",")})`,
-    ids,
-  );
+  const defs = await repo().listWorkflowDefinitions(ids);
   const defOf = new Map(defs.map((d) => [d.id, parseDefinition(d.definition)]));
   const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
   const ttl = fleet ? FLEET_SLICE_TTL_MS : SLICE_TTL_MS;
@@ -741,9 +713,7 @@ export type ScriptSavingsRead = Omit<WorkflowSavingsRead, "rows"> & { rows: Scri
 /** A script name the savings route answers for: one in the catalog, or the inline-source bucket. */
 export async function isKnownScriptName(name: string): Promise<boolean> {
   if (name === INLINE_SCRIPT_NAME) return true;
-  return !!(await getDbClient().get<{ n: number }>("SELECT 1 n FROM scripts WHERE name=? LIMIT 1", [
-    name,
-  ]));
+  return repo().scriptNameExists(name);
 }
 
 const zeroScriptFacts = (): ScriptFacts => ({
@@ -799,23 +769,16 @@ export async function readScriptSavings(opts: {
   /** A deployment calibration of the session-cost curve; the shipped curve when absent. */
   curve?: CurveSet;
 }): Promise<ScriptSavingsRead> {
-  const client = getDbClient();
   const { firstDay, lastDay, ...window } = savingsWindow(opts.days, opts.now);
   const calendarDays = daysBetween(firstDay, lastDay);
   // Issued together: each query waits its turn on the shared connection, and
   // two queued at once wait about once.
-  const [marker, scheduledRows] = await Promise.all([
-    client.get<{ n: number; at: string | null }>(
-      "SELECT count(CASE WHEN day<? THEN 1 END) n, max(computedAt) at FROM automation_savings_days WHERE jobKind='script' AND modelVersion=? AND day>=? AND day<=?",
-      [lastDay, MODEL_VERSION, firstDay, lastDay],
-    ),
-    client.query<{ scriptName: string }>(
-      "SELECT DISTINCT scriptName FROM scheduled_tasks WHERE targetType='script' AND scriptName IS NOT NULL ORDER BY scriptName",
-    ),
+  const [marker, scheduled] = await Promise.all([
+    repo().summarizeDayMarkers("script", MODEL_VERSION, firstDay, lastDay),
+    repo().listScheduledScriptNames(),
   ]);
   // Today is still open; only closed calendar days need rollup markers.
   const complete = Number(marker?.n) >= calendarDays.length - 1;
-  const scheduled = scheduledRows.map((r) => r.scriptName);
   const scope = {
     days: opts.days,
     tier: opts.tier,
@@ -866,9 +829,12 @@ async function priceScriptBuckets(scope: {
   let computedAt = scope.markerAt;
   const jobs = new Map<string, { facts: ScriptFacts; days: Map<string, ScriptFacts> }>();
   await forEachBucketChunk<ScriptBucketRow>(
-    "day, jobId, subKind, computedAt, runs, effectRuns, opsSum, computeSecs",
-    `jobKind='script' AND modelVersion=? ${byName ? "AND jobId=?" : ""}`,
-    [MODEL_VERSION, ...(byName ? [scope.scriptName as string] : [])],
+    {
+      kind: "script",
+      modelVersion: MODEL_VERSION,
+      jobId: byName ? (scope.scriptName as string) : undefined,
+    },
+    ["day", "jobId", "subKind", "computedAt", "runs", "effectRuns", "opsSum", "computeSecs"],
     scope.firstDay,
     scope.lastDay,
     (buckets) => {
@@ -885,7 +851,6 @@ async function priceScriptBuckets(scope: {
         job.days.set(b.day, day);
       }
     },
-    byName ? "idx_automation_savings_daily_job" : undefined,
   );
   const boundaryEstimated = await clipScriptFirstDay(jobs, scope.window, scope.firstDay, scope);
 
@@ -1026,21 +991,16 @@ export async function readWorkflowComponents(opts: {
   const [workflows, scripts, links] = await Promise.all([
     readWorkflowSavings({ days: opts.days, tier: opts.tier, now: opts.now, curve: opts.curve }),
     readScriptSavings({ days: opts.days, tier: opts.tier, now: opts.now, curve: opts.curve }),
-    getDbClient().query<{
-      parentJobId: string;
-      childKind: "workflow" | "script" | "task";
-      childJobId: string;
-      linkKind: SavingsLinkKind;
-      n: number;
-      usd: number;
-    }>(
-      `SELECT parentJobId, childKind, childJobId, linkKind,
-         sum(CASE WHEN day=? THEN n*? ELSE n END) n,
-         sum(CASE WHEN day=? THEN actualUsd*? ELSE actualUsd END) usd
-       FROM automation_savings_links WHERE modelVersion=? AND day>=? AND day<=?
-       GROUP BY 1,2,3,4 ORDER BY 1,2,3,4`,
-      [firstDay, firstDayShare, firstDay, firstDayShare, MODEL_VERSION, firstDay, lastDay],
-    ),
+    repo().sumLinks(firstDay, lastDay, firstDayShare, MODEL_VERSION) as Promise<
+      {
+        parentJobId: string;
+        childKind: "workflow" | "script" | "task";
+        childJobId: string;
+        linkKind: SavingsLinkKind;
+        n: number;
+        usd: number;
+      }[]
+    >,
   ]);
   const workflowRows = new Map(workflows.rows.map((r) => [r.workflowId, r]));
   workflowRows.set(opts.workflowId, opts.own);
@@ -1228,11 +1188,7 @@ export async function readFleetSavings(opts: {
 
 /** Session spend of the whole swarm in the window, the same sum the usage page shows. */
 export async function readFleetLlmUsd(window: SavingsWindow): Promise<number> {
-  const row = await getDbClient().get<{ usd: number | null }>(
-    "SELECT sum(totalCostUsd) usd FROM session_costs WHERE createdAt>=? AND createdAt<=?",
-    [window.start, window.end],
-  );
-  return Number(row?.usd) || 0;
+  return repo().sumSessionCostUsd(window.start, window.end);
 }
 
 export type ScheduleRef = { scheduleId: string; scheduleName: string; scheduleEnabled: boolean };
@@ -1289,11 +1245,7 @@ export async function readScheduleSavings(opts: {
   sql?: SavingsSql;
   curve?: CurveSet;
 }): Promise<ScheduleSavingsRead | null> {
-  const client = getDbClient();
-  const schedules = await client.query<ScheduleTarget>(
-    `SELECT id, name, enabled, targetType, workflowId, scriptName FROM scheduled_tasks ${opts.scheduleId ? "WHERE id=?" : ""}`,
-    opts.scheduleId ? [opts.scheduleId] : [],
-  );
+  const schedules = (await repo().listScheduleTargets(opts.scheduleId)) as ScheduleTarget[];
   if (opts.scheduleId && schedules.length === 0) return null;
   const single = opts.scheduleId !== undefined;
   const of = (targetType: ScheduleTarget["targetType"]) =>
@@ -1387,10 +1339,7 @@ export async function readScheduleSavings(opts: {
 async function targetExists(s: ScheduleTarget): Promise<boolean> {
   // A schedule with no target configured has nothing that could be gone.
   if (s.targetType === "workflow") {
-    return (
-      !s.workflowId ||
-      !!(await getDbClient().get("SELECT 1 FROM workflows WHERE id=?", [s.workflowId]))
-    );
+    return !s.workflowId || (await repo().workflowExists(s.workflowId));
   }
   return !s.scriptName || (await isKnownScriptName(s.scriptName));
 }
@@ -1400,17 +1349,10 @@ async function readMeasuredSpend(
   start: string,
   opts: { scheduleId?: string; now: number },
 ): Promise<Map<string, { runs: number; usd: number; ms: number }>> {
-  const rows = await getDbClient().query<{
-    scheduleId: string;
-    runs: number;
-    usd: number | null;
-    ms: number | null;
-  }>(
-    `SELECT t.scheduleId, count(DISTINCT t.id) runs, sum(c.totalCostUsd) usd, sum(c.durationMs) ms
-     FROM agent_tasks t LEFT JOIN session_costs c ON c.taskId=t.id
-     WHERE ${opts.scheduleId ? "t.scheduleId=?" : "t.scheduleId IS NOT NULL"} AND t.createdAt>=? AND t.createdAt<=?
-     GROUP BY t.scheduleId`,
-    [...(opts.scheduleId ? [opts.scheduleId] : []), start, new Date(opts.now).toISOString()],
+  const rows = await repo().sumScheduleSpend(
+    start,
+    new Date(opts.now).toISOString(),
+    opts.scheduleId,
   );
   return new Map(
     rows.map((r) => [
@@ -1445,7 +1387,7 @@ async function clipScriptFirstDay(
     : window.start;
   if (![...jobs.values()].some((j) => j.days.has(firstDay))) return false;
   const slice = { start: sliceStart, end: dayStartIso(utcDay(startMs + DAY_MS)) };
-  const sql: SavingsSql = opts.sql ?? ((q, p) => getDbClient().query(q, p));
+  const sql = opts.sql;
   const scope = { scriptName: opts.scriptName };
   const live = await cachedScan<ScriptSliceResult>(
     `script\u0000${MODEL_VERSION}\u0000${opts.scriptName ?? "*"}\u0000${slice.start}`,

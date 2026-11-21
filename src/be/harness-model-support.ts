@@ -20,7 +20,6 @@ import {
   modelFamilyKey,
 } from "@desplega/model-catalog";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
 import { getStorage } from "./storage";
 
 export type HarnessModelSupportStatus = "ok" | "unsupported" | "unknown";
@@ -84,13 +83,7 @@ export async function recordHarnessModelSupport(input: {
  * worker actually ran, so it cannot mark an arbitrary model unsupported for its peers.
  */
 export async function agentRanModel(agentId: string, modelId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-     WHERE agentId = ? AND (resolvedModel = ? OR (resolvedModel IS NULL AND model = ?))
-     LIMIT 1`,
-    [agentId, modelId, modelId],
-  );
-  return row !== null && row !== undefined;
+  return getStorage().repos.tasks.agentRanModel(agentId, modelId);
 }
 
 export async function getAgentHarnessCliVersion(agentId: string): Promise<string | null> {

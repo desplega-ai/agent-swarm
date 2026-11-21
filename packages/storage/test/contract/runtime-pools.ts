@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type NewRuntimePool, type RuntimePoolsRepository, type Storage, sql } from "../../src";
+import {
+  type NewRuntimePool,
+  type RuntimePoolsRepository,
+  type SqlQuery,
+  type Storage,
+  sql,
+} from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-21T10:00:00.000Z";
@@ -882,6 +888,76 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       expect(await runtimeRow("rt")).toMatchObject({ task_id: null });
       await repo.setRuntimeTask("rt", "a1", "t-1");
       expect(await runtimeRow("rt")).toMatchObject({ task_id: "t-1" });
+    });
+
+    test("pool routing: eligible free slots per agent, provisioning agents, live auth modes", async () => {
+      const perTask = newPool({ lifecycle: "per-task" });
+      const disabled = newPool({ enabled: false });
+      await repo.insertPool(perTask);
+      await repo.insertPool(disabled);
+      await agent("a1");
+      await agent("a2", "a2", perTask.id);
+      await agent("a3", "a3", disabled.id);
+      const set = (id: string, fields: SqlQuery) =>
+        storage.executor.run(sql`UPDATE runtime_instances SET ${fields} WHERE id = ${id}`);
+      // a1: two runtimes, 3 slots with one session, and 1 slot busy with its live task.
+      await runtime("r1", "a1");
+      await set("r1", sql`reported_slots = 3, last_seen_at = ${T1}`);
+      await session("s1", "a1", "r1");
+      await task("t-live", { agentId: "a1", status: "in_progress" });
+      await runtime("r2", "a1");
+      await set("r2", sql`reported_slots = 1, last_seen_at = ${T1}, task_id = 't-live'`);
+      // Excluded: draining, credential not ready, stale.
+      await runtime("r3", "a1");
+      await set("r3", sql`reported_slots = 5, last_seen_at = ${T1}, draining = 1`);
+      await runtime("r4", "a1");
+      await set("r4", sql`reported_slots = 5, last_seen_at = ${T1}, credential_ready = 0`);
+      await runtime("r5", "a1");
+      await set("r5", sql`reported_slots = 5, last_seen_at = ${T0}`);
+      // a2 (per-task pool): a runtime on a live task counts (2 - 1 free); one whose
+      // task finished is excluded.
+      await task("t-run", { agentId: "a2", status: "in_progress" });
+      await runtime("r6", "a2", { poolId: perTask.id });
+      await set("r6", sql`reported_slots = 2, last_seen_at = ${T1}, task_id = 't-run'`);
+      await task("t-done", { agentId: "a2", status: "completed" });
+      await runtime("r8", "a2", { poolId: perTask.id });
+      await set("r8", sql`reported_slots = 5, last_seen_at = ${T1}, task_id = 't-done'`);
+      // a3: disabled pool, excluded.
+      await runtime("r7", "a3", { poolId: disabled.id });
+      await set("r7", sql`reported_slots = 2, last_seen_at = ${T1}`);
+      const slots = await repo.listEligibleRuntimeSlots(T1);
+      expect(
+        Object.fromEntries(slots.map((row) => [row.agent_id, Number(row.free_slots)])),
+      ).toEqual({ a1: 2, a2: 1 });
+      expect(await repo.listEligibleRuntimeSlots(T1, "a2")).toEqual([
+        { agent_id: "a2", free_slots: 1 },
+      ]);
+
+      await runtime("p1", "a1", { status: "provisioning" });
+      await runtime("p2", "a1", { status: "provisioning" });
+      await runtime("p3", "a2", { status: "provisioning" });
+      await set("p3", sql`draining = 1`);
+      expect(await repo.listProvisioningAgentIds()).toEqual(["a1"]);
+
+      await storage.executor.run(sql`
+        INSERT INTO session_tokens (id, "tokenHash", "tokenPreview", "agentId", "runtimeId", "expiresAt", "revokedAt")
+        VALUES ('k1', 'h1', 'p', 'a1', 'r1', ${T2}, NULL),
+               ('k2', 'h2', 'p', 'a1', 'r2', ${T0}, NULL),
+               ('k3', 'h3', 'p', 'a2', 'r6', ${T2}, ${T0})`);
+      const modes = await repo.listLiveRuntimeAuthModes(T1, T1);
+      expect(
+        modes
+          .map((row) => [row.agent_id, row.runtime_token])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0])) || Number(b[1]) - Number(a[1])),
+      ).toEqual([
+        ["a1", 1],
+        ["a1", 0],
+        ["a1", 0],
+        ["a1", 0],
+        ["a2", 0],
+        ["a2", 0],
+        ["a3", 0],
+      ]);
     });
   });
 }

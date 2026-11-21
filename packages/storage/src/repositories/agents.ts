@@ -256,6 +256,23 @@ export interface AgentsRepository {
   listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
   /** Entries of one event type, newest first (ties: insertion order). */
   listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+  /** True when the task has an entry of `eventType`. */
+  hasTaskLogEvent(taskId: string, eventType: string): Promise<boolean>;
+  /**
+   * The task's newest entry of `eventType` by `createdAt` (a tie picks the
+   * row the engine meets first).
+   */
+  findLatestTaskLog(
+    taskId: string,
+    eventType: string,
+  ): Promise<{ id: string; metadata: string | null } | null>;
+  /** Replaces an entry's metadata. Returns the changed count. */
+  setLogMetadata(id: string, metadata: string): Promise<number>;
+  /**
+   * Status changes and claims from `pending`/`unassigned` to `in_progress`
+   * logged at or after `since`.
+   */
+  countRecentQueuePickups(since: string): Promise<number>;
 
   // ---- services ----
   insertService(
@@ -611,6 +628,34 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   abstract listLogsByTaskChronological(taskId: string, eventType?: string): Promise<AgentLogRow[]>;
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
   abstract listLogsByEventType(eventType: string): Promise<AgentLogRow[]>;
+
+  async hasTaskLogEvent(taskId: string, eventType: string): Promise<boolean> {
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM agent_log WHERE "taskId" = ${taskId} AND "eventType" = ${eventType} LIMIT 1`);
+    return row != null;
+  }
+
+  findLatestTaskLog(
+    taskId: string,
+    eventType: string,
+  ): Promise<{ id: string; metadata: string | null } | null> {
+    return this.db.get(sql`
+      SELECT id, metadata
+        FROM agent_log
+       WHERE "taskId" = ${taskId} AND "eventType" = ${eventType}
+       ORDER BY "createdAt" DESC
+       LIMIT 1`);
+  }
+
+  async setLogMetadata(id: string, metadata: string): Promise<number> {
+    const result = await this.db.run(
+      sql`UPDATE agent_log SET metadata = ${metadata} WHERE id = ${id}`,
+    );
+    return result.changes;
+  }
+
+  /** Keeps the SQLite index hint (unary `+`) that the query plan depends on. */
+  abstract countRecentQueuePickups(since: string): Promise<number>;
 
   // ---- services ----
 

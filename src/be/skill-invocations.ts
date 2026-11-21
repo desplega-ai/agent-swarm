@@ -1,5 +1,4 @@
 import type { ResolvedSkillRow } from "@desplega/storage";
-import type { DbExecutor } from "./db-client";
 import { estimateTokens } from "./memory/key-browser";
 import { getStorage } from "./storage";
 
@@ -54,9 +53,8 @@ async function resolveSkill(input: {
  * of the same skill in the same session never counts twice.
  */
 export async function recordSkillInvocation(
-  // Kept for the callers: the repository calls below join the caller's
-  // transaction (or run alone outside one), exactly as `db` did.
-  _db: DbExecutor,
+  // The repository calls below join the caller's transaction (or run alone
+  // outside one).
   input: SkillInvokeEventInput,
   eventId: string,
 ): Promise<boolean> {

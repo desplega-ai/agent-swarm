@@ -100,5 +100,67 @@ export function eventsContract(engine: ContractEngine): void {
       ]);
       expect(await repo.countByEvent({ category: "nope" })).toEqual([]);
     });
+
+    test("listFiltered: filters, data field, latest per pair, newest first", async () => {
+      const add = async (o: Partial<NewEvent>, createdAt: string) => {
+        const e = newEvent(o);
+        await repo.insert(e);
+        await setCreatedAt(e.id, createdAt);
+        return e.id;
+      };
+      const a = await add(
+        { event: "x.a", agentId: "ag", data: '{"field":"f1"}' },
+        "2026-01-01T00:00:00.000Z",
+      );
+      const b = await add(
+        { event: "x.a", agentId: "ag", data: '{"field":"f1"}' },
+        "2026-01-02T00:00:00.000Z",
+      );
+      const c = await add(
+        { event: "x.b", agentId: "ag", data: '{"field":"f2"}' },
+        "2026-01-03T00:00:00.000Z",
+      );
+      const d = await add(
+        { event: "x.b", agentId: "other", status: "error" },
+        "2026-01-04T00:00:00.000Z",
+      );
+      const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+      expect(ids(await repo.listFiltered({ limit: 10 }))).toEqual([d, c, b, a]);
+      expect(ids(await repo.listFiltered({ limit: 2 }))).toEqual([d, c]);
+      expect(ids(await repo.listFiltered({ agentId: "ag", limit: 10 }))).toEqual([c, b, a]);
+      expect(ids(await repo.listFiltered({ events: ["x.b"], limit: 10 }))).toEqual([d, c]);
+      expect(ids(await repo.listFiltered({ status: "error", limit: 10 }))).toEqual([d]);
+      expect(ids(await repo.listFiltered({ dataField: "f1", limit: 10 }))).toEqual([b, a]);
+      expect(
+        ids(
+          await repo.listFiltered({
+            since: "2026-01-02T00:00:00.000Z",
+            until: "2026-01-03T00:00:00.000Z",
+            limit: 10,
+          }),
+        ),
+      ).toEqual([c, b]);
+      expect(
+        ids(
+          await repo.listFiltered({
+            agentId: "ag",
+            limit: 10,
+            latestPerDataField: { events: ["x.a", "x.b"], dataFields: ["f1", "f2"] },
+          }),
+        ),
+      ).toEqual([c, b]);
+      expect(
+        await repo.listFiltered({
+          limit: 10,
+          latestPerDataField: { events: [], dataFields: ["f1"] },
+        }),
+      ).toEqual([]);
+      expect(ids(await repo.listFiltered({ readableBy: { userId: "u1" }, limit: 10 }))).toEqual([
+        d,
+        c,
+        b,
+        a,
+      ]);
+    });
   });
 }
