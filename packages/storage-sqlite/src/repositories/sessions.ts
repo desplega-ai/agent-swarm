@@ -25,7 +25,8 @@ import {
   type SessionTreeRow,
   type SessionTreeRules,
   type SessionViewerSpec,
-  type SqlQuery,
+  type SourceBackfillRootRow,
+  SqlQuery,
   sql,
   sqlList,
   sqlWhere,
@@ -552,5 +553,17 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
       SELECT r.id FROM agent_tasks r
       WHERE r."parentTaskId" IS NULL AND r."key" >= ${range.lo} AND r."key" < ${range.hi}
         AND ${sessionViewerSql(viewer)} ORDER BY r.id`);
+  }
+
+  listSourceBackfillRoots(afterId: string, limit: number): Promise<SourceBackfillRootRow[]> {
+    // The select list stays unquoted: session-source-backfill.test.ts matches
+    // the statement by its leading text.
+    const select = new SqlQuery(["SELECT id, slackChannelId, slackThreadTs, contextKey"], []);
+    return this.db.query<SourceBackfillRootRow>(sql`${select} FROM agent_tasks
+       WHERE "parentTaskId" IS NULL AND id > ${afterId}
+         AND ("key" = 'shared/' OR "key" = 'shared/task:' || lower(id) || '/')
+         AND (("slackChannelId" IS NOT NULL AND "slackThreadTs" IS NOT NULL)
+           OR "contextKey" GLOB 'task:chat-sdk:*')
+       ORDER BY id LIMIT ${limit}`);
   }
 }

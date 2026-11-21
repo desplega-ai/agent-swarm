@@ -452,6 +452,13 @@ export type SessionTokenLookupRow = {
   depth: number;
 };
 
+export type SourceBackfillRootRow = {
+  id: string;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  contextKey: string | null;
+};
+
 export interface SessionsRepository {
   // ---- session_logs ----
   /** `lineNumber` of the newest stored line of `(sessionId, iteration)`, by insert order. */
@@ -723,6 +730,12 @@ export interface SessionsRepository {
   ): Promise<{ key: string; parentTaskId: string | null } | null>;
   /** The task and all its descendants, each once. Unordered. */
   listChainTaskIds(rootId: string): Promise<string[]>;
+  /**
+   * Source-key backfill batch: root tasks after `afterId` whose key is still
+   * the default (`shared/` or `shared/task:<lower id>/`) and that came from a
+   * Slack thread or a chat-sdk context. Ordered by id, at most `limit`.
+   */
+  listSourceBackfillRoots(afterId: string, limit: number): Promise<SourceBackfillRootRow[]>;
 
   // ---- session labels ----
   /** Live (`expires_at` NULL or after `nowMs`) kv values of the keys. Unordered. */
@@ -1306,6 +1319,12 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   ): Promise<{ key: string; parentTaskId: string | null } | null> {
     return this.db.get(sql`SELECT "key", "parentTaskId" FROM agent_tasks WHERE id = ${taskId}`);
   }
+
+  /** The chat-sdk context match uses GLOB: kept per engine. */
+  abstract listSourceBackfillRoots(
+    afterId: string,
+    limit: number,
+  ): Promise<SourceBackfillRootRow[]>;
 
   async listChainTaskIds(rootId: string): Promise<string[]> {
     const rows = await this.db.query<{ id: string }>(sql`

@@ -151,10 +151,6 @@
     "reason": "M2 move: seeded db-query scripts (M4 step 4)",
     "sites": 2
   },
-  "src/be/session-source-backfill.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
   "src/be/storage.ts": {
     "reason": "M2 move: boot path (M2 step 7); getStorage folds into the composition root",
     "sites": 1

@@ -12,7 +12,6 @@
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey } from "../assets/source-key";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
 import {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -44,7 +43,6 @@ export async function runSessionSourceBackfill({
   batchSize = 200,
   afterBatch,
 }: SessionSourceBackfillOptions = {}): Promise<BackfillStats | null> {
-  const client = getDbClient();
   const storage = getStorage();
   const done = await storage.repos.config.getSeedState("maintenance", DONE_KEY);
   if (done) return null;
@@ -61,14 +59,9 @@ export async function runSessionSourceBackfill({
   const stats: BackfillStats = { scanned: 0, moved: 0, skipped: 0, failed: 0 };
 
   for (;;) {
-    const roots = await client.query<BackfillRoot>(
-      `SELECT id, slackChannelId, slackThreadTs, contextKey FROM agent_tasks
-       WHERE parentTaskId IS NULL AND id > ?
-         AND ("key" = 'shared/' OR "key" = 'shared/task:' || lower(id) || '/')
-         AND ((slackChannelId IS NOT NULL AND slackThreadTs IS NOT NULL)
-           OR contextKey GLOB 'task:chat-sdk:*')
-       ORDER BY id LIMIT ?`,
-      [cursor, batchSize],
+    const roots: BackfillRoot[] = await storage.repos.sessions.listSourceBackfillRoots(
+      cursor,
+      batchSize,
     );
     if (roots.length === 0) break;
 

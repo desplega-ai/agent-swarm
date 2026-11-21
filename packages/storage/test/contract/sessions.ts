@@ -796,6 +796,42 @@ export function sessionsContract(engine: ContractEngine): void {
       ]);
     });
 
+    test("source backfill roots: default-key Slack and chat-sdk roots after the cursor, by id, limited", async () => {
+      const root = (
+        id: string,
+        key: string,
+        f: {
+          parent?: string;
+          channel?: string;
+          thread?: string;
+          context?: string;
+        } = {},
+      ) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "key", "parentTaskId",
+            "slackChannelId", "slackThreadTs", "contextKey")
+          VALUES (${id}, 't', 'pending', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z', ${key},
+            ${f.parent ?? null}, ${f.channel ?? null}, ${f.thread ?? null}, ${f.context ?? null})`);
+      await root("b-slack", "shared/", { channel: "C1", thread: "1.2" });
+      await root("A-chat", "shared/task:a-chat/", { context: "task:chat-sdk:x" });
+      await root("c-moved", "shared/research/", { channel: "C1", thread: "1.2" });
+      await root("d-nothread", "shared/", { channel: "C1" });
+      await root("e-other", "shared/", { context: "task:other:x" });
+      await root("f-child", "shared/", { parent: "b-slack", channel: "C1", thread: "1.2" });
+      await root("g-slack", "shared/task:g-slack/", { channel: "C2", thread: "3.4" });
+      const ids = async (after: string, limit: number) =>
+        (await repo.listSourceBackfillRoots(after, limit)).map((row) => row.id);
+      expect(await ids("", 10)).toEqual(["A-chat", "b-slack", "g-slack"]);
+      expect(await ids("", 2)).toEqual(["A-chat", "b-slack"]);
+      expect(await ids("b-slack", 10)).toEqual(["g-slack"]);
+      expect((await repo.listSourceBackfillRoots("", 1))[0]).toEqual({
+        id: "A-chat",
+        slackChannelId: null,
+        slackThreadTs: null,
+        contextKey: "task:chat-sdk:x",
+      });
+    });
+
     test("session moves: keys, prefix roots, chains, favorites", async () => {
       await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'U'), ('u2', 'V')`);
       await insertRoot("b", "shared/g/");
