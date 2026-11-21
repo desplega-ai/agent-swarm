@@ -89,6 +89,7 @@ import {
 } from "./model-group-resolution";
 import { tierConfigKey } from "./model-tier-keys";
 import { loadModelsDevCache } from "./modelsdev-cache";
+import { getStorage } from "./storage";
 
 export { isTierConfigKey, tierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -289,11 +290,7 @@ function autoUpgradeEnabled(): boolean {
 }
 
 async function lastAliasResolution(alias: string): Promise<string | null> {
-  const row = await getDbClient().get<{ newModel: string }>(
-    "SELECT newModel FROM model_alias_resolutions WHERE alias = ? ORDER BY id DESC LIMIT 1",
-    [alias],
-  );
-  return row?.newModel ?? null;
+  return await getStorage().repos.models.lastAliasResolution(alias);
 }
 
 /**
@@ -321,11 +318,13 @@ export async function resolveLatestAlias(
   if (!resolved) return null;
 
   if (resolved !== previous && opts.record !== false) {
-    await getDbClient().run(
-      "INSERT INTO model_alias_resolutions (alias, previousModel, newModel, changedAt) VALUES (?, ?, ?, ?)",
-      [key, previous, resolved, now.getTime()],
-    );
-    getDbClient().afterCommit(() => {
+    await getStorage().repos.models.insertAliasResolution({
+      alias: key,
+      previousModel: previous,
+      newModel: resolved,
+      changedAt: now.getTime(),
+    });
+    getStorage().afterCommit(() => {
       console.info(
         `[model-tiers] alias ${key} now resolves to ${resolved}${previous ? ` (was ${previous})` : ""}`,
       );

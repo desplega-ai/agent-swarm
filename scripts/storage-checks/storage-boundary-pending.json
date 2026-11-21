@@ -145,11 +145,11 @@
   },
   "src/be/db/model-groups.ts": {
     "reason": "M2 move: models",
-    "sites": 14
+    "sites": 2
   },
   "src/be/db/model-profiles.ts": {
     "reason": "M2 move: models",
-    "sites": 18
+    "sites": 6
   },
   "src/be/db/page-versions.ts": {
     "reason": "M2 move: pages, metrics, apps",
@@ -293,7 +293,7 @@
   },
   "src/be/harness-model-support.ts": {
     "reason": "M2 move: models",
-    "sites": 8
+    "sites": 4
   },
   "src/be/import/index.ts": {
     "reason": "M2 move: assets and import",
@@ -405,10 +405,6 @@
   },
   "src/be/model-catalog-store.ts": {
     "reason": "M2 move: models",
-    "sites": 14
-  },
-  "src/be/model-group-resolution.ts": {
-    "reason": "M2 move: models",
     "sites": 2
   },
   "src/be/model-profile-check.ts": {
@@ -417,7 +413,7 @@
   },
   "src/be/model-tier-resolution.ts": {
     "reason": "M2 move: models",
-    "sites": 10
+    "sites": 8
   },
   "src/be/multi-runtime.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
@@ -562,10 +558,6 @@
   "src/be/sealed-json.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
-  },
-  "src/be/seed-model-groups.ts": {
-    "reason": "M2 move: models",
-    "sites": 3
   },
   "src/be/seed-model-profiles.ts": {
     "reason": "M2 move: models",
@@ -778,10 +770,6 @@
   "src/http/memory.ts": {
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 2
-  },
-  "src/http/model-profiles.ts": {
-    "reason": "M2 move: models",
-    "sites": 1
   },
   "src/http/oauth-callback.ts": {
     "reason": "M2 move: integrations",
