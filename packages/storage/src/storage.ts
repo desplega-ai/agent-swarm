@@ -18,6 +18,7 @@ import type { ModelsRepository } from "./repositories/models";
 import type { OAuthRepository } from "./repositories/oauth";
 import type { PagesRepository } from "./repositories/pages";
 import type { RbacRepository } from "./repositories/rbac";
+import type { RetentionRepository } from "./repositories/retention";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { SavingsRepository } from "./repositories/savings";
 import type { SchedulesRepository } from "./repositories/schedules";
@@ -59,6 +60,7 @@ export type Repositories = {
   improvements: ImprovementsRepository;
   sessions: SessionsRepository;
   savings: SavingsRepository;
+  retention: RetentionRepository;
 };
 
 /**

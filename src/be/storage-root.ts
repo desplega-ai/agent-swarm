@@ -65,6 +65,8 @@ export function createStorage(client: DbClient, options: { vectorSearch: boolean
 
 // SQLite boot (the synchronous start path of the SQLite engine).
 // The memory full-text backfill statements, for the query-plan test.
+// Retention statement texts, for the query-plan tests (src/be/db-retention.ts,
+// src/be/db/workflow-run-retention.ts re-export them under their old names).
 export {
   applySqliteFilePragmas,
   applySqliteTemplatePragmas,
@@ -81,9 +83,13 @@ export {
   listCredentialBindingBlobs,
   listPlaintextOAuthSecrets,
   MEMORY_ID_BATCH_SQL,
+  type RetentionSweepStatements,
   readAssetKeyAuditDataSync,
   removeLegacyTaskStatusCheck,
   replaceCredentialBindingBlob,
+  retentionSweepStatements,
   runSqliteMigrations,
   storeEncryptedOAuthSecrets,
+  workflowRetentionCandidatesSql,
+  workflowRunRetentionStatements as sqliteWorkflowRunRetentionStatements,
 } from "@desplega/storage-sqlite";

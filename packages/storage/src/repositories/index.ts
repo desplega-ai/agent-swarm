@@ -14,6 +14,7 @@ export * from "./models";
 export * from "./oauth";
 export * from "./pages";
 export * from "./rbac";
+export * from "./retention";
 export * from "./runtime-pools";
 export * from "./savings";
 export * from "./schedules";

@@ -15,6 +15,7 @@ import { modelsContract } from "./models";
 import { oauthContract } from "./oauth";
 import { pagesContract } from "./pages";
 import { rbacContract } from "./rbac";
+import { retentionContract } from "./retention";
 import { runtimePoolsContract } from "./runtime-pools";
 import { savingsContract } from "./savings";
 import { schedulesContract } from "./schedules";
@@ -58,4 +59,5 @@ export function runStorageContract(engine: ContractEngine): void {
   improvementsContract(engine);
   sessionsContract(engine);
   savingsContract(engine);
+  retentionContract(engine);
 }

@@ -15,10 +15,6 @@
     "reason": "M2 move: tasks",
     "sites": 3
   },
-  "src/be/db-retention.ts": {
-    "reason": "M2 move: other (assign a domain when moved)",
-    "sites": 8
-  },
   "src/be/db.ts": {
     "reason": "M2 move: every domain (see the domain map in the ledger)",
     "sites": 292
@@ -70,10 +66,6 @@
   "src/be/db/users/references.ts": {
     "reason": "M2 move: users and RBAC",
     "sites": 10
-  },
-  "src/be/db/workflow-run-retention.ts": {
-    "reason": "M2 move: workflows",
-    "sites": 12
   },
   "src/be/db/workflow-runs.ts": {
     "reason": "M2 move: workflows",
