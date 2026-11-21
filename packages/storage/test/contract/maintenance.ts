@@ -60,6 +60,18 @@ export function maintenanceContract(engine: ContractEngine): void {
       expect(await repo.getState("boot-scrub-v3")).toBe("done");
     });
 
+    test("deleteSkippedBootScrubVersions reads leading digits only, as an integer", async () => {
+      await repo.setState("boot-scrub-skipped-v5x", "f");
+      await repo.setState("boot-scrub-skipped-vx", "f");
+      await repo.setState("boot-scrub-skipped-v100", "f");
+      await repo.setState("Boot-scrub-skipped-v1", "f");
+      await repo.deleteSkippedBootScrubVersions(10);
+      expect(await repo.getState("boot-scrub-skipped-v5x")).toBeNull();
+      expect(await repo.getState("boot-scrub-skipped-vx")).toBeNull();
+      expect(await repo.getState("boot-scrub-skipped-v100")).toBe("f");
+      expect(await repo.getState("Boot-scrub-skipped-v1")).toBe("f");
+    });
+
     test("scanKeyedBatch pages in key order after the cursor, inside the filter", async () => {
       for (const key of ["b", "a", "d", "c"]) await putKv("ct-ns", key, `v-${key}`);
       await putKv("other-ns", "aa", "x");

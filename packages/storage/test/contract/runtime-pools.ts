@@ -593,6 +593,17 @@ export function runtimePoolsContract(engine: ContractEngine): void {
       expect(await repo.listPendingTaskIds("a1")).toEqual(["t-old", "t-low", "t-b", "t-a"]);
     });
 
+    test("pending work: a NULL priority sorts after every priority", async () => {
+      await agent("a1");
+      await task("t-null", { agentId: "a1" });
+      await storage.executor.run(sql`UPDATE agent_tasks SET priority = NULL WHERE id = 't-null'`);
+      await task("t-low", { agentId: "a1", priority: 0 });
+      expect((await repo.listPendingWork<{ id: string }>("a1")).map((t) => t.id)).toEqual([
+        "t-low",
+        "t-null",
+      ]);
+    });
+
     test("unread mention channels count once per channel", async () => {
       await agent("a1");
       const channel = (id: string) =>
