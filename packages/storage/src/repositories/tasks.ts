@@ -1,4 +1,4 @@
-import { likeAsciiCi, nowIso } from "../dialect";
+import { jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
@@ -273,6 +273,12 @@ export type TaskSessionColumn =
   | "harnessVariant"
   | "harnessVariantMeta"
   | "resolvedEffort";
+
+/** The session columns that hold JSON (bound through `jsonText`). */
+const TASK_JSON_SESSION_COLUMNS: ReadonlySet<string> = new Set([
+  "providerMeta",
+  "harnessVariantMeta",
+]);
 
 /** A move to a terminal status. */
 export type TaskFinish = {
@@ -922,7 +928,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       UPDATE agent_tasks
          SET task = ${args.nextTask},
              status = CASE WHEN ${args.toDraft} THEN 'draft' ELSE status END,
-             "slackParticipants" = COALESCE(${args.slackParticipants}, "slackParticipants"),
+             "slackParticipants" = COALESCE(${jsonText(args.slackParticipants)}, "slackParticipants"),
              "lastUpdatedAt" = ${args.now}
          WHERE id = ${args.taskId} AND status = 'pending' AND task = ${args.expectedTask}`);
     return result.changes;
@@ -1411,7 +1417,9 @@ export abstract class BaseTasksRepository implements TasksRepository {
     if (f.offeredTo) c.push(sql`"offeredTo" = ${f.offeredTo}`);
     if (f.taskType) c.push(sql`"taskType" = ${f.taskType}`);
     if (f.tags && f.tags.length > 0) {
-      const tags = f.tags.map((tag) => sql`${likeAsciiCi(sql`tags`, sql`${`%"${tag}"%`}`)}`);
+      const tags = f.tags.map(
+        (tag) => sql`${likeAsciiCi(sql`CAST(tags AS text)`, sql`${`%"${tag}"%`}`)}`,
+      );
       c.push(sql`(${sqlJoin(tags, sql` OR `)})`);
     }
     if (f.scheduleId) c.push(sql`"scheduleId" = ${f.scheduleId}`);
@@ -1430,7 +1438,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   /** Leaves out heartbeat, heartbeat-checklist and boot-triage tasks. */
   protected notHeartbeat(): SqlQuery {
-    return sql`(COALESCE("taskType", '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND NOT ${likeAsciiCi(sql`tags`, sql`'%"heartbeat"%'`)})`;
+    return sql`(COALESCE("taskType", '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage') AND NOT ${likeAsciiCi(sql`CAST(tags AS text)`, sql`'%"heartbeat"%'`)})`;
   }
 
   async countTasks(filters: TaskListFilters): Promise<number> {
@@ -1540,7 +1548,8 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const sets: SqlQuery[] = [sql`"lastUpdatedAt" = ${now}`];
     for (const [column, value] of Object.entries(values)) {
       if (value === undefined) continue;
-      sets.push(sql`${sqlIdent(column)} = ${value}`);
+      const bound = TASK_JSON_SESSION_COLUMNS.has(column) ? sql`${jsonText(value)}` : sql`${value}`;
+      sets.push(sql`${sqlIdent(column)} = ${bound}`);
     }
     return this.db.get<TaskRow>(
       sql`UPDATE agent_tasks SET ${sqlJoin(sets, sql`, `)} WHERE id = ${taskId} RETURNING *`,
@@ -1574,7 +1583,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   setTaskTags(taskId: string, tagsJson: string, touch: boolean): Promise<TaskRow | null> {
     const touched = touch ? sql`, "lastUpdatedAt" = ${nowIso}` : EMPTY;
     return this.db.get<TaskRow>(
-      sql`UPDATE agent_tasks SET tags = ${tagsJson}${touched} WHERE id = ${taskId} RETURNING *`,
+      sql`UPDATE agent_tasks SET tags = ${jsonText(tagsJson)}${touched} WHERE id = ${taskId} RETURNING *`,
     );
   }
 
@@ -1803,7 +1812,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   async upsertTaskUiSpec(r: TaskUiSpecRow & { userId: string | null }): Promise<void> {
     await this.db.run(sql`
       INSERT INTO task_ui_specs (task_id, spec, actions, fallback_text, created_by, updated_by)
-      VALUES (${r.taskId}, ${r.spec}, ${r.actions}, ${r.fallbackText}, ${r.userId}, ${r.userId})
+      VALUES (${r.taskId}, ${jsonText(r.spec)}, ${r.actions}, ${r.fallbackText}, ${r.userId}, ${r.userId})
       ON CONFLICT(task_id) DO UPDATE SET
         spec=excluded.spec, actions=excluded.actions, fallback_text=excluded.fallback_text,
         updated_by=excluded.updated_by, updated_at=${nowIso}`);
@@ -2067,7 +2076,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }): Promise<void> {
     await this.db.run(sql`
       INSERT INTO deferred_event_waits ("scheduleId", source, event, "matchKey", "matchJson", created_by, updated_by)
-      VALUES (${r.scheduleId}, ${r.source}, ${r.event}, ${r.matchKey}, ${r.matchJson}, ${r.userId}, ${r.userId})`);
+      VALUES (${r.scheduleId}, ${r.source}, ${r.event}, ${r.matchKey}, ${jsonText(r.matchJson)}, ${r.userId}, ${r.userId})`);
   }
 
   async insertDeferredTaskWait(r: {
