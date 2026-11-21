@@ -1216,3 +1216,22 @@ Every config keeps its verdict and distinct-state count from the #3215 table abo
 `workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
 `workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3476's e2e scenario
 `workflow-executable-config-sources` passes.
+
+## Sync with #3494 and #3485 (`main` @ `53beb059c`)
+
+#3494 decides which agent a run's `swarm-script` and `sub-workflow` nodes act as from the pinned
+definition, inside `createRunWithInitialState`'s transaction, and stores it on the run INSERT
+(`principal`, migration 367). It adds a read and one column on the row `IStart` already commits;
+no modelled guard reads it. When the last edit came from another non-lead agent, those executors
+fail the step, which is an `XRun` `fail` outcome covered by the fenced `XFail`. #3485 makes the
+approval resume route on the stored request bound to the step instead of the event payload; the
+model has no approval nodes. The `.tla` and `.cfg` files are unchanged. ACTIONS.md notes both
+changes and re-pins every `engine.ts` line (+1 after the imports, +5 after the run INSERT), the
+`resume.ts` lines after the approval resume (+17), the shifted `db.ts`, `db/workflow-runs.ts` and
+`executors/sub-workflow.ts` lines, and the `db.ts` helper pins that still pointed at older code.
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.
