@@ -315,6 +315,8 @@ export interface UsersRepository {
     actor: string;
     now: string;
   }): Promise<UserFavoriteRow | null>;
+  /** Every non-null user email. Ordered by email. */
+  listUserEmails(): Promise<string[]>;
 }
 
 export abstract class BaseUsersRepository implements UsersRepository {
@@ -739,5 +741,12 @@ export abstract class BaseUsersRepository implements UsersRepository {
         "lastUpdatedAt" = excluded."lastUpdatedAt",
         updated_by = excluded.updated_by
       RETURNING *`);
+  }
+
+  async listUserEmails(): Promise<string[]> {
+    const rows = await this.db.query<{ email: string }>(
+      sql`SELECT email FROM users WHERE email IS NOT NULL ORDER BY email`,
+    );
+    return rows.map((row) => row.email);
   }
 }

@@ -16,7 +16,6 @@ import {
   getActiveSessions,
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getTaskById,
   hasCapacity,
   isAgentEligibleForTask,
@@ -31,6 +30,7 @@ import {
 import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
+import { getStorage } from "@/be/storage";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
@@ -246,7 +246,7 @@ export async function taskActionHandler(
       return agentOnlyActionResult();
     }
 
-    const result = await getDbClient().transaction(
+    const result = await getStorage().transaction(
       async (): Promise<TaskActionResult | SwarmToolResult> => {
         if (!taskId) {
           return { success: false, message: `Task ID is required for '${action}' action.` };
@@ -373,7 +373,7 @@ export async function taskActionHandler(
     };
   }
 
-  const transacted = getDbClient().transaction(async (): Promise<TaskActionResult> => {
+  const transacted = getStorage().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         const newTask = await createTaskExtended(

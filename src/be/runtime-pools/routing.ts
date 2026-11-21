@@ -25,6 +25,7 @@ import {
   liveRuntimeAuthModes,
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
+import { getStorage } from "../storage";
 import { listRuntimePools } from "./db";
 import { isRuntimePoolWakeable } from "./reachability";
 
@@ -82,13 +83,7 @@ export async function routePoolTasks(
   }
   const releasedFrom = new Map<string, string>();
   if (enabled && !opts.taskIds) {
-    const pending = await getDbClient().query<AgentTaskRow>(
-      `SELECT * FROM agent_tasks WHERE status = 'pending'
-       AND (pool_wake_at IS NOT NULL OR agentId IN (
-         SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL
-         UNION SELECT agent_id FROM runtime_instances WHERE pool_id IS NOT NULL
-       )) AND COALESCE(routing_reason, '') != 'human_pinned'`,
-    );
+    const pending = (await getStorage().repos.tasks.listPoolPendingTasks()) as AgentTaskRow[];
     for (const task of pending.map(rowToAgentTask)) {
       const agent = allAgents.find((a) => a.id === task.agentId);
       const pool = pools.find((p) => p.id === agent?.runtimePoolId);
@@ -110,13 +105,12 @@ export async function routePoolTasks(
         if (await releaseTask(task.id, task)) releasedFrom.set(task.id, task.agentId);
       } else {
         // The sweep routes this release itself, without an independent routing event.
-        const released = await getDbClient().run(
-          `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
-           WHERE id = ? AND status = 'pending' AND agentId = ? AND pool_wake_at IS NULL
-             AND COALESCE(routing_reason, '') != 'human_pinned'`,
-          [new Date().toISOString(), task.id, task.agentId],
+        const released = await getStorage().repos.tasks.releasePendingPoolTask(
+          task.id,
+          task.agentId,
+          new Date().toISOString(),
         );
-        if (released.changes) {
+        if (released) {
           releasedFrom.set(task.id, task.agentId);
           try {
             await createLogEntry({
@@ -162,11 +156,7 @@ export async function routePoolTasks(
   const headroom = async (agent: Agent): Promise<number> => {
     let count = reserved.get(agent.id);
     if (count === undefined) {
-      const occupied = await getDbClient().get<{ count: number; pending: number }>(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(status = 'pending'), 0) AS pending
-         FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')`,
-        [agent.id],
-      );
+      const occupied = await getStorage().repos.tasks.countAgentOpenTasks(agent.id);
       count = occupied?.count ?? 0;
       reserved.set(agent.id, count);
       if (runtimeSlots.has(agent.id))
@@ -302,14 +292,11 @@ export async function routePoolTasks(
       const workerId = worker.id;
       const assignment =
         enabled && !poolWakeAt
-          ? await getDbClient().transaction(async (tx) => {
+          ? await getStorage().transaction(async () => {
               // Recheck physical capacity under the assignment's write lock.
               const slots = (await eligibleRuntimeSlots(workerId)).get(workerId) ?? 0;
-              const pending = await tx.get<{ count: number }>(
-                "SELECT COUNT(*) AS count FROM agent_tasks WHERE agentId = ? AND status = 'pending'",
-                [workerId],
-              );
-              if (slots <= (pending?.count ?? 0)) return null;
+              const pending = await getStorage().repos.tasks.countAgentPendingTasks(workerId);
+              if (slots <= pending) return null;
               return await assignUnassignedTaskPending(task.id, workerId, assignmentOptions);
             })
           : await assignUnassignedTaskPending(task.id, workerId, assignmentOptions);

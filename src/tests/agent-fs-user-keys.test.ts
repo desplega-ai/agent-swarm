@@ -70,7 +70,7 @@ beforeEach(async () => {
   for (const key of ENV_KEYS) delete process.env[key];
   dbPath = `/tmp/agent-fs-user-keys-${crypto.randomUUID()}.sqlite`;
   initDb(dbPath);
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   records = [];
   email = `human-${crypto.randomUUID()}@example.test`;
   members = [{ userId: AFS_USER_ID, email, role: "editor" }];

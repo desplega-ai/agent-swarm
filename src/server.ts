@@ -459,7 +459,7 @@ export async function createServer(
   }
 
   try {
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
   } catch (err) {
     console.error("[startup] Failed to sync RBAC seed rows:", err);
     // RBAC flag-on must fail closed; flag-off deployments should not be bricked

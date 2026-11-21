@@ -1,5 +1,6 @@
 import {
   BaseOAuthRepository,
+  type OAuthAppListingRow,
   type OAuthAppRow,
   type OAuthAuthorizationRow,
   type OAuthAuthorizationSweepRow,
@@ -68,5 +69,17 @@ export class SqliteOAuthRepository extends BaseOAuthRepository {
       WHERE p.flow = 'mcp' AND a."mcpServerId" = ${mcpServerId} AND ${user}
       ORDER BY p."createdAt" DESC, p.rowid ASC LIMIT 1`);
     return row?.appId ?? null;
+  }
+
+  listProviderAppsWithDefaultToken(): Promise<OAuthAppListingRow[]> {
+    return this.db.query<OAuthAppListingRow>(sql`
+      SELECT a.id, a.provider, a."clientId", a."authorizeUrl", a."tokenUrl", a."redirectUri",
+             a.scopes, a."extraParamsJson", a."tokenAuthStyle", a."tokenBodyFormat", a.source,
+             z.id AS "authorizationId", z."expiresAt" AS "tokenExpiresAt",
+             z."updatedAt" AS "tokenUpdatedAt", a."createdAt", a."updatedAt"
+        FROM oauth_apps a
+        LEFT JOIN oauth_authorizations z ON z."appId" = a.id AND z.label = 'default'
+       WHERE a."mcpServerId" IS NULL
+       ORDER BY a.provider ASC, a.rowid ASC`);
   }
 }

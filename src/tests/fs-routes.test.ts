@@ -500,14 +500,14 @@ describe("personal agent-fs identity and keys", () => {
   }> = [];
 
   beforeAll(async () => {
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     await createUser({ name: "Filesystem Fixture Admin" });
   });
 
   beforeEach(async () => {
     upstream = undefined;
     originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     _resetFsKeyRateLimitForTests();
     mode = "ready";
     requests.length = 0;

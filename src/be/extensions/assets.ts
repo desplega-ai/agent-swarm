@@ -37,7 +37,6 @@ import {
   deleteSkill,
   deleteSkillFile,
   deleteWorkflow,
-  getDbClient,
   getScheduledTaskById,
   getScheduledTaskByName,
   getSkillById,
@@ -576,10 +575,8 @@ const scheduleAdapter: Adapter<SchedulePlan> = {
 };
 
 async function findWorkflowByName(name: string): Promise<Workflow | null> {
-  const row = await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [
-    name,
-  ]);
-  return row ? await getWorkflow(row.id) : null;
+  const id = await getStorage().repos.workflows.findWorkflowIdByName(name);
+  return id ? await getWorkflow(id) : null;
 }
 
 const workflowAdapter: Adapter<WorkflowPlan> = {
@@ -629,11 +626,8 @@ const workflowAdapter: Adapter<WorkflowPlan> = {
 
 async function findSkillByName(name: string) {
   // Any scope: an extension skill must not shadow a same-named skill anywhere.
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM skills WHERE name = ? ORDER BY createdAt LIMIT 1",
-    [name],
-  );
-  return row ? await getSkillById(row.id) : null;
+  const id = await getStorage().repos.skills.findOldestSkillIdByName(name);
+  return id ? await getSkillById(id) : null;
 }
 
 const skillAdapter: Adapter<SkillPlan> = {

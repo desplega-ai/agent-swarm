@@ -35,10 +35,10 @@ export function ensurePricingSeeded(): void {
 }
 
 /** Sync the built-in RBAC roles, permissions and default-role trigger. */
-export function ensureRbacSeeded(): void {
+export async function ensureRbacSeeded(): Promise<void> {
   const db = getDb();
   if (rbacSyncedDbs.has(db)) return;
-  ensureRbacSeedsSynced();
+  await ensureRbacSeedsSynced();
   rbacSyncedDbs.add(db);
 }
 

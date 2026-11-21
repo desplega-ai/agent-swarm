@@ -6,7 +6,6 @@ import {
   failTask,
   getAgentById,
   getAgentCurrentTask,
-  getDbClient,
   getResolvedConfig,
   getTaskById,
   insertTaskAttachment,
@@ -21,6 +20,7 @@ import {
   storeTaskLearning,
   type TaskLearningResult,
 } from "@/be/memory/task-learning";
+import { getStorage } from "@/be/storage";
 import {
   CitationInputSchema,
   getTaskCitations,
@@ -423,7 +423,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ? await scriptActionIssues(uiSpec.actions)
           : [];
 
-      const result = await getDbClient().transaction(async () => {
+      const result = await getStorage().transaction(async () => {
         const attempt: typeof decided = {};
         // tx-replay-safe: a fresh object per attempt replaces the previous attempt's
         decided = attempt;
@@ -539,7 +539,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           // Post-commit, so a rolled-back progress write never leaves a learning
           // behind, and a failed learning write never rolls back the progress.
           attempt.learningWrite = new Promise((resolve) => {
-            getDbClient().afterCommit(() =>
+            getStorage().afterCommit(() =>
               storeTaskLearning({
                 agentId: agent.id,
                 isLead: agent.isLead === true,
@@ -687,7 +687,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             // afterCommit: the transaction can still roll back (e.g. a later
             // capacity update throws) — business-use must not be told the
             // task completed for a write that never landed.
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               ensure({
                 id: "completed",
                 flow: "task",
@@ -720,7 +720,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             // afterCommit: mirrors the "completed" branch above — dropped if
             // this transaction rolls back.
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               ensure({
                 id: "failed",
                 flow: "task",

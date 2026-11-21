@@ -346,5 +346,104 @@ export function agentsContract(engine: ContractEngine): void {
         { date: "2026-11-21", count: 1 },
       ]);
     });
+
+    test("worker-reported model columns write only on change (NULL-safe)", async () => {
+      await repo.insertAgent(newAgent({ id: "m1" }));
+      expect(await repo.getModelTierOverrides("m1")).toBeNull();
+      expect(await repo.modelTierOverridesDiffer("m1", null)).toBe(false);
+      expect(await repo.modelTierOverridesDiffer("m1", '{"smol":"x"}')).toBe(true);
+      expect(await repo.modelTierOverridesDiffer("missing", '{"smol":"x"}')).toBe(false);
+      await repo.setModelTierOverrides("m1", '{"smol":"x"}');
+      expect(await repo.getModelTierOverrides("m1")).toBe('{"smol":"x"}');
+      expect(await repo.modelTierOverridesDiffer("m1", '{"smol":"x"}')).toBe(false);
+      await repo.setModelTierOverrides("m1", null);
+      expect(await repo.getModelTierOverrides("m1")).toBeNull();
+      expect(await repo.getModelTierOverrides("missing")).toBeNull();
+
+      expect(await repo.getHarnessCliVersion("m1")).toBeNull();
+      await repo.setHarnessCliVersion("m1", "1.2.3");
+      expect(await repo.getHarnessCliVersion("m1")).toBe("1.2.3");
+      await repo.setHarnessCliVersion("m1", null);
+      expect(await repo.getHarnessCliVersion("m1")).toBeNull();
+    });
+
+    test("non-extension agents by name and skill install if absent", async () => {
+      await repo.insertAgent(newAgent({ id: "n1", name: "nina" }));
+      await repo.insertAgent(newAgent({ id: "x1", name: "xt" }));
+      await storage.executor.run(sql`UPDATE agents SET role = 'extension' WHERE id = 'x1'`);
+      expect(await repo.listNonExtensionAgentIdsByName("nina", 2)).toEqual(["n1"]);
+      expect(await repo.listNonExtensionAgentIdsByName("xt", 2)).toEqual([]);
+      expect(await repo.listNonExtensionAgentIdsByName(null, 2)).toEqual([]);
+
+      await storage.executor.run(sql`
+        INSERT INTO skills (id, name, description, content, type, scope, "createdAt", "lastUpdatedAt")
+        VALUES ('sk1', 'sk', 'd', 'c', 'personal', 'swarm', ${T0}, ${T0})`);
+      expect(await repo.installSkillIfAbsent("i1", "n1", "sk1", T0)).toBe(true);
+      await repo.setSkillActive("n1", "sk1", false);
+      // A present row stays as it is (inactive).
+      expect(await repo.installSkillIfAbsent("i2", "n1", "sk1", T1)).toBe(false);
+      const row = await storage.executor.get<{ id: string; isActive: number }>(
+        sql`SELECT id, "isActive" FROM agent_skills WHERE "agentId" = 'n1'`,
+      );
+      expect(row).toEqual({ id: "i1", isActive: 0 });
+    });
+
+    test("countActiveMcpServerInstalls counts active installs per server", async () => {
+      for (const id of ["s1", "s2", "s3"]) {
+        await storage.executor.run(sql`
+          INSERT INTO mcp_servers (id, name, scope, transport, "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, 'global', 'http', ${T0}, ${T0})`);
+      }
+      await repo.insertAgent(newAgent({ id: "ma" }));
+      await repo.insertAgent(newAgent({ id: "mb" }));
+      await repo.installMcpServer("i1", "ma", "s2", T0);
+      await repo.installMcpServer("i2", "mb", "s2", T0);
+      await repo.installMcpServer("i3", "ma", "s1", T0);
+      await repo.installMcpServer("i4", "ma", "s3", T0);
+      await storage.executor.run(
+        sql`UPDATE agent_mcp_servers SET "isActive" = ${false} WHERE "mcpServerId" = 's3'`,
+      );
+      expect(await repo.countActiveMcpServerInstalls()).toEqual([
+        { mcpServerId: "s1", installs: 1 },
+        { mcpServerId: "s2", installs: 2 },
+      ]);
+    });
+
+    test("listAgentNames returns every name in insertion order", async () => {
+      await repo.insertAgent(newAgent({ id: "n2", name: "zed" }));
+      await repo.insertAgent(newAgent({ id: "n1", name: "amy" }));
+      expect(await repo.listAgentNames()).toEqual(["zed", "amy"]);
+    });
+
+    test("firstAgentCreatedAt returns the earliest createdAt", async () => {
+      expect(await repo.firstAgentCreatedAt()).toBeNull();
+      await repo.insertAgent(newAgent({ id: "f1" }));
+      await repo.insertAgent(newAgent({ id: "f2" }));
+      await storage.executor.run(sql`UPDATE agents SET "createdAt" = ${T1} WHERE id = 'f1'`);
+      await storage.executor.run(
+        sql`UPDATE agents SET "createdAt" = ${"2000-01-01T00:00:00.000Z"} WHERE id = 'f2'`,
+      );
+      expect(await repo.firstAgentCreatedAt()).toBe("2000-01-01T00:00:00.000Z");
+    });
+
+    test("steering fields by ids and the total agent count", async () => {
+      expect(await repo.listSteeringFieldsByIds([])).toEqual([]);
+      await repo.insertAgent(newAgent({ id: "s2", isLead: true, harnessProvider: "codex" }));
+      await repo.insertAgent(newAgent({ id: "s1" }));
+      await repo.insertAgent(newAgent({ id: "s3" }));
+      expect(await repo.listSteeringFieldsByIds(["s2", "s1", "nope"])).toEqual([
+        { id: "s1", isLead: 0, provider: null, harness_provider: null },
+        { id: "s2", isLead: 1, provider: null, harness_provider: "codex" },
+      ]);
+      expect(await repo.countAllAgents()).toBe(3);
+    });
+
+    test("countNonExtensionAgents skips extension identities", async () => {
+      await repo.insertAgent(newAgent({ id: "c1" }));
+      await repo.insertAgent(newAgent({ id: "c2" }));
+      await storage.executor.run(sql`UPDATE agents SET role = 'extension' WHERE id = 'c2'`);
+      expect(await repo.countNonExtensionAgents()).toBe(1);
+      expect(await repo.countAllAgents()).toBe(2);
+    });
   });
 }

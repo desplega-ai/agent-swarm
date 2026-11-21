@@ -19,11 +19,9 @@ import {
   createWorkflow,
   deleteSkillFile,
   getAgentById,
-  getDbClient,
   getSkillById,
   getSkillFiles,
   getWorkflow,
-  NOT_EXTENSION_AGENT_SQL,
   updateAgentProfile,
   updateSkill,
   upsertSkillFiles,
@@ -39,6 +37,7 @@ import {
 import { getScript, getScriptById, upsertScriptByName } from "../scripts/db";
 import { getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
+import { getStorage } from "../storage";
 import type {
   ImportedAgent,
   ImportedScript,
@@ -59,19 +58,11 @@ export async function getOwnedId(
   kind: ImportKind,
   key: string,
 ): Promise<string | null> {
-  const row = await getDbClient().get<{ entityId: string }>(
-    "SELECT entityId FROM import_items WHERE sourceId = ? AND kind = ? AND itemKey = ?",
-    [sourceId, kind, key],
-  );
-  return row?.entityId ?? null;
+  return getStorage().repos.assets.findImportedEntityId(sourceId, kind, key);
 }
 
 async function isOwned(kind: ImportKind, entityId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ n: number }>(
-    "SELECT 1 AS n FROM import_items WHERE kind = ? AND entityId = ? LIMIT 1",
-    [kind, entityId],
-  );
-  return row !== null;
+  return getStorage().repos.assets.isImportedEntity(kind, entityId);
 }
 
 export async function recordOwnership(
@@ -81,13 +72,13 @@ export async function recordOwnership(
   entityId: string,
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO import_items (sourceId, kind, itemKey, entityId, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(sourceId, kind, itemKey) DO UPDATE SET
-       entityId = excluded.entityId, updatedAt = excluded.updatedAt`,
-    [sourceId, kind, key, entityId, now, now],
-  );
+  await getStorage().repos.assets.upsertImportItem({
+    sourceId,
+    kind,
+    itemKey: key,
+    entityId,
+    now,
+  });
 }
 
 type Target = { id: string | null } | "conflict";
@@ -152,12 +143,13 @@ export async function installImportedSkills(
       missing.push(key);
       continue;
     }
-    const result = await getDbClient().run(
-      `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
-       VALUES (?, ?, ?, 1, ?) ON CONFLICT(agentId, skillId) DO NOTHING`,
-      [crypto.randomUUID(), agentId, skillId, new Date().toISOString()],
+    const wrote = await getStorage().repos.agents.installSkillIfAbsent(
+      crypto.randomUUID(),
+      agentId,
+      skillId,
+      new Date().toISOString(),
     );
-    installed += result.changes;
+    if (wrote) installed += 1;
   }
   return { installed, missing };
 }
@@ -168,12 +160,9 @@ export async function findAgent(entry: {
   agentName: string | null;
 }): Promise<Agent | null | "ambiguous"> {
   if (entry.agentId) return getAgentById(entry.agentId);
-  const rows = await getDbClient().query<{ id: string }>(
-    `SELECT id FROM agents WHERE name = ? AND ${NOT_EXTENSION_AGENT_SQL} LIMIT 2`,
-    [entry.agentName],
-  );
-  if (rows.length > 1) return "ambiguous";
-  return rows[0] ? getAgentById(rows[0].id) : null;
+  const ids = await getStorage().repos.agents.listNonExtensionAgentIdsByName(entry.agentName, 2);
+  if (ids.length > 1) return "ambiguous";
+  return ids[0] ? getAgentById(ids[0]) : null;
 }
 
 // ─── Seeders ────────────────────────────────────────────────────────────────
@@ -273,7 +262,7 @@ function skillsSeeder(source: ImportSource, items: Resolved<ImportedSkill>[]) {
     },
     // One transaction: a row without its files would hash as edited forever.
     (item) =>
-      getDbClient().transaction(async () => {
+      getStorage().transaction(async () => {
         const { spec } = item;
         if (item.targetId) {
           await updateSkill(item.targetId, spec);
@@ -395,13 +384,7 @@ export async function prepareSeeders(
     async (id) => (await getSkillById(id)) !== null,
     (item) => item.spec.name,
     // Any scope: an imported skill must not shadow a same-named skill anywhere.
-    async (name) =>
-      (
-        await getDbClient().get<{ id: string }>(
-          "SELECT id FROM skills WHERE name = ? ORDER BY createdAt LIMIT 1",
-          [name],
-        )
-      )?.id ?? null,
+    async (name) => getStorage().repos.skills.findOldestSkillIdByName(name),
     conflicts,
   );
   const workflows = await partition(
@@ -410,9 +393,7 @@ export async function prepareSeeders(
     pkg.workflows,
     async (id) => (await getWorkflow(id)) !== null,
     (item) => item.spec.name,
-    async (name) =>
-      (await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [name]))
-        ?.id ?? null,
+    async (name) => getStorage().repos.workflows.findWorkflowIdByName(name),
     conflicts,
   );
 

@@ -10,7 +10,8 @@ import {
   readDesignSystem,
 } from "../themes/design-system";
 import type { DesignSystem } from "../types";
-import { getDbClient, getKv, upsertKv } from "./db";
+import { getKv, upsertKv } from "./db";
+import { getStorage } from "./storage";
 
 export type StoredDesignSystem =
   | { status: "none" }
@@ -43,7 +44,7 @@ export async function getActiveDesignSystem(): Promise<DesignSystem | null> {
 
 /** Saves `record` and moves the value it replaces to `org.prev`. */
 export async function saveDesignSystem(record: DesignSystem): Promise<void> {
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const current = await getKv(DESIGN_SYSTEM_NAMESPACE, DESIGN_SYSTEM_KEY);
     if (current) {
       await upsertKv({

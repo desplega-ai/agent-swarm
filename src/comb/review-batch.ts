@@ -8,7 +8,8 @@
  * account.
  */
 
-import { claimKv, deleteKv, getDbClient, getKv, getLeadAgent, upsertKv } from "../be/db";
+import { getStorage } from "@/be/storage";
+import { claimKv, deleteKv, getKv, getLeadAgent, upsertKv } from "../be/db";
 import { findUserById } from "../be/users";
 import {
   type AgentFsComment,
@@ -332,7 +333,7 @@ async function claimComments(
   candidates: CommentRead[],
   claim: string,
 ): Promise<{ won: CommentRead[]; lost: Array<{ id: string; entry: KvEntry | null }> }> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const won: CommentRead[] = [];
     const lost: Array<{ id: string; entry: KvEntry | null }> = [];
     for (const read of candidates) {
@@ -362,7 +363,7 @@ async function settleClaims(
 ): Promise<void> {
   const settled = await Promise.allSettled(
     ids.map((id) =>
-      getDbClient().transaction(async () => {
+      getStorage().transaction(async () => {
         const entry = await getKv(SENT_KV_NAMESPACE, id);
         if (entry && claimToken(entry) !== claim) return false;
         if (next) {

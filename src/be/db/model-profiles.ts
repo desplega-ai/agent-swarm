@@ -28,7 +28,6 @@ import {
 } from "../model-profile-check";
 import { getStorage } from "../storage";
 import { getAgentById } from "./agents";
-import { getDbClient } from "./runtime";
 import { SUPERSEDED_RESUME_REPAIR_WINDOW_MS } from "./tasks/read";
 
 /** Agent-scoped swarm_config key holding the agent's default profile name. */
@@ -224,22 +223,19 @@ export async function modelProfileReferences(name: string): Promise<{
   fallbackOf: string[];
   groups: string[];
 }> {
-  const agents = await getDbClient().query<{ scopeId: string }>(
-    "SELECT scopeId FROM swarm_config WHERE scope = 'agent' AND key = ? AND value = ?",
-    [MODEL_PROFILE_CONFIG_KEY, name],
+  const agentIds = await getStorage().repos.config.listAgentScopeIdsWithValue(
+    MODEL_PROFILE_CONFIG_KEY,
+    name,
   );
   const models = getStorage().repos.models;
   const openTaskCount = await models.countTasksHoldingProfile(name, taskHoldWindow());
-  const schedules = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM scheduled_tasks WHERE profile = ? ORDER BY id",
-    [name],
-  );
+  const scheduleIds = await getStorage().repos.schedules.listIdsByProfile(name);
   const fallbackOf = await models.listProfilesWithFallback(name);
   const groups = await models.listGroupsWithMember(name);
   return {
-    agentIds: agents.map((a) => a.scopeId),
+    agentIds,
     openTaskCount,
-    scheduleIds: schedules.map((s) => s.id),
+    scheduleIds,
     fallbackOf: [...new Set(fallbackOf)],
     groups,
   };
@@ -335,9 +331,10 @@ export async function modelProfileFallbacksError(
 
 /** The agent's default profile name (agent-scoped MODEL_PROFILE), or null. */
 export async function getAgentDefaultProfileName(agentId: string): Promise<string | null> {
-  const row = await getDbClient().get<{ value: string }>(
-    "SELECT value FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
-    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  const row = await getStorage().repos.config.findConfigByScopeKey(
+    "agent",
+    agentId,
+    MODEL_PROFILE_CONFIG_KEY,
   );
   return row?.value.trim() || null;
 }
@@ -357,13 +354,13 @@ export async function repoModelOverrideKeys(
 ): Promise<Set<string>> {
   const repoId = await vcsRepoId(vcsRepo);
   if (!repoId) return new Set();
-  const rows = await getDbClient().query<{ key: string }>(
-    `SELECT key FROM swarm_config
-      WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')
-        ${includeSecrets ? "" : "AND isSecret = 0"}`,
-    [repoId],
+  const keys = await getStorage().repos.config.listScopedKeys(
+    "repo",
+    repoId,
+    ["MODEL_OVERRIDE", "REASONING_EFFORT_OVERRIDE"],
+    { includeSecrets },
   );
-  return new Set(rows.map((row) => row.key));
+  return new Set(keys);
 }
 
 /**
@@ -549,8 +546,9 @@ export async function clearAgentModelProfileOnOverrideChange(
 ): Promise<void> {
   if (key !== "MODEL_OVERRIDE" && key !== "REASONING_EFFORT_OVERRIDE") return;
   if (effectiveOverride(before) === effectiveOverride(after)) return;
-  await getDbClient().run(
-    "DELETE FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
-    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  await getStorage().repos.config.deleteConfigByScopeKey(
+    "agent",
+    agentId,
+    MODEL_PROFILE_CONFIG_KEY,
   );
 }

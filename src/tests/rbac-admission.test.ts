@@ -166,7 +166,7 @@ beforeEach(async () => {
   delete process.env.RBAC_AUDIT_RETENTION_DAYS;
 
   initDb(TEST_DB_PATH);
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   await createAgent({ id: LEAD_ID, name: "Admission Lead", isLead: true, status: "idle" });
   await flushAuditBuffer();
   await getDbClient().run("DELETE FROM permission_audit");

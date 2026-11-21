@@ -76,4 +76,18 @@ export class SqliteConfigRepository extends BaseConfigRepository {
         "suffixes" in filter ? sql`"keySuffix", scope, "scopeId"` : sql`status, rowid`
       }`);
   }
+
+  async listAgentScopeIdsWithValue(key: string, value: string): Promise<string[]> {
+    const rows = await this.db.query<{ scopeId: string }>(sql`
+      SELECT "scopeId" FROM swarm_config
+       WHERE scope = 'agent' AND key = ${key} AND value = ${value}
+       ORDER BY rowid`);
+    return rows.map((row) => row.scopeId);
+  }
+
+  listRepoNamesAndUrls(): Promise<{ name: string | null; url: string | null }[]> {
+    return this.db.query<{ name: string | null; url: string | null }>(
+      sql`SELECT name, url FROM swarm_repos ORDER BY rowid`,
+    );
+  }
 }

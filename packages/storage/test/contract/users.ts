@@ -494,5 +494,12 @@ export function usersContract(engine: ContractEngine): void {
         ),
       ).toEqual(["p3"]);
     });
+
+    test("listUserEmails returns the non-null emails ordered by email", async () => {
+      await repo.insertUser(newUser({ id: "e1", name: "One", email: "zz@x.co" }));
+      await repo.insertUser(newUser({ id: "e2", name: "Two", email: "aa@x.co" }));
+      await repo.insertUser(newUser({ id: "e3", name: "Three", email: null }));
+      expect(await repo.listUserEmails()).toEqual(["aa@x.co", "zz@x.co"]);
+    });
   });
 }

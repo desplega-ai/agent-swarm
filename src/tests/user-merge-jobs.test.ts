@@ -569,7 +569,7 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("409 last_admin when the source is the only admin, and nothing is queued", async () => {
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     const admin = await createUser({ name: "OnlyAdmin" });
     const viewer = await createUser({ name: "Viewer" });
     await setUserRoles(admin.id, ["admin"], null);
@@ -585,7 +585,7 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("a merge source never counts as a live admin while its job is pending", async () => {
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     const adminA = await createUser({ name: "AdminA" });
     const adminB = await createUser({ name: "AdminB" });
     await setUserRoles(adminA.id, ["admin"], null);

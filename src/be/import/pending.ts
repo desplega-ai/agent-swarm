@@ -4,8 +4,9 @@
  */
 
 import type { Agent } from "../../types";
-import { getAgentById, getDbClient } from "../db";
+import { getAgentById } from "../db";
 import { recordSeedState } from "../seed/state-db";
+import { getStorage } from "../storage";
 import {
   getOwnedId,
   identityIsAdoptable,
@@ -14,27 +15,16 @@ import {
   writeInstructions,
 } from "./seeders";
 
-type PendingRow = {
-  sourceId: string;
-  agentKey: string;
-  instructions: string | null;
-  instructionsHash: string | null;
-  skillKeys: string;
-};
-
 /** Returns true when it changed the agent's profile or installs. */
 export async function resolvePendingImportAssignments(
   agent: Pick<Agent, "id" | "name">,
 ): Promise<boolean> {
-  const rows = await getDbClient().query<PendingRow>(
-    `SELECT sourceId, agentKey, instructions, instructionsHash, skillKeys
-       FROM import_pending_assignments WHERE agentId = ? OR agentName = ?`,
-    [agent.id, agent.name],
-  );
+  const assets = getStorage().repos.assets;
+  const rows = await assets.listPendingAssignmentsForAgent(agent.id, agent.name);
   if (rows.length === 0) return false;
 
   // A savepoint: a failure here rolls back only these writes, never the registration.
-  return getDbClient().transaction(async (tx) => {
+  return getStorage().transaction(async () => {
     let changed = false;
     for (const row of rows) {
       const live = await getAgentById(agent.id);
@@ -58,10 +48,7 @@ export async function resolvePendingImportAssignments(
         JSON.parse(row.skillKeys) as string[],
       );
       if (installed > 0) changed = true;
-      await tx.run("DELETE FROM import_pending_assignments WHERE sourceId = ? AND agentKey = ?", [
-        row.sourceId,
-        row.agentKey,
-      ]);
+      await assets.deletePendingAssignment(row.sourceId, row.agentKey);
       console.log(
         `[import:${row.sourceId}] resolved pending assignments for agent ${row.agentKey}`,
       );

@@ -1,5 +1,5 @@
-import { getDbClient } from "@/be/db";
 import type { MemoryRetrievalSource } from "@/be/memory/types";
+import { getStorage } from "@/be/storage";
 import type { AgentMemory } from "@/types";
 import { ensure } from "../../../utils/business-use";
 
@@ -64,14 +64,8 @@ export async function recordMemoryAccesses(memoryIds: string[]): Promise<void> {
   if (ids.length === 0) return;
 
   const now = new Date().toISOString();
-  await getDbClient().transaction(async (tx) => {
-    for (const id of ids) {
-      await tx.run(
-        "UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WHERE id = ?",
-        [now, id],
-      );
-    }
-  });
+  const storage = getStorage();
+  await storage.transaction(() => storage.repos.memory.recordAccesses(ids, now));
 }
 
 export async function recordRetrievals(
@@ -83,33 +77,31 @@ export async function recordRetrievals(
 ): Promise<void> {
   if (!taskId || results.length === 0) return;
 
-  const insertSql = `INSERT INTO memory_retrieval
-       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank, retrievalSource, relevance)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const now = new Date().toISOString();
   const retrievalId = crypto.randomUUID();
   const contextKey = extras?.contextKey ?? null;
   const intent = extras?.intent ?? null;
   const eventType = extras?.eventType ?? "search";
 
-  await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  await storage.transaction(async () => {
     for (const [rank, r] of results.entries()) {
-      await tx.run(insertSql, [
-        crypto.randomUUID(),
+      await storage.repos.memory.insertRetrieval({
+        id: crypto.randomUUID(),
         taskId,
         agentId,
-        sessionId ?? null,
-        r.memoryId,
-        r.similarity,
-        now,
+        sessionId: sessionId ?? null,
+        memoryId: r.memoryId,
+        similarity: r.similarity,
+        retrievedAt: now,
         contextKey,
         intent,
         eventType,
         retrievalId,
         rank,
-        r.retrievalSource ?? null,
-        r.relevance ?? null,
-      ]);
+        retrievalSource: r.retrievalSource ?? null,
+        relevance: r.relevance ?? null,
+      });
     }
   });
 
@@ -137,8 +129,5 @@ export async function recordRetrievals(
 export async function getRetrievalsForTask(
   taskId: string,
 ): Promise<{ memoryId: string; similarity: number | null }[]> {
-  return getDbClient().query<{ memoryId: string; similarity: number | null }>(
-    "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
-    [taskId],
-  );
+  return getStorage().repos.memory.listRetrievalsForTask(taskId);
 }

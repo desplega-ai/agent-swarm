@@ -6,23 +6,30 @@ import {
   type TransactionOptions,
 } from "@desplega/storage";
 import { sqliteDialect } from "./dialect";
+import { SqliteAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
 import { SqliteAgentsRepository } from "./repositories/agents";
 import { SqliteAssetsRepository } from "./repositories/assets";
 import { SqliteChatRepository } from "./repositories/chat";
 import { SqliteConfigRepository } from "./repositories/config";
 import { SqliteEventsRepository } from "./repositories/events";
 import { SqliteExtensionsRepository } from "./repositories/extensions";
+import { SqliteImprovementsRepository } from "./repositories/improvements";
 import { SqliteKvRepository } from "./repositories/kv";
 import { SqliteMaintenanceRepository } from "./repositories/maintenance";
 import { SqliteMcpServersRepository } from "./repositories/mcp-servers";
+import { SqliteMemoryRepository } from "./repositories/memory";
 import { SqliteModelsRepository } from "./repositories/models";
 import { SqliteOAuthRepository } from "./repositories/oauth";
 import { SqlitePagesRepository } from "./repositories/pages";
 import { SqliteRbacRepository } from "./repositories/rbac";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
+import { SqliteSavingsRepository } from "./repositories/savings";
+import { SqliteSchedulesRepository } from "./repositories/schedules";
 import { SqliteScriptsRepository } from "./repositories/scripts";
+import { SqliteSessionsRepository } from "./repositories/sessions";
 import { SqliteSkillsRepository } from "./repositories/skills";
 import { SqliteSlackRepository } from "./repositories/slack";
+import { SqliteTasksRepository } from "./repositories/tasks";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
 import { SqliteWorkflowsRepository } from "./repositories/workflows";
@@ -76,6 +83,13 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       pages: new SqlitePagesRepository(executor),
       skills: new SqliteSkillsRepository(executor),
       kv: new SqliteKvRepository(executor),
+      tasks: new SqliteTasksRepository(executor),
+      memory: new SqliteMemoryRepository(executor),
+      schedules: new SqliteSchedulesRepository(executor),
+      agentFsWebhooks: new SqliteAgentFsWebhooksRepository(executor),
+      improvements: new SqliteImprovementsRepository(executor),
+      sessions: new SqliteSessionsRepository(executor),
+      savings: new SqliteSavingsRepository(executor),
     },
     transaction: <T>(fn: () => Promise<T>, opts?: TransactionOptions) =>
       client.transaction(() => fn(), opts),
@@ -110,3 +124,4 @@ export {
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
 export { existingUserIdsSync, readAssetKeyAuditDataSync } from "./repositories/assets";
+export { FTS_SCAN_BATCH_SQL, MEMORY_ID_BATCH_SQL } from "./repositories/memory";

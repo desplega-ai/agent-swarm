@@ -1,3 +1,4 @@
+import type { TaskRow } from "@desplega/storage";
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
 import { sessionSourceKey } from "../../../assets/source-key";
@@ -20,6 +21,7 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
 } from "../../../types";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
+import { getStorage } from "../../storage";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { publishWorkerNudge } from "../../worker-nudges";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
@@ -34,9 +36,17 @@ import {
   type AgentTaskRow,
   getTaskById,
   NEVER_STARTED_TASK_STATUSES,
-  readableSessionCondition,
   rowToAgentTask,
 } from "./read";
+
+function tasksRepo() {
+  return getStorage().repos.tasks;
+}
+
+/** The repository row, typed with the enum columns `src/types.ts` narrows. */
+function asRow(row: TaskRow | null): AgentTaskRow | null {
+  return row as AgentTaskRow | null;
+}
 
 type TaskWriteDependencies = {
   createLogEntry: (entry: {
@@ -91,26 +101,25 @@ export async function createTask(
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
   const isHumanFree = await classifyTaskHumanFree({ source });
-  const row = await getDbClient().get<AgentTaskRow>(
-    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, isHumanFree, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    [
+  const row = asRow(
+    await tasksRepo().insertSimpleTask({
       id,
-      sessionSourceKey({
-        id,
-        slackChannelId: options?.slackChannelId,
-        slackThreadTs: options?.slackThreadTs,
-      }) ?? defaultAssetKey("task", id),
+      key:
+        sessionSourceKey({
+          id,
+          slackChannelId: options?.slackChannelId,
+          slackThreadTs: options?.slackThreadTs,
+        }) ?? defaultAssetKey("task", id),
       agentId,
-      scrubSecrets(task),
-      "pending",
+      task: scrubSecrets(task),
+      status: "pending",
       source,
-      options?.slackChannelId ?? null,
-      options?.slackThreadTs ?? null,
-      options?.slackUserId ?? null,
-      pkg.version,
-      isHumanFree ? 1 : 0,
-    ],
+      slackChannelId: options?.slackChannelId ?? null,
+      slackThreadTs: options?.slackThreadTs ?? null,
+      slackUserId: options?.slackUserId ?? null,
+      swarmVersion: pkg.version,
+      isHumanFree,
+    }),
   );
   if (!row) throw new Error("Failed to create task");
   try {
@@ -177,10 +186,7 @@ export async function getPendingTaskForAgent(
   probe?: PendingTaskProbe,
 ): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
-  const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
-    [agentId],
-  );
+  const rows = (await tasksRepo().listPendingTasksForAgent(agentId)) as AgentTaskRow[];
 
   const agent = await getAgentById(agentId);
   if (!agent) return null;
@@ -254,29 +260,28 @@ export async function assignUnassignedTaskPending(
   const now = new Date().toISOString();
   const snapshot = options.routingSnapshot;
   // Revalidate snapshots and capacity in the write itself, without holding a lock during routing.
-  const guards = snapshot
-    ? ` AND lastUpdatedAt = ?
-        AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND lastUpdatedAt = ?
-          AND (SELECT COUNT(*) FROM agent_tasks WHERE agentId = agents.id
-            AND status IN ('pending', 'in_progress')) < COALESCE(maxTasks, 1))`
-    : "";
-  const poolGuard = snapshot?.pool
-    ? ` AND EXISTS (SELECT 1 FROM runtime_pools WHERE id = ? AND updated_at = ?
-        AND enabled = 1 AND (circuit_open_until IS NULL OR circuit_open_until <= ?))`
-    : "";
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?, pool_wake_at = ?
-       WHERE id = ? AND status = 'unassigned'${guards}${poolGuard} RETURNING *`,
-    [
+  const row = asRow(
+    await tasksRepo().assignUnassignedTask({
+      taskId,
       agentId,
       now,
-      options.poolWakeAt ?? null,
-      taskId,
-      ...(snapshot ? [snapshot.task.lastUpdatedAt, agentId, snapshot.agent.lastUpdatedAt] : []),
-      ...(snapshot?.pool
-        ? [snapshot.pool.id, snapshot.pool.updatedAt, options.poolWakeAt ?? now]
-        : []),
-    ],
+      poolWakeAt: options.poolWakeAt ?? null,
+      guards: {
+        snapshot: snapshot
+          ? {
+              taskLastUpdatedAt: snapshot.task.lastUpdatedAt,
+              agentLastUpdatedAt: snapshot.agent.lastUpdatedAt,
+            }
+          : undefined,
+        pool: snapshot?.pool
+          ? {
+              id: snapshot.pool.id,
+              updatedAt: snapshot.pool.updatedAt,
+              at: options.poolWakeAt ?? now,
+            }
+          : undefined,
+      },
+    }),
   );
 
   if (row) {
@@ -290,7 +295,7 @@ export async function assignUnassignedTaskPending(
         metadata: { pendingDispatch: true },
       });
     } catch {}
-    getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
+    getStorage().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -305,11 +310,7 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
     return null;
   }
 
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-    [taskId],
-  );
+  const row = asRow(await tasksRepo().startTask(taskId));
   if (row && oldTask) {
     try {
       await dependencies.createLogEntry({
@@ -324,7 +325,7 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
   const result = row ? rowToAgentTask(row) : null;
   // Notify lifecycle subscribers only after the claim commits (e.g. GitHub eyes reaction).
   if (result && oldTask.status !== "in_progress") {
-    getDbClient().afterCommit(() => emitTaskStarted(result));
+    getStorage().afterCommit(() => emitTaskStarted(result));
   }
   return result;
 }
@@ -340,39 +341,21 @@ export async function updateTaskClaudeSessionId(
   /** Effort the session runs at; null records that the harness default applied. */
   resolvedEffort?: ReasoningEffort | null,
 ): Promise<AgentTask | null> {
-  const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
-  const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
-
-  if (provider !== undefined) {
-    setClauses.push("provider = ?");
-    params.push(provider);
-  }
-  if (providerMeta !== undefined) {
-    setClauses.push("providerMeta = ?");
-    params.push(JSON.stringify(providerMeta));
-  }
-  if (model !== undefined) {
-    setClauses.push("model = ?");
-    params.push(model);
-  }
-  if (harnessVariant !== undefined) {
-    setClauses.push("harnessVariant = ?");
-    params.push(harnessVariant);
-  }
-  if (harnessVariantMeta !== undefined) {
-    setClauses.push("harnessVariantMeta = ?");
-    params.push(JSON.stringify(harnessVariantMeta));
-  }
-  if (resolvedEffort !== undefined) {
-    setClauses.push("resolvedEffort = ?");
-    params.push(resolvedEffort);
-  }
-
-  params.push(taskId);
-
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const row = asRow(
+    await tasksRepo().setTaskSessionColumns(
+      taskId,
+      {
+        claudeSessionId,
+        provider,
+        providerMeta: providerMeta !== undefined ? JSON.stringify(providerMeta) : undefined,
+        model,
+        harnessVariant,
+        harnessVariantMeta:
+          harnessVariantMeta !== undefined ? JSON.stringify(harnessVariantMeta) : undefined,
+        resolvedEffort,
+      },
+      new Date().toISOString(),
+    ),
   );
   return row ? rowToAgentTask(row) : null;
 }
@@ -387,10 +370,7 @@ export async function recordTaskProviderIfUnset(
   taskId: string,
   provider: ProviderName,
 ): Promise<void> {
-  await getDbClient().run("UPDATE agent_tasks SET provider = ? WHERE id = ? AND provider IS NULL", [
-    provider,
-    taskId,
-  ]);
+  await tasksRepo().setTaskProviderIfUnset(taskId, provider);
 }
 
 /**
@@ -404,10 +384,7 @@ export async function updateTaskTitle(
   title: string | null,
 ): Promise<AgentTask | null> {
   const normalized = title === null ? null : title.trim() || null;
-  const row = await getDbClient().get<AgentTaskRow>(
-    "UPDATE agent_tasks SET title = ? WHERE id = ? RETURNING *",
-    [normalized, taskId],
-  );
+  const row = asRow(await tasksRepo().setTaskTitle(taskId, normalized));
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -420,11 +397,9 @@ export async function updateTaskTags(
   taskId: string,
   change: { add?: string[]; remove?: string[] },
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().transaction(async () => {
-    const current = await getDbClient().get<Pick<AgentTaskRow, "tags">>(
-      "SELECT tags FROM agent_tasks WHERE id = ?",
-      [taskId],
-    );
+  const repo = tasksRepo();
+  const row = await getStorage().transaction(async () => {
+    const current = await repo.findTaskTags(taskId);
     if (!current) return null;
     const previousTagsJson = current.tags;
     const existing: string[] = previousTagsJson ? JSON.parse(previousTagsJson) : [];
@@ -433,10 +408,7 @@ export async function updateTaskTags(
       (tag) => !removed.has(tag),
     );
     const nextTagsJson = JSON.stringify(nextTags);
-    const updated = await getDbClient().get<AgentTaskRow>(
-      "UPDATE agent_tasks SET tags = ? WHERE id = ? RETURNING *",
-      [nextTagsJson, taskId],
-    );
+    const updated = asRow(await repo.setTaskTags(taskId, nextTagsJson, false));
     if (updated && tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
       await reclassifyTaskHumanFree([taskId]);
     }
@@ -457,10 +429,7 @@ export async function setTaskTitleIfUnset(
 ): Promise<AgentTask | null> {
   const normalized = title.trim();
   if (!normalized) return null;
-  const row = await getDbClient().get<AgentTaskRow>(
-    "UPDATE agent_tasks SET title = ? WHERE id = ? AND title IS NULL RETURNING *",
-    [normalized, taskId],
-  );
+  const row = asRow(await tasksRepo().setTaskTitleIfUnset(taskId, normalized));
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -488,33 +457,30 @@ export async function completeTask(
 
   // One scrubbed copy feeds both the stored row and the task.completed event.
   const scrubbedOutput = output ? scrubSecrets(output) : output;
-  const row = await getDbClient().transaction(async () => {
+  const repo = tasksRepo();
+  const row = await getStorage().transaction(async () => {
     const finishedAt = new Date().toISOString();
     // The status predicate re-checks the idempotency guard atomically: the
     // await between the guard read above and this write lets a racing
     // terminal transition (e.g. heartbeat failTask) land first.
-    let completed = await getDbClient().get<AgentTaskRow>(
-      `UPDATE agent_tasks SET status = ?, statusKind = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-      ["completed", options?.statusKind ?? null, finishedAt, id],
+    let completed = asRow(
+      await repo.finishTask(id, {
+        status: "completed",
+        statusKind: options?.statusKind ?? null,
+        finishedAt,
+      }),
     );
     if (!completed) return null;
 
     if (scrubbedOutput) {
-      completed = await getDbClient().get<AgentTaskRow>(
-        "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [scrubbedOutput, id],
-      );
+      completed = asRow(await repo.setTaskOutput(id, scrubbedOutput));
     }
     if (completed && options?.addTags?.length) {
       const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
       const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
       const previousTagsJson = completed.tags;
       const nextTagsJson = JSON.stringify(nextTags);
-      completed = await getDbClient().get<AgentTaskRow>(
-        "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [nextTagsJson, id],
-      );
+      completed = asRow(await repo.setTaskTags(id, nextTagsJson, true));
       // Only a tag the classifier reads (e.g. "heartbeat") can flip the flag;
       // a "deferred" write must not walk the task's whole subtree.
       if (tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
@@ -522,9 +488,8 @@ export async function completeTask(
       }
     }
     if (completed && options?.deferredAt) {
-      completed = await getDbClient().get<AgentTaskRow>(
-        "UPDATE agent_tasks SET deferredAt = ?, deferredUntil = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [options.deferredAt, options.deferredUntil ?? null, id],
+      completed = asRow(
+        await repo.setTaskDeferral(id, options.deferredAt, options.deferredUntil ?? null),
       );
     }
     if (completed) {
@@ -559,7 +524,7 @@ export async function completeTask(
         newValue: "completed",
       });
     } catch {}
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       import("../../../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.completed", {
@@ -632,18 +597,14 @@ export async function failTask(
   const scrubbedReason = scrubSecrets(reason);
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'failed', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
-         AND (? IS NULL OR lastUpdatedAt = ?) RETURNING *`,
-    [
-      opts.statusKind ?? null,
-      scrubbedReason,
+  const row = asRow(
+    await tasksRepo().finishTask(id, {
+      status: "failed",
+      statusKind: opts.statusKind ?? null,
+      failureReason: scrubbedReason,
       finishedAt,
-      id,
-      opts.expectedLastUpdatedAt ?? null,
-      opts.expectedLastUpdatedAt ?? null,
-    ],
+      expectedLastUpdatedAt: opts.expectedLastUpdatedAt,
+    }),
   );
   if (row && oldTask) {
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
@@ -668,7 +629,7 @@ export async function failTask(
         metadata: { reason: scrubbedReason },
       });
     } catch {}
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       import("../../../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.failed", {
@@ -729,14 +690,9 @@ export async function overwriteTerminalTaskResultText(
     patch.failureReason !== undefined
       ? scrubSecrets(patch.failureReason)
       : (task.failureReason ?? null);
-  const row = await getDbClient().transaction(async () => {
-    const updated =
-      (await getDbClient().get<AgentTaskRow>(
-        `UPDATE agent_tasks SET output = ?, failureReason = ?
-         WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
-         RETURNING *`,
-        [output, failureReason, id],
-      )) ?? null;
+  const repo = tasksRepo();
+  const row = await getStorage().transaction(async () => {
+    const updated = asRow(await repo.overwriteTerminalResultText(id, output, failureReason));
     if (updated && patch.output !== undefined) {
       await dependencies.reconcileTaskPullRequestAttachments(id, updated.agentId, [
         updated.output,
@@ -774,15 +730,18 @@ export async function cancelTask(
   const cancelReason = scrubSecrets(reason ?? "Cancelled by user");
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'cancelled', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-    [options.statusKind ?? null, cancelReason, finishedAt, id],
+  const row = asRow(
+    await tasksRepo().finishTask(id, {
+      status: "cancelled",
+      statusKind: options.statusKind ?? null,
+      failureReason: cancelReason,
+      finishedAt,
+    }),
   );
 
   if (row && oldTask) {
     const recipients = new Set([row.agentId, row.offeredTo]);
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       for (const agentId of recipients) {
         if (agentId) publishWorkerNudge(agentId, { kind: "cancel", taskId: id });
       }
@@ -811,7 +770,7 @@ export async function cancelTask(
         metadata: reason ? { reason: cancelReason } : undefined,
       });
     } catch {}
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       import("../../../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.cancelled", {
@@ -832,7 +791,7 @@ export async function cancelTask(
     // Deferral suppresses the original worker completion's Lead follow-up.
     // If its wake-up is cancelled, report that outcome after the cancel commits.
     if (row.source === "schedule" && row.taskType === "deferred" && row.parentTaskId) {
-      getDbClient().afterCommit(async () => {
+      getStorage().afterCommit(async () => {
         try {
           const { createWorkerTaskFollowUp } = await import("../../../tasks/worker-follow-up");
           await createWorkerTaskFollowUp({
@@ -896,10 +855,13 @@ export async function skipTask(
   const skipReason = scrubSecrets(reason);
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'skipped', statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') RETURNING *`,
-    [opts.statusKind ?? null, skipReason, finishedAt, id],
+  const row = asRow(
+    await tasksRepo().finishTask(id, {
+      status: "skipped",
+      statusKind: opts.statusKind ?? null,
+      failureReason: skipReason,
+      finishedAt,
+    }),
   );
   if (!row) return null;
 
@@ -913,7 +875,7 @@ export async function skipTask(
       metadata: { reason: skipReason },
     });
   } catch {}
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     import("../../../workflows/event-bus")
       .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.skipped", {
@@ -977,22 +939,14 @@ export async function supersedeTask(
   }
 
   const finishedAt = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = 'superseded',
-           statusKind = ?,
-           finishedAt = ?,
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
-         AND (? IS NULL OR lastUpdatedAt = ?)
-       RETURNING *`,
-    [
-      args.statusKind ?? (isTaskStatusKindFor("superseded", args.reason) ? args.reason : null),
+  const row = asRow(
+    await tasksRepo().finishTask(id, {
+      status: "superseded",
+      statusKind:
+        args.statusKind ?? (isTaskStatusKindFor("superseded", args.reason) ? args.reason : null),
       finishedAt,
-      id,
-      args.expectedLastUpdatedAt ?? null,
-      args.expectedLastUpdatedAt ?? null,
-    ],
+      expectedLastUpdatedAt: args.expectedLastUpdatedAt,
+    }),
   );
 
   if (row && oldTask) {
@@ -1021,7 +975,7 @@ export async function supersedeTask(
         metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
       });
     } catch {}
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       import("../../../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.superseded", {
@@ -1063,15 +1017,7 @@ export async function supersedeTask(
  * unless the row is still exactly that failure. Returns whether it moved.
  */
 export async function markWorkflowStepTaskSuperseded(id: string): Promise<boolean> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = 'superseded',
-           statusKind = 'workflow_retry',
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'failed' AND failureReason = ?
-       RETURNING *`,
-    [id, SUPERSEDED_WORKFLOW_TASK_REASON],
-  );
+  const row = await tasksRepo().markWorkflowStepTaskSuperseded(id, SUPERSEDED_WORKFLOW_TASK_REASON);
   if (!row) return false;
   try {
     await dependencies.createLogEntry({
@@ -1100,24 +1046,13 @@ export async function settleSupersededTaskDependents(
 ): Promise<void> {
   try {
     if (resumeTaskId) {
-      const placeholders = NEVER_STARTED_TASK_STATUSES.map(() => "?").join(", ");
-      // One statement: the new array is built from the row's current
-      // `dependsOn`, so settlements of a shared dependent compose, and the
+      // One statement: settlements of a shared dependent compose, and the
       // status predicate is evaluated at write time, so a claim into
       // `in_progress` is skipped while offered -> reviewing/pending is not.
-      const repointed = await getDbClient().query<{ id: string; agentId: string | null }>(
-        `UPDATE agent_tasks
-            SET dependsOn = (
-                  SELECT json_group_array(value ORDER BY k) FROM (
-                    SELECT CASE WHEN j.value = ? THEN ? ELSE j.value END AS value,
-                           MIN(j.key) AS k
-                      FROM json_each(agent_tasks.dependsOn) AS j
-                     GROUP BY 1)),
-                lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-          WHERE status IN (${placeholders})
-            AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
-          RETURNING id, agentId`,
-        [supersededId, resumeTaskId, ...NEVER_STARTED_TASK_STATUSES, supersededId],
+      const repointed = await tasksRepo().repointDependents(
+        supersededId,
+        resumeTaskId,
+        NEVER_STARTED_TASK_STATUSES,
       );
       for (const dep of repointed) {
         try {
@@ -1198,15 +1133,7 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
     return null;
   }
 
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = 'paused',
-           was_paused = 1,
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'in_progress'
-       RETURNING *`,
-    [id],
-  );
+  const row = asRow(await tasksRepo().pauseTask(id));
 
   if (row && oldTask) {
     try {
@@ -1232,15 +1159,7 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = 'in_progress',
-           was_paused = 1,
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'paused'
-       RETURNING *`,
-    [taskId],
-  );
+  const row = asRow(await tasksRepo().resumePausedTask(taskId));
 
   if (row && oldTask) {
     try {
@@ -1267,13 +1186,7 @@ export async function getPausedTasksForAgent(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentTask[]> {
-  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE agentId = ? AND status = 'paused'${readable ? ` AND ${readable.sql}` : ""}
-       ORDER BY createdAt ASC, rowid ASC`,
-    [agentId, ...(readable?.params ?? [])],
-  );
+  const rows = (await tasksRepo().listPausedTasksForAgent(agentId, readableBy)) as AgentTaskRow[];
   return rows.map(rowToAgentTask);
 }
 
@@ -1282,18 +1195,7 @@ export async function getOrphanedInProgressTasksForAgent(
   minAgeSeconds = 60,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT t.* FROM agent_tasks t
-       LEFT JOIN active_sessions s ON s.taskId = t.id
-       WHERE t.agentId = ?
-         AND t.status = 'in_progress'
-         AND t.claudeSessionId IS NULL
-         AND t.lastUpdatedAt < ?
-         AND s.id IS NULL
-         AND t.finishedAt IS NULL
-       ORDER BY t.createdAt ASC, t.rowid ASC`,
-    [agentId, cutoff],
-  );
+  const rows = (await tasksRepo().listOrphanedInProgressTasks(agentId, cutoff)) as AgentTaskRow[];
   return rows.map(rowToAgentTask);
 }
 
@@ -1302,23 +1204,7 @@ export async function resetOrphanedInProgressTasksForAgent(
   minAgeSeconds = 60,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = 'pending',
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id IN (
-         SELECT t.id FROM agent_tasks t
-         LEFT JOIN active_sessions s ON s.taskId = t.id
-         WHERE t.agentId = ?
-           AND t.status = 'in_progress'
-           AND t.claudeSessionId IS NULL
-           AND t.lastUpdatedAt < ?
-           AND s.id IS NULL
-           AND t.finishedAt IS NULL
-       )
-       RETURNING *`,
-    [agentId, cutoff],
-  );
+  const rows = (await tasksRepo().resetOrphanedInProgressTasks(agentId, cutoff)) as AgentTaskRow[];
 
   for (const row of rows) {
     try {
@@ -1346,43 +1232,32 @@ export async function getRecentlyCancelledTasksForAgent(
   readableBy?: { userId: string | null },
 ): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const readable = readableBy ? readableSessionCondition(readableBy.userId) : undefined;
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE agentId = ?
-       AND status = 'cancelled'
-       AND finishedAt > ?${readable ? ` AND ${readable.sql}` : ""}
-       ORDER BY finishedAt DESC`,
-    [agentId, fiveMinutesAgo, ...(readable?.params ?? [])],
-  );
+  const rows = (await tasksRepo().listRecentlyCancelledTasks(
+    agentId,
+    fiveMinutesAgo,
+    readableBy,
+  )) as AgentTaskRow[];
   return rows.map(rowToAgentTask);
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-  return await getDbClient().transaction(async (tx) => {
+  const repo = tasksRepo();
+  return await getStorage().transaction(async () => {
     // `parentTaskId` has no foreign key, so children survive with a dangling
     // parent. The human-free rule reads the parent row, so they are reclassified
     // once it is gone.
-    const childIds = (
-      await tx.query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [id])
-    ).map((row) => row.id);
+    const childIds = await repo.listChildTaskIds(id);
     // Its descendants leave the session too; the delete trigger handles the rest.
     await dropSessionDescendants(id);
-    const result = await tx.run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+    const changes = await repo.deleteTask(id);
     await reclassifyTaskHumanFree(childIds);
-    return result.changes > 0;
+    return changes > 0;
   });
 }
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
   const scrubbedProgress = scrubSecrets(progress);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET progress = ?,
-       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped') THEN status ELSE 'in_progress' END,
-       lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    [scrubbedProgress, id],
-  );
+  const row = asRow(await tasksRepo().updateTaskProgress(id, scrubbedProgress));
   if (row) {
     try {
       await dependencies.createLogEntry({
@@ -1392,7 +1267,7 @@ export async function updateTaskProgress(id: string, progress: string): Promise<
         newValue: scrubbedProgress,
       });
     } catch {}
-    getDbClient().afterCommit(() => {
+    getStorage().afterCommit(() => {
       import("../../../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.progress", {

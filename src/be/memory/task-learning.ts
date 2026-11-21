@@ -20,12 +20,13 @@
  * "needs a second line" rule was measured and dropped: it would have rejected
  * 15% of the rated or retrieved learnings, most of them good one-line gotchas.
  */
-import { getDbClient } from "@/be/db";
+
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { LEARNING_DUPLICATE_MIN_SIMILARITY } from "@/be/memory/constants";
 import { indexMemoryContent } from "@/be/memory/index-content";
 import { LEARNINGS_ROOT, LONGTERM_ROOT } from "@/be/memory/key-paths";
 import { applyRating } from "@/be/memory/raters/store";
+import { getStorage } from "@/be/storage";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -132,7 +133,7 @@ export async function storeTaskLearning(params: {
     }
     // One write transaction for the replay check and the insert, so two
     // overlapping calls with the same learning store it once.
-    return await getDbClient().transaction(() =>
+    return await getStorage().transaction(() =>
       insertLearning({ agentId, isLead, taskId: task.id, text, tags, workstream }),
     );
   } catch (err) {
@@ -181,11 +182,10 @@ async function findReplay(
   taskId: string,
   contentHash: string,
 ): Promise<Extract<TaskLearningResult, { status: "replayed" }> | null> {
-  const replay = await getDbClient().get<{ id: string; key: string }>(
-    `SELECT id, key FROM agent_memory
-     WHERE sourceTaskId = ? AND contentHash = ? AND key LIKE '${LEARNINGS_ROOT}/%'
-     LIMIT 1`,
-    [taskId, contentHash],
+  const replay = await getStorage().repos.memory.findLearningReplay(
+    taskId,
+    contentHash,
+    LEARNINGS_ROOT,
   );
   return replay ? { status: "replayed", memoryId: replay.id, key: replay.key } : null;
 }
@@ -293,10 +293,7 @@ async function insertLearning(params: {
   // Keep the path unique across the swarm: on a taken key, add a short suffix.
   for (let attempt = 0; attempt < KEY_ATTEMPTS; attempt++) {
     const key = attempt === 0 ? baseKey : `${baseKey}-${crypto.randomUUID().slice(0, 6)}`;
-    const taken = await getDbClient().get<{ id: string }>(
-      "SELECT id FROM agent_memory WHERE scope = 'swarm' AND key = ? LIMIT 1",
-      [key],
-    );
+    const taken = await getStorage().repos.memory.findSwarmIdByKey(key);
     if (taken) continue;
     try {
       const result = await indexMemoryContent({

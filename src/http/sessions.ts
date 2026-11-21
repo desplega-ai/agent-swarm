@@ -18,7 +18,6 @@ import {
   countSessions,
   createAgent,
   getAgentById,
-  getDbClient,
   getPendingApprovalsForTasks,
   getRootTaskChain,
   getTaskById,
@@ -52,6 +51,7 @@ import {
   toSessionSharesState,
 } from "../be/session-shares";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
+import { getStorage } from "../be/storage";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import { getTaskUiSpecsForTasks, TaskUiSpecSchema } from "../be/task-ui-spec";
 import {
@@ -458,7 +458,7 @@ async function handleAgentTokens(
     const parsed = await mintAgentTokenRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const agentId = parsed.params.id;
-    const result = await getDbClient()
+    const result = await getStorage()
       .transaction(async () => {
         let agentCreated = false;
         if (!(await getAgentById(agentId))) {
@@ -962,7 +962,7 @@ export async function handleSessions(
     if (!parsed) return true;
     const { agentId, taskId, runtimeId, ttlMs } = parsed.body;
     try {
-      const result = await getDbClient().transaction(async () => {
+      const result = await getStorage().transaction(async () => {
         if (auth.kind === "agent") {
           const task = taskId ? await getTaskById(taskId) : null;
           if (
@@ -1018,12 +1018,14 @@ export async function handleSessions(
     }
     const parsed = await revokeSessionTokenRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const revoked = await getDbClient().transaction(async (client) => {
+    const revoked = await getStorage().transaction(async () => {
       if (auth.kind === "agent") {
-        const child = await client.get(
-          `SELECT id FROM session_tokens WHERE id = ? AND agentId = ? AND taskId IS NOT NULL
-           AND ${auth.runtimeId ? "parentRuntimeId" : "parentTokenId"} = ?`,
-          [parsed.params.tokenId, auth.agentId, auth.runtimeId ?? auth.tokenId],
+        const child = await getStorage().repos.sessions.hasChildTaskToken(
+          parsed.params.tokenId,
+          auth.agentId,
+          auth.runtimeId
+            ? { runtimeId: auth.runtimeId }
+            : { tokenId: auth.runtimeId ?? auth.tokenId },
         );
         if (!child) return false;
       }

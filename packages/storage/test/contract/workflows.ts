@@ -1149,5 +1149,78 @@ export function workflowsContract(engine: ContractEngine): void {
         ["s-a", "wa", "timeout"],
       ]);
     });
+
+    test("findWorkflowIdByName finds by exact name", async () => {
+      await workflow("wf-a");
+      expect(await repo.findWorkflowIdByName("wf-a")).toBe("wf-a");
+      expect(await repo.findWorkflowIdByName("WF-A")).toBeNull();
+    });
+
+    test("preflight: enabled rows, setup failure runs in a window, failed run insert", async () => {
+      await workflow("wf-b");
+      await workflow("wf-off", { enabled: false });
+      await workflow("wf-a");
+      const rows = await repo.listEnabledPreflightRows();
+      expect(rows.map((r) => [r.id, r.kind])).toEqual([
+        ["wf-b", "workflow"],
+        ["wf-a", "workflow"],
+      ]);
+
+      const start = "2026-11-21T00:00:00.000Z";
+      const end = "2026-11-22T00:00:00.000Z";
+      expect(await repo.findFirstTopLevelSetupFailureRunId("wf-a", start, end)).toBeNull();
+      await repo.insertFailedRun({
+        id: "r2",
+        workflowId: "wf-a",
+        triggerType: "manual",
+        triggerData: null,
+        error: "NEEDS_SETUP: slack",
+        createdBy: null,
+        now: "2026-11-21T12:00:00.000Z",
+      });
+      await repo.insertFailedRun({
+        id: "r1",
+        workflowId: "wf-a",
+        triggerType: "manual",
+        triggerData: '{"a":1}',
+        error: "needs_setup: github",
+        createdBy: null,
+        now: "2026-11-21T11:00:00.000Z",
+      });
+      await repo.insertFailedRun({
+        id: "r-old",
+        workflowId: "wf-a",
+        triggerType: "manual",
+        triggerData: null,
+        error: "needs_setup: x",
+        createdBy: null,
+        now: "2026-11-20T11:00:00.000Z",
+      });
+      expect(await repo.findRunById("r1")).toMatchObject({
+        status: "failed",
+        triggerData: '{"a":1}',
+        error: "needs_setup: github",
+        startedAt: "2026-11-21T11:00:00.000Z",
+        finishedAt: "2026-11-21T11:00:00.000Z",
+        parentStepId: null,
+      });
+      // LIKE folds ASCII case, as SQLite's built-in LIKE does.
+      expect(await repo.findFirstTopLevelSetupFailureRunId("wf-a", start, end)).toBe("r1");
+      expect(await repo.hasOtherSetupFailureRun("wf-a", "r1", start, end)).toBe(true);
+      expect(
+        await repo.hasOtherSetupFailureRun("wf-a", "r1", start, "2026-11-21T12:00:00.000Z"),
+      ).toBe(false);
+      expect(await repo.hasOtherSetupFailureRun("wf-b", "x", start, end)).toBe(false);
+    });
+
+    test("countCompletedRunsAll counts completed runs of every workflow", async () => {
+      expect(await repo.countCompletedRunsAll()).toBe(0);
+      await workflow("wa");
+      await workflow("wb");
+      await run("r1", { workflowId: "wa", status: "completed" });
+      await run("r2", { workflowId: "wb", status: "completed" });
+      await run("r3", { workflowId: "wb", status: "failed" });
+      expect(await repo.countCompletedRunsAll()).toBe(2);
+    });
   });
 }
