@@ -368,5 +368,89 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(await repo.findActiveSessionIdentity("as1")).toEqual({ agentId: "a1", taskId: "t1" });
       expect(await repo.findActiveSessionIdentity("nope")).toBeNull();
     });
+
+    test("session shares: access, insert-order lists, revoke", async () => {
+      await storage.executor.run(sql`INSERT INTO users (id, name) VALUES ('u1', 'u'), ('u2', 'v')`);
+      await insertTask("root");
+      const share = (id: string, userId: string | null, access: string, createdAt: string) =>
+        repo.insertShare({ id, rootTaskId: "root", userId, access, createdAt, actor: "u1" });
+      await share("sh-b", "u2", "read", "2026-11-21T10:00:00.000Z");
+      await share("sh-a", null, "write", "2026-11-21T10:00:00.000Z");
+      await share("sh-0", "u1", "read", "2026-11-21T09:00:00.000Z");
+      expect((await repo.listActiveShares("root")).map((r) => r.id)).toEqual([
+        "sh-0",
+        "sh-b",
+        "sh-a",
+      ]);
+      expect((await repo.listShareAccess("root", "u2")).map((r) => r.access).sort()).toEqual([
+        "read",
+        "write",
+      ]);
+      expect((await repo.listShareAccess("root", null)).map((r) => r.access)).toEqual(["write"]);
+      await repo.revokeShare("sh-b", "2026-11-21T11:00:00.000Z", "u1");
+      expect((await repo.listActiveShares("root")).map((r) => r.id)).toEqual(["sh-0", "sh-a"]);
+      const history = await repo.listShareHistory("root");
+      expect(history.map((r) => r.id)).toEqual(["sh-0", "sh-b", "sh-a"]);
+      expect(history[1]).toEqual({
+        id: "sh-b",
+        rootTaskId: "root",
+        userId: "u2",
+        access: "read",
+        createdAt: "2026-11-21T10:00:00.000Z",
+        revokedAt: "2026-11-21T11:00:00.000Z",
+        revokedBy: "u1",
+      });
+    });
+
+    test("listTaskAncestors returns each task of the chains once", async () => {
+      await insertTask("root");
+      await insertTask("child", { parentTaskId: "root" });
+      await insertTask("leaf", { parentTaskId: "child" });
+      await insertTask("other");
+      const rows = await repo.listTaskAncestors(["leaf", "child", "missing"]);
+      expect(rows.map((r) => r.id).sort()).toEqual(["child", "leaf", "root"]);
+      expect(rows.find((r) => r.id === "leaf")).toEqual({
+        id: "leaf",
+        parentTaskId: "child",
+        requestedByUserId: null,
+        scheduleId: null,
+      });
+    });
+
+    test("hasChildTaskToken matches the parent token or runtime", async () => {
+      const token = (id: string, taskId: string | null, parent: Record<string, string>) =>
+        storage.executor.run(sql`
+          INSERT INTO session_tokens (id, "tokenHash", "tokenPreview", "agentId", "taskId", "parentTokenId", "parentRuntimeId", "expiresAt")
+          VALUES (${id}, ${`h-${id}`}, 'p', 'a1', ${taskId}, ${parent.tokenId ?? null}, ${parent.runtimeId ?? null}, '2099-01-01T00:00:00.000Z')`);
+      await token("k1", "t1", { tokenId: "parent" });
+      await token("k2", "t1", { runtimeId: "rt" });
+      expect(await repo.hasChildTaskToken("k1", "a1", { tokenId: "parent" })).toBe(true);
+      expect(await repo.hasChildTaskToken("k1", "a2", { tokenId: "parent" })).toBe(false);
+      expect(await repo.hasChildTaskToken("k1", "a1", { runtimeId: "parent" })).toBe(false);
+      expect(await repo.hasChildTaskToken("k2", "a1", { runtimeId: "rt" })).toBe(true);
+    });
+
+    test("prunePricingHistory keeps the newest rows of each triple", async () => {
+      const insert = (tokenClass: string, effectiveFrom: number) =>
+        repo.insertPricingRow({
+          provider: "contract",
+          model: "m",
+          token_class: tokenClass,
+          effective_from: effectiveFrom,
+          price_per_million_usd: 1,
+          createdAt: 1,
+          lastUpdatedAt: 1,
+        });
+      for (const at of [100, 300, 200]) await insert("input", at);
+      await insert("output", 100);
+      const before = (await repo.listPricingRows()).length;
+      const deleted = await repo.prunePricingHistory(2);
+      expect(deleted).toBeGreaterThanOrEqual(1);
+      expect((await repo.listPricingRows()).length).toBe(before - deleted);
+      expect(
+        (await repo.listPricingRowsFor("contract", "m", "input")).map((r) => r.effective_from),
+      ).toEqual([300, 200]);
+      expect((await repo.listPricingRowsFor("contract", "m", "output")).length).toBe(1);
+    });
   });
 }

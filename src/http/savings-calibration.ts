@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
+import { getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { type DbParam, DbTransactionDeadlineError } from "../be/db-client";
 import { calibrate, type DerivedCurveSet } from "../be/savings/calibrate";
 import type { SavingsSql } from "../be/savings/compute";
@@ -11,6 +11,7 @@ import {
   SHIPPED_CALIBRATION,
   StoredCalibrationSchema,
 } from "../be/savings/model";
+import { getStorage } from "../be/storage";
 import { ensureConfigAdmin } from "./config";
 import { DbQueryConcurrencyCapError, DbQueryTimeoutError } from "./db-query-shared";
 import { route } from "./route-def";
@@ -231,7 +232,7 @@ export async function handleSavingsCalibration(
         // The outer transaction owns the deadline (upsertSwarmConfig's own one becomes a
         // savepoint inside it): BEGIN stops retrying and COMMIT is skipped once it has
         // passed, so a 504 is never followed by a late write.
-        await getDbClient().transaction(
+        await getStorage().transaction(
           () =>
             upsertSwarmConfig({
               scope: "global",

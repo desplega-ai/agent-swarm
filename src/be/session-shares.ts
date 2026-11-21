@@ -1,4 +1,7 @@
-import { getDbClient } from "./db";
+import type { SessionShareRow, TaskAncestorRow } from "@desplega/storage";
+import { getStorage } from "./storage";
+
+const sessionsRepo = () => getStorage().repos.sessions;
 
 /**
  * Session sharing store. A session is a root task (`parentTaskId IS NULL`) and
@@ -13,16 +16,7 @@ export type SessionShareAccess = "read" | "write";
 export type SessionAccess = "owner" | SessionShareAccess | "none";
 export type SessionEveryoneAccess = SessionShareAccess | "none";
 
-export type SessionShareRow = {
-  id: string;
-  rootTaskId: string;
-  /** NULL = everyone. */
-  userId: string | null;
-  access: SessionShareAccess;
-  createdAt: string;
-  revokedAt: string | null;
-  revokedBy: string | null;
-};
+export type { SessionShareRow };
 
 /**
  * `scheduleId` is set when a schedule fired the root task. Such a session is
@@ -62,33 +56,16 @@ export async function getSessionRoot(taskId: string): Promise<SessionRoot | null
 
 const ROOT_LOOKUP_CHUNK = 500;
 
-type AncestorRow = {
-  id: string;
-  parentTaskId: string | null;
-  requestedByUserId: string | null;
-  scheduleId: string | null;
-};
-
 /** `getSessionRoot` for many tasks; unknown tasks and tasks in a cycle are absent. */
 export async function getSessionRoots(taskIds: string[]): Promise<Map<string, SessionRoot>> {
   const ids = [...new Set(taskIds)];
   // Every ancestor once (`UNION` drops revisits, which also ends a cycle),
   // then resolve each chain in memory: linear in the tasks involved.
-  const tasks = new Map<string, AncestorRow>();
+  const tasks = new Map<string, TaskAncestorRow>();
   for (let start = 0; start < ids.length; start += ROOT_LOOKUP_CHUNK) {
     const chunk = ids.slice(start, start + ROOT_LOOKUP_CHUNK).filter((id) => !tasks.has(id));
     if (chunk.length === 0) continue;
-    const rows = await getDbClient().query<AncestorRow>(
-      `WITH RECURSIVE up(id) AS (
-           SELECT id FROM agent_tasks WHERE id IN (${chunk.map(() => "?").join(", ")})
-           UNION
-           SELECT t.parentTaskId FROM agent_tasks t JOIN up ON t.id = up.id
-           WHERE t.parentTaskId IS NOT NULL
-         )
-         SELECT t.id, t.parentTaskId, t.requestedByUserId, t.scheduleId
-         FROM up CROSS JOIN agent_tasks t ON t.id = up.id`,
-      chunk,
-    );
+    const rows = await sessionsRepo().listTaskAncestors(chunk);
     for (const row of rows) tasks.set(row.id, row);
   }
 
@@ -152,11 +129,7 @@ export async function sessionAccessForRoot(
 ): Promise<SessionAccess> {
   if (!root.requestedByUserId) return "owner";
   if (actingUserId && root.requestedByUserId === actingUserId) return "owner";
-  const rows = await getDbClient().query<{ access: SessionShareAccess }>(
-    `SELECT access FROM session_shares
-     WHERE rootTaskId = ? AND revokedAt IS NULL AND (userId IS NULL OR userId = ?)`,
-    [root.id, actingUserId],
-  );
+  const rows = await sessionsRepo().listShareAccess(root.id, actingUserId);
   if (rows.some((row) => row.access === "write")) return "write";
   return rows.length > 0 || root.scheduleId ? "read" : "none";
 }
@@ -171,24 +144,12 @@ export async function sessionAccess(
 }
 
 export async function listActiveSessionShares(rootTaskId: string): Promise<SessionShareRow[]> {
-  return getDbClient().query<SessionShareRow>(
-    `SELECT id, rootTaskId, userId, access, createdAt, revokedAt, revokedBy
-     FROM session_shares
-     WHERE rootTaskId = ? AND revokedAt IS NULL
-     ORDER BY createdAt, rowid`,
-    [rootTaskId],
-  );
+  return sessionsRepo().listActiveShares(rootTaskId);
 }
 
 /** Every row for a root, revoked ones included, oldest first. */
 export async function listSessionShareHistory(rootTaskId: string): Promise<SessionShareRow[]> {
-  return getDbClient().query<SessionShareRow>(
-    `SELECT id, rootTaskId, userId, access, createdAt, revokedAt, revokedBy
-     FROM session_shares
-     WHERE rootTaskId = ?
-     ORDER BY createdAt, rowid`,
-    [rootTaskId],
-  );
+  return sessionsRepo().listShareHistory(rootTaskId);
 }
 
 export function toSessionSharesState(rows: SessionShareRow[]): SessionSharesState {
@@ -218,13 +179,9 @@ export async function setSessionShares(
     if (user.userId !== root.requestedByUserId) want.set(user.userId, user.access);
   }
 
-  return getDbClient().transaction(async (tx) => {
+  return getStorage().transaction(async () => {
     const now = new Date().toISOString();
-    const active = await tx.query<SessionShareRow>(
-      `SELECT id, rootTaskId, userId, access, createdAt, revokedAt, revokedBy
-       FROM session_shares WHERE rootTaskId = ? AND revokedAt IS NULL`,
-      [root.id],
-    );
+    const active = await sessionsRepo().listActiveShares(root.id);
     const kept = new Set<string>();
     for (const row of active) {
       const target = row.userId ?? "*";
@@ -232,33 +189,20 @@ export async function setSessionShares(
         kept.add(target);
         continue;
       }
-      await tx.run(
-        "UPDATE session_shares SET revokedAt = ?, revokedBy = ?, updated_by = ? WHERE id = ?",
-        [now, actorUserId, actorUserId, row.id],
-      );
+      await sessionsRepo().revokeShare(row.id, now, actorUserId);
     }
     for (const [target, access] of want) {
       if (kept.has(target)) continue;
-      await tx.run(
-        `INSERT INTO session_shares (id, rootTaskId, userId, access, createdAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          root.id,
-          target === "*" ? null : target,
-          access,
-          now,
-          actorUserId,
-          actorUserId,
-        ],
-      );
+      await sessionsRepo().insertShare({
+        id: crypto.randomUUID(),
+        rootTaskId: root.id,
+        userId: target === "*" ? null : target,
+        access,
+        createdAt: now,
+        actor: actorUserId,
+      });
     }
-    const rows = await tx.query<SessionShareRow>(
-      `SELECT id, rootTaskId, userId, access, createdAt, revokedAt, revokedBy
-       FROM session_shares WHERE rootTaskId = ? AND revokedAt IS NULL
-       ORDER BY createdAt, rowid`,
-      [root.id],
-    );
+    const rows = await sessionsRepo().listActiveShares(root.id);
     return toSessionSharesState(rows);
   });
 }

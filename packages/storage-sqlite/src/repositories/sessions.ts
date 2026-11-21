@@ -6,9 +6,11 @@ import {
   type SessionCostFilter,
   type SessionCostRow,
   type SessionLogRow,
+  type SessionShareRow,
   type SessionSummaryDriftRow,
   sql,
   sqlList,
+  type TaskAncestorRow,
 } from "@desplega/storage";
 
 type SumRow = { total: number };
@@ -178,6 +180,37 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     UNION ALL SELECT m."rootId", 'member', NULL, m."taskId"
       FROM session_members m LEFT JOIN chain c ON c.id = m."taskId" AND c.root_id = m."rootId"
       WHERE c.id IS NULL AND (${since} IS NULL OR m."rootId" IN (SELECT "rootId" FROM stored))`);
+  }
+
+  // ---- session_shares and session roots ----
+
+  listTaskAncestors(taskIds: readonly string[]): Promise<TaskAncestorRow[]> {
+    // Every ancestor once (`UNION` drops revisits, which also ends a cycle).
+    return this.db.query<TaskAncestorRow>(sql`
+      WITH RECURSIVE up(id) AS (
+        SELECT id FROM agent_tasks WHERE id IN (${sqlList(taskIds)})
+        UNION
+        SELECT t."parentTaskId" FROM agent_tasks t JOIN up ON t.id = up.id
+        WHERE t."parentTaskId" IS NOT NULL
+      )
+      SELECT t.id, t."parentTaskId", t."requestedByUserId", t."scheduleId"
+      FROM up CROSS JOIN agent_tasks t ON t.id = up.id`);
+  }
+
+  listActiveShares(rootTaskId: string): Promise<SessionShareRow[]> {
+    return this.db.query<SessionShareRow>(sql`
+      SELECT id, "rootTaskId", "userId", access, "createdAt", "revokedAt", "revokedBy"
+      FROM session_shares
+      WHERE "rootTaskId" = ${rootTaskId} AND "revokedAt" IS NULL
+      ORDER BY "createdAt", rowid`);
+  }
+
+  listShareHistory(rootTaskId: string): Promise<SessionShareRow[]> {
+    return this.db.query<SessionShareRow>(sql`
+      SELECT id, "rootTaskId", "userId", access, "createdAt", "revokedAt", "revokedBy"
+      FROM session_shares
+      WHERE "rootTaskId" = ${rootTaskId}
+      ORDER BY "createdAt", rowid`);
   }
 
   // ---- budget_refusal_notifications ----

@@ -383,10 +383,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 3
   },
-  "src/be/pricing-refresh.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
-  },
   "src/be/primitives/object-embed.ts": {
     "reason": "M2 move: pages, metrics, apps",
     "sites": 4
@@ -563,10 +559,6 @@
     "reason": "M2 move: skills",
     "sites": 2
   },
-  "src/be/session-shares.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 9
-  },
   "src/be/session-source-backfill.ts": {
     "reason": "M2 move: sessions and cost",
     "sites": 9
@@ -635,10 +627,6 @@
     "reason": "M2 move: assets and import",
     "sites": 2
   },
-  "src/http/budgets.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 1
-  },
   "src/http/codex-oauth-device.ts": {
     "reason": "M2 move: integrations",
     "sites": 2
@@ -683,10 +671,6 @@
     "reason": "M2 move: other (assign a domain when moved)",
     "sites": 1
   },
-  "src/http/savings-calibration.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 1
-  },
   "src/http/script-connections.ts": {
     "reason": "M2 move: scripts",
     "sites": 3
@@ -698,10 +682,6 @@
   "src/http/scripts.ts": {
     "reason": "M2 move: scripts",
     "sites": 1
-  },
-  "src/http/sessions.ts": {
-    "reason": "M2 move: sessions and cost",
-    "sites": 2
   },
   "src/http/status.ts": {
     "reason": "M2 move: other (assign a domain when moved)",

@@ -127,6 +127,35 @@ export type SessionSummaryDriftRow = {
   stored: string | number | null;
 };
 
+// ---- session_shares and session roots ----
+
+export type SessionShareRow = {
+  id: string;
+  rootTaskId: string;
+  /** NULL = everyone. */
+  userId: string | null;
+  access: "read" | "write";
+  createdAt: string;
+  revokedAt: string | null;
+  revokedBy: string | null;
+};
+
+export type NewSessionShare = {
+  id: string;
+  rootTaskId: string;
+  userId: string | null;
+  access: string;
+  createdAt: string;
+  actor: string | null;
+};
+
+export type TaskAncestorRow = {
+  id: string;
+  parentTaskId: string | null;
+  requestedByUserId: string | null;
+  scheduleId: string | null;
+};
+
 // ---- budgets, refusals, pricing ----
 
 export type BudgetRow = {
@@ -234,6 +263,29 @@ export interface SessionsRepository {
     terminalStatuses: readonly string[],
   ): Promise<SessionSummaryDriftRow[]>;
 
+  // ---- session_shares and session roots ----
+  /**
+   * The given tasks and every ancestor of them, each once (a parent cycle
+   * ends). Unordered: the caller indexes them by id.
+   */
+  listTaskAncestors(taskIds: readonly string[]): Promise<TaskAncestorRow[]>;
+  /** Access of the active shares of a root that name `userId` or everyone. Unordered. */
+  listShareAccess(rootTaskId: string, userId: string | null): Promise<{ access: string }[]>;
+  /** Active shares of a root, oldest first; ties in insert order. */
+  listActiveShares(rootTaskId: string): Promise<SessionShareRow[]>;
+  /** Every share row of a root, revoked ones included, oldest first; ties in insert order. */
+  listShareHistory(rootTaskId: string): Promise<SessionShareRow[]>;
+  revokeShare(id: string, now: string, actor: string | null): Promise<void>;
+  insertShare(share: NewSessionShare): Promise<void>;
+
+  // ---- session_tokens ----
+  /** Whether `tokenId` is a task token of `agentId` minted by the given parent token or runtime. */
+  hasChildTaskToken(
+    tokenId: string,
+    agentId: string,
+    parent: { runtimeId: string } | { tokenId: string },
+  ): Promise<boolean>;
+
   // ---- budgets ----
   findBudget(scope: string, scopeId: string): Promise<BudgetRow | null>;
   /** Ordered by scope, then scope id (the primary key). */
@@ -271,6 +323,8 @@ export interface SessionsRepository {
   ): Promise<PricingRowDb | null>;
   /** Plain insert: a primary key collision throws. */
   insertPricingRow(row: PricingRowDb): Promise<void>;
+  /** Keeps the newest `keepLatest` rows of each triple; returns the rows deleted. */
+  prunePricingHistory(keepLatest: number): Promise<number>;
   deletePricingRow(
     provider: string,
     model: string,
@@ -426,6 +480,50 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
     terminalStatuses: readonly string[],
   ): Promise<SessionSummaryDriftRow[]>;
 
+  // ---- session_shares and session roots ----
+
+  /** Recursive walk with a join-order hint (CROSS JOIN) on SQLite. */
+  abstract listTaskAncestors(taskIds: readonly string[]): Promise<TaskAncestorRow[]>;
+
+  listShareAccess(rootTaskId: string, userId: string | null): Promise<{ access: string }[]> {
+    return this.db.query<{ access: string }>(sql`
+      SELECT access FROM session_shares
+      WHERE "rootTaskId" = ${rootTaskId} AND "revokedAt" IS NULL AND ("userId" IS NULL OR "userId" = ${userId})`);
+  }
+
+  /** Insert order needs the engine's insert sequence. */
+  abstract listActiveShares(rootTaskId: string): Promise<SessionShareRow[]>;
+  abstract listShareHistory(rootTaskId: string): Promise<SessionShareRow[]>;
+
+  async revokeShare(id: string, now: string, actor: string | null): Promise<void> {
+    await this.db.run(sql`
+      UPDATE session_shares SET "revokedAt" = ${now}, "revokedBy" = ${actor}, updated_by = ${actor}
+      WHERE id = ${id}`);
+  }
+
+  async insertShare(share: NewSessionShare): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO session_shares (id, "rootTaskId", "userId", access, "createdAt", created_by, updated_by)
+      VALUES (${share.id}, ${share.rootTaskId}, ${share.userId}, ${share.access}, ${share.createdAt}, ${share.actor}, ${share.actor})`);
+  }
+
+  // ---- session_tokens ----
+
+  async hasChildTaskToken(
+    tokenId: string,
+    agentId: string,
+    parent: { runtimeId: string } | { tokenId: string },
+  ): Promise<boolean> {
+    const parentMatch =
+      "runtimeId" in parent
+        ? sql`"parentRuntimeId" = ${parent.runtimeId}`
+        : sql`"parentTokenId" = ${parent.tokenId}`;
+    const row = await this.db.get<{ id: string }>(sql`
+      SELECT id FROM session_tokens WHERE id = ${tokenId} AND "agentId" = ${agentId} AND "taskId" IS NOT NULL
+      AND ${parentMatch}`);
+    return row !== null;
+  }
+
   // ---- budgets ----
 
   findBudget(scope: string, scopeId: string): Promise<BudgetRow | null> {
@@ -529,6 +627,25 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
       INSERT INTO pricing (${PRICING_COLUMNS})
       VALUES (${row.provider}, ${row.model}, ${row.token_class}, ${row.effective_from},
         ${row.price_per_million_usd}, ${row.createdAt}, ${row.lastUpdatedAt})`);
+  }
+
+  async prunePricingHistory(keepLatest: number): Promise<number> {
+    // effective_from is part of the primary key, so the rank inside a triple is total.
+    const result = await this.db.run(sql`
+      DELETE FROM pricing
+      WHERE (provider, model, token_class, effective_from) IN (
+        SELECT provider, model, token_class, effective_from
+        FROM (
+          SELECT provider, model, token_class, effective_from,
+            ROW_NUMBER() OVER (
+              PARTITION BY provider, model, token_class
+              ORDER BY effective_from DESC
+            ) AS rn
+          FROM pricing
+        ) ranked
+        WHERE rn > ${keepLatest}
+      )`);
+    return result.changes;
   }
 
   async deletePricingRow(
