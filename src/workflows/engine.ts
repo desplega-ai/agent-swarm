@@ -418,6 +418,17 @@ const activeWalks = new Map<string, number>();
 const executingSteps = new Set<string>();
 
 /**
+ * Mark a step as executed by this process, inside the claim transaction. An
+ * attempt that rolls back gives the mark back, also when the client runs the
+ * callback again (decision D6): a kept mark would make the next attempt read
+ * its own claim as another walker's.
+ */
+function claimExecutingStep(stepId: string): void {
+  executingSteps.add(stepId);
+  getDbClient().onAttemptRollback(() => executingSteps.delete(stepId));
+}
+
+/**
  * Fail closed when a run's sealed replay state cannot be opened. Resuming from
  * the scrubbed copy would feed redaction markers to downstream nodes, so the
  * run (and `stepId`, when one was claimed) fails with the error instead.
@@ -922,7 +933,7 @@ async function executeStep(
       // crash between the insert and the step parking) instead of a second one.
       if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
         claimedStepId = current.id;
-        executingSteps.add(current.id);
+        claimExecutingStep(current.id);
         return {
           existingStep: current,
           stepId: current.id,
@@ -977,7 +988,7 @@ async function executeStep(
     // Registered before the transaction commits, so no other walker can see
     // this `running` row without also seeing it owned.
     claimedStepId = stepId;
-    executingSteps.add(stepId);
+    claimExecutingStep(stepId);
     const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
     return { existingStep, stepId, fence, deduped: false };
   };
