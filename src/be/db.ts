@@ -30,7 +30,6 @@ import type {
   MetricRow,
   MetricVersionRow,
   PageColumnUpdate,
-  PageFilter,
   PageRow,
   PageVersionRow,
   RoutingCandidateMatch,
@@ -244,7 +243,6 @@ import {
   getAllAgents,
   isAgentEligibleForTask,
   isExtensionAgent,
-  NOT_EXTENSION_AGENT_SQL,
   ReservedAgentRoleError,
   reservedRoleViolation,
   rowToAgent,
@@ -292,7 +290,6 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
-  readableSessionCondition,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
@@ -1762,13 +1759,10 @@ export async function getLogsByAgentId(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentLog[]> {
-  const readable = readableBy
-    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
-    : undefined;
-  const rows = await getDbClient().query<AgentLogRow>(
-    `SELECT * FROM agent_log WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
-    [agentId, ...(readable?.params ?? [])],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByAgent(
+    agentId,
+    readableBy,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -1808,21 +1802,8 @@ export async function getAllLogs(
   limit?: number,
   readableBy?: { userId: string | null },
 ): Promise<AgentLog[]> {
-  const readable = readableBy
-    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
-    : undefined;
-  const readableParams = readable?.params ?? [];
-  if (limit) {
-    const rows = await getDbClient().query<AgentLogRow>(
-      `SELECT * FROM agent_log WHERE eventType != 'agent_status_change'${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC LIMIT ?`,
-      [...readableParams, limit],
-    );
-    return rows.map(rowToAgentLog);
-  }
-  const rows = await getDbClient().query<AgentLogRow>(
-    `SELECT * FROM agent_log${readable ? ` WHERE ${readable.sql}` : ""} ORDER BY createdAt DESC`,
-    readableParams,
-  );
+  // With a limit, agent status changes are left out.
+  const rows = (await getStorage().repos.agents.listAllLogs(limit, readableBy)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -5960,24 +5941,10 @@ export async function getActiveSessions(
   agentId?: string,
   readableBy?: { userId: string | null },
 ): Promise<ActiveSession[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-  if (agentId) {
-    conditions.push("agentId = ?");
-    params.push(agentId);
-  }
-  if (readableBy) {
-    const readable = readableSessionCondition(readableBy.userId, "active_sessions.taskId", {
-      nullable: true,
-    });
-    conditions.push(readable.sql);
-    params.push(...readable.params);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return await getDbClient().query<ActiveSession>(
-    `SELECT * FROM active_sessions ${where} ORDER BY startedAt DESC`,
-    params,
-  );
+  return (await getStorage().repos.agents.listActiveSessions(
+    agentId,
+    readableBy,
+  )) as ActiveSession[];
 }
 
 export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
@@ -6132,10 +6099,7 @@ export async function failPendingResumeIfUnclaimed(
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
 export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
-  const rows = await getDbClient().query<AgentRow>(
-    `SELECT * FROM agents
-       WHERE status = 'idle' AND isLead = 0`,
-  );
+  const rows = (await getStorage().repos.agents.listIdleWorkers()) as AgentRow[];
   const agents = rows.map((row) => rowToAgent(row));
 
   const withCapacity = await Promise.all(
@@ -6395,7 +6359,6 @@ export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promis
 }
 
 async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
-  const client = getDbClient();
   const tasks = getStorage().repos.tasks;
   const linkedTaskIds = await tasks.listTaskIdsOfWorkflow(id);
   // Cascade delete in FK-safe order:
@@ -6411,7 +6374,7 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   await deleteOrphanedRunDefinitions(definitionHashes);
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
-  await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
+  await getStorage().repos.users.deleteFavoritesOfItem("workflow", id);
   // 5. Keep Idempotency-Keys that created or triggered it taken, without the stored response
   await tombstoneWorkflowIdempotencyKeys(id);
   // 6. Delete workflow
@@ -10845,16 +10808,7 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
   leads_alive: number;
   workers_alive: number;
 }> {
-  const row = await getDbClient().get<{ leads_alive: number | null; workers_alive: number | null }>(
-    `SELECT
-         SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
-         SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers_alive
-       FROM agents
-       WHERE lastActivityAt IS NOT NULL
-         AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
-         AND status != 'offline'`,
-    [minutes],
-  );
+  const row = await getStorage().repos.agents.countLiveAgents(minutes);
   return {
     leads_alive: row?.leads_alive ?? 0,
     workers_alive: row?.workers_alive ?? 0,
@@ -10867,12 +10821,7 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
  * while the `/status` heartbeat window (`lastActivityAt`) lags for idle agents.
  */
 export async function getReadyAgentCounts(): Promise<{ leads: number; workers: number }> {
-  const row = await getDbClient().get<{ leads: number | null; workers: number | null }>(
-    `SELECT SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads,
-            SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers
-       FROM agents
-      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL}`,
-  );
+  const row = await getStorage().repos.agents.countReadyAgents();
   return { leads: row?.leads ?? 0, workers: row?.workers ?? 0 };
 }
 
@@ -10914,15 +10863,10 @@ export interface SwarmMetrics {
  * grouping rides the indexes added in migration 069.
  */
 export async function getSwarmMetrics(): Promise<SwarmMetrics> {
-  const client = getDbClient();
-
-  const groupCounts = async (
-    table: string,
-    where?: string,
-  ): Promise<{ total: number; by_status: Record<string, number> }> => {
-    const rows = await client.query<{ status: string; count: number }>(
-      `SELECT status, COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""} GROUP BY status`,
-    );
+  const repos = getStorage().repos;
+  const groupCounts = (
+    rows: { status: string; count: number }[],
+  ): { total: number; by_status: Record<string, number> } => {
     const by_status: Record<string, number> = {};
     let total = 0;
     for (const r of rows) {
@@ -10932,22 +10876,18 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
     return { total, by_status };
   };
 
-  const workflowRow = await client.get<{ total: number; enabled: number }>(
-    "SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled FROM workflows",
-  );
-  const pagesRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM pages");
-  const sessionsRow = await client.get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM active_sessions",
-  );
-  const skillsRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM skills");
+  const workflowRow = await repos.workflows.countWorkflows();
+  const pages = await repos.pages.countPages({});
+  const sessions = await repos.agents.countActiveSessions();
+  const skills = await repos.skills.countSkills();
 
   return {
-    tasks: await groupCounts("agent_tasks"),
-    agents: await groupCounts("agents", NOT_EXTENSION_AGENT_SQL),
+    tasks: groupCounts(await repos.tasks.countTasksByStatus()),
+    agents: groupCounts(await repos.agents.countAgentsByStatus()),
     workflows: { total: workflowRow?.total ?? 0, enabled: workflowRow?.enabled ?? 0 },
-    pages: { total: pagesRow?.count ?? 0 },
-    sessions: { active: sessionsRow?.count ?? 0 },
-    skills: { total: skillsRow?.count ?? 0 },
+    pages: { total: pages },
+    sessions: { active: sessions },
+    skills: { total: skills },
   };
 }
 

@@ -741,6 +741,8 @@ export interface WorkflowsRepository {
   /** Distinct Slack threads with an unexpired pending request raised by one of their tasks. In no particular order. */
   listSlackThreadsAwaitingHuman(): Promise<{ channelId: string; threadTs: string }[]>;
   isSlackThreadAwaitingHuman(channelId: string, threadTs: string): Promise<boolean>;
+  /** Workflow count and enabled count. */
+  countWorkflows(): Promise<{ total: number; enabled: number | null } | null>;
 }
 
 export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
@@ -1686,5 +1688,11 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
         AND task."slackThreadTs" = ${threadTs}
       LIMIT 1`);
     return !!row;
+  }
+
+  countWorkflows(): Promise<{ total: number; enabled: number | null } | null> {
+    return this.db.get(sql`
+      SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = ${true} THEN 1 ELSE 0 END) AS enabled
+      FROM workflows`);
   }
 }

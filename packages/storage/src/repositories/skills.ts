@@ -303,6 +303,7 @@ export interface SkillsRepository {
    * before others, then by name. Rows of equal rank and name come in no fixed order.
    */
   listAgentSkills(agentId: string, activeOnly: boolean): Promise<SkillWithInstallRow[]>;
+  countSkills(): Promise<number>;
 
   // ---- skill_files ----
   /** One skill's files by path (unique per skill). */
@@ -658,5 +659,10 @@ export abstract class BaseSkillsRepository implements SkillsRepository {
       sql`DELETE FROM skill_files WHERE "skillId" = ${skillId} AND path = ${path}`,
     );
     return result.changes;
+  }
+
+  async countSkills(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(sql`SELECT COUNT(*) AS count FROM skills`);
+    return row?.count ?? 0;
   }
 }

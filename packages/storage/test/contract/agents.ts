@@ -346,5 +346,45 @@ export function agentsContract(engine: ContractEngine): void {
         { date: "2026-11-21", count: 1 },
       ]);
     });
+
+    test("agent log feeds, active sessions, live and ready agent counts", async () => {
+      const agent = (id: string, isLead: boolean, status: string, lastActivityAt: string | null) =>
+        storage.executor.run(sql`
+          INSERT INTO agents (id, name, "isLead", status, "lastActivityAt", "createdAt", "lastUpdatedAt")
+          VALUES (${id}, ${id}, ${isLead}, ${status}, ${lastActivityAt}, '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      const now = new Date().toISOString();
+      await agent("lead", true, "idle", now);
+      await agent("w1", false, "idle", now);
+      await agent("w2", false, "busy", "2020-01-01T00:00:00.000Z");
+      await agent("w3", false, "offline", now);
+      expect(await repo.countLiveAgents(5)).toEqual({ leads_alive: 1, workers_alive: 1 });
+      expect(await repo.countReadyAgents()).toEqual({ leads: 1, workers: 2 });
+      expect((await repo.listIdleWorkers()).map((a) => a.id)).toEqual(["w1"]);
+      const log = (id: string, eventType: string, agentId: string) =>
+        storage.executor.run(sql`
+          INSERT INTO agent_log (id, "eventType", "agentId", "createdAt")
+          VALUES (${id}, ${eventType}, ${agentId}, '2026-11-21T10:00:00.000Z')`);
+      await log("l1", "task_created", "w1");
+      await log("l2", "agent_status_change", "w1");
+      await log("l3", "task_created", "w2");
+      expect((await repo.listLogsByAgent("w1")).map((l) => l.id)).toEqual(["l2", "l1"]);
+      expect((await repo.listLogsByAgent("w1", { userId: null })).map((l) => l.id)).toEqual([
+        "l2",
+        "l1",
+      ]);
+      expect((await repo.listAllLogs(10)).map((l) => l.id)).toEqual(["l3", "l1"]);
+      expect((await repo.listAllLogs(undefined)).map((l) => l.id)).toEqual(["l3", "l2", "l1"]);
+      const before = await repo.countActiveSessions();
+      for (const id of ["s1", "s2"]) {
+        await storage.executor.run(sql`
+          INSERT INTO active_sessions (id, "agentId", "triggerType", "startedAt", "lastHeartbeatAt")
+          VALUES (${id}, 'w1', 'poll', '2026-11-21T10:00:00.000Z', '2026-11-21T10:00:00.000Z')`);
+      }
+      expect(await repo.countActiveSessions()).toBe(before + 2);
+      expect((await repo.listActiveSessions("w1")).map((s) => s.id)).toEqual(["s2", "s1"]);
+      expect((await repo.listActiveSessions(undefined, { userId: null })).map((s) => s.id)).toEqual(
+        ["s2", "s1"],
+      );
+    });
   });
 }

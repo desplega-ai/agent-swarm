@@ -1,6 +1,7 @@
 import { likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { readableSessionSql } from "./tasks";
 
 /**
  * Domain: agents (`agents`, `agent_log`, `agent_history`, `agent_mcp_servers`,
@@ -337,6 +338,36 @@ export interface AgentsRepository {
    * first. Days with no task are absent.
    */
   dailyTaskCounts(agentId: string, sinceDay: string): Promise<{ date: string; count: number }[]>;
+
+  // ---- agent_log: agent and global feeds ----
+  /** One agent's log, newest first, then insertion order (newest first). */
+  listLogsByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<AgentLogRow[]>;
+  /**
+   * The log, newest first, then insertion order (newest first). With `limit`,
+   * agent status changes are left out.
+   */
+  listAllLogs(
+    limit: number | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<AgentLogRow[]>;
+
+  // ---- active_sessions ----
+  /** Newest `startedAt` first, then insertion order (newest first). */
+  listActiveSessions(
+    agentId: string | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<ActiveSessionRow[]>;
+  countActiveSessions(): Promise<number>;
+
+  // ---- agents: counts ----
+  /** Idle non-lead agents, in insertion order. */
+  listIdleWorkers(): Promise<AgentRow[]>;
+  /** Non-offline leads and workers active in the last `minutes` (database clock). */
+  countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null>;
+  /** Idle or busy leads and workers, extensions left out. */
+  countReadyAgents(): Promise<{ leads: number | null; workers: number | null } | null>;
 }
 
 export abstract class BaseAgentsRepository implements AgentsRepository {
@@ -767,5 +798,80 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
         sql`UPDATE active_sessions SET "providerSessionId" = ${providerSessionId} WHERE "taskId" = ${taskId}`,
       )
     ).changes;
+  }
+
+  // ---- agent_log: agent and global feeds ----
+
+  protected abstract logOrder(): SqlQuery;
+
+  listLogsByAgent(agentId: string, readableBy?: { userId: string | null }): Promise<AgentLogRow[]> {
+    const readable = readableBy
+      ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_log."taskId"`, { nullable: true })}`
+      : EMPTY;
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log WHERE "agentId" = ${agentId}${readable}
+      ORDER BY "createdAt" DESC, ${this.logOrder()} DESC`);
+  }
+
+  listAllLogs(
+    limit: number | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<AgentLogRow[]> {
+    const conditions: SqlQuery[] = [];
+    if (limit) conditions.push(sql`"eventType" != 'agent_status_change'`);
+    if (readableBy) {
+      conditions.push(
+        readableSessionSql(readableBy.userId, sql`agent_log."taskId"`, { nullable: true }),
+      );
+    }
+    const cap = limit ? sql` LIMIT ${limit}` : EMPTY;
+    return this.db.query<AgentLogRow>(sql`
+      SELECT * FROM agent_log${sqlWhere(conditions)}
+      ORDER BY "createdAt" DESC, ${this.logOrder()} DESC${cap}`);
+  }
+
+  // ---- active_sessions ----
+
+  listActiveSessions(
+    agentId: string | undefined,
+    readableBy?: { userId: string | null },
+  ): Promise<ActiveSessionRow[]> {
+    const conditions: SqlQuery[] = [];
+    if (agentId) conditions.push(sql`"agentId" = ${agentId}`);
+    if (readableBy) {
+      conditions.push(
+        readableSessionSql(readableBy.userId, sql`active_sessions."taskId"`, { nullable: true }),
+      );
+    }
+    return this.db.query<ActiveSessionRow>(sql`
+      SELECT * FROM active_sessions${sqlWhere(conditions)}
+      ORDER BY "startedAt" DESC, ${this.logOrder()} DESC`);
+  }
+
+  async countActiveSessions(): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM active_sessions`,
+    );
+    return row?.count ?? 0;
+  }
+
+  // ---- agents: counts ----
+
+  listIdleWorkers(): Promise<AgentRow[]> {
+    return this.db.query<AgentRow>(sql`
+      SELECT * FROM agents WHERE status = 'idle' AND "isLead" = ${false}
+      ORDER BY ${this.logOrder()}`);
+  }
+
+  abstract countLiveAgents(
+    minutes: number,
+  ): Promise<{ leads_alive: number | null; workers_alive: number | null } | null>;
+
+  countReadyAgents(): Promise<{ leads: number | null; workers: number | null } | null> {
+    return this.db.get(sql`
+      SELECT SUM(CASE WHEN "isLead" = ${true} THEN 1 ELSE 0 END) AS leads,
+        SUM(CASE WHEN "isLead" = ${false} THEN 1 ELSE 0 END) AS workers
+      FROM agents
+      WHERE status IN ('idle', 'busy') AND ${this.notExtensionAgent()}`);
   }
 }
