@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Storage, UserReferenceColumn, UsersRepository } from "../../src";
-import { sql } from "../../src";
+import { jsonText, sql } from "../../src";
 import type { ContractEngine } from "./env";
 
 const T0 = "2026-11-01T00:00:00.000Z";
@@ -26,10 +26,23 @@ export function userReferencesContract(engine: ContractEngine): void {
       await engine.release(storage);
     });
 
-    const run = (id: string, context: string | null, createdBy: string | null = null) =>
-      storage.executor.run(sql`
+    // `context` is jsonb on Postgres: valid JSON goes through jsonText (on
+    // SQLite it binds the same text). A malformed context binds as plain
+    // text: SQLite stores the text as is, and Postgres, which cannot store
+    // malformed JSON in jsonb, stores it as a JSON string scalar. Either way
+    // the requester path finds no requester in it.
+    const run = (id: string, context: string | null, createdBy: string | null = null) => {
+      let valid = context !== null;
+      try {
+        if (context !== null) JSON.parse(context);
+      } catch {
+        valid = false;
+      }
+      const value = valid ? sql`${jsonText(context)}` : sql`${context}`;
+      return storage.executor.run(sql`
         INSERT INTO workflow_runs (id, "workflowId", status, context, created_by)
-        VALUES (${id}, 'wf', 'completed', ${context}, ${createdBy})`);
+        VALUES (${id}, 'wf', 'completed', ${value}, ${createdBy})`);
+    };
     const requested = (userId: string) => JSON.stringify({ swarm: { requestedByUserId: userId } });
 
     const column = async (tableName: string, columnName: string) => {
