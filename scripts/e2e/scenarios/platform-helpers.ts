@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { asRecord, asString, expect, expectStatus } from "../http";
+import { asRecord, asString, expect, expectStatus, recordHttpCall } from "../http";
 import type { McpConnection } from "../mcp";
 import type { ScenarioContext } from "../run";
 
@@ -229,6 +229,54 @@ export function startMockServer(
 /** `sha256=<hex>` HMAC of a body, the signature shape webhook providers send. */
 export function hmacSignature(secret: string, body: string): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+}
+
+// ─── Webhook body limit ──────────────────────────────────────────────────────
+
+/** Cap of the public webhook receivers that read the raw body before their own check. */
+export const WEBHOOK_MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+/**
+ * A public webhook answers 413 to a body one byte over the cap, both when the size is
+ * declared in Content-Length and when it is streamed chunked with no Content-Length.
+ */
+export async function expectWebhookBodyTooLarge(
+  ctx: ScenarioContext,
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<void> {
+  const total = WEBHOOK_MAX_BODY_BYTES + 1;
+  const declared = await ctx.api("POST", path, {
+    apiKey: null,
+    headers,
+    rawBody: new Uint8Array(total).fill(0x61),
+  });
+  expectStatus(declared, [413], `${path} with a declared oversized body`);
+
+  const chunk = new Uint8Array(64 * 1024).fill(0x61);
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent >= total) return controller.close();
+      const piece = chunk.subarray(0, Math.min(chunk.byteLength, total - sent));
+      sent += piece.byteLength;
+      controller.enqueue(piece);
+    },
+  });
+  const started = performance.now();
+  const streamed = await fetch(`${ctx.baseUrl}${path}`, {
+    method: "POST",
+    headers,
+    body: stream,
+    duplex: "half",
+    signal: AbortSignal.timeout(30_000),
+  } as RequestInit);
+  const text = await streamed.text();
+  recordHttpCall("POST", path, streamed.status, performance.now() - started);
+  expect(
+    streamed.status === 413 && text.includes("Payload too large"),
+    `${path} with a streamed oversized body answers 413, got ${streamed.status} ${text.slice(0, 200)}`,
+  );
 }
 
 /** An unsigned JWT-shaped string that carries `payload` (enough for plan and email decoding). */

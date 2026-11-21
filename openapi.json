@@ -69049,6 +69049,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Jira webhook handler not configured",
             "content": {
@@ -69625,6 +69635,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74339,6 +74359,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "GitHub integration not configured",
             "content": {
@@ -74616,6 +74646,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "AgentMail integration not configured or inbound archive unavailable",
             "content": {
@@ -74671,6 +74711,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -77399,6 +77449,16 @@
           },
           "404": {
             "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {

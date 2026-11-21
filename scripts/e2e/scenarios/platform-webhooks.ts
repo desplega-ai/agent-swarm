@@ -4,6 +4,7 @@ import type { Scenario, ScenarioContext } from "../run";
 import {
   cleanupStack,
   deleteConfig,
+  expectWebhookBodyTooLarge,
   hmacSignature,
   putConfig,
   reloadConfig,
@@ -609,6 +610,13 @@ export const platformWebhooks: Scenario = {
         ) === null,
         "an unrouted message creates no task",
       );
+
+      // ── body limit: the body is read before the signature check ────────────
+      await expectWebhookBodyTooLarge(ctx, "/api/github/webhook", {
+        "X-GitHub-Event": "pull_request",
+      });
+      await expectWebhookBodyTooLarge(ctx, "/api/agentmail/webhook");
+      await expectWebhookBodyTooLarge(ctx, "/api/integrations/kapso/webhook");
 
       // ── back to the disabled contract ──────────────────────────────────────
       for (const id of rows.splice(0)) await deleteConfig(ctx, id);
