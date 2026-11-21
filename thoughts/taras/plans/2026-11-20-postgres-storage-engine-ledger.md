@@ -442,6 +442,21 @@ Proof:
 
 Decision inside my authority: `data-copy` needs `E2E_POSTGRES_URL` in every run, including the SQLite run, so the scenario list stays the same on both engines (check 3). CI gives the SQLite e2e job a Postgres service too (M7).
 
+## M7 results (part 9)
+
+- CI (check 23): merge-gate jobs `e2e-postgres-shard` (4 shards, `--engine postgres`) and `e2e-postgres` (strict merge), `storage-checks` (checks 7, 12, 13, 14, 15, 18; check 11 stays in lint-and-typecheck), all with a `pgvector/pgvector:pg16` service; the SQLite `e2e-contract-shard` jobs get the same service for `data-copy`. Merge Gate needs all three. The helm workflow runs `scripts/check-chart-postgres.sh` (chart tests).
+- Chart: `database.url` / `database.queryUrl` / `database.existingSecret`; a `<release>-database` Secret; DATABASE_URL and DATABASE_QUERY_URL from it; Litestream sidecar, ConfigMap and Secret off on Postgres; the `api.replicas == 1` guard kept (message names both engines).
+- Compose overlay `docker-compose.postgres.yml`; `DEPLOYMENT.md` section; docs-site guide `guides/postgres.mdx`, CLI, environment-variable and Kubernetes pages; `runbooks/postgres.md` with the production cutover and rollback; `CLAUDE.md` engine wording and a pointer to the rules.
+- Replica blockers (check 25): `thoughts/taras/research/2026-11-20-replica-blockers.md`, 114 items with file and line (buses 11, locks 41, caches 15, timers 30, single-owner connections 8, local files 5, other 4). Hardest: workflow execution ownership in process memory, realtime rooms, boot-time orphan resets, config reload into `process.env`.
+- Fork `main` merged into the branch (25 commits, D18). Conflicts: `package.json` (`check:dep-graph` keeps the storage packages and adds `packages/agent-swarm-sdk`), `src/be/db/slack-card-groups.ts` (main dropped `lastSectionAt`; the read stays on the slack repository).
+
+Postgres defects found by the full 4-shard strict runs and fixed (each with the scenario that failed):
+
+- Pool claim at READ COMMITTED (D7 site): when concurrent polls took every candidate of one list, the poll returned no task while free tasks remained (SERIALIZABLE used to retry and re-read). The claim loop now reads the pool again, up to 5 lists (`src/http/poll.ts`). Failed: `model-harness-guard` after `poll-concurrent-claim`. Not a retry change: the isolation and locks are unchanged.
+- Unique violation on an expression index mapped to garbage text; it now gives SQLite's `UNIQUE constraint failed: index '<name>'` (`packages/storage-postgres/src/errors.ts`, contract test in `client.test.ts`). Failed: `divergence-error-mapping`.
+
+Scenario edits (section 10, SQL portability and helper use, no assertion change): `platform-chat-sdk-rocketchat` (GLOB to a `substr` prefix test), `platform-webhooks` and `slack-thread-one-card` (lines from main: `?` placeholders with a params array that `ctx.db.get` ignores, and unquoted camelCase; now the `sql` tag with quoted identifiers; on SQLite they had run with unbound parameters).
+
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
 Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metadata) and `platform-users` (the `profile_changed` event's before/after) failed on JSON text. Daniel chose (a), `accept_reorder`: keep `jsonb` and accept reordered keys. The two scenarios now compare the parsed value with a strict deep-equal (`Bun.deepEquals(..., true)`); every key and value is still asserted. Recorded under "Deviations" and "Edited scenarios". `kv_entries.value` is text and keeps its byte-order assertion.
@@ -509,6 +524,7 @@ Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metada
 See "M1 results / Edited scenarios".
 
 - `divergence-values`, `platform-users-lifecycle`, `platform-users-access` (part 7): jsonb JSON compared by parsed deep-equal, not text (approved deviation, see "Deviations").
+- `platform-chat-sdk-rocketchat`, `platform-webhooks`, `slack-thread-one-card` (part 9): SQL portability (see M7 results).
 - `divergence-db-query-denial` (part 6): the parameterized query binds with `$1` instead of `?` (both dialects accept `$1`; SQL portability, no assertion change).
 
 ## New scenarios after M1
