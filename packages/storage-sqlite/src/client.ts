@@ -71,9 +71,21 @@ type TxContext = {
   afterCommit: (() => void | Promise<void>)[];
   /** Hooks to run after ROLLBACK; dropped on COMMIT. */
   afterRollback: (() => void)[];
+  /** Hooks to run when this attempt rolls back, replayed or not; dropped on COMMIT. */
+  attemptRollback: (() => void)[];
 };
 
 const txContext = new AsyncLocalStorage<TxContext>();
+
+function runAttemptRollbackHooks(ctx: TxContext): void {
+  for (const hook of ctx.attemptRollback) {
+    try {
+      hook();
+    } catch (hookErr) {
+      console.error("[db-client] onAttemptRollback hook threw:", hookErr);
+    }
+  }
+}
 
 export function isInTransaction(): boolean {
   const store = txContext.getStore();
@@ -397,7 +409,12 @@ class BunSqliteClient implements DbClient {
     deadlineAt?: number,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
-    const ctx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
+    const ctx: TxContext = {
+      closed: false,
+      afterCommit: [],
+      afterRollback: [],
+      attemptRollback: [],
+    };
     let began = false;
     try {
       const db = this.getDatabase();
@@ -427,14 +444,25 @@ class BunSqliteClient implements DbClient {
         // for real. A full ROLLBACK, not a savepoint: virtual tables (FTS5,
         // sqlite-vec) do not all undo a savepoint, and Postgres retries the
         // whole transaction too.
-        const replayCtx: TxContext = { closed: false, afterCommit: [], afterRollback: [] };
+        const replayCtx: TxContext = {
+          closed: false,
+          afterCommit: [],
+          afterRollback: [],
+          attemptRollback: [],
+        };
         try {
           await txContext.run(replayCtx, () => fn(this.boundExecutor(replayCtx)));
+        } catch (err) {
+          // The replayed attempt failed for good: its hooks are the last attempt's.
+          ctx.attemptRollback.push(...replayCtx.attemptRollback);
+          ctx.afterRollback.push(...replayCtx.afterRollback);
+          throw err;
         } finally {
           replayCtx.closed = true;
         }
         began = false;
         db.run("ROLLBACK");
+        runAttemptRollbackHooks(replayCtx);
         db.run(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
         began = true;
         this.replayedTransactions += 1;
@@ -463,6 +491,7 @@ class BunSqliteClient implements DbClient {
         } catch {
           // Connection-level failure while rolling back; surface the original error.
         }
+        runAttemptRollbackHooks(ctx);
         for (const hook of ctx.afterRollback) {
           try {
             hook();
@@ -491,6 +520,11 @@ class BunSqliteClient implements DbClient {
   afterRollback(fn: () => void): void {
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) ctx.afterRollback.push(fn);
+  }
+
+  onAttemptRollback(fn: () => void): void {
+    const ctx = txContext.getStore();
+    if (ctx && !ctx.closed) ctx.attemptRollback.push(fn);
   }
 
   inTransaction(): boolean {

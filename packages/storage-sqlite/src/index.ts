@@ -51,6 +51,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       client.transaction(() => fn(), opts),
     afterCommit: (fn) => client.afterCommit(fn),
     afterRollback: (fn) => client.afterRollback(fn),
+    onAttemptRollback: (fn) => client.onAttemptRollback(fn),
     inTransaction: () => client.inTransaction(),
   };
 }

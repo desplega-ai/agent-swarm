@@ -71,6 +71,15 @@ export interface DbClient extends DbExecutor {
    * does nothing.
    */
   afterRollback(fn: () => void): void;
+  /**
+   * Run `fn` synchronously when the current attempt of the open outermost
+   * transaction rolls back, also when the client then runs the callback
+   * again (decision D6: a Postgres retry, a `--tx-replay` first attempt).
+   * Dropped on commit. Only for undoing in-process state that the attempt
+   * set up (a hold, a claim mark), never for a side effect: those go in
+   * `afterCommit` or `afterRollback`. With no transaction open it does nothing.
+   */
+  onAttemptRollback(fn: () => void): void;
   /** True while the current async context is inside an open transaction. */
   inTransaction(): boolean;
 }

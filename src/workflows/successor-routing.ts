@@ -90,18 +90,14 @@ export async function claimAndOweWalk<T extends SuccessorClaim>(
   let debt: SuccessorWalkDebt | undefined;
   try {
     return await getDbClient().transaction(async () => {
-      // A replayed attempt (decision D6) drops the hold of the rolled-back
-      // attempt: its afterRollback hook was discarded with it.
-      debt?.release();
-      // tx-replay-safe: released on the line above, so each attempt holds at most one debt
-      debt = undefined;
       const result = await claim();
       if (result.claimed && !result.runFailed && result.successors.length > 0) {
-        // tx-replay-safe: the previous attempt's hold is released at the callback start
+        // tx-replay-safe: a rolled-back attempt releases its own hold (onAttemptRollback below)
         debt = oweSuccessorWalk(runId);
         // Inside a caller's transaction the claim publishes only at its
-        // COMMIT; a rollback there (or a failed COMMIT) must drop the hold too.
-        getDbClient().afterRollback(debt.release);
+        // COMMIT; a rollback there (or a failed COMMIT) must drop the hold too,
+        // also for an attempt that is retried or replayed (decision D6).
+        getDbClient().onAttemptRollback(debt.release);
         return { ...result, successorDebt: debt };
       }
       return result;
