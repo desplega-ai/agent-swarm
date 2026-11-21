@@ -14,7 +14,7 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 |---|---|---|
 | M0 Baseline and spikes | done | see git log |
 | M1 Stronger contract on SQLite | done (SQLite side); see M1 results | see git log |
-| M2 Storage packages on SQLite | not started | |
+| M2 Storage packages on SQLite | in progress (packages, checks 11/12/13/15, test:storage, --tx-replay done; domain moves running) | see git log |
 | M3 Postgres engine | not started | |
 | M4 Engine-specific domains | not started | |
 | M5 Contract on Postgres | not started | |
@@ -199,9 +199,42 @@ Not covered by M1 scenarios: age-based deletion in retention (the API cannot bac
 
 `scripts/e2e/fixtures/base-db.sqlite.gz` (2.0 MB, a VACUUMed file made by base commit `99d7de13a`) plus `base-db.json` (row ids and a throwaway encryption key for the one secret config row). Generator: `bun scripts/e2e/fixtures/make-base-db.ts <checkout of the base commit>`. `ctx.startFixtureSut("base-db")` boots a second API on it. On Postgres the fixture goes through the copy command, which arrives in M6. Until then `startFixtureSut` throws on Postgres with a pointer to M6.
 
+## M2 results (in progress)
+
+### Packages (step 1, D4)
+
+- `packages/storage` (`@desplega/storage`): the driver seam (`DbClient`, moved out of `src/be/db-client.ts`), the `sql` tag (`sql`, `sqlList`, `sqlIdent`, `sqlJoin`, `sqlWhere`, `dialectFragment`), the `Dialect` interface with its helpers (`nowIso`, `nowText`, `nowEpochMs`, `likeAsciiCi`, `greatestStrict`, `leastStrict`), `Capabilities`, typed errors, `SqlExecutor`, the `Storage` facade, and one repository contract + base class per domain under `src/repositories/`.
+- `packages/storage-sqlite` (`@desplega/storage-sqlite`): the bun:sqlite client (moved with `git mv`; logging and event-loop accounting are injected through a `StatementObserver`, so the package never imports `src/`), the SQLite dialect, the `Sqlite*` overrides and `createSqliteStorage`.
+- Composition root: `src/be/storage-root.ts` is the only `src/` file that imports an engine package. `src/be/storage.ts` exposes `getStorage()`. `src/be/db-client.ts` stays as a re-export shim for existing importers until they move.
+- The `sql` tag renders `?` or `$n` from structure. No SQL text is rewritten at run time (section 4).
+
+### Decision: where entity types live (D4 open point)
+
+Rule: **repositories return row types declared in `@desplega/storage`, in the SQLite value shape** (flags 0/1, JSON as text, each timestamp in the text format its SQLite column stores, epoch-ms integers as numbers). **Entity types stay in `src/types.ts`; the `rowTo*` mappers stay in `src/`.** The Postgres repositories convert to that row shape at the repository boundary (the codec of M3). Reason: the mappers and the ~660 SQLite-bound unit tests keep working unchanged, the API responses stay byte-equal on both engines, and the packages need no zod or `src/` import. A mapper never parses a driver-parsed value, because the Postgres codec hands back text.
+
+### Checks added
+
+| # | Command | Result now |
+|---|---|---|
+| 11 | `bun run check:dep-graph` (now cruises `packages/storage*`) | pass, 0 errors. New rules: packages never import `src/`; `bun:sqlite` only in `packages/storage-sqlite` (plus the transitional `PENDING_SQLITE_IMPORTERS`, 9 entries, each with a reason; empty by end of M2/M4); a Postgres driver module only in `packages/storage-postgres`; engine packages only from the composition root; the contracts package imports no engine. Probe: a temporary file that broke each rule produced 3 errors. |
+| 12 | `bun run check:storage-boundary` | pass with a shrinking pending list: `scripts/storage-checks/storage-boundary-pending.json`, seeded once with `--init` at 246 files / 2,193 sites (SQL literals by uppercase statement shape, plus imports of `DbClient`/`getDbClient`/`getDb`). Each entry names its domain. `--update` only shrinks it. Permanent exceptions with reasons: `src/be/sql-connections.ts` (user external databases for scripts, Bun.SQL to the user's own DB, never the swarm DB), `src/be/storage-root.ts` (composition root). The `.sql` migration files stay under `src/be/migrations` (section 4 forbids renaming them); the check reads code only. |
+| 13 | `bun run check:sql-portability` | pass (48 sql templates). Rejects unquoted mixed-case identifiers in any `sql` template (D8) and 22 SQLite-only forms outside `packages/storage-sqlite`. Probe: an unquoted `createdAt` and a `rowid` in the base class both failed. |
+| 15 | `bun run check:tx-callbacks` | pass (291 callbacks). One reasoned exception: `emitRunFinished` (it schedules through afterCommit itself, `src/be/db/workflow-runs.ts`). |
+| 18 | `bun run test:storage` | SQLite side passes (extensions contract, 8 tests). Postgres side arrives in M3. |
+
+### --tx-replay (step 6)
+
+`bun run e2e --tx-replay` sets `STORAGE_TX_REPLAY=1` on the SUT. The SQLite client runs each outermost transaction callback once inside a savepoint, rolls it back with its afterCommit/afterRollback hooks discarded, then runs it for real. The runner refuses a run whose API log lacks the replay banner. Sample run (extensions, divergence-error-mapping, divergence-concurrent-schedule-claim, stress-poll-claim): 4 of 4 pass.
+
+### Domains moved
+
+| Domain | State |
+|---|---|
+| extensions | moved (`src/be/extensions/db.ts`, the `extension_assets` SQL in `assets.ts`); its workflow/skill lookups move with those domains |
+
 ## Decisions inside my authority
 
-- D4 entity types: open. Decided in M2, recorded here.
+- D4 entity types: decided in M2 (see "M2 results").
 - Driver: `Bun.SQL` (spike above).
 
 ## Deviations
