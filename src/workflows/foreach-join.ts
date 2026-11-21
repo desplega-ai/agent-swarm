@@ -307,8 +307,8 @@ export async function cancelQueuedForeachChildren(
     ? `not started: fail-fast after item ${failedKey} failed`
     : "not started: fail-fast after the run failed";
   const finishedAt = new Date().toISOString();
-  let cancelled = 0;
-  await getDbClient().transaction(async () => {
+  return await getDbClient().transaction(async () => {
+    let cancelled = 0;
     const children = latestForeachChildren(
       def,
       parentNodeId,
@@ -324,8 +324,8 @@ export async function cancelQueuedForeachChildren(
       );
       if (row) cancelled++;
     }
+    return cancelled;
   });
-  return cancelled;
 }
 
 async function hasQueuedChild(

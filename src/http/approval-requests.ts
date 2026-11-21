@@ -48,6 +48,9 @@ import { agentFirstPrincipal, authUserId } from "./request-principal";
 import { bodyTask, route } from "./route-def";
 import { jsonError } from "./utils";
 
+/** A config value an approved answer wrote, for the post-commit side effects. */
+type ConfigWrite = { result: ConfigResult; value: string };
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const QuestionSchema = z.object({
@@ -663,16 +666,19 @@ export async function answerApprovalRequest(
 
   const responderId = responderKey(responder);
   const respondedAt = new Date().toISOString();
-  const configWrites: { result: ConfigResult; value: string }[] = [];
   // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
   // `all` / `{ min: N }` request append in turn and never drop each other.
   // Config writes share it, so a lost race writes nothing.
   const outcome = await getDbClient()
     .transaction(async () => {
+      // Local to the attempt: a replayed attempt (decision D6) collects its own.
+      const configWrites: ConfigWrite[] = [];
       const current = await getApprovalRequestById(input.id);
-      if (!current || current.status !== "pending") return { kind: "unavailable" as const };
+      if (!current || current.status !== "pending")
+        return { kind: "unavailable" as const, configWrites };
       const prior = current.approvals ?? [];
-      if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
+      if (prior.some((v) => v.responder === responderId))
+        return { kind: "duplicate" as const, configWrites };
 
       // Config values are written only when the request resolves approved (D8).
       const responses = { ...safeResponses };
@@ -712,30 +718,29 @@ export async function answerApprovalRequest(
         );
         if (!resolved && configWrites.length > 0) throw new ConfigRespondAbort("unavailable");
         return resolved
-          ? { kind: "resolved" as const, request: resolved }
-          : { kind: "unavailable" as const };
+          ? { kind: "resolved" as const, request: resolved, configWrites }
+          : { kind: "unavailable" as const, configWrites };
       }
       const recorded = (await recordApprovalVotes(input.id, votes))
         ? await getApprovalRequestById(input.id)
         : null;
       return recorded
-        ? { kind: "recorded" as const, request: recorded }
-        : { kind: "unavailable" as const };
+        ? { kind: "recorded" as const, request: recorded, configWrites }
+        : { kind: "unavailable" as const, configWrites };
     })
     .catch((error: unknown) => {
       if (!(error instanceof ConfigRespondAbort)) throw error;
       // Rolled back: nothing was written.
-      configWrites.length = 0;
       return error.kind === "conflict"
         ? { kind: "conflict" as const, message: error.message }
-        : { kind: "unavailable" as const };
+        : { kind: "unavailable" as const, configWrites: [] as ConfigWrite[] };
     });
 
   if (outcome.kind === "conflict") {
     return { kind: "error", status: 409, message: outcome.message };
   }
   // The transaction has committed: run what PUT /api/config runs after a write.
-  for (const { result, value } of configWrites) {
+  for (const { result, value } of outcome.configWrites) {
     try {
       await runConfigWriteSideEffects(result.scope, result.key, value);
     } catch (err) {

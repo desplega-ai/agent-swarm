@@ -410,6 +410,13 @@ async function claimChildren(
     // so concurrent drives (a settlement's drive and the recovery sweep)
     // serialize here and never exceed the cap together.
     await getDbClient().transaction(async () => {
+      // The claim set is a per-process guard that must change under the write
+      // lock, so it is not deferred to afterCommit. A replayed attempt
+      // (decision D6) first gives back what the rolled-back attempt took.
+      // tx-replay-safe: this loop resets the claims of the previous attempt
+      for (const child of claimed) ownedChildren.delete(child.id);
+      // tx-replay-safe: each attempt starts with an empty claim list
+      claimed.length = 0;
       // A cancel of the run (or of an ancestor) that committed first wins.
       const status = await getWorkflowRunStatus(runId);
       if (status !== "running" && status !== "waiting") return;
@@ -421,7 +428,9 @@ async function claimChildren(
       );
       for (const child of children) {
         if (child.status === "running" && !ownedChildren.has(child.id)) {
+          // tx-replay-safe: reset at the callback start
           ownedChildren.add(child.id);
+          // tx-replay-safe: reset at the callback start
           claimed.push(child);
         }
       }
@@ -438,7 +447,9 @@ async function claimChildren(
           [child.id],
         );
         if (!row) continue;
+        // tx-replay-safe: reset at the callback start
         ownedChildren.add(child.id);
+        // tx-replay-safe: reset at the callback start
         claimed.push({ ...child, status: "running" });
         free--;
       }

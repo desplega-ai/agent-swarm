@@ -112,15 +112,18 @@ async function recordProvisionFailure(
   countedFailures: Set<string>,
 ): Promise<void> {
   const error = scrubSecrets(reason);
-  const failedTask = await getStorage().transaction(async () => {
+  // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
+  // The claim is taken before the transaction, so a replayed attempt (decision D6)
+  // sees the same answer; it is given back when this runtime was already retired.
+  const counts = !countedFailures.has(runtime.agentId);
+  if (counts) countedFailures.add(runtime.agentId);
+  const outcome = await getStorage().transaction(async () => {
     if (runtime.id) {
       const retired = await repo().setProvisionError(runtime.id, error);
-      if (!retired) return null;
+      if (!retired) return "not-retired" as const;
       await markRuntimeTerminated(runtime.id, error);
     }
-    // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
-    if (countedFailures.has(runtime.agentId)) return null;
-    countedFailures.add(runtime.agentId);
+    if (!counts) return null;
     const pool = await repo().recordPoolProvisionFailure(runtime.poolId ?? null, {
       error,
       now: now.toISOString(),
@@ -153,6 +156,8 @@ async function recordProvisionFailure(
     await repo().resetProvisionRetry(runtime.agentId);
     return null;
   });
+  if (counts && outcome === "not-retired") countedFailures.delete(runtime.agentId);
+  const failedTask = outcome === "not-retired" ? null : outcome;
   if (failedTask) {
     try {
       await createWorkerTaskFollowUp({
@@ -195,10 +200,9 @@ export async function provisionRuntime(
         ? await resolveE2bImage(pool.id, signal)
         : (pool.resolvedImage ?? pool.image!);
     if (signal?.aborted || image === null) return false;
-    let workspaceSlot: number | null = null;
-    const token = await getStorage().transaction(async () => {
+    const { token, workspaceSlot } = await getStorage().transaction(async () => {
       const credential = await mintRuntimeToken(agent.id, runtimeId);
-      if (pool.workspace) workspaceSlot = await nextFreeWorkspaceSlot(agent.id);
+      const workspaceSlot = pool.workspace ? await nextFreeWorkspaceSlot(agent.id) : null;
       await insertProvisioningRuntime({
         id: runtimeId,
         agentId: agent.id,
@@ -209,7 +213,7 @@ export async function provisionRuntime(
       });
       await repo().recordProvisionRequest(runtimeId, agent.id, now.toISOString());
       signal?.throwIfAborted();
-      return credential.plaintext;
+      return { token: credential.plaintext, workspaceSlot };
     });
     signal?.throwIfAborted();
     registerVolatileSecret(token, `runtime:${runtimeId}`);

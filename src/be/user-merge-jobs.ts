@@ -339,7 +339,9 @@ async function finishJob(
   const client = getDbClient();
   // Outside the transaction, so a failed delete still reports its phase.
   await saveProgress(client, job.id, DELETE_USER_PHASE, progress);
-  await client.transaction(async (tx) => {
+  // A copy per attempt: a replayed attempt (decision D6) must not count twice.
+  const done = await client.transaction(async (tx) => {
+    const next = { ...progress };
     if (references.length > 0) {
       const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId, tx);
       const contexts = await rewriteWorkflowRunRequester(
@@ -348,7 +350,7 @@ async function finishJob(
         job.targetUserId,
       );
       if (contexts > 0) {
-        progress[WORKFLOW_CONTEXT_PHASE] = (progress[WORKFLOW_CONTEXT_PHASE] ?? 0) + contexts;
+        next[WORKFLOW_CONTEXT_PHASE] = (next[WORKFLOW_CONTEXT_PHASE] ?? 0) + contexts;
       }
       for (const reference of references) {
         const changes = await rewriteUserReferenceColumn(
@@ -358,24 +360,26 @@ async function finishJob(
         );
         if (changes > 0) {
           const phase = `${reference.tableName}.${reference.columnName}`;
-          progress[phase] = (progress[phase] ?? 0) + changes;
+          next[phase] = (next[phase] ?? 0) + changes;
         }
       }
     }
     const result = await tx.run("DELETE FROM users WHERE id = ?", [job.sourceUserId]);
-    progress[DELETE_USER_PHASE] = (progress[DELETE_USER_PHASE] ?? 0) + result.changes;
+    next[DELETE_USER_PHASE] = (next[DELETE_USER_PHASE] ?? 0) + result.changes;
     await tx.run(
       `UPDATE user_merge_jobs
        SET status = 'done', phase = ?, progress = ?, error = NULL, finishedAt = ?
        WHERE id = ?`,
-      [DELETE_USER_PHASE, JSON.stringify(progress), new Date().toISOString(), job.id],
+      [DELETE_USER_PHASE, JSON.stringify(next), new Date().toISOString(), job.id],
     );
     client.afterCommit(() => {
       invalidateTelemetryUserRole(job.sourceUserId);
       invalidateTelemetryUserRole(job.targetUserId);
       scheduleOrgDomainRecompute();
     });
+    return next;
   });
+  Object.assign(progress, done);
 }
 
 async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promise<void> {
@@ -407,20 +411,22 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
   // forward) and rewrites them in one transaction.
   while (true) {
     const started = performance.now();
-    const changes = await client.transaction(async (tx) => {
+    const { changes, next } = await client.transaction(async (tx) => {
+      const next = { ...progress };
       const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId, tx, batchSize);
-      if (runIds.length === 0) return 0;
+      if (runIds.length === 0) return { changes: 0, next };
       const rewritten = await rewriteWorkflowRunRequester(
         runIds,
         job.sourceUserId,
         job.targetUserId,
       );
       if (rewritten > 0) {
-        progress[WORKFLOW_CONTEXT_PHASE] = (progress[WORKFLOW_CONTEXT_PHASE] ?? 0) + rewritten;
+        next[WORKFLOW_CONTEXT_PHASE] = (next[WORKFLOW_CONTEXT_PHASE] ?? 0) + rewritten;
       }
-      await saveProgress(tx, job.id, WORKFLOW_CONTEXT_PHASE, progress);
-      return rewritten;
+      await saveProgress(tx, job.id, WORKFLOW_CONTEXT_PHASE, next);
+      return { changes: rewritten, next };
     });
+    Object.assign(progress, next);
     await afterBatch(WORKFLOW_CONTEXT_PHASE, changes, performance.now() - started);
     // A short batch means no run names the source any more. A selected run
     // always changes (its requester is the source), so this also ends the
@@ -434,17 +440,19 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
     const phase = `${reference.tableName}.${reference.columnName}`;
     while (true) {
       const started = performance.now();
-      const changes = await client.transaction(async (tx) => {
+      const { changes, next } = await client.transaction(async (tx) => {
+        const next = { ...progress };
         const rewritten = await rewriteUserReferenceColumn(
           reference,
           job.sourceUserId,
           job.targetUserId,
           batchSize,
         );
-        if (rewritten > 0) progress[phase] = (progress[phase] ?? 0) + rewritten;
-        await saveProgress(tx, job.id, phase, progress);
-        return rewritten;
+        if (rewritten > 0) next[phase] = (next[phase] ?? 0) + rewritten;
+        await saveProgress(tx, job.id, phase, next);
+        return { changes: rewritten, next };
       });
+      Object.assign(progress, next);
       await afterBatch(phase, changes, performance.now() - started);
       // A short batch means the column holds no more rows for the source.
       if (changes < batchSize) break;

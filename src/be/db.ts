@@ -3828,7 +3828,7 @@ export {
 
 export async function updateAgentProfile(
   id: string,
-  updates: {
+  requested: {
     name?: string;
     description?: string;
     role?: string;
@@ -3856,6 +3856,8 @@ export async function updateAgentProfile(
   const storage = getStorage();
   const agents = storage.repos.agents;
   return await storage.transaction(async () => {
+    // A local copy: a replayed attempt (decision D6) must start from the request.
+    let updates = requested;
     // Get current agent state for version comparison
     const current = (await agents.findAgentById(id)) as AgentRow | null;
     if (!current) return null;
@@ -11837,13 +11839,15 @@ export async function recordKeyUsage(
   scope = "global",
   scopeId: string | null = null,
   /** Plan id the worker detected on the credential (for example from the Codex JWT). */
-  plan: string | null = null,
+  reportedPlan: string | null = null,
   planRaw?: string | null,
 ): Promise<{ planChanged: boolean }> {
   const now = new Date().toISOString();
   const storage = getStorage();
   const keys = storage.repos.config;
   return storage.transaction(async () => {
+    // A local copy: a replayed attempt (decision D6) must start from the report.
+    let plan = reportedPlan;
     const effectiveScopeId = scopeId ?? "";
 
     // Upsert key status record. Sets `provider` on insert (auto-derived from

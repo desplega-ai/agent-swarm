@@ -389,12 +389,13 @@ async function sweepTarget(
     }
 
     const batchLastId = rows[rows.length - 1]!.id as string;
-    await client.transaction(async (tx) => {
+    stats.changed += await client.transaction(async (tx) => {
+      let changed = 0;
       for (const { id, before, after } of pending) {
         const wrote = target.memory
           ? await rewriteMemoryRow(id, before, after)
           : await rewriteRow(tx, target, id, before, after);
-        if (wrote) stats.changed++;
+        if (wrote) changed++;
       }
       await tx.run(
         `INSERT INTO seed_state (kind, key, seededHash, seededAt)
@@ -402,6 +403,7 @@ async function sweepTarget(
          ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
         [cursorKey, batchLastId],
       );
+      return changed;
     });
 
     stats.scanned += rows.length;

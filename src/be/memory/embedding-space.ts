@@ -184,19 +184,23 @@ async function reembedMemory(
     if (vectors.some((v) => !v) && !(await endpointWorks(provider))) return false;
 
     const lastId = rows[rows.length - 1]!.id;
-    await client.transaction(async () => {
+    const batch = await client.transaction(async () => {
+      const tally = { done: 0, failed: 0 };
       for (let i = 0; i < rows.length; i++) {
         const vector = vectors[i];
         if (vector) {
           await store.updateEmbedding(rows[i]!.id, vector, provider.name);
-          counts.done++;
+          tally.done++;
         } else {
           await store.clearEmbedding(rows[i]!.id);
-          counts.failed++;
+          tally.failed++;
         }
       }
       await writeState(cursorKey, lastId);
+      return tally;
     });
+    counts.done += batch.done;
+    counts.failed += batch.failed;
     cursor = lastId;
 
     if (++batches % LOG_EVERY_BATCHES === 0) {
@@ -251,20 +255,24 @@ async function reembedScripts(
     // Vectors and cursor commit together, so a crash never leaves a new
     // vector behind a cursor that still points before it.
     const lastId = rows[rows.length - 1]!.id;
-    await client.transaction(async () => {
+    const batch = await client.transaction(async () => {
+      const tally = { done: 0, failed: 0 };
       for (const { id, result } of embedded) {
         if (result) {
           await writeScriptEmbedding(id, result);
-          counts.done++;
+          tally.done++;
         } else {
           // Rejected input: its old vector is in the old space. The missing-
           // embedding backfill retries it.
           await client.run("DELETE FROM script_embeddings WHERE scriptId = ?", [id]);
-          counts.failed++;
+          tally.failed++;
         }
       }
       await writeState(cursorKey, lastId);
+      return tally;
     });
+    counts.done += batch.done;
+    counts.failed += batch.failed;
     cursor = lastId;
 
     await opts.afterBatch?.({ table: "scripts", ids: rows.map((r) => r.id) });

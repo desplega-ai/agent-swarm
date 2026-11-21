@@ -67,8 +67,8 @@ export function migrateLegacyCredentialBindingBlob(database: Database): number {
              datetime('now'), datetime('now'))`,
   );
 
-  let imported = 0;
   const tx = database.transaction(() => {
+    let imported = 0;
     for (const config of rows) {
       let bindings: ReturnType<typeof normalizeCredentialBindingsDocument>;
       try {
@@ -113,8 +113,9 @@ export function migrateLegacyCredentialBindingBlob(database: Database): number {
     database
       .prepare<unknown, [string]>("DELETE FROM swarm_config WHERE key = ?")
       .run(CREDENTIAL_BINDINGS_CONFIG_KEY);
+    return imported;
   });
-  tx();
+  const imported = tx();
 
   console.log(
     `[credential-bindings] Migrated ${imported} legacy SCRIPT_CREDENTIAL_BINDINGS entr(ies) to relational rows and retired the blob key.`,

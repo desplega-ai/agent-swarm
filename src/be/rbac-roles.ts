@@ -577,76 +577,78 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
      )`,
   );
 
-  const stats: RbacSeedSyncStats = {
-    rolesInserted: 0,
-    rolesUpdated: 0,
-    permissionsInserted: 0,
-    permissionsDeleted: 0,
-    usersBackfilled: 0,
-  };
-
   // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
-  db.transaction(() => {
-    for (const role of BUILTIN_ROLES) {
-      const grantsAll = role.grantsAll ? 1 : 0;
-      const insertResult = insertRole.run(role.id, role.name, role.description, grantsAll);
-      stats.rolesInserted += insertResult.changes;
-      if (insertResult.changes === 0) {
-        const updateResult = updateRole.run(
-          role.name,
-          role.description,
-          grantsAll,
-          role.id,
-          role.name,
-          role.description,
-          grantsAll,
-        );
-        stats.rolesUpdated += updateResult.changes;
-      }
-    }
-
-    for (const role of BUILTIN_ROLES) {
-      const row = selectRoleById.get(role.id);
-      if (row) {
-        continue;
-      }
-
-      const colliding = selectRoleByName.get(role.name);
-      if (colliding) {
-        throw new Error(
-          `RBAC built-in role "${role.name}" (${role.id}) is missing because role ` +
-            `"${colliding.name}" (${colliding.id}) already uses that name. ` +
-            "Rename or remove the conflicting role, then rerun `rbac bootstrap`.",
-        );
-      }
-
-      throw new Error(
-        `RBAC built-in role "${role.name}" (${role.id}) is missing after seed sync. ` +
-          "Rerun `rbac bootstrap`; if it still fails, inspect the roles table.",
-      );
-    }
-
-    for (const role of BUILTIN_ROLES) {
-      const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
-      const existingRows = selectRolePermissions.all(role.id);
-      for (const row of existingRows) {
-        if (!desiredVerbs.has(row.verb as PermissionVerb)) {
-          stats.permissionsDeleted += deleteRolePermission.run(role.id, row.verb).changes;
+  const stats = db
+    .transaction((): RbacSeedSyncStats => {
+      const stats: RbacSeedSyncStats = {
+        rolesInserted: 0,
+        rolesUpdated: 0,
+        permissionsInserted: 0,
+        permissionsDeleted: 0,
+        usersBackfilled: 0,
+      };
+      for (const role of BUILTIN_ROLES) {
+        const grantsAll = role.grantsAll ? 1 : 0;
+        const insertResult = insertRole.run(role.id, role.name, role.description, grantsAll);
+        stats.rolesInserted += insertResult.changes;
+        if (insertResult.changes === 0) {
+          const updateResult = updateRole.run(
+            role.name,
+            role.description,
+            grantsAll,
+            role.id,
+            role.name,
+            role.description,
+            grantsAll,
+          );
+          stats.rolesUpdated += updateResult.changes;
         }
       }
-      for (const verb of desiredVerbs) {
-        stats.permissionsInserted += insertRolePermission.run(role.id, verb).changes;
+
+      for (const role of BUILTIN_ROLES) {
+        const row = selectRoleById.get(role.id);
+        if (row) {
+          continue;
+        }
+
+        const colliding = selectRoleByName.get(role.name);
+        if (colliding) {
+          throw new Error(
+            `RBAC built-in role "${role.name}" (${role.id}) is missing because role ` +
+              `"${colliding.name}" (${colliding.id}) already uses that name. ` +
+              "Rename or remove the conflicting role, then rerun `rbac bootstrap`.",
+          );
+        }
+
+        throw new Error(
+          `RBAC built-in role "${role.name}" (${role.id}) is missing after seed sync. ` +
+            "Rerun `rbac bootstrap`; if it still fails, inspect the roles table.",
+        );
       }
-    }
 
-    db.run(CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL);
+      for (const role of BUILTIN_ROLES) {
+        const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
+        const existingRows = selectRolePermissions.all(role.id);
+        for (const row of existingRows) {
+          if (!desiredVerbs.has(row.verb as PermissionVerb)) {
+            stats.permissionsDeleted += deleteRolePermission.run(role.id, row.verb).changes;
+          }
+        }
+        for (const verb of desiredVerbs) {
+          stats.permissionsInserted += insertRolePermission.run(role.id, verb).changes;
+        }
+      }
 
-    // DES-445 pre-GA heal: zero user roles is never intentional today; users
-    // are deactivated, not stripped. When RBAC reaches GA with real role
-    // management, zero roles becomes a deliberate deny-all posture and this
-    // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
-    stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
-  }).immediate();
+      db.run(CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL);
+
+      // DES-445 pre-GA heal: zero user roles is never intentional today; users
+      // are deactivated, not stripped. When RBAC reaches GA with real role
+      // management, zero roles becomes a deliberate deny-all posture and this
+      // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
+      stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
+      return stats;
+    })
+    .immediate();
 
   if (!opts?.quiet) {
     console.log(
