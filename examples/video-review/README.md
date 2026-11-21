@@ -32,7 +32,9 @@ clone or a `file://` copy makes no request to another origin.
 4. "Download JSON" writes `<file name>-feedback-<version>.json`. "Copy JSON" puts the same text on the clipboard.
    Give it to your agent with the video.
 
-The page follows the light or dark setting of your system. `?theme=light` or `?theme=dark` sets it.
+The top bar has links to the guide, to the repository on GitHub and to agent-swarm.dev. Its last button changes
+between the light theme and the dark theme, and the browser keeps the choice. Without a choice, the page follows
+the setting of your system. `?theme=light` or `?theme=dark` in the URL comes before both.
 
 Comments are saved in the browser (`localStorage`) under the file name and the version (`v1`, or `?version=`). A
 file with the same name opens the same comments. Give each new cut a new file name or a new `?version=`, so it

@@ -21,10 +21,14 @@
 <meta name="twitter:description" content="Mark ranges on a timeline, draw on the picture, and hand the notes to your agent as JSON. The video stays on your computer.">
 <meta name="twitter:image" content="https://video-edit.agent-swarm.dev/og.png">
 <script>
-// Theme: ?theme=light or ?theme=dark, else the system setting. Set before the first paint.
+// Theme: ?theme=light or ?theme=dark, then the choice saved by the button in the top bar, else the system setting.
+// Set before the first paint.
 (() => {
+  const ok = t => t === 'light' || t === 'dark';
   const t = new URLSearchParams(location.search).get('theme');
-  document.documentElement.dataset.theme = t === 'light' || t === 'dark' ? t : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  let saved = null;
+  try { saved = localStorage.getItem('video-review:theme'); } catch {}
+  document.documentElement.dataset.theme = ok(t) ? t : ok(saved) ? saved : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 })();
 </script>
 <script>
@@ -40,8 +44,8 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
 <style>
   :root { color-scheme: dark; --bg:#101113; --panel:#191b1f; --panel2:#14161a; --line:#2c2f36; --line2:#3d414b; --text:#e9eaed; --dim:#8d929c; --hint:#5d626c;
           --accent:#f59e0b; --accent-hover:#fbbf24; --accent-ink:#f59e0b; --btn:#24272d; --btn-hover:#2e323a; --ruler:#15171b; --lane:#22252b; --field:#0d0e10;
-          --pop:#23262c; --kbd:#1d1f24; --head:#fff; --veil:#101113f2; --toast-bg:#fff; --toast-fg:#111; --shadow:0 12px 32px #000b; --c:transparent; }
-  /* Light theme: the system setting, or ?theme=light. The picture area stays black in both themes. */
+          --pop:#23262c; --kbd:#1d1f24; --head:#fff; --veil:#101113f2; --toast-bg:#fff; --toast-fg:#111; --shadow:0 12px 32px #000b; --c:transparent; --bar:44px; }
+  /* Light theme: the system setting, the button in the top bar, or ?theme=light. The picture area stays black in both themes. */
   :root[data-theme="light"] { color-scheme: light; --bg:#f5f5f2; --panel:#fff; --panel2:#fafaf8; --line:#e1e1dc; --line2:#c8c8c2; --text:#1b1c1f; --dim:#6a6e77; --hint:#9a9ea7;
           --accent:#f59e0b; --accent-hover:#fbbf24; --accent-ink:#b45309; --btn:#fff; --btn-hover:#efefeb; --ruler:#efefeb; --lane:#e9e9e4; --field:#fff;
           --pop:#fff; --kbd:#f2f2ee; --head:#1b1c1f; --veil:#f5f5f2f2; --toast-bg:#1b1c1f; --toast-fg:#fff; --shadow:0 12px 32px #0003; }
@@ -50,9 +54,9 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
   *::-webkit-scrollbar { display: none; }
   html, body { height: 100%; margin: 0; }
   body { background: var(--bg); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         display: grid; grid-template-columns: minmax(0, 1fr) 400px; overflow: hidden; }
-  main { padding: 14px 16px 12px; height: 100vh; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 9px; user-select: none; position: relative; }
-  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; height: 100vh; min-height: 0; }
+         display: grid; grid-template-columns: minmax(0, 1fr) 400px; grid-template-rows: var(--bar) minmax(0, 1fr); overflow: hidden; }
+  main { padding: 14px 16px 12px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 9px; user-select: none; position: relative; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .grow { flex: 1; }
   .lbl { color: var(--dim); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
@@ -66,6 +70,20 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
   .swatch.on { border-color: var(--head); }
   :root[data-theme="light"] .swatch { box-shadow: 0 0 0 1px var(--line2); }
   .num { background: var(--c); color: #16181c; font-weight: 700; border-radius: 10px; padding: 0 7px; flex: none; }
+  .sprite { position: absolute; width: 0; height: 0; }
+  .ic { width: 16px; height: 16px; flex: none; }
+
+  /* top bar: the name, the links, the theme button. It stays above the start screen. */
+  #bar { grid-column: 1 / -1; max-width: 100vw; padding: 0 10px 0 12px; display: flex; align-items: center; gap: 14px; white-space: nowrap;
+         background: var(--panel); border-bottom: 1px solid var(--line); }
+  #bar .logo { width: 24px; height: 24px; }
+  #bar b { font-size: 14px; margin-left: -6px; }
+  #bar a { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); text-decoration: none; }
+  #bar a:hover { color: var(--accent-ink); }
+  #theme { width: 30px; height: 28px; padding: 0; display: grid; place-items: center; flex: none; }
+  :root[data-theme="light"] #theme .sun, :root[data-theme="dark"] #theme .moon { display: none; }
+  @media (max-width: 520px) { #bar { gap: 12px; } #bar a span { display: none; } }
+  @media (max-width: 370px) { #bar b { display: none; } }
 
   /* picture */
   .stagewrap { flex: 1 1 0; min-height: 90px; container-type: size; display: grid; place-items: center; }
@@ -145,7 +163,7 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
   #toast.show { opacity: 1; }
 
   /* start screen: choose a video from this computer */
-  #start { position: fixed; inset: 0; z-index: 15; display: grid; place-items: center; padding: 24px; background: var(--veil); }
+  #start { position: fixed; inset: var(--bar) 0 0; z-index: 15; display: grid; place-items: center; padding: 24px; background: var(--veil); }
   #start[hidden] { display: none; }
   #drop { width: min(560px, 100%); padding: 34px 30px 26px; border: 2px dashed var(--line2); border-radius: 12px; background: var(--panel);
           display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
@@ -156,12 +174,39 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
   #choose { background: var(--accent); border-color: var(--accent); color: #16181c; font-weight: 700; font-size: 15px; padding: 9px 20px; }
   #choose:hover { background: var(--accent-hover); }
   #private { color: var(--text); }
-  #start footer { display: flex; gap: 16px; margin-top: 6px; }
-  #start a { color: var(--dim); }
+  #start footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin-top: 6px; }
+  #start a { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); }
   #start a:hover { color: var(--accent-ink); }
 </style>
 </head>
 <body>
+<!-- Icons, used with <use>. i-swarm is logo.png as a drawing. i-github is the Simple Icons path. -->
+<svg class="sprite" aria-hidden="true">
+  <defs><path id="i-hex" d="M0-163.5 141.6-81.75V81.75L0 163.5-141.6 81.75V-81.75Z"/></defs>
+  <symbol id="i-swarm" viewBox="0 0 512 512">
+    <g transform="translate(256 256)" fill="none" stroke="#ce9010">
+      <use href="#i-hex" stroke-width="21"/>
+      <g stroke-width="13.3" stroke-opacity=".5">
+        <use href="#i-hex" transform="translate(324 0) scale(.995)"/><use href="#i-hex" transform="translate(-324 0) scale(.995)"/>
+        <use href="#i-hex" transform="translate(162 282.3) scale(.995)"/><use href="#i-hex" transform="translate(-162 282.3) scale(.995)"/>
+        <use href="#i-hex" transform="translate(162 -282.3) scale(.995)"/><use href="#i-hex" transform="translate(-162 -282.3) scale(.995)"/>
+      </g>
+    </g>
+  </symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+  <symbol id="i-guide" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+</svg>
+<header id="bar">
+  <svg class="ic logo" aria-hidden="true"><use href="#i-swarm"/></svg>
+  <b>Video Review</b>
+  <a href="https://www.agent-swarm.dev/?utm_source=video-edit&amp;utm_medium=header" target="_blank" rel="noopener">by Agent Swarm</a>
+  <span class="grow"></span>
+  <a href="https://docs.agent-swarm.dev/docs/guides/video-review" target="_blank" rel="noopener" aria-label="Guide" title="Guide"><svg class="ic" aria-hidden="true"><use href="#i-guide"/></svg><span>Guide</span></a>
+  <a href="https://github.com/desplega-ai/agent-swarm" target="_blank" rel="noopener" aria-label="GitHub" title="Agent Swarm on GitHub"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+  <button id="theme"><svg class="ic sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+</header>
 <main>
   <div class="stagewrap">
     <div class="stage" id="stage">
@@ -252,8 +297,8 @@ if (location.hostname === 'video-edit.agent-swarm.dev') {
     <p id="private">The video stays on this computer. Nothing is uploaded.</p>
     <footer>
       <a href="https://docs.agent-swarm.dev/docs/guides/video-review" target="_blank" rel="noopener">Guide</a>
-      <a href="https://github.com/desplega-ai/agent-swarm/tree/main/examples/video-review" target="_blank" rel="noopener">Source</a>
-      <a href="https://www.agent-swarm.dev" target="_blank" rel="noopener">by Agent Swarm</a>
+      <a href="https://github.com/desplega-ai/agent-swarm/tree/main/examples/video-review" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg>Source</a>
+      <a href="https://www.agent-swarm.dev/?utm_source=video-edit&amp;utm_medium=start" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-swarm"/></svg>by Agent Swarm</a>
     </footer>
   </div>
   <input id="file" type="file" accept="video/*,.mkv" hidden>
@@ -899,6 +944,14 @@ $('del').onclick = () => { const c = byId(selectedId); if (c) removeComment(c); 
 $('done').onclick = finish;
 $('copy').onclick = copyJson;
 $('download').onclick = downloadJson;
+// The button in the top bar changes the theme and saves the choice. ?theme= in the URL comes first on the next load (see the head).
+function setTheme(t, keep) {
+  document.documentElement.dataset.theme = t;
+  $('theme').title = $('theme').ariaLabel = `Change to the ${t === 'light' ? 'dark' : 'light'} theme`;
+  if (keep) { try { localStorage.setItem('video-review:theme', t); } catch {} }
+}
+$('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true);
+setTheme(document.documentElement.dataset.theme);
 $('aside').onmouseenter = () => { listHover = true; };
 $('aside').onmouseleave = () => { listHover = false; };
 function setTool(t) { tool = t; document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); }
