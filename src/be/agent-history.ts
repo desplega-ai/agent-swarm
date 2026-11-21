@@ -5,16 +5,18 @@
  * so data keyed by agent id without a foreign key (tasks, memories, scripts,
  * config) reattaches. Rows behind a cascading foreign key do not come back.
  */
+
+import type { AgentDeleteBlockerCounts, AgentHistoryRow } from "@desplega/storage";
 import type { Agent, AgentHistoryEvent } from "../types";
 import { TERMINAL_TASK_STATUSES } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   deleteAgent,
   getAgentById,
-  getDbClient,
   installSystemDefaultSkillsForAgent,
   isExtensionAgent,
 } from "./db";
+import { getStorage } from "./storage";
 import { revokeAllAgentSessionTokens } from "./users";
 
 /** A refused delete or restore; `code` is the machine-readable reason. */
@@ -30,36 +32,17 @@ export class AgentHistoryError extends Error {
   }
 }
 
-const NON_TERMINAL_SQL = `status NOT IN (${TERMINAL_TASK_STATUSES.map((s) => `'${s}'`).join(", ")})`;
-
 // Each count refuses the delete. The last three are NO ACTION foreign keys
 // that would otherwise fail the DELETE itself.
-const COUNT_BLOCKERS: Array<[code: string, sql: string, what: string]> = [
+const COUNT_BLOCKERS: Array<[code: keyof AgentDeleteBlockerCounts, what: string]> = [
   [
     "open_tasks",
-    `SELECT COUNT(*) AS n FROM agent_tasks WHERE (agentId = ?1 OR offeredTo = ?1) AND ${NON_TERMINAL_SQL}`,
     "non-terminal task(s) are assigned or offered to it; finish, cancel or reassign them",
   ],
-  [
-    "schedules",
-    "SELECT COUNT(*) AS n FROM scheduled_tasks WHERE targetAgentId = ?1 AND enabled = 1",
-    "enabled schedule(s) target it; disable or retarget them",
-  ],
-  [
-    "owned_skills",
-    "SELECT COUNT(*) AS n FROM skills WHERE ownerAgentId = ?1",
-    "skill(s) are owned by it",
-  ],
-  [
-    "owned_mcp_servers",
-    "SELECT COUNT(*) AS n FROM mcp_servers WHERE ownerAgentId = ?1",
-    "MCP server(s) are owned by it",
-  ],
-  [
-    "inboxes",
-    "SELECT COUNT(*) AS n FROM agentmail_inbox_mappings WHERE agentId = ?1",
-    "AgentMail inbox(es) map to it",
-  ],
+  ["schedules", "enabled schedule(s) target it; disable or retarget them"],
+  ["owned_skills", "skill(s) are owned by it"],
+  ["owned_mcp_servers", "MCP server(s) are owned by it"],
+  ["inboxes", "AgentMail inbox(es) map to it"],
 ];
 
 async function deleteBlockers(agent: Agent): Promise<Array<{ code: string; message: string }>> {
@@ -75,22 +58,18 @@ async function deleteBlockers(agent: Agent): Promise<Array<{ code: string; messa
   if (agent.runtimePoolId) {
     blockers.push({ code: "pool_bound", message: `Unbind it from pool ${agent.runtimePoolId}.` });
   }
-  for (const [code, sql, what] of COUNT_BLOCKERS) {
-    const n = (await getDbClient().get<{ n: number }>(sql, [agent.id]))?.n ?? 0;
+  const counts = await getStorage().repos.agents.countDeleteBlockers(
+    agent.id,
+    TERMINAL_TASK_STATUSES,
+  );
+  for (const [code, what] of COUNT_BLOCKERS) {
+    const n = counts[code];
     if (n > 0) blockers.push({ code, message: `${n} ${what}.` });
   }
   return blockers;
 }
 
-type HistoryRow = {
-  id: string;
-  agent_id: string;
-  event: "deleted" | "restored";
-  actor_ref: string;
-  reason: string;
-  snapshot_json: string;
-  created_at: string;
-};
+type HistoryRow = AgentHistoryRow;
 
 function rowToEvent(row: HistoryRow): AgentHistoryEvent {
   return {
@@ -110,33 +89,24 @@ async function appendEvent(
   actorRef: string,
   reason: string,
 ): Promise<AgentHistoryEvent> {
-  const snapshot = await getDbClient().get<Record<string, unknown>>(
-    "SELECT * FROM agents WHERE id = ?",
-    [agentId],
-  );
-  const row = await getDbClient().get<HistoryRow>(
-    `INSERT INTO agent_history (id, agent_id, event, actor_ref, reason, snapshot_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      crypto.randomUUID(),
-      agentId,
-      event,
-      actorRef,
-      scrubSecrets(reason.trim()),
-      // Unscrubbed: restore must reinsert the row byte-exact.
-      JSON.stringify(snapshot),
-      new Date().toISOString(),
-    ],
-  );
+  const agents = getStorage().repos.agents;
+  const snapshot = await agents.findAgentSnapshot(agentId);
+  const row = await agents.insertHistory({
+    id: crypto.randomUUID(),
+    agent_id: agentId,
+    event,
+    actor_ref: actorRef,
+    reason: scrubSecrets(reason.trim()),
+    // Unscrubbed: restore must reinsert the row byte-exact.
+    snapshot_json: JSON.stringify(snapshot),
+    created_at: new Date().toISOString(),
+  });
   if (!row) throw new Error("Failed to append agent history");
   return rowToEvent(row);
 }
 
 async function latestEvent(agentId: string): Promise<HistoryRow | null> {
-  return await getDbClient().get<HistoryRow>(
-    "SELECT * FROM agent_history WHERE agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-    [agentId],
-  );
+  return await getStorage().repos.agents.latestHistory(agentId);
 }
 
 export async function deleteAgentToHistory(
@@ -144,7 +114,8 @@ export async function deleteAgentToHistory(
   reason: string,
   actorRef: string,
 ): Promise<AgentHistoryEvent> {
-  return await getDbClient().transaction(async () => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     const agent = await getAgentById(agentId);
     if (!agent) throw new AgentHistoryError("Agent not found", 404, "not_found");
     const blockers = await deleteBlockers(agent);
@@ -155,8 +126,8 @@ export async function deleteAgentToHistory(
     // Every token that resolves to the agent dies with it.
     await revokeAllAgentSessionTokens(agentId);
     // Install rows hold NO ACTION foreign keys; restore reinstalls the system defaults.
-    await getDbClient().run("DELETE FROM agent_skills WHERE agentId = ?", [agentId]);
-    await getDbClient().run("DELETE FROM agent_mcp_servers WHERE agentId = ?", [agentId]);
+    await storage.repos.agents.deleteAgentSkills(agentId);
+    await storage.repos.agents.deleteAgentMcpServers(agentId);
     await deleteAgent(agentId);
     return event;
   });
@@ -167,7 +138,9 @@ export async function restoreAgentFromHistory(
   input: { reason: string; newName?: string },
   actorRef: string,
 ): Promise<{ agent: Agent; event: AgentHistoryEvent }> {
-  return await getDbClient().transaction(async () => {
+  const storage = getStorage();
+  const agents = storage.repos.agents;
+  return await storage.transaction(async () => {
     if (await getAgentById(agentId)) {
       throw new AgentHistoryError("Agent exists; nothing to restore", 409, "not_deleted");
     }
@@ -179,7 +152,7 @@ export async function restoreAgentFromHistory(
     const name = input.newName?.trim() || String(row.name);
     row.name = name;
     row.lastUpdatedAt = new Date().toISOString();
-    const taken = await getDbClient().get("SELECT id FROM agents WHERE name = ?", [name]);
+    const taken = await agents.findAgentIdByName(name);
     if (taken) {
       throw new AgentHistoryError(
         `Another agent is named "${name}". Pass newName.`,
@@ -188,13 +161,9 @@ export async function restoreAgentFromHistory(
       );
     }
     // Only columns that still exist, so a snapshot taken before a later migration still restores.
-    const columns = (
-      await getDbClient().query<{ name: string }>("SELECT name FROM pragma_table_info('agents')")
-    )
-      .map((c) => c.name)
-      .filter((c) => c in row);
-    await getDbClient().run(
-      `INSERT INTO agents (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+    const columns = (await agents.listAgentColumns()).filter((c) => c in row);
+    await agents.insertAgentSnapshot(
+      columns,
       columns.map((c) => row[c] ?? null),
     );
     await installSystemDefaultSkillsForAgent(agentId);
@@ -206,10 +175,6 @@ export async function restoreAgentFromHistory(
 /** Newest first; one agent's events, or every agent's. */
 export async function listAgentHistory(agentId?: string): Promise<AgentHistoryEvent[]> {
   // shortcut: capped at 500 rows with no paging, add a cursor if the table outgrows it.
-  const rows = await getDbClient().query<HistoryRow>(
-    `SELECT * FROM agent_history ${agentId ? "WHERE agent_id = ?" : ""}
-      ORDER BY created_at DESC, rowid DESC LIMIT 500`,
-    agentId ? [agentId] : [],
-  );
+  const rows = await getStorage().repos.agents.listHistory(agentId || undefined, 500);
   return rows.map(rowToEvent);
 }

@@ -14,6 +14,13 @@ export {
 } from "./db/session-costs";
 
 import type { Database } from "bun:sqlite";
+import type {
+  ApiKeyRef,
+  ApiKeyStatusRow,
+  SwarmConfigRow,
+  SwarmRepoColumnUpdate,
+  SwarmRepoRow,
+} from "@desplega/storage";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -289,13 +296,14 @@ import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
+import { getStorage } from "./storage";
 import {
   invalidConfigKeyError,
   isApiProcessControlEnvKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
-  teamsSdkEnvKeysSql,
+  TEAMS_SDK_ENV_KEYS,
 } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
@@ -2308,19 +2316,15 @@ export async function createLogEntry(entry: {
 }): Promise<AgentLog> {
   const id = crypto.randomUUID();
   const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
-  const row = await getDbClient().get<AgentLogRow>(
-    `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    [
-      id,
-      entry.eventType,
-      entry.agentId ?? null,
-      entry.taskId ?? null,
-      entry.oldValue ? scrubSecrets(entry.oldValue) : null,
-      entry.newValue ? scrubSecrets(entry.newValue) : null,
-      metaJson ? scrubSecrets(metaJson) : null,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertLog({
+    id,
+    eventType: entry.eventType,
+    agentId: entry.agentId ?? null,
+    taskId: entry.taskId ?? null,
+    oldValue: entry.oldValue ? scrubSecrets(entry.oldValue) : null,
+    newValue: entry.newValue ? scrubSecrets(entry.newValue) : null,
+    metadata: metaJson ? scrubSecrets(metaJson) : null,
+  })) as AgentLogRow | null;
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
 }
@@ -2340,10 +2344,7 @@ export async function getLogsByAgentId(
 }
 
 export async function getLogsByTaskId(taskId: string, limit = 200): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTask(taskId, limit)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2351,18 +2352,17 @@ export async function getLogsByTaskIdAndEventType(
   taskId: string,
   eventType: AgentLogEventType,
 ): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? AND eventType = ? ORDER BY createdAt ASC",
-    [taskId, eventType],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTaskChronological(
+    taskId,
+    eventType,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
 export async function getLogsByTaskIdChronological(taskId: string): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
-    [taskId],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTaskChronological(
+    taskId,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2371,10 +2371,7 @@ export async function getLogsByTaskIdChronological(taskId: string): Promise<Agen
  * REST audit-log tests to assert mutation rows landed.
  */
 export async function getLogsByEventType(eventType: AgentLogEventType): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE eventType = ? ORDER BY createdAt DESC",
-    [eventType],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByEventType(eventType)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -3856,9 +3853,11 @@ export async function updateAgentProfile(
     allowExtensionRole?: boolean;
   },
 ): Promise<Agent | null> {
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const agents = storage.repos.agents;
+  return await storage.transaction(async () => {
     // Get current agent state for version comparison
-    const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
+    const current = (await agents.findAgentById(id)) as AgentRow | null;
     if (!current) return null;
 
     const roleViolation = reservedRoleViolation(current.role, updates.role, {
@@ -3948,10 +3947,7 @@ export async function updateAgentProfile(
     }
 
     if (updates.name !== undefined) {
-      const existingAgent = await tx.get<AgentRow>(
-        "SELECT * FROM agents WHERE name = ? AND id != ?",
-        [updates.name, id],
-      );
+      const existingAgent = await agents.findAgentByNameExcept(updates.name, id);
       if (existingAgent) throw new Error("Agent name already exists");
     }
 
@@ -3996,41 +3992,21 @@ export async function updateAgentProfile(
     const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
 
     const now = new Date().toISOString();
-    const row = await tx.get<AgentRow>(
-      `UPDATE agents SET
-          name = COALESCE(?, name),
-          description = COALESCE(?, description),
-          role = COALESCE(?, role),
-          capabilities = COALESCE(?, capabilities),
-          claudeMd = COALESCE(?, claudeMd),
-          soulMd = COALESCE(?, soulMd),
-          identityMd = COALESCE(?, identityMd),
-          setupScript = COALESCE(?, setupScript),
-          toolsMd = COALESCE(?, toolsMd),
-          heartbeatMd = COALESCE(?, heartbeatMd),
-          avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
-          slack_icon = CASE WHEN ? = 1 THEN ? ELSE slack_icon END,
-          lastUpdatedAt = ?
-         WHERE id = ? RETURNING *`,
-      [
-        updates.name ?? null,
-        updates.description ?? null,
-        updates.role ?? null,
-        updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-        writable.claudeMd ?? null,
-        writable.soulMd ?? null,
-        writable.identityMd ?? null,
-        writable.setupScript ?? null,
-        writable.toolsMd ?? null,
-        writable.heartbeatMd ?? null,
-        avatarProvided ? 1 : 0,
-        avatarJson,
-        slackIconProvided ? 1 : 0,
-        slackIconJson,
-        now,
-        id,
-      ],
-    );
+    const row = (await agents.updateAgentProfile(id, {
+      name: updates.name ?? null,
+      description: updates.description ?? null,
+      role: updates.role ?? null,
+      capabilities: updates.capabilities ? JSON.stringify(updates.capabilities) : null,
+      claudeMd: writable.claudeMd ?? null,
+      soulMd: writable.soulMd ?? null,
+      identityMd: writable.identityMd ?? null,
+      setupScript: writable.setupScript ?? null,
+      toolsMd: writable.toolsMd ?? null,
+      heartbeatMd: writable.heartbeatMd ?? null,
+      avatar: { set: avatarProvided, value: avatarJson },
+      slackIcon: { set: slackIconProvided, value: slackIconJson },
+      now,
+    })) as AgentRow | null;
 
     return row ? rowToAgent(row) : null;
   });
@@ -4666,27 +4642,22 @@ export async function createService(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ServiceRow>(
-    `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      agentId,
-      name,
-      options.port ?? 3000,
-      options.description ?? null,
-      options.url ?? null,
-      options.healthCheckPath ?? "/health",
-      options.script,
-      options.cwd ?? null,
-      options.interpreter ?? null,
-      options.args ? JSON.stringify(options.args) : null,
-      options.env ? JSON.stringify(options.env) : null,
-      JSON.stringify(options.metadata ?? {}),
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertService({
+    id,
+    agentId,
+    name,
+    port: options.port ?? 3000,
+    description: options.description ?? null,
+    url: options.url ?? null,
+    healthCheckPath: options.healthCheckPath ?? "/health",
+    script: options.script,
+    cwd: options.cwd ?? null,
+    interpreter: options.interpreter ?? null,
+    args: options.args ? JSON.stringify(options.args) : null,
+    env: options.env ? JSON.stringify(options.env) : null,
+    metadata: JSON.stringify(options.metadata ?? {}),
+    now,
+  })) as ServiceRow | null;
 
   if (!row) throw new Error("Failed to create service");
 
@@ -4703,7 +4674,7 @@ export async function createService(
 }
 
 export async function getServiceById(id: string): Promise<Service | null> {
-  const row = await getDbClient().get<ServiceRow>("SELECT * FROM services WHERE id = ?", [id]);
+  const row = (await getStorage().repos.agents.findServiceById(id)) as ServiceRow | null;
   return row ? rowToService(row) : null;
 }
 
@@ -4711,18 +4682,15 @@ export async function getServiceByAgentAndName(
   agentId: string,
   name: string,
 ): Promise<Service | null> {
-  const row = await getDbClient().get<ServiceRow>(
-    "SELECT * FROM services WHERE agentId = ? AND name = ?",
-    [agentId, name],
-  );
+  const row = (await getStorage().repos.agents.findServiceByAgentAndName(
+    agentId,
+    name,
+  )) as ServiceRow | null;
   return row ? rowToService(row) : null;
 }
 
 export async function getServicesByAgentId(agentId: string): Promise<Service[]> {
-  const rows = await getDbClient().query<ServiceRow>(
-    "SELECT * FROM services WHERE agentId = ? ORDER BY name",
-    [agentId],
-  );
+  const rows = (await getStorage().repos.agents.listServicesByAgent(agentId)) as ServiceRow[];
   return rows.map(rowToService);
 }
 
@@ -4733,34 +4701,11 @@ export interface ServiceFilters {
 }
 
 export async function getAllServices(filters?: ServiceFilters): Promise<Service[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (filters?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(filters.agentId);
-  }
-
-  if (filters?.name) {
-    conditions.push("name LIKE ?");
-    params.push(`%${filters.name}%`);
-  }
-
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM services ${whereClause} ORDER BY
-    CASE status
-      WHEN 'healthy' THEN 1
-      WHEN 'starting' THEN 2
-      WHEN 'unhealthy' THEN 3
-      WHEN 'stopped' THEN 4
-    END, name`;
-
-  const rows = await getDbClient().query<ServiceRow>(query, params);
+  const rows = (await getStorage().repos.agents.listServices({
+    agentId: filters?.agentId,
+    nameLike: filters?.name,
+    status: filters?.status,
+  })) as ServiceRow[];
   return rows.map(rowToService);
 }
 
@@ -4772,10 +4717,11 @@ export async function updateServiceStatus(
   if (!oldService) return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<ServiceRow>(
-    `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
-    [status, now, id],
-  );
+  const row = (await getStorage().repos.agents.setServiceStatus(
+    id,
+    status,
+    now,
+  )) as ServiceRow | null;
 
   if (row && oldService.status !== status) {
     try {
@@ -4805,8 +4751,7 @@ export async function deleteService(id: string): Promise<boolean> {
     } catch {}
   }
 
-  const result = await getDbClient().run("DELETE FROM services WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteService(id)) > 0;
 }
 
 /** Upsert a service - update if exists (by agentId + name), create if not */
@@ -4820,27 +4765,22 @@ export async function upsertService(
   if (existing) {
     // Update existing service
     const now = new Date().toISOString();
-    const row = await getDbClient().get<ServiceRow>(
-      `UPDATE services SET
-          port = ?, description = ?, url = ?, healthCheckPath = ?,
-          script = ?, cwd = ?, interpreter = ?, args = ?, env = ?,
-          metadata = ?, lastUpdatedAt = ?
-        WHERE id = ? RETURNING *`,
-      [
-        options.port ?? existing.port,
-        options.description ?? existing.description ?? null,
-        options.url ?? existing.url ?? null,
-        options.healthCheckPath ?? existing.healthCheckPath ?? "/health",
-        options.script,
-        options.cwd ?? null,
-        options.interpreter ?? null,
-        options.args ? JSON.stringify(options.args) : null,
-        options.env ? JSON.stringify(options.env) : null,
-        JSON.stringify(options.metadata ?? existing.metadata ?? {}),
-        now,
-        existing.id,
-      ],
-    );
+    const row = (await getStorage().repos.agents.updateServiceDefinition(
+      existing.id,
+      {
+        port: options.port ?? existing.port,
+        description: options.description ?? existing.description ?? null,
+        url: options.url ?? existing.url ?? null,
+        healthCheckPath: options.healthCheckPath ?? existing.healthCheckPath ?? "/health",
+        script: options.script,
+        cwd: options.cwd ?? null,
+        interpreter: options.interpreter ?? null,
+        args: options.args ? JSON.stringify(options.args) : null,
+        env: options.env ? JSON.stringify(options.env) : null,
+        metadata: JSON.stringify(options.metadata ?? existing.metadata ?? {}),
+      },
+      now,
+    )) as ServiceRow | null;
 
     if (!row) throw new Error("Failed to update service");
     return rowToService(row);
@@ -4863,8 +4803,7 @@ export async function deleteServicesByAgentId(agentId: string): Promise<number> 
     } catch {}
   }
 
-  const result = await getDbClient().run("DELETE FROM services WHERE agentId = ?", [agentId]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteServicesByAgent(agentId);
 }
 
 // ============================================================================
@@ -5443,17 +5382,13 @@ function credentialKey(keyType: string, keySuffix: string): string {
 async function getCredentialLabels(): Promise<
   Map<string, { name: string | null; plan: string | null; planSource: PlanSource | null }>
 > {
-  const rows = await getDbClient().query<{
+  const rows = (await getStorage().repos.config.listKeyLabels()) as {
     keyType: string;
     keySuffix: string;
     name: string | null;
     plan: string | null;
     planSource: PlanSource | null;
-  }>(
-    `SELECT keyType, keySuffix, name, plan, planSource FROM api_key_status
-      ORDER BY CASE planSource WHEN 'manual' THEN 0 WHEN 'detected' THEN 1 WHEN 'estimated' THEN 2 ELSE 3 END,
-        updatedAt DESC`,
-  );
+  }[];
   const labels = new Map<
     string,
     { name: string | null; plan: string | null; planSource: PlanSource | null }
@@ -6544,30 +6479,6 @@ export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
 // Swarm Config Operations (Centralized Environment/Config Management)
 // ============================================================================
 
-type SwarmConfigRow = {
-  id: string;
-  scope: string;
-  scopeId: string | null;
-  key: string;
-  value: string;
-  isSecret: number; // SQLite boolean
-  envPath: string | null;
-  description: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
-  exportToEnv?: number; // SQLite boolean; absent only on pre-215 test schemas
-};
-
-type SwarmConfigLookupRow = {
-  id: string;
-  scope: string;
-  scopeId: string | null;
-  key: string;
-  isSecret: number;
-  encrypted: number;
-};
-
 const RESERVED_CONFIG_PLACEHOLDER = "[reserved key stored in swarm_config; delete this row]";
 
 function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
@@ -6695,26 +6606,7 @@ export async function getSwarmConfigs(filters?: {
   scopeId?: string;
   key?: string;
 }): Promise<SwarmConfig[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (filters?.scope) {
-    conditions.push("scope = ?");
-    params.push(filters.scope);
-  }
-  if (filters?.scopeId) {
-    conditions.push("scopeId = ?");
-    params.push(filters.scopeId);
-  }
-  if (filters?.key) {
-    conditions.push("key = ?");
-    params.push(filters.key);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM swarm_config ${whereClause} ORDER BY key ASC`;
-
-  const rows = await getDbClient().query<SwarmConfigRow>(query, params);
+  const rows = await getStorage().repos.config.listConfigs(filters ?? {});
   return rows.map(rowToSwarmConfig);
 }
 
@@ -6725,12 +6617,14 @@ export async function getSwarmConfigs(filters?: {
  * (`isApiProcessControlEnvKey`) and keys that cannot be env names stay out too.
  */
 export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
-  const rows = await getDbClient().query<SwarmConfigRow>(
-    `SELECT * FROM swarm_config
-       WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
-       ORDER BY key ASC`,
-  );
+  const rows = await getStorage().repos.config.listGlobalConfigsExcept([
+    "API_KEY",
+    "SECRETS_ENCRYPTION_KEY",
+    "CORS_ALLOW_ANY_ORIGIN",
+    "EXTENSION_ALLOW_LEAD_ACTIVATION",
+    "CHAT_SDK_API_URL_OVERRIDES",
+    ...TEAMS_SDK_ENV_KEYS,
+  ]);
   return rows
     .filter(
       (row) =>
@@ -6745,9 +6639,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
  * Get a single config entry by ID.
  */
 export async function getSwarmConfigById(id: string): Promise<SwarmConfig | null> {
-  const row = await getDbClient().get<SwarmConfigRow>("SELECT * FROM swarm_config WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.config.findConfigById(id);
   return row ? rowToSwarmConfig(row) : null;
 }
 
@@ -6763,10 +6655,7 @@ export async function getSwarmConfigLookupById(id: string): Promise<{
   isSecret: boolean;
   encrypted: boolean;
 } | null> {
-  const row = await getDbClient().get<SwarmConfigLookupRow>(
-    "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.config.findConfigById(id);
   if (!row) return null;
   return {
     id: row.id,
@@ -6804,14 +6693,14 @@ export async function upsertSwarmConfig(data: {
 
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
-  const isSecret = data.isSecret ? 1 : 0;
+  const isSecret = data.isSecret === true;
   const envPath = data.envPath ?? null;
   const description = data.description ?? null;
 
   // Encrypt secret values at rest. Non-secret values are stored verbatim so
   // they remain queryable and diffable. rowToSwarmConfig reverses this on read.
   const storedValue = data.isSecret ? encryptSecret(data.value, getEncryptionKey()) : data.value;
-  const encryptedFlag: number = data.isSecret ? 1 : 0;
+  const encryptedFlag = data.isSecret === true;
 
   // Manual check for existing entry because SQLite's UNIQUE constraint
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
@@ -6821,54 +6710,36 @@ export async function upsertSwarmConfig(data: {
   // UNIQUE constraint cannot arbitrate a NULL scopeId), leaving a duplicate
   // pair where env injection reads the last row and every later save updates
   // the first one, i.e. a permanent silent no-op.
-  const row = await getDbClient().transaction(async () => {
-    const existing =
-      scopeId === null
-        ? await getDbClient().get<SwarmConfigRow>(
-            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-            [data.scope, data.key],
-          )
-        : await getDbClient().get<SwarmConfigRow>(
-            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-            [data.scope, scopeId, data.key],
-          );
+  const storage = getStorage();
+  const configs = storage.repos.config;
+  const row = await storage.transaction(async () => {
+    const existing = await configs.findConfigByScopeKey(data.scope, scopeId, data.key);
 
     // COALESCE keeps the stored flag when the caller did not send one.
     const written = existing
-      ? await getDbClient().get<SwarmConfigRow>(
-          `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
-             exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
-           WHERE id = ? RETURNING *`,
-          [
-            storedValue,
-            isSecret,
-            envPath,
-            description,
-            encryptedFlag,
-            now,
-            restricted ? 1 : 0,
-            data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
-            existing.id,
-          ],
-        )
-      : await getDbClient().get<SwarmConfigRow>(
-          `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-          [
-            crypto.randomUUID(),
-            data.scope,
-            scopeId,
-            data.key,
-            storedValue,
-            isSecret,
-            envPath,
-            description,
-            now,
-            now,
-            encryptedFlag,
-            restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0,
-          ],
-        );
+      ? await configs.updateConfigValue(existing.id, {
+          value: storedValue,
+          isSecret,
+          envPath,
+          description,
+          encrypted: encryptedFlag,
+          now,
+          forceNoExport: restricted,
+          exportToEnv: data.exportToEnv === undefined ? null : data.exportToEnv,
+        })
+      : await configs.insertConfig({
+          id: crypto.randomUUID(),
+          scope: data.scope,
+          scopeId,
+          key: data.key,
+          value: storedValue,
+          isSecret,
+          envPath,
+          description,
+          encrypted: encryptedFlag,
+          exportToEnv: restricted ? false : (data.exportToEnv ?? defaultExportToEnv(data.key)),
+          now,
+        });
     if (data.scope === "agent" && scopeId) {
       await clearAgentModelProfileOnOverrideChange(scopeId, data.key, existing, written);
     }
@@ -6886,7 +6757,7 @@ export async function upsertSwarmConfig(data: {
     registerSensitiveKeyName(config.key);
   }
 
-  getDbClient().afterCommit(() => publishWorkerConfigNudge(config.scope, config.scopeId));
+  storage.afterCommit(() => publishWorkerConfigNudge(config.scope, config.scopeId));
 
   return config;
 }
@@ -6912,14 +6783,11 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const row = await getDbClient().get<SwarmConfigRow>(
-    "DELETE FROM swarm_config WHERE id = ? RETURNING *",
-    [id],
-  );
+  const row = await getStorage().repos.config.deleteConfig(id);
   if (row?.scope === "agent" && row.scopeId) {
     await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key, row, null);
   }
-  if (row) getDbClient().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
+  if (row) getStorage().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
   return row !== null;
 }
 
@@ -6938,16 +6806,11 @@ export async function deleteSwarmConfigByKey(
   key: string,
 ): Promise<boolean> {
   const resolvedScopeId = scope === "global" ? null : scopeId;
-  const existing =
-    resolvedScopeId === null
-      ? await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-          [scope, key],
-        )
-      : await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-          [scope, resolvedScopeId, key],
-        );
+  const existing = await getStorage().repos.config.findConfigByScopeKey(
+    scope,
+    resolvedScopeId,
+    key,
+  );
   if (!existing) return false;
   return await deleteSwarmConfig(existing.id);
 }
@@ -6994,19 +6857,6 @@ export async function getResolvedConfig(
 // Swarm Repos Functions (Centralized Repository Management)
 // ============================================================================
 
-type SwarmRepoRow = {
-  id: string;
-  url: string;
-  name: string;
-  clonePath: string;
-  defaultBranch: string;
-  autoClone: number; // SQLite boolean
-  hooks: string | null;
-  guidelines: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
-
 function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
   return {
     id: row.id,
@@ -7026,41 +6876,22 @@ export async function getSwarmRepos(filters?: {
   autoClone?: boolean;
   name?: string;
 }): Promise<SwarmRepo[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.autoClone !== undefined) {
-    conditions.push("autoClone = ?");
-    params.push(filters.autoClone ? 1 : 0);
-  }
-  if (filters?.name) {
-    conditions.push("name = ?");
-    params.push(filters.name);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM swarm_repos ${whereClause} ORDER BY name ASC`;
-
-  const rows = await getDbClient().query<SwarmRepoRow>(query, params);
+  const rows = await getStorage().repos.config.listRepos(filters ?? {});
   return rows.map(rowToSwarmRepo);
 }
 
 export async function getSwarmRepoById(id: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE id = ?", [id]);
+  const row = await getStorage().repos.config.findRepoById(id);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByName(name: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE name = ?", [
-    name,
-  ]);
+  const row = await getStorage().repos.config.findRepoByName(name);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByUrl(url: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE url = ?", [
-    url,
-  ]);
+  const row = await getStorage().repos.config.findRepoByUrl(url);
   return row ? rowToSwarmRepo(row) : null;
 }
 
@@ -7079,22 +6910,17 @@ export async function createSwarmRepo(data: {
   const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
-  const row = await getDbClient().get<SwarmRepoRow>(
-    `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.url,
-      data.name,
-      clonePath,
-      data.defaultBranch ?? "main",
-      data.autoClone !== false ? 1 : 0,
-      hooksJson,
-      guidelinesJson,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.config.insertRepo({
+    id,
+    url: data.url,
+    name: data.name,
+    clonePath,
+    defaultBranch: data.defaultBranch ?? "main",
+    autoClone: data.autoClone !== false,
+    hooks: hooksJson,
+    guidelines: guidelinesJson,
+    now,
+  });
 
   if (!row) throw new Error("Failed to create repo");
   return rowToSwarmRepo(row);
@@ -7112,46 +6938,28 @@ export async function updateSwarmRepo(
     guidelines: RepoGuidelines | null;
   }>,
 ): Promise<SwarmRepo | null> {
-  const setClauses: string[] = [];
-  const params: (string | number | null)[] = [];
-
-  const stringFields = ["url", "name", "clonePath", "defaultBranch"] as const;
-  for (const field of stringFields) {
-    if (updates[field] !== undefined) {
-      setClauses.push(`${field} = ?`);
-      params.push(updates[field]);
-    }
-  }
-  if (updates.autoClone !== undefined) {
-    setClauses.push("autoClone = ?");
-    params.push(updates.autoClone ? 1 : 0);
-  }
+  const columns: SwarmRepoColumnUpdate = {};
+  if (updates.url !== undefined) columns.url = updates.url;
+  if (updates.name !== undefined) columns.name = updates.name;
+  if (updates.clonePath !== undefined) columns.clonePath = updates.clonePath;
+  if (updates.defaultBranch !== undefined) columns.defaultBranch = updates.defaultBranch;
+  if (updates.autoClone !== undefined) columns.autoClone = updates.autoClone;
   if (updates.hooks !== undefined) {
-    setClauses.push("hooks = ?");
-    params.push(updates.hooks ? JSON.stringify(updates.hooks) : null);
+    columns.hooks = updates.hooks ? JSON.stringify(updates.hooks) : null;
   }
   if (updates.guidelines !== undefined) {
-    setClauses.push("guidelines = ?");
-    params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
+    columns.guidelines = updates.guidelines ? JSON.stringify(updates.guidelines) : null;
   }
 
-  if (setClauses.length === 0) return await getSwarmRepoById(id);
+  if (Object.keys(columns).length === 0) return await getSwarmRepoById(id);
 
-  setClauses.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-
-  const row = await getDbClient().get<SwarmRepoRow>(
-    `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const row = await getStorage().repos.config.updateRepo(id, columns, new Date().toISOString());
 
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function deleteSwarmRepo(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.config.deleteRepo(id)) > 0;
 }
 
 // ============================================================================
@@ -7257,36 +7065,28 @@ export async function insertActiveSession(session: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ActiveSession>(
-    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      session.agentId,
-      session.taskId ?? null,
-      session.triggerType,
-      session.inboxMessageId ?? null,
-      session.taskDescription ?? null,
-      session.runnerSessionId ?? null,
-      session.runtimeInstanceId ?? null,
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertActiveSession({
+    id,
+    agentId: session.agentId,
+    taskId: session.taskId ?? null,
+    triggerType: session.triggerType,
+    inboxMessageId: session.inboxMessageId ?? null,
+    taskDescription: session.taskDescription ?? null,
+    runnerSessionId: session.runnerSessionId ?? null,
+    runtimeInstanceId: session.runtimeInstanceId ?? null,
+    now,
+  })) as ActiveSession | null;
 
   if (!row) throw new Error("Failed to insert active session");
   return row;
 }
 
 export async function deleteActiveSession(taskId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionByTask(taskId)) > 0;
 }
 
 export async function deleteActiveSessionById(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionById(id)) > 0;
 }
 
 export async function getActiveSessions(
@@ -7315,26 +7115,16 @@ export async function getActiveSessions(
 
 export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
-    [now, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.heartbeatActiveSession(taskId, now)) > 0;
 }
 
 export async function cleanupStaleSessions(maxAgeMinutes = 30): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?", [
-    cutoff,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsBefore(cutoff);
 }
 
 export async function cleanupAgentSessions(agentId: string): Promise<number> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE agentId = ?", [
-    agentId,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsByAgent(agentId);
 }
 
 /** Update providerSessionId on an active session identified by taskId */
@@ -7342,11 +7132,10 @@ export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
-    [providerSessionId, taskId],
+  return (
+    (await getStorage().repos.agents.setActiveSessionProviderSessionId(taskId, providerSessionId)) >
+    0
   );
-  return result.changes > 0;
 }
 
 /**
@@ -7354,12 +7143,7 @@ export async function updateActiveSessionProviderSessionId(
  * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
  */
 export async function getActiveSessionForTask(taskId: string): Promise<ActiveSession | null> {
-  return (
-    (await getDbClient().get<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1",
-      [taskId],
-    )) ?? null
-  );
+  return (await getStorage().repos.agents.findActiveSessionByTask(taskId)) as ActiveSession | null;
 }
 
 /**
@@ -11175,13 +10959,7 @@ export async function installSkill(agentId: string, skillId: string): Promise<Ag
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentSkillRow>(
-    `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(agentId, skillId) DO UPDATE SET isActive = 1
-       RETURNING *`,
-    [id, agentId, skillId, now],
-  );
+  const row = await getStorage().repos.agents.installSkill(id, agentId, skillId, now);
 
   if (!row) throw new Error("Failed to install skill");
   return rowToAgentSkill(row);
@@ -11204,11 +10982,7 @@ export async function installSystemDefaultSkillsForAgent(agentId: string): Promi
 }
 
 export async function uninstallSkill(agentId: string, skillId: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?",
-    [agentId, skillId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.uninstallSkill(agentId, skillId)) > 0;
 }
 
 export async function getAgentSkills(
@@ -11253,11 +11027,7 @@ export async function toggleAgentSkill(
   skillId: string,
   isActive: boolean,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?",
-    [isActive ? 1 : 0, agentId, skillId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.setSkillActive(agentId, skillId, isActive)) > 0;
 }
 
 // ── MCP Servers ──────────────────────────────────────────────────────────
@@ -11579,24 +11349,14 @@ export async function installMcpServer(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentMcpServerRow>(
-    `INSERT INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(agentId, mcpServerId) DO UPDATE SET isActive = 1
-       RETURNING *`,
-    [id, agentId, mcpServerId, now],
-  );
+  const row = await getStorage().repos.agents.installMcpServer(id, agentId, mcpServerId, now);
 
   if (!row) throw new Error("Failed to install MCP server");
   return rowToAgentMcpServer(row);
 }
 
 export async function uninstallMcpServer(agentId: string, mcpServerId: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?",
-    [agentId, mcpServerId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.uninstallMcpServer(agentId, mcpServerId)) > 0;
 }
 
 export async function getAgentMcpServers(
@@ -11848,12 +11608,6 @@ export interface ApiKeyStatus {
   updatedAt: string;
 }
 
-type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows" | "providerAccount" | "spendCap"> & {
-  rateLimitWindows: string | null;
-  providerAccount: string | null;
-  spendCap: string | null;
-};
-
 function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitWindowTelemetry {
   if (!value) return {};
   try {
@@ -11870,6 +11624,7 @@ function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitW
 function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
   return {
     ...row,
+    planSource: row.planSource as PlanSource | null,
     rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows),
     providerAccount: parseProviderAccount(row.providerAccount),
     spendCap: row.spendCap ? (JSON.parse(row.spendCap) as SpendCap) : null,
@@ -11938,38 +11693,17 @@ export async function getAvailableKeyIndices(
   const now = new Date().toISOString();
   const nowMs = Date.now();
   const client = getDbClient();
+  const keys = getStorage().repos.config;
   const effectiveScopeId = scopeId ?? "";
   const suffixes = keySuffixes?.length ? keySuffixes : undefined;
   const rowFilter = suffixes
-    ? `keyType = ? AND keySuffix IN (${suffixes.map(() => "?").join(", ")})`
-    : "keyType = ? AND scope = ? AND scopeId = ?";
-  const rowParams = suffixes ? [keyType, ...suffixes] : [keyType, scope, effectiveScopeId];
+    ? { keyType, suffixes }
+    : { keyType, scope, scopeId: effectiveScopeId };
 
   // Auto-clear expired rate limits. Never an auth bench: only `clearAuthBench` lifts it.
-  await client.run(
-    `UPDATE api_key_status
-     SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
-     WHERE ${rowFilter}
-       AND status = 'rate_limited' AND rateLimitedUntil <= ? AND consecutiveAuthFailures < ?`,
-    [now, ...rowParams, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
-  );
+  await keys.clearExpiredRateLimits(rowFilter, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD);
 
-  const rows = await client.query<{
-    keyIndex: number;
-    keySuffix: string;
-    scope: string;
-    scopeId: string;
-    status: string;
-    rateLimitWindows: string | null;
-    plan: string | null;
-    authFailureSeq: number;
-    lastValidationFailedAt: string | null;
-    spendCap: string | null;
-  }>(
-    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt, spendCap FROM api_key_status
-       WHERE ${rowFilter}`,
-    rowParams,
-  );
+  const rows = await keys.listAdmissionRows(rowFilter);
   // Pool positions a row applies to: the position holding its suffix, or its stored index.
   // A suffix held by several pool members cannot tell them apart, so it falls back to
   // the index read: only a row of the requested scope, at its stored index.
@@ -12107,7 +11841,9 @@ export async function recordKeyUsage(
   planRaw?: string | null,
 ): Promise<{ planChanged: boolean }> {
   const now = new Date().toISOString();
-  return getDbClient().transaction(async (client) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  return storage.transaction(async () => {
     const effectiveScopeId = scopeId ?? "";
 
     // Upsert key status record. Sets `provider` on insert (auto-derived from
@@ -12115,16 +11851,11 @@ export async function recordKeyUsage(
     // The `name` column is left null on insert and only set via the
     // setApiKeyName API endpoint when the user manually labels the key.
     const provider = deriveProviderFromKeyType(keyType);
-    await client.run(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-     ON CONFLICT(keyType, keySuffix, scope, scopeId)
-     DO UPDATE SET
-       lastUsedAt = excluded.lastUsedAt,
-       totalUsageCount = totalUsageCount + 1,
-       keyIndex = excluded.keyIndex,
-       updatedAt = excluded.updatedAt`,
-      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
+    await keys.upsertKeyUsage(
+      { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+      keyIndex,
+      provider,
+      now,
     );
 
     const ambiguousPro =
@@ -12138,33 +11869,20 @@ export async function recordKeyUsage(
         : null;
     // A legacy plan report must not retain a contradictory raw claim.
     if (rawIdentity || plan) {
-      await client.run(
-        "UPDATE api_key_status SET detectedPlanRaw = ? WHERE keyType = ? AND keySuffix = ?",
-        [rawIdentity, keyType, keySuffix],
-      );
+      await keys.setDetectedPlanRaw(keyType, keySuffix, rawIdentity);
     }
     if (ambiguousPro || (keyType === "CODEX_OAUTH" && planRaw && !codexPlanFromClaim(planRaw))) {
       plan = null;
-      const cleared = await client.run(
-        "UPDATE api_key_status SET plan = NULL, planSource = 'detected' WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual' AND (plan IS NOT NULL OR planSource IS NOT 'detected')",
-        [keyType, keySuffix],
-      );
-      planChanged = cleared.changes > 0;
+      planChanged = (await keys.setDetectedPlan(keyType, keySuffix, null)) > 0;
     }
     // A detected plan replaces an estimate, never a plan the operator picked.
     if (plan) {
-      const result = await client.run(
-        `UPDATE api_key_status SET plan = ?, planSource = 'detected'
-         WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual'
-           AND (plan IS NOT ? OR planSource IS NOT 'detected')`,
-        [plan, keyType, keySuffix, plan],
-      );
-      planChanged = result.changes > 0;
+      planChanged = (await keys.setDetectedPlan(keyType, keySuffix, plan)) > 0;
     }
 
     // Record which key was used on the task
     if (taskId) {
-      await client.run(
+      await getDbClient().run(
         "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
         [keySuffix, keyType, taskId],
       );
@@ -12184,21 +11902,7 @@ export async function setApiKeyPlan(
   plan: string | null,
 ): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = plan
-    ? await getDbClient().run(
-        `UPDATE api_key_status SET plan = ?, planSource = 'manual', updatedAt = ?
-           WHERE keyType = ? AND keySuffix = ?`,
-        [plan, now, keyType, keySuffix],
-      )
-    : await getDbClient().run(
-        `UPDATE api_key_status
-           SET plan = CASE WHEN planSource = 'manual' THEN NULL ELSE plan END,
-               planSource = CASE WHEN planSource = 'manual' THEN NULL ELSE planSource END,
-               updatedAt = ?
-           WHERE keyType = ? AND keySuffix = ?`,
-        [now, keyType, keySuffix],
-      );
-  return result.changes > 0;
+  return (await getStorage().repos.config.setManualPlan(keyType, keySuffix, plan, now)) > 0;
 }
 
 /**
@@ -12217,30 +11921,16 @@ export async function markKeyRateLimited(
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  await getDbClient().run(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt, spendCap)
-       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?, ?)
-       ON CONFLICT(keyType, keySuffix, scope, scopeId)
-       DO UPDATE SET
-         status = 'rate_limited',
-         rateLimitedUntil = CASE WHEN status = 'rate_limited' AND consecutiveAuthFailures >= ${CODEX_AUTH_FAILURE_BENCH_THRESHOLD} THEN MAX(COALESCE(rateLimitedUntil, ''), excluded.rateLimitedUntil) ELSE excluded.rateLimitedUntil END,
-         spendCap = excluded.spendCap,
-         lastRateLimitAt = excluded.lastRateLimitAt,
-         rateLimitCount = rateLimitCount + 1,
-         keyIndex = excluded.keyIndex,
-         updatedAt = excluded.updatedAt`,
-    [
-      keyType,
-      keySuffix,
+  await getStorage().repos.config.markRateLimited(
+    { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+    {
       keyIndex,
-      scope,
-      effectiveScopeId,
       rateLimitedUntil,
-      now,
+      spendCap: spendCap ? JSON.stringify(spendCap) : null,
       provider,
       now,
-      spendCap ? JSON.stringify(spendCap) : null,
-    ],
+      benchThreshold: CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+    },
   );
 }
 
@@ -12260,20 +11950,13 @@ export async function recordKeyAuthFailure(
 ): Promise<KeyAuthFailureResult> {
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  const ref: ApiKeyRef = { keyType, keySuffix, scope, scopeId: effectiveScopeId };
+  return await storage.transaction(async () => {
     const now = new Date().toISOString();
     const source = "report-auth-failure";
-    const row = await tx.get<{ consecutiveAuthFailures: number; rateLimitedUntil: string | null }>(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, consecutiveAuthFailures, lastAuthFailureAt, authFailureSeq, provider, updatedAt)
-         VALUES (?, ?, ?, ?, ?, 'available', 1, ?, (SELECT COALESCE(MAX(authFailureSeq), 0) + 1 FROM api_key_status), ?, ?)
-         ON CONFLICT(keyType, keySuffix, scope, scopeId)
-         DO UPDATE SET
-           consecutiveAuthFailures = consecutiveAuthFailures + 1,
-           lastAuthFailureAt = excluded.lastAuthFailureAt, authFailureSeq = excluded.authFailureSeq,
-           keyIndex = excluded.keyIndex, updatedAt = excluded.updatedAt
-         RETURNING consecutiveAuthFailures, rateLimitedUntil`,
-      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
-    );
+    const row = await keys.recordAuthFailure(ref, keyIndex, provider, now);
     if (!row) throw new Error("Failed to record auth failure");
     const { consecutiveAuthFailures } = row;
     if (consecutiveAuthFailures < CODEX_AUTH_FAILURE_BENCH_THRESHOLD) {
@@ -12283,13 +11966,7 @@ export async function recordKeyAuthFailure(
     if (row.rateLimitedUntil && Date.parse(row.rateLimitedUntil) > Date.parse(benchedUntil)) {
       benchedUntil = row.rateLimitedUntil;
     }
-    await tx.run(
-      `UPDATE api_key_status
-         SET status = 'rate_limited', rateLimitedUntil = ?, lastRateLimitAt = ?,
-             rateLimitCount = rateLimitCount + 1, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-      [benchedUntil, now, now, keyType, keySuffix, scope, effectiveScopeId],
-    );
+    await keys.benchKey(ref, benchedUntil, now);
     await upsertKv({
       namespace: CODEX_AUTH_WATCH_NAMESPACE,
       key: codexAuthBenchMarkerKey(keySuffix),
@@ -12323,15 +12000,11 @@ export async function recordKeyRateLimitWindows(
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  await getDbClient().transaction(async (tx) => {
-    const existing = await tx.get<{
-      rateLimitWindows: string | null;
-      providerAccount: string | null;
-    }>(
-      `SELECT rateLimitWindows, providerAccount FROM api_key_status
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-      [keyType, keySuffix, scope, effectiveScopeId],
-    );
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  const ref: ApiKeyRef = { keyType, keySuffix, scope, scopeId: effectiveScopeId };
+  await storage.transaction(async () => {
+    const existing = await keys.getRateLimitWindows(ref);
     const { windows: mergedWindows, account: mergedAccount } = applyProviderQuotaReport(
       {
         windows: parseRateLimitWindowsJson(existing?.rateLimitWindows),
@@ -12340,28 +12013,13 @@ export async function recordKeyRateLimitWindows(
       scrubProviderQuotaReport({ windows, account, replace }),
     );
     assertProviderQuotaCapacity({ windows: mergedWindows, account: mergedAccount });
-    await tx.run(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, providerAccount, provider, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(keyType, keySuffix, scope, scopeId)
-         DO UPDATE SET
-           rateLimitWindows = excluded.rateLimitWindows,
-           providerAccount = excluded.providerAccount,
-           keyIndex = excluded.keyIndex,
-           provider = excluded.provider,
-           updatedAt = excluded.updatedAt`,
-      [
-        keyType,
-        keySuffix,
-        keyIndex,
-        scope,
-        effectiveScopeId,
-        JSON.stringify(mergedWindows),
-        mergedAccount ? JSON.stringify(mergedAccount) : null,
-        provider,
-        now,
-      ],
-    );
+    await keys.upsertRateLimitWindows(ref, {
+      keyIndex,
+      rateLimitWindows: JSON.stringify(mergedWindows),
+      providerAccount: mergedAccount ? JSON.stringify(mergedAccount) : null,
+      provider,
+      now,
+    });
   });
 }
 
@@ -12377,13 +12035,12 @@ export async function setApiKeyName(
   scope = "global",
   scopeId: string | null = null,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    `UPDATE api_key_status
-       SET name = ?, updatedAt = ?
-       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-    [name, new Date().toISOString(), keyType, keySuffix, scope, scopeId ?? ""],
+  const changes = await getStorage().repos.config.setKeyName(
+    { keyType, keySuffix, scope, scopeId: scopeId ?? "" },
+    name,
+    new Date().toISOString(),
   );
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -12403,36 +12060,25 @@ export async function clearKeyRateLimit(
   const effectiveScopeId = scopeId ?? "";
   const { keyIndex = -1, authFence = null } = opts;
   const clearAuthBench = opts.clearAuthBench === true && authFence !== null;
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  return await storage.transaction(async () => {
     // The key's rows in every scope: `getAvailableKeyIndices` reads them all by suffix.
-    const result = await tx.run(
-      `UPDATE api_key_status
-         SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ?
-           AND status = 'rate_limited' AND ((? AND authFailureSeq <= ?) OR consecutiveAuthFailures < ?)`,
-      [
-        now,
-        keyType,
-        keySuffix,
-        clearAuthBench ? 1 : 0,
-        authFence,
-        CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
-      ],
-    );
-    const cleared = result.changes > 0;
+    const changes = await keys.clearRateLimit(keyType, keySuffix, {
+      now,
+      liftAuthBench: clearAuthBench,
+      authFence,
+      benchThreshold: CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+    });
+    const cleared = changes > 0;
     if (!clearAuthBench) return cleared;
-    const lifted = await tx.query<{ keySuffix: string }>(
-      `UPDATE api_key_status SET consecutiveAuthFailures = 0, updatedAt = ?1,
-           status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END,
-           spendCap = CASE WHEN keySuffix = ?2 THEN spendCap END
-         WHERE keyType = ?3 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
-           AND ((keySuffix = ?2 AND authFailureSeq <= ?7)
-             OR (keySuffix != ?2 AND keyIndex = ?6 AND scope = ?4 AND scopeId = ?5)) RETURNING keySuffix`,
-      [now, keySuffix, keyType, scope, effectiveScopeId, keyIndex, authFence],
+    const lifted = await keys.liftAuthBench(
+      { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+      { keyIndex, authFence, now },
     );
-    const retired = lifted.filter((row) => row.keySuffix !== keySuffix);
+    const retired = lifted.filter((suffix) => suffix !== keySuffix);
     if (keyType === "CODEX_OAUTH") {
-      for (const suffix of [...(cleared ? [keySuffix] : []), ...retired.map((r) => r.keySuffix)]) {
+      for (const suffix of [...(cleared ? [keySuffix] : []), ...retired]) {
         await deleteKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(suffix));
       }
     }
@@ -12448,27 +12094,11 @@ export async function getKeyStatuses(
   scope?: string,
   scopeId?: string | null,
 ): Promise<ApiKeyStatus[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (keyType) {
-    conditions.push("keyType = ?");
-    params.push(keyType);
-  }
-  if (scope) {
-    conditions.push("scope = ?");
-    params.push(scope);
-    if (scopeId !== undefined) {
-      conditions.push("scopeId = ?");
-      params.push(scopeId ?? "");
-    }
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<ApiKeyStatusRow>(
-    `SELECT * FROM api_key_status ${where} ORDER BY keyIndex`,
-    params,
-  );
+  const rows = await getStorage().repos.config.listKeyStatuses({
+    keyType,
+    scope,
+    scopeId: scopeId === undefined ? undefined : (scopeId ?? ""),
+  });
   return rows.map(rowToApiKeyStatus);
 }
 

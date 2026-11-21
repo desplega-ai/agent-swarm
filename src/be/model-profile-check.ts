@@ -19,9 +19,10 @@ import type {
 import { getModelAwareCredentialVars, keySuffix, splitCredentialPool } from "../utils/credentials";
 import { runtimeHarnessSections } from "../utils/runtime-model-catalog";
 import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
-import { getAgentById, getDbClient, getResolvedConfig } from "./db";
+import { getAgentById, getResolvedConfig } from "./db";
 import { getModelProfileByName, hasUnreadableCredentialAllowlist } from "./db/model-profiles";
 import { isKnownCatalogModel } from "./model-validation";
+import { getStorage } from "./storage";
 
 /** Harnesses whose credential var depends on the model prefix (`getModelAwareCredentialVars`). */
 const MODEL_AWARE_CREDENTIAL_HARNESSES = new Set(["pi", "opencode", "dsh", "grok", "fx"]);
@@ -75,18 +76,13 @@ export function runtimeReadsRepoSecrets(agent: { id: string; isLead?: boolean })
  */
 export async function vcsRepoId(vcsRepo: string | null | undefined): Promise<string | null> {
   if (!vcsRepo?.trim()) return null;
-  const client = getDbClient();
-  const named = await client.query<{ id: string; url: string }>(
-    "SELECT id, url FROM swarm_repos WHERE name = ? ORDER BY name ASC",
-    [vcsRepoName(vcsRepo)],
-  );
+  const repos = getStorage().repos.config;
+  const named = await repos.listRepos({ name: vcsRepoName(vcsRepo) });
   const match = named.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
   if (match) return match.id;
   // A repo registered under a display name (`frontend` for acme/web) has no name hit:
   // match its URL instead, as fetchRepoConfig falls back to.
-  const all = await client.query<{ id: string; url: string }>(
-    "SELECT id, url FROM swarm_repos ORDER BY name ASC",
-  );
+  const all = await repos.listRepos({});
   return all.find((r) => vcsRepoUrlMatches(r.url, vcsRepo))?.id ?? null;
 }
 
@@ -196,14 +192,7 @@ async function keyStatusHasSuffix(
   keyType: string,
   suffixes: string[],
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM api_key_status
-      WHERE keyType = ?
-        AND keySuffix IN (${suffixes.map(() => "?").join(", ")})
-        AND ((scope = 'agent' AND scopeId = ?) OR scope = 'global')`,
-    [keyType, ...suffixes, agentId],
-  );
-  return (row?.n ?? 0) > 0;
+  return getStorage().repos.config.hasKeySuffix(keyType, suffixes, agentId);
 }
 
 async function credentialAllowlistRow(

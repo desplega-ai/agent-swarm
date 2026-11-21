@@ -2,6 +2,8 @@ import type { Capabilities } from "./capabilities";
 import type { DbClient, TransactionOptions } from "./client";
 import type { Dialect } from "./dialect";
 import type { SqlExecutor } from "./executor";
+import type { AgentsRepository } from "./repositories/agents";
+import type { ConfigRepository } from "./repositories/config";
 import type { ExtensionsRepository } from "./repositories/extensions";
 import type { ModelsRepository } from "./repositories/models";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
@@ -11,6 +13,8 @@ export type Repositories = {
   extensions: ExtensionsRepository;
   models: ModelsRepository;
   runtimePools: RuntimePoolsRepository;
+  config: ConfigRepository;
+  agents: AgentsRepository;
 };
 
 /**

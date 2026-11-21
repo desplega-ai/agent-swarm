@@ -1,3 +1,5 @@
+import { agentsContract } from "./agents";
+import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { extensionsContract } from "./extensions";
 import { modelsContract } from "./models";
@@ -10,4 +12,6 @@ export function runStorageContract(engine: ContractEngine): void {
   extensionsContract(engine);
   modelsContract(engine);
   runtimePoolsContract(engine);
+  configContract(engine);
+  agentsContract(engine);
 }
