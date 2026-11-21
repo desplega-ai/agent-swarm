@@ -455,7 +455,7 @@ describe("seed-scripts catalog", () => {
               rows: [["agent", "session_summary", 2, 0]],
             };
           }
-          if (sql.includes("SELECT id, name, source, accessCount, embedding")) {
+          if (sql.includes('SELECT id, name, source, "accessCount", embedding')) {
             return {
               columns: ["id", "name", "source", "accessCount", "embedding"],
               rows: [
@@ -524,7 +524,7 @@ describe("seed-scripts catalog", () => {
               ],
             };
           }
-          if (sql.includes("FROM scripts") && sql.includes("GROUP BY scope, isScratch")) {
+          if (sql.includes("FROM scripts") && sql.includes('GROUP BY scope, "isScratch"')) {
             return {
               columns: ["scope", "isScratch", "count"],
               rows: [

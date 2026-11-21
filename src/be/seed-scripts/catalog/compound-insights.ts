@@ -359,20 +359,43 @@ export default async function compoundInsights(args: any, ctx: any) {
   const includeByAgent = parsed.data.includeByAgent !== false;
   const publishPage = parsed.data.publishPage !== false;
 
-  // `days` is a validated positive int, so it is safe to interpolate into the
-  // SQLite datetime modifier. EXCLUDED_FAIL is a fixed constant list.
-  const w = `datetime('now','-${days} days')`;
+  // The window cutoff is bound as $1 in every windowed query: ISO text, the
+  // format the timestamp columns store on SQLite (timestamptz on Postgres).
+  // script_runs.startedAt is text in both engines with mixed formats, so it
+  // compares as text against the `YYYY-MM-DD HH:MM:SS` cutoff, as before.
+  // EXCLUDED_FAIL is a fixed constant list.
+  const sinceIso = new Date(Date.now() - days * 86_400_000).toISOString();
+  const sinceSpace = `${sinceIso.slice(0, 10)} ${sinceIso.slice(11, 19)}`;
   const exclList = EXCLUDED_FAIL.map((r) => `'${r}'`).join(",");
   // A "real" failure = status failed AND not one of the bookkeeping reasons.
-  const realFail = `t.status='failed' AND (t.failureReason IS NULL OR t.failureReason NOT IN (${exclList}))`;
+  const realFail = `t.status='failed' AND (t."failureReason" IS NULL OR t."failureReason" NOT IN (${exclList}))`;
+
+  // db_query runs the engine's own dialect and each response states it (a
+  // response without the field is SQLite). Portable statements are plain
+  // strings; a statement with no portable form carries one text per dialect.
+  let dialect: "sqlite" | "postgres" | undefined;
+  const query = async (
+    sql: string | { sqlite: string; postgres: string },
+    params: unknown[] = [],
+  ): Promise<any> => {
+    if (typeof sql !== "string" && dialect === undefined) {
+      const probe: any = await ctx.swarm.db_query({ sql: "SELECT 1 AS one" });
+      dialect = (probe?.data ?? probe)?.dialect === "postgres" ? "postgres" : "sqlite";
+    }
+    const text = typeof sql === "string" ? sql : sql[dialect ?? "sqlite"];
+    const res: any = await ctx.swarm.db_query({ sql: text, params });
+    dialect = (res?.data ?? res)?.dialect === "postgres" ? "postgres" : "sqlite";
+    return res;
+  };
 
   const insights: any = { days, generatedAt: new Date().toISOString() };
 
   // Task summary (all agents, direct SQL).
   const statusRows = rowsToObjects(
-    await ctx.swarm.db_query({
-      sql: `SELECT status, count(*) as cnt FROM agent_tasks t WHERE t.createdAt > ${w} GROUP BY status`,
-    }),
+    await query(
+      `SELECT status, count(*) AS cnt FROM agent_tasks t WHERE t."createdAt" > $1 GROUP BY status ORDER BY status`,
+      [sinceIso],
+    ),
   );
   const statusCounts: Record<string, number> = {};
   let total = 0;
@@ -393,25 +416,28 @@ export default async function compoundInsights(args: any, ctx: any) {
 
   // Failure clusters (real failures only, normalized to a 60-char lowercased prefix).
   insights.failureClusters = rowsToObjects(
-    await ctx.swarm.db_query({
-      sql: `SELECT substr(lower(t.failureReason),1,60) as reason, count(*) as count
+    await query(
+      `SELECT substr(lower(t."failureReason"),1,60) AS reason, count(*) AS count
             FROM agent_tasks t
-            WHERE ${realFail} AND t.failureReason IS NOT NULL AND t.createdAt > ${w}
-            GROUP BY reason ORDER BY count DESC LIMIT 10`,
-    }),
+            WHERE ${realFail} AND t."failureReason" IS NOT NULL AND t."createdAt" > $1
+            GROUP BY reason ORDER BY count DESC, reason ASC LIMIT 10`,
+      [sinceIso],
+    ),
   );
 
   // Schedule health (>= 2 runs, > 20% real-failure rate).
   if (includeScheduleHealth) {
     const sh = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT s.name as name, s.id as id, count(t.id) as runs,
-                     sum(case when ${realFail} then 1 else 0 end) as failed
+      await query(
+        `SELECT s.name AS name, s.id AS id, count(t.id) AS runs,
+                     sum(case when ${realFail} then 1 else 0 end) AS failed
               FROM scheduled_tasks s
-              JOIN agent_tasks t ON t.scheduleId = s.id
-              WHERE t.createdAt > ${w} AND t.status != 'cancelled'
-              GROUP BY s.id, s.name HAVING runs >= 2`,
-      }),
+              JOIN agent_tasks t ON t."scheduleId" = s.id
+              WHERE t."createdAt" > $1 AND t.status != 'cancelled'
+              GROUP BY s.id, s.name HAVING count(t.id) >= 2
+              ORDER BY s.name, s.id`,
+        [sinceIso],
+      ),
     );
     insights.scheduleHealth = sh
       .map((r: any) => ({
@@ -429,21 +455,37 @@ export default async function compoundInsights(args: any, ctx: any) {
   // `'%"type":"tool_use"%'` filter excludes tool_result rows (which only carry
   // `tool_use_id`), and instr/substr pull the first tool name per log line.
   // Approximate: a log line with parallel tool_use blocks counts only its first.
+  // Postgres spells instr() strpos() and refuses a negative substr length
+  // (SQLite returns ''), so this statement has one text per dialect.
   if (includeToolUsage) {
     insights.toolUsage = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `WITH tu AS (
+      await query(
+        {
+          sqlite: `WITH tu AS (
                  SELECT substr(content, instr(content,'"type":"tool_use"')) AS tail
                  FROM session_logs
-                 WHERE content LIKE '%"type":"tool_use"%' AND createdAt > ${w}
+                 WHERE content LIKE '%"type":"tool_use"%' AND "createdAt" > $1
                ),
                nm AS (
                  SELECT substr(tail, instr(tail,'"name":"')+8) AS rest
                  FROM tu WHERE instr(tail,'"name":"') > 0
                )
                SELECT substr(rest,1,instr(rest,'"')-1) AS tool, count(*) AS calls
-               FROM nm GROUP BY tool ORDER BY calls DESC LIMIT 25`,
-      }),
+               FROM nm GROUP BY tool ORDER BY calls DESC, tool ASC LIMIT 25`,
+          postgres: `WITH tu AS (
+                 SELECT substr(content, strpos(content,'"type":"tool_use"')) AS tail
+                 FROM session_logs
+                 WHERE content LIKE '%"type":"tool_use"%' AND "createdAt" > $1
+               ),
+               nm AS (
+                 SELECT substr(tail, strpos(tail,'"name":"')+8) AS rest
+                 FROM tu WHERE strpos(tail,'"name":"') > 0
+               )
+               SELECT substr(rest,1,greatest(strpos(rest,'"')-1, 0)) AS tool, count(*) AS calls
+               FROM nm GROUP BY tool ORDER BY calls DESC, tool ASC LIMIT 25`,
+        },
+        [sinceIso],
+      ),
     ).map((r: any) => ({ tool: r.tool, calls: r.calls }));
   }
 
@@ -452,12 +494,12 @@ export default async function compoundInsights(args: any, ctx: any) {
   // SQLite does not expose a scalar cosine_similarity() function.
   if (includeMemoryHealth) {
     const memRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT scope, source, count(*) as cnt,
-                     sum(case when accessCount = 0 then 1 else 0 end) as zeroAccess,
-                     sum(case when sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL then 1 else 0 end) as referenced
-              FROM agent_memory GROUP BY scope, source`,
-      }),
+      await query(
+        `SELECT scope, source, count(*) as cnt,
+                     sum(case when "accessCount" = 0 then 1 else 0 end) AS "zeroAccess",
+                     sum(case when "sourceTaskId" IS NOT NULL OR "sourcePath" IS NOT NULL then 1 else 0 end) AS referenced
+              FROM agent_memory GROUP BY scope, source ORDER BY scope, source`,
+      ),
     );
     const totalMem = memRows.reduce((s: number, r: any) => s + (r.cnt ?? 0), 0);
     const bySource: any = {};
@@ -484,16 +526,16 @@ export default async function compoundInsights(args: any, ctx: any) {
       0,
     );
     const popularButUseless = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT id, name, source, accessCount, alpha, beta,
-                     round(alpha / nullif(alpha + beta, 0), 3) as usefulness,
-                     substr(content, 1, 180) as preview
+      await query(
+        `SELECT id, name, source, "accessCount", alpha, beta,
+                     round(CAST(alpha / nullif(alpha + beta, 0) AS numeric), 3) AS usefulness,
+                     substr(content, 1, 180) AS preview
               FROM agent_memory
               WHERE source IN ('session_summary','task_completion')
-                AND accessCount >= 5
+                AND "accessCount" >= 5
                 AND alpha <= beta
-              ORDER BY accessCount DESC, beta DESC LIMIT 10`,
-      }),
+              ORDER BY "accessCount" DESC, beta DESC, id ASC LIMIT 10`,
+      ),
     ).map((r: any) => ({
       id: r.id,
       name: r.name,
@@ -503,24 +545,25 @@ export default async function compoundInsights(args: any, ctx: any) {
       preview: r.preview,
     }));
     const zeroAccessStaleRefRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT source, count(*) as count
+      await query(
+        `SELECT source, count(*) as count
               FROM agent_memory
-              WHERE accessCount = 0
-                AND (sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL)
-                AND createdAt < datetime('now','-${days} days')
-              GROUP BY source ORDER BY count DESC`,
-      }),
+              WHERE "accessCount" = 0
+                AND ("sourceTaskId" IS NOT NULL OR "sourcePath" IS NOT NULL)
+                AND "createdAt" < $1
+              GROUP BY source ORDER BY count DESC, source ASC`,
+        [sinceIso],
+      ),
     );
 
     const similarityRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT id, name, source, accessCount, embedding
+      await query(
+        `SELECT id, name, source, "accessCount", embedding
               FROM agent_memory
               WHERE source IN ('session_summary','task_completion')
                 AND embedding IS NOT NULL
-              ORDER BY accessCount DESC LIMIT 30`,
-      }),
+              ORDER BY "accessCount" DESC, id ASC LIMIT 30`,
+      ),
     );
     let strongestAutoSnapshotPair: any = null;
     const vectors = similarityRows
@@ -572,17 +615,34 @@ export default async function compoundInsights(args: any, ctx: any) {
   // triplets are good prompts for a future seed script.
   if (includeScriptCandidates) {
     const rows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `WITH raw AS (
-                 SELECT rowid AS seq, sessionId, iteration, lineNumber, content,
-                        json_extract(content, '$.tool_name') as jsonToolName
+      // rowid (insertion order) is "_rowid" on Postgres, and the JSON field is
+      // read with json_extract on SQLite, ->> on Postgres; a line that is not a
+      // JSON object has no tool_name on either engine.
+      await query(
+        {
+          sqlite: `WITH raw AS (
+                 SELECT rowid AS seq, "sessionId", iteration, "lineNumber", content,
+                        CASE WHEN json_valid(content) THEN json_extract(content, '$.tool_name') END AS "jsonToolName"
                  FROM session_logs
-                 WHERE createdAt > ${w}
-                   AND (content LIKE '%"type":"tool_use"%' OR json_extract(content, '$.tool_name') IS NOT NULL)
+                 WHERE "createdAt" > $1
                )
-               SELECT sessionId, iteration, lineNumber, jsonToolName, content
-               FROM raw ORDER BY sessionId, iteration, seq LIMIT 100`,
-      }),
+               SELECT "sessionId", iteration, "lineNumber", "jsonToolName", content
+               FROM raw
+               WHERE content LIKE '%"type":"tool_use"%' OR "jsonToolName" IS NOT NULL
+               ORDER BY "sessionId", iteration, seq LIMIT 100`,
+          postgres: `WITH raw AS (
+                 SELECT "_rowid" AS seq, "sessionId", iteration, "lineNumber", content,
+                        CASE WHEN content IS JSON OBJECT THEN (content::jsonb)->>'tool_name' END AS "jsonToolName"
+                 FROM session_logs
+                 WHERE "createdAt" > $1
+               )
+               SELECT "sessionId", iteration, "lineNumber", "jsonToolName", content
+               FROM raw
+               WHERE content LIKE '%"type":"tool_use"%' OR "jsonToolName" IS NOT NULL
+               ORDER BY "sessionId", iteration, seq LIMIT 100`,
+        },
+        [sinceIso],
+      ),
     );
     const bySession = new Map<string, string[]>();
     for (const row of rows) {
@@ -618,52 +678,85 @@ export default async function compoundInsights(args: any, ctx: any) {
   // and are intentionally not added to run totals.
   if (includeScriptUsage) {
     const runRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `WITH journal_durations AS (
-                 SELECT runId, sum(durationMs) AS journalDurationMs
+      // The run duration fallback, rounded to the millisecond: julianday() on
+      // SQLite, epoch arithmetic on Postgres (startedAt is text there too: read
+      // as UTC in either format).
+      await query(
+        {
+          sqlite: `WITH journal_durations AS (
+                 SELECT "runId", sum("durationMs") AS "journalDurationMs"
                  FROM script_run_journal
-                 WHERE durationMs IS NOT NULL
-                 GROUP BY runId
+                 WHERE "durationMs" IS NOT NULL
+                 GROUP BY "runId"
                )
-               SELECT sr.scriptName, sr.kind, sr.status, sr.startedAt, sr.finishedAt,
+               SELECT sr."scriptName", sr.kind, sr.status, sr."startedAt", sr."finishedAt",
                       COALESCE(
-                        jd.journalDurationMs,
+                        jd."journalDurationMs",
                         CASE
-                          WHEN sr.finishedAt IS NOT NULL
-                          THEN CAST((julianday(sr.finishedAt) - julianday(sr.startedAt)) * 86400000 AS INTEGER)
+                          WHEN sr."finishedAt" IS NOT NULL
+                          THEN CAST(round((julianday(sr."finishedAt") - julianday(sr."startedAt")) * 86400000) AS INTEGER)
                           ELSE NULL
                         END
-                      ) AS durationMs
+                      ) AS "durationMs"
                FROM script_runs sr
-               LEFT JOIN journal_durations jd ON jd.runId = sr.id
-               WHERE sr.startedAt > ${w}
-               ORDER BY sr.startedAt DESC`,
-      }),
+               LEFT JOIN journal_durations jd ON jd."runId" = sr.id
+               WHERE sr."startedAt" > $1
+               ORDER BY sr."startedAt" DESC, sr.id ASC`,
+          postgres: `WITH journal_durations AS (
+                 SELECT "runId", sum("durationMs") AS "journalDurationMs"
+                 FROM script_run_journal
+                 WHERE "durationMs" IS NOT NULL
+                 GROUP BY "runId"
+               )
+               SELECT sr."scriptName", sr.kind, sr.status, sr."startedAt", sr."finishedAt",
+                      COALESCE(
+                        jd."journalDurationMs",
+                        CASE
+                          WHEN sr."finishedAt" IS NOT NULL
+                          THEN CAST(round(EXTRACT(EPOCH FROM (sr."finishedAt" - (CAST(sr."startedAt" AS timestamp) AT TIME ZONE 'UTC'))) * 1000) AS bigint)
+                          ELSE NULL
+                        END
+                      ) AS "durationMs"
+               FROM script_runs sr
+               LEFT JOIN journal_durations jd ON jd."runId" = sr.id
+               WHERE sr."startedAt" > $1
+               ORDER BY sr."startedAt" DESC, sr.id ASC`,
+        },
+        [sinceSpace],
+      ),
     );
     const creationRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT scope, isScratch, count(*) AS count
+      await query(
+        `SELECT scope, "isScratch", count(*) AS count
               FROM scripts
-              WHERE createdAt > ${w}
-              GROUP BY scope, isScratch`,
-      }),
+              WHERE "createdAt" > $1
+              GROUP BY scope, "isScratch"
+              ORDER BY scope, "isScratch"`,
+        [sinceIso],
+      ),
     );
     const editRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT s.scope, count(*) AS count
+      await query(
+        `SELECT s.scope, count(*) AS count
               FROM script_versions sv
-              JOIN scripts s ON s.id = sv.scriptId
-              WHERE sv.changedAt > ${w} AND sv.version > 1
-              GROUP BY s.scope`,
-      }),
+              JOIN scripts s ON s.id = sv."scriptId"
+              WHERE sv."changedAt" > $1 AND sv.version > 1
+              GROUP BY s.scope
+              ORDER BY s.scope`,
+        [sinceIso],
+      ),
     );
     const scriptToolRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `WITH tu AS (
+      // instr() and json_extract() on SQLite; strpos() (no negative substr
+      // length) and ->> on Postgres. A line that is not a JSON object has no
+      // tool_name on either engine.
+      await query(
+        {
+          sqlite: `WITH tu AS (
                  SELECT substr(content, instr(content,'"type":"tool_use"')) AS tail,
-                        json_extract(content, '$.tool_name') as jsonToolName
+                        CASE WHEN json_valid(content) THEN json_extract(content, '$.tool_name') END AS "jsonToolName"
                  FROM session_logs
-                 WHERE createdAt > ${w}
+                 WHERE "createdAt" > $1
                    AND (content LIKE '%script-run%'
                      OR content LIKE '%launch-script-run%'
                      OR content LIKE '%get-script-run%'
@@ -671,7 +764,7 @@ export default async function compoundInsights(args: any, ctx: any) {
                ),
                nm AS (
                  SELECT COALESCE(
-                          jsonToolName,
+                          "jsonToolName",
                           CASE
                             WHEN instr(tail,'"name":"') > 0
                             THEN substr(substr(tail, instr(tail,'"name":"')+8), 1, instr(substr(tail, instr(tail,'"name":"')+8), '"')-1)
@@ -684,8 +777,36 @@ export default async function compoundInsights(args: any, ctx: any) {
                FROM nm
                WHERE tool IS NOT NULL AND tool LIKE '%script%'
                GROUP BY tool
-               ORDER BY calls DESC`,
-      }),
+               ORDER BY calls DESC, tool ASC`,
+          postgres: `WITH tu AS (
+                 SELECT substr(content, strpos(content,'"type":"tool_use"')) AS tail,
+                        CASE WHEN content IS JSON OBJECT THEN (content::jsonb)->>'tool_name' END AS "jsonToolName"
+                 FROM session_logs
+                 WHERE "createdAt" > $1
+                   AND (content LIKE '%script-run%'
+                     OR content LIKE '%launch-script-run%'
+                     OR content LIKE '%get-script-run%'
+                     OR content LIKE '%list-script-runs%')
+               ),
+               nm AS (
+                 SELECT COALESCE(
+                          "jsonToolName",
+                          CASE
+                            WHEN strpos(tail,'"name":"') > 0
+                            THEN substr(substr(tail, strpos(tail,'"name":"')+8), 1, greatest(strpos(substr(tail, strpos(tail,'"name":"')+8), '"')-1, 0))
+                            ELSE NULL
+                          END
+                        ) AS tool
+                 FROM tu
+               )
+               SELECT tool, count(*) AS calls
+               FROM nm
+               WHERE tool IS NOT NULL AND tool LIKE '%script%'
+               GROUP BY tool
+               ORDER BY calls DESC, tool ASC`,
+        },
+        [sinceIso],
+      ),
     );
     insights.scriptUsage = summarizeScriptUsage(runRows, creationRows, editRows, scriptToolRows);
   }
@@ -694,16 +815,18 @@ export default async function compoundInsights(args: any, ctx: any) {
   // the headline per-task average, and null taskId rows are reported separately.
   if (includeCostAndTokens) {
     const costRows = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT sc.taskId, sc.agentId, COALESCE(a.name, sc.agentId, 'unknown') AS agentName,
+      await query(
+        `SELECT sc."taskId", sc."agentId", COALESCE(a.name, sc."agentId", 'unknown') AS "agentName",
                      COALESCE(a.harness_provider, a.provider, 'unknown') AS provider,
-                     sc.totalCostUsd, sc.inputTokens, sc.outputTokens, sc.cacheReadTokens,
-                     sc.cacheWriteTokens, sc.reasoningOutputTokens, sc.thinkingTokens,
-                     sc.numTurns, sc.model, sc.costSource
+                     sc."totalCostUsd", sc."inputTokens", sc."outputTokens", sc."cacheReadTokens",
+                     sc."cacheWriteTokens", sc."reasoningOutputTokens", sc."thinkingTokens",
+                     sc."numTurns", sc.model, sc."costSource"
               FROM session_costs sc
-              LEFT JOIN agents a ON a.id = sc.agentId
-              WHERE sc.createdAt > ${w}`,
-      }),
+              LEFT JOIN agents a ON a.id = sc."agentId"
+              WHERE sc."createdAt" > $1
+              ORDER BY sc."createdAt", sc.id`,
+        [sinceIso],
+      ),
     );
     insights.costAndTokens = summarizeCostAndTokens(costRows);
   }
@@ -711,14 +834,15 @@ export default async function compoundInsights(args: any, ctx: any) {
   // Per-agent breakdown — covers every agent that ran a task in the window.
   if (includeByAgent) {
     insights.byAgent = rowsToObjects(
-      await ctx.swarm.db_query({
-        sql: `SELECT a.name as agent, count(*) as total,
-                     sum(case when t.status='completed' then 1 else 0 end) as completed,
-                     sum(case when ${realFail} then 1 else 0 end) as failed
-              FROM agent_tasks t LEFT JOIN agents a ON a.id = t.agentId
-              WHERE t.createdAt > ${w} AND t.agentId IS NOT NULL
-              GROUP BY t.agentId, a.name ORDER BY total DESC LIMIT 30`,
-      }),
+      await query(
+        `SELECT a.name AS agent, count(*) AS total,
+                     sum(case when t.status='completed' then 1 else 0 end) AS completed,
+                     sum(case when ${realFail} then 1 else 0 end) AS failed
+              FROM agent_tasks t LEFT JOIN agents a ON a.id = t."agentId"
+              WHERE t."createdAt" > $1 AND t."agentId" IS NOT NULL
+              GROUP BY t."agentId", a.name ORDER BY total DESC, t."agentId" ASC LIMIT 30`,
+        [sinceIso],
+      ),
     ).map((r: any) => ({
       agent: r.agent,
       total: r.total,
