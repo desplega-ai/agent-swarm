@@ -736,8 +736,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "362_favorites_app.sql");
       // 367 alters workflow_runs, which this fixture does not create.
       markMigrationApplied(database, "367_workflow_run_principal.sql");
-      // 369 alters pages, which this fixture does not create (see 269).
-      markMigrationApplied(database, "369_page_kit.sql");
+      // 371 alters pages, which this fixture does not create (see 269).
+      markMigrationApplied(database, "371_page_kit.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
