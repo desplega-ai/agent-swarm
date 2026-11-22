@@ -216,6 +216,13 @@ describe("allowlisted senders create tasks", () => {
       (await handlePullRequestCommented(azureComment("allowed-az@example.test"))).created,
     ).toBe(true);
   });
+
+  test("AZURE_DEVOPS_ALLOWED_ACTORS name without an email creates a task with no linked user", async () => {
+    process.env.AZURE_DEVOPS_ALLOWED_ACTORS = "CONTOSO\\az-builder";
+    const result = await handlePullRequestCommented(azureComment("contoso\\az-builder"));
+    expect(result.created).toBe(true);
+    expect(await findUserByExternalId("azure-devops", "contoso\\az-builder")).toBeNull();
+  });
 });
 
 describe("controls", () => {
