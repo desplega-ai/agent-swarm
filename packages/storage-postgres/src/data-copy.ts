@@ -503,6 +503,16 @@ export async function copyIntoPostgres(
           await conn.unsafe("ROLLBACK");
           return report;
         }
+        // The SQLite migrations older than this chain stay in the history:
+        // queries read their applied_at (the session cost credential fallback
+        // reads migration 307's). The runner ignores versions outside its chain.
+        const chainStart = chain[0]?.version ?? Number.POSITIVE_INFINITY;
+        for (const m of source.migrationHistory().filter((h) => h.version < chainStart)) {
+          await conn.unsafe(
+            "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES ($1, $2, $3::timestamptz, $4)",
+            [m.version, m.name, m.appliedAt, m.checksum],
+          );
+        }
         for (const migration of reapplyAfterCopy(chain, options.migrationsDir)) {
           const result = (await conn.unsafe(migration.sql)) as { count?: number };
           log(`[db-copy] reapplied ${migration.name}`);

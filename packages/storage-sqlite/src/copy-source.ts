@@ -108,6 +108,20 @@ export function openSqliteCopySource(path: string): CopySource {
         .get();
       return row?.v === null || row?.v === undefined ? null : Number(row.v);
     },
+    migrationHistory() {
+      if (this.migrationHead() === null) return [];
+      return db
+        .query<{ version: bigint; name: string; applied_at: string; checksum: string }, []>(
+          "SELECT version, name, applied_at, checksum FROM _migrations ORDER BY version",
+        )
+        .all()
+        .map((r) => ({
+          version: Number(r.version),
+          name: r.name,
+          appliedAt: r.applied_at,
+          checksum: r.checksum,
+        }));
+    },
     tables: () => tables,
     skippedTables: () => skipped,
     *rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]> {

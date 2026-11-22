@@ -10,6 +10,7 @@ export {
 export type {
   CopyCell,
   CopyColumn,
+  CopyMigration,
   CopyProblem,
   CopyReport,
   CopyRow,

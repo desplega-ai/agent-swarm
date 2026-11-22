@@ -36,9 +36,14 @@ export type CopyRow = {
 /** A source table the copy does not carry, with the reason. */
 export type SkippedCopyTable = { name: string; reason: string };
 
+/** One applied migration of the source, as its `_migrations` row records it. */
+export type CopyMigration = { version: number; name: string; appliedAt: string; checksum: string };
+
 export interface CopySource {
   /** Highest applied migration ordinal, or null when the source has none. */
   migrationHead(): number | null;
+  /** Every applied migration of the source, in version order. */
+  migrationHistory(): CopyMigration[];
   /** The data tables to copy (migration bookkeeping and engine-internal tables excluded). */
   tables(): CopyTable[];
   /** Engine-internal tables that the target rebuilds itself (full text, vectors). */

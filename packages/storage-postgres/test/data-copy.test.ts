@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CopyCell, CopyRow, CopySource, CopyTable } from "@desplega/storage";
+import type { CopyCell, CopyMigration, CopyRow, CopySource, CopyTable } from "@desplega/storage";
 import { copyIntoPostgres } from "../src/data-copy";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 
@@ -87,12 +87,19 @@ function goodItems(): CopyRow[] {
   ];
 }
 
+/** SQLite history: version 0 is older than the test chain, version 1 is the chain's. */
+const HISTORY: CopyMigration[] = [
+  { version: 0, name: "000_legacy", appliedAt: "2026-01-02T03:04:05.678Z", checksum: "c0" },
+  { version: 1, name: "001_chain", appliedAt: "2026-11-20T00:00:00.000Z", checksum: "c1" },
+];
+
 function source(
   tables: Record<string, { table: CopyTable; rows: CopyRow[] }>,
   head = 1,
 ): CopySource {
   return {
     migrationHead: () => head,
+    migrationHistory: () => HISTORY,
     tables: () => Object.values(tables).map((t) => t.table),
     skippedTables: () => [],
     *rows(table, batchSize) {
@@ -171,6 +178,19 @@ describe("copyIntoPostgres", () => {
       "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
     );
     expect(next[0].id).toBe(6);
+    // SQLite migrations older than the chain keep their applied_at; the
+    // chain's own rows stay as the Postgres runner wrote them.
+    const history = await sql.unsafe(
+      "SELECT version::int AS v, name, applied_at AS at, checksum FROM _migrations ORDER BY version",
+    );
+    expect(history[0]).toEqual({
+      v: 0,
+      name: "000_legacy",
+      at: new Date("2026-01-02T03:04:05.678Z"),
+      checksum: "c0",
+    });
+    expect(history.map((r: { v: number }) => r.v)).toEqual([0, 1]);
+    expect(history[1].checksum).not.toBe("c1");
     // The user trigger is back on.
     await expect(sql.unsafe(`INSERT INTO items (id, flag) VALUES ('z', true)`)).rejects.toThrow(
       /trigger fired/,
