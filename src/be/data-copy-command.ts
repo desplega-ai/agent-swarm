@@ -71,15 +71,17 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   for (const rebuilt of report.rebuilt) {
     console.log(`[db-copy] rebuilt ${rebuilt.table}: ${rebuilt.rows} rows (${rebuilt.reason})`);
   }
-  for (const problem of report.problems) {
+  for (const problem of report.problems.slice(0, 200)) {
     console.error(
       scrubSecrets(
         `[db-copy] cannot store ${problem.table}.${problem.column} (${problem.row}): ${problem.reason}`,
       ),
     );
   }
-  if (report.problemCount > report.problems.length) {
-    console.error(`[db-copy] ... and ${report.problemCount - report.problems.length} more`);
+  if (report.problemCount > 200) {
+    console.error(
+      `[db-copy] ... and ${report.problemCount - 200} more${parsed.json ? ` (all in ${parsed.json})` : " (--json lists all)"}`,
+    );
   }
   for (const table of report.tables.filter((t) => !t.equal)) {
     console.error(

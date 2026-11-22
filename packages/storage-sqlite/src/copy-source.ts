@@ -18,7 +18,7 @@ type XInfoRow = { name: string; type: string; pk: bigint | number; hidden: bigin
 /** Tables that hold bookkeeping, not data. The target keeps its own copy of each. */
 const BOOKKEEPING: Record<string, string> = {
   _migrations: "migration bookkeeping: the target records its own chain",
-  sqlite_sequence: "SQLite AUTOINCREMENT counters: the copy resets the target sequences",
+  sqlite_sequence: "SQLite AUTOINCREMENT counters: the copy carries them to the target sequences",
 };
 
 /** Shadow table suffixes of FTS5 and sqlite-vec (vec0). A table like `agent_tasks_fts_state` is data. */
@@ -124,6 +124,16 @@ export function openSqliteCopySource(path: string): CopySource {
     },
     tables: () => tables,
     skippedTables: () => skipped,
+    autoincrementCounters() {
+      if (!listed.some((t) => t.name === "sqlite_sequence")) return {};
+      const counters: Record<string, number> = {};
+      for (const row of db
+        .query<{ name: string; seq: bigint | number }, []>("SELECT name, seq FROM sqlite_sequence")
+        .all()) {
+        counters[row.name] = Number(row.seq);
+      }
+      return counters;
+    },
     *rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]> {
       const pk = primaryKey(table.name);
       const select = table.columns

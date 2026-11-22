@@ -48,6 +48,12 @@ export interface CopySource {
   tables(): CopyTable[];
   /** Engine-internal tables that the target rebuilds itself (full text, vectors). */
   skippedTables(): SkippedCopyTable[];
+  /**
+   * The AUTOINCREMENT high-water mark of each table that has one (SQLite
+   * `sqlite_sequence`). It can exceed the largest surviving key when the
+   * newest rows were deleted, and a key is never reused below it.
+   */
+  autoincrementCounters?(): Record<string, number>;
   /** Every row of `table`, in insertion order, in batches of at most `batchSize`. */
   rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]>;
   close(): void;

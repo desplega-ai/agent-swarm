@@ -82,6 +82,22 @@ function chainSeededTables(migrationsDir: string): Set<string> {
   return seeded;
 }
 
+/**
+ * Rows the chain itself seeds per table: one per top-level `INSERT INTO`
+ * statement (the baseline writes one row per statement). An INSERT inside a
+ * trigger or function body is indented, so it does not count: those tables
+ * start empty.
+ */
+function chainSeedRowCounts(migrationsDir: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const migration of loadPostgresMigrations(migrationsDir)) {
+    for (const match of migration.sql.matchAll(/^INSERT\s+INTO\s+"?([A-Za-z0-9_]+)"?/gim)) {
+      if (match[1]) counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
 async function readTargetTables(conn: Conn): Promise<Map<string, TargetTable>> {
   const rows = await conn.unsafe(`
     SELECT c.relname AS "table", a.attname AS "column",
@@ -127,7 +143,8 @@ async function readTargetTables(conn: Conn): Promise<Map<string, TargetTable>> {
 
 type Converted = { ok: true; value: string | null } | { ok: false; reason: string };
 
-const utf8 = new TextDecoder("utf-8", { fatal: true });
+// ignoreBOM keeps a leading U+FEFF: it is part of the stored value, not a byte order mark.
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const ISO_TIMESTAMP =
   /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?)?$/;
 
@@ -359,7 +376,8 @@ export async function copyIntoPostgres(
   options: PostgresCopyOptions,
 ): Promise<CopyReport> {
   const log = options.log ?? ((line: string) => console.log(line));
-  const maxProblems = options.maxProblems ?? 200;
+  // Every location stays in the report; the CLI prints only the first ones.
+  const maxProblems = options.maxProblems ?? Number.POSITIVE_INFINITY;
   const report: CopyReport = {
     ok: false,
     problems: [],
@@ -410,6 +428,21 @@ export async function copyIntoPostgres(
         const rows = await conn.unsafe(`SELECT EXISTS(SELECT 1 FROM ${quote(name)}) AS present`);
         if (rows[0]?.present === true) occupied.push(name);
       }
+      // A seeded table may hold the chain's own seed rows and nothing else.
+      // The copy replaces those rows, so an operator row there would be lost.
+      const seedCounts = chainSeedRowCounts(options.migrationsDir);
+      for (const name of seeded) {
+        const target = targets.get(name);
+        if (!target) continue;
+        const expected = seedCounts.get(name) ?? 0;
+        const hasRowid = target.columns.some((c) => c.name === TABLE_ORDER_KEY);
+        const rows = await conn.unsafe(
+          `SELECT COUNT(*)::bigint AS n${hasRowid ? `, MAX(${quote(TABLE_ORDER_KEY)})::bigint AS top` : ""} FROM ${quote(name)}`,
+        );
+        const count = Number(rows[0]?.n ?? 0);
+        const top = hasRowid && rows[0]?.top !== null ? Number(rows[0]?.top) : 0;
+        if (count > expected || top > expected) occupied.push(name);
+      }
       if (occupied.length > 0) {
         report.error = `the target database holds rows (tables: ${occupied.slice(0, 10).join(", ")}). Copy into an empty database only.`;
         return report;
@@ -448,6 +481,15 @@ export async function copyIntoPostgres(
           const sum = await copyTable(conn, source, table, target, options, problem, log);
           checksums.set(table.name, sum.checksum);
           if (table.name === "agent_memory" && vectorTable) {
+            const widths = embeddingWidths(sum.embeddings);
+            if (sum.embeddings.length > 0 && !widths.has(options.embeddingDimensions)) {
+              report.error =
+                `the source embeddings have ${[...widths.keys()].join(", ")} dimensions, ` +
+                `but this copy indexes ${options.embeddingDimensions}: no vector would be built. ` +
+                `Set EMBEDDING_DIMENSIONS=${[...widths.keys()][0]} (the value the API uses), then copy again. Nothing was written.`;
+              await conn.unsafe("ROLLBACK");
+              return report;
+            }
             vectors = await insertVectors(conn, sum.embeddings, options.embeddingDimensions);
           }
         }
@@ -467,12 +509,19 @@ export async function copyIntoPostgres(
         // Run the deferred foreign key checks now: a violation fails here, and
         // ALTER TABLE refuses a table with pending trigger events.
         await conn.unsafe("SET CONSTRAINTS ALL IMMEDIATE");
+        // A SQLite AUTOINCREMENT key never goes below its high-water mark, even
+        // after the newest rows were deleted: carry the counter to the key column.
+        const counters = source.autoincrementCounters?.() ?? {};
         for (const table of targets.values()) {
-          for (const column of table.columns.filter((c) => c.identity)) {
+          const identity = table.columns.filter((c) => c.identity);
+          const keyColumn =
+            identity.find((c) => c.name !== TABLE_ORDER_KEY) ?? identity[0] ?? undefined;
+          for (const column of identity) {
+            const counter = column === keyColumn ? (counters[table.name] ?? 0) : 0;
             await conn.unsafe(
               `SELECT setval(pg_get_serial_sequence(${quoteLiteral(quote(table.name))}, ${quoteLiteral(column.name)}),
-                      COALESCE((SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}), 1),
-                      (SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}) IS NOT NULL)`,
+                      GREATEST(COALESCE((SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}), 0), ${counter}, 1),
+                      GREATEST(COALESCE((SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}), 0), ${counter}) > 0)`,
             );
           }
           if (table.hasUserTriggers)
@@ -634,6 +683,16 @@ async function copyTable(
   }
   log(`[db-copy] ${table.name}: ${failed ? "values refused" : `${copied} rows`}`);
   return { checksum, embeddings };
+}
+
+/** Embedding widths (floats) found in the source, with how many embeddings have each. */
+function embeddingWidths(embeddings: [string, Uint8Array][]): Map<number, number> {
+  const widths = new Map<number, number>();
+  for (const [, bytes] of embeddings) {
+    const width = bytes.byteLength / 4;
+    widths.set(width, (widths.get(width) ?? 0) + 1);
+  }
+  return widths;
 }
 
 async function insertVectors(
