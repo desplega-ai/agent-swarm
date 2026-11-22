@@ -1,4 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
+import { runCli } from "../cli";
 import { type ApiClient, asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -118,7 +122,7 @@ export const dataCopy: Scenario = {
       const kvBefore = await api("GET", `/api/kv/${kvKey}`, { agentId });
       expectStatus(kvBefore, [200], "kv get on the source");
 
-      const { cli, target, recopy } = await pair.copy();
+      const { cli, target, recopy, sourcePath, targetUrl } = await pair.copy();
       expect(
         cli.exitCode === 0,
         `db-copy exited ${cli.exitCode}: ${cli.stderr.slice(-2000)}${cli.stdout.slice(-1000)}`,
@@ -186,6 +190,36 @@ export const dataCopy: Scenario = {
         again.stderr.includes("an API process holds the target database"),
         `a second copy did not name the running API: ${again.stderr.slice(-800)}`,
       );
+
+      // --json never names the source: the report would replace the rollback file.
+      const sourceHash = () => createHash("sha256").update(readFileSync(sourcePath)).digest("hex");
+      const hashBefore = sourceHash();
+      const links = mkdtempSync(join(tmpdir(), "db-copy-json-"));
+      try {
+        const symlink = join(links, "report-symlink.json");
+        const hardlink = join(links, "report-hardlink.json");
+        symlinkSync(sourcePath, symlink);
+        linkSync(sourcePath, hardlink);
+        for (const report of [
+          sourcePath,
+          relative(process.cwd(), sourcePath),
+          `${sourcePath}-wal`,
+          symlink,
+          hardlink,
+        ]) {
+          const refused = await runCli(
+            ["db-copy", "--from", sourcePath, "--to", targetUrl, "--json", report],
+            { cwd: process.cwd(), env: { DESPLEGA_TELEMETRY_ENV: "test" }, timeoutMs: 120_000 },
+          );
+          expect(
+            refused.exitCode === 2 && refused.stderr.includes("is the SQLite source"),
+            `db-copy --json ${report} exited ${refused.exitCode}, expected 2: ${refused.stderr.slice(-600)}`,
+          );
+          expect(sourceHash() === hashBefore, `db-copy --json ${report} changed the source file`);
+        }
+      } finally {
+        rmSync(links, { recursive: true, force: true });
+      }
     } finally {
       await pair.stop();
     }

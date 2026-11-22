@@ -124,6 +124,9 @@ export type DataCopyPair = {
     target: ApiClient;
     /** The same copy again into the target database, while the target API holds it. */
     recopy: () => Promise<CliResult>;
+    /** The source SQLite file (its API is stopped) and the target database URL. */
+    sourcePath: string;
+    targetUrl: string;
   }>;
   stop: () => Promise<void>;
 };
@@ -397,6 +400,8 @@ async function bootStack(
               cli,
               target: createApiClient(target.baseUrl, target.apiKey),
               recopy: () => copyCli(target.databaseUrl ?? ""),
+              sourcePath: source.dbPath,
+              targetUrl: target.databaseUrl ?? "",
             };
           },
           async stop() {
