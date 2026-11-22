@@ -496,6 +496,13 @@ export async function copyIntoPostgres(
             entry.sourceRows === entry.targetRows && entry.sourceChecksum === entry.targetChecksum;
           report.tables.push(entry);
         }
+        // A difference rolls the copy back: a committed mismatch would leave
+        // rows that make every later run refuse a non-empty target.
+        if (!report.tables.every((t) => t.equal)) {
+          report.error = "a row count or checksum differs (see tables); nothing was written";
+          await conn.unsafe("ROLLBACK");
+          return report;
+        }
         for (const migration of reapplyAfterCopy(chain, options.migrationsDir)) {
           const result = (await conn.unsafe(migration.sql)) as { count?: number };
           log(`[db-copy] reapplied ${migration.name}`);
@@ -507,8 +514,7 @@ export async function copyIntoPostgres(
         }
         await conn.unsafe("COMMIT");
         committed = true;
-        report.ok = report.tables.every((t) => t.equal);
-        if (!report.ok) report.error = "a row count or checksum differs (see tables)";
+        report.ok = true;
         return report;
       } catch (error) {
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});

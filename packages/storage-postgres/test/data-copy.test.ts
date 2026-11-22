@@ -218,6 +218,23 @@ describe("copyIntoPostgres", () => {
     expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
   });
 
+  test("a checksum difference rolls the copy back, so a re-run is not refused", async () => {
+    // Second precision drops the .123 of the first item: the rows store, but
+    // the target checksum differs from the source one.
+    writeFileSync(
+      join(dir, "001_chain.sql"),
+      CHAIN.replace("at timestamptz,", "at timestamptz(0),"),
+    );
+    const report = await run(fullSource());
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/checksum differs.*nothing was written/);
+    expect(report.tables.find((t) => t.table === "items")?.equal).toBe(false);
+    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+    const again = await run(fullSource());
+    expect(again.error).toMatch(/checksum differs/);
+  });
+
   test("refuses a target with rows and a source at another migration head", async () => {
     expect((await run(fullSource())).ok).toBe(true);
     const again = await run(fullSource());
