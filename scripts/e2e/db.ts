@@ -231,7 +231,7 @@ export async function preparePostgresQueryReader(databaseUrl: string): Promise<s
     // before the API boots (for example scripts/e2e/fixtures/postgres-bench-seed.sql).
     const seedFile = process.env.E2E_POSTGRES_SEED_SQL;
     if (seedFile) await sql.unsafe(await Bun.file(seedFile).text());
-    await sql.unsafe(`CREATE ROLE "${role}" LOGIN`);
+    await sql.unsafe(`CREATE ROLE "${role}" LOGIN PASSWORD '${role}'`);
     await sql.unsafe(`GRANT CONNECT ON DATABASE "${database}" TO "${role}"`);
     await sql.unsafe(`GRANT USAGE ON SCHEMA public TO "${role}"`);
     await sql.unsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO "${role}"`);
@@ -242,7 +242,8 @@ export async function preparePostgresQueryReader(databaseUrl: string): Promise<s
   }
   const url = new URL(databaseUrl);
   url.username = role;
-  url.password = "";
+  // A password, not trust: CI's Postgres image requires scram over TCP.
+  url.password = role;
   return url.toString();
 }
 

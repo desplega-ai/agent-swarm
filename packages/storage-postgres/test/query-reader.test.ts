@@ -23,7 +23,8 @@ const role = `st_reader_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 function readerUrl(): string {
   const url = new URL(db.url);
   url.username = role;
-  url.password = "";
+  // A password, not trust: CI's Postgres image requires scram over TCP.
+  url.password = role;
   return url.toString();
 }
 
@@ -46,7 +47,7 @@ beforeAll(async () => {
   await admin.unsafe(
     `INSERT INTO agents VALUES ('a1', true, '{"k":1}', 42, '2026-11-20T10:00:00Z'), ('a2', false, NULL, 2, NULL)`,
   );
-  await admin.unsafe(`CREATE ROLE ${role} LOGIN`);
+  await admin.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD '${role}'`);
   await admin.unsafe(`GRANT CONNECT ON DATABASE ${db.name} TO ${role}`);
   await admin.unsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
   await admin.unsafe(`GRANT SELECT ON agents TO ${role}`);
