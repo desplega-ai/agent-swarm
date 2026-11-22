@@ -97,6 +97,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Investigating a payroll discrepancy for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-payroll-discrepancy-review). Reference.
 - [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-service-capacity-planning). Reference.
 - [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/maintenance-work-order-triage). Reference.
+- [Preparing an unusual facility energy reading for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/facility-energy-anomaly-review). Reference.
 - [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/support-knowledge-conflict-review). Reference.
 - [Hot Patterns](https://docs.agent-swarm.dev/docs/playbooks/patterns). Reference.
 - [Pattern: Litmus Tests (LLM-as-Judge Quality Gates)](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests). When: Someone wants one agent to check another agent's output against a rubric before it ships.
