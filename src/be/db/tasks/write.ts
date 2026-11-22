@@ -647,10 +647,12 @@ export async function failTask(
           ),
         );
     });
+    // The swallowed writes below run in savepoints: on Postgres a failed
+    // statement would otherwise abort the caller's transaction and drop the
+    // failure itself.
     try {
-      await dependencies.promotePendingSteeringForTask(
-        id,
-        "Task failed before steering was delivered",
+      await getStorage().transaction(() =>
+        dependencies.promotePendingSteeringForTask(id, "Task failed before steering was delivered"),
       );
     } catch (error) {
       console.error(
@@ -663,7 +665,7 @@ export async function failTask(
     // The cascade is recursive (transitive closure) and cycle-safe.
     if (opts.cascadeDependents !== false) {
       try {
-        await dependencies.cascadeFailDependents(id, "failed");
+        await getStorage().transaction(() => dependencies.cascadeFailDependents(id, "failed"));
       } catch (err) {
         console.error("[failTask] cascade-fail dependents error:", err);
       }

@@ -1754,15 +1754,20 @@ export async function createLogEntry(entry: {
 }): Promise<AgentLog> {
   const id = crypto.randomUUID();
   const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
-  const row = (await getStorage().repos.agents.insertLog({
-    id,
-    eventType: entry.eventType,
-    agentId: entry.agentId ?? null,
-    taskId: entry.taskId ?? null,
-    oldValue: entry.oldValue ? scrubSecrets(entry.oldValue) : null,
-    newValue: entry.newValue ? scrubSecrets(entry.newValue) : null,
-    metadata: metaJson ? scrubSecrets(metaJson) : null,
-  })) as AgentLogRow | null;
+  // A nested transaction (a SAVEPOINT) inside a caller's transaction: most
+  // callers swallow a failed log write, and on Postgres a failed statement
+  // aborts the whole transaction unless it ran inside a savepoint.
+  const row = (await getStorage().transaction(() =>
+    getStorage().repos.agents.insertLog({
+      id,
+      eventType: entry.eventType,
+      agentId: entry.agentId ?? null,
+      taskId: entry.taskId ?? null,
+      oldValue: entry.oldValue ? scrubSecrets(entry.oldValue) : null,
+      newValue: entry.newValue ? scrubSecrets(entry.newValue) : null,
+      metadata: metaJson ? scrubSecrets(metaJson) : null,
+    }),
+  )) as AgentLogRow | null;
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
 }
