@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { type ApiClient, asRecord, expect, expectStatus } from "../http";
+import {
+  type ApiClient,
+  asRecord,
+  asRecords,
+  asString,
+  expect,
+  expectStatus,
+} from "../http";
 import type { Scenario } from "../run";
 
 // Check 20 of the storage-engine brief (decision D11): fill a source API through the
@@ -145,6 +152,28 @@ export const dataCopy: Scenario = {
         kvAfter.status === 200 && kvAfter.text === kvBefore.text,
         `kv value differs after the copy: ${kvBefore.text} vs ${kvAfter.text}`,
       );
+
+      // The API on the copy applies no migration: the chain is already recorded. The
+      // starter dashboard still runs, because the copy restores its Postgres SQL over
+      // the SQLite SQL it copied (COLLATE NOCASE, datetime, ? placeholders).
+      const definitions = await target("GET", "/api/metrics/definitions?agentId=system");
+      expectStatus(definitions, [200], "list the system metrics on the copy");
+      const starter = asRecords(definitions.json, "metrics").find(
+        (metric) => metric.slug === "swarm-operations-overview",
+      );
+      expect(starter !== undefined, "The starter dashboard is missing on the copy");
+      const starterRun = await target(
+        "POST",
+        `/api/metrics/definitions/${asString(starter!.id, "starter id")}/run`,
+        { body: { variables: { agentFilter: agentId } } },
+      );
+      expectStatus(starterRun, [200], "run the starter dashboard on the copy");
+      for (const widget of asRecords(starterRun.json, "widgets")) {
+        expect(
+          Array.isArray(asRecord(widget.result).rows),
+          `starter widget ${asRecord(widget.widget).id} failed on the copy: ${JSON.stringify(widget).slice(0, 600)}`,
+        );
+      }
 
       // The copy keeps working on the target: a new write after it lands.
       const created = await target("POST", "/api/tasks", {

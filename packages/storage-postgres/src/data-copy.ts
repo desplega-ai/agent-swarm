@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   CopyCell,
   CopyProblem,
@@ -322,6 +324,27 @@ class TableChecksum {
   }
 }
 
+/**
+ * Migrations the copy runs again after it writes the rows (`after-copy.json` in the
+ * chain directory). The chain runs on the empty target before the copy, so a
+ * migration that rewrites seeded rows into Postgres SQL (the starter dashboard,
+ * 370) is overwritten by the SQLite rows; the API on the copy then skips it,
+ * because `_migrations` records it. Each listed file must be safe to run twice.
+ */
+function reapplyAfterCopy(
+  chain: ReturnType<typeof loadPostgresMigrations>,
+  migrationsDir: string,
+): ReturnType<typeof loadPostgresMigrations> {
+  const file = join(migrationsDir, "after-copy.json");
+  if (!existsSync(file)) return [];
+  const names = (JSON.parse(readFileSync(file, "utf8")) as { reapply?: string[] }).reapply ?? [];
+  return names.map((name) => {
+    const migration = chain.find((m) => m.name === name);
+    if (!migration) throw new Error(`after-copy.json names ${name}, which is not in the chain`);
+    return migration;
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 function float32Vector(bytes: Uint8Array): string {
@@ -455,9 +478,8 @@ export async function copyIntoPostgres(
           if (table.hasUserTriggers)
             await conn.unsafe(`ALTER TABLE ${quote(table.name)} ENABLE TRIGGER USER`);
         }
-        await conn.unsafe("COMMIT");
-        committed = true;
-
+        // Compare in the copy transaction, before the engine-native rows below
+        // replace copied ones on purpose.
         for (const table of sourceTables) {
           const target = targets.get(table.name) as TargetTable;
           const sourceSum = checksums.get(table.name) as TableChecksum;
@@ -474,6 +496,17 @@ export async function copyIntoPostgres(
             entry.sourceRows === entry.targetRows && entry.sourceChecksum === entry.targetChecksum;
           report.tables.push(entry);
         }
+        for (const migration of reapplyAfterCopy(chain, options.migrationsDir)) {
+          const result = (await conn.unsafe(migration.sql)) as { count?: number };
+          log(`[db-copy] reapplied ${migration.name}`);
+          report.rebuilt.push({
+            table: migration.name,
+            rows: Number(result.count ?? 0),
+            reason: "Postgres rows of this migration restored over the copied SQLite rows",
+          });
+        }
+        await conn.unsafe("COMMIT");
+        committed = true;
         report.ok = report.tables.every((t) => t.equal);
         if (!report.ok) report.error = "a row count or checksum differs (see tables)";
         return report;

@@ -1,0 +1,4 @@
+{
+  "$comment": "Migrations db-copy runs again after it writes the SQLite rows: each rewrites seeded rows into Postgres SQL, and the copied rows would undo it. Each must be safe to run twice.",
+  "reapply": ["370_metrics_starter_postgres"]
+}
