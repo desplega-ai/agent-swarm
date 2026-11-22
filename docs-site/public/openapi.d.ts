@@ -18371,7 +18371,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Launch a page session (issues HttpOnly cookie) */
+        /**
+         * Launch a page session (issues HttpOnly cookie)
+         * @description The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.
+         */
         post: {
             parameters: {
                 query?: never;
