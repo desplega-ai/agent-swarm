@@ -504,6 +504,22 @@ Scenario edits (section 10, SQL portability and helper use, no assertion change)
 | 23 to 25 | CI, docs, replica blockers | **done** (M7) |
 | 26 | PR | not opened: waiting on the STOP-ASK |
 
+## Part 10: GitHub webhook flake on Postgres (investigated and fixed)
+
+Daniel chose `investigate` (2026-11-21).
+
+Cause: `/health` answers as soon as the server listens, but `initGitHub()` ran later in the listen callback, after the awaited telemetry and Slack startup (`src/http/index.ts`). A delivery in that gap is checked with no secret and gets 401; GitHub (and the emulator) do not redeliver. `github-emulate-flows` restarts the API and creates the issue and comments at once, so all three webhooks can land in the gap. The order is upstream code (unchanged since the base commit); the Postgres engine widens the gap, because the awaited startup reads are network round trips.
+
+Evidence:
+
+- Server log at the part 9 failure (rerun, restart 1): `GET /health → 200`, then three `POST /api/github/webhook → 401` ("Signature verification failed"), then `[Slack] Task watcher started`, then `[GitHub] Webhook handler initialized`. DB state at the failure: no `agent_tasks` row with `source = 'github'` for the repo; the webhooks never reached the handler.
+- Probe (a temporary scenario, not committed): restart the API with a GitHub secret, then send a signed `ping` every 5 ms until it answers 200. Before the fix: Postgres 3 of 20 restarts got 3 or 4 401s (77 to 126 ms after `/health`); SQLite 0 of 15. After the fix: Postgres 0 of 30, SQLite 0 of 15.
+- Full Postgres runs before the fix: run 1 (4 shards) passed, run 2 invalid (5 parallel boots hit the 60 s health timeout), run 3 passed plus 6 runs of the scenario alone under that load, all passed. The full-run failure did not reproduce in 2 valid runs; the probe reproduces the mechanism.
+
+Fix (commit `216829ddf`, in this branch because the branch makes it fail): the GitHub, GitLab, Azure DevOps and Bitbucket webhook inits (synchronous env reads) run first in the listen callback, before any await. No scenario changed. Proof: the probe above; `github-emulate-flows`, `platform-webhooks`, `defer-wake-pr-merged` pass on both engines; strict full runs after the fix (below) pass `github-emulate-flows` every time.
+
+Same class, not fixed (new, seen once): `linear-emulate-flows` failed its first attempt in one Postgres run (`linear authorize url: expected 200, got 500`), passed on rerun. `await initLinear()` writes the Linear `oauth_apps` row later in the same callback, after `/health` answers; the authorize route reads that row. Closing it needs `initLinear`/`initJira` before `listen`, a larger change to the start order. Left open; listed under "Open risks".
+
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
 Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metadata) and `platform-users` (the `profile_changed` event's before/after) failed on JSON text. Daniel chose (a), `accept_reorder`: keep `jsonb` and accept reordered keys. The two scenarios now compare the parsed value with a strict deep-equal (`Bun.deepEquals(..., true)`); every key and value is still asserted. Recorded under "Deviations" and "Edited scenarios". `kv_entries.value` is text and keeps its byte-order assertion.
@@ -538,6 +554,8 @@ Was open: `jsonb` (D8) reorders object keys, so `divergence-values` (user metada
 - Local Postgres is a private cluster from Ubuntu packages, not Docker (no Docker in the container). pgvector 0.6.0 locally, 0.8.x in CI.
 
 ## Open risks
+
+- Integrations that start after `/health` answers: `linear-emulate-flows` flaked once on Postgres (part 10) because `initLinear` runs after the server listens. Webhook secrets are fixed (part 10); Linear and Jira OAuth rows are not.
 
 - Postgres full text differs from FTS5 in known ways: no non-ASCII case folding under the C ctype, no accent removal, porter vs snowball stems, text past 100,000 characters (tasks) or tsvector position 16,383 not searchable by phrase. D15 tests pass on the fixed corpus.
 - Memory full text on Postgres costs about 0.1 ms per matching row (each match rebuilds its tsvector): a term that matches 20,000 memories took 2.2 to 2.7 s. A stored tsvector column would fix it; the bench (M5) decides.
