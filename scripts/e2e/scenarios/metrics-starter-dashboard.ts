@@ -1,0 +1,64 @@
+import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import type { Scenario } from "../run";
+import { registerWorker } from "./core-helpers";
+
+// The seeded starter dashboard runs on the engine that seeded it: every widget query
+// and every variable options query, for each time range and with the filters set.
+export const metricsStarterDashboard: Scenario = {
+  name: "metrics-starter-dashboard",
+  order: 9_446,
+  async run(ctx) {
+    const agentId = await registerWorker(ctx, "metrics-starter");
+    const response = await ctx.api("GET", "/api/metrics/definitions?agentId=system&fields=full");
+    expectStatus(response, [200], "list the system metrics");
+    const starter = asRecords(response.json, "metrics").find(
+      (metric) => metric.slug === "swarm-operations-overview",
+    );
+    expect(starter !== undefined, "The starter dashboard is not seeded");
+    const metricId = asString(starter!.id, "starter id");
+    const definition = asRecord(starter!.definition);
+    const widgetCount = asRecords(definition, "widgets").length;
+    const range = asRecords(definition, "variables").find((v) => v.key === "rangeModifier");
+    const ranges = asRecords(range, "options").map((option) => option.value);
+    expect(ranges.length > 0, "The time range variable has no options");
+
+    const runs = [
+      ...ranges.map((rangeModifier) => ({ rangeModifier })),
+      { rangeModifier: ranges[0], agentFilter: agentId },
+    ];
+    for (const variables of runs) {
+      const run = await ctx.api("POST", `/api/metrics/definitions/${metricId}/run`, {
+        body: { variables },
+      });
+      expectStatus(run, [200], `run the starter dashboard with ${JSON.stringify(variables)}`);
+      const widgets = asRecords(run.json, "widgets");
+      expect(
+        widgets.length === widgetCount,
+        `ran ${widgets.length} of ${widgetCount} widgets with ${JSON.stringify(variables)}`,
+      );
+      for (const widget of widgets) {
+        expect(
+          Array.isArray(asRecord(widget.result).rows),
+          `widget ${asRecord(widget.widget).id} returned no rows array`,
+        );
+      }
+      // The options queries ran too: the requester and agent lists are filled.
+      const resolved = asRecords(asRecord(asRecord(run.json).metric).definition, "variables");
+      for (const key of ["userFilter", "agentFilter"]) {
+        const options = asRecords(
+          resolved.find((v) => v.key === key),
+          "options",
+        );
+        expect(options[0]?.value === "all", `${key} options do not start with "all"`);
+      }
+      const agents = asRecords(
+        resolved.find((v) => v.key === "agentFilter"),
+        "options",
+      );
+      expect(
+        agents.some((option) => option.value === agentId),
+        "The agent options query does not list the new agent",
+      );
+    }
+  },
+};
