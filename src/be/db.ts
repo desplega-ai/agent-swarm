@@ -2620,9 +2620,10 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   }
 
   const result = row ? rowToAgentTask(row as AgentTaskRow) : null;
-  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
+  // Notify lifecycle subscribers only after the claim commits: a replayed
+  // or retried transaction runs this callback more than once.
   if (result) {
-    emitTaskStarted(result);
+    getStorage().afterCommit(() => emitTaskStarted(result));
   }
   return result;
 }
