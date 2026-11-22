@@ -336,7 +336,7 @@ async function createWorkItemTask(
   trigger: Trigger,
   opts: {
     followup: boolean;
-    requestedByUserId: string;
+    requestedByUserId?: string;
     commentText?: string;
     parentTaskId?: string;
     existingTaskId?: string;
@@ -404,16 +404,19 @@ async function createWorkItemTask(
  * Only actors mapped to a swarm user (or allowlisted) may create tasks: the
  * task text is untrusted work-item content handed to a PAT-enabled agent.
  */
-async function authorizeActor(ctx: WorkItemContext, trigger: Trigger): Promise<string | null> {
-  const userId = ctx.actor
+async function authorizeActor(
+  ctx: WorkItemContext,
+  trigger: Trigger,
+): Promise<{ userId: string | undefined } | null> {
+  const sender = ctx.actor
     ? await authorizeAzureDevOpsActor(ctx.actor, "work_item", `${trigger} #${ctx.workItemId}`)
     : null;
-  if (!userId) {
+  if (!sender) {
     console.warn(
       `[AzureDevOps] Ignoring ${TRIGGER_LABEL[trigger]} on work item #${ctx.workItemId}: actor is not a known swarm user`,
     );
   }
-  return userId;
+  return sender;
 }
 
 /**
@@ -431,8 +434,9 @@ async function routeToTask(
   trigger: Trigger,
   commentText?: string,
 ): Promise<HandlerResult> {
-  const requestedByUserId = await authorizeActor(ctx, trigger);
-  if (!requestedByUserId) return { created: false };
+  const sender = await authorizeActor(ctx, trigger);
+  if (!sender) return { created: false };
+  const requestedByUserId = sender.userId;
 
   const externalId = trackerKey(ctx.org, ctx.workItemId);
   const claim = await createTrackerSyncIfAbsent({
@@ -727,9 +731,12 @@ export async function handleWorkItemRestored(event: WorkItemRestoredEvent): Prom
       await markTrackerDelivery(PROVIDER, "task", externalId, event.id);
       return { created: false };
     }
-    const requestedByUserId = await authorizeActor(ctx, "restored");
-    if (!requestedByUserId) return { created: false };
-    const taskId = await createWorkItemTask(ctx, "restored", { followup: true, requestedByUserId });
+    const sender = await authorizeActor(ctx, "restored");
+    if (!sender) return { created: false };
+    const taskId = await createWorkItemTask(ctx, "restored", {
+      followup: true,
+      requestedByUserId: sender.userId,
+    });
     if (!taskId) return { created: false };
     await updateTrackerSyncSwarmId(sync.id, taskId);
     await markTrackerDelivery(PROVIDER, "task", externalId, event.id);
