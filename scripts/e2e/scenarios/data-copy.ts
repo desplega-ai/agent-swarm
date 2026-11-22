@@ -1,12 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  type ApiClient,
-  asRecord,
-  asRecords,
-  asString,
-  expect,
-  expectStatus,
-} from "../http";
+import { type ApiClient, asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
 // Check 20 of the storage-engine brief (decision D11): fill a source API through the
@@ -154,8 +147,8 @@ export const dataCopy: Scenario = {
       );
 
       // The API on the copy applies no migration: the chain is already recorded. The
-      // starter dashboard still runs, because the copy restores its Postgres SQL over
-      // the SQLite SQL it copied (COLLATE NOCASE, datetime, ? placeholders).
+      // starter dashboard still runs, because the copy rewrites each stock SQLite query
+      // it copied (COLLATE NOCASE, datetime, ? placeholders) to its Postgres form.
       const definitions = await target("GET", "/api/metrics/definitions?agentId=system");
       expectStatus(definitions, [200], "list the system metrics on the copy");
       const starter = asRecords(definitions.json, "metrics").find(

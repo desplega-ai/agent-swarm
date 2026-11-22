@@ -59,7 +59,7 @@ At start, a probe checks that the role cannot read the 7 denied tables (directly
 
 ## One process per database
 
-The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on.
+The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on. If the lock session ends while the API runs (a database restart, a dropped connection), the API logs `lost the one-process lock` and exits within about a second; the supervisor restarts it, and the new process waits for the lock again.
 
 More than one API replica is not supported on either engine. The parts that a second replica would break are listed, with file and line, in `thoughts/taras/research/2026-11-20-replica-blockers.md`: the in-memory realtime bus (`src/realtime/bus.ts`), the workflow event bus (`src/workflows/event-bus.ts`), in-memory locks (`src/oauth/ensure-mcp-token.ts`), per-process caches, and timers with no leader election.
 
@@ -75,7 +75,7 @@ Before the window:
 
 1. Deploy the target build on SQLite as usual. Let it start once, so the SQLite file is at this build's migration head.
 2. Create the Postgres database and role (Requirements). Do not start an API on it.
-3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy`. Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you.
+3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy`. Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you. Read every `ATTENTION` line too: a saved dashboard query in SQLite SQL that the copy does not know (an edited widget, a hand-written dashboard) does not run on Postgres. The copy rewrites only the stock queries of the starter dashboard and of the old new-dashboard template, and keeps titles and other edits. Plan an edit for each listed query. Set `EMBEDDING_DIMENSIONS` to the value the API uses: the copy refuses embeddings of another width.
 
 In the window:
 
@@ -120,7 +120,10 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
-| `db-copy: the target database holds rows` | Copy into a new, empty database. |
+| `db-copy: the target database holds rows` | Copy into a new, empty database. A table the migrations seed (channels, roles, pricing, ...) may hold only those seed rows. |
+| `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
+| `db-copy: --json ... is the SQLite source` | Write the report to another path. |
+| `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
 
 Sources: decision records in `thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine-goal-prompt.md` (D1 to D18) and the ledger `thoughts/taras/plans/2026-11-20-postgres-storage-engine-ledger.md`.

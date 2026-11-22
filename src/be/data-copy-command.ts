@@ -83,6 +83,11 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       `[db-copy] ... and ${report.problemCount - 200} more${parsed.json ? ` (all in ${parsed.json})` : " (--json lists all)"}`,
     );
   }
+  for (const item of report.attention ?? []) {
+    console.warn(
+      scrubSecrets(`[db-copy] ATTENTION ${item.table} ${item.row}, ${item.column}: ${item.reason}`),
+    );
+  }
   for (const table of report.tables.filter((t) => !t.equal)) {
     console.error(
       `[db-copy] MISMATCH ${table.table}: rows ${table.sourceRows} -> ${table.targetRows}, checksum ${table.sourceChecksum.slice(0, 12)} -> ${table.targetChecksum.slice(0, 12)}`,

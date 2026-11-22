@@ -76,8 +76,14 @@ export type CopyReport = {
   ok: boolean;
   /** Values the target cannot store (the copy then rolls back). */
   problems: CopyProblem[];
-  /** Problems found in total (the list keeps the first ones only). */
+  /** Problems found in total (the list holds every one unless a cap was set). */
   problemCount: number;
+  /**
+   * Saved SQLite queries (metric widgets and variable options) that the copy
+   * could not rewrite and that do not run on Postgres. The copy still
+   * succeeds; an operator edits each one before or right after cutover.
+   */
+  attention?: CopyProblem[];
   /** A failure that stopped the copy (refused target, constraint at commit). */
   error?: string;
   tables: CopyTableReport[];

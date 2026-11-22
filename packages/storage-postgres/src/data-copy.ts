@@ -363,6 +363,110 @@ function reapplyAfterCopy(
 }
 
 // ---------------------------------------------------------------------------
+// Saved metric queries
+
+type MetricQuery = { sql: string; params?: unknown[] };
+type MetricQueryPort = { sqlite: MetricQuery; postgres: MetricQuery };
+
+function sameQuery(a: MetricQuery, b: MetricQuery): boolean {
+  return a.sql === b.sql && JSON.stringify(a.params ?? []) === JSON.stringify(b.params ?? []);
+}
+
+/**
+ * Rewrites the saved metric queries the chain knows (`metric-query-ports.json`:
+ * the starter dashboard and the previous new-dashboard template) from SQLite to
+ * Postgres, one query at a time, so titles, layout and edited queries stay as
+ * the operator saved them. Every other query that does not run on Postgres is
+ * reported in `attention`. Returns the number of metrics rows rewritten.
+ */
+async function portMetricQueries(
+  conn: Conn,
+  migrationsDir: string,
+  report: CopyReport,
+): Promise<number> {
+  const file = join(migrationsDir, "metric-query-ports.json");
+  const ports = existsSync(file)
+    ? ((JSON.parse(readFileSync(file, "utf8")) as { ports?: MetricQueryPort[] }).ports ?? [])
+    : [];
+  const rows = await conn.unsafe(
+    `SELECT id, "agentId", slug, definition::text AS definition FROM metrics ORDER BY "_rowid"`,
+  );
+  let rewritten = 0;
+  for (const row of rows) {
+    const label = `${String(row.slug)} (agent ${String(row.agentId)})`;
+    let definition: {
+      widgets?: { id?: string; query?: MetricQuery }[];
+      variables?: { key?: string; optionsQuery?: MetricQuery }[];
+    };
+    try {
+      definition = JSON.parse(String(row.definition));
+    } catch {
+      continue;
+    }
+    const queries: { where: string; query: MetricQuery; set(port: MetricQuery): void }[] = [];
+    for (const widget of definition.widgets ?? []) {
+      if (!widget.query?.sql) continue;
+      const target = widget.query;
+      queries.push({
+        where: `widget ${widget.id ?? "?"}`,
+        query: target,
+        set: (port) => {
+          target.sql = port.sql;
+          target.params = port.params ?? [];
+        },
+      });
+    }
+    for (const variable of definition.variables ?? []) {
+      if (!variable.optionsQuery?.sql) continue;
+      const target = variable.optionsQuery;
+      queries.push({
+        where: `variable ${variable.key ?? "?"} options`,
+        query: { sql: target.sql },
+        set: (port) => {
+          target.sql = port.sql;
+        },
+      });
+    }
+    let changed = false;
+    for (const entry of queries) {
+      const port = ports.find((p) => sameQuery(p.sqlite, entry.query));
+      if (port) {
+        entry.set(port.postgres);
+        changed = true;
+        continue;
+      }
+      // Not a known query: check that Postgres can plan it as it is.
+      await conn.unsafe("SAVEPOINT metric_query_check");
+      try {
+        await conn.unsafe(
+          `EXPLAIN ${entry.query.sql}`,
+          (entry.query.params ?? []).map(() => null),
+        );
+        await conn.unsafe("RELEASE SAVEPOINT metric_query_check");
+      } catch (error) {
+        await conn.unsafe("ROLLBACK TO SAVEPOINT metric_query_check");
+        await conn.unsafe("RELEASE SAVEPOINT metric_query_check");
+        report.attention ??= [];
+        report.attention.push({
+          table: "metrics",
+          column: entry.where,
+          row: label,
+          reason: `does not run on Postgres, edit it: ${(error as Error).message}`,
+        });
+      }
+    }
+    if (changed) {
+      await conn.unsafe("UPDATE metrics SET definition = $1::text::jsonb WHERE id = $2", [
+        JSON.stringify(definition),
+        row.id,
+      ]);
+      rewritten += 1;
+    }
+  }
+  return rewritten;
+}
+
+// ---------------------------------------------------------------------------
 
 function float32Vector(bytes: Uint8Array): string {
   const floats = new Float32Array(
@@ -561,6 +665,16 @@ export async function copyIntoPostgres(
             "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES ($1, $2, $3::timestamptz, $4)",
             [m.version, m.name, m.appliedAt, m.checksum],
           );
+        }
+        const ported = targets.has("metrics")
+          ? await portMetricQueries(conn, options.migrationsDir, report)
+          : 0;
+        if (ported > 0) {
+          report.rebuilt.push({
+            table: "metrics",
+            rows: ported,
+            reason: "stock SQLite widget and options queries rewritten to their Postgres form",
+          });
         }
         for (const migration of reapplyAfterCopy(chain, options.migrationsDir)) {
           const result = (await conn.unsafe(migration.sql)) as { count?: number };
