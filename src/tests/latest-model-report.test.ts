@@ -137,7 +137,7 @@ describe("latest model source across the initial, result and final reports", () 
   });
 });
 
-test("Claude saves the latest main request settings after the session init write", async () => {
+test("Claude saves the latest main request settings after the session init write, then deletes the transcript", async () => {
   const sessionId = crypto.randomUUID();
   const taskId = crypto.randomUUID();
   const request = {
@@ -162,6 +162,7 @@ test("Claude saves the latest main request settings after the session init write
       .concat('{"type":"api-request"')
       .join("\n"),
   );
+  await Bun.write(`${directory}/projects/test/${sessionId}/subagents/agent-child.jsonl`, "{}");
 
   const metadata: Record<string, unknown>[] = [];
   globalThis.fetch = (async (input, init) => {
@@ -225,4 +226,7 @@ test("Claude saves the latest main request settings after the session init write
     { version: "test" },
     { version: "test", observedModel: "observed-model", observedReasoningEffort: "high" },
   ]);
+  // The prompt-bearing transcript does not outlive the session.
+  expect(await Bun.file(`${directory}/projects/test/${sessionId}.jsonl`).exists()).toBe(false);
+  expect(await Bun.$`ls ${directory}/projects/test`.text()).toBe("");
 });
