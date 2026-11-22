@@ -808,10 +808,15 @@ export async function cancelTask(
         }
       });
     }
+    // The swallowed writes below run in savepoints: on Postgres a failed
+    // statement would otherwise abort the caller's transaction and drop the
+    // cancel itself.
     try {
-      await dependencies.promotePendingSteeringForTask(
-        id,
-        "Task was cancelled before steering was delivered",
+      await getStorage().transaction(() =>
+        dependencies.promotePendingSteeringForTask(
+          id,
+          "Task was cancelled before steering was delivered",
+        ),
       );
     } catch (error) {
       console.error(
@@ -822,7 +827,7 @@ export async function cancelTask(
 
     if (options.cascadeDependents !== false) {
       try {
-        await dependencies.cascadeFailDependents(id, "cancelled");
+        await getStorage().transaction(() => dependencies.cascadeFailDependents(id, "cancelled"));
       } catch (err) {
         console.error("[cancelTask] cascade-fail dependents error:", err);
       }
