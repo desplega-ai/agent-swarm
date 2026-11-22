@@ -1106,6 +1106,24 @@ describe("scrubJson", () => {
     expect(JSON.stringify(out)).not.toContain(value);
   });
 
+  test("still redacts a value under a sensitive key in the fallback path", () => {
+    const token = randomToken(40);
+    const password = randomToken(24);
+    const event = {
+      token,
+      nested: { "db.password": password, note: "<db-password>" },
+      result: line,
+    };
+    expect(() => JSON.parse(scrubSecrets(JSON.stringify(event)))).toThrow();
+    const out = scrubJson(event);
+    expect(out.token).toBe("[REDACTED:token]");
+    expect(out.nested["db.password"]).toBe("[REDACTED:db.password]");
+    expect(out.nested.note).toBe("<db-password>");
+    const text = JSON.stringify(out);
+    expect(text).not.toContain(token);
+    expect(text).not.toContain(password);
+  });
+
   test("matches the serialized scrub when that one parses", () => {
     const github = ["ghp", randomToken(36)].join("_");
     const event = { type: "raw_stderr", content: `Authorization: Bearer ${github}\n` };

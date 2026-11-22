@@ -1270,15 +1270,40 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
  * redacts. A key pass can reach across a JSON string boundary, though: an
  * unclosed `KEY='` inside a string value runs to the end of the text and
  * swallows the closing quote, so the result no longer parses. Then every
- * string leaf and key is scrubbed on its own (`scrubObject`).
+ * string leaf and key is scrubbed on its own (`scrubObject`), after a string
+ * under a sensitive key is redacted whole, as the serialized pass would have.
  */
 export function scrubJson<T>(value: T): T {
   if (value === undefined) return value;
   try {
     return JSON.parse(scrubSecrets(JSON.stringify(value))) as T;
   } catch {
-    return scrubObject(value);
+    return scrubObject(redactSensitiveKeys(value) as T);
   }
+}
+
+const WHOLE_JSON_KEY_RE = new RegExp(`^${JSON_KEY}$`);
+
+/**
+ * The leaf-by-leaf walk never sees the `"key": "value"` adjacency that
+ * `redactJsonValues` reads in the serialized form, so the key context is
+ * applied here: same keys, same placeholder rule, string values only.
+ */
+function redactSensitiveKeys(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveKeys(item, seen));
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const sensitive =
+      typeof child === "string" &&
+      WHOLE_JSON_KEY_RE.test(key) &&
+      isSensitiveKeyPath(key) &&
+      !isPlaceholderValue(child);
+    out[key] = sensitive ? `[REDACTED:${key}]` : redactSensitiveKeys(child, seen);
+  }
+  return out;
 }
 
 function scrubWithMatcher(text: string, matcher: KnownValueMatcher): ScrubbedText {
