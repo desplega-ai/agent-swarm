@@ -709,6 +709,10 @@ export async function handlePoll(
             // would have claimed). That id is stable for the duration of the
             // refusal, and the dedup is per-(task,date) so subsequent same-day
             // refusals on the same lead-candidate are suppressed.
+            // Admission per requester: the agent and global caps are the same for
+            // every candidate, the user cap is not. A claim of a later candidate
+            // (the first one is locked or taken) checks its own requester first.
+            const admittedRequesters = new Map<string, boolean>();
             if (unassignedIds.length > 0) {
               if (probe) return NEEDS_WRITE;
               const candidateId = unassignedIds[0]!;
@@ -718,6 +722,7 @@ export async function handlePoll(
                 new Date(),
                 candidateTask?.requestedByUserId,
               );
+              admittedRequesters.set(candidateTask?.requestedByUserId ?? "", admission.allowed);
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
                 const dedup = await recordBudgetRefusalNotification({
@@ -780,7 +785,19 @@ export async function handlePoll(
                 );
               }
             };
+            const requesterAdmitted = async (taskId: string): Promise<boolean> => {
+              const requester = (await getTaskById(taskId))?.requestedByUserId;
+              const key = requester ?? "";
+              let allowed = admittedRequesters.get(key);
+              if (allowed === undefined) {
+                allowed = (await canClaim(myAgentId, new Date(), requester)).allowed;
+                admittedRequesters.set(key, allowed);
+              }
+              return allowed;
+            };
             for await (const candidateId of candidates()) {
+              // Over its requester's budget: skip it. The task stays in the pool.
+              if (!(await requesterAdmitted(candidateId))) continue;
               const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
                 await recordRuntimeTask(claimed.id);
