@@ -54,12 +54,34 @@ export const upgradeBaseDb: Scenario = {
       });
       expectStatus(created, [201], "new task on the upgraded database");
 
-      const applied = fixture.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM _migrations");
-      const current = ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM _migrations");
+      // The upgraded database holds every migration a new database holds. On
+      // Postgres it also keeps the SQLite history older than the Postgres chain:
+      // db-copy carries it (queries read migration 307's applied_at), so compare
+      // the current versions and check the legacy rows apart.
+      const versions = (db: typeof ctx.db) =>
+        db
+          .query<{ version: number }>("SELECT version FROM _migrations ORDER BY version")
+          .map((row) => Number(row.version));
+      const upgraded = versions(fixture.db);
+      const fresh = versions(ctx.db);
+      const missing = fresh.filter((v) => !upgraded.includes(v));
       expect(
-        Number(applied?.n) === Number(current?.n),
-        `upgraded database has ${applied?.n} migrations, a new one has ${current?.n}`,
+        missing.length === 0,
+        `upgraded database misses migrations ${missing.join(", ")} that a new one has`,
       );
+      const chainStart = fresh[0] ?? 0;
+      const extra = upgraded.filter((v) => !fresh.includes(v));
+      if (fixture.db.engine === "postgres") {
+        expect(
+          extra.length > 0 && extra.every((v) => v < chainStart),
+          `upgraded Postgres database: copied legacy history ${extra.slice(0, 5).join(", ")}... must all be older than the chain start ${chainStart}`,
+        );
+      } else {
+        expect(
+          extra.length === 0,
+          `upgraded database has migrations ${extra.join(", ")} that a new one lacks`,
+        );
+      }
     } finally {
       await fixture.stop();
     }
