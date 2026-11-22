@@ -563,6 +563,23 @@ export function memoryContract(engine: ContractEngine): void {
       expect(await repo.ftsTableSchema()).toBeTruthy();
     });
 
+    test("full-text parity: a phrase matches inside one field, not across name and content", async () => {
+      await engine.prepareMemorySearch(storage, 4);
+      const rows: [string, string, string][] = [
+        ["p1", "heron notes", "A blue heron waded in."],
+        ["p2", "blue", "heron nests by the lake"],
+      ];
+      for (const [id, name, content] of rows) {
+        await repo.insertMemory(memory({ id, name, content, agentId: AGENT }));
+      }
+      await repo.insertMissingFtsRows(rows.map(([id]) => id));
+      const ids = async (terms: string[]) =>
+        (await repo.searchFtsRows(terms, searchAll(), 50)).map((r) => r.id).sort();
+      expect(await ids(["blue-heron"])).toEqual(["p1"]);
+      expect(await ids(["blue heron"])).toEqual(["p1"]);
+      expect(await ids(["heron"])).toEqual(["p1", "p2"]);
+    });
+
     test("full-text parity: ranked results share at least 4 of the first 5 ids", async () => {
       await seedFtsCorpus();
       const terms = ["deploy", "worker", "the", "memory", "cosine", "thread"];

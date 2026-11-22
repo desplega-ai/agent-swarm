@@ -38,6 +38,25 @@ function ftsDocument(alias: string): SqlQuery {
   );
 }
 
+/** One field's text vector (the index concatenates the name and content vectors). */
+function ftsField(alias: string, column: "name" | "content"): SqlQuery {
+  const p = alias ? `${alias}.` : "";
+  return new SqlQuery(
+    [`to_tsvector('memory_english'::regconfig, memory_fts_text(${p}"${column}"))`],
+    [],
+  );
+}
+
+/**
+ * `query` matches one memory: the indexed concatenation prefilters (it uses
+ * the GIN index), and the field recheck keeps a phrase inside one field, as
+ * FTS5 does. The concatenation puts the first content word right after the
+ * last name word, so a phrase alone would match across the boundary.
+ */
+function ftsMatch(alias: string, query: SqlQuery): SqlQuery {
+  return sql`(${ftsDocument(alias)} @@ ${query} AND (${ftsField(alias, "name")} @@ ${query} OR ${ftsField(alias, "content")} @@ ${query}))`;
+}
+
 /** A query term with the punctuation of the indexed text turned into spaces. */
 function ftsTermText(term: string): SqlQuery {
   return sql`memory_fts_text(CAST(${term} AS text))`;
@@ -126,23 +145,24 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
         sql`(${i}, ${phraseQuery(term)}, tsvector_to_array(to_tsvector('memory_english'::regconfig, ${ftsTermText(term)})))`,
     );
     const conditions = this.searchConditions(
-      [sql`${ftsDocument("m")} @@ (SELECT ${ftsQuery(terms)})`],
+      [ftsMatch("m", sql`(SELECT ${ftsQuery(terms)})`)],
       filter,
       "m",
     );
     return this.via(reader).query<AgentMemoryRow & { rank: number }>(sql`
       WITH term AS MATERIALIZED (
         SELECT t.i, t.query, t.lexemes,
-               (SELECT COUNT(*) FROM agent_memory a WHERE ${ftsDocument("a")} @@ t.query) AS n
+               (SELECT COUNT(*) FROM agent_memory a WHERE ${ftsMatch("a", sql`t.query`)}) AS n
           FROM (VALUES ${sqlJoin(termRows, sql`, `)}) AS t(i, query, lexemes)
       ),
       matched AS MATERIALIZED (
-        SELECT m.id, ${ftsDocument("m")} AS doc
+        SELECT m.id, ${ftsDocument("m")} AS doc, ${ftsField("m", "name")} AS name_doc,
+               ${ftsField("m", "content")} AS content_doc
           FROM agent_memory m
          WHERE ${sqlJoin(conditions, sql` AND `)}
       ),
       hit AS MATERIALIZED (
-        SELECT id, doc,
+        SELECT id, doc, name_doc, content_doc,
                (SELECT SUM(COALESCE(array_length(u.positions, 1), 1)) FROM unnest(doc) u) AS len
           FROM matched
       ),
@@ -156,7 +176,7 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
                  * tf.f * 2.2 / (tf.f + 1.2 * (0.25 + 0.75 * hit.len / stats.avglen))) AS score
           FROM hit CROSS JOIN stats CROSS JOIN term
           CROSS JOIN LATERAL (
-            SELECT CASE WHEN hit.doc @@ term.query
+            SELECT CASE WHEN hit.name_doc @@ term.query OR hit.content_doc @@ term.query
                      THEN COALESCE((SELECT MIN(COALESCE(array_length(u.positions, 1), 1))
                                       FROM unnest(hit.doc) u WHERE u.lexeme = ANY (term.lexemes)), 0)
                      ELSE 0 END AS f) tf
