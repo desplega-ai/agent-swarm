@@ -2,6 +2,7 @@ import { agentFsWebhooksContract } from "./agent-fs-webhooks";
 import { agentsContract } from "./agents";
 import { assetsContract } from "./assets";
 import { chatContract } from "./chat";
+import { clientContract } from "./client";
 import { configContract } from "./config";
 import type { ContractEngine } from "./env";
 import { eventsContract } from "./events";
@@ -35,6 +36,7 @@ export type { ContractEngine } from "./env";
 
 /** The repository contract suite. Every engine runs all of it. */
 export function runStorageContract(engine: ContractEngine): void {
+  clientContract(engine);
   extensionsContract(engine);
   modelsContract(engine);
   runtimePoolsContract(engine);

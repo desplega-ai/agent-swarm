@@ -263,7 +263,7 @@ export class PostgresClient implements DbClient {
               attemptRollback: [],
             };
             const active = ctx;
-            const result = await txContext.run(active, () => fn(this));
+            const result = await txContext.run(active, () => fn(this.boundExecutor(active)));
             if (replaying) throw new ReplayRollback(result);
             if (opts.deadlineAt !== undefined && Date.now() > opts.deadlineAt) {
               throw new DbTransactionDeadlineError();
@@ -332,7 +332,7 @@ export class PostgresClient implements DbClient {
           attemptRollback: outer.attemptRollback,
         };
         try {
-          return await txContext.run(inner, () => fn(this));
+          return await txContext.run(inner, () => fn(this.boundExecutor(inner)));
         } finally {
           inner.closed = true;
         }
@@ -343,6 +343,28 @@ export class PostgresClient implements DbClient {
     }
     outer.afterCommit.push(...savepointHooks);
     return result;
+  }
+
+  /**
+   * The executor a transaction callback receives: bound to that attempt (or
+   * savepoint), it runs on the attempt's connection even outside its async
+   * context, and it throws once the attempt ends. A retained handle can then
+   * never write through the pool after a rollback.
+   */
+  private boundExecutor(ctx: TxContext): DbExecutor {
+    const guard = <R>(call: () => Promise<R>): Promise<R> => {
+      if (ctx.closed) {
+        return Promise.reject(
+          new Error("[pg-client] transaction handle used after its transaction ended"),
+        );
+      }
+      return txContext.run(ctx, call);
+    };
+    return {
+      query: <T>(text: string, params?: DbParam[]) => guard(() => this.query<T>(text, params)),
+      get: <T>(text: string, params?: DbParam[]) => guard(() => this.get<T>(text, params)),
+      run: (text: string, params?: DbParam[]) => guard(() => this.run(text, params)),
+    };
   }
 
   afterCommit(fn: () => void | Promise<void>): void {

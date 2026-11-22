@@ -155,32 +155,6 @@ describe("postgres client", () => {
     expect(seen).toEqual(["attempt", "rollback"]);
   });
 
-  test("a rolled-back savepoint drops its afterCommit hooks; a released one keeps them", async () => {
-    const seen: string[] = [];
-    await client.transaction(async () => {
-      client.afterCommit(() => {
-        seen.push("outer");
-      });
-      await expect(
-        client.transaction(async () => {
-          client.afterCommit(() => {
-            seen.push("rolled-back");
-          });
-          throw new Error("inner boom");
-        }),
-      ).rejects.toThrow("inner boom");
-      await client.transaction(async () => {
-        await client.transaction(async () => {
-          client.afterCommit(() => {
-            seen.push("released");
-          });
-        });
-      });
-    });
-    await tick();
-    expect(seen).toEqual(["outer", "released"]);
-  });
-
   test("a serialization failure retries the whole callback; failed attempts' hooks are discarded", async () => {
     await client.run(`INSERT INTO t VALUES ('ctr', 'x', 0)`);
     const commits: number[] = [];
