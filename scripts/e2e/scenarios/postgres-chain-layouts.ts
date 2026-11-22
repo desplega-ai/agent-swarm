@@ -1,6 +1,6 @@
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { createPostgresDatabase, dropPostgresDatabase } from "../db";
 import { createApiClient, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
@@ -13,6 +13,48 @@ async function freePort(): Promise<number> {
   const port = probe.port as number;
   probe.stop(true);
   return port;
+}
+
+// Lays out the files the Dockerfile runtime stage copies from the build context
+// (`COPY <src> <dest>` without `--from`) under `root`, with `/app` mapped to `root`,
+// and returns `$MIGRATIONS_DIR` from its `ENV`. A COPY removed from the Dockerfile is
+// missing here too, so the boot below fails as the image would.
+function replicateDockerfileCopies(root: string): { migrationsDir: string } {
+  const lines = readFileSync(join(repoRoot, "Dockerfile"), "utf8").split("\n");
+  const lastFrom = lines.findLastIndex((line) => /^FROM\s/i.test(line));
+  let workdir = "/";
+  let migrationsDir: string | undefined;
+  const toLocal = (dest: string) => {
+    const abs = isAbsolute(dest) ? dest : join(workdir, dest);
+    return join(root, relative("/app", abs));
+  };
+  for (const line of lines.slice(lastFrom + 1)) {
+    const workdirMatch = /^WORKDIR\s+(\S+)/i.exec(line);
+    if (workdirMatch) workdir = workdirMatch[1] as string;
+    const envMatch = /^ENV\s+MIGRATIONS_DIR=(\S+)/i.exec(line);
+    if (envMatch) migrationsDir = toLocal(envMatch[1] as string);
+    const copy = /^COPY\s+(?!--)(.+)$/i.exec(line);
+    if (!copy) continue;
+    const args = (copy[1] as string).trim().split(/\s+/);
+    const dest = args.pop() as string;
+    const target = toLocal(dest);
+    for (const src of args) {
+      if (src.includes("*")) {
+        mkdirSync(target, { recursive: true });
+        for (const file of new Bun.Glob(src).scanSync({ cwd: repoRoot })) {
+          cpSync(join(repoRoot, file), join(target, file.split("/").pop() as string));
+        }
+      } else if (dest.endsWith("/") && !src.endsWith("/")) {
+        mkdirSync(target, { recursive: true });
+        cpSync(join(repoRoot, src), join(target, src.split("/").pop() as string));
+      } else {
+        mkdirSync(dirname(target), { recursive: true });
+        cpSync(join(repoRoot, src), target, { recursive: true });
+      }
+    }
+  }
+  expect(migrationsDir !== undefined, "the Dockerfile runtime stage sets no ENV MIGRATIONS_DIR");
+  return { migrationsDir: migrationsDir as string };
 }
 
 async function run(command: string[], cwd: string, env: Record<string, string>) {
@@ -28,8 +70,9 @@ async function run(command: string[], cwd: string, env: Record<string, string>) 
 // The Postgres migration chain is found outside a source checkout:
 // - the npm package: `dist/` chunks beside the shipped `src/`, `db-copy` run through the
 //   Node bin from a directory outside the checkout;
-// - the API image: a compiled binary (it reads `/$bunfs/`), the chain copied to
-//   `$MIGRATIONS_DIR/postgres` as the Dockerfile does, booted on DATABASE_URL.
+// - the API image: a compiled binary (it reads `/$bunfs/`) with the
+//   files the Dockerfile runtime stage COPYs laid out from the Dockerfile itself, booted on
+//   DATABASE_URL.
 export const postgresChainLayouts: Scenario = {
   name: "postgres-chain-layouts",
   order: 9_050,
@@ -78,8 +121,7 @@ export const postgresChainLayouts: Scenario = {
 
       // API image layout.
       const image = join(work, "image");
-      const migrations = join(image, "migrations");
-      mkdirSync(migrations, { recursive: true });
+      mkdirSync(image, { recursive: true });
       const compiled = await run(
         [
           "bun",
@@ -97,12 +139,11 @@ export const postgresChainLayouts: Scenario = {
         compiled.exitCode === 0,
         `bun build --compile failed: ${compiled.stderr.slice(-1500)}`,
       );
-      const sqliteChain = join(repoRoot, "src/be/migrations");
-      for (const file of readdirSync(sqliteChain).filter((f) => f.endsWith(".sql"))) {
-        cpSync(join(sqliteChain, file), join(migrations, file));
-      }
-      cpSync(CHAIN, join(migrations, "postgres"), { recursive: true });
-      cpSync(join(repoRoot, "package.json"), join(image, "package.json"));
+      const layout = replicateDockerfileCopies(image);
+      expect(
+        existsSync(join(layout.migrationsDir, "postgres")),
+        `the Dockerfile runtime stage copies no Postgres chain to $MIGRATIONS_DIR/postgres (${layout.migrationsDir})`,
+      );
       const imageTarget = await createPostgresDatabase(`chain-img-${ctx.nonce}`);
       databases.push(imageTarget);
       const port = await freePort();
@@ -111,7 +152,7 @@ export const postgresChainLayouts: Scenario = {
         PORT: String(port),
         DATABASE_URL: imageTarget,
         DATABASE_PATH: join(image, "unused.sqlite"),
-        MIGRATIONS_DIR: migrations,
+        MIGRATIONS_DIR: layout.migrationsDir,
       };
       delete env.DATABASE_QUERY_URL;
       api = Bun.spawn([join(image, "agent-swarm-api")], {
