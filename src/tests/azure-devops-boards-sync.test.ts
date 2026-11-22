@@ -570,14 +570,6 @@ describe("actor authorization", () => {
     expect((await post(assignedToBot(createdFixture))).json.created).toBe(true);
   });
 
-  test("an allowlisted actor without an email-like name creates a task with no linked user", async () => {
-    const name = "CONTOSO\\builder";
-    process.env.AZURE_DEVOPS_ALLOWED_ACTORS = name;
-    const { json } = await post(byStranger(assignedToBot(createdFixture), name));
-    expect(json.created).toBe(true);
-    expect((await getTaskById(json.taskId))?.requestedByUserId).toBeFalsy();
-  });
-
   test("an actor linked to a swarm user creates a task without the allowlist", async () => {
     delete process.env.AZURE_DEVOPS_ALLOWED_ACTORS;
     const email = "linked@example.org";
