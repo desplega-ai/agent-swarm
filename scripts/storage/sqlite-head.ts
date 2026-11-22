@@ -95,7 +95,9 @@ export function pgClassOf(
 export function pgTypeName(cls: PgClass): string {
   switch (cls) {
     case "timestamptz":
-      return "timestamptz";
+      // Millisecond precision, as SQLite stores and as JS Dates read back: a
+      // microsecond value would never equal its own read in a CAS predicate.
+      return "timestamptz(3)";
     case "epoch-ms":
     case "bigint":
       return "bigint";

@@ -532,6 +532,27 @@ export function tasksContract(engine: ContractEngine): void {
       expect(row?.lastUpdatedAt).toBe(row?.createdAt as string);
     });
 
+    test("a server-stamped lastUpdatedAt read back wins its own compare-and-swap", async () => {
+      // The heartbeat and routed assignment read a row, then CAS on the value
+      // they read. The engine's clock stamps it, so the stored value must equal
+      // the read one: no precision finer than the read text keeps.
+      await seedTask(storage, { id: "cas", status: "in_progress" });
+      await repo.setTaskOutput("cas", "partial");
+      const read = await storage.executor.get<{ lastUpdatedAt: string }>(
+        sql`SELECT "lastUpdatedAt" FROM agent_tasks WHERE id = ${"cas"}`,
+      );
+      const lastUpdatedAt = read?.lastUpdatedAt as string;
+      expect(lastUpdatedAt).not.toBe(T0);
+      const failed = await repo.finishTask("cas", {
+        status: "failed",
+        statusKind: "error",
+        failureReason: "stalled",
+        finishedAt: T1,
+        expectedLastUpdatedAt: lastUpdatedAt,
+      });
+      expect(failed).toMatchObject({ status: "failed", statusKind: "error" });
+    });
+
     test("terminal moves are conditional and compare-and-swap", async () => {
       await seedTask(storage, { id: "a", status: "in_progress", lastUpdatedAt: T0 });
       expect(

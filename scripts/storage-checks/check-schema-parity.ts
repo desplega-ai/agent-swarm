@@ -276,6 +276,7 @@ type PgColumn = {
   table_name: string;
   column_name: string;
   data_type: string;
+  datetime_precision: number | null;
   is_nullable: string;
   column_default: string | null;
   is_identity: string;
@@ -328,7 +329,7 @@ async function introspectPostgres(db: PostgresClient): Promise<PgSchema> {
   );
   const columns = new Map<string, PgColumn[]>();
   for (const c of await db.query<PgColumn>(
-    `SELECT table_name, column_name, data_type, is_nullable, column_default, is_identity, ordinal_position
+    `SELECT table_name, column_name, data_type, datetime_precision, is_nullable, column_default, is_identity, ordinal_position
      FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position`,
   )) {
     columns.set(c.table_name, [...(columns.get(c.table_name) ?? []), c]);
@@ -636,7 +637,8 @@ function compareTable(
     if (!p) continue;
     const { cls } = pgClassOf(types, t.name, c.name, c.declared);
     const want = pgTypeName(cls);
-    const got = PG_DATA_TYPE[p.data_type] ?? p.data_type;
+    const mapped = PG_DATA_TYPE[p.data_type] ?? p.data_type;
+    const got = mapped === "timestamptz" ? `timestamptz(${p.datetime_precision})` : mapped;
     if (want !== got)
       add(`type:${t.name}.${c.name}`, `classified ${cls} (${want}), Postgres ${got}`);
     // A PRIMARY KEY column is NOT NULL on Postgres. SQLite accepts NULL in a
