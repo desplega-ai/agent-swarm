@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.3] - 2026-11-22
+
+### Added
+- SDK: `@desplega.ai/agent-swarm-sdk`, a typed TypeScript client for the swarm API that sends a task and waits for its result (#3482).
+- Integrations: `GITLAB_ALLOWED_SENDERS` and `BITBUCKET_ALLOWED_SENDERS`; GitLab, Bitbucket and Azure DevOps mentions now need a linked swarm user or an allowlisted sender (#3541).
+- Examples: a review loop skill for the agent that edits a video (#3544) and a top bar with links and a theme button on the video review page (#3547).
+
+### Changed
+- Dependencies: claude-code, anthropic sdk, amp, grok, qwen (#3537) and amp, acp sdk (#3551) worker harness bumps.
+- Performance: scripts keep three warm spares per native executor spec (#3548).
+- CI: the timings-snapshot artifact hand-off retries once (#3534).
+- Docs: Hive Slack themes in the README (#3543), win-loss and onboarding playbook clarifications (#3545, #3546), swarm-scripts skill seed patches (#3535); `.env.example` lists the GitLab variables.
+
+### Fixed
+- Azure DevOps: allowlisted actors with no linked user can create tasks (#3556).
+- Slack: one live card per ask with honest PR links (#3550); `/agent-swarm-status` applies the sender allowlist (#3536).
+- Codex: web search loop checks count completed queries (#3539); reasoning effort is preserved for live catalog models (#3540).
+- HTTP: public webhook receivers limit raw-body size (#3538).
+- UI: `apps/ui/node_modules` is pruned before the Vercel install (#3542).
+
 ## [2.14.2] - 2026-11-21
 
 ### Added
