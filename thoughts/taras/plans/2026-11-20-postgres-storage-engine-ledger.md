@@ -17,9 +17,9 @@ branch: feat/postgres-storage-engine (fork Capchase/agent-swarm)
 | M2 Storage packages on SQLite | done (part 5): checks 1, 8, 16 on SQLite (see table); check 12 pending list at 32 files / 281 sites, every one owned by M4 or the SQLite start path (see Part 5) | `f3ce45ec5` |
 | M3 Postgres engine | done (part 6): repositories, codec, baseline, triggers, runner, API start on Postgres (D1, D16); checks 7, 9, 14, 18 pass | `7b5952e21` |
 | M4 Engine-specific domains | done (part 6): steps 1 to 5; check 12 at 0 pending sites | `14f212978` |
-| M5 Contract on Postgres | in progress (part 10): D7 applied to the poll claim (87.5% -> 0%), task finish (71.7% -> 0%) and unkeyed task creation (68.6% -> 0%, `7084a65ef`); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
+| M5 Contract on Postgres | done (part 10): D7 applied to the poll claim (87.5% -> 0%), task finish (71.7% -> 0%) and unkeyed task creation (68.6% -> 0%, `7084a65ef`); keyed task creation kept SERIALIZABLE (approved exception); four single-row or registration sites above 5% accepted as exceptions by Daniel (part 9) | `74403ae87` |
 | M6 Data copy | done (part 9): `agent-swarm db-copy`, CLI and check-20 scenario `data-copy`, base-db fixture boots on Postgres through the copy (check 10), 4 contract tests | `f0480cc9a` |
-| M7 Delivery | in progress (part 9): CI, chart, compose, docs, runbook, replica blockers done; PR not opened (STOP-ASK on unkeyed task creation retries; `github-emulate-flows` intermittent on Postgres) | `52bf8352c` |
+| M7 Delivery | part 10: unkeyed creation fixed, webhook flake fixed, every check re-run on `216829ddf`; PR opened (see output) | `216829ddf` |
 
 ## Swarm adaptations (from the dispatching task, they win over the brief)
 
@@ -519,6 +519,23 @@ Evidence:
 Fix (commit `216829ddf`, in this branch because the branch makes it fail): the GitHub, GitLab, Azure DevOps and Bitbucket webhook inits (synchronous env reads) run first in the listen callback, before any await. No scenario changed. Proof: the probe above; `github-emulate-flows`, `platform-webhooks`, `defer-wake-pr-merged` pass on both engines; strict full runs after the fix (below) pass `github-emulate-flows` every time.
 
 Same class, not fixed (new, seen once): `linear-emulate-flows` failed its first attempt in one Postgres run (`linear authorize url: expected 200, got 500`), passed on rerun. `await initLinear()` writes the Linear `oauth_apps` row later in the same callback, after `/health` answers; the authorize route reads that row. Closing it needs `initLinear`/`initJira` before `listen`, a larger change to the start order. Left open; listed under "Open risks".
+
+## Part 10 final check runs (code head `216829ddf`)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | strict suite on SQLite (4 shards + `merge.ts --strict`) | **pass**: 242 passed, 0 failed, 2 flaky (`slack-pre-task-create-block` reaction timeout, `model-group-resolution`, flaky at the base) |
+| 2 | strict suite on Postgres, two full runs | **pass** both: 242 passed, 0 failed. Flaky: `model-group-resolution` (both), `linear-emulate-flows` (second run; see the webhook section). `github-emulate-flows` passed in both. |
+| 3 | same scenario list | **pass** (one list; both engines ran 242) |
+| 4 | `--tx-replay` on Postgres (4 shards + strict merge) | **pass**: 242 passed, 0 failed, 2 flaky (`model-group-resolution`, `linear-emulate-flows`) |
+| 5 | divergence scenarios on Postgres | **pass** (flow `storage-engine-parity`, now with `stress-task-create` and `divergence-tracker-dedup`) |
+| 6 | no new coverage exclusion | **pass**: the manifest diff adds two scenarios to a flow, no exclusion |
+| 7 | schema parity | **pass**: 0 unexplained, 164 allowlisted |
+| 9, 11 to 15 | migration conflicts, dep-graph, storage boundary, SQL portability, triggers, tx-callbacks | **pass** |
+| 16 | existing gates | `lint`, `lint:slop`, `tsc:check:tsc`, db boundary, async seam, floating promises, promise sinks, audit columns, unit-test allowlist, test spawn: **pass**. `e2e:ui`: **pass** (294 passed, 79 skipped; first run in this work). `test:root -- --parallel=4` (with `env -u BOOT_SCRUB_MODE -u RBAC_ENABLED`): exit 1, 23,098 pass / 28 fail: 18 fail at the base (AgentMail 8, realtime transport 7, GitLab event names 2, initTelemetry 1); the other 10 are in 7 files that pass alone (inventories 3/3, Slack mode lifecycle 2/2, app shell 5/5, scripts-fs 16/16, savings rollup 22/22, agent-fs proxy 27/27, required-params migration 7/7). |
+| 17 | `docs:openapi` | **pass**: no diff |
+| 18 | `test:storage` | **pass**: SQLite 398/0, Postgres 452/0 |
+| 21, 22 | bench, stress | **pass**: unkeyed task creation 0.0% (part 10 section); 0 exhausted, 0 5xx; only accepted exceptions above 5% |
 
 ## Decided: JSON key order in API responses (Daniel, 2026-11-21)
 
