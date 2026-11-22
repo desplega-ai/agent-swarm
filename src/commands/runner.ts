@@ -33,7 +33,10 @@ import {
 import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
-import { readClaudeRequestSettings } from "../providers/claude-request-settings";
+import {
+  readClaudeRequestSettings,
+  removeClaudeSessionTranscript,
+} from "../providers/claude-request-settings";
 import {
   authJsonToCredentialSelection,
   credentialsToAuthJson,
@@ -5509,6 +5512,10 @@ export async function spawnProviderProcess(
             );
           }
         }
+        // shortcut: a crashed runner leaves the transcript to Claude Code's own
+        // cleanupPeriodDays pruning; add a boot sweep if worker disks fill up.
+        if (adapter.name === "claude" && result.sessionId)
+          await removeClaudeSessionTranscript(result.sessionId, config.env ?? process.env);
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {
