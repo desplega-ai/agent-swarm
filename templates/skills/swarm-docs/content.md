@@ -87,6 +87,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-offboarding-access-review). Reference.
 - [Coordinating a new hire's first-day readiness across HR, managers and operations with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-onboarding-readiness-review). Reference.
+- [Coordinating an interview loop across recruiters and engineering managers with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/interview-scheduling-handoff). Reference.
 - [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-training-completion-evidence-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/competitor-change-brief). Reference.
 - [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/business-continuity-tabletop-preparation). Reference.
