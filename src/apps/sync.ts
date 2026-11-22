@@ -3,6 +3,7 @@ import { deleteKv, getAllTasks, getDbClient, getKv, type TaskFilters, upsertKv }
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { withSpan } from "../otel";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
 import { createSweepScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -264,9 +265,11 @@ async function pullFromScript(args: {
 }): Promise<PullResult> {
   const warnings: string[] = [];
   const { source } = args;
-  const script = await getScriptById(source.scriptId);
+  // Per-phase spans (no-ops when OTel is off) so SigNoz shows where an app-sync
+  // pass spends its time before the script itself runs.
+  const script = await withSpan("app.sync.getScript", () => getScriptById(source.scriptId));
   if (!script) throw new SyncPassError(`script "${source.scriptId}" not found`);
-  const agentId = await resolveSyncRunAs(script);
+  const agentId = await withSpan("app.sync.resolveRunAs", () => resolveSyncRunAs(script));
 
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.
@@ -811,7 +814,9 @@ async function executePass(args: {
   // for a pair that changed or vanished while it was in flight.
   let plannedFingerprint: string | null = null;
 
-  const finish = async (result: SyncPassResult): Promise<SyncPassResult> => {
+  const finish = (result: SyncPassResult): Promise<SyncPassResult> =>
+    withSpan("app.sync.finish", () => finishPass(result));
+  const finishPass = async (result: SyncPassResult): Promise<SyncPassResult> => {
     const scrubbed = scrubObject({ ...result, warnings, durationMs: Date.now() - startedMs });
     const current = await resolvePair(args.appId, args.model, args.sourceName);
     const stillCurrent =
@@ -856,31 +861,39 @@ async function executePass(args: {
     // summary, never pull.records. The sweep scrubber skips rules a clean text
     // cannot trigger: the default one re-reads the env per string and blocks
     // the event loop for tens of ms on a few hundred rows.
-    const pull = scrubObject(
-      source.connector === "script"
-        ? await pullFromScript({
-            appId: args.appId,
-            model: args.model,
-            sourceName: args.sourceName,
-            source,
-          })
-        : await pullFromSwarmTasks(source, args.invokedBy),
-      undefined,
-      undefined,
-      createSweepScrubber(),
+    const pulledRaw = await withSpan(
+      "app.sync.pull",
+      () =>
+        source.connector === "script"
+          ? pullFromScript({
+              appId: args.appId,
+              model: args.model,
+              sourceName: args.sourceName,
+              source,
+            })
+          : pullFromSwarmTasks(source, args.invokedBy),
+      { connector: source.connector },
+    );
+    const pull = await withSpan("app.sync.scrub", () =>
+      scrubObject(pulledRaw, undefined, undefined, createSweepScrubber()),
     );
     pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);
-    await reconcile({
-      appId: args.appId,
-      model: args.model,
-      sourceName: args.sourceName,
-      fingerprint,
-      joinKey: source.joinKey,
-      pull,
-      warnings,
-      counts,
-    });
+    await withSpan(
+      "app.sync.reconcile",
+      () =>
+        reconcile({
+          appId: args.appId,
+          model: args.model,
+          sourceName: args.sourceName,
+          fingerprint,
+          joinKey: source.joinKey,
+          pull,
+          warnings,
+          counts,
+        }),
+      { records: pull.records.length },
+    );
     return finish({ ...base, ...counts, pulled });
   } catch (error) {
     const message =
