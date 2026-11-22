@@ -624,3 +624,9 @@ See "M1 results / Edited scenarios".
 
 - `src/tests/skill-usage-cohorts.test.ts`: the query-plan exemption matches `MIN("createdAt")` (identifier now quoted per D8).
 - `src/tests/claude-managed-adapter.test.ts` (part 5, timing only): the fake event stream waits 20 ms before each event. With the resolver async through storage, the in-process note render takes a few async reads; back-to-back fake events settled the session first. No assertion changed.
+
+## 2026-11-22: re-review blocker, starter dashboard after db-copy (part 13)
+- Problem: db-copy runs the chain on the empty target, then writes the SQLite rows, so the starter dashboard reverted to SQLite SQL. The API on the copy skips 370 (recorded), and the dashboard fails on COLLATE NOCASE.
+- Fix 2e259f671: db-copy reruns the migrations listed in `src/be/migrations/postgres/after-copy.json` (370) inside the copy transaction, after the checksum comparison.
+- Proof: `data-copy` scenario now runs the starter on the copy. Postgres: FAIL at c1342144 (400 collation "nocase"), PASS at 2e259f671. storage-postgres package tests 452/452.
+- Fork main already equal to upstream cacd91a6. Merged origin/main into the branch: a1515e2f0.
