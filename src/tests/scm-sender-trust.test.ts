@@ -9,8 +9,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, tes
 import { unlink } from "node:fs/promises";
 import { resetAzureDevOpsBotIdCache } from "../azure-devops/api";
 import { AZURE_DEVOPS_BOT_NAME, resetAzureDevOps } from "../azure-devops/auth";
+import { handleWorkItemCreated } from "../azure-devops/boards-sync";
 import { handlePullRequestCommented } from "../azure-devops/handlers";
-import type { PullRequestCommentedEvent } from "../azure-devops/types";
+import type { PullRequestCommentedEvent, WorkItemCreatedEvent } from "../azure-devops/types";
 import { closeDb, createAgent, createUser, getDbClient, initDb } from "../be/db";
 import { findUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resetBitbucketBotCache } from "../bitbucket/api";
@@ -23,6 +24,7 @@ import type { CommentEvent } from "../github/types";
 import { getGitLabBotName } from "../gitlab/auth";
 import { handleNote } from "../gitlab/handlers";
 import type { NoteEvent } from "../gitlab/types";
+import azureWorkItemSample from "./fixtures/azure-boards/workitem.created.json";
 import azureCommentSample from "./fixtures/azure-devops/pull-request-commented.json";
 import bitbucketCommentSample from "./fixtures/bitbucket/pullrequest-comment-created.json";
 
@@ -151,6 +153,16 @@ function azureComment(uniqueName: string): PullRequestCommentedEvent {
   return event;
 }
 
+function azureWorkItem(changedBy: string): WorkItemCreatedEvent {
+  const id = nextId++;
+  const event = structuredClone(azureWorkItemSample) as unknown as WorkItemCreatedEvent;
+  event.id = `00000000-0000-4000-8000-${String(id).padStart(12, "0")}`;
+  event.resource.id = id;
+  event.resource.fields["System.ChangedBy"] = changedBy;
+  event.resource.fields["System.Description"] = `@${AZURE_DEVOPS_BOT_NAME} please look`;
+  return event;
+}
+
 function githubComment(login: string): CommentEvent {
   const id = nextId++;
   return {
@@ -215,6 +227,21 @@ describe("allowlisted senders create tasks", () => {
     expect(
       (await handlePullRequestCommented(azureComment("allowed-az@example.test"))).created,
     ).toBe(true);
+  });
+
+  test("AZURE_DEVOPS_ALLOWED_ACTORS name without an email creates a task with no linked user", async () => {
+    process.env.AZURE_DEVOPS_ALLOWED_ACTORS = "CONTOSO\\az-builder";
+    const result = await handlePullRequestCommented(azureComment("contoso\\az-builder"));
+    expect(result.created).toBe(true);
+    expect(await findUserByExternalId("azure-devops", "contoso\\az-builder")).toBeNull();
+  });
+
+  test("AZURE_DEVOPS_ALLOWED_ACTORS name without an email creates a Boards task", async () => {
+    process.env.AZURE_DEVOPS_ORG_URL = "https://dev.azure.com/acme-org";
+    const changedBy = "Builder <CONTOSO\\az-builder>";
+    expect((await handleWorkItemCreated(azureWorkItem(changedBy))).created).toBe(false);
+    process.env.AZURE_DEVOPS_ALLOWED_ACTORS = "contoso\\az-builder";
+    expect((await handleWorkItemCreated(azureWorkItem(changedBy))).created).toBe(true);
   });
 });
 
