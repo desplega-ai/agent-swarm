@@ -5167,7 +5167,13 @@ export function autoEncryptLegacyPlaintextSecrets(
   // Create plaintext backup if key was auto-generated (not user-provided)
   if (options.createBackup) {
     const { writeFileSync } = require("node:fs");
-    const backupPath = `${dbPath}.backup.secrets-${new Date().toISOString().split("T")[0]}.env`;
+    // The backup sits beside the encryption key, in the data directory (D2).
+    const { basename, join } = require("node:path");
+    const { swarmDataDir } = require("../utils/data-dir");
+    const backupPath = join(
+      swarmDataDir(dbPath),
+      `${basename(dbPath)}.backup.secrets-${new Date().toISOString().split("T")[0]}.env`,
+    );
     const backupLines = [
       "# PLAINTEXT SECRET BACKUP - CREATED DURING AUTO-ENCRYPTION MIGRATION",
       "# This file was created because you did not provide SECRETS_ENCRYPTION_KEY",
