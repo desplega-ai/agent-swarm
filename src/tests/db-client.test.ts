@@ -123,6 +123,32 @@ describe("db-client transactions", () => {
     expect(await names()).toEqual(["outer"]);
   });
 
+  test("a rolled-back savepoint drops its afterCommit hooks; a released one keeps them", async () => {
+    const seen: string[] = [];
+    await client.transaction(async () => {
+      client.afterCommit(() => {
+        seen.push("outer");
+      });
+      await expect(
+        client.transaction(async () => {
+          client.afterCommit(() => {
+            seen.push("rolled-back");
+          });
+          throw new Error("inner boom");
+        }),
+      ).rejects.toThrow("inner boom");
+      await client.transaction(async () => {
+        await client.transaction(async () => {
+          client.afterCommit(() => {
+            seen.push("released");
+          });
+        });
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(seen).toEqual(["outer", "released"]);
+  });
+
   test("concurrent top-level write waits for the open transaction", async () => {
     const order: string[] = [];
     const txPromise = client.transaction(async (tx) => {

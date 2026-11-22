@@ -563,15 +563,33 @@ class BunSqliteClient implements DbClient {
     this.savepointSeq += 1;
     const name = `db_client_sp_${this.savepointSeq}`;
     const tx = this.boundExecutor(ctx);
+    // afterCommit hooks registered inside the savepoint wait in their own list:
+    // a ROLLBACK TO undoes the savepoint's writes, so it must drop their hooks
+    // too. `closed` and the other hook lists stay the outer transaction's.
+    const inner: TxContext = {
+      get closed() {
+        return ctx.closed;
+      },
+      set closed(value: boolean) {
+        ctx.closed = value;
+      },
+      afterCommit: [],
+      afterRollback: ctx.afterRollback,
+      attemptRollback: ctx.attemptRollback,
+    };
     db.run(`SAVEPOINT ${name}`);
     try {
-      const result = await fn(tx);
+      const result = await txContext.run(inner, () => fn(tx));
       db.run(`RELEASE SAVEPOINT ${name}`);
+      ctx.afterCommit.push(...inner.afterCommit);
       return result;
     } catch (err) {
       db.run(`ROLLBACK TO SAVEPOINT ${name}`);
       db.run(`RELEASE SAVEPOINT ${name}`);
       throw err;
+    } finally {
+      // A late registration from a leaked continuation joins the outer list, as before.
+      inner.afterCommit = ctx.afterCommit;
     }
   }
 

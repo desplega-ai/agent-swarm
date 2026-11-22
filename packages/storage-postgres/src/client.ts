@@ -316,14 +316,18 @@ export class PostgresClient implements DbClient {
 
   private async savepoint<T>(outer: TxContext, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
     this.savepointCounter += 1;
+    // afterCommit hooks wait in their own list until the savepoint is
+    // released: a savepoint that rolls back drops its writes, so it drops
+    // their hooks too. The other hook lists are the outermost transaction's.
+    const savepointHooks: (() => void | Promise<void>)[] = [];
+    let result: T;
     try {
-      return await outer.handle.savepoint(async (sp) => {
+      result = await outer.handle.savepoint(async (sp) => {
         const inner: TxContext = {
           closed: false,
           handle: sp,
           failure: outer.failure,
-          // Hooks registered inside a savepoint belong to the outermost transaction.
-          afterCommit: outer.afterCommit,
+          afterCommit: savepointHooks,
           afterRollback: outer.afterRollback,
           attemptRollback: outer.attemptRollback,
         };
@@ -337,6 +341,8 @@ export class PostgresClient implements DbClient {
       if (isRetryable(err)) outer.failure.retryable ??= sqlstateOf(err) ?? "";
       throw mapPostgresError(err, this.options.checkMessages);
     }
+    outer.afterCommit.push(...savepointHooks);
+    return result;
   }
 
   afterCommit(fn: () => void | Promise<void>): void {
