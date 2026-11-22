@@ -757,15 +757,16 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "version") {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
-} else if ((args.command === "onboard" || args.command === "controller") && !process.versions.bun) {
+} else if (
+  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  !process.versions.bun
+) {
   // The published bin uses Node, but these commands require Bun APIs.
   const { spawnSync } = await import("node:child_process");
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      args.command === "onboard"
-        ? "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command."
-        : "Controller requires Bun. Install Bun from https://bun.sh, then retry this command.",
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);

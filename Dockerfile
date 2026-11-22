@@ -144,6 +144,9 @@ COPY package.json ./
 
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
 COPY src/be/migrations/*.sql /app/migrations/
+# The Postgres chain (SQL, parts and the JSON metadata) is resolved as
+# $MIGRATIONS_DIR/postgres by src/be/storage-root.ts.
+COPY src/be/migrations/postgres/ /app/migrations/postgres/
 
 # Copy vendored models.dev pricing snapshot so the compiled binary can seed
 # pricing rows from a real filesystem path at runtime.

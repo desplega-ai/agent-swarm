@@ -3,7 +3,8 @@
  * database (decision D11). The runbook (`runbooks/postgres.md`) gives the
  * production procedure around it.
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { EMBEDDING_DIMENSIONS } from "./memory/constants";
 import { copySqliteFileToPostgres } from "./storage-root";
@@ -43,6 +44,12 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   }
   if (!existsSync(from)) {
     console.error(`db-copy: no SQLite file at ${from}`);
+    return 2;
+  }
+  if (parsed.json && reportWouldOverwriteSource(parsed.json, from)) {
+    console.error(
+      `db-copy: --json ${parsed.json} is the SQLite source (or its -wal/-shm file); pick another report path`,
+    );
     return 2;
   }
   if (!to || !/^postgres(ql)?:\/\//.test(to)) {
@@ -89,4 +96,22 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   }
   console.error(scrubSecrets(`[db-copy] FAILED: ${report.error ?? "unknown error"}`));
   return 1;
+}
+
+/**
+ * True when the report path names the source file or one of its WAL files,
+ * by path or by file identity (a hard link or symlink). The check runs before
+ * the copy starts, so a refused copy never replaces the rollback file.
+ */
+export function reportWouldOverwriteSource(reportPath: string, sqlitePath: string): boolean {
+  const report = resolve(reportPath);
+  const sources = [sqlitePath, `${sqlitePath}-wal`, `${sqlitePath}-shm`];
+  if (sources.some((source) => resolve(source) === report)) return true;
+  if (!existsSync(report)) return false;
+  const target = statSync(report);
+  return sources.some((source) => {
+    if (!existsSync(source)) return false;
+    const stat = statSync(source);
+    return stat.dev === target.dev && stat.ino === target.ino;
+  });
 }

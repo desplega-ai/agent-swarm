@@ -4,7 +4,7 @@
  * package `@desplega/storage` and asks `getStorage()` for repositories.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type CopyReport,
@@ -245,14 +245,33 @@ export function ignoredDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string
 const PROCESS_LOCK_WAIT_MS = 10_000;
 const POSTGRES_POOL_MAX = 10;
 
-/** Directory of the Postgres migration chain. */
-function postgresMigrationsDir(): string {
-  if (import.meta.dir.startsWith("/$bunfs/")) {
+/**
+ * Directory of the Postgres migration chain. The first candidate that holds
+ * `column-types.json` wins:
+ * - `POSTGRES_MIGRATIONS_DIR` (explicit override);
+ * - next to this file (a source checkout, `bun run src/http.ts`);
+ * - `$MIGRATIONS_DIR/postgres` (the API image copies the chain to
+ *   `/app/migrations/postgres`, since a compiled binary reads `/$bunfs/`);
+ * - `../src/be/migrations/postgres` (the npm package: `dist/` chunks beside
+ *   the shipped `src/`).
+ */
+export function postgresMigrationsDir(
+  env: NodeJS.ProcessEnv = process.env,
+  importDir: string = import.meta.dir,
+): string {
+  const candidates = [
+    env.POSTGRES_MIGRATIONS_DIR,
+    join(importDir, "migrations", "postgres"),
+    env.MIGRATIONS_DIR ? join(env.MIGRATIONS_DIR, "postgres") : undefined,
+    join(importDir, "..", "src", "be", "migrations", "postgres"),
+  ].filter((dir): dir is string => !!dir && !dir.startsWith("/$bunfs/"));
+  const found = candidates.find((dir) => existsSync(join(dir, "column-types.json")));
+  if (!found) {
     throw new Error(
-      "[db] the Postgres engine cannot run from a compiled binary yet: the Postgres migration chain is not shipped with it",
+      `[db] cannot find the Postgres migration chain (looked in ${candidates.join(", ")}); set POSTGRES_MIGRATIONS_DIR`,
     );
   }
-  return join(import.meta.dir, "migrations", "postgres");
+  return found;
 }
 
 export type PostgresEngine = {
