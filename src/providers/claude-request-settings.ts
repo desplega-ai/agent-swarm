@@ -1,8 +1,15 @@
 import { createReadStream } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { scrubSecrets } from "../utils/secret-scrubber";
+
+const SESSION_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function claudeProjectsDir(env: NodeJS.ProcessEnv): string {
+  return join(env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), ".claude"), "projects");
+}
 
 interface ClaudeRequestSettings {
   observedModel: string;
@@ -16,11 +23,8 @@ export async function readClaudeRequestSettings(
 ): Promise<ClaudeRequestSettings | undefined> {
   // Claude names the main JSONL file by UUID. Project directory names can be
   // overridden or hashed, and subagent transcripts live another level down.
-  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(sessionId)) return;
-  const projects = join(
-    env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), ".claude"),
-    "projects",
-  );
+  if (!SESSION_ID.test(sessionId)) return;
+  const projects = claudeProjectsDir(env);
   try {
     for await (const path of new Bun.Glob(`*/${sessionId}.jsonl`).scan({
       cwd: projects,
@@ -58,5 +62,22 @@ export async function readClaudeRequestSettings(
     }
   } catch {
     // Older CLIs and sessions with persistence disabled have no replay file.
+  }
+}
+
+/**
+ * Delete a finished session's transcript and subagent transcripts. Swarm
+ * sessions are never resumed, so the file only has to live until the request
+ * settings are read.
+ */
+export async function removeClaudeSessionTranscript(
+  sessionId: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (!SESSION_ID.test(sessionId)) return;
+  const projects = claudeProjectsDir(env);
+  for (const dir of await readdir(projects).catch(() => [])) {
+    await rm(join(projects, dir, `${sessionId}.jsonl`), { force: true }).catch(() => {});
+    await rm(join(projects, dir, sessionId), { recursive: true, force: true }).catch(() => {});
   }
 }

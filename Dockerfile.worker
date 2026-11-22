@@ -563,8 +563,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.5
-ARG DSH_SHA512=70d6e9d76b4b60b5135da5658bbcf0c0c8f39a6115083d4f465760e282ad5cce3e94561c91c6a588c4b63d4fc5a13841e2200dfdf28e4880f49ebb51654e068f
+ARG DSH_VERSION=0.2.3-alpha.2
+ARG DSH_SHA512=9a2e61abdea7939c7a1cf53a8247074946442acd3fc68c9df0c57b1824c3a542d895c25521491f9f926236ff9400c695db654ee154306cb5a78e41415796ff8a
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -579,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795262446-g9f3ad9
-ARG AMP_SHA512_AMD64=bef453f3430f92f7c9fe8429e47da1476754fe39a41ba1a87c84d1174b141bad1daabea151eea3126f25293af8c8086163a62d7983f490d5e95549ea49ae52b4
-ARG AMP_SHA512_ARM64=ecf2420e9e7a949bc1be94c43e4f7a1436e75b5d13391ca736789beea257115ac3e5ca1ed54bef18c6250f533bc2af46387a475514b10e9eb0219f5b58acf84d
+ARG AMP_VERSION=0.0.1795334436-g660843
+ARG AMP_SHA512_AMD64=2f6c7d2df89ae0b9c9ea67552f2920e9f2490dd7dfd8f3d60ab6fd01e71edf0a2564027dd9e8349aa070490820c00df2b58629472a31817809cb074112d3e66b
+ARG AMP_SHA512_ARM64=b810b54cdf46046ceab59d4bd1cc5cffab7f91680b036434a3af2b80787f0a60ba71ade9249a6b0d95653aee30879eef2b83dd1d884cc3e9f1e8b16a0a351825
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -639,8 +639,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.3), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.3
+# scripts are not needed for ACP (verified on 0.28.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.28.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \

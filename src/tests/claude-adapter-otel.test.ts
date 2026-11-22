@@ -146,7 +146,7 @@ describe("buildClaudeCodeRuntimeEnv", () => {
 
     expect(env.ENABLE_TOOL_SEARCH).toBe("true");
     expect(env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING).toBe("1");
-    expect(env.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBe("1");
+    expect(env.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBeUndefined();
     expect(env.CLAUDE_CODE_DISABLE_ATTACHMENTS).toBe("1");
     expect(env.DISABLE_FEEDBACK_COMMAND).toBe("1");
     expect(env.DISABLE_BUG_COMMAND).toBe("1");
@@ -286,7 +286,7 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     const env = spawnedEnvs[0];
     expect(env?.ENABLE_TOOL_SEARCH).toBe("true");
     expect(env?.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING).toBe("1");
-    expect(env?.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBe("1");
+    expect(env?.CLAUDE_CODE_SKIP_PROMPT_HISTORY).toBeUndefined();
     expect(env?.CLAUDE_CODE_DISABLE_ATTACHMENTS).toBe("1");
     expect(env?.DISABLE_FEEDBACK_COMMAND).toBe("1");
     expect(env?.DISABLE_BUG_COMMAND).toBe("1");
