@@ -329,8 +329,8 @@
       "scenarios": ["requester-hint"]
     },
     "budget-refusal": {
-      "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
-      "scenarios": ["core-budgets"]
+      "description": "A zero agent or user budget refuses claims and lifting it lets the task run; a fallback pool claim checks its own requester's budget",
+      "scenarios": ["core-budgets", "budget-pool-fallback"]
     },
     "chat-sdk-tools": {
       "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, Telegram messages through a loopback mock, and the Rocket.Chat webhook and REST round trip.",
@@ -447,8 +447,8 @@
       "scenarios": ["core-messaging"]
     },
     "metric-dashboards": {
-      "description": "Metric definition lifecycle, versions, run, create_metric upsert",
-      "scenarios": ["core-telemetry"]
+      "description": "Metric definition lifecycle, versions, run, create_metric upsert; the seeded starter dashboard and the UI template run on the engine",
+      "scenarios": ["core-telemetry", "metrics-starter-dashboard"]
     },
     "model-catalog-and-pricing": {
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
