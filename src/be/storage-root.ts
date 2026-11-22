@@ -327,7 +327,18 @@ export async function openPostgresEngine(
 ): Promise<PostgresEngine> {
   console.log(`[db] Postgres engine selected (DATABASE_URL=${scrubSecrets(url)})`);
   const migrationsDir = postgresMigrationsDir();
-  const lock = await acquireProcessLock(url, { waitMs: PROCESS_LOCK_WAIT_MS });
+  const lock = await acquireProcessLock(url, {
+    waitMs: PROCESS_LOCK_WAIT_MS,
+    // Availability follows the lock: once its session ends, a second API may
+    // take the database, so this one stops instead of writing next to it. The
+    // supervisor restarts it, and the restart waits for the lock again.
+    onLost: (reason) => {
+      console.error(
+        `[db] FATAL: lost the one-process lock of the Postgres database (${reason}). Exiting so that only one API writes to it.`,
+      );
+      process.exit(1);
+    },
+  });
   try {
     const setup = createPostgresClient(url, { max: 1 });
     let createdThisBoot: boolean;
