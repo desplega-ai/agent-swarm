@@ -1,9 +1,11 @@
+import { resolve } from "node:path";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { registerWorker } from "./core-helpers";
 
 // The seeded starter dashboard runs on the engine that seeded it: every widget query
 // and every variable options query, for each time range and with the filters set.
+// The dashboard UI's new-dashboard template runs on both engines too.
 export const metricsStarterDashboard: Scenario = {
   name: "metrics-starter-dashboard",
   order: 9_446,
@@ -58,6 +60,26 @@ export const metricsStarterDashboard: Scenario = {
       expect(
         agents.some((option) => option.value === agentId),
         "The agent options query does not list the new agent",
+      );
+    }
+
+    const template = await Bun.file(
+      resolve(import.meta.dir, "../../../apps/ui/src/pages/metrics/new-metric-definition.json"),
+    ).json();
+    const created = await ctx.api("POST", "/api/metrics/definitions", {
+      agentId,
+      body: { title: `New dashboard template ${ctx.nonce}`, definition: template },
+    });
+    expectStatus(created, [201], "create a dashboard from the UI template");
+    const templateId = asString(asRecord(created.json).id, "template metric id");
+    for (const variables of [{}, { agentFilter: agentId, userFilter: "nobody" }]) {
+      const run = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
+        body: { variables },
+      });
+      expectStatus(run, [200], `run the UI template with ${JSON.stringify(variables)}`);
+      expect(
+        asRecords(run.json, "widgets").length === asRecords(template, "widgets").length,
+        "The UI template did not run every widget",
       );
     }
   },

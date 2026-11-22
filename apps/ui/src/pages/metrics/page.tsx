@@ -74,65 +74,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn, formatSmartTime } from "@/lib/utils";
+import newMetricDefinition from "./new-metric-definition.json";
 
-const NEW_METRIC_DEFINITION: MetricDefinition = {
-  version: 1,
-  refreshSeconds: 60,
-  layout: { columns: 2 },
-  variables: [
-    {
-      key: "rangeModifier",
-      label: "Time range",
-      type: "select",
-      defaultValue: "-30 days",
-      options: [
-        { label: "Last 7 days", value: "-7 days" },
-        { label: "Last 30 days", value: "-30 days" },
-        { label: "Last 90 days", value: "-90 days" },
-      ],
-    },
-    {
-      key: "userFilter",
-      label: "Requester user ID",
-      type: "text",
-      defaultValue: "",
-    },
-    {
-      key: "agentFilter",
-      label: "Agent ID",
-      type: "text",
-      defaultValue: "",
-    },
-  ],
-  widgets: [
-    {
-      id: "task-statuses",
-      title: "Task statuses",
-      description: "Tasks grouped by current status.",
-      query: {
-        sql: "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE createdAt >= datetime('now', ?) AND (? = '' OR COALESCE(requestedByUserId, '') = ?) AND (? = '' OR COALESCE(agentId, '') = ?) GROUP BY status ORDER BY tasks DESC",
-        params: [
-          "{{rangeModifier}}",
-          "{{userFilter}}",
-          "{{userFilter}}",
-          "{{agentFilter}}",
-          "{{agentFilter}}",
-        ],
-        maxRows: 100,
-      },
-      viz: {
-        type: "bar",
-        x: "status",
-        y: "tasks",
-        format: "integer",
-        columns: [
-          { key: "status", label: "Status" },
-          { key: "tasks", label: "Tasks", format: "integer" },
-        ],
-      },
-    },
-  ],
-};
+// The template of a new dashboard. Its SQL runs on both storage engines: $n
+// placeholders, double-quoted camelCase columns, no engine-only functions.
+// scripts/e2e/scenarios/metrics-starter-dashboard.ts runs it on both.
+const NEW_METRIC_DEFINITION = newMetricDefinition as MetricDefinition;
 
 function formatValue(value: unknown, format?: MetricFormat): string {
   if (value == null) return "-";

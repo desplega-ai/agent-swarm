@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "refreshSeconds": 60,
+  "layout": {
+    "columns": 2
+  },
+  "variables": [
+    {
+      "key": "userFilter",
+      "label": "Requester user ID",
+      "type": "text",
+      "defaultValue": ""
+    },
+    {
+      "key": "agentFilter",
+      "label": "Agent ID",
+      "type": "text",
+      "defaultValue": ""
+    }
+  ],
+  "widgets": [
+    {
+      "id": "task-statuses",
+      "title": "Task statuses",
+      "description": "Tasks grouped by current status.",
+      "query": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE ($1 = '' OR COALESCE(\"requestedByUserId\", '') = $1) AND ($2 = '' OR COALESCE(\"agentId\", '') = $2) GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{userFilter}}", "{{agentFilter}}"],
+        "maxRows": 100
+      },
+      "viz": {
+        "type": "bar",
+        "x": "status",
+        "y": "tasks",
+        "format": "integer",
+        "columns": [
+          {
+            "key": "status",
+            "label": "Status"
+          },
+          {
+            "key": "tasks",
+            "label": "Tasks",
+            "format": "integer"
+          }
+        ]
+      }
+    }
+  ]
+}
