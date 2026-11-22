@@ -780,9 +780,12 @@ export async function handlePoll(
                   tried.add(id);
                   yield id;
                 }
-                batch = (await getUnassignedTaskIdsForAgent(myAgentId, 5, runsHere)).filter(
-                  (id) => !tried.has(id),
-                );
+                // Read past the tried IDs: a candidate a concurrent writer
+                // still holds stays at the top of the priority order, and a
+                // fixed limit of 5 would never reach the free task below it.
+                batch = (
+                  await getUnassignedTaskIdsForAgent(myAgentId, tried.size + 5, runsHere)
+                ).filter((id) => !tried.has(id));
               }
             };
             const requesterAdmitted = async (taskId: string): Promise<boolean> => {
