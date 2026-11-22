@@ -5,19 +5,10 @@
   "harness": "codex",
   "model": "gpt-6-luna",
   "modelAlias": null,
-  "resolvedModels": [
-    "gpt-6-luna"
-  ],
+  "resolvedModels": ["gpt-6-luna"],
   "reasoningEffort": null,
   "envKeys": [],
-  "apiVersions": [
-    "2.14.3"
-  ],
-  "workerVersions": [
-    "2.14.3"
-  ],
-  "e2bTemplates": [
-    "rkxvj304b0cbgcc5rzuz",
-    "sd4hhphn0dopxjkrruix"
-  ]
+  "apiVersions": ["2.14.3"],
+  "workerVersions": ["2.14.3"],
+  "e2bTemplates": ["rkxvj304b0cbgcc5rzuz", "sd4hhphn0dopxjkrruix"]
 }

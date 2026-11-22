@@ -21,24 +21,18 @@
   "budgetUsd": null,
   "budgetMs": null,
   "passThreshold": 0.75,
-  "gates": [
-    "report-exists[w2]:/workspace/audit/merged-report.md"
-  ],
+  "gates": ["report-exists[w2]:/workspace/audit/merged-report.md"],
   "dimensions": [
     {
       "name": "delegation",
       "weight": 5,
-      "checks": [
-        "delegation-paper-trail"
-      ],
+      "checks": ["delegation-paper-trail"],
       "judge": null
     },
     {
       "name": "correctness",
       "weight": 2,
-      "checks": [
-        "merged-answer-key"
-      ],
+      "checks": ["merged-answer-key"],
       "judge": null
     }
   ]
