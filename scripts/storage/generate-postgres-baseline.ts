@@ -236,7 +236,7 @@ function emitForeignKeys(schema: HeadSchema, t: HeadTable): string[] {
 }
 
 /** Views at the head schema, each written for Postgres by hand (one today). */
-const VIEW_PORTS: Record<string, { sqlite: string; postgres: string }> = {
+export const VIEW_PORTS: Record<string, { sqlite: string; postgres: string }> = {
   session_summary_recompute: {
     sqlite: "CREATE VIEW session_summary_recompute AS SELECT NULL AS rootId",
     postgres: `CREATE VIEW "session_summary_recompute" AS SELECT NULL::text AS "rootId";`,

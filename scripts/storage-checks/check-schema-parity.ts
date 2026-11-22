@@ -28,7 +28,7 @@ import {
   type PostgresClient,
   runPostgresMigrations,
 } from "../../packages/storage-postgres/src";
-import { tableContext } from "../storage/generate-postgres-baseline";
+import { tableContext, VIEW_PORTS } from "../storage/generate-postgres-baseline";
 import { qi, translateExpr } from "../storage/pg-translate";
 import {
   type ColumnTypes,
@@ -777,6 +777,99 @@ async function createScratch(
   };
 }
 
+/** Rows as comparable text: column names and values, NULL kept apart from the text "null". */
+function viewRowsText(rows: Record<string, unknown>[]): string {
+  return JSON.stringify(
+    rows
+      .map((row) =>
+        Object.keys(row)
+          .sort()
+          .map((k) => [k, row[k] === null || row[k] === undefined ? null : String(row[k])]),
+      )
+      .map((row) => JSON.stringify(row))
+      .sort(),
+  );
+}
+
+/** The differences of one Postgres view (`schema`.`name`) against SQLite's rows and its port. */
+async function viewDiffs(
+  pgClient: PostgresClient,
+  name: string,
+  schema: string,
+  sqliteRows: Record<string, unknown>[],
+): Promise<Diff[]> {
+  const pgRows = await pgClient.query<Record<string, unknown>>(
+    `SELECT * FROM ${qi(schema)}.${qi(name)}`,
+  );
+  const sqliteText = viewRowsText(sqliteRows);
+  const pgText = viewRowsText(pgRows);
+  if (sqliteText !== pgText) {
+    return [
+      {
+        key: `view:${name}`,
+        detail: `returns different rows on an empty database: SQLite ${sqliteText} vs Postgres ${pgText}`,
+      },
+    ];
+  }
+  const port = VIEW_PORTS[name];
+  if (!port) return [{ key: `view:${name}`, detail: "has no Postgres port in VIEW_PORTS" }];
+  // Postgres normalizes both definitions the same way: create the port in a
+  // throwaway schema and compare pg_get_viewdef text.
+  const definitions = await pgClient.transaction(async (tx) => {
+    await tx.run("CREATE SCHEMA parity_view_port");
+    await tx.run("SET LOCAL search_path TO parity_view_port, public");
+    await tx.run(port.postgres);
+    const row = await tx.get<{ expected: string; actual: string }>(
+      `SELECT pg_get_viewdef('parity_view_port.${qi(name)}'::regclass) AS expected,
+              pg_get_viewdef('${qi(schema)}.${qi(name)}'::regclass) AS actual`,
+    );
+    await tx.run("DROP SCHEMA parity_view_port CASCADE");
+    return row;
+  });
+  if (definitions && definitions.expected !== definitions.actual) {
+    return [
+      {
+        key: `view:${name}`,
+        detail: `the Postgres definition differs from its port: ${definitions.actual.trim()} vs ${definitions.expected.trim()}`,
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * A view's name and columns can stay while its body changes. Compare what each
+ * view returns on the two empty databases and its Postgres definition with the
+ * hand port. A control runs every time: the same view with its rows filtered
+ * out must fail, or the comparison has stopped working.
+ */
+async function compareViewBehavior(
+  pgClient: PostgresClient,
+  head: HeadSchema,
+  pg: PgSchema,
+  sqliteViewRows: Map<string, Record<string, unknown>[]>,
+): Promise<{ diffs: Diff[]; errors: string[] }> {
+  const diffs: Diff[] = [];
+  const errors: string[] = [];
+  for (const v of head.views) {
+    if (!pg.views.has(v.name)) continue;
+    const rows = sqliteViewRows.get(v.name) ?? [];
+    diffs.push(...(await viewDiffs(pgClient, v.name, "public", rows)));
+    await pgClient.run("CREATE SCHEMA parity_view_control");
+    try {
+      await pgClient.run(
+        `CREATE VIEW parity_view_control.${qi(v.name)} AS SELECT * FROM public.${qi(v.name)} WHERE false`,
+      );
+      if ((await viewDiffs(pgClient, v.name, "parity_view_control", rows)).length === 0) {
+        errors.push(`view control: a changed ${v.name} (no rows) was not detected`);
+      }
+    } finally {
+      await pgClient.run("DROP SCHEMA parity_view_control CASCADE");
+    }
+  }
+  return { diffs, errors };
+}
+
 export async function runSchemaParity(): Promise<{
   unexplained: Diff[];
   explained: Diff[];
@@ -800,11 +893,22 @@ export async function runSchemaParity(): Promise<{
     .query<{ name: string }, []>("SELECT name FROM pragma_table_info('_migrations')")
     .all()
     .map((r) => r.name);
+  // A view's name and columns can stay while its body changes: compare what
+  // each view returns on the two empty databases, and the Postgres definition
+  // with the hand port it was generated from.
+  const sqliteViewRows = new Map<string, Record<string, unknown>[]>();
+  for (const v of head.views) {
+    sqliteViewRows.set(
+      v.name,
+      sqlite.query<Record<string, unknown>, []>(`SELECT * FROM "${v.name}"`).all(),
+    );
+  }
   sqlite.close();
 
   const scratch = await createScratch(adminUrl);
   const pgClient = createPostgresClient(scratch.url, { max: 2, rawValues: true });
   let diffs: Diff[];
+  let viewErrors: string[] = [];
   try {
     await runPostgresMigrations(pgClient, {
       migrationsDir: POSTGRES_MIGRATIONS_DIR,
@@ -817,12 +921,16 @@ export async function runSchemaParity(): Promise<{
       pgRows.set(t, await pgClient.query<Record<string, unknown>>(`SELECT * FROM ${qi(t)}`));
     }
     diffs = compareSchemas(types, head, allSqliteTables, sqliteMigrationColumns, seeds, pg, pgRows);
+    const views = await compareViewBehavior(pgClient, head, pg, sqliteViewRows);
+    diffs.push(...views.diffs);
+    viewErrors = views.errors;
   } finally {
     await pgClient.close();
     await scratch.drop();
   }
 
   const { entries, errors } = readAllowlist(readFileSync(ALLOWLIST_PATH, "utf8"));
+  errors.push(...viewErrors);
   const explained = diffs.filter((d) => entries.has(d.key));
   const unexplained = diffs.filter((d) => !entries.has(d.key));
   for (const key of entries.keys()) {
