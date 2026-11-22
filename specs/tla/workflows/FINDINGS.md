@@ -1216,3 +1216,45 @@ Every config keeps its verdict and distinct-state count from the #3215 table abo
 `workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
 `workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3476's e2e scenario
 `workflow-executable-config-sources` passes.
+
+## Sync with #3485 and #3494 (`main` @ `cacd91a60`)
+
+#3494 decides a run's principal from the pinned definition inside `createRunWithInitialState`'s
+transaction and stores it on the run row. The `sub-workflow` and `swarm-script` executors now
+refuse with a failed result when that principal is refused (a creator-owned workflow last edited by
+another non-lead agent). For `sub-workflow` the refusal sits next to the existing pre-start
+refusals (depth, recursion, a missing or disabled child workflow), after the read of the attempt's
+child and before the child start. The model had no such branch: `ChildStart` with no child always
+started one. It now may also go to the fenced `XFail` when `"fail"` is in `BranchOutcomes`. That is
+redundant on a first call (`XRun` / `P5` already pick `fail`) and new on a re-claimed row (`XChild`)
+whose first call crashed before the refusal. `Probe-child-run-refusal.cfg` (new) is
+`Probe-child-run-crash.cfg` with `BranchOutcomes = {"async", "fail"}` and holds. Configs without
+`"fail"` in `BranchOutcomes` or without `ChildRunResume` have the same state space as before.
+
+#3485 makes the approval resume route on the stored approval request (bound to the run and step)
+instead of the bus event payload. Approval steps are a node kind the model does not have, so no
+action changes. Its added lines shift every later `resume.ts` line. ACTIONS.md re-pins the
+`engine.ts`, `resume.ts`, `db/workflow-runs.ts` and `executors/sub-workflow.ts` lines, and the
+`db.ts` lines, which were stale before this sync.
+
+Re-run with tla2tools 2026.11.06, BFS, `-workers 4 -deadlock` (`-workers 8` for
+`Probe-join-retry-sweep.cfg`). Every config keeps its verdict, and every config that holds keeps
+its distinct-state count from the #3215 table above. `src/tests/workflow-tla-races.test.ts` +
+`workflow-sub-workflow` + `workflow-cascade-cancel` + `workflow-agent-task-retry` +
+`workflow-finalization-races` + `workflow-parallel-park` + `workflow-retry-v2` +
+`workflow-hitl-routing` + `workflow-replay` + `workflow-definition-pinning`: 168 pass / 0 fail /
+0 `test.failing`. The e2e scenarios `workflow-approvals` and `workflow-edited-script-principal`
+pass.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 21,041 | 23 |
+| `Long.cfg` | `JoinWaitsForBranches` violated (CX8) | 2,584,379 | 27 |
+| `Fix-CX1` .. `Fix-CX7`, `Fix-CX11`, `Fix-CX13` | all hold | unchanged | - |
+| `Ctl-*`, calibration | same verdicts | - | - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 7,825,516 / 1,085,197 | - / 39 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 10,704 / 510 | - / 18 |
+| `Probe-child-run-refusal.cfg` (new) | holds | 16,395 | - |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,269 | 19 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 7,349 | 36 |
+| `Probe-join-retry-sweep.cfg` | CX18 found | 24,044,621 | 42 |

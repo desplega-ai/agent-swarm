@@ -265,13 +265,18 @@ XDedup(t) ==
      ELSE NewStep(t, n)
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
 
-\* F8 + CR sub-workflow.ts:90-138 SubWorkflowExecutor.run: the attempt's
+\* F8 + CR sub-workflow.ts:86-157 SubWorkflowExecutor.execute: the attempt's
 \* existing child (task # "none") is reused and settled: running parks, a
 \* finished child is a sync result. With none, createRunWithInitialState
-\* (engine.ts:281-322) starts one in a transaction that requires the attempt
+\* (engine.ts:337-399) starts one in a transaction that requires the attempt
 \* to still run (Fence, isParentStepAttemptCurrent) and finds a child another
 \* call of the same attempt started (unique (parentStepId, parentStepAttempt)).
 \* Not current: ParentStepNotCurrentError, the executor fails (fenced, stale).
+\* With "fail" in BranchOutcomes, a call that finds no child may also fail
+\* before the start (sub-workflow.ts:102-127: depth, recursion, a missing or
+\* disabled child workflow, and since #3494 a refused run principal). On the
+\* first call XRun / P5 already pick "fail"; this covers a re-claimed row
+\* (XChild), whose first call crashed before the refusal.
 ChildStart(t, okPc, failPc, waitPc) ==
   LET i == thr[t].sid
       tk == steps[i].task IN
@@ -280,8 +285,10 @@ ChildStart(t, okPc, failPc, waitPc) ==
        /\ UNCHANGED steps
   ELSE IF ~Fence(t)
   THEN SetT(t, [thr[t] EXCEPT !.pc = failPc]) /\ UNCHANGED steps
-  ELSE /\ steps' = [steps EXCEPT ![i].task = "run", ![i].tg = @ + 1]
-       /\ SetT(t, [thr[t] EXCEPT !.pc = waitPc])
+  ELSE \/ /\ steps' = [steps EXCEPT ![i].task = "run", ![i].tg = @ + 1]
+          /\ SetT(t, [thr[t] EXCEPT !.pc = waitPc])
+       \/ /\ "fail" \in BranchOutcomes
+          /\ SetT(t, [thr[t] EXCEPT !.pc = failPc]) /\ UNCHANGED steps
 
 \* F13 (#3215) agent-task.ts:71-90 AgentTaskExecutor.execute on a re-claimed
 \* row: the task already bound to the step (getTaskByWorkflowRunStepId) is
