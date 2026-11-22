@@ -33,7 +33,7 @@ import {
   RuntimePoolUpdateSchema,
 } from "../types";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubJson, scrubSecrets } from "../utils/secret-scrubber";
 import { agentFirstPrincipal, requireAuthKind } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -309,7 +309,7 @@ const controllerTokenRoute = route({
 });
 
 function scrubResponse<T>(data: T): T {
-  return JSON.parse(scrubSecrets(JSON.stringify(data))) as T;
+  return scrubJson(data);
 }
 
 export async function handleRuntimePools(

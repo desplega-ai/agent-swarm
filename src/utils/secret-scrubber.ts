@@ -1264,6 +1264,23 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
   return scrubWithMatcher(text, getMatcher());
 }
 
+/**
+ * `scrubSecrets` over a JSON-serializable value, keeping its shape. The
+ * serialized form is scrubbed first, so key context (`"token": "…"`) still
+ * redacts. A key pass can reach across a JSON string boundary, though: an
+ * unclosed `KEY='` inside a string value runs to the end of the text and
+ * swallows the closing quote, so the result no longer parses. Then every
+ * string leaf and key is scrubbed on its own (`scrubObject`).
+ */
+export function scrubJson<T>(value: T): T {
+  if (value === undefined) return value;
+  try {
+    return JSON.parse(scrubSecrets(JSON.stringify(value))) as T;
+  } catch {
+    return scrubObject(value);
+  }
+}
+
 function scrubWithMatcher(text: string, matcher: KnownValueMatcher): ScrubbedText {
   let out = text;
 

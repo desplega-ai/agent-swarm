@@ -70,7 +70,7 @@ import {
   scrubProviderQuotaReport,
 } from "../utils/provider-account-telemetry";
 import { type RuntimeCatalog, runtimeCatalogModel } from "../utils/runtime-model-catalog";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubJson, scrubSecrets } from "../utils/secret-scrubber";
 import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
   CodexAppServer,
@@ -1232,7 +1232,7 @@ export class CodexSession implements ProviderSession {
   private emit(event: ProviderEvent): void {
     // App-server item payloads can carry tool arguments and model errors.
     // Scrub the complete event at the log and listener egress boundary.
-    const scrubbed = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
+    const scrubbed = scrubJson(event);
     try {
       this.logFileHandle.write(
         `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,
@@ -2441,7 +2441,7 @@ class CodexSubprocessSession implements ProviderSession {
   }
 
   private emit(event: ProviderEvent): void {
-    event = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
+    event = scrubJson(event);
     if (event.type === "session_init" && event.sessionId) {
       this._sessionId = event.sessionId;
     }
@@ -2541,7 +2541,7 @@ class CodexSubprocessSession implements ProviderSession {
       delivery?: SteerDeliveryResult;
     };
     try {
-      msg = JSON.parse(scrubSecrets(line));
+      msg = scrubJson(JSON.parse(line));
     } catch {
       // Not a valid JSON envelope — treat as raw stderr-equivalent.
       this.emit({ type: "raw_stderr", content: `${line}\n` });
