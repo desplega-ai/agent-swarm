@@ -72,6 +72,31 @@ export const metricsStarterDashboard: Scenario = {
     });
     expectStatus(created, [201], "create a dashboard from the UI template");
     const templateId = asString(asRecord(created.json).id, "template metric id");
+    // The template keeps the time range, bound as a start instant ({{rangeModifier:since}}):
+    // a task created now counts in every range.
+    const task = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: `metrics template ${ctx.nonce}`,
+        agentId,
+        routingReason: "human_pinned",
+        source: "api",
+      },
+    });
+    expectStatus(task, [201], "create a task for the template");
+    const templateRanges = asRecords(
+      asRecords(template, "variables").find((v) => v.key === "rangeModifier"),
+      "options",
+    ).map((option) => option.value);
+    expect(templateRanges.length === 3, "The UI template lost its time range");
+    for (const rangeModifier of templateRanges) {
+      const run = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
+        body: { variables: { rangeModifier, agentFilter: agentId } },
+      });
+      expectStatus(run, [200], `run the UI template over ${String(rangeModifier)}`);
+      const rows = asRecords(asRecord(asRecords(run.json, "widgets")[0]?.result), "rows");
+      const total = rows.reduce((sum, row) => sum + Number(row.tasks), 0);
+      expect(total === 1, `the UI template counted ${total} tasks over ${String(rangeModifier)}`);
+    }
     for (const variables of [{}, { agentFilter: agentId, userFilter: "nobody" }]) {
       const run = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
         body: { variables },

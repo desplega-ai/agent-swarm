@@ -31,7 +31,25 @@ import { jsonError } from "./utils";
 
 const DEFAULT_METRIC_MAX_ROWS = 100;
 const HARD_METRIC_MAX_ROWS = 500;
-const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/;
+// `{{key}}` binds the variable. `{{key:since}}` binds the instant the variable's
+// relative range starts ("-30 days" -> an ISO 8601 UTC timestamp): a time
+// filter as a bound value runs the same on both storage engines
+// (`"createdAt" >= $1`), with no engine-only date function.
+const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)(?::(since))?\}\}$/;
+const RANGE_MODIFIER_RE = /^\s*([+-]?\d+)\s+(minute|hour|day)s?\s*$/i;
+const RANGE_UNIT_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 } as const;
+
+/** The start of a relative range such as "-30 days", as an ISO 8601 UTC timestamp. */
+function rangeStart(key: string, modifier: MetricParam, now = Date.now()): string {
+  const match = typeof modifier === "string" ? RANGE_MODIFIER_RE.exec(modifier) : null;
+  if (!match) {
+    throw new Error(
+      `Metric variable "${key}" must be a relative range such as "-30 days" for {{${key}:since}}`,
+    );
+  }
+  const unit = match[2]!.toLowerCase() as keyof typeof RANGE_UNIT_MS;
+  return new Date(now + Number(match[1]) * RANGE_UNIT_MS[unit]).toISOString();
+}
 const MetricRunBodySchema = z
   .object({
     variables: z
@@ -154,6 +172,7 @@ function resolveWidgetParams(
     if (!(key in variables)) {
       throw new Error(`Metric variable "${key}" is not defined`);
     }
+    if (match[2] === "since") return rangeStart(key, variables[key] ?? null);
     return variables[key] ?? null;
   });
 }

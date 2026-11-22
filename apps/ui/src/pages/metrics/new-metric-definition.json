@@ -6,6 +6,26 @@
   },
   "variables": [
     {
+      "key": "rangeModifier",
+      "label": "Time range",
+      "type": "select",
+      "defaultValue": "-30 days",
+      "options": [
+        {
+          "label": "Last 7 days",
+          "value": "-7 days"
+        },
+        {
+          "label": "Last 30 days",
+          "value": "-30 days"
+        },
+        {
+          "label": "Last 90 days",
+          "value": "-90 days"
+        }
+      ]
+    },
+    {
       "key": "userFilter",
       "label": "Requester user ID",
       "type": "text",
@@ -24,8 +44,8 @@
       "title": "Task statuses",
       "description": "Tasks grouped by current status.",
       "query": {
-        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE ($1 = '' OR COALESCE(\"requestedByUserId\", '') = $1) AND ($2 = '' OR COALESCE(\"agentId\", '') = $2) GROUP BY status ORDER BY tasks DESC",
-        "params": ["{{userFilter}}", "{{agentFilter}}"],
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE \"createdAt\" >= $1 AND ($2 = '' OR COALESCE(\"requestedByUserId\", '') = $2) AND ($3 = '' OR COALESCE(\"agentId\", '') = $3) GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{rangeModifier:since}}", "{{userFilter}}", "{{agentFilter}}"],
         "maxRows": 100
       },
       "viz": {
