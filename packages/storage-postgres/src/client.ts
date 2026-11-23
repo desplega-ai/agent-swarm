@@ -259,11 +259,16 @@ export class PostgresClient implements DbClient {
     if (outer && !outer.closed) return this.savepoint(outer, fn);
 
     let replayPending = this.options.txReplay === true;
-    const stats = this.options.onTransactionEnd
-      ? { stack: new Error().stack ?? "", retries: [] as string[] }
-      : null;
+    // The caller stack is captured only for the bench sink: it is not free.
+    const stack = this.options.onTransactionEnd ? (new Error().stack ?? "") : "";
+    const retries: string[] = [];
     const end = (attempts: number, outcome: TransactionEndInfo["outcome"]) => {
-      if (stats) this.options.onTransactionEnd?.({ ...stats, attempts, outcome });
+      this.options.onTransactionEnd?.({ stack, retries, attempts, outcome });
+      this.options.observer?.onTransaction?.({
+        attempts,
+        retries,
+        outcome: outcome === "error" ? "rollback" : outcome,
+      });
     };
     for (let attempt = 1; ; attempt++) {
       if (opts.deadlineAt !== undefined && Date.now() > opts.deadlineAt) {
@@ -330,7 +335,7 @@ export class PostgresClient implements DbClient {
         if (retryState !== null && attempt < this.retry.maxAttempts) {
           this.retriedAttempts += 1;
           this.options.onRetry?.(retryState, attempt);
-          stats?.retries.push(retryState);
+          retries.push(retryState);
           await Bun.sleep(this.backoffMs(attempt));
           continue;
         }
