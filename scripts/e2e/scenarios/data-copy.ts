@@ -217,6 +217,27 @@ export const dataCopy: Scenario = {
           );
           expect(sourceHash() === hashBefore, `db-copy --json ${report} changed the source file`);
         }
+        // A symlink as --from: SQLite's WAL sits beside the real file, not the link.
+        const fromLink = join(links, "source-link.sqlite");
+        symlinkSync(sourcePath, fromLink);
+        const viaLink = await runCli(
+          ["db-copy", "--from", fromLink, "--to", targetUrl, "--json", `${sourcePath}-wal`],
+          { cwd: process.cwd(), env: { DESPLEGA_TELEMETRY_ENV: "test" }, timeoutMs: 120_000 },
+        );
+        expect(
+          viaLink.exitCode === 2 && viaLink.stderr.includes("is the SQLite source"),
+          `db-copy --from <symlink> --json <real>-wal exited ${viaLink.exitCode}, expected 2: ${viaLink.stderr.slice(-600)}`,
+        );
+        // A report path that cannot be written is refused before the copy starts.
+        const dirReport = await runCli(
+          ["db-copy", "--from", sourcePath, "--to", targetUrl, "--json", links],
+          { cwd: process.cwd(), env: { DESPLEGA_TELEMETRY_ENV: "test" }, timeoutMs: 120_000 },
+        );
+        expect(
+          dirReport.exitCode === 2 && dirReport.stderr.includes("is a directory"),
+          `db-copy --json <directory> exited ${dirReport.exitCode}, expected 2: ${dirReport.stderr.slice(-600)}`,
+        );
+        expect(sourceHash() === hashBefore, "a refused report path changed the source file");
       } finally {
         rmSync(links, { recursive: true, force: true });
       }
