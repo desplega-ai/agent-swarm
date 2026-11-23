@@ -6,6 +6,7 @@ import {
   buildTaskFtsMatch,
   HUMAN_FREE_TAGS,
   type HumanFreeClassifyInput,
+  narrowTaskStatus,
   readableSessionSql,
   SqlQuery,
   sql,
@@ -169,7 +170,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
   listTasksDispatchedFrom(taskIds: readonly string[]): Promise<TaskRow[]> {
     if (taskIds.length === 0) return Promise.resolve([]);
     const ids = JSON.stringify(taskIds);
-    return this.db.query<TaskRow>(sql`
+    return this.taskRows(sql`
       SELECT t.*,
         (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
       FROM agent_tasks t
@@ -268,7 +269,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     const outerOrder = [...new Set([...orderColumns, "rowid DESC"])]
       .map((column) => `agent_tasks.${column}`)
       .join(", ");
-    return this.db.query<TaskListRow<F>>(sql`WITH page AS (
+    const rows = await this.db.query<TaskListRow<F>>(sql`WITH page AS (
       SELECT rowid AS rid FROM agent_tasks${pageIndex}${sqlWhere(conditions)}
       ORDER BY ${raw(orderColumns.join(", "))} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )
@@ -276,6 +277,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = agent_tasks.id) AS "totalCostUsd"
     FROM page JOIN agent_tasks ON agent_tasks.rowid = page.rid
     ORDER BY ${raw(outerOrder)}`);
+    return rows.map(narrowTaskStatus);
   }
 
   /**
@@ -612,7 +614,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
   }
 
   listDependentTasks(parentId: string): Promise<TaskRow[]> {
-    return this.db.query<TaskRow>(sql`
+    return this.taskRows(sql`
       SELECT t.* FROM agent_tasks t, json_each(t."dependsOn") AS dep
       WHERE dep.value = ${parentId}
       ORDER BY t.rowid`);
@@ -621,7 +623,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
   listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
     // The condition text stays as written before the move: the
     // heartbeat-checklist test intercepts this read by its text.
-    return this.db.query<TaskRow>(sql`
+    return this.taskRows(sql`
       SELECT * FROM agent_tasks WHERE ${raw("status = 'in_progress' AND lastUpdatedAt < ")}${cutoff}
       ORDER BY "lastUpdatedAt" ASC, rowid ASC`);
   }
@@ -636,7 +638,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
   listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
     // `CROSS JOIN` keeps the chain as the outer loop: with a plain JOIN, SQLite
     // scanned all of agent_tasks to skip the sort.
-    return this.db.query<TaskRow>(sql`
+    return this.taskRows(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
         UNION ALL

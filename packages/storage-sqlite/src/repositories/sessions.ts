@@ -5,6 +5,7 @@ import {
   type KeyCostSummaryRow,
   type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
+  narrowTaskStatus,
   type RequestCompositionRow,
   type SessionCostAgentSummaryRow,
   type SessionCostCredentialSummaryRow,
@@ -18,7 +19,6 @@ import {
   type SessionListTriageWrite,
   type SessionLogRow,
   type SessionPageMemberRow,
-  type TaskChainRow,
   type SessionRootFilterSpec,
   type SessionShareRow,
   type SessionSummaryDriftRow,
@@ -33,6 +33,7 @@ import {
   sqlList,
   sqlWhere,
   type TaskAncestorRow,
+  type TaskChainRow,
 } from "@desplega/storage";
 import { keyWindowUsageQuery } from "./key-window-usage";
 import {
@@ -132,13 +133,11 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     );
   }
 
-  listChainWithCosts(
-    rootTaskId: string,
-  ): Promise<TaskChainRow[]> {
+  async listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]> {
     // rowid breaks createdAt ties as idx_agent_tasks_created did. CROSS JOIN
     // keeps the chain as the outer loop: with a plain JOIN, SQLite scanned all
     // of agent_tasks to skip the sort.
-    return this.db.query(sql`
+    const rows = await this.db.query<TaskChainRow>(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
         UNION ALL
@@ -150,6 +149,7 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
       FROM chain
       CROSS JOIN agent_tasks t ON t.id = chain.id
       ORDER BY t."createdAt", t.rowid`);
+    return rows.map(narrowTaskStatus);
   }
 
   listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]> {

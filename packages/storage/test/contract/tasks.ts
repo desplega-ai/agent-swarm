@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  InvalidTaskStatusError,
   jsonText,
   type Storage,
   sql,
@@ -1466,6 +1467,22 @@ export function tasksContract(engine: ContractEngine): void {
       await seedTask(storage, { id: "rv", status: "reviewing" });
       expect(await repo.releaseReviewingIdleSince(T1, T1)).toBe(1);
       expect((await repo.findTaskById("rv"))?.status).toBe("offered");
+    });
+
+    test("reads reject a stored status outside TaskStatus", async () => {
+      await seedTask(storage, { id: "bad", status: "in_progres" });
+      await seedTask(storage, { id: "ok", status: "pending" });
+      await expect(repo.findTaskById("bad")).rejects.toBeInstanceOf(InvalidTaskStatusError);
+      await expect(repo.listTasksByStatus("in_progres")).rejects.toThrow(
+        'Task bad has status "in_progres", which is not a TaskStatus',
+      );
+      await expect(repo.listTasks({}, { limit: 25, offset: 0 }, "full")).rejects.toBeInstanceOf(
+        InvalidTaskStatusError,
+      );
+      await expect(storage.repos.sessions.listChainWithCosts("bad")).rejects.toBeInstanceOf(
+        InvalidTaskStatusError,
+      );
+      expect((await repo.findTaskById("ok"))?.status).toBe("pending");
     });
 
     test("offers to offline or deleted agents return to the pool unless reachable", async () => {

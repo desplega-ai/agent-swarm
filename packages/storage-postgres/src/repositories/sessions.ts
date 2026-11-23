@@ -20,6 +20,7 @@ import {
   type KeyCostSummaryRow,
   type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
+  narrowTaskStatus,
   type RequestCompositionRow,
   type SessionCostAgentSummaryRow,
   type SessionCostCredentialSummaryRow,
@@ -145,10 +146,8 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
       SELECT ${LOG_COLUMNS} FROM session_logs WHERE "taskId" = ${taskId} ORDER BY "_rowid" ASC`);
   }
 
-  listChainWithCosts(
-    rootTaskId: string,
-  ): Promise<TaskChainRow[]> {
-    return this.db.query(sql`
+  async listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]> {
+    const rows = await this.db.query<TaskChainRow>(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
         UNION ALL
@@ -160,6 +159,7 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
       FROM chain
       JOIN agent_tasks t ON t.id = chain.id
       ORDER BY t."createdAt", t."_rowid"`);
+    return rows.map(narrowTaskStatus);
   }
 
   listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]> {
