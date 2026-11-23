@@ -46,7 +46,10 @@ export class SqliteMemoryIndexes implements MemorySearchIndexes {
       `);
       return { ready: true, backfill: true };
     } catch (err) {
-      console.error("[memory-fts] Failed to initialize memory_fts:", (err instanceof Error ? err.message : String(err)));
+      console.error(
+        "[memory-fts] Failed to initialize memory_fts:",
+        err instanceof Error ? err.message : String(err),
+      );
       return { ready: false, backfill: false };
     }
   }
@@ -89,7 +92,10 @@ export class SqliteMemoryIndexes implements MemorySearchIndexes {
 
       return { initialized: true, lastPopulate };
     } catch (err) {
-      console.error("[memory-vec] Failed to initialize memory_vec:", (err instanceof Error ? err.message : String(err)));
+      console.error(
+        "[memory-vec] Failed to initialize memory_vec:",
+        err instanceof Error ? err.message : String(err),
+      );
       return { initialized: false, lastPopulate: null };
     }
   }
@@ -162,7 +168,7 @@ export class SqliteMemoryIndexes implements MemorySearchIndexes {
       } catch (err) {
         failed++;
         console.error(
-          `[memory-vec] populate failed memory_id=${row.id}: ${(err instanceof Error ? err.message : String(err))}`,
+          `[memory-vec] populate failed memory_id=${row.id}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

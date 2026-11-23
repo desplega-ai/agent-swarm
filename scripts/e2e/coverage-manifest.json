@@ -232,6 +232,7 @@
         "storage-recovery",
         "data-copy",
         "data-copy-later-release",
+        "data-copy-refused-rows",
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
