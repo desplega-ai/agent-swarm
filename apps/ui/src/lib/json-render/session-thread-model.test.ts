@@ -7,9 +7,14 @@ import {
   isValidSessionKey,
   pickSessionRoot,
   runDispatchChain,
+  SESSION_THREAD_DEFAULT_MAX_FILES,
   SESSION_THREAD_MAX_REQUEST_CHARS,
+  type ThreadAttachment,
+  threadAttachmentConfig,
   threadContextKey,
+  threadRequestAttachments,
   threadRequestText,
+  uploadThreadAttachments,
 } from "./session-thread-model";
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -33,7 +38,11 @@ const SESSION = { key: "item-1", scope: "user" as const };
 /** Runs `onDispatch` with an app.action handler that reports `slot`. */
 async function dispatchWith(
   onDispatch: Parameters<typeof runDispatchChain>[0]["onDispatch"],
-  options: { leafTaskId?: string | null; slot?: Record<string, unknown> } = {},
+  options: {
+    leafTaskId?: string | null;
+    slot?: Record<string, unknown>;
+    attachments?: ThreadAttachment[];
+  } = {},
 ) {
   const state: Record<string, unknown> = {};
   const executed: Executed = [];
@@ -41,6 +50,7 @@ async function dispatchWith(
     onDispatch,
     message: "make it blue",
     leafTaskId: options.leafTaskId ?? null,
+    attachments: options.attachments,
     session: SESSION,
     execute: async (binding) => {
       executed.push(binding);
@@ -287,5 +297,127 @@ describe("threadRequestText", () => {
   test("a task of another source, or with no marker, is left to the timeline", () => {
     expect(threadRequestText(task({ source: "mcp", task: prompt("quoted") }))).toBeNull();
     expect(threadRequestText(task({ task: "plain prompt" }))).toBeNull();
+  });
+});
+
+const SHOT: ThreadAttachment = {
+  path: "/projects/p1/attachments/20261122T100000000Z-abcd1234-1-shot.png",
+  name: "shot.png",
+  mimeType: "image/png",
+  size: 3,
+};
+
+describe("thread attachments", () => {
+  const defaults = { accept: [".png", ".pdf"], maxBytes: 50 };
+
+  test("no prop, no config: the thread stays text only", () => {
+    expect(threadAttachmentConfig(undefined, defaults)).toBeNull();
+    expect(threadAttachmentConfig(null, defaults)).toBeNull();
+    expect(threadAttachmentConfig([".png"], defaults)).toBeNull();
+  });
+
+  test("the prop's limits win, and missing or unusable ones fall back", () => {
+    expect(
+      threadAttachmentConfig(
+        { dir: "/a", accept: [".md", 3, ""], maxFiles: 2, maxBytes: 9 },
+        defaults,
+      ),
+    ).toEqual({ dir: "/a", limits: { accept: [".md"], maxBytes: 9, maxFiles: 2 } });
+    expect(
+      threadAttachmentConfig({ dir: "/a", accept: [], maxFiles: 0, maxBytes: 1.5 }, defaults),
+    ).toEqual({
+      dir: "/a",
+      limits: { accept: defaults.accept, maxBytes: 50, maxFiles: SESSION_THREAD_DEFAULT_MAX_FILES },
+    });
+  });
+
+  test("files upload create-only names in order, then come back as $form items", async () => {
+    const uploads: Array<[string, string]> = [];
+    const files = [
+      new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" }),
+      new File(["# Notes"], "notes v2.md"),
+    ];
+    const result = await uploadThreadAttachments({
+      files,
+      dir: "/projects/p1/attachments/",
+      upload: async (path, file) => {
+        uploads.push([path, file.name]);
+        return path;
+      },
+      now: new Date("2026-11-22T10:00:00.000Z"),
+      nonce: "abcd1234",
+    });
+    expect(uploads).toEqual([
+      ["/projects/p1/attachments/20261122T100000000Z-abcd1234-1-shot.png", "shot.png"],
+      ["/projects/p1/attachments/20261122T100000000Z-abcd1234-2-notes-v2.md", "notes v2.md"],
+    ]);
+    expect(result).toEqual([
+      SHOT,
+      {
+        path: "/projects/p1/attachments/20261122T100000000Z-abcd1234-2-notes-v2.md",
+        name: "notes v2.md",
+        mimeType: "application/octet-stream",
+        size: 7,
+      },
+    ]);
+  });
+
+  test("a failed upload rejects with the file's name and stops the rest", async () => {
+    const tried: string[] = [];
+    const files = ["a.png", "b.pdf", "c.png"].map((name) => new File(["x"], name));
+    const sending = uploadThreadAttachments({
+      files,
+      dir: "/up",
+      upload: async (path, file) => {
+        tried.push(file.name);
+        if (file.name === "b.pdf") throw new Error("412 file exists");
+        return path;
+      },
+    });
+    await expect(sending).rejects.toThrow(
+      "b.pdf failed to upload (412 file exists), so nothing was sent. Send again to retry.",
+    );
+    expect(tried).toEqual(["a.png", "b.pdf"]);
+  });
+
+  test("files need a usable folder and an agent-fs connection; no files need neither", async () => {
+    const files = [new File(["x"], "a.png")];
+    const upload = async (path: string) => path;
+    await expect(uploadThreadAttachments({ files, dir: "/a/../b", upload })).rejects.toThrow(
+      "attachments.dir is not an agent-fs folder path",
+    );
+    await expect(uploadThreadAttachments({ files, dir: undefined, upload })).rejects.toThrow(
+      "attachments.dir is not an agent-fs folder path",
+    );
+    await expect(uploadThreadAttachments({ files, dir: "/a", upload: null })).rejects.toThrow(
+      "Connect agent-fs to send files",
+    );
+    expect(await uploadThreadAttachments({ files: [], dir: undefined, upload: null })).toEqual([]);
+  });
+
+  test("$form carries the attachments only when the thread passes them", async () => {
+    const onDispatch = [{ action: "app.action", params: { name: "ask", input: { $form: "" } } }];
+    const withFiles = await dispatchWith(onDispatch, { attachments: [SHOT] });
+    expect(withFiles.executed[0]?.params?.input).toEqual({
+      message: "make it blue",
+      attachments: [SHOT],
+    });
+    const none = await dispatchWith(onDispatch, { attachments: [] });
+    expect(none.executed[0]?.params?.input).toEqual({ message: "make it blue", attachments: [] });
+    const textOnly = await dispatchWith(onDispatch);
+    expect(textOnly.executed[0]?.params?.input).toEqual({ message: "make it blue" });
+  });
+
+  test("a bubble's files come from the marker input; malformed items are left out", () => {
+    const input = {
+      message: "use this",
+      attachments: [SHOT, { path: "relative.png", name: "x", mimeType: "image/png", size: 1 }, 7],
+    };
+    const prompt = `Do it.\n[App action] app=a action=ask input=${JSON.stringify(input)}`;
+    expect(threadRequestAttachments(task({ task: prompt }))).toEqual([SHOT]);
+    expect(threadRequestAttachments(task({ task: prompt, source: "ui" }))).toEqual([]);
+    const textOnly = '[App action] app=a action=ask input={"message":"hi"}';
+    expect(threadRequestAttachments(task({ task: textOnly }))).toEqual([]);
+    expect(threadRequestAttachments(task({ task: "no marker" }))).toEqual([]);
   });
 });

@@ -270,7 +270,8 @@
         "knowledge-apps",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
-        "knowledge-apps-primitives"
+        "knowledge-apps-primitives",
+        "knowledge-apps-session-thread-files"
       ]
     },
     "asset-namespaces": {
