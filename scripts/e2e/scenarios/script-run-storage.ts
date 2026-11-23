@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -16,10 +17,7 @@ export const scriptRunStorage: Scenario = {
   name: "script-run-storage",
   order: 445,
   async run(ctx) {
-    expect(
-      ctx.db.get<{ auto_vacuum: number }>("PRAGMA auto_vacuum")?.auto_vacuum === 2,
-      "a fresh database must enable incremental auto vacuum",
-    );
+    expect(ctx.db.reclaimsFreeSpace(), "a fresh database must enable incremental auto vacuum");
     const agentId = await registerAgent(ctx, "storage");
     const source = `// storage ${ctx.nonce}: café 雪\nexport default async function (args: { value: number }) {\n  return { value: args.value };\n}\n`;
     let scratchName = "";
@@ -61,8 +59,7 @@ export const scriptRunStorage: Scenario = {
     }
 
     const sharedRuns = ctx.db.query<StoredRun>(
-      "SELECT id, source, sourceHash, scriptName FROM script_runs WHERE agentId = ? AND sourceHash IN (SELECT hash FROM script_run_sources WHERE source = ?)",
-      [agentId, source],
+      sql`SELECT id, source, "sourceHash", "scriptName" FROM script_runs WHERE "agentId" = ${agentId} AND "sourceHash" IN (SELECT hash FROM script_run_sources WHERE source = ${source})`,
     );
     expect(sharedRuns.length === 6, `expected six shared runs, got ${sharedRuns.length}`);
     expect(
@@ -74,9 +71,9 @@ export const scriptRunStorage: Scenario = {
       "the named run did not share the inline source",
     );
     expect(
-      ctx.db.get<{ n: number }>("SELECT count(*) AS n FROM script_run_sources WHERE source = ?", [
-        source,
-      ])?.n === 1,
+      ctx.db.get<{ n: number }>(
+        sql`SELECT count(*) AS n FROM script_run_sources WHERE source = ${source}`,
+      )?.n === 1,
       "six executions must store the exact source once",
     );
 
@@ -88,8 +85,7 @@ export const scriptRunStorage: Scenario = {
     });
     expectRunOk(distinct, "distinct source");
     const distinctRow = ctx.db.get<{ hash: string; source: string }>(
-      "SELECT hash, source FROM script_run_sources WHERE source = ?",
-      [distinctSource],
+      sql`SELECT hash, source FROM script_run_sources WHERE source = ${distinctSource}`,
     );
     expect(
       distinctRow?.source === distinctSource && distinctRow.hash !== sharedRuns[0]?.sourceHash,
@@ -133,8 +129,7 @@ export const scriptRunStorage: Scenario = {
       let taskId = "";
       const waiting = await pollUntil(() => {
         const task = ctx.db.get<{ id: string; status: string }>(
-          "SELECT id, status FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-          [`script-run:${runId}:wait`],
+          sql`SELECT id, status FROM agent_tasks WHERE "contextKey" = ${`script-run:${runId}:wait`} AND "taskType" = 'script-run-step'`,
         );
         if (!task) return false;
         expect(task.status === "pending", `restart step must be unclaimed: ${task.status}`);
@@ -150,7 +145,7 @@ export const scriptRunStorage: Scenario = {
         "durable run must journal its first step before restart",
       );
       expect(
-        ctx.db.get<StoredRun>("SELECT source, sourceHash FROM script_runs WHERE id = ?", [runId])
+        ctx.db.get<StoredRun>(sql`SELECT source, "sourceHash" FROM script_runs WHERE id = ${runId}`)
           ?.source === "",
         "durable run must recover without the legacy source column",
       );
@@ -191,15 +186,13 @@ export const scriptRunStorage: Scenario = {
       );
       expect(
         ctx.db.get<{ n: number }>(
-          "SELECT count(*) AS n FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-          [`script-run:${runId}:wait`],
+          sql`SELECT count(*) AS n FROM agent_tasks WHERE "contextKey" = ${`script-run:${runId}:wait`} AND "taskType" = 'script-run-step'`,
         )?.n === 1,
         "restart dispatched a duplicate step task",
       );
       expect(
         ctx.db.get<{ n: number }>(
-          "SELECT count(*) AS n FROM script_runs WHERE agentId = ? AND sourceHash = ?",
-          [agentId, sharedRuns[0]?.sourceHash ?? ""],
+          sql`SELECT count(*) AS n FROM script_runs WHERE "agentId" = ${agentId} AND "sourceHash" = ${sharedRuns[0]?.sourceHash ?? ""}`,
         )?.n === 7,
         "durable nested step must share the inline source and replay without another execution",
       );

@@ -2,13 +2,8 @@ import { telemetry } from "../telemetry";
 import { ProviderNameSchema, TERMINAL_TASK_STATUSES } from "../types";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { z } from "../utils/zod-openapi";
-import {
-  deleteSwarmConfigByKey,
-  getDbClient,
-  getSwarmConfigs,
-  getTaskById,
-  upsertSwarmConfig,
-} from "./db";
+import { deleteSwarmConfigByKey, getSwarmConfigs, getTaskById, upsertSwarmConfig } from "./db";
+import { getStorage } from "./storage";
 import { validateConfigValue } from "./swarm-config-guard";
 
 const ONBOARDING_CONFIG_KEY = "onboarding_state";
@@ -432,7 +427,7 @@ function queueTelemetry(events: PendingTelemetry[]): void {
   // may run after it has moved on. Null for an operator (API key) request.
   const actor = { userId: getCurrentRequestUserId() ?? null };
   for (const item of events) {
-    getDbClient().afterCommit(() => telemetry.onboarding(item.event, item.properties, actor));
+    getStorage().afterCommit(() => telemetry.onboarding(item.event, item.properties, actor));
   }
 }
 
@@ -442,17 +437,7 @@ function queueTelemetry(events: PendingTelemetry[]): void {
  * task status does not matter: failed or pending work is use too.
  */
 async function isExistingInstall(): Promise<boolean> {
-  const row = await getDbClient().get<{ existing: number }>(
-    `SELECT CASE WHEN
-       EXISTS (SELECT 1 FROM users LIMIT 1)
-       OR EXISTS (
-         SELECT 1 FROM agent_tasks
-         WHERE taskType IS NULL OR taskType NOT IN ('boot-triage', 'heartbeat-checklist')
-         LIMIT 1
-       )
-     THEN 1 ELSE 0 END AS existing`,
-  );
-  return row?.existing === 1;
+  return getStorage().repos.tasks.hasUserOrNonSystemTask();
 }
 
 async function loadState(
@@ -569,29 +554,7 @@ const FIRST_TASK_SETTLE_MS = 10_000;
  * gives its answer in a later task of the same tree.
  */
 async function isTaskTreeSettled(rootId: string): Promise<boolean> {
-  const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
-  // UNION (not UNION ALL) drops repeated ids, so a parentTaskId cycle ends the walk.
-  const row = await getDbClient().get<{
-    open: number;
-    deferred: number;
-    lastFinishedAt: string | null;
-  }>(
-    `WITH RECURSIVE tree(id) AS (
-       SELECT ?
-       UNION
-       SELECT t.id FROM agent_tasks t JOIN tree ON t.parentTaskId = tree.id
-     )
-     SELECT
-       COALESCE(SUM(t.status NOT IN (${terminal})), 0) AS open,
-       EXISTS (
-         SELECT 1 FROM scheduled_tasks s
-         WHERE s.parentTaskId IN (SELECT id FROM tree)
-           AND s.taskType = 'deferred' AND s.enabled = 1
-       ) AS deferred,
-       MAX(COALESCE(t.finishedAt, t.lastUpdatedAt)) AS lastFinishedAt
-     FROM tree JOIN agent_tasks t ON t.id = tree.id`,
-    [rootId, ...TERMINAL_TASK_STATUSES],
-  );
+  const row = await getStorage().repos.tasks.taskTreeSettlement(rootId, TERMINAL_TASK_STATUSES);
   if (!row || row.open > 0 || row.deferred || !row.lastFinishedAt) return false;
   return Date.now() - Date.parse(row.lastFinishedAt) >= FIRST_TASK_SETTLE_MS;
 }
@@ -729,16 +692,16 @@ export async function readOrUpdateOnboarding(
   loadSignals: SignalLoader,
   action?: OnboardingAction,
 ): Promise<{ state: OnboardingState; signals: OnboardingSignals }> {
-  const client = getDbClient();
+  const storage = getStorage();
   if (!action) {
-    const read = await client.transaction(async () => await loadAndDerive(loadSignals, []), {
+    const read = await storage.transaction(async () => await loadAndDerive(loadSignals, []), {
       readOnly: true,
     });
     if (!read.dirty)
       return { state: presentState(read.state, read.signals), signals: read.signals };
   }
 
-  return await client.transaction(async () => {
+  return await storage.transaction(async () => {
     const events: PendingTelemetry[] = [];
     const loaded = await loadAndDerive(loadSignals, events);
     const state = loaded.state;
@@ -788,7 +751,7 @@ export async function updateOnboardingMemory(
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
   change?: MemoryConfigChange,
 ): Promise<boolean> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const events: PendingTelemetry[] = [];
     const loaded = await loadState(events);
     let dirty = loaded.dirty;
@@ -841,7 +804,7 @@ export async function updateOnboardingMemory(
 export async function updateOnboardingAiFromCodexDevice(
   result: { status: "complete" } | { status: "failed"; errorClass: OnboardingErrorClass },
 ): Promise<boolean> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const rows = await getSwarmConfigs({ scope: "global", key: ONBOARDING_CONFIG_KEY });
     const stored = rows[0];
     if (!stored) return false;

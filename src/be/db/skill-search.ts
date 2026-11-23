@@ -1,16 +1,8 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
-// bm25() takes one weight per FTS column, in declaration order.
-// skills_fts (migration 239): skill_id (UNINDEXED), name, description, content.
-// skills_meta_fts (migration 241): skill_id (UNINDEXED), name, description.
-const SKILLS_FTS_BM25 = "bm25(skills_fts, 0.0, 3.0, 2.0, 1.0)";
-const SKILLS_META_FTS_BM25 = "bm25(skills_meta_fts, 0.0, 3.0, 2.0)";
-
-// FTS5 bm25 normalizes by the length of the whole row, so in skills_fts a
-// long SKILL.md body buries a name or description hit. skills_meta_fts holds
-// only those short fields; its score is added at this multiple. On the live
-// catalog, multiples from 2 to 10 rank the same; 3 is mid-range.
-const META_SCORE_MULTIPLE = 3;
+// The ranked query (bm25 weights, the skills_meta_fts score multiple) lives in
+// the skills repository (one per engine). On the live catalog, meta score
+// multiples from 2 to 10 rank the same; 3 is mid-range.
 
 // English function words that agents put in natural-language queries. Each
 // one matches most of the catalog ("a" matched 189 of 189 skills) and only
@@ -24,19 +16,18 @@ const STOPWORDS = new Set(
 );
 
 /**
- * Build a skills_fts MATCH expression from free text. Every term is quoted as
- * an FTS5 string, so user text cannot inject operators (NEAR, AND, -, *, ^,
- * column filters). Stopwords are dropped and the remaining terms are OR-ed:
- * ranked recall, ordered by bm25. Returns null when no term is left, so the
- * caller falls back to the substring match.
+ * The search terms of free text, for the skills repository's ranked search
+ * (each engine builds its own full-text query from them, so user text cannot
+ * inject query syntax). Stopwords are dropped and at most 12 terms are kept;
+ * the terms are OR-ed: ranked recall. Returns null when no term is left, so
+ * the caller falls back to the substring match.
  */
-export function buildSkillsFtsMatch(query: string): string | null {
+export function buildSkillSearchTerms(query: string): string[] | null {
   const terms = query
     .split(/[^\p{L}\p{N}_-]+/u)
     .filter((term) => /[\p{L}\p{N}]/u.test(term) && !STOPWORDS.has(term.toLowerCase()))
     .slice(0, 12);
-  if (terms.length === 0) return null;
-  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+  return terms.length === 0 ? null : terms;
 }
 
 /**
@@ -54,29 +45,11 @@ export async function searchSkillRowsRanked<T>(
   limit: number,
   columns: string,
 ): Promise<T[]> {
-  const match = buildSkillsFtsMatch(query);
-  if (!match) return [];
+  const terms = buildSkillSearchTerms(query);
+  if (!terms) return [];
   const exactName = query.trim();
   try {
-    return await getDbClient().query<T>(
-      `WITH hits AS (
-         SELECT skill_id, ${SKILLS_FTS_BM25} AS score FROM skills_fts WHERE skills_fts MATCH ?
-       ),
-       meta AS (
-         SELECT skill_id, ${SKILLS_META_FTS_BM25} AS score
-         FROM skills_meta_fts WHERE skills_meta_fts MATCH ?
-       )
-       SELECT ${columns} FROM skills
-       LEFT JOIN hits ON hits.skill_id = skills.id
-       LEFT JOIN meta ON meta.skill_id = skills.id
-       WHERE skills.isEnabled = 1
-         AND (hits.skill_id IS NOT NULL OR lower(skills.name) = lower(?))
-       ORDER BY lower(skills.name) = lower(?) DESC,
-         COALESCE(hits.score, 0) + ${META_SCORE_MULTIPLE} * COALESCE(meta.score, 0) ASC,
-         skills.name ASC
-       LIMIT ?`,
-      [match, match, exactName, exactName, limit],
-    );
+    return await getStorage().repos.skills.searchRankedSkills<T>(terms, exactName, limit, columns);
   } catch (err) {
     console.warn(
       "[skills-fts] ranked query failed, using substring match:",

@@ -1,3 +1,4 @@
+import type { AgentRow as StorageAgentRow } from "@desplega/storage";
 import type {
   Agent,
   AgentAvatar,
@@ -13,7 +14,9 @@ import type {
 } from "../../types";
 import { AgentAvatarSchema, AgentSlackIconSchema } from "../../types";
 import { isEnvFlagEnabled } from "../../utils/env-flag";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
+
+const agentsRepo = () => getStorage().repos.agents;
 
 type AgentDependencies = {
   createLogEntry: (entry: {
@@ -38,40 +41,8 @@ export function configureAgentDependencies(value: AgentDependencies): void {
 // Agent Queries
 // ============================================================================
 
-export type AgentRow = {
-  id: string;
-  name: string;
-  isLead: number;
-  status: AgentStatus;
-  description: string | null;
-  role: string | null;
-  capabilities: string | null;
-  maxTasks: number | null;
-  emptyPollCount: number | null;
-  claudeMd: string | null;
-  soulMd: string | null;
-  identityMd: string | null;
-  setupScript: string | null;
-  toolsMd: string | null;
-  heartbeatMd: string | null;
-  lastActivityAt: string | null;
-  provider: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  /** JSON array of env-var names; populated only when status is `waiting_for_credentials`. */
-  credentialMissing: string | null;
-  /** Phase 1.5: per-agent harness provider pushed on worker registration. */
-  harness_provider: string | null;
-  /** Migration 055: worker-self-reported credential snapshot (JSON of AgentCredStatus). NULL = unreported. */
-  cred_status: string | null;
-  /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
-  avatar: string | null;
-  /** Migration 256: JSON of AgentSlackIcon. */
-  slack_icon: string | null;
-  runtime_pool_id: string | null;
-  runtime_provision_attempts: number;
-  runtime_provision_retry_at: string | null;
-};
+/** The storage row type: one canonical shape for the repository and its callers. */
+export type AgentRow = StorageAgentRow;
 
 /** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
  * hand-edited row, or a future downgrade) falls back to `null` so rendering
@@ -161,10 +132,10 @@ export async function updateAgentCredentialState(
   const prev = await getAgentById(agentId);
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
-  const row = await getDbClient().get<AgentRow>(
-    "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-    [status, missingJson, agentId],
-  );
+  const row = await agentsRepo().setAgentColumns(agentId, {
+    status,
+    credentialMissing: missingJson,
+  });
   // Only clear the accumulated empty-poll count on a genuine recovery
   // (waiting_for_credentials -> ready), so routine post-task `ready:true`
   // reports don't clobber a legitimately accumulated count and defeat the
@@ -182,10 +153,7 @@ export async function updateAgentCredentialMissing(
   missing: string[] | null,
 ): Promise<void> {
   const json = missing && missing.length > 0 ? JSON.stringify(missing) : null;
-  await getDbClient().run(
-    "UPDATE agents SET credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-    [json, agentId],
-  );
+  await agentsRepo().setAgentColumns(agentId, { credentialMissing: json });
 }
 
 /** An operator deleted this id (agent_history); only restore may reinsert it. */
@@ -198,10 +166,7 @@ export class AgentDeletedError extends Error {
 
 /** Whether the latest agent_history event for `agentId` is `deleted`. */
 export async function isAgentDeleted(agentId: string): Promise<boolean> {
-  const last = await getDbClient().get<{ event: string }>(
-    "SELECT event FROM agent_history WHERE agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-    [agentId],
-  );
+  const last = await agentsRepo().latestHistory(agentId);
   return last?.event === "deleted";
 }
 
@@ -212,20 +177,18 @@ export async function createAgent(
   const maxTasks = agent.maxTasks ?? 1;
   // Check and insert share one write transaction (a savepoint inside the caller's), so an
   // operator delete cannot commit between them. Every agents insert but restore comes here.
-  const row = await getDbClient().transaction(async () => {
+  const storage = getStorage();
+  const row = await storage.transaction(async () => {
     if (await isAgentDeleted(id)) throw new AgentDeletedError(id);
-    return await getDbClient().get<AgentRow>(
-      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
-      [
-        id,
-        agent.name,
-        agent.isLead ? 1 : 0,
-        agent.status,
-        maxTasks,
-        agent.provider ?? null,
-        agent.harnessProvider ?? null,
-      ],
-    );
+    return storage.repos.agents.insertAgent({
+      id,
+      name: agent.name,
+      isLead: agent.isLead === true,
+      status: agent.status,
+      maxTasks,
+      provider: agent.provider ?? null,
+      harnessProvider: agent.harnessProvider ?? null,
+    });
   });
   if (!row) throw new Error("Failed to create agent");
   try {
@@ -256,7 +219,7 @@ export async function createAgent(
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {
-  const row = await getDbClient().get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
+  const row = await agentsRepo().findAgentById(id);
   return row ? rowToAgent(row) : null;
 }
 
@@ -328,11 +291,9 @@ export async function getAllAgents(opts?: {
   slim?: boolean;
   includeExtensions?: boolean;
 }): Promise<Agent[]> {
-  const rows = await getDbClient().query<AgentRow>(
-    opts?.includeExtensions
-      ? "SELECT * FROM agents ORDER BY name"
-      : `SELECT * FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} ORDER BY name`,
-  );
+  const rows = await agentsRepo().listAgents({
+    includeExtensions: opts?.includeExtensions === true,
+  });
   return rows.map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
@@ -343,9 +304,7 @@ export async function getAgentStatusCounts(): Promise<{
   busy: number;
   offline: number;
 }> {
-  const rows = await getDbClient().query<{ status: AgentStatus; count: number }>(
-    `SELECT status, COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} GROUP BY status`,
-  );
+  const rows = await agentsRepo().countAgentsByStatus();
   const counts = { total: 0, idle: 0, busy: 0, offline: 0 };
   for (const { status, count } of rows) {
     counts.total += count;
@@ -368,10 +327,7 @@ export async function getLeadAgent(): Promise<Agent | null> {
 
 export async function updateAgentStatus(id: string, status: AgentStatus): Promise<Agent | null> {
   const oldAgent = await getAgentById(id);
-  const row = await getDbClient().get<AgentRow>(
-    "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-    [status, id],
-  );
+  const row = await agentsRepo().setAgentColumns(id, { status });
   if (row && oldAgent) {
     try {
       await dependencies.createLogEntry({
@@ -386,11 +342,7 @@ export async function updateAgentStatus(id: string, status: AgentStatus): Promis
 }
 
 export async function updateAgentMaxTasks(id: string, maxTasks: number): Promise<Agent | null> {
-  const row = await getDbClient().get<AgentRow>(
-    `UPDATE agents SET maxTasks = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    [maxTasks, id],
-  );
+  const row = await agentsRepo().setAgentColumns(id, { maxTasks });
   return row ? rowToAgent(row) : null;
 }
 
@@ -398,11 +350,7 @@ export async function updateAgentProvider(
   id: string,
   provider: ProviderName,
 ): Promise<Agent | null> {
-  const row = await getDbClient().get<AgentRow>(
-    `UPDATE agents SET provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    [provider, id],
-  );
+  const row = await agentsRepo().setAgentColumns(id, { provider });
   return row ? rowToAgent(row) : null;
 }
 
@@ -417,11 +365,9 @@ export async function setAgentHarnessProvider(
   id: string,
   provider: ProviderName | null,
 ): Promise<Agent | null> {
-  const row = await getDbClient().get<AgentRow>(
-    `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    [provider, id],
-  );
+  const row = await agentsRepo().setAgentColumns(id, {
+    harness_provider: provider,
+  });
   return row ? rowToAgent(row) : null;
 }
 
@@ -440,11 +386,7 @@ export async function updateAgentCredStatus(
   credStatus: AgentCredStatus | null,
 ): Promise<Agent | null> {
   const json = credStatus ? JSON.stringify(credStatus) : null;
-  const row = await getDbClient().get<AgentRow>(
-    `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    [json, id],
-  );
+  const row = await agentsRepo().setAgentColumns(id, { cred_status: json });
   return row ? rowToAgent(row) : null;
 }
 
@@ -457,10 +399,7 @@ export async function updateAgentCredStatus(
  * are still returned — the caller surfaces them as "unreported".
  */
 export async function listAgentsWithCredStatusByProvider(provider: string): Promise<Agent[]> {
-  const rows = await getDbClient().query<AgentRow>(
-    `SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`,
-    [provider],
-  );
+  const rows = await agentsRepo().listAgentsByHarnessProvider(provider);
   return rows.map((row) => rowToAgent(row));
 }
 
@@ -475,21 +414,12 @@ export async function listAgentsWithCredStatusByProvider(provider: string): Prom
 export async function getAgentHarnessProviders(): Promise<
   Array<{ provider: string; count: number }>
 > {
-  const rows = await getDbClient().query<{ provider: string; count: number }>(
-    `SELECT harness_provider AS provider, COUNT(*) AS count
-       FROM agents
-       WHERE harness_provider IS NOT NULL
-       GROUP BY harness_provider
-       ORDER BY harness_provider`,
-  );
+  const rows = await agentsRepo().countAgentsByHarnessProvider();
   return rows.map((r) => ({ provider: r.provider, count: r.count }));
 }
 
 export async function updateAgentActivity(id: string): Promise<void> {
-  await getDbClient().run(
-    `UPDATE agents SET lastActivityAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
-    [id],
-  );
+  await agentsRepo().touchAgentActivity(id);
 }
 
 // ============================================================================
@@ -504,15 +434,7 @@ export const MAX_EMPTY_POLLS = 2;
  * Returns the new count after incrementing.
  */
 export async function incrementEmptyPollCount(agentId: string): Promise<number> {
-  const row = await getDbClient().get<{ emptyPollCount: number }>(
-    `UPDATE agents
-       SET emptyPollCount = emptyPollCount + 1,
-           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ?
-       RETURNING emptyPollCount`,
-    [agentId],
-  );
-  return row?.emptyPollCount ?? 0;
+  return (await agentsRepo().incrementEmptyPollCount(agentId)) ?? 0;
 }
 
 /**
@@ -520,13 +442,7 @@ export async function incrementEmptyPollCount(agentId: string): Promise<number> 
  * Called when a task is assigned or agent re-registers.
  */
 export async function resetEmptyPollCount(agentId: string): Promise<void> {
-  await getDbClient().run(
-    `UPDATE agents
-     SET emptyPollCount = 0,
-         lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ?`,
-    [agentId],
-  );
+  await agentsRepo().resetEmptyPollCount(agentId);
 }
 
 /**
@@ -548,8 +464,7 @@ export async function deleteAgent(id: string): Promise<boolean> {
       });
     } catch {}
   }
-  const result = await getDbClient().run("DELETE FROM agents WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await agentsRepo().deleteAgent(id)) > 0;
 }
 
 // ============================================================================
@@ -569,13 +484,7 @@ export async function deleteAgent(id: string): Promise<boolean> {
  * that created it, which would otherwise consume the lead's own capacity.
  */
 export async function getActiveTaskCount(agentId: string): Promise<number> {
-  const result = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-     WHERE (agentId = ? AND status = 'in_progress')
-        OR (offeredTo = ? AND status = 'reviewing')`,
-    [agentId, agentId],
-  );
-  return result?.count ?? 0;
+  return agentsRepo().countActiveTasks(agentId);
 }
 
 /**
@@ -721,12 +630,5 @@ export async function getAgentDailyTaskCounts(
   days: number,
 ): Promise<{ date: string; count: number }[]> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
-  return getDbClient().query<{ date: string; count: number }>(
-    `SELECT substr(createdAt, 1, 10) AS date, COUNT(*) AS count
-       FROM agent_tasks
-      WHERE agentId = ? AND createdAt >= ?
-      GROUP BY date
-      ORDER BY date`,
-    [agentId, since],
-  );
+  return agentsRepo().dailyTaskCounts(agentId, since);
 }

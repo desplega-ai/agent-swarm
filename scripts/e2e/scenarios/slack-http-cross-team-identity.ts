@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asString, expect, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { postSigned } from "../slack-http";
@@ -42,8 +43,7 @@ function mentionBody(
 
 function requesterOf(ctx: ScenarioContext, ts: string): { found: boolean; userId: string | null } {
   const row = ctx.db.get<{ requestedByUserId: string | null }>(
-    "SELECT requestedByUserId FROM agent_tasks WHERE source = 'slack' AND (slackTriggerMessageTs = ? OR slackThreadTs = ?)",
-    [ts, ts],
+    sql`SELECT "requestedByUserId" FROM agent_tasks WHERE source = 'slack' AND ("slackTriggerMessageTs" = ${ts} OR "slackThreadTs" = ${ts})`,
   );
   return { found: row !== null && row !== undefined, userId: row?.requestedByUserId ?? null };
 }
@@ -51,8 +51,7 @@ function requesterOf(ctx: ScenarioContext, ts: string): { found: boolean; userId
 function slackAliasOwner(ctx: ScenarioContext, slackUserId: string): string | null {
   return (
     ctx.db.get<{ userId: string }>(
-      "SELECT userId FROM user_external_ids WHERE kind = 'slack' AND externalId = ?",
-      [slackUserId],
+      sql`SELECT "userId" FROM user_external_ids WHERE kind = 'slack' AND "externalId" = ${slackUserId}`,
     )?.userId ?? null
   );
 }
@@ -69,7 +68,10 @@ export const slackHttpCrossTeamIdentity: Scenario = {
     const flip = await enableNativeHttp(ctx);
     try {
       const leadId = await registerLead(flip.ctx, "e2e-lead-http-cross-team");
-      const n = ctx.nonce.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
+      const n = ctx.nonce
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 10);
       const colleague = await createUser(ctx, "cross-team colleague", {
         email: `colleague-${n}@corp.test`,
       });

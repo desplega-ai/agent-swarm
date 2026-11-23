@@ -1,7 +1,8 @@
+import type { ApprovalListFilter } from "@desplega/storage";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../../utils/secret-scrubber";
 import { normalizeDate, normalizeDateRequired } from "../date-utils";
 import { breaksJsonValidity } from "../scrub-json";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * One accepted answer to an approval request. `responder` comes from the
@@ -24,24 +25,13 @@ export interface ApprovalRequestListFilters {
   limit?: number;
 }
 
-/** WHERE + LIMIT shared by the full and slim approval list reads (default limit 100). */
-export function approvalRequestListClause(filters?: ApprovalRequestListFilters): {
-  sql: string;
-  params: (string | number)[];
-} {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters?.workflowRunId) {
-    conditions.push("workflowRunId = ?");
-    params.push(filters.workflowRunId);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  params.push(filters?.limit ?? 100);
-  return { sql: `${where} ORDER BY createdAt DESC LIMIT ?`, params };
+/** Filters shared by the full and slim approval list reads (default limit 100). */
+export function approvalListFilter(filters?: ApprovalRequestListFilters): ApprovalListFilter {
+  return {
+    status: filters?.status || undefined,
+    workflowRunId: filters?.workflowRunId || undefined,
+    limit: filters?.limit ?? 100,
+  };
 }
 
 /**
@@ -66,25 +56,15 @@ export interface ApprovalRequestSummary {
   updatedAt: string;
 }
 
-type ApprovalRequestSummaryRow = Omit<ApprovalRequestSummary, "questionCount" | "createdBy"> & {
-  questionCount: number | null;
-  created_by: string | null;
-};
-
 export async function listApprovalRequestSummaries(
   filters?: ApprovalRequestListFilters,
 ): Promise<ApprovalRequestSummary[]> {
-  const { sql, params } = approvalRequestListClause(filters);
-  // Project in SQL so the heavy JSON columns are never read or parsed.
-  const rows = await getDbClient().query<ApprovalRequestSummaryRow>(
-    `SELECT id, title, workflowRunId, workflowRunStepId, sourceTaskId, status, resolvedBy,
-            resolvedAt, timeoutSeconds, expiresAt, created_by, createdAt, updatedAt,
-            json_array_length(questions) AS questionCount
-       FROM approval_requests ${sql}`,
-    params,
+  const rows = await getStorage().repos.workflows.listApprovalSummaries(
+    approvalListFilter(filters),
   );
   return rows.map(({ created_by, questionCount, ...row }) => ({
     ...row,
+    status: row.status as ApprovalRequestSummary["status"],
     questionCount: questionCount ?? 0,
     resolvedAt: normalizeDate(row.resolvedAt),
     expiresAt: normalizeDate(row.expiresAt),
@@ -103,15 +83,7 @@ export async function getPendingApprovalVoteState(
   ids: string[],
 ): Promise<{ id: string; approvers: unknown; approvals: ApprovalVote[] | null }[]> {
   if (ids.length === 0) return [];
-  const rows = await getDbClient().query<{
-    id: string;
-    approvers: string;
-    approvals: string | null;
-  }>(
-    `SELECT id, approvers, approvals FROM approval_requests
-       WHERE status = 'pending' AND id IN (${ids.map(() => "?").join(", ")})`,
-    ids,
-  );
+  const rows = await getStorage().repos.workflows.listPendingApprovalVotes(ids);
   return rows.map((row) => ({
     id: row.id,
     approvers: JSON.parse(row.approvers),
@@ -125,14 +97,11 @@ export async function getPendingApprovalVoteState(
  * is no longer pending.
  */
 export async function recordApprovalVotes(id: string, approvals: ApprovalVote[]): Promise<boolean> {
-  const row = await getDbClient().get<{ id: string }>(
-    `UPDATE approval_requests
-       SET approvals = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING id`,
-    [scrubApprovalVotesJson(approvals), new Date().toISOString(), id],
+  return getStorage().repos.workflows.recordApprovalVotes(
+    id,
+    scrubApprovalVotesJson(approvals),
+    new Date().toISOString(),
   );
-  return row !== null && row !== undefined;
 }
 
 /**
@@ -157,12 +126,7 @@ export async function getPendingApprovalsForTasks(taskIds: string[]): Promise<
   }[]
 > {
   if (!taskIds.length) return [];
-  return getDbClient().query(
-    `SELECT id, status, sourceTaskId, title FROM approval_requests
-     WHERE sourceTaskId IN (${taskIds.map(() => "?").join(",")}) AND status = 'pending'
-     ORDER BY createdAt, id`,
-    taskIds,
-  );
+  return getStorage().repos.workflows.listPendingApprovalsForTasks(taskIds);
 }
 
 /** The claim key of one Slack thread's cancellation post: `<channel>:<messageTs>`. */
@@ -182,17 +146,7 @@ export async function listUndeliveredCancelledApprovalRequestIds(
   const ids: string[] = [];
   for (let i = 0; i < runIds.length; i += 500) {
     const chunk = runIds.slice(i, i + 500);
-    const rows = await getDbClient().query<{
-      id: string;
-      notificationChannels: string;
-      claims: string | null;
-    }>(
-      `SELECT id, notificationChannels, cancellationNotificationClaims AS claims
-         FROM approval_requests
-        WHERE workflowRunId IN (${chunk.map(() => "?").join(", ")})
-          AND status = 'cancelled' AND notificationChannels IS NOT NULL`,
-      chunk,
-    );
+    const rows = await getStorage().repos.workflows.listCancelledNotifiedApprovals(chunk);
     for (const row of rows) {
       const claims = row.claims ? (JSON.parse(row.claims) as Record<string, unknown>) : {};
       const channels = JSON.parse(row.notificationChannels) as Array<{
@@ -227,7 +181,7 @@ export function scheduleApprovalCardUpdates(
     ),
   );
   if (posted.length === 0) return;
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     import("../../workflows/approval-notifications")
       .then(({ updateResolvedApprovalCards }) => updateResolvedApprovalCards(posted))
       .catch((err) =>

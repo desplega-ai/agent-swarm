@@ -10,9 +10,11 @@ import { initAgentMail } from "../agentmail";
 import { initAzureDevOps, initAzureDevOpsOutbound } from "../azure-devops";
 import { drainApi, isApiDraining } from "../be/api-drain";
 import {
-  closeDb,
+  closeDatabase,
   emitBuiltInIntegrationConnectedOnce,
   getSwarmConfigs,
+  isPostgresEngine,
+  startPostgres,
   upsertSwarmConfig,
 } from "../be/db";
 import { startTaskSearchBackfill, stopTaskSearchBackfill } from "../be/db/tasks/search-index";
@@ -212,6 +214,8 @@ const globalState = globalThis as typeof globalThis & {
   __runId?: string;
   __closeRealtime?: () => void;
   __stopExtensions?: () => Promise<void>;
+  /** Closes the Postgres engine of the previous module instance (pool and lock watcher). */
+  __closeDatabase?: () => Promise<void>;
 };
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
@@ -281,6 +285,16 @@ if (globalState.__httpServer) {
   await globalState.__stopExtensions?.();
   console.log("[HTTP] Hot reload detected, closing previous server...");
   globalState.__httpServer.close();
+  // A reload re-evaluates the db module, so its Postgres engine would leak its
+  // pool and ownership lock. Retire it before the new start below.
+  const closePrevious = globalState.__closeDatabase;
+  globalState.__closeDatabase = undefined;
+  await closePrevious?.().catch((err) =>
+    console.error(
+      "[HTTP] Closing the previous Postgres engine failed:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    ),
+  );
 }
 
 const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
@@ -626,7 +640,7 @@ async function shutdown() {
     httpServer.close((error) => (error ? reject(error) : resolve()));
   });
   await closeRooms();
-  closeDb();
+  await closeDatabase();
   console.log("MCP HTTP server closed, and database connection closed");
   process.exit(0);
 }
@@ -671,6 +685,22 @@ startEventLoopLagProbe();
 // credential saved only in swarm_config silently reverts to the stale env
 // value on the next deploy (2026-09-16 prod Slack outage). Reserved keys
 // (API_KEY, SECRETS_ENCRYPTION_KEY, ...) stay env-only regardless.
+// DATABASE_URL with a postgres:// scheme selects the Postgres engine (decision D1).
+// Its start is asynchronous, so it runs here, before the first database access.
+// The SQLite engine opens lazily on first use, as before.
+if (isPostgresEngine()) {
+  try {
+    await startPostgres();
+    globalState.__closeDatabase = closeDatabase;
+  } catch (err) {
+    console.error(
+      "[startup] Postgres start failed:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+    process.exit(1);
+  }
+}
+
 // New-install seed: a database created by this boot gets the default
 // retention values as global config rows. Runs before the load below so the
 // rows are injected. Non-fatal: a failed seed leaves retention off.
@@ -739,7 +769,7 @@ try {
   // Guarded per DB handle: `createServer()` (one per MCP session) calls the
   // same helper, so seeding here is what keeps session init off this path.
   const { ensurePricingSeeded } = await import("../be/boot-seeds");
-  ensurePricingSeeded();
+  await ensurePricingSeeded();
   const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
   startPricingRefreshLoop();
 } catch (err) {
@@ -755,7 +785,7 @@ try {
 
 try {
   const { ensureRbacSeeded } = await import("../be/boot-seeds");
-  ensureRbacSeeded();
+  await ensureRbacSeeded();
 } catch (err) {
   console.error("[startup] Failed to sync RBAC seed rows:", err);
   // RBAC flag-on must fail closed; flag-off deployments should not be bricked
@@ -819,6 +849,16 @@ httpServer
       setApiLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
     }
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
+
+    // Webhook signature handlers (if configured), before the first await below:
+    // /health answers as soon as the server listens, and a delivery that lands
+    // before its handler holds the secret gets a 401 (GitHub does not redeliver).
+    // On Postgres the awaited startup reads below take long enough for that to
+    // happen (github-emulate-flows, ledger part 10). Each init is synchronous.
+    initGitHub();
+    initGitLab();
+    initAzureDevOps();
+    initBitbucket();
 
     ensure({
       id: "listen",
@@ -901,21 +941,10 @@ httpServer
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();
 
-    // Initialize GitHub webhook handler (if configured)
-    initGitHub();
-
-    // Initialize GitLab webhook handler (if configured)
-    initGitLab();
-
-    // Initialize Azure DevOps service-hook handler (if configured)
-    initAzureDevOps();
     initAzureDevOpsOutbound();
 
     // MCP Events webhook delivery for /mcp-user subscribers (gated per event by MCP_USER_EVENTS_ENABLED)
     initMcpEventsDispatcher();
-
-    // Initialize Bitbucket Cloud webhook handler (if configured)
-    initBitbucket();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

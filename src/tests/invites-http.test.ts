@@ -77,7 +77,7 @@ let port: number;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   server = createTestServer(API_KEY);
   port = await listenOnFreePort(server, "127.0.0.1");

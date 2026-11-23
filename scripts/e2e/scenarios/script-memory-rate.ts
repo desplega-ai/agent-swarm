@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { cancelTask, createPinnedTask } from "./knowledge-helpers";
@@ -121,8 +122,7 @@ export const scriptMemoryRate: Scenario = {
           `${executor}: missing identifier error differs from MCP`,
         );
         const ratings = ctx.db.query<{ memoryId: string; signal: number; reasoning: string }>(
-          "SELECT memoryId, signal, reasoning FROM memory_rating WHERE taskId = ? AND source = 'explicit-self'",
-          [taskId],
+          sql`SELECT "memoryId", signal, reasoning FROM memory_rating WHERE "taskId" = ${taskId} AND source = 'explicit-self'`,
         );
         expect(ratings.length === 3, `${executor}: expected exactly three persisted ratings`);
         for (const [memoryId, signal] of [

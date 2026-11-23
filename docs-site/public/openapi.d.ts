@@ -2466,6 +2466,11 @@ export interface paths {
                             total: number;
                             truncated: boolean;
                             rowLimit: number | null;
+                            /**
+                             * @description SQL dialect of the storage engine that ran the query
+                             * @enum {string}
+                             */
+                            dialect: "sqlite" | "postgres";
                         };
                     };
                 };

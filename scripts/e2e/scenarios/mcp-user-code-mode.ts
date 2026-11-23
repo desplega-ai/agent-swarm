@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { createUser } from "./core-helpers";
@@ -152,8 +153,7 @@ export const mcpUserCodeMode: Scenario = {
 
       // One token per executed run (named, whoami, throws, outlives), each revoked at run end.
       const runTokens = ctx.db.query<{ revokedAt: string | null }>(
-        "SELECT revokedAt FROM user_tokens WHERE userId = ? AND expiresAt IS NOT NULL",
-        [userId],
+        sql`SELECT "revokedAt" FROM user_tokens WHERE "userId" = ${userId} AND "expiresAt" IS NOT NULL`,
       );
       expect(
         runTokens.length === 4 && runTokens.every((t) => t.revokedAt !== null),

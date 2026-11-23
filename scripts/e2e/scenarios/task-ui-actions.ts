@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -112,8 +113,7 @@ export const taskUiActions: Scenario = {
       );
       // The completion also wakes the lead with its own child task; count the action's only.
       const children = ctx.db.get<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM agent_tasks WHERE parentTaskId = ? AND task LIKE ?",
-        [taskId, `%${PROMPT}%`],
+        sql`SELECT COUNT(*) AS count FROM agent_tasks WHERE "parentTaskId" = ${taskId} AND task LIKE ${`%${PROMPT}%`}`,
       );
       expect(children?.count === 1, `The clicks created ${children?.count} follow-up tasks`);
 
@@ -123,8 +123,7 @@ export const taskUiActions: Scenario = {
       // Cancel the follow-up and the completion's lead task: later scenarios need an idle lead.
       if (taskId) {
         const children = ctx.db.query<{ id: string }>(
-          "SELECT id FROM agent_tasks WHERE parentTaskId = ?",
-          [taskId],
+          sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${taskId}`,
         );
         for (const child of children) await cancelQuietly(ctx, child.id);
       }
@@ -191,8 +190,7 @@ export const taskUiScriptActions: Scenario = {
       });
       expectStatus(upserted, [200], "upsert the card script");
       const row = ctx.db.get<{ contentHash: string }>(
-        "SELECT contentHash FROM scripts WHERE name = ? AND scope = 'global'",
-        [scriptName],
+        sql`SELECT "contentHash" FROM scripts WHERE name = ${scriptName} AND scope = 'global'`,
       );
       expect(Boolean(row?.contentHash), "The card script has no contentHash");
       const allowlist = `${scriptName}@${row?.contentHash.slice(0, 12)}`;
@@ -274,8 +272,7 @@ export const taskUiScriptActions: Scenario = {
     } finally {
       if (taskId) {
         const children = ctx.db.query<{ id: string }>(
-          "SELECT id FROM agent_tasks WHERE parentTaskId = ?",
-          [taskId],
+          sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${taskId}`,
         );
         for (const child of children) await cancelQuietly(ctx, child.id);
       }

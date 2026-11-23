@@ -1,8 +1,8 @@
+import { getStorage } from "@/be/storage";
 import {
   createAgent,
   EXTENSION_AGENT_ROLE,
   getAllAgents,
-  getDbClient,
   updateAgentMaxTasks,
   updateAgentProfile,
   updateAgentStatus,
@@ -14,7 +14,7 @@ function extensionAgentName(name: string): string {
 
 export async function ensureExtensionAgent(name: string): Promise<string> {
   const agentName = extensionAgentName(name);
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     let agent = (await getAllAgents({ includeExtensions: true })).find(
       (candidate) => candidate.name === agentName,
     );

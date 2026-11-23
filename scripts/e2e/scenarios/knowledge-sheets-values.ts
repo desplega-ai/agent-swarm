@@ -38,7 +38,10 @@ export const knowledgeSheetsValues: Scenario = {
         const read = async (id: string, range: string) =>
           JSON.stringify((await call("sheet-get-range", { id, range })).values);
         const create = async (path: string, extra: Record<string, unknown> = {}) =>
-          asString(asRecord((await call("sheet-create", { path, ...extra })).object).id, "sheet id");
+          asString(
+            asRecord((await call("sheet-create", { path, ...extra })).object).id,
+            "sheet id",
+          );
 
         // An identical write changes nothing and does not bump the version.
         const path = `values-${ctx.nonce}.sheet.json`;
@@ -60,7 +63,8 @@ export const knowledgeSheetsValues: Scenario = {
         });
         await call("sheet-set-range", { id, range: "B6", values: [[null]] });
         expect(
-          (await read(id, "B1:B6")) === `[["007"],["=not a formula"],["#DIV/0!"],[true],["plain"],[null]]`,
+          (await read(id, "B1:B6")) ===
+            `[["007"],["=not a formula"],["#DIV/0!"],[true],["plain"],[null]]`,
           `typed values: ${await read(id, "B1:B6")}`,
         );
         const cells = asRecord(asRecord((storedSheet(fake, path).tabs as unknown[])[0]).cells);
@@ -89,8 +93,16 @@ export const knowledgeSheetsValues: Scenario = {
         // Equal-area mismatches refuse and leave the file and version alone.
         const guard = await create(`guard-${ctx.nonce}.sheet.json`);
         const guardPath = `guard-${ctx.nonce}.sheet.json`;
-        await call("sheet-set-range", { id: guard, range: "C1:D1", values: [["keep C", "keep D"]] });
-        await call("sheet-set-range", { id: guard, range: "A3:A4", values: [["keep A3"], ["keep A4"]] });
+        await call("sheet-set-range", {
+          id: guard,
+          range: "C1:D1",
+          values: [["keep C", "keep D"]],
+        });
+        await call("sheet-set-range", {
+          id: guard,
+          range: "A3:A4",
+          values: [["keep A3"], ["keep A4"]],
+        });
         const body = fake.files.get(guardPath)?.body;
         const guardWrites = fake.writes();
         const shapes: Array<[string, Grid]> = [
@@ -111,14 +123,11 @@ export const knowledgeSheetsValues: Scenario = {
           fake.files.get(guardPath)?.body === body && fake.writes() === guardWrites,
           "a refused shape writes nothing",
         );
+        expect((await read(guard, "C1:D1")) === `[["keep C","keep D"]]`, "the neighbours survive");
         expect(
-          (await read(guard, "C1:D1")) === `[["keep C","keep D"]]`,
-          "the neighbours survive",
-        );
-        expect(
-          (await refused("sheet-set-range", { id, range: "A1048576", values: [[1], [2]] })).includes(
-            "runs past",
-          ),
+          (
+            await refused("sheet-set-range", { id, range: "A1048576", values: [[1], [2]] })
+          ).includes("runs past"),
           "a write past the last row",
         );
 
@@ -163,8 +172,7 @@ export const knowledgeSheetsValues: Scenario = {
         });
         await call("sheet-set-range", { id: hand, range: "C1", values: [["'=literal"]] });
         expect(
-          (await read(hand, "A1:A5")) ===
-            `[["$12"],[" 007"],["=not a formula"],[5],["'quoted"]]`,
+          (await read(hand, "A1:A5")) === `[["$12"],[" 007"],["=not a formula"],[5],["'quoted"]]`,
           "hand-authored text",
         );
         expect((await read(hand, "B1:B2")) === `[[10],["$12!"]]`, "hand-authored formulas");
@@ -192,7 +200,8 @@ export const knowledgeSheetsValues: Scenario = {
         await call("sheet-set-range", { id: heavy, range: "C1", values: [["=SUM(B1:B5000)"]] });
         expect(performance.now() - started < 10_000, "10k cells recalculate in under 10s");
         expect(
-          (await read(heavy, "C1")) === "[[25005000]]" && (await read(heavy, "B5000")) === "[[10000]]",
+          (await read(heavy, "C1")) === "[[25005000]]" &&
+            (await read(heavy, "B5000")) === "[[10000]]",
           "the 10k-cell workbook computed",
         );
       });

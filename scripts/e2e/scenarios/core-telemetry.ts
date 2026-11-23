@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -41,7 +42,7 @@ async function events(ctx: ScenarioContext, agentId: string, taskId: string) {
     `Unexpected stored event ${response.text}`,
   );
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM events WHERE id = ?", [String(stored.id)])
+    ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM events WHERE id = ${String(stored.id)}`)
       ?.n === 1,
     "events table lacks the stored event",
   );
@@ -230,8 +231,7 @@ async function maintenance(ctx: ScenarioContext) {
   expectStatus(response, [200], "advance the cursor");
   expect(
     ctx.db.get<{ lastSeenTs: string }>(
-      "SELECT lastSeenTs FROM channel_activity_cursors WHERE channelId = ?",
-      [channelId],
+      sql`SELECT "lastSeenTs" FROM channel_activity_cursors WHERE "channelId" = ${channelId}`,
     )?.lastSeenTs === "1700000000.000200",
     "The cursor was not advanced in place",
   );
@@ -259,8 +259,10 @@ async function metricDefinitions(ctx: ScenarioContext, agentId: string, otherId:
   const definition = {
     version: 1,
     widgets: [
-      widget("stat", "SELECT COUNT(*) AS n FROM agents WHERE id = ?", ["{{agent}}"]),
-      widget("rows", "SELECT id, status FROM agent_tasks WHERE agentId = ? LIMIT 5", ["{{agent}}"]),
+      widget("stat", "SELECT COUNT(*) AS n FROM agents WHERE id = $1", ["{{agent}}"]),
+      widget("rows", 'SELECT id, status FROM agent_tasks WHERE "agentId" = $1 LIMIT 5', [
+        "{{agent}}",
+      ]),
     ],
     variables: [{ key: "agent", label: "Agent", type: "text", defaultValue: agentId }],
   };
@@ -437,6 +439,26 @@ async function metricDefinitions(ctx: ScenarioContext, agentId: string, otherId:
       {
         title: "Rejected",
         definition: { version: 1, widgets: [widget("rows", "UPDATE agents SET name = 'x'")] },
+      },
+      "Metric query rejected",
+    );
+    // Saved options SQL follows the same rule as widget SQL.
+    await expectToolError(
+      conn,
+      "create_metric",
+      {
+        title: "Rejected options",
+        definition: {
+          version: 1,
+          widgets: [widget("stat", "SELECT COUNT(*) AS n FROM agents")],
+          variables: [
+            {
+              key: "pick",
+              type: "select",
+              optionsQuery: { sql: "SELECT id FROM agents; DELETE FROM agents", valueKey: "id" },
+            },
+          ],
+        },
       },
       "Metric query rejected",
     );
