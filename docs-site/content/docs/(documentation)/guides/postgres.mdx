@@ -46,6 +46,8 @@ docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --en
 
 **Helm:** set `database.url`, or `database.existingSecret` with a `DATABASE_URL` key (and optional `DATABASE_QUERY_URL`). The chart turns the Litestream sidecar off on Postgres. Keep `api.replicas: 1`.
 
+**Connections and poolers:** one API process uses 1 connection for its one-process lock, up to 10 for queries, and up to 4 for the optional `db-query` reader. Allow at least 15 for the role. The lock is a session advisory lock, so the lock connection needs session affinity: behind PgBouncer or a cloud proxy, use session pooling for `DATABASE_URL`, or connect directly. Transaction pooling is not supported.
+
 ## db-query reader role
 
 On Postgres, `db-query` runs agent SQL as a separate role with read access to the permitted tables only. Create it after the first start:
