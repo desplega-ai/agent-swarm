@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { Cleanup, registerWorker } from "./platformb-helpers";
@@ -116,8 +117,7 @@ export const platformbFs: Scenario = {
         is_primary: number;
         provider_id: string;
       }>(
-        "SELECT task_id, name, size_bytes, sha256, is_primary, provider_id FROM task_attachments WHERE id = ?",
-        [notesId],
+        sql`SELECT task_id, name, size_bytes, sha256, is_primary, provider_id FROM task_attachments WHERE id = ${notesId}`,
       );
       expect(
         row?.task_id === taskId &&
@@ -286,7 +286,7 @@ export const platformbFs: Scenario = {
         "A deleted file can still be downloaded",
       );
       expect(
-        ctx.db.get("SELECT id FROM task_attachments WHERE id = ?", [notesId]) === null,
+        ctx.db.get(sql`SELECT id FROM task_attachments WHERE id = ${notesId}`) === null,
         "The deleted attachment is still in task_attachments",
       );
       response = await ctx.api("GET", base);

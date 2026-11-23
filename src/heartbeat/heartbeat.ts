@@ -17,7 +17,6 @@ import {
   getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
-  getDbClient,
   getDependentTasks,
   getIdleWorkersWithCapacity,
   getLeadAgent,
@@ -63,6 +62,7 @@ import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { carryUnhandledSteering, promotePendingSteeringForTask } from "../be/steering";
+import { getStorage } from "../be/storage";
 import type { HeartbeatAction, HeartbeatClassification } from "../extensions/contract";
 import { dispatchPre, extensionIdForAgent } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
@@ -1051,12 +1051,9 @@ export async function runRebootSweep(): Promise<void> {
         }
 
         // Guard: only retry if parent doesn't already have a retry child
-        const existingRetry = await getDbClient().get<{ id: string }>(
-          `SELECT id FROM agent_tasks
-           WHERE parentTaskId = ?
-             AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
-           LIMIT 1`,
-          [task.id, ...TERMINAL_TASK_STATUSES],
+        const existingRetry = await getStorage().repos.tasks.findOpenChildTaskId(
+          task.id,
+          TERMINAL_TASK_STATUSES,
         );
 
         if (!existingRetry) {
@@ -1189,15 +1186,13 @@ async function settleRebootSweptDependents(
         ];
         // Status + membership predicates make the re-point a no-op if the
         // dependent was claimed or re-pointed since it was read.
-        const row = await getDbClient().get<{ id: string }>(
-          `UPDATE agent_tasks
-              SET dependsOn = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE id = ? AND status = ?
-              AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
-            RETURNING id`,
-          [JSON.stringify(dependsOn), dep.id, dep.status, sweptId],
+        const repointed = await getStorage().repos.tasks.repointTaskDependency(
+          dep.id,
+          dep.status,
+          sweptId,
+          JSON.stringify(dependsOn),
         );
-        if (!row) continue;
+        if (!repointed) continue;
         try {
           await createLogEntry({
             eventType: "task_dependency_repointed",
@@ -1321,7 +1316,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
     //    cancel so the pin is retried next sweep instead of being stranded.
     let escalation: { decisionTaskId: string } | null = null;
     try {
-      escalation = await getDbClient().transaction(async () => {
+      escalation = await getStorage().transaction(async () => {
         const terminalized = await failPendingResumeIfUnclaimed(
           resume.id,
           "cancelled",
@@ -1847,15 +1842,9 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
   // Dedup: skip if lead already has an active heartbeat-checklist task.
-  // Unary + keeps agentId/taskType off their indexes, so the seek runs on
-  // status over the few open tasks instead of every past checklist task.
-  const existing = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-       WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
-         AND +agentId = ?
-         AND +taskType = 'heartbeat-checklist'
-       LIMIT 1`,
-    [...OPEN_TASK_STATUSES, lead.id],
+  const existing = await getStorage().repos.tasks.findOpenHeartbeatChecklistTask(
+    lead.id,
+    OPEN_TASK_STATUSES,
   );
   if (existing) return;
 
@@ -1877,13 +1866,13 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   // Shadow mode leaves the prompt untouched so the Lead's own quiet/non-quiet
   // outcome stays an independent check on the gate's verdict.
   if (gateMode === "enforce" && gate?.verdict === "wake" && gate.summary) {
-    const findings = resolveTemplate("heartbeat.checklist.gate_findings", {
+    const findings = await resolveTemplate("heartbeat.checklist.gate_findings", {
       gate_summary: gate.summary,
     });
     if (!findings.skipped && findings.text) systemStatus += `\n\n${findings.text}`;
   }
 
-  const result = resolveTemplate("heartbeat.checklist", {
+  const result = await resolveTemplate("heartbeat.checklist", {
     system_status: systemStatus,
     heartbeat_content: heartbeatMd,
   });
@@ -2121,13 +2110,9 @@ export async function createBootTriageTask(): Promise<void> {
   const heartbeatMd = lead.heartbeatMd ?? "";
 
   // Dedup: skip if lead already has an active boot-triage task
-  const existing = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-       WHERE agentId = ?
-         AND taskType = 'boot-triage'
-         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
-       LIMIT 1`,
-    [lead.id, ...TERMINAL_TASK_STATUSES],
+  const existing = await getStorage().repos.tasks.findOpenBootTriageTask(
+    lead.id,
+    TERMINAL_TASK_STATUSES,
   );
   if (existing) return;
 
@@ -2156,7 +2141,7 @@ export async function createBootTriageTask(): Promise<void> {
     return `## System status unavailable\n\nStatus gathering failed after this boot (${reason}). Investigate the task, agent, and DB state directly.`;
   });
 
-  const result = resolveTemplate("heartbeat.boot-triage", {
+  const result = await resolveTemplate("heartbeat.boot-triage", {
     system_status: systemStatus,
     heartbeat_content: isEffectivelyEmpty(heartbeatMd)
       ? "_No standing orders configured._"

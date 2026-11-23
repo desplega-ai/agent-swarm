@@ -501,7 +501,7 @@ export async function createApprovalFollowUpTask(
 
   const { text: taskText } =
     templateEventType === "hitl.follow_up"
-      ? resolveTemplate("hitl.follow_up", {
+      ? await resolveTemplate("hitl.follow_up", {
           request_id: request.id,
           title: request.title,
           status: request.status,
@@ -510,7 +510,7 @@ export async function createApprovalFollowUpTask(
             (request.responses ?? {}) as Record<string, unknown>,
           ),
         })
-      : resolveTemplate("hitl.timeout", {
+      : await resolveTemplate("hitl.timeout", {
           request_id: request.id,
           title: request.title,
           expires_at: request.expiresAt ?? "",

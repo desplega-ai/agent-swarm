@@ -95,6 +95,30 @@ const rows = (r: any): any[] => {
   const c: string[] = d?.columns ?? [];
   return d.rows.map((x: any[]) => Object.fromEntries(c.map((k, i) => [k, x[i]])));
 };
+// db_query runs the engine's own SQL dialect and states it on each response. Portable statements are plain strings;
+// a statement with no portable form carries one text per dialect.
+type Sql = string | { sqlite: string; postgres: string };
+// `$n` placeholders numbered in order of first appearance (bun:sqlite binds `$n` that way): call `p` in text order.
+// The same key returns the same placeholder.
+function binder() {
+  const keys = new Map<string, string>();
+  const values: unknown[] = [];
+  const p = (key: string, value: unknown) => {
+    let ph = keys.get(key);
+    if (!ph) {
+      values.push(value);
+      ph = `$${values.length}`;
+      keys.set(key, ph);
+    }
+    return ph;
+  };
+  return { p, values };
+}
+// Prefix test that is index-friendly and identical on both engines (byte order: SQLite BINARY, Postgres "C"):
+// `col` starts with `prefix` (ending in "/") iff prefix <= col < prefix with its last "/" bumped to "0".
+const startsWithSlash = (col: string, prefix: string) => `(${col} >= '${prefix}' AND ${col} < '${prefix.slice(0, -1)}0')`;
+// Before any committed cursor the lower bound is "the start"; a timestamp column (Postgres) cannot compare with ''.
+const START = "0001-01-01T00:00:00.000Z";
 // foreach aggregate -> per batch {batchId, status, taskId, items|null, error}. A [FAILED...] taskOutput is a failure.
 export function parseTriage(agg: unknown): Array<{ batchId: string; status: string; taskId: string | null; items: any[] | null; error: string | null }> {
   const a: any = parse(agg);
@@ -249,9 +273,19 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const dry = a.dryRun === true || a.dryRun === "true" || a.dryRun === undefined || a.dryRun === "";
   const runId = a.runId ?? "";
   const errors: string[] = [];
-  const q = async (label: string, sql: string, params: unknown[] = []): Promise<any[]> => {
+  let dialect: "sqlite" | "postgres" | undefined;
+  const q = async (label: string, sql: Sql, params: unknown[] = []): Promise<any[]> => {
     try {
-      return rows(await ctx.swarm.db_query({ sql, params }));
+      if (typeof sql !== "string" && !dialect) {
+        const probe: any = await ctx.swarm.db_query({ sql: "SELECT 1 AS one" });
+        const d = (probe?.data ?? probe)?.dialect;
+        dialect = d === "postgres" ? "postgres" : "sqlite";
+      }
+      const text = typeof sql === "string" ? sql : dialect === "postgres" ? sql.postgres : sql.sqlite;
+      const res: any = await ctx.swarm.db_query({ sql: text, params });
+      const d = (res?.data ?? res)?.dialect;
+      if (d === "sqlite" || d === "postgres") dialect = d;
+      return rows(res);
     } catch (e: any) {
       errors.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`);
       return [];
@@ -290,40 +324,55 @@ export default async function (args: unknown, ctx: ScriptContext) {
     if (skipReason) return { ok: !errors.length, mode: "plan", dryRun: dry, runId, at, skipReason, batches: [], catalog: "", caps, counts: {}, cursor: null, errors };
     const c = parse(entry?.value) ?? {};
     const from: Cursor = { createdAt: String(c.createdAt ?? ""), id: String(c.id ?? ""), at: String(c.at ?? ""), atId: String(c.atId ?? "") };
-    const live = `m.chunkIndex = 0 AND m.key GLOB '/learnings/*' AND (m.expiresAt IS NULL OR m.expiresAt > ?)`;
-    const after = `(m.createdAt > ? OR (m.createdAt = ? AND m.id > ?))`;
-    const counts = (await q("counts", `SELECT COUNT(*) total, SUM(CASE WHEN ${after} THEN 1 ELSE 0 END) pending FROM agent_memory m WHERE ${live}`, [from.createdAt, from.createdAt, from.id, at]))[0] ?? {};
+    const fromAt = from.createdAt || START;
+    const live = (P: ReturnType<typeof binder>["p"]) =>
+      `m."chunkIndex" = 0 AND ${startsWithSlash("m.key", "/learnings/")} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${P("at", at)})`;
+    const after = (P: ReturnType<typeof binder>["p"]) =>
+      `(m."createdAt" > ${P("fromAt", fromAt)} OR (m."createdAt" = ${P("fromAt", fromAt)} AND m.id > ${P("fromId", from.id)}))`;
+    const cb = binder();
+    const countsSql = `SELECT COUNT(*) total, SUM(CASE WHEN ${after(cb.p)} THEN 1 ELSE 0 END) pending FROM agent_memory m WHERE ${live(cb.p)}`;
+    const counts = (await q("counts", countsSql, cb.values))[0] ?? {};
     // Reuse by another agent since `at`: a retrieval inside their task (not the dedup probe) or a rating from their task.
-    const reuseExpr = `(
-        (SELECT COUNT(*) FROM memory_retrieval r WHERE r.memoryId = m.id AND r.retrievedAt >= ?1 AND r.agentId <> coalesce(m.agentId, '') AND r.taskId IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store')
-      + (SELECT COUNT(*) FROM memory_rating g JOIN agent_tasks t ON t.id = g.taskId WHERE g.memoryId = m.id AND g.createdAt >= ?1 AND t.agentId <> coalesce(m.agentId, '')))`;
-    const cols = (reuse: string) => `m.id, m.name, m.key, m.agentId, m.tags, m.accessCount, m.alpha, m.beta, m.contentHash, m.totalChunks, m.createdAt, substr(m.content, 1, ${a.previewChars}) AS text, ${reuse} AS reuse`;
+    const reuseExpr = (P: ReturnType<typeof binder>["p"]) => `(
+        (SELECT COUNT(*) FROM memory_retrieval r WHERE r."memoryId" = m.id AND r."retrievedAt" >= ${P("since", from.at || at)} AND r."agentId" <> coalesce(m."agentId", '') AND r."taskId" IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store')
+      + (SELECT COUNT(*) FROM memory_rating g JOIN agent_tasks t ON t.id = g."taskId" WHERE g."memoryId" = m.id AND g."createdAt" >= ${P("since", from.at || at)} AND t."agentId" <> coalesce(m."agentId", '')))`;
+    const cols = (reuse: string) =>
+      `m.id, m.name, m.key, m."agentId", m.tags, m."accessCount", m.alpha, m.beta, m."contentHash", m."totalChunks", m."createdAt", substr(m.content, 1, ${a.previewChars}) AS text, ${reuse} AS reuse`;
     const S = a.batchSize;
     const newCap = S * a.maxBatches;
     const reuseCap = S * reuseBatches;
-    const fresh = newCap
-      ? await q("new", `SELECT ${cols(from.at ? reuseExpr : "0")} FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt > ?3 OR (m.createdAt = ?3 AND m.id > ?4)) ORDER BY m.createdAt, m.id LIMIT ?5`, [from.at || at, at, from.createdAt, from.id, newCap])
-      : [];
+    const nb = binder();
+    const freshSql = newCap
+      ? `SELECT ${cols(from.at ? reuseExpr(nb.p) : "0")} FROM agent_memory m WHERE ${live(nb.p)} AND ${after(nb.p)} ORDER BY m."createdAt", m.id LIMIT ${nb.p("cap", newCap)}`
+      : "";
+    const fresh = newCap ? await q("new", freshSql, nb.values) : [];
     // Reuse rows are learnings already triaged (at or before the cursor) and not yet carried by a /longterm doc (its
     // Sources list the id). Only after a committed run: the first run has nothing to compare against. Read in (first
     // reuse event past the watermark, id) order, so rows over the cap stay eligible. An event is past the watermark
     // (at, atId) when (event time, row id) sorts after it: a row at or below atId already had its events at `at` read,
     // so only its later events count. Taking the first event >= at instead would hide that row's later reuse.
-    const pastWatermark = (col: string) => `(${col} > ?1 OR (${col} = ?1 AND m.id > ?6))`;
-    const firstReuseExpr = `min(
-        coalesce((SELECT MIN(r.retrievedAt) FROM memory_retrieval r WHERE r.memoryId = m.id AND ${pastWatermark("r.retrievedAt")} AND r.agentId <> coalesce(m.agentId, '') AND r.taskId IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store'), '~'),
-        coalesce((SELECT MIN(g.createdAt) FROM memory_rating g JOIN agent_tasks t ON t.id = g.taskId WHERE g.memoryId = m.id AND ${pastWatermark("g.createdAt")} AND t.agentId <> coalesce(m.agentId, '')), '~'))`;
+    // firstReuse is the earlier of the two first events (NULL when neither exists): a CASE, since scalar min() is
+    // SQLite-only and a timestamp column (Postgres) has no text sentinel.
     const reuseRan = !!(reuseCap && from.at && from.createdAt);
     const reuseErrors = errors.length;
-    const reuse = reuseRan
-      ? await q(
-          "reuse",
-          `SELECT * FROM (SELECT ${cols(reuseExpr)}, ${firstReuseExpr} AS firstReuse FROM agent_memory m WHERE ${live.replace("?", "?2")} AND (m.createdAt < ?3 OR (m.createdAt = ?3 AND m.id <= ?4))
-               AND NOT EXISTS (SELECT 1 FROM agent_memory l WHERE l.chunkIndex = 0 AND (l.name GLOB '/longterm/*' OR coalesce(l.key, '') GLOB '/longterm/*') AND instr(l.content, m.id) > 0)) x
-             WHERE x.firstReuse <> '~' ORDER BY x.firstReuse, x.id LIMIT ?5`,
-          [from.at, at, from.createdAt, from.id, reuseCap, from.atId],
-        )
-      : [];
+    let reuse: any[] = [];
+    if (reuseRan) {
+      const rb = binder();
+      const P = rb.p;
+      const pastWatermark = (col: string) => `(${col} > ${P("since", from.at)} OR (${col} = ${P("since", from.at)} AND m.id > ${P("atId", from.atId)}))`;
+      // A /longterm doc carries a learning when its content contains the learning's id.
+      const carried = { sqlite: "instr(l.content, m.id) > 0", postgres: "strpos(l.content, m.id) > 0" };
+      const head = `SELECT * FROM (
+             SELECT y.*, CASE WHEN y.ra IS NULL THEN y.rg WHEN y.rg IS NULL OR y.ra <= y.rg THEN y.ra ELSE y.rg END AS "firstReuse" FROM (
+               SELECT ${cols(reuseExpr(P))},
+                 (SELECT MIN(r."retrievedAt") FROM memory_retrieval r WHERE r."memoryId" = m.id AND ${pastWatermark('r."retrievedAt"')} AND r."agentId" <> coalesce(m."agentId", '') AND r."taskId" IS NOT NULL AND coalesce(r.intent, '') <> 'dedup before store') AS ra,
+                 (SELECT MIN(g."createdAt") FROM memory_rating g JOIN agent_tasks t ON t.id = g."taskId" WHERE g."memoryId" = m.id AND ${pastWatermark('g."createdAt"')} AND t."agentId" <> coalesce(m."agentId", '')) AS rg
+               FROM agent_memory m WHERE ${live(P)} AND (m."createdAt" < ${P("fromAt", from.createdAt)} OR (m."createdAt" = ${P("fromAt", from.createdAt)} AND m.id <= ${P("fromId", from.id)}))
+                 AND NOT EXISTS (SELECT 1 FROM agent_memory l WHERE l."chunkIndex" = 0 AND (${startsWithSlash("l.name", "/longterm/")} OR ${startsWithSlash("coalesce(l.key, '')", "/longterm/")}) AND `;
+      const tail = `)) y) x
+             WHERE x."firstReuse" IS NOT NULL ORDER BY x."firstReuse", x.id LIMIT ${P("cap", reuseCap)}`;
+      reuse = await q("reuse", { sqlite: head + carried.sqlite + tail, postgres: head + carried.postgres + tail }, rb.values);
+    }
     const reuseTo = reuseWatermark({ from, at, reuseRan, reuseFailed: errors.length > reuseErrors, reuseCap, rows: reuse.map((r) => ({ id: String(r.id), firstReuse: String(r.firstReuse) })) });
     const doc = (r: any, src: "new" | "reuse") => {
       const alpha = Number(r.alpha ?? 1);
@@ -340,7 +389,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
     chunk(fresh, "new");
     chunk(reuse.filter((r) => !freshIds.has(String(r.id))), "reuse");
     // Promote targets the triage should prefer: existing /longterm subject docs (lane docs by name, agent docs by key).
-    const targets = await q("catalog", `SELECT DISTINCT CASE WHEN name GLOB '/longterm/*' THEN name ELSE key END p FROM agent_memory WHERE chunkIndex = 0 AND (name GLOB '/longterm/*' OR coalesce(key, '') GLOB '/longterm/*') ORDER BY p LIMIT 1000`);
+    const targets = await q(
+      "catalog",
+      `SELECT DISTINCT CASE WHEN ${startsWithSlash("name", "/longterm/")} THEN name ELSE key END p FROM agent_memory WHERE "chunkIndex" = 0 AND (${startsWithSlash("name", "/longterm/")} OR ${startsWithSlash("coalesce(key, '')", "/longterm/")}) ORDER BY p LIMIT 1000`,
+    );
     const catalogList = [...new Set(targets.map((r) => String(r.p ?? "")).filter((x) => promoteRoot(x)))].slice(0, a.catalogMax);
     const last = fresh[fresh.length - 1];
     const planned = batches.reduce((s, b) => s + b.docs.length, 0);
@@ -380,7 +432,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const leadId = String(a.leadAgentId ?? "").trim();
     const runIds = [...new Set(parsed.map((x) => x.taskId).filter((x): x is string => !!x))];
     const tasks = new Map<string, { agentId: string; task: string }>();
-    if (leadId && runIds.length) for (const r of await q("triage-authors", `SELECT id, agentId, substr(task, 1, 300) task FROM agent_tasks WHERE id IN (${runIds.map(() => "?").join(",")})`, runIds)) tasks.set(String(r.id), { agentId: String(r.agentId ?? ""), task: String(r.task ?? "") });
+    if (leadId && runIds.length) for (const r of await q("triage-authors", `SELECT id, "agentId", substr(task, 1, 300) task FROM agent_tasks WHERE id IN (${runIds.map((_, i) => `$${i + 1}`).join(",")})`, runIds)) tasks.set(String(r.id), { agentId: String(r.agentId ?? ""), task: String(r.task ?? "") });
     const uses = new Map<string, number>();
     for (const x of parsed) if (x.taskId) uses.set(x.taskId, (uses.get(x.taskId) ?? 0) + 1);
     for (const x of parsed) {
@@ -446,11 +498,13 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const taskIds = parsed.map((x) => x.taskId).filter(Boolean) as string[];
     let cost: { usd: number | null; basis: string } = { usd: null, basis: "no tasks" };
     if (taskIds.length) {
-      const c = (await q("cost", `SELECT COUNT(DISTINCT taskId) tasks, SUM(totalCostUsd) usd FROM session_costs WHERE taskId IN (${taskIds.map(() => "?").join(",")})`, taskIds))[0];
+      const c = (await q("cost", `SELECT COUNT(DISTINCT "taskId") tasks, SUM("totalCostUsd") usd FROM session_costs WHERE "taskId" IN (${taskIds.map((_, i) => `$${i + 1}`).join(",")})`, taskIds))[0];
       const measured = measuredCost(c, new Set(taskIds).size);
       if (measured) cost = measured;
       else {
-        const prior = (await q("cost-prior", `SELECT COUNT(*) tasks, AVG(s.usd) usd FROM (SELECT sc.taskId, SUM(sc.totalCostUsd) usd FROM session_costs sc JOIN agent_tasks t ON t.id = sc.taskId WHERE t.tags LIKE '%dreaming-v2-learnings%' AND t.status = 'completed' AND sc.createdAt >= datetime('now','-7 days') GROUP BY sc.taskId) s`))[0];
+        // tags is JSON text on SQLite and jsonb on Postgres: LIKE reads its text form on both.
+        const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+        const prior = (await q("cost-prior", `SELECT COUNT(*) tasks, AVG(s.usd) usd FROM (SELECT sc."taskId", SUM(sc."totalCostUsd") usd FROM session_costs sc JOIN agent_tasks t ON t.id = sc."taskId" WHERE CAST(t.tags AS text) LIKE '%dreaming-v2-learnings%' AND t.status = 'completed' AND sc."createdAt" >= $1 GROUP BY sc."taskId") s`, [weekAgo]))[0];
         cost = prior && Number(prior.tasks) > 0 && prior.usd !== null ? { usd: Number(prior.usd) * taskIds.length, basis: `estimate: mean of ${prior.tasks} triage tasks in 7 days` } : { usd: null, basis: "session_costs lands after the triage tasks finish" };
       }
     }

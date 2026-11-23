@@ -192,7 +192,7 @@ afterAll(async () => {
 describe("memory search does not rescan the tables on every call", () => {
   test("a cached or in-flight fallback is dropped by the first vector write", async () => {
     const store = new SqliteMemoryStore();
-    const vecUsable = store.getHealth().sqliteVec.initialized;
+    const vecUsable = (await store.getHealth()).sqliteVec.initialized;
     const expectedSource = vecUsable ? "vec" : "fallback";
     const scans = watchCountScans();
     scans.hold = new Set([0, 1]);
@@ -226,7 +226,7 @@ describe("memory search does not rescan the tables on every call", () => {
 
   test("search computes the health counts off the event loop, once per window, and never counts memory_vec per query", async () => {
     const store = new SqliteMemoryStore();
-    const vecUsable = store.getHealth().sqliteVec.initialized;
+    const vecUsable = (await store.getHealth()).sqliteVec.initialized;
     await remember(store, healthAgent, "second-note", "manual", null, 0.8);
     const scans = watchCountScans();
     try {
@@ -257,8 +257,8 @@ describe("memory search does not rescan the tables on every call", () => {
 
       // The health endpoint's read stays fresh on every call, and the worker's
       // single-statement counts equal it.
-      const fresh = store.getHealth();
-      store.getHealth();
+      const fresh = await store.getHealth();
+      await store.getHealth();
       expect(scans.health).toBe(2);
       const offLoop = await (
         store as unknown as { getHealthCountsOffLoop(): Promise<unknown> }
@@ -461,7 +461,7 @@ describe("health counts and the FTS sync avoid full scans", () => {
 
   test("missingFromVec equals the agent_memory anti-join it replaced", async () => {
     const store = new SqliteMemoryStore();
-    if (!store.getHealth().sqliteVec.initialized) return; // no vec0: the count is validEmbedding
+    if (!(await store.getHealth()).sqliteVec.initialized) return; // no vec0: the count is validEmbedding
     for (let i = 0; i < 3; i++) await remember(store, scanAgent, `vec-${i}`, "manual", null, 0.5);
     const dropped = await store.store({
       agentId: scanAgent,
@@ -506,7 +506,7 @@ describe("health counts and the FTS sync avoid full scans", () => {
       .get()?.n;
     try {
       expect(oracle).toBeGreaterThanOrEqual(1);
-      const counts = store.getHealth().counts;
+      const counts = (await store.getHealth()).counts;
       expect(counts.extraInVec).toBeGreaterThanOrEqual(1);
       expect(counts.missingFromVec).toBe(oracle as number);
     } finally {

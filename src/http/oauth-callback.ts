@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient } from "@/be/db";
 import { gcMcpOAuthPending } from "@/be/db-queries/mcp-oauth";
 import {
   consumeOAuthPending,
@@ -9,6 +8,7 @@ import {
   updateAuthorizationIdentity,
   upsertAuthorization,
 } from "@/be/db-queries/oauth";
+import { getStorage } from "@/be/storage";
 import { resolveAndStoreJiraCloudId } from "@/jira/oauth";
 import { captureLinearAppUserId } from "@/linear/oauth";
 import { oauthAppRowToProviderConfig } from "@/oauth/ensure-token";
@@ -225,10 +225,7 @@ export async function completeGenericOAuthCallback(
     let authorizationAlreadyExisted: boolean | undefined;
     try {
       authorizationAlreadyExisted = Boolean(
-        await getDbClient().get<{ id: string }>(
-          "SELECT id FROM oauth_authorizations WHERE appId = ? AND label = ?",
-          [pending.appId, pending.label],
-        ),
+        await getStorage().repos.oauth.findAuthorizationIdByLabel(pending.appId, pending.label),
       );
     } catch {
       // Leave first_of_type false if the telemetry-only preflight cannot run.
@@ -248,13 +245,9 @@ export async function completeGenericOAuthCallback(
 
     try {
       const integrationType = _resolveIntegrationType(app.provider);
-      const providers = await getDbClient().query<{ provider: string }>(
-        `SELECT a.provider
-           FROM oauth_authorizations z
-           JOIN oauth_apps a ON a.id = z.appId`,
-      );
+      const providers = await getStorage().repos.oauth.listAuthorizationProviders();
       const typeCount = providers.filter(
-        (row) => _resolveIntegrationType(row.provider) === integrationType,
+        (provider) => _resolveIntegrationType(provider) === integrationType,
       ).length;
       emitIntegrationConnected(
         integrationType,

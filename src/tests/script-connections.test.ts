@@ -375,7 +375,7 @@ describe("script connections", () => {
     expect(connection.generatedTypes).toContain(
       "getRepo(args: VendorApiGetRepoArgs, options: ScriptApiRawOptions): Promise<ScriptApiRawResult>;",
     );
-    const descriptor = getScriptApiConnectionDescriptors().find(
+    const descriptor = (await getScriptApiConnectionDescriptors()).find(
       (candidate) => candidate.slug === "vendorApi",
     );
     const getRepo = descriptor?.operations.find((operation) => operation.name === "getRepo");
@@ -486,7 +486,7 @@ describe("script connections", () => {
       "graphql<T = JsonValue>(query: string, variables?: Record<string, JsonValue>): Promise<T>;",
     );
 
-    const descriptor = getScriptApiConnectionDescriptors().find(
+    const descriptor = (await getScriptApiConnectionDescriptors()).find(
       (candidate) => candidate.slug === "countries",
     );
     expect(descriptor).toEqual({
@@ -1140,7 +1140,7 @@ describe("script connections", () => {
       expect(refreshed?.openapiSpecEtag).toBe('"v2"');
       expect(refreshed?.generationError).toBeNull();
       expect(refreshed?.generatedTypes).toContain("listOrgRepos");
-      const descriptor = getScriptApiConnectionDescriptors().find(
+      const descriptor = (await getScriptApiConnectionDescriptors()).find(
         (candidate) => candidate.slug === connection.slug,
       );
       expect(descriptor?.operations.some((operation) => operation.name === "listOrgRepos")).toBe(
@@ -1400,7 +1400,7 @@ describe("script connections", () => {
         agentId: "agent-1",
         resources,
         egressSecrets: await buildScriptCredentialBindings({ agentId: "agent-1" }),
-        apiConnections: getScriptApiConnectionDescriptors(),
+        apiConnections: await getScriptApiConnectionDescriptors(),
         source: `
           export default async (_args, ctx) => {
             return await ctx.api.runtimeVendor.getRepo({

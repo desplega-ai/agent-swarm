@@ -5,7 +5,6 @@ import { isApiDraining } from "@/be/api-drain";
 import {
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
@@ -17,6 +16,7 @@ import {
   updateAgentStatus,
 } from "@/be/db";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
+import { getStorage } from "@/be/storage";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentTask } from "@/types";
 import { isMultiRuntimeEnabled } from "@/utils/multi-runtime";
@@ -132,7 +132,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const outcome = await getDbClient().transaction(
+        const outcome = await getStorage().transaction(
           async (): Promise<
             AgentTask | "at-capacity" | "runtime-unavailable" | "draining" | null
           > => {

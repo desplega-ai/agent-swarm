@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -47,8 +48,7 @@ export const scriptKv: Scenario = {
       `kv put response is wrong: ${put.text}`,
     );
     const row = ctx.db.get<{ value: string; value_type: string }>(
-      "SELECT value, value_type FROM kv_entries WHERE namespace = ? AND key = ?",
-      [own, "greeting"],
+      sql`SELECT value, value_type FROM kv_entries WHERE namespace = ${own} AND key = ${"greeting"}`,
     );
     expect(row?.value_type === "json" && row.value.includes(ctx.nonce), "kv row not persisted");
     const got = await ctx.api("GET", "/api/kv/greeting", { agentId });
@@ -311,10 +311,9 @@ export const scriptKv: Scenario = {
       expect(res.text.includes("profile enrichment"), `wrong refusal: ${res.text}`);
     }
     expect(
-      ctx.db.get("SELECT key FROM kv_entries WHERE namespace = ? AND key = ?", [
-        enrichNs,
-        enrichKey,
-      ]) == null,
+      ctx.db.get(
+        sql`SELECT key FROM kv_entries WHERE namespace = ${enrichNs} AND key = ${enrichKey}`,
+      ) == null,
       "a refused enrichment write left a row",
     );
     expectStatus(

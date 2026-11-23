@@ -1,5 +1,5 @@
-import { getDbClient } from "../be/db";
 import { getOAuthApp } from "../be/db-queries/oauth";
+import { getStorage } from "../be/storage";
 import type { JiraOAuthAppMetadata } from "./types";
 
 /**
@@ -44,7 +44,7 @@ export async function getJiraMetadata(): Promise<JiraOAuthAppMetadata> {
 /**
  * Read-modify-write merge of the Jira `oauth_apps.metadata` blob.
  *
- * Wrapped in a single SQLite transaction so concurrent writers can't stomp
+ * Wrapped in a single transaction so concurrent writers can't stomp
  * each other's keys (e.g. Phase 2 cloudId write + Phase 5 webhookIds write).
  *
  * Merge semantics:
@@ -57,10 +57,9 @@ export async function getJiraMetadata(): Promise<JiraOAuthAppMetadata> {
  * before any metadata writes).
  */
 export async function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{ metadata: string | null }>(
-      "SELECT metadata FROM oauth_apps WHERE provider = 'jira'",
-    );
+  const repo = getStorage().repos.oauth;
+  await getStorage().transaction(async () => {
+    const row = await repo.getAppMetadata("jira");
 
     if (!row) {
       throw new Error(
@@ -94,10 +93,7 @@ export async function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>)
       merged.webhookIds = [...byId.values()];
     }
 
-    await tx.run(
-      "UPDATE oauth_apps SET metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
-      [JSON.stringify(merged)],
-    );
+    await repo.setAppMetadata("jira", JSON.stringify(merged));
   });
 }
 
@@ -107,7 +103,5 @@ export async function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>)
  * stays — `initJira()` requires the `oauth_apps` row to exist.
  */
 export async function clearJiraMetadata(): Promise<void> {
-  await getDbClient().run(
-    "UPDATE oauth_apps SET metadata = '{}', updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
-  );
+  await getStorage().repos.oauth.setAppMetadata("jira", "{}");
 }

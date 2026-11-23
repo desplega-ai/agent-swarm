@@ -15,7 +15,7 @@
  * `getDb()`); plan: thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md
  * Phase 1.
  */
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 
 // ─── Shapes ──────────────────────────────────────────────────────────────────
 
@@ -102,102 +102,14 @@ export async function getUsefulnessStats(
   const days = options.days ?? 30;
   const threshold = options.threshold ?? 0.6;
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const db = getDbClient();
-
-  // Volume — window rows, distinct memories, per-call groups, eventType split.
-  // SUM(CASE …) instead of COUNT(*) FILTER for maximum SQLite compatibility.
-  const volumeRow = (await db.get<{
-    retrievals: number;
-    distinctMemories: number;
-    retrievalGroups: number;
-    searchEvents: number | null;
-    getEvents: number | null;
-  }>(
-    `SELECT COUNT(*)                                                AS retrievals,
-            COUNT(DISTINCT memoryId)                                AS distinctMemories,
-            COUNT(DISTINCT retrievalId)                             AS retrievalGroups,
-            SUM(CASE WHEN eventType = 'search' THEN 1 ELSE 0 END)   AS searchEvents,
-            SUM(CASE WHEN eventType = 'get' THEN 1 ELSE 0 END)      AS getEvents
-       FROM memory_retrieval
-      WHERE retrievedAt > ?`,
-    [cutoff],
-  ))!;
-
-  // Per-arm breakdown — retrieval provenance plus "did this surfaced memory
-  // get cited in the same task". EXISTS keeps multi-rating (task, memory)
-  // pairs from inflating the count. Restricted to search events: memory-get
-  // rows carry no retrievalSource and would otherwise pollute the NULL
-  // ("legacy") arm. NULL eventType = pre-096 rows, kept (they were searches).
-  const armRows = await db.query<{
-    retrievalSource: string | null;
-    retrievals: number;
-    distinctMemories: number;
-    citedRetrievals: number | null;
-  }>(
-    `SELECT mr.retrievalSource            AS retrievalSource,
-            COUNT(*)                      AS retrievals,
-            COUNT(DISTINCT mr.memoryId)   AS distinctMemories,
-            SUM(CASE WHEN EXISTS (
-                  SELECT 1
-                    FROM memory_rating rt
-                   WHERE rt.taskId = mr.taskId
-                     AND rt.memoryId = mr.memoryId
-                     AND rt.source = 'implicit-citation'
-                     AND rt.signal > 0
-                ) THEN 1 ELSE 0 END)      AS citedRetrievals
-       FROM memory_retrieval mr
-      WHERE mr.retrievedAt > ?
-        AND (mr.eventType IS NULL OR mr.eventType = 'search')
-      GROUP BY mr.retrievalSource
-      ORDER BY retrievals DESC`,
-    [cutoff],
-  );
-
-  // Citation rate per memory-source — the reconstructed R4 §A.2 query.
-  const sourceRows = await db.query<{
-    source: string;
-    ratings: number;
-    positive: number | null;
-    avgSignal: number | null;
-  }>(
-    `SELECT am.source                                       AS source,
-            COUNT(*)                                        AS ratings,
-            SUM(CASE WHEN mr.signal > 0 THEN 1 ELSE 0 END)  AS positive,
-            AVG(mr.signal)                                  AS avgSignal
-       FROM memory_rating mr
-       JOIN agent_memory am ON am.id = mr.memoryId
-      WHERE mr.source = 'implicit-citation'
-        AND mr.createdAt > ?
-      GROUP BY am.source
-      ORDER BY ratings DESC`,
-    [cutoff],
-  );
-
-  // Posterior movement — how far the Beta(1,1) priors have drifted.
-  const posteriorRow = (await db.get<{
-    totalMemories: number;
-    movedFromPrior: number | null;
-    avgPosteriorMean: number | null;
-    avgPosteriorMeanMoved: number | null;
-    aboveThreshold: number | null;
-  }>(
-    `SELECT COUNT(*)                                                   AS totalMemories,
-            SUM(CASE WHEN alpha <> 1.0 OR beta <> 1.0 THEN 1 ELSE 0 END) AS movedFromPrior,
-            AVG(alpha / (alpha + beta))                                AS avgPosteriorMean,
-            AVG(CASE WHEN alpha <> 1.0 OR beta <> 1.0
-                     THEN alpha / (alpha + beta) END)                  AS avgPosteriorMeanMoved,
-            SUM(CASE WHEN alpha / (alpha + beta) > ? THEN 1 ELSE 0 END) AS aboveThreshold
-       FROM agent_memory`,
-    [threshold],
-  ))!;
-
-  // Sanity — all-time totals, unwindowed: "is anything flowing at all".
-  const totalRetrievalRows = (await db.get<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM memory_retrieval",
-  ))!.n;
-  const ratingsBySource = await db.query<{ source: string; count: number }>(
-    "SELECT source, COUNT(*) AS count FROM memory_rating GROUP BY source ORDER BY count DESC",
-  );
+  const {
+    volume: volumeRow,
+    arms: armRows,
+    sources: sourceRows,
+    posterior: posteriorRow,
+    totalRetrievalRows,
+    ratingsBySource,
+  } = await getStorage().repos.memory.getUsefulnessRows(cutoff, threshold);
   const totalRatingRows = ratingsBySource.reduce((sum, row) => sum + row.count, 0);
 
   return {

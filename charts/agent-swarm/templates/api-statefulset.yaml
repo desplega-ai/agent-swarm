@@ -1,10 +1,13 @@
 {{/*
-SQLite is single-writer; running more than one API pod corrupts the DB.
-Catch the misconfig at render time so it never reaches the cluster.
+One API process per database. SQLite is single-writer: more than one API pod
+corrupts the DB. On Postgres the API holds a one-process advisory lock, and its
+realtime bus, locks, caches and timers live in one process
+(runbooks/postgres.md). Catch the misconfig at render time.
 */}}
 {{- if ne (int .Values.api.replicas) 1 }}
-  {{- fail (printf "api.replicas must be 1 (SQLite single-writer constraint), got %d" (int .Values.api.replicas)) }}
+  {{- fail (printf "api.replicas must be 1 (one API process per database, on SQLite and on Postgres), got %d" (int .Values.api.replicas)) }}
 {{- end }}
+{{- $postgres := include "agent-swarm.postgres" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -68,6 +71,20 @@ spec:
               value: {{ .Values.api.port | quote }}
             - name: DATABASE_PATH
               value: /app/data/agent-swarm-db.sqlite
+            {{- if $postgres }}
+            {{- /* Postgres engine (runbooks/postgres.md). The volume still holds the encryption key and page-session secret. */}}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-swarm.databaseSecretName" . }}
+                  key: DATABASE_URL
+            - name: DATABASE_QUERY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-swarm.databaseSecretName" . }}
+                  key: DATABASE_QUERY_URL
+                  optional: true
+            {{- end }}
             {{- if .Values.agentFs.enabled }}
             - name: AGENT_FS_API_URL
               value: "http://{{ include "agent-swarm.fullname" . }}-agent-fs:{{ .Values.agentFs.port }}"
@@ -117,7 +134,8 @@ spec:
           volumeMounts:
             - name: api-data
               mountPath: /app/data
-        {{- if .Values.litestream.enabled }}
+        {{- /* Litestream replicates the SQLite WAL: off on Postgres. */}}
+        {{- if and .Values.litestream.enabled (not $postgres) }}
         - name: litestream
           image: "{{ .Values.litestream.image.repository }}:{{ .Values.litestream.image.tag }}"
           imagePullPolicy: {{ .Values.litestream.image.pullPolicy }}

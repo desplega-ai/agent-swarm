@@ -1,3 +1,4 @@
+import { insertionOrder, sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -37,8 +38,7 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
     "A batch without taskId must report success and its count",
   );
   const unassignedRows = ctx.db.query<{ taskId: string | null; content: string }>(
-    "SELECT taskId, content FROM session_logs WHERE sessionId = ? ORDER BY rowid",
-    [unassignedSessionId],
+    sql`SELECT "taskId", content FROM session_logs WHERE "sessionId" = ${unassignedSessionId} ORDER BY ${insertionOrder}`,
   );
   expect(
     unassignedRows.length === 2 &&
@@ -90,8 +90,7 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
   );
   expect(
     ctx.db.query<{ content: string }>(
-      "SELECT content FROM session_logs WHERE taskId = ? AND content LIKE '%AAAAAAAAAA%'",
-      [taskId],
+      sql`SELECT content FROM session_logs WHERE "taskId" = ${taskId} AND content LIKE '%AAAAAAAAAA%'`,
     ).length === 0,
     "The raw secret reached the session_logs table",
   );
@@ -208,7 +207,7 @@ async function sessionCosts(
   );
   expect(Array.isArray(priced.modelBreakdown), "No model breakdown stored");
   expect(
-    ctx.db.query<{ id: string }>("SELECT id FROM session_costs WHERE taskId = ?", [taskId])
+    ctx.db.query<{ id: string }>(sql`SELECT id FROM session_costs WHERE "taskId" = ${taskId}`)
       .length === 2,
     "session_costs does not hold both rows",
   );
@@ -388,16 +387,14 @@ async function activeSessions(ctx: ScenarioContext, workerId: string, otherId: s
 
   // Heartbeat and provider session id.
   const before = ctx.db.get<{ lastHeartbeatAt: string }>(
-    "SELECT lastHeartbeatAt FROM active_sessions WHERE id = ?",
-    [sessionId],
+    sql`SELECT "lastHeartbeatAt" FROM active_sessions WHERE id = ${sessionId}`,
   );
   const beat = await pollUntil(
     async () => {
       const result = await ctx.api("PUT", `/api/active-sessions/heartbeat/${taskId}`);
       expectStatus(result, [200], "heartbeat");
       const after = ctx.db.get<{ lastHeartbeatAt: string }>(
-        "SELECT lastHeartbeatAt FROM active_sessions WHERE id = ?",
-        [sessionId],
+        sql`SELECT "lastHeartbeatAt" FROM active_sessions WHERE id = ${sessionId}`,
       );
       return (
         asRecord(result.json).updated === true && after?.lastHeartbeatAt !== before?.lastHeartbeatAt
@@ -498,7 +495,7 @@ async function activeSessions(ctx: ScenarioContext, workerId: string, otherId: s
   expectStatus(response, [200], "stale cleanup");
   expect(typeof asRecord(response.json).cleaned === "number", "cleanup has no count");
   expect(
-    ctx.db.get<{ id: string }>("SELECT id FROM active_sessions WHERE id = ?", [secondId]) !== null,
+    ctx.db.get<{ id: string }>(sql`SELECT id FROM active_sessions WHERE id = ${secondId}`) !== null,
     "A fresh session was cleaned as stale",
   );
   response = await ctx.api("POST", "/api/active-sessions/cleanup", { body: { agentId: workerId } });
@@ -610,8 +607,7 @@ async function credentialAttribution(ctx: ScenarioContext, agentId: string, task
     "cost identity conflict",
   );
   const rows = ctx.db.query<{ credentialKeySuffix: string; harness: string; n: number }>(
-    "SELECT credentialKeySuffix, harness, COUNT(*) AS n FROM session_costs WHERE sessionId IN (?, ?) GROUP BY credentialKeySuffix, harness",
-    [first.sessionId, retry.sessionId],
+    sql`SELECT "credentialKeySuffix", harness, COUNT(*) AS n FROM session_costs WHERE "sessionId" IN (${first.sessionId}, ${retry.sessionId}) GROUP BY "credentialKeySuffix", harness`,
   );
   expect(
     rows.length === 2 && rows.every((row) => row.n === 1),

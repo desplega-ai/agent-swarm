@@ -1,8 +1,8 @@
 import type { RequestComposition, RequestCompositionPart } from "../../types";
 import { getKv, upsertKv } from "../db";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
-type RequestCompositionRow = Omit<RequestComposition, "parts"> & { parts: string };
+const sessionsRepo = () => getStorage().repos.sessions;
 
 export interface CreateRequestCompositionInput {
   taskId: string;
@@ -37,36 +37,25 @@ export async function createRequestComposition(
   const staticEstTokens = input.parts.reduce((sum, part) => sum + part.estTokens, 0);
   const tokenRatio = input.tokenRatio ?? 1;
 
-  const seq = await getDbClient().transaction(async (tx) => {
-    const stored = await tx.get<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM request_composition WHERE taskId = ?",
-      [input.taskId],
-    );
-    if ((stored?.count ?? 0) >= MAX_REQUEST_COMPOSITIONS_PER_TASK) return null;
-    const last = await tx.get<{ seq: number | null }>(
-      "SELECT MAX(seq) AS seq FROM request_composition WHERE sessionId = ?",
-      [input.sessionId],
-    );
-    const next = last?.seq == null ? 0 : last.seq + 1;
-    await tx.run(
-      `INSERT INTO request_composition
-         (id, taskId, agentId, sessionId, seq, provider, model, source, parts, staticEstTokens, tokenRatio, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        input.taskId,
-        input.agentId,
-        input.sessionId,
-        next,
-        input.provider,
-        input.model ?? null,
-        input.source,
-        JSON.stringify(input.parts),
-        staticEstTokens,
-        tokenRatio,
-        createdAt,
-      ],
-    );
+  const seq = await getStorage().transaction(async () => {
+    const stored = await sessionsRepo().countRequestCompositionsByTask(input.taskId);
+    if (stored >= MAX_REQUEST_COMPOSITIONS_PER_TASK) return null;
+    const last = await sessionsRepo().maxRequestCompositionSeq(input.sessionId);
+    const next = last == null ? 0 : last + 1;
+    await sessionsRepo().insertRequestComposition({
+      id,
+      taskId: input.taskId,
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+      seq: next,
+      provider: input.provider,
+      model: input.model ?? null,
+      source: input.source,
+      parts: JSON.stringify(input.parts),
+      staticEstTokens,
+      tokenRatio,
+      createdAt,
+    });
     return next;
   });
   if (seq === null) return null;
@@ -92,11 +81,7 @@ export async function getRequestCompositionsByTask(
   taskId: string,
   limit = MAX_REQUEST_COMPOSITIONS_PER_TASK,
 ): Promise<RequestComposition[]> {
-  const rows = await getDbClient().query<RequestCompositionRow>(
-    `SELECT id, taskId, agentId, sessionId, seq, provider, model, source, parts, staticEstTokens, tokenRatio, createdAt
-       FROM request_composition WHERE taskId = ? ORDER BY createdAt ASC, seq ASC LIMIT ?`,
-    [taskId, limit],
-  );
+  const rows = await sessionsRepo().listRequestCompositionsByTask(taskId, limit);
   return rows.map((row) => ({ ...row, parts: JSON.parse(row.parts) as RequestCompositionPart[] }));
 }
 
@@ -104,12 +89,7 @@ export async function getRequestCompositionsByTask(
 export async function getLatestWorkerComposition(
   sessionId: string,
 ): Promise<RequestComposition | null> {
-  const row = await getDbClient().get<RequestCompositionRow>(
-    `SELECT id, taskId, agentId, sessionId, seq, provider, model, source, parts, staticEstTokens, tokenRatio, createdAt
-       FROM request_composition WHERE sessionId = ? AND source = 'worker'
-       ORDER BY seq DESC LIMIT 1`,
-    [sessionId],
-  );
+  const row = await sessionsRepo().latestWorkerComposition(sessionId);
   return row ? { ...row, parts: JSON.parse(row.parts) as RequestCompositionPart[] } : null;
 }
 
@@ -175,7 +155,7 @@ export async function recordTokenRatio(
   provider: string,
   observed: number,
 ): Promise<TokenRatioState> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const key = tokenRatioKey(provider);
     const entry = await getKv(TOKEN_RATIO_KV_NAMESPACE, key);
     const next = nextTokenRatio(parseTokenRatio(entry?.value), observed);

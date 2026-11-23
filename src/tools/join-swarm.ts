@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createAgent, getAllAgents, getDbClient, updateAgentProfile } from "@/be/db";
+import { createAgent, getAllAgents, updateAgentProfile } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -84,7 +85,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
       const agentId = requestInfo.agentId ?? requestedId ?? "";
 
       try {
-        const agent = await getDbClient().transaction(async () => {
+        const agent = await getStorage().transaction(async () => {
           const agents = await getAllAgents({ includeExtensions: true });
 
           const existingIdAgent = agents.find((agent) => agent.id === agentId);

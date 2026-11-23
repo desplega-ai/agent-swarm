@@ -58,7 +58,7 @@ import {
   parseModelTier,
   type ReasoningEffort,
 } from "../types";
-import { createLogEntry, getDbClient } from "./db";
+import { createLogEntry } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
@@ -89,6 +89,7 @@ import {
 } from "./model-group-resolution";
 import { tierConfigKey } from "./model-tier-keys";
 import { loadModelsDevCache } from "./modelsdev-cache";
+import { getStorage } from "./storage";
 
 export { isTierConfigKey, tierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -147,13 +148,10 @@ export function parseModelTierOverridesHeader(
 }
 
 export async function getAgentModelTierOverrides(agentId: string): Promise<ModelTierOverrides> {
-  const row = await getDbClient().get<{ modelTierOverrides: string | null }>(
-    "SELECT modelTierOverrides FROM agents WHERE id = ?",
-    [agentId],
-  );
-  if (!row?.modelTierOverrides) return {};
+  const stored = await getStorage().repos.agents.getModelTierOverrides(agentId);
+  if (!stored) return {};
   try {
-    return sanitizeModelTierOverrides(JSON.parse(row.modelTierOverrides));
+    return sanitizeModelTierOverrides(JSON.parse(stored));
   } catch {
     return {};
   }
@@ -169,11 +167,7 @@ export async function modelTierOverridesDiffer(
   overrides: ModelTierOverrides,
 ): Promise<boolean> {
   const next = storedModelTierOverrides(overrides);
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM agents WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [agentId, next],
-  );
-  return row !== null;
+  return getStorage().repos.agents.modelTierOverridesDiffer(agentId, next);
 }
 
 /** Store the worker's overrides; no write when unchanged. Empty object clears. */
@@ -182,10 +176,7 @@ export async function setAgentModelTierOverrides(
   overrides: ModelTierOverrides,
 ): Promise<void> {
   const next = storedModelTierOverrides(overrides);
-  await getDbClient().run(
-    "UPDATE agents SET modelTierOverrides = ? WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [next, agentId, next],
-  );
+  await getStorage().repos.agents.setModelTierOverrides(agentId, next);
 }
 
 // ─── Catalog for alias resolution ────────────────────────────────────────────
@@ -289,11 +280,7 @@ function autoUpgradeEnabled(): boolean {
 }
 
 async function lastAliasResolution(alias: string): Promise<string | null> {
-  const row = await getDbClient().get<{ newModel: string }>(
-    "SELECT newModel FROM model_alias_resolutions WHERE alias = ? ORDER BY id DESC LIMIT 1",
-    [alias],
-  );
-  return row?.newModel ?? null;
+  return await getStorage().repos.models.lastAliasResolution(alias);
 }
 
 /**
@@ -321,11 +308,13 @@ export async function resolveLatestAlias(
   if (!resolved) return null;
 
   if (resolved !== previous && opts.record !== false) {
-    await getDbClient().run(
-      "INSERT INTO model_alias_resolutions (alias, previousModel, newModel, changedAt) VALUES (?, ?, ?, ?)",
-      [key, previous, resolved, now.getTime()],
-    );
-    getDbClient().afterCommit(() => {
+    await getStorage().repos.models.insertAliasResolution({
+      alias: key,
+      previousModel: previous,
+      newModel: resolved,
+      changedAt: now.getTime(),
+    });
+    getStorage().afterCommit(() => {
       console.info(
         `[model-tiers] alias ${key} now resolves to ${resolved}${previous ? ` (was ${previous})` : ""}`,
       );
@@ -809,16 +798,12 @@ export async function recordClaimModelResolution(
       );
       // Profiles never fail fast on the CLI check (only a raw task pin does), so this is a resolution.
       const resolution = "unsupported" in checked ? picked.resolution : checked;
-      await getDbClient().run(
-        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-        [
-          resolution.resolvedModel,
-          resolution.modelSource,
-          resolution.modelAlias,
-          picked.profile.name,
-          task.id,
-        ],
-      );
+      await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+        resolvedModel: resolution.resolvedModel,
+        modelSource: resolution.modelSource,
+        modelAlias: resolution.modelAlias,
+        resolvedProfile: picked.profile.name,
+      });
       return {
         resolvedModel: resolution.resolvedModel,
         modelSource: resolution.modelSource,
@@ -856,16 +841,12 @@ export async function recordClaimModelResolution(
     );
     // A profile source never fails fast on the CLI check, as for a task's own profile.
     const resolution = "unsupported" in checked ? alias.resolution : checked;
-    await getDbClient().run(
-      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-      [
-        resolution.resolvedModel,
-        resolution.modelSource,
-        resolution.modelAlias,
-        alias.profile.name,
-        task.id,
-      ],
-    );
+    await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+      resolvedModel: resolution.resolvedModel,
+      modelSource: resolution.modelSource,
+      modelAlias: resolution.modelAlias,
+      resolvedProfile: alias.profile.name,
+    });
     return {
       resolvedModel: resolution.resolvedModel,
       modelSource: resolution.modelSource,
@@ -879,12 +860,7 @@ export async function recordClaimModelResolution(
   if (!resolved) {
     // A re-claimed row keeps the claim record of its previous run; drop it so
     // the trigger and the row do not replay that run's model.
-    await getDbClient().run(
-      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL, resolvedProfile = NULL
-         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL
-           OR resolvedProfile IS NOT NULL)`,
-      [task.id],
-    );
+    await getStorage().repos.tasks.clearTaskModelResolution(task.id);
     return {};
   }
   if ("harnessMismatch" in resolved) return { modelUnsupported: resolved.harnessMismatch };
@@ -897,10 +873,12 @@ export async function recordClaimModelResolution(
     return { modelUnsupported: checked.unsupported };
   }
   const resolution = checked;
-  await getDbClient().run(
-    "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = NULL WHERE id = ?",
-    [resolution.resolvedModel, resolution.modelSource, resolution.modelAlias, task.id],
-  );
+  await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+    resolvedModel: resolution.resolvedModel,
+    modelSource: resolution.modelSource,
+    modelAlias: resolution.modelAlias,
+    resolvedProfile: null,
+  });
   return resolution.modelAlias
     ? resolution
     : { resolvedModel: resolution.resolvedModel, modelSource: resolution.modelSource };

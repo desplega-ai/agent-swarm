@@ -11,8 +11,8 @@
  */
 import { DEFAULT_MODEL_TIER_MAP, MODEL_TIERS, ProviderNameSchema } from "../types";
 import { createModelProfile, isModelNameTakenError } from "./db/model-profiles";
-import { getDbClient } from "./db/runtime";
 import { tierConfigKey } from "./model-tier-keys";
+import { getStorage } from "./storage";
 
 export async function seedModelProfiles(): Promise<number> {
   let inserted = 0;
@@ -20,10 +20,11 @@ export async function seedModelProfiles(): Promise<number> {
     for (const tier of MODEL_TIERS) {
       const fallback = DEFAULT_MODEL_TIER_MAP[harness]?.[tier];
       if (!fallback) continue;
-      const configured = await getDbClient().get<{ value: string }>(
-        "SELECT value FROM swarm_config WHERE scope = 'global' AND scopeId IS NULL AND key = ? AND isSecret = 0",
-        [tierConfigKey(harness, tier)],
-      );
+      const rows = await getStorage().repos.config.listConfigs({
+        scope: "global",
+        key: tierConfigKey(harness, tier),
+      });
+      const configured = rows.find((row) => row.scopeId === null && !row.isSecret);
       const name = `${harness}-${tier}`;
       try {
         const created = await createModelProfile({

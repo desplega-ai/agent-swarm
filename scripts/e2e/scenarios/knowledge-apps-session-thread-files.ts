@@ -53,8 +53,12 @@ export const knowledgeAppsSessionThreadFiles: Scenario = {
       const definition = asRecord(asRecord(read.json).app).definition;
       const saved = asRecord(asRecord(asRecord(definition).pages).main).elements;
       expect(
-        JSON.stringify(asRecord(asRecord(asRecord(saved).thread).props).attachments) ===
-          JSON.stringify(attachments),
+        // Structural compare: Postgres jsonb reorders object keys; array order still counts.
+        Bun.deepEquals(
+          asRecord(asRecord(asRecord(saved).thread).props).attachments,
+          attachments,
+          true,
+        ),
         "the attachments option is stored as written",
       );
 

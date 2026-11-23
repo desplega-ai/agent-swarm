@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -197,7 +198,7 @@ export const platformMcpServers: Scenario = {
       });
       expect(stdio.command === "echo" && stdio.url === null, "a stdio server keeps its command");
       expect(
-        ctx.db.get<{ name: string }>("SELECT name FROM mcp_servers WHERE id = ?", [http.id])
+        ctx.db.get<{ name: string }>(sql`SELECT name FROM mcp_servers WHERE id = ${http.id}`)
           ?.name === http.name,
         "the server is persisted",
       );
@@ -345,10 +346,9 @@ export const platformMcpServers: Scenario = {
         "install links the agent and the server",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?", [
-          agentId,
-          http.id,
-        ]) !== null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "agentId" = ${agentId} AND "mcpServerId" = ${http.id}`,
+        ) !== null,
         "the install is persisted",
       );
       const installCountOf = async () =>
@@ -894,8 +894,7 @@ export const platformMcpServers: Scenario = {
         "authorize redirects to the provider with a fresh state",
       );
       const pendingRows = ctx.db.query<{ state: string }>(
-        "SELECT p.state FROM oauth_pending p JOIN oauth_apps a ON a.id = p.appId WHERE p.flow = 'mcp' AND a.mcpServerId = ?",
-        [http.id],
+        sql`SELECT p.state FROM oauth_pending p JOIN oauth_apps a ON a.id = p."appId" WHERE p.flow = 'mcp' AND a."mcpServerId" = ${http.id}`,
       );
       expect(
         pendingRows.length >= 2 && pendingRows.some((r) => r.state === state),
@@ -1059,10 +1058,9 @@ export const platformMcpServerTools: Scenario = {
       );
       expect(created.message.includes(serverId), "the create message names the server id");
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?", [
-          ownerId,
-          serverId,
-        ]) !== null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "agentId" = ${ownerId} AND "mcpServerId" = ${serverId}`,
+        ) !== null,
         "the creator is installed automatically",
       );
       expectToolError(
@@ -1152,10 +1150,9 @@ export const platformMcpServerTools: Scenario = {
         "self-install",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?", [
-          otherId,
-          serverId,
-        ]) !== null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "agentId" = ${otherId} AND "mcpServerId" = ${serverId}`,
+        ) !== null,
         "the self-install is persisted",
       );
       expectToolError(
@@ -1299,12 +1296,13 @@ export const platformMcpServerTools: Scenario = {
       );
       expect(deleted.message.includes(name), "the delete message names the server");
       expect(
-        ctx.db.get("SELECT 1 AS one FROM mcp_servers WHERE id = ?", [serverId]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM mcp_servers WHERE id = ${serverId}`) === null,
         "the server row is gone",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM agent_mcp_servers WHERE mcpServerId = ?", [serverId]) ===
-          null,
+        ctx.db.get(
+          sql`SELECT 1 AS one FROM agent_mcp_servers WHERE "mcpServerId" = ${serverId}`,
+        ) === null,
         "deleting a server drops its installs",
       );
     } finally {

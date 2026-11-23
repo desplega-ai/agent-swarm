@@ -376,7 +376,7 @@ async function createWorkItemTask(
             description_section: description ? `Description:\n${description}\n\n` : "",
           };
 
-  const result = resolveTemplate(templateName, variables);
+  const result = await resolveTemplate(templateName, variables);
   if (result.skipped) return null;
 
   const lead = await findLeadAgent();
