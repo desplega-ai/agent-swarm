@@ -562,7 +562,11 @@ class BunSqliteClient implements DbClient {
     // instead of silent data loss.
     this.savepointSeq += 1;
     const name = `db_client_sp_${this.savepointSeq}`;
-    const tx = this.boundExecutor(ctx);
+    // The handle lives as long as its savepoint, as on Postgres: once the
+    // savepoint is released or rolled back, a retained handle throws instead
+    // of writing into the outer transaction.
+    let ended = false;
+    const tx = this.boundExecutor(ctx, () => ended);
     // afterCommit hooks registered inside the savepoint wait in their own list:
     // a ROLLBACK TO undoes the savepoint's writes, so it must drop their hooks
     // too. `closed` and the other hook lists stay the outer transaction's.
@@ -588,6 +592,7 @@ class BunSqliteClient implements DbClient {
       db.run(`RELEASE SAVEPOINT ${name}`);
       throw err;
     } finally {
+      ended = true;
       // A late registration from a leaked continuation joins the outer list, as before.
       inner.afterCommit = ctx.afterCommit;
     }
@@ -721,10 +726,13 @@ class BunSqliteClient implements DbClient {
     }
   }
 
-  private boundExecutor(ctx: TxContext): DbExecutor {
+  private boundExecutor(ctx: TxContext, savepointEnded?: () => boolean): DbExecutor {
     const guard = (): Database => {
       if (ctx.closed) {
         throw new Error("db-client: transaction executor used after the transaction closed");
+      }
+      if (savepointEnded?.()) {
+        throw new Error("db-client: transaction executor used after its savepoint ended");
       }
       return this.getDatabase();
     };

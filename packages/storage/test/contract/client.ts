@@ -77,5 +77,32 @@ export function clientContract(engine: ContractEngine): void {
       await expect(mark(kept as DbExecutor, "after")).rejects.toThrow();
       expect(await markers()).toEqual(["inside"]);
     });
+
+    test("a savepoint handle kept past its rollback rejects writes in the open outer transaction", async () => {
+      await storage.client.transaction(async (outer) => {
+        let kept: DbExecutor | undefined;
+        await expect(
+          storage.client.transaction(async (inner) => {
+            kept = inner;
+            throw new Error("roll back the savepoint");
+          }),
+        ).rejects.toThrow("roll back the savepoint");
+        await expect(mark(kept as DbExecutor, "after-savepoint")).rejects.toThrow();
+        await mark(outer, "outer");
+      });
+      expect(await markers()).toEqual(["outer"]);
+    });
+
+    test("a savepoint handle kept past its release rejects writes in the open outer transaction", async () => {
+      await storage.client.transaction(async () => {
+        let kept: DbExecutor | undefined;
+        await storage.client.transaction(async (inner) => {
+          kept = inner;
+          await mark(inner, "inside");
+        });
+        await expect(mark(kept as DbExecutor, "after-release")).rejects.toThrow();
+      });
+      expect(await markers()).toEqual(["inside"]);
+    });
   });
 }
