@@ -508,9 +508,7 @@ export interface SessionsRepository {
    * with the sum of its session costs as `totalCostUsd`, oldest first; ties
    * in insert order.
    */
-  listChainWithCosts(
-    rootTaskId: string,
-  ): Promise<TaskChainRow[]>;
+  listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]>;
   /** A task's lines in insert order; with `limit`, only the newest `limit` lines (still oldest first). */
   listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;
   /** One iteration's lines in insert order. */
@@ -906,9 +904,7 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   }
 
   /** Insert order and the join-order hint are engine-specific. */
-  abstract listChainWithCosts(
-    rootTaskId: string,
-  ): Promise<TaskChainRow[]>;
+  abstract listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]>;
 
   /** Insert order needs the engine's insert sequence. */
   abstract listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;
