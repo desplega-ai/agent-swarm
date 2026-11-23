@@ -936,7 +936,20 @@ export async function copyIntoPostgres(
         // After COMMIT: the copy's table locks are gone, and a saved query runs
         // only on a read-only session that does not own the database.
         for (const pending of toPlan) {
-          const planned = await planReadOnly(options.url, pending.query);
+          let planned: string | null;
+          try {
+            planned = await planReadOnly(options.url, pending.query);
+          } catch (error) {
+            // The data is committed: report this query as unverified, not the copy as failed.
+            report.unchecked ??= [];
+            report.unchecked.push({
+              table: "metrics",
+              column: pending.where,
+              row: pending.row,
+              reason: `could not be checked on Postgres: ${(error as Error).message}`,
+            });
+            continue;
+          }
           if (planned) {
             report.attention ??= [];
             report.attention.push({

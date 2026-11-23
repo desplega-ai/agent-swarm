@@ -97,6 +97,13 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       scrubSecrets(`[db-copy] ATTENTION ${item.table} ${item.row}, ${item.column}: ${item.reason}`),
     );
   }
+  for (const item of report.unchecked ?? []) {
+    console.error(
+      scrubSecrets(
+        `[db-copy] NOT CHECKED ${item.table} ${item.row}, ${item.column}: ${item.reason}`,
+      ),
+    );
+  }
   for (const table of report.tables.filter((t) => !t.equal)) {
     console.error(
       `[db-copy] MISMATCH ${table.table}: rows ${table.sourceRows} -> ${table.targetRows}, checksum ${table.sourceChecksum.slice(0, 12)} -> ${table.targetChecksum.slice(0, 12)}`,
@@ -116,6 +123,14 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       // 3: committed, report missing. Distinct from 1 (copy failed).
       return report.ok ? 3 : 1;
     }
+  }
+  const unchecked = report.unchecked?.length ?? 0;
+  if (report.ok && unchecked > 0) {
+    console.error(
+      `[db-copy] COMMITTED with unchecked dashboards: ${report.tables.length} tables, ${rows} rows, every count and checksum equal, but ${unchecked} saved ${unchecked === 1 ? "query was" : "queries were"} not checked on Postgres (NOT CHECKED lines above). Run each one before cutover.`,
+    );
+    // 4: committed, a dashboard check is incomplete. Distinct from 0, 1 and 3.
+    return 4;
   }
   if (report.ok) {
     console.log(
