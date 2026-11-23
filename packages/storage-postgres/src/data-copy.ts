@@ -261,8 +261,14 @@ function timestampText(text: string): string | null {
     number,
     number,
   ];
-  if (month < 1 || month > 12 || day < 1) return null;
-  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
+  // Postgres has no year 0 (1 BC), and Date.UTC maps years 0-99 to 1900-1999.
+  if (year < 1 || month < 1 || month > 12 || day < 1) return null;
+  const monthEnd = new Date(Date.UTC(2000, month, 0));
+  monthEnd.setUTCFullYear(year, month, 0);
+  if (day > monthEnd.getUTCDate()) return null;
+  // Postgres takes a UTC offset up to 15:59; JavaScript takes up to 23:59.
+  const offset = /^[+-](\d{2}):?(\d{2})?$/.exec(zone);
+  if (offset && (Number(offset[1]) > 15 || Number(offset[2] ?? 0) > 59)) return null;
   return Number.isFinite(Date.parse(iso)) ? iso : null;
 }
 

@@ -220,6 +220,18 @@ describe("copyIntoPostgres", () => {
       // Date.parse accepts both and rolls them into March; Postgres refuses them.
       item(8, [text("feb30"), int(1), NULL, text("2026-02-30 10:00:00"), NULL, NULL, NULL, NULL]),
       item(9, [text("feb31"), int(1), NULL, text("2026-02-31T10:00:00Z"), NULL, NULL, NULL, NULL]),
+      // Date.parse accepts both; Postgres refuses an offset past 15:59 and year 0.
+      item(10, [
+        text("off16"),
+        int(1),
+        NULL,
+        text("2026-01-01T10:00:00+16:00"),
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+      ]),
+      item(11, [text("year0"), int(1), NULL, text("0000-01-01 00:00:00"), NULL, NULL, NULL, NULL]),
     ];
     const report = await run(fullSource(bad));
     expect(report.ok).toBe(false);
@@ -233,9 +245,39 @@ describe("copyIntoPostgres", () => {
       ["rowid 7", "flag", "NULL in a NOT NULL column"],
       ["rowid 8", "at", "invalid timestamp"],
       ["rowid 9", "at", "invalid timestamp"],
+      ["rowid 10", "at", "invalid timestamp"],
+      ["rowid 11", "at", "invalid timestamp"],
     ]);
     expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+  });
+
+  test("copies the timestamp edges Postgres accepts", async () => {
+    const edges = [
+      item(20, [
+        text("off15"),
+        int(1),
+        NULL,
+        text("2026-01-01T10:00:00+15:59"),
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+      ]),
+      item(21, [text("year1"), int(1), NULL, text("0001-01-01 00:00:00"), NULL, NULL, NULL, NULL]),
+      item(22, [text("leap4"), int(1), NULL, text("0004-02-29 00:00:00"), NULL, NULL, NULL, NULL]),
+    ];
+    const report = await run(fullSource([...goodItems(), ...edges]));
+    expect(report.problems).toEqual([]);
+    expect(report.ok).toBe(true);
+    const rows = await sql.unsafe(
+      "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS at FROM items WHERE id IN ('off15', 'year1', 'leap4') ORDER BY id",
+    );
+    expect(rows.map((r: { id: string; at: string }) => [r.id, r.at])).toEqual([
+      ["leap4", "0004-02-29 00:00"],
+      ["off15", "2025-12-31 18:01"],
+      ["year1", "0001-01-01 00:00"],
+    ]);
   });
 
   test("a foreign key that fails at the end rolls the copy back", async () => {
