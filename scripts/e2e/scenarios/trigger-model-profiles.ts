@@ -27,6 +27,10 @@ function agentDefault(ctx: ScenarioContext, agentId: string): string | null {
   );
 }
 
+// A custom id no catalog lists: allowCustomModel lets it through, and a models.dev
+// deprecation cannot reject it (gpt-5 went deprecated upstream on 2026-11-23).
+const CUSTOM_CODEX_MODEL = "e2e-custom-codex-model";
+
 export const triggerModelProfiles: Scenario = {
   name: "trigger-model-profiles",
   order: 9_320,
@@ -53,7 +57,7 @@ export const triggerModelProfiles: Scenario = {
     try {
       // ── one name space for profiles and groups ─────────────────────────────
       let response = await ctx.api("POST", "/api/model-profiles", {
-        body: { name: profile, harness: "codex", model: "gpt-5", allowCustomModel: true },
+        body: { name: profile, harness: "codex", model: CUSTOM_CODEX_MODEL, allowCustomModel: true },
       });
       expectStatus(response, [201], "create a profile");
       response = await ctx.api("POST", "/api/model-groups", {
@@ -62,7 +66,7 @@ export const triggerModelProfiles: Scenario = {
       expectStatus(response, [201], "create a group");
 
       response = await ctx.api("POST", "/api/model-profiles", {
-        body: { name: group, harness: "codex", model: "gpt-5", allowCustomModel: true },
+        body: { name: group, harness: "codex", model: CUSTOM_CODEX_MODEL, allowCustomModel: true },
       });
       expectStatus(response, [409], "a profile cannot take a group's name");
       expect(

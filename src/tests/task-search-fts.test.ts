@@ -80,9 +80,19 @@ describe("task search over agent_tasks_fts", () => {
   });
 
   test("matches whole tokens, with a prefix match on the last one", async () => {
-    await newTask("Update the rulebook for reviewers");
-    await newTask("Fix PR #2443 and 24430");
-    await newTask("Bump to 12443");
+    // Search also matches a task id by prefix, and a random UUID can start with
+    // "443" or "2443". Pin ids that no digit-only search below can prefix.
+    let n = 0;
+    const uuid = spyOn(crypto, "randomUUID").mockImplementation(
+      () => `ffffffff-ffff-4fff-8fff-${(n++).toString(16).padStart(12, "f")}` as const,
+    );
+    try {
+      await newTask("Update the rulebook for reviewers");
+      await newTask("Fix PR #2443 and 24430");
+      await newTask("Bump to 12443");
+    } finally {
+      uuid.mockRestore();
+    }
 
     expect(await found("rulebook")).toEqual(["Update the rulebook for reviewers"]);
     expect(await found("rule")).toEqual(["Update the rulebook for reviewers"]);
