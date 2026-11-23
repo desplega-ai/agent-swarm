@@ -35,6 +35,7 @@ src/commands/rate-limit-outcome.ts  # worker runtime helper imported by the runn
 src/commands/seat-mismatch-report.ts  # worker runtime helper imported by the runner
 src/commands/templates.ts  # runner trigger prompt templates, worker runtime
 src/commands/worktree-reaper.ts  # worker runtime helper imported by the runner
+src/utils/runtime-model-catalog.ts  # the Codex subprocess regression seeds a live-only model in the worker parent and checks the isolated child
 src/providers/  # harness adapters, worker runtime
 src/hooks/  # harness hooks, worker runtime
 src/prompts/  # prompt-template registry, worker runtime

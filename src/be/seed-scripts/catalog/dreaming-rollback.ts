@@ -58,17 +58,39 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const runId = typeof a.runId === "string" ? a.runId : "";
   if (!runId) return { restored, failed: [{ actionId: null, reason: "runId required" }], planned };
   const only: string[] = Array.isArray(a.actionIds) ? a.actionIds.map(String) : [];
-  const q = async (sql: string, params: unknown[] = []) => rows(await ctx.swarm.db_query({ sql, params }));
+  // db_query runs the engine's own dialect and each response states it (a missing field means SQLite). A
+  // statement with no portable text carries one text per dialect; before any response, one `SELECT 1` tells.
+  let dialect: "sqlite" | "postgres" | undefined;
+  const send = async (sql: string, params: unknown[] = []) => {
+    const res: any = await ctx.swarm.db_query({ sql, params });
+    dialect = (res?.data ?? res)?.dialect === "postgres" ? "postgres" : "sqlite";
+    return rows(res);
+  };
+  const q = async (sql: string | { sqlite: string; postgres: string }, params: unknown[] = []) => {
+    if (typeof sql === "string") return send(sql, params);
+    if (!dialect) await send("SELECT 1 AS one");
+    return send(dialect === "postgres" ? sql.postgres : sql.sqlite, params);
+  };
   const legacyRead = dry && (a.legacyRead === true || a.legacyRead === "true");
   // Stored bytes of one memory's content via hex (legacy: the scrubbed plain read, dryRun control only).
   const readMemory = async (memoryId: string, legacy = false) => {
-    const r = await q(`SELECT content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = ?`, [memoryId]);
+    // Upper-case hex of the UTF-8 bytes on both engines.
+    const r = await q(
+      {
+        sqlite: `SELECT content, hex(CAST(content AS BLOB)) AS hx FROM agent_memory WHERE id = $1`,
+        postgres: `SELECT content, upper(encode(convert_to(content, 'UTF8'), 'hex')) AS hx FROM agent_memory WHERE id = $1`,
+      },
+      [memoryId],
+    );
     return r.length ? (legacy ? String(r[0].content ?? "") : decodeHex(r[0].hx)) : null;
   };
   // A pre-image value as stored: hex(...) of its kv row, so the scrubber never rewrites the memory bodies in it.
   const readPreimage = async (key: string) => {
     const r = await q(
-      `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = ? AND key = ? AND (expires_at IS NULL OR expires_at > ?)`,
+      {
+        sqlite: `SELECT hex(CAST(value AS BLOB)) AS hx FROM kv_entries WHERE namespace = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)`,
+        postgres: `SELECT upper(encode(convert_to(value, 'UTF8'), 'hex')) AS hx FROM kv_entries WHERE namespace = $1 AND key = $2 AND (expires_at IS NULL OR expires_at > $3)`,
+      },
       [NS, key, Date.now()],
     );
     if (!r.length) return null;
@@ -81,7 +103,16 @@ export default async function (args: unknown, ctx: ScriptContext) {
   try {
     const fx = "api" + "_key=sk-" + "fixture-9f8e7d6c5b4a39281706f5e4d3c2b1a0\nsecond line of the memory body";
     const kvValue = JSON.stringify({ rows: [{ content: fx }] });
-    const p = (await q(`SELECT ? AS plain, hex(CAST(? AS BLOB)) AS hx, hex(CAST(? AS BLOB)) AS vhx`, [fx, fx, kvValue]))[0] ?? {};
+    const p =
+      (
+        await q(
+          {
+            sqlite: `SELECT $1 AS plain, hex(CAST($2 AS BLOB)) AS hx, hex(CAST($3 AS BLOB)) AS vhx`,
+            postgres: `SELECT CAST($1 AS text) AS plain, upper(encode(convert_to(CAST($2 AS text), 'UTF8'), 'hex')) AS hx, upper(encode(convert_to(CAST($3 AS text), 'UTF8'), 'hex')) AS vhx`,
+          },
+          [fx, fx, kvValue],
+        )
+      )[0] ?? {};
     const plain = String(p.plain ?? "");
     const row = JSON.parse(decodeHex(p.vhx)).rows[0];
     const body = preBody(row);
@@ -118,11 +149,11 @@ export default async function (args: unknown, ctx: ScriptContext) {
         const field = FIELD[it.target?.file] ?? "";
         const agentId = String(it.target?.agentId ?? "");
         if (!field || !pre) { failed.push({ actionId: id, reason: "missing field or pre-image" }); continue; }
-        const cur = String((await q(`SELECT ${field} AS body FROM agents WHERE id = ?`, [agentId]))[0]?.body ?? "");
+        const cur = String((await q(`SELECT "${field}" AS body FROM agents WHERE id = $1`, [agentId]))[0]?.body ?? "");
         let next: string | null = null;
         let how = "";
         if ((await sha(cur)) === it.afterSha && pre.contextVersionId) {
-          const cv = await q(`SELECT content FROM context_versions WHERE id = ?`, [pre.contextVersionId]);
+          const cv = await q(`SELECT content FROM context_versions WHERE id = $1`, [pre.contextVersionId]);
           if (cv.length && (await sha(String(cv[0].content ?? ""))) === pre.sha256) {
             next = String(cv[0].content);
             how = "full pre-image from context_versions";
@@ -155,16 +186,16 @@ export default async function (args: unknown, ctx: ScriptContext) {
         const want = await sha(next);
         if (dry) { planned.push({ actionId: id, kind: "identity", agentId, field, how, netChars: next.length - cur.length }); continue; }
         await ctx.swarm.profile_update({ agentId, [field]: next });
-        const re = String((await q(`SELECT ${field} AS body FROM agents WHERE id = ?`, [agentId]))[0]?.body ?? "");
+        const re = String((await q(`SELECT "${field}" AS body FROM agents WHERE id = $1`, [agentId]))[0]?.body ?? "");
         if ((await sha(re)) === want) restored.push({ actionId: id, kind: "identity", how });
         else failed.push({ actionId: id, reason: "re-read sha differs after restore" });
       } else if (it.kind === "memory-store") {
         const mid = String(it.target?.memoryId ?? "");
-        const r = mid ? await q(`SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [mid]) : [];
+        const r = mid ? await q(`SELECT COUNT(*) n FROM agent_memory WHERE id = $1`, [mid]) : [];
         if (!mid || Number(r[0]?.n) === 0) { failed.push({ actionId: id, reason: "stored memory already gone or id unknown" }); continue; }
         if (dry) { planned.push({ actionId: id, kind: "memory-store", how: `memory_delete ${mid}` }); continue; }
         await ctx.swarm.memory_delete({ id: mid });
-        const r2 = await q(`SELECT COUNT(*) n FROM agent_memory WHERE id = ?`, [mid]);
+        const r2 = await q(`SELECT COUNT(*) n FROM agent_memory WHERE id = $1`, [mid]);
         if (Number(r2[0]?.n) === 0) restored.push({ actionId: id, kind: "memory-store", how: "deleted" });
         else failed.push({ actionId: id, reason: "row still present after delete" });
       } else if (it.kind === "memory-delete") {
@@ -176,7 +207,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
           let tags: string[] = [];
           try { tags = Array.isArray(m.tags) ? m.tags : JSON.parse(m.tags ?? "[]"); } catch {}
           await ctx.swarm.memory_store({ name: String(m.name), content: preBody(m), scope: m.scope === "agent" ? "agent" : "swarm", tags: [...tags, "dreaming-v2-restored"], intent: `dreaming-rollback ${runId} ${id}` });
-          const c = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = ?`, [m.name]);
+          const c = await q(`SELECT COUNT(*) n FROM agent_memory WHERE name = $1`, [m.name]);
           if (Number(c[0]?.n) >= 1) restored.push({ actionId: id, kind: "memory-delete", how: `re-stored ${m.name}` });
           else failed.push({ actionId: id, reason: `re-store of ${m.name} not visible` });
         }
@@ -196,14 +227,14 @@ export default async function (args: unknown, ctx: ScriptContext) {
         if (pre?.content) {
           if (dry) { planned.push({ actionId: id, kind: "skill", how: "skill_update content back to pre-image" }); continue; }
           await ctx.swarm.skill_update({ skillId, content: String(pre.content) });
-          const r = await q(`SELECT content FROM skills WHERE id = ?`, [skillId]);
+          const r = await q(`SELECT content FROM skills WHERE id = $1`, [skillId]);
           if (r.length && String(r[0].content) === String(pre.content)) restored.push({ actionId: id, kind: "skill", how: "content restored" });
           else failed.push({ actionId: id, reason: "skill content differs after restore" });
         } else {
           // No pre-image: a skill-create. Disable (reversible); delete after the week-1 review.
           if (dry) { planned.push({ actionId: id, kind: "skill", how: "skill_update isEnabled:false (created skill)" }); continue; }
           await ctx.swarm.skill_update({ skillId, isEnabled: false });
-          const r = await q(`SELECT isEnabled FROM skills WHERE id = ?`, [skillId]);
+          const r = await q(`SELECT "isEnabled" FROM skills WHERE id = $1`, [skillId]);
           if (r.length && !Number(r[0].isEnabled)) restored.push({ actionId: id, kind: "skill", how: "disabled" });
           else failed.push({ actionId: id, reason: "skill still enabled after disable" });
         }

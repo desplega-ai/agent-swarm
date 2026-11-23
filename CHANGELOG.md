@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.4] - 2026-11-23
+
+### Added
+- Apps: an app `SessionThread` can send files (#3569).
+- Pages: page sessions launch as the user picked in the dashboard (#3553).
+- Docs: facility energy anomaly review (#3560) and interview scheduling handoff (#3559) guides, plus release notes for the week of 2026-11-23 (#3570).
+
+### Changed
+- Dependencies: amp, dsh, qwen (#3566) and amp (#3561) worker harness bumps.
+- Performance: timing spans on the app-sync pass and the script run prelude (#3564).
+- Evals: benchmark 1.0 published from the weekly run (#3565).
+
+### Fixed
+- Slack: the completed card is skipped when the agent already replied in the thread (#3567).
+- Scrubber: JSON stays valid when a redaction spans a closing quote (#3563).
+- Claude: worker sessions write the transcript the request-settings reader needs (#3557).
+- UI: the raw JSON panel shows "No output" when a step has no output (#3555).
+
+## [2.14.3] - 2026-11-22
+
+### Added
+- SDK: `@desplega.ai/agent-swarm-sdk`, a typed TypeScript client for the swarm API that sends a task and waits for its result (#3482).
+- Integrations: `GITLAB_ALLOWED_SENDERS` and `BITBUCKET_ALLOWED_SENDERS`; GitLab, Bitbucket and Azure DevOps mentions now need a linked swarm user or an allowlisted sender (#3541).
+- Examples: a review loop skill for the agent that edits a video (#3544) and a top bar with links and a theme button on the video review page (#3547).
+
+### Changed
+- Dependencies: claude-code, anthropic sdk, amp, grok, qwen (#3537) and amp, acp sdk (#3551) worker harness bumps.
+- Performance: scripts keep three warm spares per native executor spec (#3548).
+- CI: the timings-snapshot artifact hand-off retries once (#3534).
+- Docs: Hive Slack themes in the README (#3543), win-loss and onboarding playbook clarifications (#3545, #3546), swarm-scripts skill seed patches (#3535); `.env.example` lists the GitLab variables.
+
+### Fixed
+- Azure DevOps: allowlisted actors with no linked user can create tasks (#3556).
+- Slack: one live card per ask with honest PR links (#3550); `/agent-swarm-status` applies the sender allowlist (#3536).
+- Codex: web search loop checks count completed queries (#3539); reasoning effort is preserved for live catalog models (#3540).
+- HTTP: public webhook receivers limit raw-body size (#3538).
+- UI: `apps/ui/node_modules` is pruned before the Vercel install (#3542).
+
 ## [2.14.2] - 2026-11-21
 
 ### Added

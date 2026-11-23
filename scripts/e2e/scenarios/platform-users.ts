@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { type ComposedUser, createUser, userOf } from "./platform-helpers";
@@ -77,8 +78,7 @@ export const platformUsersLifecycle: Scenario = {
       `create records identity_added and budget_changed, got ${eventTypes(alice)}`,
     );
     const budget = ctx.db.get<{ daily_budget_usd: number }>(
-      "SELECT daily_budget_usd FROM budgets WHERE scope = 'user' AND scope_id = ?",
-      [alice.id],
+      sql`SELECT daily_budget_usd FROM budgets WHERE scope = 'user' AND scope_id = ${alice.id}`,
     );
     expect(budget?.daily_budget_usd === 5, "the user budget is mirrored into the budgets table");
 
@@ -187,13 +187,13 @@ export const platformUsersLifecycle: Scenario = {
       expect(types.includes(expected), `patch records ${expected}, got ${types}`);
     }
     expect(
-      ctx.db.get("SELECT 1 AS one FROM budgets WHERE scope = 'user' AND scope_id = ?", [
-        alice.id,
-      ]) === null,
+      ctx.db.get(
+        sql`SELECT 1 AS one FROM budgets WHERE scope = 'user' AND scope_id = ${alice.id}`,
+      ) === null,
       "clearing the budget removes the budgets row",
     );
     expect(
-      ctx.db.get<{ name: string }>("SELECT name FROM users WHERE id = ?", [alice.id])?.name ===
+      ctx.db.get<{ name: string }>(sql`SELECT name FROM users WHERE id = ${alice.id}`)?.name ===
         renamed,
       "the rename is persisted",
     );
@@ -229,7 +229,9 @@ export const platformUsersLifecycle: Scenario = {
       (await getUser(ctx, alice.id, "?recentEvents=50")).recentEvents.some(
         (event) =>
           event.eventType === "profile_changed" &&
-          JSON.stringify(event.after) === JSON.stringify({ avatar }),
+          // afterJson is jsonb on Postgres (reorders keys): compare the parsed value
+          // (approved by Daniel, 2026-11-21).
+          Bun.deepEquals(event.after, { avatar }, true),
       ),
       "an avatar change records profile_changed",
     );
@@ -328,8 +330,7 @@ export const platformUsersLifecycle: Scenario = {
       "unlink for unknown user",
     );
     const identityRows = ctx.db.query<{ externalId: string }>(
-      "SELECT externalId FROM user_external_ids WHERE userId = ?",
-      [alice.id],
+      sql`SELECT "externalId" FROM user_external_ids WHERE "userId" = ${alice.id}`,
     );
     expect(
       identityRows.length === 1 && identityRows[0]?.externalId === slackId,
@@ -475,8 +476,7 @@ export const platformUsersLifecycle: Scenario = {
     );
     expect(
       ctx.db.get(
-        "SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?",
-        [dismissA],
+        sql`SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND "externalId" = ${dismissA}`,
       ) === null,
       "dismiss links the identity to no user",
     );
@@ -638,7 +638,7 @@ export const platformUsersLifecycle: Scenario = {
     expect(eventTypes(mergedUser).includes("manual_merge"), "merge records manual_merge");
     expectStatus(await ctx.api("GET", `/api/users/${bob.id}`), [404], "the merge source is gone");
     expect(
-      ctx.db.get("SELECT 1 AS one FROM users WHERE id = ?", [bob.id]) === null,
+      ctx.db.get(sql`SELECT 1 AS one FROM users WHERE id = ${bob.id}`) === null,
       "the merge source row is deleted",
     );
 
@@ -734,8 +734,7 @@ export const platformUsersAccess: Scenario = {
       "reads never expose the plaintext",
     );
     const stored = ctx.db.get<{ tokenHash: string }>(
-      "SELECT tokenHash FROM user_tokens WHERE id = ?",
-      [String(summary.id)],
+      sql`SELECT "tokenHash" FROM user_tokens WHERE id = ${String(summary.id)}`,
     );
     expect(stored && stored.tokenHash !== plaintext, "only a hash of the token is stored");
 
@@ -879,17 +878,16 @@ export const platformUsersAccess: Scenario = {
       "set roles replaces the role set",
     );
     const roleRows = ctx.db.query<{ name: string }>(
-      `SELECT r.name FROM principal_roles pr JOIN roles r ON r.id = pr.roleId
-       WHERE pr.principalType = 'user' AND pr.principalId = ?`,
-      [other.id],
+      sql`SELECT r.name FROM principal_roles pr JOIN roles r ON r.id = pr."roleId"
+       WHERE pr."principalType" = 'user' AND pr."principalId" = ${other.id}`,
     );
     expect(roleRows.map((r) => r.name).join() === "viewer", "the role change is persisted");
     expect(
       (await getUser(ctx, other.id)).recentEvents.some(
         (e) =>
           e.eventType === "profile_changed" &&
-          JSON.stringify(e.before) === JSON.stringify({ rbacRoles: ["admin"] }) &&
-          JSON.stringify(e.after) === JSON.stringify({ rbacRoles: ["viewer"] }),
+          Bun.deepEquals(e.before, { rbacRoles: ["admin"] }, true) &&
+          Bun.deepEquals(e.after, { rbacRoles: ["viewer"] }, true),
       ),
       "the role change is on the identity timeline",
     );
@@ -958,9 +956,8 @@ export const platformUsersAccess: Scenario = {
     expect(
       ctx.db
         .query<{ name: string }>(
-          `SELECT r.name FROM principal_roles pr JOIN roles r ON r.id = pr.roleId
-           WHERE pr.principalType = 'user' AND pr.principalId = ?`,
-          [invitedUser.id],
+          sql`SELECT r.name FROM principal_roles pr JOIN roles r ON r.id = pr."roleId"
+           WHERE pr."principalType" = 'user' AND pr."principalId" = ${invitedUser.id}`,
         )
         .map((r) => r.name)
         .join() === "viewer",

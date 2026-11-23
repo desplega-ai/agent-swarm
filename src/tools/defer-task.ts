@@ -6,11 +6,11 @@ import {
   createLogEntry,
   createScheduledTask,
   getAgentById,
-  getDbClient,
   getTaskById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
 import { resolveRequesterTimezone } from "@/be/requester-timezone";
+import { getStorage } from "@/be/storage";
 import {
   describeEventWait,
   type EventMatch,
@@ -347,15 +347,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
       }
 
       try {
-        const committed = await getDbClient().transaction(async () => {
+        const storage = getStorage();
+        const tasks = storage.repos.tasks;
+        const committed = await storage.transaction(async () => {
           if (admitted) {
-            const pending = await getDbClient().get<{ n: number }>(
-              `SELECT COUNT(*) AS n FROM deferred_event_waits w
-               JOIN scheduled_tasks s ON s.id = w.scheduleId
-               WHERE w.status = 'pending' AND s.enabled = 1 AND s.targetAgentId = ?`,
-              [agent.id],
-            );
-            if ((pending?.n ?? 0) >= MAX_PENDING_EVENT_WAITS_PER_AGENT) {
+            const pending = await tasks.countPendingEventWaitsForAgent(agent.id);
+            if (pending >= MAX_PENDING_EVENT_WAITS_PER_AGENT) {
               throw new DeferAbortedError(
                 `You already hold ${MAX_PENDING_EVENT_WAITS_PER_AGENT} pending external event waits; wait for one to fire.`,
               );
@@ -363,15 +360,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
           }
           // The transaction's write lock makes admission atomic with the INSERT.
           if (watchedTaskIds.length) {
-            const existing = await getDbClient().get<{ scheduleId: string; parentTaskId: string }>(
-              `SELECT w.scheduleId, s.parentTaskId FROM deferred_task_waits w
-               JOIN scheduled_tasks s ON s.id = w.scheduleId
-               JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
-               WHERE w.status = 'pending' AND s.enabled = 1 AND s.targetAgentId = ?
-                 AND m.taskId IN (${watchedTaskIds.map(() => "?").join(", ")})
-               LIMIT 1`,
-              [agent.id, ...watchedTaskIds],
-            );
+            const existing = await tasks.findPendingTaskWaitWatching(agent.id, watchedTaskIds);
             if (existing) {
               throw new DeferAbortedError(
                 `Pending watcher ${existing.scheduleId} (task ${existing.parentTaskId}) already watches these tasks for this agent.`,
@@ -425,20 +414,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           if (admitted && eventWait) {
             const matchKey = matchKeyOf(admitted.match);
-            await getDbClient().run(
-              "INSERT INTO deferred_event_waits (scheduleId, source, event, matchKey, matchJson, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-              [
-                schedule.id,
-                admitted.adapter.source,
-                eventWait.event,
-                matchKey,
-                JSON.stringify(admitted.match),
-                createdBy ?? null,
-                createdBy ?? null,
-              ],
-            );
+            await tasks.insertDeferredEventWait({
+              scheduleId: schedule.id,
+              source: admitted.adapter.source,
+              event: eventWait.event,
+              matchKey,
+              matchJson: JSON.stringify(admitted.match),
+              userId: createdBy ?? null,
+            });
             // The event may land between the read above and this commit; recheck after it.
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               void reconcileDeferredEventWaits({
                 source: admitted.adapter.source,
                 event: eventWait.event,
@@ -448,17 +433,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
               });
             });
           } else if (wakeOn) {
-            await getDbClient().run(
-              "INSERT INTO deferred_task_waits (scheduleId, eventName, mode, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
-              [schedule.id, wakeOn.event, wakeMode, createdBy ?? null, createdBy ?? null],
-            );
+            await tasks.insertDeferredTaskWait({
+              scheduleId: schedule.id,
+              eventName: wakeOn.event,
+              mode: wakeMode,
+              userId: createdBy ?? null,
+            });
             for (const watchedId of watchedTaskIds) {
-              await getDbClient().run(
-                "INSERT INTO deferred_task_wait_members (scheduleId, taskId, created_by, updated_by) VALUES (?, ?, ?, ?)",
-                [schedule.id, watchedId, createdBy ?? null, createdBy ?? null],
-              );
+              await tasks.insertDeferredTaskWaitMember(schedule.id, watchedId, createdBy ?? null);
             }
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               void Promise.all(watchedTaskIds.map((id) => reconcileDeferredTaskWaits(id))).catch(
                 (err) => {
                   console.error("[defer-task] Event wake reconciliation failed:", err);
@@ -510,7 +494,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           // afterCommit: the transaction can still roll back; business-use must
           // not be told the task completed for a write that never landed.
-          getDbClient().afterCommit(() => {
+          getStorage().afterCommit(() => {
             ensure({
               id: "completed",
               flow: "task",

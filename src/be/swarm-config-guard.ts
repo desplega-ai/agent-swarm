@@ -93,6 +93,13 @@ const RESERVED_KEYS = new Set([
   "OPENCODE_SDK_PATH",
   // Every script run token goes to this base URL; a config writer must not redirect it.
   "SCRIPT_API_BASE_URL",
+  // Storage engine selection and its credentials (Postgres decisions D1, D10):
+  // deployment env only, never a config row.
+  "DATABASE_URL",
+  "DATABASE_QUERY_URL",
+  "DATABASE_PASSWORD",
+  // Locates the encryption key file before any config row is read (D2).
+  "SWARM_DATA_DIR",
 ]);
 
 /**

@@ -189,7 +189,7 @@
     },
     {
       "name": "script-run-step-types",
-      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
+      "query": "SELECT DISTINCT \"stepType\" AS value FROM script_run_journal",
       "universe": ["raw-llm", "agent-task", "swarm-script"],
       "excluded": []
     },
@@ -207,7 +207,7 @@
     },
     {
       "name": "script-fs-modes",
-      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
+      "query": "SELECT DISTINCT \"fsMode\" AS value FROM scripts",
       "universe": ["none", "workspace-rw"],
       "excluded": [
         {
@@ -224,6 +224,44 @@
     }
   ],
   "flows": {
+    "storage-engine-parity": {
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "scenarios": [
+        "upgrade-base-db",
+        "tasks-historical-values",
+        "storage-recovery",
+        "data-copy",
+        "divergence-fulltext-search",
+        "divergence-vector-search",
+        "divergence-like-case",
+        "divergence-text-order",
+        "divergence-concurrent-schedule-claim",
+        "stress-poll-claim",
+        "stress-task-finish",
+        "stress-task-create",
+        "divergence-tracker-dedup",
+        "divergence-retention",
+        "divergence-db-query-denial",
+        "divergence-list-order",
+        "divergence-timestamps",
+        "divergence-values",
+        "divergence-error-mapping",
+        "trigger-asset-keys",
+        "trigger-model-profiles",
+        "trigger-session-maintenance",
+        "trigger-fts-sync",
+        "trigger-chat-relay",
+        "trigger-immutability",
+        "trigger-rbac-default-role",
+        "trigger-cascades",
+        "postgres-chain-layouts",
+        "postgres-password-env"
+      ]
+    },
+    "live-task-claim": {
+      "description": "A task claimed by a worker with a live, heartbeating session stays in_progress until the run ends",
+      "scenarios": ["task-live-claim", "task-started-after-commit"]
+    },
     "caller-scoped-writes": {
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
@@ -270,7 +308,8 @@
         "knowledge-apps",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
-        "knowledge-apps-primitives"
+        "knowledge-apps-primitives",
+        "knowledge-apps-session-thread-files"
       ]
     },
     "asset-namespaces": {
@@ -295,8 +334,8 @@
       "scenarios": ["requester-hint"]
     },
     "budget-refusal": {
-      "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
-      "scenarios": ["core-budgets"]
+      "description": "A zero agent or user budget refuses claims and lifting it lets the task run; a fallback pool claim checks its own requester's budget",
+      "scenarios": ["core-budgets", "budget-pool-fallback"]
     },
     "chat-sdk-tools": {
       "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, Telegram messages through a loopback mock, and the Rocket.Chat webhook and REST round trip.",
@@ -308,7 +347,7 @@
     },
     "config-store": {
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
-      "scenarios": ["platform-config", "platform-lead-tools"]
+      "scenarios": ["platform-config", "platform-lead-tools", "secrets-backup-data-dir"]
     },
     "platform-config-key-guards": {
       "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
@@ -413,8 +452,8 @@
       "scenarios": ["core-messaging"]
     },
     "metric-dashboards": {
-      "description": "Metric definition lifecycle, versions, run, create_metric upsert",
-      "scenarios": ["core-telemetry"]
+      "description": "Metric definition lifecycle, versions, run, create_metric upsert; the seeded starter dashboard and the UI template run on the engine",
+      "scenarios": ["core-telemetry", "metrics-starter-dashboard"]
     },
     "model-catalog-and-pricing": {
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
@@ -437,8 +476,8 @@
       "scenarios": ["platform-oauth-locks"]
     },
     "page-publishing": {
-      "description": "create page, serve public/authed/password, version history, feedback task, delete",
-      "scenarios": ["knowledge-pages"]
+      "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
+      "scenarios": ["knowledge-pages", "knowledge-page-dashboard-user"]
     },
     "org-design-system": {
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
@@ -614,11 +653,12 @@
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, and the flag state shard 4 starts from",
+      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, one card per fix across a coder and its reviewer, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
         "slack-lead-follow-up-card",
         "slack-follow-up-card-merge",
+        "slack-thread-one-card",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
@@ -686,7 +726,7 @@
     },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
-      "scenarios": ["poll-concurrent-claim"]
+      "scenarios": ["poll-concurrent-claim", "poll-rescan-locked"]
     },
     "task-create-idempotency": {
       "description": "POST /api/tasks with an Idempotency-Key: a retry and a three-way race on one key return one task, a different body under the key is a 409, unkeyed creates stay separate, a malformed key is a 400",

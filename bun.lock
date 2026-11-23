@@ -5,7 +5,7 @@
     "": {
       "name": "cc-orch-mcp",
       "dependencies": {
-        "@agentclientprotocol/sdk": "2.8.0",
+        "@agentclientprotocol/sdk": "2.9.1",
         "@ai-sdk/openai": "^3.0.142",
         "@anthropic-ai/claude-agent-sdk": "0.3.330",
         "@anthropic-ai/sdk": "^1.12.0",
@@ -73,6 +73,9 @@
         "@desplega.ai/slack-mock": "^0.6.1",
         "@desplega/model-catalog": "workspace:*",
         "@desplega/model-routing": "workspace:*",
+        "@desplega/storage": "workspace:*",
+        "@desplega/storage-postgres": "workspace:*",
+        "@desplega/storage-sqlite": "workspace:*",
         "@faker-js/faker": "^10.6.0",
         "@opencode/plugin": "2.3.2",
         "@opencode/sdk": "2.3.2",
@@ -225,6 +228,15 @@
         "vite": "^7.3.8",
       },
     },
+    "packages/agent-swarm-sdk": {
+      "name": "@desplega.ai/agent-swarm-sdk",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "openapi-typescript": "^7",
+        "typescript": "^5.9.0",
+      },
+    },
     "packages/model-catalog": {
       "name": "@desplega/model-catalog",
       "version": "0.1.0",
@@ -236,6 +248,36 @@
     "packages/model-routing": {
       "name": "@desplega/model-routing",
       "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage": {
+      "name": "@desplega/storage",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage-postgres": {
+      "name": "@desplega/storage-postgres",
+      "version": "0.1.0",
+      "dependencies": {
+        "@desplega/storage": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage-sqlite": {
+      "name": "@desplega/storage-sqlite",
+      "version": "0.1.0",
+      "dependencies": {
+        "@desplega/storage": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.2.0",
         "typescript": "^5.9.3",
@@ -267,7 +309,7 @@
 
     "@agent-swarm/ui-e2e": ["@agent-swarm/ui-e2e@workspace:packages/ui-e2e"],
 
-    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.8.0", "", { "peerDependencies": { "@modelcontextprotocol/server": "^2.4.0", "zod": "^3.25.76 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/server"] }, "sha512-EjsvoRX8nEH2z3PAVI2ILsVXAefVcSlLPeXGjlQoFgkJE71F2J0Fj7N6oL/k7SnP0vY+9hmONPFz/K2zalnTiw=="],
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.9.1", "", { "peerDependencies": { "@modelcontextprotocol/server": "^2.4.0", "zod": "^3.25.76 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/server"] }, "sha512-8iJdxGa3SunLfzqLLb3RfQFmr4hnmWeAyeAK6MbkJiXJbrRlMRgKsVnDl/7Hu48yu/30gAlytNDzh5W77rv5SA=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@3.0.236", "", { "dependencies": { "@ai-sdk/provider": "3.0.19", "@ai-sdk/provider-utils": "4.0.66", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ng0HofoeM794Q4J1+j3I3FFDA7Mj84mM9rn1q0SAe2rPGUXNW7gNmbkLITsZUoOr+/BbePsknwe1pMykiOrv2A=="],
 
@@ -475,6 +517,8 @@
 
     "@desplega.ai/agent-fs-just-bash": ["@desplega.ai/agent-fs-just-bash@0.18.37", "", { "peerDependencies": { "just-bash": ">=3.0.1" }, "optionalPeers": ["just-bash"] }, "sha512-ylXuyJiuMkpfcxHd5J+/a2p9cM1ZZs3m3NYvbH4wfWuaC57zalDJYP+3+QTP51ra/x6iBFteDYEdQrfjkVsiOg=="],
 
+    "@desplega.ai/agent-swarm-sdk": ["@desplega.ai/agent-swarm-sdk@workspace:packages/agent-swarm-sdk"],
+
     "@desplega.ai/business-use": ["@desplega.ai/business-use@0.4.3", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-qAqV3vDI1VX5khn2Mi7bul+mqJf0RE5Gdus+41VI8SUOCeRIidnqXaNO/dCUAoPwZLN7Mx9zLTn/I3s/IDcToA=="],
 
     "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.6.1", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-/Uw9dmQzM2GWAZ64B8XmizWTLdWgNPvZLPcYttm4l9zGDkCah/7UXjxWUPvHEzuj5FBv61Ia+HOlEXKVuVAZpw=="],
@@ -482,6 +526,12 @@
     "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
 
     "@desplega/model-routing": ["@desplega/model-routing@workspace:packages/model-routing"],
+
+    "@desplega/storage": ["@desplega/storage@workspace:packages/storage"],
+
+    "@desplega/storage-postgres": ["@desplega/storage-postgres@workspace:packages/storage-postgres"],
+
+    "@desplega/storage-sqlite": ["@desplega/storage-sqlite@workspace:packages/storage-sqlite"],
 
     "@discordjs/builders": ["@discordjs/builders@1.14.1", "", { "dependencies": { "@discordjs/formatters": "^0.6.2", "@discordjs/util": "^1.2.0", "@sapphire/shapeshift": "^4.0.0", "discord-api-types": "^0.38.40", "fast-deep-equal": "^3.1.3", "ts-mixer": "^6.0.4", "tslib": "^2.6.3" } }, "sha512-gSKkhXLqs96TCzk66VZuHHl8z2bQMJFGwrXC0f33ngK+FLNau4hU1PYny3DNJfNdSH+gVMzE85/d5FQ2BpcNwQ=="],
 

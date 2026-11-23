@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.14.2",
+    "version": "2.14.4",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -12321,6 +12321,14 @@
                         "number",
                         "null"
                       ]
+                    },
+                    "dialect": {
+                      "type": "string",
+                      "enum": [
+                        "sqlite",
+                        "postgres"
+                      ],
+                      "description": "SQL dialect of the storage engine that ran the query"
                     }
                   },
                   "required": [
@@ -12329,7 +12337,8 @@
                     "elapsed",
                     "total",
                     "truncated",
-                    "rowLimit"
+                    "rowLimit",
+                    "dialect"
                   ]
                 }
               }
@@ -43868,6 +43877,7 @@
     "/api/pages/{id}/launch": {
       "post": {
         "summary": "Launch a page session (issues HttpOnly cookie)",
+        "description": "The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.",
         "tags": [
           "Pages"
         ],

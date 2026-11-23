@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -166,8 +167,7 @@ export const slackTaskOutputUiSpec: Scenario = {
         await unsafeMcp.close();
       }
       const stored = ctx.db.get<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM task_ui_specs WHERE task_id = ?",
-        [unsafe.taskId],
+        sql`SELECT COUNT(*) AS count FROM task_ui_specs WHERE task_id = ${unsafe.taskId}`,
       );
       expect(stored?.count === 0, "The refused spec was stored");
       await waitForReaction(ctx, unsafe.ts, "white_check_mark");

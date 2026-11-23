@@ -1,0 +1,3058 @@
+{
+  "$comment": "Postgres type class of each SQLite head-schema column that is not plain TEXT/REAL/BLOB (decision D8). Read by scripts/storage/generate-postgres-baseline.ts and check:schema-parity. Classes: timestamptz (format iso-ms-z | space), epoch-ms, boolean, jsonb, bigint, text (not proven; see reason).",
+  "tables": {
+    "active_sessions": {
+      "lastHeartbeatAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:715 INSERT binds now (db.ts:7061 toISOString); agents.ts:756 UPDATE binds now from db.ts:7112 / src/be/db/active-sessions.ts:28 new Date(nowMs).toISOString()"
+      },
+      "startedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/agents.ts:715 INSERT binds s.now = new Date().toISOString() (src/be/db.ts:7061); DEFAULT strftime iso unused/identical"
+      }
+    },
+    "agent_fs_object_webhooks": {
+      "attemptedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/object-webhooks.ts:169,:181 UPDATE attemptedAt = doneIso (new Date().toISOString())"
+      },
+      "claimedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/object-webhooks.ts:144 UPDATE SET claimedAt = nowIso (new Date(now).toISOString()); :169/:181 set NULL"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/object-webhooks.ts:128 INSERT binds nowIso (toISOString); no other writer"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/object-webhooks.ts:128 INSERT nowIso; :169,:181 UPDATE doneIso (toISOString)"
+      }
+    },
+    "agent_history": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/agent-history.ts:102 created_at: new Date().toISOString() via agents.ts:517 INSERT; append-only"
+      },
+      "snapshot_json": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/agents.ts:517 INSERT; value src/be/agent-history.ts:101 JSON.stringify(snapshot); table append-only (334 triggers); restore JSON.parses it (agent-history.ts:151)"
+      }
+    },
+    "agent_log": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/agents.ts:541 INSERT binds ${nowIso} = strftime('%Y-%m-%dT%H:%M:%fZ','now') (packages/storage-sqlite/src/dialect.ts:6)"
+      },
+      "metadata": {
+        "class": "text",
+        "evidence": "src/be/db.ts:2311 metadata = scrubSecrets(JSON.stringify(meta)) (raw string scrub, not scrubJsonValue); src/be/db/tasks/write.ts:1180 JSON.stringify; reader write.ts:1171 JSON.parse in try/catch",
+        "reason": "scrubSecrets on raw JSON text can break JSON validity (src/be/scrub-json.ts:29 exists to guard exactly that); readers tolerate parse failure. jsonb only if scrub is proven JSON-safe"
+      },
+      "newValue": {
+        "class": "text",
+        "evidence": "src/be/db.ts:2310 scrubSecrets(entry.newValue); plain strings (status, retryTaskId heartbeat.ts:1207, deferralDetails src/tools/defer-task.ts:508)",
+        "reason": "free-form plain text, not JSON"
+      },
+      "oldValue": {
+        "class": "text",
+        "evidence": "src/be/db.ts:2309 createLogEntry stores scrubSecrets(entry.oldValue), plain strings (statuses, task ids e.g. src/heartbeat/heartbeat.ts:1206)",
+        "reason": "free-form plain text, not JSON"
+      }
+    },
+    "agent_mcp_servers": {
+      "installedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:670 INSERT binds now = new Date().toISOString() (src/be/db.ts:10879)"
+      },
+      "isActive": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/agents.ts:670 INSERT ${true}, ON CONFLICT SET ${true}; DEFAULT 1; no other writer"
+      }
+    },
+    "agent_memory": {
+      "accessCount": {
+        "class": "bigint",
+        "evidence": "sqlite-store.ts:634 UPDATE accessCount = accessCount + 1"
+      },
+      "accessedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:537 INSERT now; :634 and src/be/memory/raters/retrieval.ts:70 UPDATE new Date().toISOString()"
+      },
+      "chunkIndex": {
+        "class": "bigint",
+        "evidence": "src/be/memory/providers/sqlite-store.ts:537 INSERT input.chunkIndex ?? 0 (index)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:537 INSERT now = new Date().toISOString() (:524); only writer"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:207 computeExpiresAt toISOString (INSERT :537, UPDATE :1410); migrations 200/279 strftime('%Y-%m-%dT%H:%M:%fZ',...). Compared to datetime('now') in reads (sqlite-store.ts:870 etc.)"
+      },
+      "tags": {
+        "class": "jsonb",
+        "evidence": "sqlite-store.ts:537 INSERT JSON.stringify(tags.map(scrubSecrets)); DEFAULT '[]'; no UPDATE of tags. Read via LIKE '%memtax%' in src/be/seed-scripts/catalog/dreaming-memtax.ts:419 (text match on JSON)"
+      },
+      "totalChunks": {
+        "class": "bigint",
+        "evidence": "sqlite-store.ts:537 INSERT input.totalChunks ?? 1 (count)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:537 INSERT now (toISOString); :1410 UPDATE now (:1379 toISOString); migration 099 SET updatedAt = createdAt (iso)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "sqlite-store.ts:537 INSERT version 1; :1410 UPDATE version = targetVersion (increment)"
+      }
+    },
+    "agent_memory_edge": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/memory/raters/store.ts:107 INSERT binds new Date().toISOString() (:159); only writer"
+      }
+    },
+    "agent_memory_version": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:567 INSERT now (:524 toISOString); :1393 INSERT now (:1379 toISOString)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "sqlite-store.ts:567 / :1393 INSERT now (toISOString); no UPDATE"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "sqlite-store.ts:567 / :1393 INSERT version number"
+      }
+    },
+    "agent_skills": {
+      "installedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:641 INSERT now (src/be/db.ts:10489 toISOString); src/be/import/seeders.ts:156 new Date().toISOString()"
+      },
+      "isActive": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/agents.ts:641 INSERT ${true}; :658 UPDATE binds boolean isActive; src/be/import/seeders.ts:156 literal 1; DEFAULT 1"
+      }
+    },
+    "agent_tasks": {
+      "acceptedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "db.ts:3302 UPDATE acceptedAt = now (db.ts:3300 toISOString); only writer"
+      },
+      "compactionCount": {
+        "class": "bigint",
+        "evidence": "db.ts:11016 UPDATE compactionCount = COALESCE(compactionCount,0) + 1; migration 219 SET = COUNT(*)"
+      },
+      "contextWindowSize": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:11027 SET contextWindowSize = ? (input.contextTotalTokens) WHERE contextWindowSize IS NULL; token count"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/write.ts:95 INSERT strftime('%Y-%m-%dT%H:%M:%fZ','now'); db.ts:3003 INSERT now (db.ts:2575 toISOString); no DEFAULT"
+      },
+      "deferredAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "write.ts:526 UPDATE deferredAt = options.deferredAt; only caller src/tools/defer-task.ts:489 new Date().toISOString()"
+      },
+      "deferredUntil": {
+        "class": "text",
+        "evidence": "write.ts:526 deferredUntil = nextRunAt from src/tools/defer-task.ts:310: delayMs -> toISOString, else runAt validated z.string().datetime() (:184)",
+        "reason": "one writer stores a caller runAt checked by z.string().datetime() without normalizing precision (src/tools/defer-task.ts:184); Postgres could not return the same text"
+      },
+      "dependsOn": {
+        "class": "jsonb",
+        "evidence": "db.ts:3003 INSERT JSON.stringify; src/heartbeat/heartbeat.ts:1194 UPDATE JSON.stringify; write.ts:1110 json_group_array(...) (SQLite JSON fns json_each need rewrite)"
+      },
+      "fallbackHops": {
+        "class": "jsonb",
+        "evidence": "db.ts:3003 INSERT fallbackHops?.length ? JSON.stringify(...) : null; only writer"
+      },
+      "finishedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "write.ts:497,636,778,900,984 finishedAt = new Date().toISOString(); db.ts:7250 now toISOString"
+      },
+      "followUpConfig": {
+        "class": "jsonb",
+        "evidence": "db.ts:3003 INSERT followUpConfig ? JSON.stringify(...) : null; only writer"
+      },
+      "harnessVariantMeta": {
+        "class": "jsonb",
+        "evidence": "write.ts:363 harnessVariantMeta = JSON.stringify(...) (guarded !== undefined); only writer"
+      },
+      "isHumanFree": {
+        "class": "boolean",
+        "evidence": "write.ts:112 and db.ts:3074 INSERT isHumanFree ? 1 : 0; human-free.ts:288 CASE ... THEN 1 ELSE 0; migration 182 SET = 1; reads `= 1`/`= 0` (db.ts:5132,5485)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "all ~40 writers bind new Date().toISOString() (e.g. db.ts:3200,3302,3516) or strftime('%Y-%m-%dT%H:%M:%fZ','now') (write.ts:309,497; migration 318); no datetime('now') writer found"
+      },
+      "notifiedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1649 UPDATE notifiedAt = now (toISOString); :1668 sets NULL"
+      },
+      "offeredAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "db.ts:3003 INSERT offeredTo ? now (db.ts:2575 toISOString) : null; db.ts:3337,3557 set NULL"
+      },
+      "outputSchema": {
+        "class": "jsonb",
+        "evidence": "db.ts:3003 INSERT options.outputSchema ? JSON.stringify(...) : null; no other writer"
+      },
+      "peakContextTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:11007 SET peakContextTokens = MAX(COALESCE(peakContextTokens,0), ?) token count (scalar MAX -> GREATEST on PG)"
+      },
+      "pool_wake_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "write.ts:268 UPDATE pool_wake_at = options.poolWakeAt (src/be/runtime-pools/routing.ts:288 now.toISOString()); db.ts:3236,3338 set NULL"
+      },
+      "priority": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:3003 INSERT options.priority ?? 50"
+      },
+      "providerMeta": {
+        "class": "jsonb",
+        "evidence": "src/be/db/tasks/write.ts:351 providerMeta = JSON.stringify(providerMeta) (guarded !== undefined); only writer"
+      },
+      "requestedByUserIdInherited": {
+        "class": "boolean",
+        "evidence": "db.ts:3066 INSERT requestedByUserIdInherited ? 1 : 0; migration 136 CHECK IN (0,1) and SET = 1; reads `= 1`/`= 0` (human-free.ts:79, session-summaries.ts:49)"
+      },
+      "slackParticipants": {
+        "class": "jsonb",
+        "evidence": "db.ts:3003 INSERT JSON.stringify or null; src/be/db/tasks/slack-fold.ts:55 COALESCE(JSON.stringify(...) or NULL, slackParticipants)"
+      },
+      "slackReplySent": {
+        "class": "boolean",
+        "evidence": "db.ts:1123 UPDATE slackReplySent = 1; DEFAULT 0 (migration 034); never set NULL; read as !!row.slackReplySent (read.ts:380)"
+      },
+      "tags": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:3003 INSERT JSON.stringify(tags); src/be/db/tasks/write.ts:437,:515 UPDATE JSON.stringify; DEFAULT '[]'. Text matched with LIKE '%\"heartbeat\"%' (src/be/db/tasks/read.ts:1077,1139; db.ts:7220) - needs rewrite"
+      },
+      "vcsCommentId": {
+        "class": "bigint",
+        "evidence": "db.ts:3003 INSERT options.vcsCommentId (provider comment id, can exceed int32)"
+      },
+      "vcsInstallationId": {
+        "class": "bigint",
+        "evidence": "db.ts:3003 INSERT options.vcsInstallationId (GitHub installation id)"
+      },
+      "vcsNumber": {
+        "class": "bigint",
+        "evidence": "db.ts:3003 INSERT options.vcsNumber; db.ts:1162 UPDATE vcs.vcsNumber (PR/issue number)"
+      },
+      "was_paused": {
+        "class": "boolean",
+        "evidence": "src/be/db/tasks/write.ts:1204,1238 SET was_paused = 1; DEFAULT 0 NOT NULL; no other writer"
+      }
+    },
+    "agent_tasks_fts_state": {
+      "id": {
+        "class": "bigint",
+        "evidence": "src/be/db/tasks/search-index.ts:186 single row WHERE id = 1 (row key)"
+      },
+      "indexedThrough": {
+        "class": "bigint",
+        "evidence": "search-index.ts:186 UPDATE indexedThrough = through (agent_tasks rowid watermark)"
+      }
+    },
+    "agentmail_inbox_mappings": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:7012 INSERT now = new Date().toISOString() (:7009); only writer"
+      }
+    },
+    "agents": {
+      "capabilities": {
+        "class": "jsonb",
+        "evidence": "agents.ts:447 updateAgentProfile COALESCE(${u.capabilities}) where src/be/db.ts:3990 JSON.stringify or null; DEFAULT '[]'; snapshot restore copies"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:411 INSERT ${nowIso}; snapshot restore (agents.ts:424) copies prior value"
+      },
+      "emptyPollCount": {
+        "class": "bigint",
+        "evidence": "agents.ts:470 SET emptyPollCount = emptyPollCount + 1; :479 = 0"
+      },
+      "isLead": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/agents.ts:411 INSERT ${a.isLead} boolean (src/be/db/agents.ts:217 isLead === true); restore insertAgentSnapshot (agents.ts:424) copies old 0/1; reads `isLead = 1` (db.ts:12792)"
+      },
+      "lastActivityAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:465 UPDATE lastActivityAt = ${nowIso} (strftime %Y-%m-%dT%H:%M:%fZ); snapshot restore copies"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "agents.ts:411,439,471,479 ${nowIso}; :447 u.now (db.ts:3985 toISOString); runtime-pools.ts:765,773 now (src/be/runtime-pools/db.ts:420,441 toISOString)"
+      },
+      "maxTasks": {
+        "class": "bigint",
+        "evidence": "agents.ts:411 INSERT a.maxTasks; src/be/db/agents.ts:376 setAgentColumns({maxTasks})"
+      },
+      "runtime_provision_attempts": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:786 SET = runtime_provision_attempts + 1; :800 = 0"
+      },
+      "runtime_provision_retry_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "runtime-pools.ts:794 SET = retryAt from src/be/runtime-pools/supervisor.ts:140 new Date(...).toISOString(); :800/:806, src/be/multi-runtime.ts:242 set NULL"
+      }
+    },
+    "api_key_status": {
+      "authFailureSeq": {
+        "class": "bigint",
+        "evidence": "config.ts:705 (SELECT COALESCE(MAX(authFailureSeq),0) + 1) sequence counter"
+      },
+      "consecutiveAuthFailures": {
+        "class": "bigint",
+        "evidence": "config.ts:709 consecutiveAuthFailures = consecutiveAuthFailures + 1; compared >= benchThreshold"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "No INSERT sets it; DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (migration 028:24) is the only writer"
+      },
+      "keyIndex": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/config.ts:567 etc. INSERT/UPDATE keyIndex (slot number)"
+      },
+      "lastAuthFailureAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:700 recordAuthFailure binds now (src/be/db.ts:11488 toISOString)"
+      },
+      "lastRateLimitAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:671 markRateLimited v.now and :743 benchKey now, both new Date().toISOString() (db.ts:11452, 11488)"
+      },
+      "lastSeatMismatchAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:644 setSeatMismatch binds now (src/be/db/api-keys.ts:23 toISOString)"
+      },
+      "lastUsedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:567 upsertKeyUsage binds now (src/be/db.ts:11372 toISOString)"
+      },
+      "lastValidationFailedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:806 upsertValidation failedAt = key.ok ? null : now (src/be/db/api-keys.ts:73,83 toISOString); :820,:836 set NULL"
+      },
+      "rateLimitCount": {
+        "class": "bigint",
+        "evidence": "config.ts:688 rateLimitCount = rateLimitCount + 1"
+      },
+      "rateLimitWindows": {
+        "class": "jsonb",
+        "evidence": "config.ts:778 upsertRateLimitWindows binds JSON.stringify(mergedWindows) (src/be/db.ts:11549); DEFAULT '{}' (migration 095)"
+      },
+      "rateLimitedUntil": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "config.ts:671 markRateLimited value normalized new Date(...).toISOString() (src/http/api-keys.ts:796); config.ts:743 benchKey benchedUntil toISOString (db.ts:11496). Compared as text: greatestStrict(COALESCE(rateLimitedUntil,''), ...) config.ts:666 and `<= now` :545"
+      },
+      "totalUsageCount": {
+        "class": "bigint",
+        "evidence": "config.ts:575 totalUsageCount = totalUsageCount + 1"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "every repo writer config.ts:543-835 binds now = new Date().toISOString() (db.ts:11222,11372,11452; src/be/db/api-keys.ts:23,73); DEFAULT strftime iso"
+      }
+    },
+    "app_user_config": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:692 INSERT r.now (src/apps/user-config.ts:119 toISOString)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "users.ts:692 INSERT/ON CONFLICT updatedAt = r.now (src/apps/user-config.ts:119 toISOString)"
+      }
+    },
+    "app_versions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:8063 INSERT new Date().toISOString()"
+      },
+      "snapshot": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:8063 INSERT JSON.stringify(data.snapshot); only writer"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8063 INSERT data.version (version number)"
+      }
+    },
+    "approval_requests": {
+      "approvers": {
+        "class": "jsonb",
+        "evidence": "workflows.ts:1352 INSERT; src/be/db.ts:9392 JSON.stringify(data.approvers); no UPDATE"
+      },
+      "cancellationNotificationClaims": {
+        "class": "jsonb",
+        "evidence": "workflows.ts:1461 setApprovalNotificationClaims; values JSON.stringify(claims) (src/be/db.ts:9529,9573)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflows.ts:1352 INSERT always binds a.now (src/be/db.ts:9351 toISOString), so DEFAULT CURRENT_TIMESTAMP is unused; pre-030 space rows converted by migration 030:54"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflows.ts:1352 INSERT expiresAt = new Date(Date.now()+timeoutSeconds*1000).toISOString() (src/be/db.ts:9352); legacy normalized by migration 030"
+      },
+      "notificationChannels": {
+        "class": "jsonb",
+        "evidence": "workflows.ts:1352 INSERT JSON.stringify or null (src/be/db.ts:9398); :1473 UPDATE JSON.stringify(notificationChannels) (db.ts:9587)"
+      },
+      "questions": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1352 INSERT; value src/be/db.ts:9388 scrubJsonValue(questions) (src/be/scrub-json.ts:26 guarantees valid JSON); no UPDATE"
+      },
+      "resolvedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflows.ts:1397,1412,1425 r.now/now (src/be/db.ts:9425,9452,9469 toISOString); INSERT :1352 now or null; trigger migration 140:58 strftime('%Y-%m-%dT%H:%M:%fZ'); legacy rows normalized by migration 030"
+      },
+      "responses": {
+        "class": "text",
+        "evidence": "workflows.ts:1397 resolveApproval responses = sealJson(...) (src/be/db.ts:9432; src/be/sealed-json.ts:37 'sealed:v1:' + ciphertext)",
+        "reason": "sealed ciphertext with prefix, not JSON"
+      },
+      "timeoutSeconds": {
+        "class": "bigint",
+        "evidence": "workflows.ts:1352 INSERT data.timeoutSeconds (seconds)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "INSERT a.now and every UPDATE (workflows.ts:1397-1537) binds now toISOString; trigger migration 140:61 strftime iso; DEFAULT CURRENT_TIMESTAMP unused; legacy converted by 030"
+      }
+    },
+    "apps": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "pages.ts:179 INSERT a.now = nextTimestamp() new Date(...).toISOString() (src/apps/store.ts:99-103)"
+      },
+      "definition": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/pages.ts:179 INSERT / :211 UPDATE; only via src/apps/store.ts:96 encodeDefinition = JSON.stringify(...)"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "pages.ts:179/211 nextTimestamp toISOString (src/apps/store.ts:178); src/be/db.ts:1884 UPDATE updated_at = now (toISOString)"
+      }
+    },
+    "asset_key_history": {
+      "changed_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1542 INSERT omits changed_at -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (migrations 115:59, 129); 129 copies old rows with same default"
+      }
+    },
+    "asset_key_mappings": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1618 INSERT now (toISOString); migration 115:67 backfill from task_attachments.created_at (DEFAULT strftime iso, migration 072:35)"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1587,1618,1898 and src/be/db/session-moves.ts:95 bind now toISOString; trigger 115:397 strftime iso; backfill copies task_attachments.created_at (iso)"
+      }
+    },
+    "automation_savings_daily": {
+      "agentTasks": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182 FACT_COLUMNS count"
+      },
+      "computedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "rollup.ts:492 scannedAt = new Date(...).toISOString(); :388 toISOString; compared as text (computedAt >= / > in rollup.ts:189,373)"
+      },
+      "countedRuns": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182/:293 count facts"
+      },
+      "effectRuns": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182/:293 count"
+      },
+      "eventRuns": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182 FACT_COLUMNS count"
+      },
+      "modelVersion": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182/:293 binds MODEL_VERSION constant (integer version)"
+      },
+      "runs": {
+        "class": "bigint",
+        "evidence": "src/be/savings/rollup.ts:182 UPSERT_BUCKET / :293 INSERT_SCRIPT_BUCKET run counts"
+      },
+      "schedEffectRuns": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182 FACT_COLUMNS count"
+      },
+      "schedRuns": {
+        "class": "bigint",
+        "evidence": "rollup.ts:182 FACT_COLUMNS count (rollup.ts:59)"
+      }
+    },
+    "automation_savings_days": {
+      "computedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "rollup.ts:253 markDay binds scannedAt (rollup.ts:492 toISOString)"
+      },
+      "modelVersion": {
+        "class": "bigint",
+        "evidence": "rollup.ts:253 markDay binds MODEL_VERSION"
+      }
+    },
+    "automation_savings_links": {
+      "computedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "rollup.ts:202 INSERT_LINK binds scannedAt (rollup.ts:492 toISOString)"
+      },
+      "modelVersion": {
+        "class": "bigint",
+        "evidence": "rollup.ts:202 binds MODEL_VERSION"
+      },
+      "n": {
+        "class": "bigint",
+        "evidence": "rollup.ts:202 INSERT_LINK l.n (link count)"
+      }
+    },
+    "budget_refusal_notifications": {
+      "createdAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:12671 INSERT now = Date.now(); migration 074 copies; comment db.ts:12326 'INTEGER epoch-ms'"
+      }
+    },
+    "budgets": {
+      "createdAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:12422 INSERT Date.now(); migration 074:28 CAST(strftime('%s','now') AS INTEGER)*1000"
+      },
+      "lastUpdatedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:12422 INSERT/ON CONFLICT Date.now(); migration 074:28 strftime('%s')*1000"
+      }
+    },
+    "channel_activity_cursors": {
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:9278 upsert binds strftime('%Y-%m-%dT%H:%M:%fZ','now'), so DEFAULT datetime('now') is unused; pre-030 space rows converted by migration 030:68"
+      }
+    },
+    "channel_messages": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:4144 INSERT now = new Date().toISOString() (:4133)"
+      },
+      "mentions": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:4144 INSERT JSON.stringify(options?.mentions ?? []); DEFAULT '[]'; no UPDATE of mentions"
+      }
+    },
+    "channel_read_state": {
+      "lastReadAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:4280 updateReadState binds new Date().toISOString(); src/be/db.ts:4513 claim INSERT binds lastReadAt (copied from same column) || new Date(0).toISOString(); compared as text against channel_messages.createdAt (db.ts:4492, runtime-pools.ts:834)"
+      },
+      "processing_since": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:4513-4520 sets processing_since = now (new Date().toISOString(), db.ts:4469); db.ts:4550/4563 set NULL; stale check compares < toISOString cutoff"
+      }
+    },
+    "channels": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:4073 INSERT binds new Date().toISOString(); 001_initial.sql:409 seed uses strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      },
+      "participants": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:4076-4084 INSERT binds JSON.stringify(options?.participants ?? []); DEFAULT '[]' (001_initial.sql:36); 001_initial.sql:408 seed omits it (default); read via JSON.parse db.ts:4035"
+      }
+    },
+    "chat_lists": {
+      "expires_at": {
+        "class": "epoch-ms",
+        "evidence": "src/integrations/chat-sdk/state.ts:26 expiresAtFor = Date.now()+ttlMs or null; chat.ts:163/176 bind it; compared with now=Date.now()"
+      },
+      "seq": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/chat.ts:163 INSERT seq = COALESCE(MAX(seq),0)+1 (counter)"
+      },
+      "value": {
+        "class": "jsonb",
+        "evidence": "src/integrations/chat-sdk/state.ts:107 appendListItem(key, encode(value)) where encode = JSON.stringify(value ?? null) (state.ts:15); only writer chat.ts:163"
+      }
+    },
+    "chat_locks": {
+      "expires_at": {
+        "class": "epoch-ms",
+        "evidence": "src/integrations/chat-sdk/state.ts:54 expiresAt: now + ttlMs with now=Date.now(); chat.ts:84/100 INSERT/UPDATE bind it"
+      }
+    },
+    "chat_queue": {
+      "id": {
+        "class": "bigint",
+        "evidence": "217_chat_sdk_state.sql INTEGER PRIMARY KEY AUTOINCREMENT; chat.ts:183 INSERT omits id; ordered/deleted by id (chat.ts:189,206)"
+      }
+    },
+    "chat_relay_obligations": {
+      "attempt_count": {
+        "class": "bigint",
+        "evidence": "src/be/db/tasks/read.ts:1561 SET attempt_count = attempt_count + 1; DEFAULT 0"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "Only writer is DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now'): trigger INSERT OR IGNORE (task_id) in 217_chat_sdk_state.sql/235_chat_relay_defer.sql omits it; compared < toISOString cutoff read.ts:1544"
+      },
+      "delivered_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1596 markChatRelayDelivered SET delivered_at = new Date(now).toISOString()"
+      },
+      "given_up_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1542 and :1612 SET given_up_at = new Date(now).toISOString()"
+      },
+      "last_attempt_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1561-1564 SET last_attempt_at = new Date(now).toISOString()"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime ISO-ms-Z (217 trigger insert omits it); src/be/db/tasks/read.ts:1542,1561,1581,1596,1612 SET updated_at = new Date(now).toISOString()"
+      }
+    },
+    "chat_state_kv": {
+      "expires_at": {
+        "class": "epoch-ms",
+        "evidence": "src/integrations/chat-sdk/state.ts:84/89 expiresAtFor(ttlMs, Date.now()) = now+ttl or null; chat.ts:125 binds it"
+      },
+      "value": {
+        "class": "jsonb",
+        "evidence": "src/integrations/chat-sdk/state.ts:84/89 setKv/setKvIfAbsent bind encode(value) = JSON.stringify(value ?? null); only writers chat.ts:125/139"
+      }
+    },
+    "chat_subscriptions": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/chat.ts:62 INSERT (thread_id) omits it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') only"
+      }
+    },
+    "checklist_items": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "src/be/checklist.ts:106/112 seed INSERT OR IGNORE omits createdAt -> DEFAULT CURRENT_TIMESTAMP (space); :300 add INSERT binds new Date().toISOString()",
+        "reason": "mixed formats: DEFAULT CURRENT_TIMESTAMP (space) for seeded rows vs toISOString for added rows"
+      },
+      "lastUpdatedAt": {
+        "class": "text",
+        "evidence": "src/be/checklist.ts:106/112 seed INSERT omits -> DEFAULT CURRENT_TIMESTAMP (space); :300/:321/:328/:372 write new Date().toISOString()",
+        "reason": "mixed formats: DEFAULT CURRENT_TIMESTAMP (space) vs toISOString"
+      },
+      "meta": {
+        "class": "text",
+        "evidence": "src/be/checklist.ts:313 INSERT binds scrubSecrets(JSON.stringify(action.meta)); raw scrubSecrets over JSON text can break validity (see src/be/scrub-json.ts breaksJsonValidity); checklist.ts:290 guards reads with json_valid(meta)",
+        "reason": "scrubSecrets over serialized JSON may produce invalid JSON; code already treats it as possibly-invalid (json_valid guard)"
+      },
+      "nudgedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/checklist.ts:372 UPDATE SET nudgedAt = new Date().toISOString()"
+      },
+      "sortOrder": {
+        "class": "bigint",
+        "evidence": "src/be/checklist.ts:296 COALESCE(MAX(sortOrder),-1)+1; :106 seeds literal 0/1/2; :321 reorder binds action.sortOrder"
+      },
+      "statusChangedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/checklist.ts:328 UPDATE SET statusChangedAt = now (new Date().toISOString(), :282)"
+      }
+    },
+    "codex_oauth_device_flows": {
+      "created_at": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db/codex-oauth-device-flows.ts:27 now = Date.now() -> oauth.ts:705 INSERT; DEFAULT unixepoch('subsec')*1000; 202 migration copied kv_entries.created_at (epoch ms)"
+      },
+      "expires_at": {
+        "class": "epoch-ms",
+        "evidence": "src/http/codex-oauth-device.ts:289 expiresAt = Date.now() + FLOW_TTL_MS -> oauth.ts:705 INSERT; 202 migration copied kv_entries.expires_at (epoch ms)"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "src/http/codex-oauth-device.ts:104-106 binds encryptSecret(JSON.stringify(state), key) -> ciphertext, not JSON",
+        "reason": "encrypted ciphertext"
+      },
+      "updated_at": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db/codex-oauth-device-flows.ts:27 Date.now() -> oauth.ts:705-710 INSERT/upsert; DEFAULT unixepoch('subsec')*1000"
+      }
+    },
+    "connector_codes": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/connector-codes.ts:62 createdAt: now.toISOString() -> users.ts:560 INSERT"
+      },
+      "expires_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/connector-codes.ts:51 new Date(now.getTime()+ttlMs).toISOString() -> users.ts:560 INSERT; compared to ISO now users.ts:572"
+      },
+      "used_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:571/578 SET used_at = now; callers pass toISOString (connector-codes.ts:82, src/be/users.ts:508)"
+      }
+    },
+    "context_versions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/context-versions.ts:38 now = new Date().toISOString() -> agents.ts:688 INSERT; only writer"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db/context-versions.ts:41-46 binds params.version (incrementing number) via agents.ts:688 INSERT"
+      }
+    },
+    "deferred_event_waits": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/tools/defer-task.ts:429 INSERT omits created_at -> DEFAULT CURRENT_TIMESTAMP only (339_deferred_event_waits.sql)"
+      },
+      "matchJson": {
+        "class": "jsonb",
+        "evidence": "src/tools/defer-task.ts:429-435 INSERT binds JSON.stringify(admitted.match); only writer; read at deferred-task-waits.ts:438 (matching uses matchKey, not matchJson text equality)"
+      },
+      "resolvedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/scheduler/deferred-task-waits.ts:235 UPDATE ${table} SET resolvedAt = now (new Date().toISOString(), :233)"
+      },
+      "updated_at": {
+        "class": "text",
+        "evidence": "src/tools/defer-task.ts:429 INSERT omits -> DEFAULT CURRENT_TIMESTAMP (space); src/scheduler/deferred-task-waits.ts:235 SET updated_at = new Date().toISOString()",
+        "reason": "mixed formats: DEFAULT CURRENT_TIMESTAMP (space) vs toISOString on fire"
+      }
+    },
+    "deferred_task_wait_members": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/tools/defer-task.ts:457 INSERT omits -> DEFAULT CURRENT_TIMESTAMP; 153_deferred_task_wait_members.sql:17 backfill copied deferred_task_waits.created_at (also DEFAULT CURRENT_TIMESTAMP only)"
+      },
+      "updated_at": {
+        "class": "text",
+        "evidence": "src/tools/defer-task.ts:457 INSERT omits -> DEFAULT CURRENT_TIMESTAMP (space); src/scheduler/schedule-task.ts:111 and deferred-task-waits.ts:308 SET updated_at = new Date().toISOString()",
+        "reason": "mixed formats: DEFAULT CURRENT_TIMESTAMP (space) vs toISOString"
+      }
+    },
+    "deferred_task_waits": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/tools/defer-task.ts:452 INSERT omits created_at -> DEFAULT CURRENT_TIMESTAMP only (150_deferred_task_waits.sql)"
+      },
+      "resolvedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/scheduler/deferred-task-waits.ts:235 SET resolvedAt = new Date().toISOString()"
+      },
+      "updated_at": {
+        "class": "text",
+        "evidence": "src/tools/defer-task.ts:452 INSERT omits -> DEFAULT CURRENT_TIMESTAMP (space); src/scheduler/deferred-task-waits.ts:235 SET updated_at = new Date().toISOString()",
+        "reason": "mixed formats: DEFAULT CURRENT_TIMESTAMP (space) vs toISOString"
+      }
+    },
+    "events": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/events.ts:65 INSERT binds nowIso fragment = strftime('%Y-%m-%dT%H:%M:%fZ','now') (storage-sqlite/src/dialect.ts:6); only writer"
+      },
+      "data": {
+        "class": "jsonb",
+        "evidence": "src/be/events.ts:67-72 serializeEventData: scrubSecrets(JSON.stringify) with fallback JSON.stringify(scrubObject) when validity breaks -> always valid JSON; boot-scrub-sweep.ts:140 rewrites it, skipping invalid JSON"
+      },
+      "durationMs": {
+        "class": "bigint",
+        "evidence": "src/be/events.ts:87 durationMs: input.durationMs ?? null -> packages/storage/src/repositories/events.ts:61 INSERT"
+      }
+    },
+    "extension_assets": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/extensions/assets.ts:731 now: new Date().toISOString() -> extensions.ts:412 INSERT binds createdAt; DEFAULT datetime('now') never used"
+      },
+      "enabledBefore": {
+        "class": "boolean",
+        "evidence": "src/be/extensions/assets.ts:827 enabledBefore = 1 | row value | null; :885 setEnabledBefore(row, current ? 1 : 0); :879 NULL means 'nothing to restore' (distinct from 0) | nullable flag: writers store 0/1 or NULL (nothing to restore); Postgres boolean keeps NULL"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/extensions/assets.ts:731/740 toISOString -> extensions.ts:412-422 upsert and :432 UPDATE; DEFAULT datetime('now') never used"
+      }
+    },
+    "extension_runs": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/extensions/db.ts:347 createdAt: new Date().toISOString() -> extensions.ts:442 INSERT; DEFAULT unused"
+      },
+      "durationMs": {
+        "class": "bigint",
+        "evidence": "src/be/extensions/db.ts:340 durationMs: args.durationMs ?? null -> extensions.ts:442"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/extensions/db.ts:333-338 insertRun binds args.version (extension version number)"
+      }
+    },
+    "extension_versions": {
+      "changedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/extensions/db.ts:93/121/166 changedAt: now (new Date().toISOString()) -> extensions.ts:395 INSERT; DEFAULT datetime('now') unused"
+      },
+      "filesJson": {
+        "class": "jsonb",
+        "evidence": "src/be/extensions/db.ts:57 filesJson = JSON.stringify(canonicalFiles(files)) -> extensions.ts:395 INSERT; key order is sorted by code (jsonb reorders keys, readers JSON.parse)"
+      },
+      "manifestJson": {
+        "class": "jsonb",
+        "evidence": "src/be/extensions/db.ts:56 manifestJson = JSON.stringify(args.manifest) -> extensions.ts:395 INSERT; contentHash computed from object, not stored text (db.ts:49)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/extensions/db.ts:115 version: 1 and bumped version on update -> extensions.ts:395 INSERT"
+      }
+    },
+    "extensions": {
+      "activeVersion": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/extensions.ts:257 INSERT literal 1; :276/:289/:318 bind version numbers"
+      },
+      "configJson": {
+        "class": "text",
+        "evidence": "src/be/extensions/db.ts:105/:258 JSON.stringify(args.config ?? {}); DEFAULT '{}'. NOTE: src/be/extensions/db.ts:86 compares JSON.stringify(args.config) !== existing.configJson as text (jsonb key reorder/whitespace would make it differ)",
+        "reason": "stored JSON text is compared byte-for-byte with JSON.stringify output (src/be/extensions/db.ts:86); jsonb reorders keys"
+      },
+      "consecutiveFailures": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/extensions.ts:343 consecutiveFailures = consecutiveFailures + 1; :258 literal 0"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/extensions/db.ts:93 now = new Date().toISOString() -> extensions.ts:259 INSERT binds createdAt; DEFAULT datetime('now') unused"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/extensions.ts:257 INSERT ${false}; :316 enabled = ${u.enabled} (JS boolean); :345 CASE ... THEN ${false} ELSE enabled; reads: WHERE enabled = ${false} (:329, :359)"
+      },
+      "manifestJson": {
+        "class": "jsonb",
+        "evidence": "src/be/extensions/db.ts:56 JSON.stringify(args.manifest) -> extensions.ts:250 INSERT/:287 UPDATE; rollback copies snapshot.manifestJson (also JSON.stringify)"
+      },
+      "priority": {
+        "class": "bigint",
+        "evidence": "src/be/extensions/db.ts:104 priority: args.priority ?? 100 -> extensions.ts:250/276/313"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "extensions.ts:259 INSERT, :277/:291/:301/:323/:350 UPDATE bind now; callers pass new Date().toISOString() (src/be/extensions/db.ts:93,219,267,300,314)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/extensions.ts:256 INSERT literal 1; :289 version = bumped number"
+      }
+    },
+    "harness_model_support": {
+      "checkedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/harness-model-support.ts:65 checkedAt = input.now ?? Date.now() -> packages/storage/src/repositories/models.ts:614 upsert"
+      }
+    },
+    "human_free_reclassify_queue": {
+      "afterRowid": {
+        "class": "bigint",
+        "evidence": "src/be/db/tasks/human-free.ts:199 literal 0; :393 SET afterRowid = page position (agent_tasks rowid cursor; SQLite rowid semantics need a Postgres equivalent)"
+      },
+      "hops": {
+        "class": "bigint",
+        "evidence": "src/be/db/tasks/human-free.ts:199-203 binds hops counter, ON CONFLICT hops = MAX(hops, excluded.hops)"
+      },
+      "seq": {
+        "class": "bigint",
+        "evidence": "INTEGER PK autoincrement-like row key; src/be/db/tasks/human-free.ts:199 INSERT omits seq; ordered/deleted by seq (:360,:391)"
+      }
+    },
+    "import_items": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/import/seeders.ts:83-89 INSERT binds new Date().toISOString(); only writer"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/import/seeders.ts:83-89 INSERT/ON CONFLICT updatedAt = excluded.updatedAt (toISOString)"
+      }
+    },
+    "import_pending_assignments": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/import/index.ts:35 now = new Date().toISOString() bound in INSERT :38"
+      },
+      "skillKeys": {
+        "class": "jsonb",
+        "evidence": "src/be/import/index.ts:38-49 INSERT binds JSON.stringify(agent.skills); DEFAULT '[]'; only writer"
+      }
+    },
+    "improvements": {
+      "approved_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/improvements.ts:260-264 SET approved_at = new Date().toISOString()"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/improvements.ts:215-226 INSERT binds new Date().toISOString(); DEFAULT strftime ISO-ms-Z also matches"
+      },
+      "proxy_status": {
+        "class": "bigint",
+        "evidence": "src/be/improvements.ts:300/325 proxy_status = HTTP response.status or NULL"
+      },
+      "sent_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/improvements.ts:319-324 SET sent_at = sent ? finishedAt (toISOString) : null"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/improvements.ts:217,263,319,364 bind new Date().toISOString(); DEFAULT strftime ISO-ms-Z"
+      }
+    },
+    "inbox_item_state": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:11994 and session-tree.ts:970 INSERT bind toISOString; 237_session_inbox_cleanup.sql INSERT uses strftime ISO-ms-Z; DEFAULT datetime('now') never used"
+      },
+      "dismissedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:11984 dismissedAt = status==='dismissed' ? new Date().toISOString() : null (HTTP schemas do not accept dismissedAt); session-tree.ts:972 NULL"
+      },
+      "doneAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:11985 toISOString; session-tree.ts:972 binds now (toISOString); 237_session_inbox_cleanup.sql strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      },
+      "lastReadAt": {
+        "class": "text",
+        "evidence": "src/be/db.ts:11994 binds inbox-state.ts:42 z.string().datetime(); session-tree.ts:962/972 writes a.lastActivityAt (MAX(agent_tasks.lastUpdatedAt)) or UNREAD_CURSOR '1970-01-01T00:00:00.000Z' (session-tree.ts:927)",
+        "reason": "API value checked by z.string().datetime() but stored as given (src/http/inbox-state.ts:42); precision not normalized"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:11994 and session-tree.ts:970 bind toISOString; 237 migration UPDATE/INSERT strftime ISO-ms-Z; DEFAULT datetime('now') never used"
+      },
+      "readAt": {
+        "class": "text",
+        "evidence": "src/be/db.ts:11994 binds opts.readAt from inbox-state.ts:41 z.string().datetime(); session-tree.ts:989 binds now (toISOString)",
+        "reason": "API value checked by z.string().datetime() but stored as given (src/http/inbox-state.ts:41); precision not normalized"
+      },
+      "snoozeUntil": {
+        "class": "text",
+        "evidence": "src/be/db.ts:11994 binds opts.snoozeUntil from src/http/inbox-state.ts:40 z.string().datetime() (ISO UTC Z, validated but not normalized to ms precision); session-tree.ts:972 writes NULL",
+        "reason": "API value checked by z.string().datetime() but stored as given (src/http/inbox-state.ts:40); precision not normalized"
+      }
+    },
+    "inbox_messages": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:5688-5691 INSERT binds new Date().toISOString(); only writer"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:5691 INSERT and :5753,:5764,:5776,:5788,:5804 UPDATE bind new Date().toISOString()"
+      }
+    },
+    "kv_entries": {
+      "created_at": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:13073 now = Date.now() bound at :13074,:13106,:13168; kv.ts:97 binds nowMs; DEFAULT unixepoch('subsec')*1000"
+      },
+      "expires_at": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:13071 expiresAt documented unix-ms -> INSERT :13074/:13106; kv.ts:163 UPDATE expires_at; compared to Date.now()"
+      },
+      "updated_at": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:13074/13106/13168/13196 bind Date.now(); kv.ts:97 nowMs; DEFAULT unixepoch('subsec')*1000"
+      },
+      "value": {
+        "class": "text",
+        "evidence": "src/be/db.ts:12964 encodeKvValue: json -> JSON.stringify, integer -> String, string type stores raw string; value_type column distinguishes; boot-scrub-sweep rewrites dreaming-v2 rows",
+        "reason": "value_type 'string' stores arbitrary non-JSON text"
+      }
+    },
+    "mcp_event_subscriptions": {
+      "argumentsJson": {
+        "class": "text",
+        "evidence": "src/be/mcp-events/protocol.ts:114 argumentsJson = canonicalJson(args) (sorted-key JSON, store.ts:31) -> mcp-servers.ts:137 INSERT. NOTE: canonical text is hashed into the subscription id (store.ts:48) from the freshly computed key, not the stored column; jsonb would lose the canonical key order on read-back",
+        "reason": "stored as canonical sorted-key JSON (src/be/mcp-events/store.ts:31); jsonb would return a different key order"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/store.ts:123 now: input.nowIso (protocol.ts:177 toISOString) -> mcp-servers.ts:137 INSERT"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/protocol.ts:226 new Date(now + ttlMs).toISOString() -> mcp-servers.ts:137 INSERT / :147 UPDATE"
+      },
+      "failedSince": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/dispatcher.ts:94 atIso toISOString -> mcp-servers.ts:181 COALESCE(failedSince, at); :174 NULL"
+      },
+      "lastDeliveryAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/dispatcher.ts:94 atIso = new Date().toISOString() -> mcp-servers.ts:174 SET lastDeliveryAt"
+      },
+      "previousSecretUntil": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/store.ts:132 previousSecretUntil = input.rotationGraceUntil (protocol.ts:228 new Date(now+GRACE).toISOString()) or existing value"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "mcp-servers.ts:137 INSERT and :147 UPDATE bind nowIso (protocol.ts:177 toISOString)"
+      },
+      "verifiedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/mcp-events/protocol.ts:191-214 verifiedAt = MAX(verifiedAt) of same column or nowIso (new Date(now).toISOString()) -> mcp-servers.ts:137/147"
+      }
+    },
+    "mcp_servers": {
+      "args": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10656 INSERT / :10726 UPDATE bind data.args raw; from src/http/mcp-servers.ts:110 z.string() and src/tools/mcp-servers/mcp-server-create.ts:30 z.string() with no JSON validation",
+        "reason": "unvalidated user string (described as JSON array but never parsed on write)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10653 now = new Date().toISOString() bound in INSERT :10656; only writer"
+      },
+      "envConfigKeys": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10656/:10738 bind raw string; src/http/mcp-servers.ts:113 z.string(); readers JSON.parse in try (mcp-servers.ts:352)",
+        "reason": "unvalidated user string; readers tolerate parse failure"
+      },
+      "extraAuthorizeParams": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10656/:10746 bind raw string from src/tools/mcp-servers/mcp-server-create.ts:44 z.string() (described as JSON object, not validated)",
+        "reason": "unvalidated user string"
+      },
+      "headerConfigKeys": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10656/:10742 bind raw string; src/http/mcp-servers.ts:114 z.string(); readers JSON.parse in try (mcp-servers.ts:381)",
+        "reason": "unvalidated user string"
+      },
+      "headers": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10656/:10734 bind data.headers raw; src/http/mcp-servers.ts:112 z.string(), mcp-server-create.ts:32 z.string(); no JSON validation",
+        "reason": "unvalidated user string"
+      },
+      "isEnabled": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10660 INSERT literal 1; :10750 updates.isEnabled ? 1 : 0"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10656 INSERT and :10708 UPDATE bind toISOString; packages/storage/src/repositories/mcp-servers.ts:97 binds nowIso fragment (strftime ISO-ms-Z)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10660 literal 1; :10780 version = version + 1"
+      }
+    },
+    "memory_link": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/memory/link-resolver.ts:248,286,313 now = new Date().toISOString() bound in INSERTs :215/:315"
+      },
+      "metadata": {
+        "class": "jsonb",
+        "evidence": "src/be/memory/link-resolver.ts:233 link.metadata ? JSON.stringify(link.metadata) : null; :315 sequel INSERT NULL"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/memory/link-resolver.ts:215/:315 INSERT bind toISOString; no UPDATE writer"
+      }
+    },
+    "memory_rating": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/memory/raters/store.ts:99/137 INSERT binds new Date().toISOString(); only writer"
+      }
+    },
+    "memory_retrieval": {
+      "rank": {
+        "class": "bigint",
+        "evidence": "src/be/memory/raters/retrieval.ts:97-109 rank = index from results.entries()"
+      },
+      "retrievedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/memory/raters/retrieval.ts:89 now = new Date().toISOString() bound in INSERT :86"
+      }
+    },
+    "metric_versions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:8724 INSERT omits createdAt -> DEFAULT CURRENT_TIMESTAMP only (081_metrics.sql:25)"
+      },
+      "snapshot": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:8724-8726 INSERT binds JSON.stringify(data.snapshot); only writer"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8724 INSERT binds data.version"
+      }
+    },
+    "metrics": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:8572 INSERT and 081_metrics.sql:31 seed omit createdAt -> DEFAULT CURRENT_TIMESTAMP only; no UPDATE writes it"
+      },
+      "definition": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:8572 INSERT and :8675 UPDATE bind JSON.stringify(definition); 081/091 migrations write JSON literals; 092 uses json_set"
+      },
+      "updatedAt": {
+        "class": "text",
+        "evidence": "src/be/db.ts:8572 INSERT omits -> DEFAULT CURRENT_TIMESTAMP (space); 091 migration SET updatedAt = CURRENT_TIMESTAMP; src/be/db.ts:8682 UPDATE binds new Date().toISOString(); read via normalizeDateRequired",
+        "reason": "mixed formats: CURRENT_TIMESTAMP (space) vs toISOString"
+      }
+    },
+    "model_alias_resolutions": {
+      "changedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/model-tier-resolution.ts:325 changedAt: now.getTime() -> models.ts:585 INSERT"
+      },
+      "id": {
+        "class": "bigint",
+        "evidence": "184_model_catalog.sql INTEGER PRIMARY KEY AUTOINCREMENT; models.ts:585 INSERT omits id"
+      }
+    },
+    "model_catalog": {
+      "checkedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/pricing-refresh.ts:147/183 now = Date.now() -> buildCatalogEntries -> models.ts:481 INSERT; models.ts:492 touchCatalogCheckedAt(Date.now())"
+      },
+      "contextWindow": {
+        "class": "bigint",
+        "evidence": "src/be/model-catalog-store.ts:194 pickNumber(model.limit?.context) -> factValues :135"
+      },
+      "maxOutput": {
+        "class": "bigint",
+        "evidence": "src/be/model-catalog-store.ts:195 pickNumber(model.limit?.output) -> factValues :136"
+      },
+      "reasoning": {
+        "class": "boolean",
+        "evidence": "src/be/model-catalog-store.ts:137-138 reasoning = null (unknown) or Boolean(facts.reasoning) -> models.ts:481 INSERT | nullable flag: writers store 0/1 or NULL (unknown); Postgres boolean keeps NULL"
+      },
+      "reasoningOptions": {
+        "class": "jsonb",
+        "evidence": "src/be/model-catalog-store.ts:139 reasoningOptions ? JSON.stringify(...) : null -> models.ts:481 INSERT; only writer"
+      },
+      "releaseDate": {
+        "class": "text",
+        "evidence": "src/be/model-catalog-store.ts:193 releaseDate: model.release_date (models.dev date string, e.g. YYYY-MM-DD) -> models.ts:481 INSERT",
+        "reason": "external date-only string, not a timestamp in either format"
+      }
+    },
+    "model_catalog_meta": {
+      "id": {
+        "class": "bigint",
+        "evidence": "src/be/migrations/184_model_catalog.sql:61 PK CHECK (id = 1); packages/storage/src/repositories/models.ts:513 upsert binds literal 1 (single-row id, not a flag)"
+      },
+      "lastCheckedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/pricing-refresh.ts:159,191 updateModelCatalogMeta({lastCheckedAt: now}) with now = Date.now(); src/be/model-catalog-store.ts:261 merges and re-writes the stored value"
+      },
+      "lastFetchAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/pricing-refresh.ts:147,191 now = opts.now ?? Date.now() -> updateModelCatalogMeta({lastFetchAt: now}); packages/storage/src/repositories/models.ts:513 upsert binds it"
+      }
+    },
+    "model_catalog_overlay": {
+      "contextWindow": {
+        "class": "bigint",
+        "evidence": "src/http/models-catalog.ts:87 z.number().int().positive(); packages/storage/src/repositories/models.ts:540 upsertOverlay binds it"
+      },
+      "createdAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/model-catalog-store.ts:298 now = opts.now ?? Date.now() -> packages/storage/src/repositories/models.ts:544 binds ${r.now}; DEFAULT unixepoch('subsec')*1000 also epoch ms"
+      },
+      "expiresWhenUpstreamMatches": {
+        "class": "boolean",
+        "evidence": "src/be/model-catalog-store.ts:308 binds input.expiresWhenUpstreamMatches !== false (JS boolean -> 0/1); NOT NULL DEFAULT 1; read :280 === 1"
+      },
+      "maxOutput": {
+        "class": "bigint",
+        "evidence": "src/http/models-catalog.ts:88 z.number().int().positive(); packages/storage/src/repositories/models.ts:540 upsertOverlay binds it"
+      },
+      "reasoning": {
+        "class": "boolean",
+        "evidence": "src/be/model-catalog-store.ts:137-138 writes null or Boolean(facts.reasoning) (bound as 0/1); read at :123 row.reasoning === null ? null : row.reasoning === 1 | nullable flag: writers store 0/1 or NULL (unknown); Postgres boolean keeps NULL"
+      },
+      "reasoningOptions": {
+        "class": "text",
+        "evidence": "src/be/model-catalog-store.ts:139 JSON.stringify(facts.reasoningOptions) or null; :336 compares JSON.stringify(parsed overlay) === JSON.stringify(upstream) after parse (jsonb key reorder could change that comparison)",
+        "reason": "overlay match compares JSON.stringify of the parsed value with upstream (src/be/model-catalog-store.ts:336); jsonb key order would flip it"
+      },
+      "releaseDate": {
+        "class": "text",
+        "evidence": "src/http/models-catalog.ts:86 releaseDate z.string() stored as-is via src/be/model-catalog-store.ts:134 (facts.releaseDate ?? null); upstream models.dev release_date is date-only",
+        "reason": "free-form string from API input / models.dev (date-only like 2025-01-15), no normalization"
+      },
+      "updatedAt": {
+        "class": "epoch-ms",
+        "evidence": "packages/storage/src/repositories/models.ts:544,560 binds ${r.now} (Date.now()) on insert and excluded.updatedAt on conflict; DEFAULT unixepoch('subsec')*1000"
+      }
+    },
+    "model_group_members": {
+      "position": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/models.ts:413-416 position = array index from members.entries() (0..n)"
+      }
+    },
+    "model_groups": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/model-groups.ts:107 now = new Date().toISOString() -> packages/storage/src/repositories/models.ts:404 insertGroup binds now"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/model-groups.ts:107,150 new Date().toISOString(); packages/storage/src/repositories/models.ts:426 SET lastUpdatedAt = audit.now"
+      }
+    },
+    "model_profiles": {
+      "allowCustomModel": {
+        "class": "boolean",
+        "evidence": "src/be/db/model-profiles.ts:149,181 Boolean(input.allowCustomModel) bound (0/1); src/be/migrations/220_model_profiles.sql:97 INSERT literal 1; NOT NULL DEFAULT 0"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/model-profiles.ts:142 now = new Date().toISOString() -> packages/storage/src/repositories/models.ts:321; src/be/migrations/220_model_profiles.sql:97 backfill strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      },
+      "credentialAllowlist": {
+        "class": "jsonb",
+        "evidence": "src/be/db/model-profiles.ts:67-70 serializeCredentialAllowlist = JSON.stringify(value) or null; only writer path (insert :152, update :184)"
+      },
+      "fallbacks": {
+        "class": "jsonb",
+        "evidence": "src/be/db/model-profiles.ts:153,186 JSON.stringify(fallbacks ?? []); DEFAULT '[]'; packages/storage-sqlite/src/repositories/models.ts:4 reads via json_each with json_valid guard (needs dialect rewrite)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/model-profiles.ts:189 new Date().toISOString(); packages/storage/src/repositories/models.ts:341 SET lastUpdatedAt = audit.now; migration 220 backfill strftime ISO"
+      }
+    },
+    "oauth_apps": {
+      "clientSecretEncrypted": {
+        "class": "boolean",
+        "evidence": "src/be/migrations/117_unified_oauth.sql:18 CHECK(clientSecretEncrypted IN (0,1)); packages/storage/src/repositories/oauth.ts:348,615 binds ${true}; packages/storage-sqlite/src/boot/legacy-data.ts:48 sets 1; secrets-probe reads = 1"
+      },
+      "createdAt": {
+        "class": "text",
+        "evidence": "current inserts omit it (DEFAULT strftime ISO, packages/storage/src/repositories/oauth.ts:330); but migration 117:89 copies legacy oauth_apps.createdAt whose 009 DEFAULT was datetime('now') and pre-117 upsert omitted createdAt (git 47148a4ba^ src/be/db-queries/oauth.ts:49), so rows created after 030 are space format",
+        "reason": "mixed formats: iso-ms-z (DEFAULT / 030-converted) and space (legacy datetime('now') rows copied by migration 117)"
+      },
+      "extraParamsJson": {
+        "class": "jsonb",
+        "evidence": "src/be/db-queries/oauth.ts:110,241-248 JSON.stringify(extraParams) or null or existing; migration 117:76-79 json_extract of an object (JSON text)"
+      },
+      "metadata": {
+        "class": "jsonb",
+        "evidence": "src/be/db-queries/oauth.ts:109,294 JSON.stringify(parsed) / '{}' / caller metadata (src/linear/app.ts:78 JSON.stringify); src/jira/metadata.ts:96,106 JSON.stringify / '{}'; src/be/db-queries/mcp-oauth.ts:223,446 JSON.stringify; migration 117:619 json_set/json_object; reads use json_valid/json_extract (sqlite repo :58)"
+      },
+      "requiresRefreshTokenRotation": {
+        "class": "boolean",
+        "evidence": "src/be/migrations/117_unified_oauth.sql:28 CHECK IN (0,1); packages/storage/src/repositories/oauth.ts:338,354 bind JS boolean, :617 ${false}; read packages/storage-sqlite/src/repositories/oauth.ts:57 = 1"
+      },
+      "scopes": {
+        "class": "jsonb",
+        "evidence": "src/be/db-queries/oauth.ts:63 storeScopeList = JSON.stringify([...]); src/be/db-queries/mcp-oauth.ts:108 storeScopes JSON.stringify; migration 117:56-61,111-114 builds JSON arrays by string concat (valid for RFC 6749 scope tokens, which exclude quote and backslash)"
+      },
+      "updatedAt": {
+        "class": "text",
+        "evidence": "current writes ${nowIso} strftime ISO (packages/storage/src/repositories/oauth.ts:356,364,622); legacy-data.ts:49 strftime ISO; but migration 117:89 copies legacy rows whose first insert used 009 DEFAULT datetime('now')",
+        "reason": "mixed formats: iso-ms-z current writers and space-format legacy rows copied by migration 117"
+      }
+    },
+    "oauth_authorizations": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "current inserts omit it (DEFAULT strftime ISO, packages/storage/src/repositories/oauth.ts:416); migration 117:174 copies legacy oauth_tokens.createdAt whose 009 DEFAULT was datetime('now') and the pre-117 insert omitted it (git 47148a4ba^ src/be/db-queries/oauth.ts:119)",
+        "reason": "mixed formats: iso-ms-z DEFAULT and space-format legacy oauth_tokens rows copied by migration 117"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/http/oauth-callback.ts:221, src/oauth/wrapper.ts:236,349, src/oauth/mcp-wrapper.ts:630 computeExpiresAt: new Date(...).toISOString() or NULL; legacy rows copied by migration 117:159-208 came from the same toISOString writers (git 47148a4ba^ src/oauth/wrapper.ts:176); revoke sets NULL"
+      },
+      "identityJson": {
+        "class": "jsonb",
+        "evidence": "src/oauth/identity-capture.ts:32 JSON.stringify(claims) -> src/http/oauth-callback.ts:269 -> src/be/db-queries/oauth.ts:470,527; otherwise null"
+      },
+      "lastRefreshedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/oauth.ts:457 ${nowIso} (strftime ISO); src/http/mcp-oauth.ts:760 new Date().toISOString(); revoke sets NULL; migration 117:198 copies legacy mcp_oauth_tokens value (same toISOString writer)"
+      },
+      "tokenVersion": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/oauth.ts:434,455,499 tokenVersion = tokenVersion + 1 (counter, optimistic lock)"
+      },
+      "tokensEncrypted": {
+        "class": "boolean",
+        "evidence": "src/be/migrations/117_unified_oauth.sql:147 CHECK IN (0,1); packages/storage/src/repositories/oauth.ts:423,434,455,499 bind ${true}; legacy-data.ts:54 sets 1; migration 117 literals 0/1"
+      },
+      "updatedAt": {
+        "class": "text",
+        "evidence": "current writes ${nowIso} strftime ISO (packages/storage/src/repositories/oauth.ts:437,458,470,490,501,509); migration 117:175 copies legacy oauth_tokens.updatedAt (first insert used DEFAULT datetime('now'))",
+        "reason": "mixed formats: iso-ms-z current writers and space-format legacy rows copied by migration 117"
+      }
+    },
+    "oauth_pending": {
+      "contextJson": {
+        "class": "jsonb",
+        "evidence": "src/be/db-queries/oauth.ts:610 input.contextJson ?? '{}' (wrapper.ts:91 never passes it); src/be/db-queries/mcp-oauth.ts:666 JSON.stringify({...}); DEFAULT '{}'"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/oauth.ts:534 insert omits it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now'); gc compares < new Date().toISOString() cutoff (src/be/db-queries/oauth.ts:645)"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "src/be/migrations/117_unified_oauth.sql:219 state TEXT PRIMARY KEY; src/oauth/wrapper.ts:91 random OAuth state string",
+        "reason": "opaque random PKCE state token (PK), not JSON"
+      }
+    },
+    "oauth_refresh_locks": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db-queries/oauth.ts:850 nowIso = new Date(now).toISOString() bound at packages/storage/src/repositories/oauth.ts:644; DEFAULT strftime ISO; legacy 077 writer also toISOString"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db-queries/oauth.ts:849 new Date(now + ttlMs).toISOString() -> packages/storage/src/repositories/oauth.ts:644; legacy copy (migration 117:252) from same toISOString writer; WHERE expiresAt <= ${now} string compare"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/oauth.ts:644-648 binds nowIso (toISOString) on insert/conflict; DEFAULT strftime ISO"
+      }
+    },
+    "page_versions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:8497 INSERT omits createdAt -> DEFAULT CURRENT_TIMESTAMP (060_page_versions.sql:8); no other writer (history checked)"
+      },
+      "snapshot": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:8499 JSON.stringify(data.snapshot); only writer"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8497 INSERT binds data.version (MAX(version)+1, src/pages/version.ts:12-13)"
+      }
+    },
+    "pages": {
+      "body": {
+        "class": "text",
+        "evidence": "src/be/db.ts:8167,8413 binds data.body as-is; contentType CHECK IN ('text/html','application/json','image/svg+xml') (148_pages_svg.sql:9)",
+        "reason": "page content: HTML/SVG markup or JSON depending on contentType; not always JSON"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:8167 INSERT omits createdAt -> DEFAULT CURRENT_TIMESTAMP (059_pages.sql:13); migrations 086/148 copy the column unchanged; no other writer"
+      },
+      "design_version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8182 binds data.designVersion ?? 2; DEFAULT 1 (269_pages_design_system.sql:4); version number 1/2, not a flag"
+      },
+      "updatedAt": {
+        "class": "text",
+        "evidence": "INSERT src/be/db.ts:8167 omits it -> DEFAULT CURRENT_TIMESTAMP (space); updatePage src/be/db.ts:8427 binds new Date().toISOString(); src/be/db.ts:1876 binds now (ISO)",
+        "reason": "mixed formats: space (DEFAULT on insert) and iso-ms-z (updates)"
+      },
+      "view_count": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8464 SET view_count = view_count + 1 (counter)"
+      }
+    },
+    "permission_audit": {
+      "ts": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "packages/storage/src/repositories/rbac.ts:200 INSERT omits ts -> DEFAULT CURRENT_TIMESTAMP; migration 198:19-26 copies existing ts; rbac.ts:204 notes ts holds YYYY-MM-DD HH:MM:SS (purge cutoff arithmetic per engine)"
+      }
+    },
+    "pricing": {
+      "createdAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:12541 now = Date.now() bound; src/be/seed-pricing.ts:441 and migrations 046/078/114/143 literal 0 (sentinel, most rows)"
+      },
+      "effective_from": {
+        "class": "epoch-ms",
+        "evidence": "src/be/model-catalog-store.ts:422 effectiveFrom: now (Date.now()); src/be/seed-pricing.ts:441 and migrations 046/078/114/143 literal 0 sentinel; src/http/pricing.ts:93 z.number().nonnegative() from API"
+      },
+      "lastUpdatedAt": {
+        "class": "epoch-ms",
+        "evidence": "src/be/db.ts:12541 Date.now(); src/be/model-catalog-store.ts:415 UPDATE binds now (Date.now()); seeds/migrations literal 0"
+      }
+    },
+    "primitive_objects": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/objects.ts:146 now = new Date().toISOString() -> packages/storage/src/repositories/pages.ts:295 upsertObject binds ${r.now}"
+      },
+      "deletedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/objects.ts:567 now = new Date().toISOString() -> packages/storage/src/repositories/pages.ts:373,403 SET deletedAt = ${now}; else NULL"
+      },
+      "fileVersion": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/pages.ts:294,327,373 binds agent-fs file version (integer) or NULL; compared with < / ="
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/primitives/objects.ts:146,278,567 and sheets/service.ts:131 new Date().toISOString() -> packages/storage/src/repositories/pages.ts:300,327,373,389,403"
+      }
+    },
+    "principal_roles": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "packages/storage/src/repositories/rbac.ts:132, src/be/rbac-roles.ts:112,460 and trigger trg_users_default_role (109_rbac_roles.sql:53) all omit createdAt -> DEFAULT CURRENT_TIMESTAMP"
+      }
+    },
+    "prompt_template_history": {
+      "body": {
+        "class": "text",
+        "evidence": "src/be/db.ts:8921 binds template body (Handlebars-style prompt text)",
+        "reason": "prompt template text, not JSON"
+      },
+      "changedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:8881,9022,9180 now = new Date().toISOString() bound at 8921,8973,9043,9214"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "src/be/db.ts:8921 binds state enum ('enabled'|'default_prompt_fallback'|'skip_event')",
+        "reason": "enum string, not JSON"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8921,8973,9043,9214 binds version counter (existing.version + 1)"
+      }
+    },
+    "prompt_templates": {
+      "body": {
+        "class": "text",
+        "evidence": "src/be/db.ts:8913,8953 binds prompt template body text",
+        "reason": "prompt template text, not JSON"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:8881 now = new Date().toISOString() bound in INSERT at 8953"
+      },
+      "isDefault": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:8963 data.isDefault ? 1 : 0; 8908 flips to literal 0 or copies existing; 9033 literal 1; reads existing.isDefault === 1 and migration 018 WHERE isDefault = 1"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "014_prompt_templates.sql CHECK(state IN ('enabled','default_prompt_fallback','skip_event')); src/be/db.ts:8913,9033,9205",
+        "reason": "enum string, not JSON"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:8881,9022,9180 new Date().toISOString() bound at 8913,8953,9033,9205"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:8909,9029 newVersion = existing.version + 1; migration 018 SET version = 1"
+      }
+    },
+    "request_composition": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/request-composition.ts:36 createdAt = new Date().toISOString() bound at :52"
+      },
+      "seq": {
+        "class": "bigint",
+        "evidence": "src/be/db/request-composition.ts:49 next = MAX(seq)+1 or 0, bound at :52"
+      },
+      "staticEstTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/request-composition.ts:37 sum of part.estTokens (src/types.ts:4648 z.number().int().min(0))"
+      }
+    },
+    "role_permissions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/rbac-roles.ts:457 and 109_rbac_roles.sql:42 INSERT omit createdAt -> DEFAULT CURRENT_TIMESTAMP"
+      }
+    },
+    "roles": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/rbac-roles.ts:430 and 109_rbac_roles.sql:36 INSERT omit createdAt -> DEFAULT CURRENT_TIMESTAMP"
+      },
+      "grantsAll": {
+        "class": "boolean",
+        "evidence": "src/be/rbac-roles.ts:430,434 binds number 0/1 (prepared <...number>); 109 literals 0/1; read packages/storage/src/repositories/rbac.ts:159 grantsAll = ${true}, rbac-roles.ts:441 grantsAll <> ?"
+      },
+      "isBuiltin": {
+        "class": "boolean",
+        "evidence": "src/be/rbac-roles.ts:430 INSERT literal 1, :434 SET isBuiltin = 1; 109_rbac_roles.sql:36 literal 1; DEFAULT 0; reads isBuiltin <> 1, ORDER BY isBuiltin DESC (packages/storage/src/repositories/rbac.ts:188)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/rbac-roles.ts:436 SET lastUpdatedAt = CURRENT_TIMESTAMP; inserts use DEFAULT CURRENT_TIMESTAMP"
+      }
+    },
+    "routing_decisions": {
+      "captured_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:2519 capturedAt: new Date().toISOString() -> INSERT at src/be/db.ts:3086"
+      },
+      "continuity_candidates": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:3095 JSON.stringify(routingDecisionSnapshot.continuityCandidates); only writer"
+      },
+      "worker_statuses": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:3094 JSON.stringify(routingDecisionSnapshot.workerStatuses); only writer"
+      }
+    },
+    "runtime_cache_releases": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:594 INSERT omits it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now'); no other writer"
+      },
+      "runtime_ids": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/cache-cleanup.ts:44 JSON.stringify(runtimeIds) -> packages/storage/src/repositories/runtime-pools.ts:594; CHECK json_valid AND json_type = 'array' (260_runtime_pool_cache.sql)"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "260_runtime_pool_cache.sql CHECK (state IN ('pending','deleting')); repository :618 and storage-sqlite :40 literals",
+        "reason": "enum string, not JSON"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime ISO; src/be/runtime-pools/cache-cleanup.ts:66,83 claimedAt/now = toISOString() -> storage-sqlite runtime-pools.ts:40 and repository :618; NOTE claim fence uses equality WHERE updated_at = ${claimedAt} (repository :608,619), ms precision must round-trip"
+      }
+    },
+    "runtime_controllers": {
+      "config": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/db.ts:199,261 configJson = JSON.stringify(data.config) -> repository :438,444; DEFAULT '{}'"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:438 INSERT omits it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now'); no other writer"
+      },
+      "last_error_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/http/controllers-connect.ts:90 new Date().toISOString(); src/be/runtime-pools/db.ts:160-164 errorAt = toISOString or null; supervisor.ts:135 now.toISOString() -> repository :489; :134 sets NULL"
+      },
+      "last_seen_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/http/controllers-connect.ts:134,167,184 new Date().toISOString(); src/be/runtime-pools/controllers.ts:69 now.toISOString() -> repository :481"
+      },
+      "secret_config": {
+        "class": "text",
+        "evidence": "src/be/runtime-pools/db.ts:187,249 encryptSecret(JSON.stringify(secrets)) or null -> repository :438,445",
+        "reason": "stores AES ciphertext (encrypted blob), not JSON text"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime ISO; src/be/runtime-pools/db.ts:264, seed.ts:106, controllers.ts:69, controllers-connect.ts:134,184 all new Date()/now.toISOString() -> repository :444-489"
+      }
+    },
+    "runtime_instances": {
+      "created_at": {
+        "class": "text",
+        "evidence": "DEFAULT strftime ISO, but packages/storage/src/repositories/runtime-pools.ts:705 created_at = COALESCE(${u.createdAt}, created_at) with src/be/runtime-pools/supervisor.ts:315 handle.createdAt = raw E2B sandbox.startedAt (src/runtime-providers/e2b.ts:132), not normalized",
+        "reason": "mixed formats: iso-ms-z DEFAULT plus provider-supplied E2B startedAt string (RFC3339, precision not controlled)"
+      },
+      "credential_ready": {
+        "class": "boolean",
+        "evidence": "src/be/multi-runtime.ts:430 SET credential_ready = ready ? 1 : 0; read :452 (credential_ready IS NULL OR credential_ready = 1) | nullable flag: writers store ready ? 1 : 0 or NULL (never reported); Postgres boolean keeps NULL"
+      },
+      "draining": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:722,735 bind JS boolean draining (0/1); NOT NULL DEFAULT 0; reads draining = ${false} (:637) and src/be/runtime-pools/routing.ts:79 draining = 0"
+      },
+      "idle_since": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/runtime-pools/supervisor.ts:536-537,571-572 setRuntimeIdleSince(task.finishedAt ?? idleSince ?? now.toISOString()) -> repository :729; value copied from agent_tasks.finishedAt (written ISO at src/be/db/tasks/write.ts:497)"
+      },
+      "last_seen_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/multi-runtime.ts:234,337 strftime('%Y-%m-%dT%H:%M:%fZ','now'); DEFAULT same; src/be/runtime-pools/recovery.ts:94 now.toISOString() -> repository :674; compared >= runtimeLivenessCutoff() ISO string"
+      },
+      "lease_expires_at": {
+        "class": "text",
+        "evidence": "src/be/runtime-pools/supervisor.ts:310-313 handle.meta.leaseExpiresAt (raw E2B endAt/expiresAt, src/runtime-providers/e2b.ts:128) or toISOString; :617 endAt from controller.renew (E2B ttl.expiresAt / remote-controller.ts:72 z.string()) only checked with Date.parse",
+        "reason": "mixed formats: provider/remote-controller supplied strings stored unnormalized alongside toISOString values"
+      },
+      "metadata": {
+        "class": "jsonb",
+        "evidence": "src/be/multi-runtime.ts:221 metadataJson = JSON.stringify(instance.metadata) or null; :233 COALESCE(excluded.metadata, metadata)"
+      },
+      "provision_attempts": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:693 SET provision_attempts = (SELECT runtime_provision_attempts + 1 FROM agents ...) (counter)"
+      },
+      "provision_requested_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/multi-runtime.ts:282 new Date().toISOString(); src/be/runtime-pools/supervisor.ts:214 now.toISOString() -> repository :695"
+      },
+      "reported_slots": {
+        "class": "bigint",
+        "evidence": "src/be/multi-runtime.ts:228,272 binds instance.reportedSlots / ?? 1 (slot count)"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/multi-runtime.ts:235,338,393,429 strftime ISO; DEFAULT same; supervisor.ts:316, :617 and controllers.ts toISOString() -> repository :664,707,712"
+      },
+      "workspace_slot": {
+        "class": "bigint",
+        "evidence": "src/be/multi-runtime.ts:284 binds nextFreeWorkspaceSlot() integer or NULL; CHECK workspace_slot >= 0 (322_runtime_pool_workspace.sql)"
+      }
+    },
+    "runtime_pools": {
+      "cache": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/db.ts:333,395 JSON.stringify({...cache}) or null; CHECK (cache IS NULL OR json_valid(cache)) (260_runtime_pool_cache.sql)"
+      },
+      "circuit_open_until": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/runtime-pools/supervisor.ts:131 openUntil = new Date(...).toISOString() -> repository :567; src/be/multi-runtime.ts:246 sets NULL"
+      },
+      "consecutive_failures": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:565 consecutive_failures + 1; src/be/multi-runtime.ts:246 reset to 0 (counter)"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/runtime-pools.ts:524 INSERT omits it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now'); no other writer"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "src/be/runtime-pools/db.ts:338,398 enabled: data.enabled (JS boolean bound 0/1) -> repository :524,541; NOT NULL DEFAULT 1; read db.ts:61 row.enabled === 1"
+      },
+      "env": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/db.ts:331,393 JSON.stringify(data.env) -> repository :524,540; DEFAULT '{}'"
+      },
+      "idle_minutes": {
+        "class": "bigint",
+        "evidence": "src/types.ts:2734 z.number().int().positive().nullable() -> repository :524,538"
+      },
+      "last_error_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/runtime-pools/supervisor.ts:129 now.toISOString() -> repository :566; supervisor.ts:305 errorAt toISOString or null -> repository :578"
+      },
+      "max_runtimes": {
+        "class": "bigint",
+        "evidence": "src/types.ts:2736 z.number().int().min(0).nullable() -> repository :524,539"
+      },
+      "min_runtimes": {
+        "class": "bigint",
+        "evidence": "src/types.ts:2737 z.number().int().min(0) -> repository :524,539"
+      },
+      "placements": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/db.ts:323,379 JSON.stringify(data.placements) -> repository :524,535; DEFAULT '[]'"
+      },
+      "slots_per_runtime": {
+        "class": "bigint",
+        "evidence": "src/types.ts:2735 z.number().int().min(1) -> repository :524,538"
+      },
+      "ttl_sec": {
+        "class": "bigint",
+        "evidence": "src/types.ts:2743 z.number().int().positive().nullable() -> repository :524,541"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime ISO; src/be/runtime-pools/db.ts:400, supervisor.ts:129, e2b-images.ts:35 toISOString -> repository :543,566, storage-sqlite :24; NOTE src/be/db/tasks/write.ts:264 compares updated_at = ? (optimistic check), precision must round-trip"
+      },
+      "workspace": {
+        "class": "jsonb",
+        "evidence": "src/be/runtime-pools/db.ts:336,396 JSON.stringify(data.workspace) or null; CHECK json_valid (322_runtime_pool_workspace.sql)"
+      }
+    },
+    "scheduled_tasks": {
+      "consecutiveErrors": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:6339 binds data.consecutiveErrors (incremented counter in src/scheduler/scheduler.ts error path)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:6179 now = new Date().toISOString() bound in INSERT :6181; migration 030:76 converted legacy space rows to T...000Z; migrations 002/103 copy unchanged"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:6200 data.enabled !== false ? 1 : 0; update :6323 data.enabled ? 1 : 0; DEFAULT 1 (nullable but never written NULL); reads enabled = 1 in scheduler queries"
+      },
+      "intervalMs": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:6181 binds data.intervalMs ?? null (duration ms)"
+      },
+      "lastErrorAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/scheduler/scheduler.ts:545 now.toISOString(); src/be/automation-preflight.ts:390 now.toISOString(); :503 and deferred-task-waits.ts:276 NULL -> src/be/db.ts:6343; migration 030 normalized legacy rows"
+      },
+      "lastRunAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/scheduler/scheduler.ts:397 now.toISOString(), :722-736 now = new Date().toISOString(); src/scheduler/deferred-task-waits.ts:233,273 and src/http/schedules.ts:571-580 toISOString -> src/be/db.ts:6327; migration 030 converted legacy space rows to T...000Z"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:6408 data.lastUpdatedAt ?? new Date().toISOString(), :1871 now (ISO); callers pass toISOString (scheduler.ts:547,728; automation-preflight.ts:393); scheduler.ts:413 compares lastUpdatedAt string equality between two reads (CAS)"
+      },
+      "nextRunAt": {
+        "class": "text",
+        "evidence": "calculateNextRun toISOString (src/scheduler/scheduler.ts:450,458), but src/http/schedules.ts:474 stores body.runAt as-is (z.string(), :147) and src/tools/schedules/create-schedule.ts:330 / src/tools/defer-task.ts:310 store runAt (z.string().datetime(), any precision)",
+        "reason": "user/API runAt stored without normalization (HTTP route accepts any string) alongside iso-ms-z computed values"
+      },
+      "params": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:6224 JSON.stringify(data.params ?? {}), update :6391; DEFAULT '{}' (141); migration 151 reads json_extract(params)"
+      },
+      "priority": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:6198 data.priority ?? 50; update :6315"
+      },
+      "requestedDelayMs": {
+        "class": "bigint",
+        "evidence": "src/tools/defer-task.ts:415 delayMs (z.number().int().positive(), :178) -> src/be/db.ts:6204"
+      },
+      "requestedRunAt": {
+        "class": "text",
+        "evidence": "src/tools/defer-task.ts:416 requestedRunAt: runAt, raw z.string().datetime() input (:184), bound at src/be/db.ts:6205 without normalization",
+        "reason": "user-supplied ISO datetime stored as given (precision/no-ms varies), not one format"
+      },
+      "requiredParams": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:6225,6395 JSON.stringify; migration 141:5 JSON array literals; migration 151:8 json_group_array(...); DEFAULT '[]'"
+      },
+      "requires": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:6226,6399 JSON.stringify(data.requires ?? []); DEFAULT '[]' (141)"
+      },
+      "scriptArgs": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:6223 JSON.stringify(data.scriptArgs) or '{}'; update :6387 JSON.stringify or NULL; DEFAULT '{}'"
+      },
+      "tags": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:6197 JSON.stringify(data.tags ?? []), update :6311 JSON.stringify; DEFAULT '[]'"
+      }
+    },
+    "script_apis": {
+      "callCount": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/scripts.ts:661 INSERT literal 0; packages/storage/src/repositories/scripts.ts:710 \"callCount\" = \"callCount\" + 1"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:661 INSERT binds a.now = new Date().toISOString() (src/be/scripts/db.ts:427); DEFAULT datetime('now') unused (only INSERT always sets it)"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/scripts.ts:661 INSERT binds ${true}; packages/storage/src/repositories/scripts.ts:690 UPDATE binds boolean u.enabled (src/be/scripts/db.ts:503); read as row.enabled === 1"
+      },
+      "lastUsedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:661 INSERT NULL; packages/storage/src/repositories/scripts.ts:710 binds at from src/be/scripts/db.ts:536 new Date().toISOString()"
+      }
+    },
+    "script_connections": {
+      "allowed_hosts_json": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/scripts.ts:836/860 bind c.allowedHostsJson = JSON.stringify(allowedHosts) (src/be/script-connections.ts:1827); migrations 112/117/213 copy the column"
+      },
+      "auth_hosts_override_json": {
+        "class": "jsonb",
+        "evidence": "src/be/script-connections.ts:1105 auth.hosts ? JSON.stringify(auth.hosts) : null, else null (:959); bound at packages/storage/src/repositories/scripts.ts:836/860"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:836 INSERT binds c.now = new Date().toISOString() (src/be/script-connections.ts:1490); DEFAULT datetime('now') unused by the only INSERT; migrations 112/117/213 copy values"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/scripts.ts:836/860 bind boolean c.enabled (data.enabled !== false, src/be/script-connections.ts:1845); packages/storage/src/repositories/scripts.ts:890 binds boolean enabled; read row.enabled === 1"
+      },
+      "generated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/script-connections.ts:1648/1683/1711/1731 generatedAt = now (new Date().toISOString() at :1490); bound at packages/storage/src/repositories/scripts.ts:836/860"
+      },
+      "generated_runtime_json": {
+        "class": "jsonb",
+        "evidence": "src/be/script-connections.ts:911/941/1378/1729 JSON.stringify(descriptor); stored via packages/storage/src/repositories/scripts.ts:836/860; null otherwise"
+      },
+      "openapi_spec_fetched_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:880 and :836/860 bind fetched.fetchedAt = new Date().toISOString() (src/be/script-connections.ts:1437) or the existing row's value (http/script-connections.ts:2030); no user input path"
+      },
+      "openapi_spec_json": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/scripts.ts:836/860 bind openapiSpecJson; src/be/script-connections.ts:1600 parses an inline spec inside try and only replaces it with JSON.stringify on success; on parse failure the catch (1649) records generationError and the raw user text (YAML/garbage) is stored as-is",
+        "reason": "inline user-supplied spec text is stored unnormalized when parsing fails (generationError path); vendored path stores raw file text"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:836/860 bind c.now; packages/storage/src/repositories/scripts.ts:890 binds now = new Date().toISOString() (src/be/script-connections.ts:1987)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/scripts.ts:860 version = expectedVersion + 1; packages/storage/src/repositories/scripts.ts:890 version = version + 1"
+      }
+    },
+    "script_credential_bindings": {
+      "active": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/scripts.ts:770/786 bind boolean active; packages/storage/src/repositories/scripts.ts:802 ${false}; packages/storage-sqlite/src/boot/legacy-data.ts:163 b.active ? 1 : 0"
+      },
+      "allowed_hosts_json": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/scripts.ts:770/786 bind JSON.stringify(data.allowedHosts) (src/be/script-connections.ts:432); legacy boot insert packages/storage-sqlite/src/boot/legacy-data.ts:146 binds JSON.stringify(binding.allowedHosts) (src/be/connection-bindings-blob-migration.ts:61)"
+      },
+      "created_at": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/scripts.ts:770 binds b.now = new Date().toISOString() (src/be/script-connections.ts:389), but packages/storage-sqlite/src/boot/legacy-data.ts:146 INSERT writes datetime('now')",
+        "reason": "mixed formats: iso-ms-z (repo insert) and space (legacy blob boot migration datetime('now'))"
+      },
+      "updated_at": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/scripts.ts:786/802 bind ISO now (src/be/script-connections.ts:389/464), but packages/storage-sqlite/src/boot/legacy-data.ts:146 INSERT writes datetime('now')",
+        "reason": "mixed formats: iso-ms-z and space (legacy blob boot migration datetime('now'))"
+      }
+    },
+    "script_embeddings": {
+      "embeddedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:629 upsert binds e.embeddedAt = new Date().toISOString() (src/be/scripts/embeddings.ts:85); DEFAULT unused"
+      }
+    },
+    "script_run_journal": {
+      "completedAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:13801 INSERT writes datetime('now') literal; no other writer"
+      },
+      "config": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:13801 INSERT binds scrubJsonValue(data.config ?? {}) (JSON.stringify-based, src/be/scrub-json.ts:26); read JSON.parse(row.config)"
+      },
+      "durationMs": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:13801 binds data.durationMs ?? null (integer ms duration)"
+      },
+      "result": {
+        "class": "text",
+        "evidence": "src/be/db.ts:13801 INSERT binds sealJson(data.result) = 'sealed:v1:' + ciphertext (src/be/sealed-json.ts:36-37), listed in SEALED_REPLAY_COLUMNS",
+        "reason": "sealed/encrypted text with 'sealed:v1:' prefix, not JSON"
+      },
+      "startedAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "src/be/db.ts:13801 the only INSERT omits startedAt, so DEFAULT datetime('now') writes it; no UPDATE"
+      }
+    },
+    "script_runs": {
+      "args": {
+        "class": "text",
+        "evidence": "src/be/db.ts:13458 binds sealJson(...) ('sealed:v1:' ciphertext, src/be/sealed-json.ts:36); src/be/db.ts:13517 binds scrubJsonValue JSON (plain)",
+        "reason": "mixes sealed 'sealed:v1:' encrypted text with plain JSON"
+      },
+      "finishedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:13652 finishedAt = ? with new Date().toISOString() or null (src/http/script-runs.ts:550/625/717, supervisor.ts:93/132/154); src/be/db.ts:13517 data.finishedAt ISO"
+      },
+      "last_heartbeat_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:13664 last_heartbeat_at = ? from new Date().toISOString() (src/http/script-runs.ts:693, src/script-workflows/supervisor.ts:71)"
+      },
+      "pid": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:13644 pid = ? from execution.pid / null (src/script-workflows/supervisor.ts:68)"
+      },
+      "startedAt": {
+        "class": "text",
+        "evidence": "src/be/db.ts:13458 binds new Date().toISOString() (comment: not the datetime('now') default); src/be/db.ts:13517 binds data.startedAt from new Date().toISOString() (http/scripts.ts:885, http/x.ts:244, user-code-mode.ts:111, scheduler.ts:105)",
+        "reason": "current writers use toISOString, but older rows used datetime('now') (src/be/db-retention.ts:91); mixed formats in existing databases"
+      }
+    },
+    "script_versions": {
+      "changedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:595 binds changedAt = new Date().toISOString() (src/be/scripts/db.ts:103); DEFAULT unused"
+      },
+      "signatureJson": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/scripts.ts:595 binds row.signatureJson, which is always JSON.stringify(extractScriptSignature(...)) (src/http/scripts.ts:641, seed-scripts/index.ts:471, extensions/assets.ts:330, import/dir-source.ts:293)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/scripts.ts:595 binds v.version = row.version (scripts.version, existing.version + 1)"
+      }
+    },
+    "scripts": {
+      "argsJsonSchema": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462/477/488 bind extractArgsJsonSchema() = JSON.stringify(parsed) or null (src/be/scripts/extract-schema.ts:52); packages/storage/src/repositories/scripts.ts:579 binds JSON.stringify(schema) (src/be/scripts/boot-args-schema.ts:92). Note: packages/storage/src/repositories/scripts.ts:579 WHERE \"argsJsonSchema\" = previous (text equality CAS) and extensions/assets.ts:189 hashes the stored string",
+        "reason": "stored text is a CAS key (WHERE \"argsJsonSchema\" = previous) and hashed by scriptHash; jsonb reorders keys"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462 INSERT binds s.now = new Date().toISOString() (src/be/scripts/db.ts:109); DEFAULT unused"
+      },
+      "isScratch": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462/477/488 bind Boolean(args.isScratch); src/be/migrations/130 reads isScratch = 1; read row.isScratch === 1 (src/be/scripts/db.ts:64). Reads WHERE \"isScratch\" = ${false}"
+      },
+      "signatureJson": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462/477/488 bind signatureJson = JSON.stringify(extractScriptSignature(source)) (src/http/scripts.ts:641, seed-scripts/index.ts:471, extensions/assets.ts:330, import/dir-source.ts:293). Note: text compared/hashed: src/be/scripts/db.ts:196 args.signatureJson !== existing.signatureJson, and extensions/assets.ts:189 scriptHash hashes the stored string (jsonb key reorder/whitespace would change both)",
+        "reason": "stored text is compared (src/be/scripts/db.ts:196) and hashed (scriptHash, src/be/extensions/assets.ts:189); jsonb reorders keys"
+      },
+      "typeChecked": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462/477/488 bind Boolean(args.typeChecked); read row.typeChecked === 1 (src/be/scripts/db.ts:65)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/scripts.ts:462/477/488/536/547 bind ISO now (src/be/scripts/db.ts:109/213/237/370, restore copies prior updatedAt); src/be/db.ts:1892 binds ISO now (:1849); migration 130 writes strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/scripts.ts:488 version = existing.version + 1 (src/be/scripts/db.ts:238); DEFAULT 1 on insert"
+      }
+    },
+    "seed_state": {
+      "seededAt": {
+        "class": "text",
+        "evidence": "src/be/seed/state-db.ts:28 binds new Date().toISOString(); src/be/memory/embedding-space.ts:124 and src/be/session-source-backfill.ts:132/146 write datetime('now'); packages/storage/src/repositories/maintenance.ts:65 writes nowText = datetime('now') on SQLite; packages/storage/src/repositories/runtime-pools.ts:937 INSERT omits it (DEFAULT datetime('now'))",
+        "reason": "mixed formats: iso-ms-z (recordSeedState) and space (datetime('now') writers/DEFAULT); samples show both"
+      }
+    },
+    "services": {
+      "args": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/agents.ts:559/617 bind options.args ? JSON.stringify(options.args) : null (src/be/db.ts:4651/4773)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/agents.ts:559 binds s.now = new Date().toISOString() (src/be/db.ts:4638)"
+      },
+      "env": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/agents.ts:559/617 bind options.env ? JSON.stringify(options.env) : null (src/be/db.ts:4652/4774)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/agents.ts:559/607/617 bind now = new Date().toISOString() (src/be/db.ts:4638/4714/4762)"
+      },
+      "metadata": {
+        "class": "jsonb",
+        "evidence": "packages/storage/src/repositories/agents.ts:559/617 bind JSON.stringify(options.metadata ?? {}) (src/be/db.ts:4653/4775); DEFAULT '{}'"
+      },
+      "port": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/agents.ts:559/617 bind port (options.port ?? 3000, src/be/db.ts:4644)"
+      }
+    },
+    "session_costs": {
+      "cacheReadTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.cacheReadTokens ?? null; migration 307:13 copies legacyCacheReadTokens"
+      },
+      "cacheWrite1hTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.cacheWrite1hTokens ?? null"
+      },
+      "cacheWrite5mTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.cacheWrite5mTokens ?? null"
+      },
+      "cacheWriteTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.cacheWriteTokens ?? null (token count, nullable)"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT writes strftime('%Y-%m-%dT%H:%M:%fZ','now'); migration 063 copies existing values"
+      },
+      "durationMs": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.durationMs"
+      },
+      "inputTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.inputTokens ?? 0"
+      },
+      "isError": {
+        "class": "boolean",
+        "evidence": "src/be/db/session-costs.ts:201 input.isError ? 1 : 0; migration 063 copies existing values"
+      },
+      "numTurns": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.numTurns (nullable count)"
+      },
+      "outputTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.outputTokens ?? 0"
+      },
+      "reasoningOutputTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.reasoningOutputTokens ?? 0"
+      },
+      "thinkingTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.thinkingTokens ?? 0"
+      }
+    },
+    "session_logs": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:4880 INSERT writes strftime('%Y-%m-%dT%H:%M:%fZ','now'); only writer"
+      },
+      "iteration": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:4880 INSERT binds logs.iteration"
+      },
+      "lineNumber": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:4880 INSERT binds lineNumber (last.lineNumber + 1)"
+      },
+      "reasoningChars": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:4880 INSERT binds reasoning.reasoning?.chars ?? null"
+      }
+    },
+    "session_shares": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/session-shares.ts:243 INSERT binds now = new Date().toISOString() (:222)"
+      },
+      "revokedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/session-shares.ts:236 UPDATE binds now = new Date().toISOString() (:222)"
+      }
+    },
+    "session_summaries": {
+      "chainCount": {
+        "class": "bigint",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259): COUNT(*) / chainCount + 1"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259): copies agent_tasks.createdAt (NEW.createdAt) only"
+      },
+      "lastActivityAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259)/session_task_activity: copies agent_tasks.lastUpdatedAt (NEW.lastUpdatedAt, MAX(...))"
+      },
+      "lastHumanAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259): MAX over agent_tasks.createdAt, task_steering_messages.created_at (DEFAULT strftime ISO, src/be/db.ts:2051 omits it) and approval_requests.createdAt (ISO now, src/be/db.ts:9351)"
+      },
+      "openTaskCount": {
+        "class": "bigint",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259)/session_task_open: openTaskCount + (status NOT IN ...) / +1/-1, COUNT(*)"
+      },
+      "pendingApprovalCount": {
+        "class": "bigint",
+        "evidence": "/tmp/m3/triggers.sql session_task_insert/session_root_columns/session_summary_recompute_apply (migrations 253/259): COUNT(*) of pending approval_requests; insert literal 0"
+      }
+    },
+    "session_tokens": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:714 the only INSERT binds now.toISOString(); DEFAULT datetime('now') unused"
+      },
+      "depth": {
+        "class": "bigint",
+        "evidence": "src/be/users.ts:671 binds provenance.depth ?? 0 (nesting depth integer)"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:714 INSERT binds new Date(...).toISOString(); src/be/users.ts:897 UPDATE binds new Date(...).toISOString()"
+      },
+      "lastUsedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:1010 UPDATE binds new Date().toISOString()"
+      },
+      "revokedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:761/778 bind new Date().toISOString(); packages/storage/src/repositories/runtime-pools.ts:922 binds now from src/be/runtime-pools/tokens.ts:43 toISOString()"
+      },
+      "scriptRun": {
+        "class": "boolean",
+        "evidence": "src/be/users.ts:729 scriptRun ? 1 : 0; read row?.scriptRun === 1 (:688)"
+      }
+    },
+    "skill_files": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10318 binds now = new Date().toISOString() (callers :10301/:10354)"
+      },
+      "isBinary": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10334 payload.isBinary ? 1 : 0 in INSERT ... ON CONFLICT (:10318)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10318 binds now (ISO), ON CONFLICT sets excluded.lastUpdatedAt"
+      },
+      "size": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10318 binds payload.size (byte size)"
+      }
+    },
+    "skill_invocations": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage-sqlite/src/repositories/skills.ts:80 binds now = new Date().toISOString() (src/be/skill-invocations.ts:70)"
+      },
+      "skillVersion": {
+        "class": "bigint",
+        "evidence": "packages/storage-sqlite/src/repositories/skills.ts:80 binds skill?.version ?? null (src/be/skill-invocations.ts:77)"
+      },
+      "tokenCount": {
+        "class": "bigint",
+        "evidence": "packages/storage-sqlite/src/repositories/skills.ts:80 binds estimateTokens(skill.chars) or null (src/be/skill-invocations.ts:78)"
+      }
+    },
+    "skills": {
+      "context": {
+        "class": "text",
+        "evidence": "src/be/db.ts:10074 binds data.context (skill frontmatter string, src/be/skill-parser.ts:85 metadata.context, e.g. 'fork'); updateSkill :10187",
+        "reason": "plain frontmatter text value, not JSON"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10074 the only INSERT binds now = new Date().toISOString() (:10071)"
+      },
+      "disableModelInvocation": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10074 data.disableModelInvocation ? 1 : 0; updateSkill ? 1 : 0 (:10195); nullable, never NULL written"
+      },
+      "invocationCount": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/skills.ts:208 \"invocationCount\" = \"invocationCount\" + 1"
+      },
+      "isComplex": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10094 data.isComplex ? 1 : 0; updateSkill isComplex ? 1 : 0 (:10228); nullable but no writer stores NULL"
+      },
+      "isEnabled": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10074 data.isEnabled === false ? 0 : 1; updateSkill isEnabled ? 1 : 0 (:10167). Reads WHERE skills.\"isEnabled\" = 1 (packages/storage-sqlite/src/repositories/skills.ts:70)"
+      },
+      "lastFetchedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10247 updateSkill binds updates.lastFetchedAt = new Date().toISOString() (src/http/skills.ts:712, src/tools/skills/skill-sync-remote.ts:73)"
+      },
+      "lastInvokedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/skills.ts:208 binds at = new Date().toISOString() (src/be/skill-invocations.ts:70/90)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10074/10247/10256 bind ISO now (:10071/:10150/:10254)"
+      },
+      "systemDefault": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10074 data.systemDefault ? 1 : 0; updateSkill ? 1 : 0 (:10171)"
+      },
+      "userInvocable": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:10074 data.userInvocable === false ? 0 : 1; updateSkill ? 1 : 0 (:10199); nullable, never NULL written"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10074 literal 1; :10241 version = version + 1; :10256 version + 1"
+      }
+    },
+    "slack_inbound_receipts": {
+      "attempts": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/slack.ts:275/281 attempts = attempts + 1; :260 literal 1"
+      },
+      "available_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:247/260 bind row.now (ISO); packages/storage/src/repositories/slack.ts:323 binds availableAt.toISOString() (src/be/db-queries/slack-inbound.ts:335)"
+      },
+      "claimed_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:275/281 bind nowIso (src/be/db-queries/slack-inbound.ts:288); :323 sets NULL"
+      },
+      "completed_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:260 row.now; packages/storage/src/repositories/slack.ts:308 binds outcome.completedAt = nowIso or null (src/be/db-queries/slack-inbound.ts:317)"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:247/260 bind row.now (ISO); DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') is the same format"
+      },
+      "duplicate_count": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/slack.ts:229 duplicate_count = duplicate_count + 1"
+      },
+      "last_duplicate_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:229 binds now = now.toISOString() (src/be/db-queries/slack-inbound.ts:274)"
+      },
+      "payload_bytes": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/slack.ts:247 binds row.payloadBytes; :260 literal 0"
+      },
+      "payload_erased_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:260 row.now; packages/storage/src/repositories/slack.ts:308/353 bind nowIso (src/be/db-queries/slack-inbound.ts:309/365)"
+      },
+      "received_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:247/260 bind row.now = now.toISOString() (src/be/db-queries/slack-inbound.ts:175/248)"
+      },
+      "retry_num": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/slack.ts:247/260 bind row.retryNum (Slack retry number, nullable)"
+      },
+      "state": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/slack.ts:229-353 enum strings 'pending'/'processing'/'processed'/'uncertain'/... (DEFAULT 'pending')",
+        "reason": "status enum string, not JSON"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:229-353 every UPDATE binds nowIso (toISOString); DEFAULT strftime ISO"
+      }
+    },
+    "slack_messages": {
+      "closed_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage-sqlite/src/repositories/slack.ts:151 binds now = new Date().toISOString() (src/be/db/slack-trees.ts:13); migration 278:24 strftime('%Y-%m-%dT%H:%M:%fZ','now'); triggers set NULL"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:745/801 bind now = new Date().toISOString(); packages/storage/src/repositories/slack.ts:515 row.now ISO (src/be/db/slack-card-groups.ts:103); DEFAULT strftime ISO"
+      },
+      "deferral_abandoned_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1003 binds abandoned ? now (ISO) : null"
+      },
+      "deferral_resolved_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1003 binds now = new Date().toISOString()"
+      },
+      "delivery_abandoned_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:1036 binds now = new Date().toISOString()"
+      },
+      "delivery_attempts": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:1014 delivery_attempts = delivery_attempts + 1"
+      },
+      "finalized_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:745 binds input.finalized ? now (ISO) : null; :862 COALESCE(finalized_at, now ISO); packages/storage/src/repositories/slack.ts:515 row.now ISO"
+      },
+      "stream_chunks_appended": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:745/838 MAX(excluded/stream_chunks_appended, ?) counter; :862 COALESCE(?, ...)"
+      },
+      "ts": {
+        "class": "text",
+        "evidence": "src/be/db.ts:745 binds Slack message ts (e.g. '1795220745.3'); src/be/db.ts:801 binds 'pending:<uuid>'; src/be/db/slack-card-groups.ts:109 merged prefix",
+        "reason": "Slack message id string / 'pending:' placeholder, not a timestamp"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:745/801/838/862/1014/1036 bind ISO now; :891 binds renderedThrough = new Date().toISOString() (src/slack/render-v2.ts:760/1016)"
+      }
+    },
+    "slack_relay_obligations": {
+      "attempt_count": {
+        "class": "bigint",
+        "evidence": "src/be/db/tasks/read.ts:1424 SET attempt_count = attempt_count + 1 (counter)"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "only writer is DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') via trigger INSERT (task_id) in src/be/migrations/144_slack_relay_obligations.sql:31,42"
+      },
+      "delivered_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1436,1450 UPDATE binds new Date().toISOString(); never inserted (trigger insert in 144_slack_relay_obligations.sql:31,42 leaves NULL)"
+      },
+      "last_attempt_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/tasks/read.ts:1421-1428 UPDATE binds new Date().toISOString()"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime iso on trigger insert (144_slack_relay_obligations.sql:31); UPDATEs at src/be/db/tasks/read.ts:1426,1438,1450 bind new Date().toISOString()"
+      }
+    },
+    "slack_render_v2_state": {
+      "activated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:607-612 and 627-633 INSERT binds new Date().toISOString(); compared to agent_tasks.createdAt in packages/storage-sqlite/src/repositories/slack.ts:175"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "all INSERTs (src/be/db.ts:610,630) omit it -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (124_slack_render_v2_state.sql:9)"
+      },
+      "delegation_activated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:627-633 INSERT/ON CONFLICT COALESCE binds new Date().toISOString()"
+      },
+      "id": {
+        "class": "bigint",
+        "evidence": "INTEGER PRIMARY KEY CHECK (id = 1) singleton, src/be/db.ts:610,630 insert literal 1"
+      },
+      "reconcile_cursors": {
+        "class": "jsonb",
+        "evidence": "DEFAULT '{}' (326_slack_reconcile_pages.sql:2); src/be/db/slack-trees.ts:168-169 writes JSON.stringify(cursors) via packages/storage/src/repositories/slack.ts:469. NOTE: slack-trees.ts:169 byte-compares next !== stored text (jsonb key reorder only causes a redundant write)"
+      },
+      "task_tree_enabled": {
+        "class": "boolean",
+        "evidence": "CHECK (task_tree_enabled IN (0,1)) at 323_slack_task_tree_visibility.sql:2; packages/storage/src/repositories/slack.ts:455 binds JS boolean ${enabled}; reads: COALESCE(state.task_tree_enabled, 1) = 1 (packages/storage-sqlite/src/repositories/slack.ts:21), task_tree_enabled = ${false} (storage slack.ts:450), === Number(enabled) (src/be/db/slack-trees.ts:120)"
+      },
+      "task_tree_enabled_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/slack.ts:450-456 sets ${now} from src/be/db/slack-trees.ts:123 new Date().toISOString() or keeps itself"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "only DEFAULT strftime iso (124_slack_render_v2_state.sql:10); no UPDATE sets it"
+      }
+    },
+    "swarm_config": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/config.ts:411 binds r.now = new Date().toISOString() (src/be/db.ts:6689); 220_model_profiles.sql:127 strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      },
+      "encrypted": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/config.ts:411,419 bind JS boolean (src/be/db.ts:6698); src/be/db.ts:6579 literal 1; 220_model_profiles.sql:129 literal 0; read encrypted = ${true} (storage-sqlite config.ts:34)"
+      },
+      "exportToEnv": {
+        "class": "boolean",
+        "evidence": "215_swarm_config_export_to_env.sql:7,14 DEFAULT 1 / SET 0; packages/storage/src/repositories/config.ts:411,420 bind JS boolean and CASE ... THEN ${false} ELSE COALESCE(${bool}, \"exportToEnv\"); 220_model_profiles.sql:130 literal 0"
+      },
+      "isSecret": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/config.ts:410,418 bind JS boolean (src/be/db.ts:6691 data.isSecret === true); 220_model_profiles.sql:125 literal 0; read WHERE \"isSecret\" = ${true} (packages/storage-sqlite/src/repositories/config.ts:34)"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/config.ts:411,419 bind new Date().toISOString() (src/be/db.ts:6689); 220_model_profiles.sql:128 strftime iso"
+      },
+      "value": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/config.ts:410,418 bind raw config value / encryptSecret ciphertext (src/be/db.ts:6697, 6579); migration 220_model_profiles.sql:124 stores profile name",
+        "reason": "plain operator strings and ciphertext, not JSON"
+      }
+    },
+    "swarm_repos": {
+      "autoClone": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/config.ts:462,473 bind JS boolean (src/be/db.ts:6914 data.autoClone !== false); DEFAULT 1"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/config.ts:463 binds r.now = new Date().toISOString() (src/be/db.ts:6899); only INSERT"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/config.ts:463,476 bind new Date().toISOString() (src/be/db.ts:6899,6951)"
+      }
+    },
+    "task_attachments": {
+      "capabilities": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:1252-1256 stringifyAttachmentCapabilities = JSON.stringify or NULL (bound at 1451,1954); 135_backfill_task_pull_request_attachments.sql:177 json_object(...). Read via json_extract(capabilities, ...) = ? at src/be/db.ts:1384"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "no writer binds it: src/be/db.ts:1432 INSERT and 135_backfill_task_pull_request_attachments.sql:160 omit -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (072_task_attachments.sql:35)"
+      },
+      "is_primary": {
+        "class": "boolean",
+        "evidence": "src/be/db.ts:1459,1960 bind input.isPrimary ? 1 : 0; 135_backfill_task_pull_request_attachments.sql:179 literal 0"
+      },
+      "size_bytes": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:1455,1957 bind input.sizeBytes (number) or NULL"
+      }
+    },
+    "task_citations": {
+      "citation_index": {
+        "class": "bigint",
+        "evidence": "src/be/task-citations.ts:125-136 binds citation.index; CHECK (citation_index >= 1)"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/task-citations.ts:125 INSERT omits -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (158_task_citations.sql:11)"
+      },
+      "general": {
+        "class": "boolean",
+        "evidence": "CHECK (general IN (0,1)) at 161_task_citations_general.sql:3; src/be/task-citations.ts:143 binds citation.general ? 1 : 0; read general === 1 (task-citations.ts:156)"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime iso (158_task_citations.sql:12); upsert sets updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') at src/be/task-citations.ts:131"
+      }
+    },
+    "task_context_snapshots": {
+      "contextTotalTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10974-10985 binds input.contextTotalTokens ?? null; z.number().int() at src/http/context.ts:54"
+      },
+      "contextUsedTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10974-10984 binds input.contextUsedTokens ?? null; z.number().int() at src/http/context.ts:53"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:10970,10993 INSERT binds now = new Date().toISOString(); only writer"
+      },
+      "cumulativeInputTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10974-10990 binds input.cumulativeInputTokens ?? 0; z.number().int() at src/http/context.ts:58"
+      },
+      "cumulativeOutputTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10974-10991 binds input.cumulativeOutputTokens ?? 0 (int token counter)"
+      },
+      "preCompactTokens": {
+        "class": "bigint",
+        "evidence": "src/be/db.ts:10974-10989 binds input.preCompactTokens ?? null; z.number().int() at src/http/context.ts:57"
+      }
+    },
+    "task_idempotency_keys": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/task-idempotency.ts:43-53 INSERT binds new Date().toISOString(); only writer"
+      }
+    },
+    "task_steering_messages": {
+      "body": {
+        "class": "text",
+        "evidence": "src/be/db.ts:2051-2060 binds args.body (free-form steering message text)",
+        "reason": "user/agent message text, not JSON"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:2051 INSERT omits -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (121_task_steering_messages.sql:18)"
+      },
+      "delivered_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:2152 SET delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'); src/be/steering.ts:296 sets NULL"
+      },
+      "handled_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:2183 SET handled_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+      }
+    },
+    "task_templates": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "only writer is DEFAULT datetime('now') (058_task_templates.sql:21) via seed INSERT at 058_task_templates.sql:26; no code writer, no backfill"
+      },
+      "payload": {
+        "class": "jsonb",
+        "evidence": "only writer: DEFAULT '{}' (058_task_templates.sql:18); seed INSERT at 058_task_templates.sql:26 omits it; no code INSERT/UPDATE (src/be/db.ts:12201 SELECT only)"
+      },
+      "tags": {
+        "class": "jsonb",
+        "evidence": "058_task_templates.sql:26-30 seed INSERT JSON literals like '[\"refactor\"]'; DEFAULT '[]'; no code writer"
+      }
+    },
+    "task_ui_action_runs": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/task-ui-spec.ts:123,191 INSERTs omit -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (303_task_ui_specs.sql:23)"
+      },
+      "last_run_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/task-ui-spec.ts:236-244 binds new Date().toISOString(). Note: read compares row.lastRunAt >= cooldownCutoff as string (task-ui-spec.ts:223)"
+      },
+      "locked_until": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/task-ui-spec.ts:189,192 binds new Date(nowMs + leaseMs).toISOString(); :241 NULL. Note: read compares as JS string row.lockedUntil >= now (task-ui-spec.ts:220) and SQL text < ? (:198)"
+      },
+      "run_count": {
+        "class": "bigint",
+        "evidence": "src/be/task-ui-spec.ts:242 run_count = run_count + 1 (counter)"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime iso; src/be/task-ui-spec.ts:151 strftime('%Y-%m-%dT%H:%M:%fZ','now'); :196,:242 bind new Date(...).toISOString()"
+      }
+    },
+    "task_ui_specs": {
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/task-ui-spec.ts:89 INSERT omits -> DEFAULT strftime('%Y-%m-%dT%H:%M:%fZ','now') (303_task_ui_specs.sql:10)"
+      },
+      "spec": {
+        "class": "jsonb",
+        "evidence": "src/be/task-ui-spec.ts:96 binds scrubJsonValue(value.spec) = JSON.stringify output (src/be/scrub-json.ts:26-31)"
+      },
+      "spec_version": {
+        "class": "bigint",
+        "evidence": "CHECK (spec_version = 1) DEFAULT 1 (303_task_ui_specs.sql:5); INSERT at src/be/task-ui-spec.ts:89 omits it"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "DEFAULT strftime iso; upsert sets updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') at src/be/task-ui-spec.ts:93"
+      }
+    },
+    "tracker_agent_mapping": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/trackers.ts:224 INSERT omits -> DEFAULT datetime('now') (space, 009_tracker_integration.sql:68); 030_iso8601_date_consistency.sql:49-51 rewrote existing rows to 'T...000Z'",
+        "reason": "mixed formats: DEFAULT datetime('now') space vs migration 030 ISO backfill"
+      }
+    },
+    "tracker_sync": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/trackers.ts:125,134 INSERTs omit -> DEFAULT datetime('now') space (009_tracker_integration.sql:57); 030_iso8601_date_consistency.sql:44-46 rewrote old rows to ISO .000Z",
+        "reason": "mixed formats: DEFAULT space vs migration 030 ISO backfill"
+      },
+      "lastSyncedAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/trackers.ts:125,134 INSERTs omit -> DEFAULT datetime('now') space (009_tracker_integration.sql:52); updateSync (trackers.ts:154) binds new Date().toISOString() (src/linear/outbound.ts:177, src/jira/outbound.ts:169); 030_iso8601_date_consistency.sql:41-43 ISO backfill",
+        "reason": "mixed formats: insert DEFAULT space vs UPDATE toISOString"
+      }
+    },
+    "user_external_ids": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "space",
+        "evidence": "every INSERT omits it -> DEFAULT datetime('now'): packages/storage/src/repositories/users.ts:476, 067_users_first_class.sql:121, 076_kapso_sender_user_backfill.sql:14; no backfill"
+      }
+    },
+    "user_favorites": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:734-737 binds r.now = new Date().toISOString() (src/be/db.ts:12094); DEFAULT CURRENT_TIMESTAMP unused; migrations 205/362 copy the column"
+      },
+      "lastUpdatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:737-739 binds/excluded new Date().toISOString() (src/be/db.ts:12094); DEFAULT CURRENT_TIMESTAMP unused; 205_favorites_per_dashboard_user.sql:12 copies"
+      }
+    },
+    "user_identity_events": {
+      "afterJson": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts:275 after == null ? null : JSON.stringify(after), inserted at packages/storage/src/repositories/users.ts:490"
+      },
+      "beforeJson": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts:274 before == null ? null : JSON.stringify(before), inserted at packages/storage/src/repositories/users.ts:490"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:276 binds new Date().toISOString() (only insert, packages/storage/src/repositories/users.ts:490); DEFAULT datetime('now') unused; 068 copy only. Used as paging cursor (src/be/users.ts:201)"
+      }
+    },
+    "user_merge_jobs": {
+      "attempts": {
+        "class": "bigint",
+        "evidence": "packages/storage-sqlite/src/repositories/users.ts:115 attempts = attempts + 1; reset to 0 at packages/storage/src/repositories/users.ts:629"
+      },
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:604 binds new Date().toISOString() (src/be/user-merge-jobs.ts:126,131)"
+      },
+      "finishedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:644,659 bind new Date().toISOString() (src/be/user-merge-jobs.ts:248,304); else NULL"
+      },
+      "nextAttemptAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:650 binds new Date(Date.now()+delayMs).toISOString() (src/be/user-merge-jobs.ts:256); else NULL"
+      },
+      "progress": {
+        "class": "jsonb",
+        "evidence": "literal '{}' at packages/storage/src/repositories/users.ts:604; JSON.stringify(progress) at src/be/user-merge-jobs.ts:227,303"
+      },
+      "startedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage-sqlite/src/repositories/users.ts:115 COALESCE(startedAt, ${now}) with now = new Date().toISOString() (src/be/user-merge-jobs.ts:236)"
+      }
+    },
+    "user_tokens": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:504 binds t.createdAt = new Date().toISOString() (src/be/users.ts:422,431 and 459,466); DEFAULT datetime('now') unused (only insert path)"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/users.ts:467 new Date(now.getTime()+ttlMs).toISOString(), :432 null; compared \"expiresAt\" > ${now} at packages/storage/src/repositories/users.ts:552"
+      },
+      "lastUsedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:545 binds new Date().toISOString() (src/be/users.ts:546)"
+      },
+      "revokedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/users.ts:525,530 bind new Date().toISOString() (src/be/users.ts:474,487,505)"
+      }
+    },
+    "users": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/users.ts:346-351 binds new Date().toISOString() (src/be/db.ts:11742, src/be/users.ts:308); but seed INSERTs at 031_user_registry.sql:31,34 omit it -> DEFAULT datetime('now') space",
+        "reason": "mixed formats: ISO from code vs DEFAULT datetime('now') in migration 031 seed rows"
+      },
+      "emailAliases": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:11750,11777 JSON.stringify(string[]); src/be/users.ts:319 literal '[]'; DEFAULT '[]' (031_user_registry.sql:12)"
+      },
+      "lastUpdatedAt": {
+        "class": "text",
+        "evidence": "code binds new Date().toISOString() (packages/storage/src/repositories/users.ts:351,368,377,383,390); seed INSERTs at 031_user_registry.sql:31,34 use DEFAULT datetime('now') space",
+        "reason": "mixed formats: ISO from code vs DEFAULT datetime('now') in migration 031 seed rows"
+      },
+      "metadata": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:11753 and 11781 JSON.stringify(object) or NULL; src/be/users.ts:322 NULL. Read with json_valid guard in src/be/seed-scripts/catalog/dreaming-memtax-create.ts:786"
+      }
+    },
+    "wait_states": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1572-1574 binds w.now = new Date().toISOString() (src/be/db.ts:9701); DEFAULT CURRENT_TIMESTAMP unused (only insert)"
+      },
+      "eventFilter": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:9709-9712 JSON.stringify(input.eventFilter) or NULL (string filters become JSON string literals)"
+      },
+      "expiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/workflows/executors/wait.ts:129-131 new Date(Date.now()+timeoutMs).toISOString() or null -> packages/storage/src/repositories/workflows.ts:1574"
+      },
+      "firedPayload": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:9778 JSON.stringify(data.firedPayload) or NULL -> packages/storage/src/repositories/workflows.ts:1624"
+      },
+      "resolvedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1624 binds now = new Date().toISOString() (src/be/db.ts:9774)"
+      },
+      "updatedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1574,1624 bind new Date().toISOString(); DEFAULT CURRENT_TIMESTAMP unused"
+      },
+      "wakeUpAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/workflows/executors/wait.ts:102 new Date(Date.now()+durationMs).toISOString() -> packages/storage/src/repositories/workflows.ts:1573; compared <= nowIso at :1593"
+      }
+    },
+    "workflow_idempotency_keys": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/workflow-idempotency.ts:147 new Date().toISOString() -> packages/storage/src/repositories/workflows.ts:1046"
+      },
+      "resourceDeletedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1056 binds now = new Date().toISOString() (src/be/db/workflow-idempotency.ts:167)"
+      },
+      "responseBody": {
+        "class": "text",
+        "evidence": "src/be/db/workflow-idempotency.ts:146 binds sealJson(body) = SEALED_PREFIX + ciphertext (src/be/sealed-json.ts:36-37); tombstone sets NULL (packages/storage/src/repositories/workflows.ts:1056)",
+        "reason": "sealed/encrypted string, not JSON"
+      },
+      "responseStatus": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1043-1046 binds accepted.status (HTTP status) from src/be/db/workflow-idempotency.ts:145"
+      }
+    },
+    "workflow_run_definitions": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db/workflow-run-definitions.ts:59 new Date().toISOString() -> packages/storage/src/repositories/workflows.ts:998-999"
+      },
+      "snapshot": {
+        "class": "text",
+        "evidence": "src/be/db/workflow-run-definitions.ts:52-59 JSON.stringify(pinned) keyed by computeContentHash(snapshot); comment at :41-47 says nested key order is semantically significant (executors iterate config objects in insertion order) and drives the hash",
+        "reason": "valid JSON, but jsonb would reorder nested keys that resumed runs rely on; content-hash keyed. Keep text unless key order is proven irrelevant"
+      }
+    },
+    "workflow_run_steps": {
+      "finishedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:7870 data.finishedAt from toISOString callers (src/workflows/checkpoint.ts:57,87,116, engine.ts:443); packages/storage/src/repositories/workflows.ts:835,842,978,987 bind toISOString values; 030:33-35 ISO backfill"
+      },
+      "maxRetries": {
+        "class": "bigint",
+        "evidence": "src/workflows/checkpoint.ts:103 retryPolicy.maxRetries -> src/be/db.ts:7872"
+      },
+      "nextRetryAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/workflows/checkpoint.ts:96 new Date(Date.now()+delay).toISOString() -> src/be/db.ts:7873; else NULL; 030:36-38 ISO backfill"
+      },
+      "output_replay": {
+        "class": "text",
+        "evidence": "src/be/db.ts:7865 binds sealJson(data.output) = SEALED_PREFIX + ciphertext (src/be/sealed-json.ts:36-37)",
+        "reason": "sealed/encrypted string, not JSON"
+      },
+      "retryCount": {
+        "class": "bigint",
+        "evidence": "src/workflows/checkpoint.ts:102 retryCount: retryCount + 1 -> src/be/db.ts:7871"
+      },
+      "startedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "all INSERTs bind it: src/be/db.ts:7824,7830 and src/be/db/workflow-runs.ts:551,556/587,592 new Date().toISOString() (packages/storage/src/repositories/workflows.ts:922,928,1248); DEFAULT datetime('now') unused; 030_iso8601_date_consistency.sql:30-32 converted legacy rows to ISO"
+      }
+    },
+    "workflow_runs": {
+      "context": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7713 scrubJsonValue(data.context); json_set/json_remove UPDATEs at src/be/db/users/references.ts:171-185 and src/be/db/user-references.ts:68-75 (read with json_valid guard, :59)"
+      },
+      "context_replay": {
+        "class": "text",
+        "evidence": "src/be/db.ts:7714 and src/be/db/users/references.ts:164 bind sealJson(...) = SEALED_PREFIX + ciphertext (src/be/sealed-json.ts:36-37)",
+        "reason": "sealed/encrypted string, not JSON"
+      },
+      "finishedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "src/be/db.ts:7719 data.finishedAt from toISOString callers (src/workflows/engine.ts:188,443, resume.ts:732,779, recovery.ts:174); packages/storage/src/repositories/workflows.ts:854; automation-preflight.ts:441; 030:25-27 ISO backfill"
+      },
+      "lastUpdatedAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1175 insertRun omits it -> DEFAULT datetime('now') space; updates bind new Date().toISOString() (workflows.ts:1199, src/be/db.ts:7723, workflows.ts:854); automation-preflight.ts:441 ISO",
+        "reason": "mixed formats: insert DEFAULT datetime('now') space vs UPDATE toISOString"
+      },
+      "parentStepAttempt": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1177 binds data.parentStepAttempt ?? 0 (step retryCount); 240_workflow_run_parent_step_attempt.sql:21-28 MAX(retryCount - 1, 0)"
+      },
+      "startedAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "all INSERTs bind it: src/be/db.ts:7639,7644 and src/be/automation-preflight.ts:428,440 new Date().toISOString(); DEFAULT datetime('now') unused; 030:19-21 ISO backfill"
+      },
+      "triggerData": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7645 scrubJsonValue(triggerData) or NULL; src/be/automation-preflight.ts:438 scrubJsonValue or NULL (JSON.stringify output, src/be/scrub-json.ts:26-31)"
+      }
+    },
+    "workflow_versions": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1336 insertVersion omits it -> DEFAULT datetime('now') space (008_workflow_redesign.sql:80); 030_iso8601_date_consistency.sql:89-91 rewrote old rows to ISO .000Z",
+        "reason": "mixed formats: DEFAULT space vs migration 030 ISO backfill"
+      },
+      "snapshot": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:8004 JSON.stringify(data.snapshot) -> packages/storage/src/repositories/workflows.ts:1336; read-only history (JSON.parse at src/be/db.ts:7987)"
+      },
+      "version": {
+        "class": "bigint",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1336 binds v.version (src/be/db.ts:8003)"
+      }
+    },
+    "workflows": {
+      "createdAt": {
+        "class": "text",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1067 insertWorkflow omits it -> DEFAULT datetime('now') space (samples: 84 space rows); 030_iso8601_date_consistency.sql:11-13 rewrote old rows to ISO .000Z",
+        "reason": "mixed formats: DEFAULT space vs migration 030 ISO backfill"
+      },
+      "definition": {
+        "class": "text",
+        "evidence": "src/be/db.ts:7401,7539 JSON.stringify(definition); 142_workflow_automation_preflight.sql:50-60 REPLACE() inside the text (still JSON). Live definition feeds hashPinnedDefinition (src/be/db/workflow-run-definitions.ts:58) whose comment (:41-47) says nested key order matters to executors",
+        "reason": "always JSON, but jsonb would reorder nested config keys that executors iterate in insertion order; jsonb only if key order is proven irrelevant"
+      },
+      "enabled": {
+        "class": "boolean",
+        "evidence": "packages/storage/src/repositories/workflows.ts:1074,1125 bind JS boolean (src/be/db.ts:7413 data.enabled !== false); filter enabled = ${f.enabled} (workflows.ts:1083); DEFAULT 1"
+      },
+      "lastUpdatedAt": {
+        "class": "text",
+        "evidence": "insertWorkflow (packages/storage/src/repositories/workflows.ts:1067) omits -> DEFAULT datetime('now') space; updateWorkflowColumns (:1141) and src/be/db.ts:1865 bind new Date().toISOString(); samples show 75 iso + 9 space",
+        "reason": "mixed formats: insert DEFAULT space vs UPDATE toISOString"
+      },
+      "params": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7406,7548 JSON.stringify(params ?? {}); DEFAULT '{}' (142_workflow_automation_preflight.sql:3)"
+      },
+      "requiredParams": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7407,7550 JSON.stringify(string[]); 142_workflow_automation_preflight.sql:9-21 JSON array literals; DEFAULT '[]'"
+      },
+      "requires": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7408,7552 JSON.stringify(string[]); 142_workflow_automation_preflight.sql:22-33 JSON array literals; DEFAULT '[]'"
+      },
+      "triggerSchema": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7405,7546 JSON.stringify(triggerSchema) or NULL"
+      },
+      "triggers": {
+        "class": "jsonb",
+        "evidence": "src/be/db.ts:7402,7540 JSON.stringify(triggers ?? []); DEFAULT '[]'"
+      }
+    }
+  }
+}

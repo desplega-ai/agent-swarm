@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { swarmDataDir } from "../../utils/data-dir";
 import { AES_KEY_BYTES } from "./secrets-cipher";
 
 /**
@@ -9,7 +10,7 @@ import { AES_KEY_BYTES } from "./secrets-cipher";
  * Resolution order (first match wins):
  *   1. `SECRETS_ENCRYPTION_KEY` env var   — base64 string, must decode to 32 bytes
  *   2. `SECRETS_ENCRYPTION_KEY_FILE` env var — path to file containing base64
- *   3. `<dirname(dbPath)>/.encryption-key` — on-disk file
+ *   3. `<data dir>/.encryption-key` — on-disk file (`SWARM_DATA_DIR`, default: dirname(dbPath))
  *   4. Auto-generate 32 random bytes, write to path from step 3 with mode 0600
  *      only when generation is allowed for the current DB state
  *
@@ -105,7 +106,7 @@ export function resolveEncryptionKey(
     );
   }
 
-  const keyFilePath = path.join(path.dirname(dbPath), KEY_FILENAME);
+  const keyFilePath = path.join(swarmDataDir(dbPath), KEY_FILENAME);
 
   // 3. On-disk .encryption-key file
   if (existsSync(keyFilePath)) {

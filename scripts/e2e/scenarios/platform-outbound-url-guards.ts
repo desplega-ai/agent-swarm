@@ -58,7 +58,10 @@ export const platformOutboundUrlGuards: Scenario = {
     const discovery = { authorizationEndpoint: "javascript:alert(document.domain)//" };
     const oauth = startMockServer((request: MockRequest) => {
       if (request.path === "/.well-known/oauth-protected-resource") {
-        return jsonResponse({ resource: `${oauth.origin}/mcp`, authorization_servers: [oauth.origin] });
+        return jsonResponse({
+          resource: `${oauth.origin}/mcp`,
+          authorization_servers: [oauth.origin],
+        });
       }
       if (request.path === "/.well-known/oauth-authorization-server") {
         return jsonResponse({

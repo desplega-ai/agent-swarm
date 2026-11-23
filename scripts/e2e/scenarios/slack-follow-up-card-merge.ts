@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { expect, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -12,8 +13,8 @@ import {
   registerWorker,
 } from "./slack-helpers";
 
-// A Lead follow-up that finishes soon after the Lead's previous card in the
-// same thread merges into that card (one chat.update, no new message), so the
+// A Lead follow-up that finishes after the Lead's previous card in the
+// same thread, with nothing posted in between, merges into that card (one chat.update, no new message), so the
 // thread reads as one answer and sends one notification. A later message in
 // the thread, or a failed follow-up, keeps the follow-up a separate card.
 //
@@ -38,8 +39,7 @@ type DelegatedAsk = {
 
 function outcomeRow(ctx: ScenarioContext, taskId: string): CardRow | null {
   return ctx.db.get<CardRow>(
-    "SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-    [taskId],
+    sql`SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
   );
 }
 

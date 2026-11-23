@@ -7,8 +7,10 @@
 
 import { getByPath } from "@json-render/core";
 import type { AgentTask } from "@/api/types";
+import type { AttachmentLimits } from "@/components/sessions/composer-dock";
 import { resolveScopedParams } from "./action-params";
 import type { ActionChain } from "./catalog";
+import { fileUploadPath, type UploadFn, uploadNonce } from "./form-file-model";
 import { truncateText } from "./json-preview";
 
 /** Longest person message shown per turn; the task page keeps the full prompt. */
@@ -27,24 +29,146 @@ export const SESSION_THREAD_MAX_REQUEST_CHARS = 4_000;
  */
 const APP_ACTION_MARKER_LINE = /^\[App action\] app=\S+ action=\S+ input=(\{.*\})[ \t]*$/gm;
 
+/** The input of an app-dispatched task's marker line, or `null` with no marker or malformed JSON. */
+function appActionInput(task: Pick<AgentTask, "task">): Record<string, unknown> | null {
+  let inputJson: string | undefined;
+  for (const match of task.task.matchAll(APP_ACTION_MARKER_LINE)) inputJson = match[1];
+  if (inputJson === undefined) return null;
+  try {
+    const input: unknown = JSON.parse(inputJson);
+    return input !== null && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The person's message in an app-dispatched task (`input.message` of its
  * marker line), or `null` for a task with no marker, no `message`, or
  * malformed input JSON.
  */
 export function appActionMessage(task: Pick<AgentTask, "task">): string | null {
-  let inputJson: string | undefined;
-  for (const match of task.task.matchAll(APP_ACTION_MARKER_LINE)) inputJson = match[1];
-  if (inputJson === undefined) return null;
-  try {
-    const input = JSON.parse(inputJson) as Record<string, unknown>;
-    if (typeof input.message === "string" && input.message.trim().length > 0) {
-      return input.message;
-    }
-  } catch {
-    // Malformed JSON: not a message.
+  const message = appActionInput(task)?.message;
+  return typeof message === "string" && message.trim().length > 0 ? message : null;
+}
+
+/** A file sent with a thread message: an item of `$form.attachments`, and a chip on its bubble. */
+export interface ThreadAttachment {
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
+/** An absolute agent-fs path without `..`. */
+export function isAgentFsPath(path: unknown): path is string {
+  return typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
+}
+
+function isThreadAttachment(value: unknown): value is ThreadAttachment {
+  if (value === null || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return (
+    isAgentFsPath(item.path) &&
+    typeof item.name === "string" &&
+    typeof item.mimeType === "string" &&
+    typeof item.size === "number" &&
+    Number.isFinite(item.size)
+  );
+}
+
+/**
+ * The files of an app-dispatched task (`input.attachments` of its marker
+ * line, the shape `$form.attachments` has), for the person bubble. Only
+ * `api` tasks qualify, as in `threadRequestText`. Malformed items are left out.
+ */
+export function threadRequestAttachments(task: AgentTask): ThreadAttachment[] {
+  if (task.source !== "api") return [];
+  const attachments = appActionInput(task)?.attachments;
+  return Array.isArray(attachments) ? attachments.filter(isThreadAttachment) : [];
+}
+
+/** The `SessionThread.attachments` prop, read at runtime: a bound value can be anything. */
+export interface ThreadAttachmentConfig {
+  dir: unknown;
+  limits: AttachmentLimits;
+}
+
+/** Files per message when `attachments.maxFiles` is not set. */
+export const SESSION_THREAD_DEFAULT_MAX_FILES = 10;
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * The thread's attachment settings, or `null` without the prop. `accept` and
+ * `maxBytes` fall back to the composer's own (`defaults`), `maxFiles` to
+ * `SESSION_THREAD_DEFAULT_MAX_FILES`.
+ */
+export function threadAttachmentConfig(
+  value: unknown,
+  defaults: AttachmentLimits,
+): ThreadAttachmentConfig | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const prop = value as Record<string, unknown>;
+  const accept = Array.isArray(prop.accept)
+    ? prop.accept.filter((entry): entry is string => typeof entry === "string" && entry !== "")
+    : [];
+  return {
+    dir: prop.dir,
+    limits: {
+      accept: accept.length > 0 ? accept : defaults.accept,
+      maxBytes: positiveInteger(prop.maxBytes) ?? defaults.maxBytes,
+      maxFiles: positiveInteger(prop.maxFiles) ?? SESSION_THREAD_DEFAULT_MAX_FILES,
+    },
+  };
+}
+
+/**
+ * Uploads a message's files before its dispatch: create-only, one at a time,
+ * to `<dir>/<timestamp>-<nonce>-<n>-<name>` (the Form file-field naming). Any
+ * failure rejects, so the thread sends nothing and keeps the text and files.
+ * A file uploaded before the failure stays in the folder; a retry uploads it
+ * again under a new name. `upload` is null when agent-fs is not connected.
+ */
+export async function uploadThreadAttachments(input: {
+  files: readonly File[];
+  dir: unknown;
+  upload: UploadFn | null;
+  now?: Date;
+  /** Test seam; defaults to a fresh `uploadNonce()` per message. */
+  nonce?: string;
+}): Promise<ThreadAttachment[]> {
+  if (input.files.length === 0) return [];
+  if (!isAgentFsPath(input.dir)) {
+    throw new Error("This thread's attachments.dir is not an agent-fs folder path.");
   }
-  return null;
+  const upload = input.upload;
+  if (!upload) throw new Error("Connect agent-fs to send files, then send again.");
+  const now = input.now ?? new Date();
+  const nonce = input.nonce ?? uploadNonce();
+  const uploaded: ThreadAttachment[] = [];
+  for (const [index, file] of input.files.entries()) {
+    const target = fileUploadPath(input.dir, file.name, now, nonce, index + 1);
+    try {
+      const path = await upload(target, file);
+      uploaded.push({
+        path,
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `${file.name} failed to upload (${reason}), so nothing was sent. Send again to retry.`,
+      );
+    }
+  }
+  return uploaded;
 }
 
 /**
@@ -130,11 +254,13 @@ export async function runDispatchChain(options: {
   message: string;
   /** The leaf to chain under, or `null` when the viewer has no session yet. */
   leafTaskId: string | null;
+  /** The message's uploaded files, with the `attachments` prop; omitted, `$form` has no key for them. */
+  attachments?: readonly ThreadAttachment[];
   session: ThreadSession;
   execute: (binding: { action: string; params?: Record<string, unknown> }) => Promise<void>;
   getSnapshot: () => Record<string, unknown>;
 }): Promise<DispatchChainResult> {
-  const { onDispatch, message, leafTaskId, session, execute, getSnapshot } = options;
+  const { onDispatch, message, leafTaskId, attachments, session, execute, getSnapshot } = options;
   if (!onDispatch || onDispatch.length === 0) return { newTaskId: undefined };
 
   // Explicit absence: every chain key is published, `null` when there is no
@@ -142,7 +268,7 @@ export async function runDispatchChain(options: {
   // `"parentTaskId": { "$chain": "leafTaskId" }` param is dropped and the
   // first message creates the session's root task (see `resolveScopedValue`).
   const scope = {
-    form: { message },
+    form: attachments === undefined ? { message } : { message, attachments: [...attachments] },
     state: getSnapshot(),
     chain: { leafTaskId, newTaskId: null },
   };

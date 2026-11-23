@@ -1,4 +1,8 @@
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
+
+function slackRepo() {
+  return getStorage().repos.slack;
+}
 
 /**
  * Durable receipt store for inbound Slack deliveries.
@@ -169,27 +173,19 @@ export async function admitSlackInboundReceipt(
   > = SLACK_INBOUND_LIMITS,
 ): Promise<SlackInboundAdmission> {
   const nowIso = now.toISOString();
-  return getDbClient().transaction(async (tx) => {
-    const duplicate = await tx.get<SlackInboundReceiptRow>(
-      `UPDATE slack_inbound_receipts
-          SET duplicate_count = duplicate_count + 1, last_duplicate_at = ?, updated_at = ?
-        WHERE dedup_key = ?
-        RETURNING *`,
-      [nowIso, nowIso, input.dedupKey],
-    );
+  const repo = slackRepo();
+  return getStorage().transaction(async (): Promise<SlackInboundAdmission> => {
+    const duplicate = (await repo.touchInboundDuplicate(
+      input.dedupKey,
+      nowIso,
+    )) as SlackInboundReceiptRow | null;
     if (duplicate) return { status: "duplicate", receipt: toReceipt(duplicate) };
 
     if (input.payloadBytes > limits.maxPayloadBytes) {
       return { status: "rejected", reason: "payload_too_large" };
     }
 
-    const backlog = await tx.get<{ receipts: number; bytes: number | null }>(
-      `SELECT COUNT(*) AS receipts, SUM(payload_bytes) AS bytes
-         FROM slack_inbound_receipts
-        WHERE state IN ('pending', 'processing')`,
-    );
-    const receipts = backlog?.receipts ?? 0;
-    const bytes = backlog?.bytes ?? 0;
+    const { receipts, bytes } = await repo.inboundBacklog();
     if (
       receipts >= limits.maxBacklogReceipts ||
       bytes + input.payloadBytes > limits.maxBacklogBytes
@@ -197,40 +193,27 @@ export async function admitSlackInboundReceipt(
       return { status: "rejected", reason: "backlog_full" };
     }
 
-    const inserted = await tx.get<SlackInboundReceiptRow>(
-      `INSERT INTO slack_inbound_receipts (
-          id, dedup_key, transport, kind, payload_type, api_app_id, event_id,
-          payload_ciphertext, payload_bytes, retry_num, retry_reason,
-          received_at, available_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(dedup_key) DO NOTHING
-        RETURNING *`,
-      [
-        crypto.randomUUID(),
-        input.dedupKey,
-        input.transport,
-        input.kind,
-        input.payloadType,
-        input.apiAppId ?? null,
-        input.eventId ?? null,
-        input.payloadCiphertext,
-        input.payloadBytes,
-        input.retryNum ?? null,
-        input.retryReason ?? null,
-        nowIso,
-        nowIso,
-        nowIso,
-        nowIso,
-      ],
-    );
+    const inserted = (await repo.insertInboundReceipt({
+      id: crypto.randomUUID(),
+      dedupKey: input.dedupKey,
+      transport: input.transport,
+      kind: input.kind,
+      payloadType: input.payloadType,
+      apiAppId: input.apiAppId ?? null,
+      eventId: input.eventId ?? null,
+      payloadCiphertext: input.payloadCiphertext,
+      payloadBytes: input.payloadBytes,
+      retryNum: input.retryNum ?? null,
+      retryReason: input.retryReason ?? null,
+      now: nowIso,
+    })) as SlackInboundReceiptRow | null;
     if (inserted) return { status: "admitted", receipt: toReceipt(inserted) };
 
     // Unreachable under BEGIN IMMEDIATE, kept so a future deferred caller still
     // reports the winner instead of a phantom admission.
-    const winner = await tx.get<SlackInboundReceiptRow>(
-      "SELECT * FROM slack_inbound_receipts WHERE dedup_key = ?",
-      [input.dedupKey],
-    );
+    const winner = (await repo.findInboundReceiptByKey(
+      input.dedupKey,
+    )) as SlackInboundReceiptRow | null;
     if (!winner) throw new Error("Slack inbound receipt vanished during admission");
     return { status: "duplicate", receipt: toReceipt(winner) };
   });
@@ -263,32 +246,18 @@ export async function recordSlackInboundInline(
   now: Date = new Date(),
 ): Promise<"recorded" | "duplicate"> {
   const nowIso = now.toISOString();
-  const inserted = await getDbClient().get<{ id: string }>(
-    `INSERT INTO slack_inbound_receipts (
-        id, dedup_key, transport, kind, payload_type, api_app_id, event_id,
-        payload_bytes, retry_num, retry_reason, state, attempts, outcome_code,
-        received_at, available_at, completed_at, payload_erased_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'processed', 1, 'ran_inline', ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(dedup_key) DO NOTHING
-      RETURNING id`,
-    [
-      crypto.randomUUID(),
-      input.dedupKey,
-      input.transport,
-      input.kind,
-      input.payloadType,
-      input.apiAppId ?? null,
-      input.eventId ?? null,
-      input.retryNum ?? null,
-      input.retryReason ?? null,
-      nowIso,
-      nowIso,
-      nowIso,
-      nowIso,
-      nowIso,
-      nowIso,
-    ],
-  );
+  const inserted = await slackRepo().insertInboundTombstone({
+    id: crypto.randomUUID(),
+    dedupKey: input.dedupKey,
+    transport: input.transport,
+    kind: input.kind,
+    payloadType: input.payloadType,
+    apiAppId: input.apiAppId ?? null,
+    eventId: input.eventId ?? null,
+    retryNum: input.retryNum ?? null,
+    retryReason: input.retryReason ?? null,
+    now: nowIso,
+  });
   if (inserted) return "recorded";
   await touchSlackInboundDuplicate(input.dedupKey, now);
   return "duplicate";
@@ -303,13 +272,7 @@ export async function touchSlackInboundDuplicate(
   now: Date = new Date(),
 ): Promise<boolean> {
   const nowIso = now.toISOString();
-  const row = await getDbClient().get<{ id: string }>(
-    `UPDATE slack_inbound_receipts
-        SET duplicate_count = duplicate_count + 1, last_duplicate_at = ?, updated_at = ?
-      WHERE dedup_key = ?
-      RETURNING id`,
-    [nowIso, nowIso, dedupKey],
-  );
+  const row = await slackRepo().touchInboundDuplicate(dedupKey, nowIso);
   return row !== null && row !== undefined;
 }
 
@@ -323,27 +286,7 @@ export async function claimSlackInboundReceipt(
   id?: string,
 ): Promise<SlackInboundReceipt | null> {
   const nowIso = now.toISOString();
-  const row = id
-    ? await getDbClient().get<SlackInboundReceiptRow>(
-        `UPDATE slack_inbound_receipts
-            SET state = 'processing', attempts = attempts + 1, claimed_at = ?, updated_at = ?
-          WHERE id = ? AND state = 'pending' AND available_at <= ?
-          RETURNING *`,
-        [nowIso, nowIso, id, nowIso],
-      )
-    : await getDbClient().get<SlackInboundReceiptRow>(
-        `UPDATE slack_inbound_receipts
-            SET state = 'processing', attempts = attempts + 1, claimed_at = ?, updated_at = ?
-          WHERE id = (
-                  SELECT id FROM slack_inbound_receipts
-                   WHERE state = 'pending' AND available_at <= ?
-                   ORDER BY received_at, id
-                   LIMIT 1
-                )
-            AND state = 'pending'
-          RETURNING *`,
-        [nowIso, nowIso, nowIso],
-      );
+  const row = (await slackRepo().claimInboundReceipt(nowIso, id)) as SlackInboundReceiptRow | null;
   return row ? toReceipt(row) : null;
 }
 
@@ -365,25 +308,17 @@ export async function completeSlackInboundReceipt(
 ): Promise<boolean> {
   const nowIso = now.toISOString();
   const erase = outcome.state === "processed" || outcome.state === "ignored";
-  const { changes } = await getDbClient().run(
-    `UPDATE slack_inbound_receipts
-        SET state = ?, outcome_code = ?, error_code = ?, completed_at = ?, updated_at = ?,
-            payload_ciphertext = CASE WHEN ? THEN NULL ELSE payload_ciphertext END,
-            payload_erased_at = CASE WHEN ? THEN ? ELSE payload_erased_at END
-      WHERE id = ? AND state = 'processing'`,
-    [
-      outcome.state,
-      outcome.outcomeCode ?? null,
-      outcome.errorCode ?? null,
-      outcome.state === "uncertain" ? null : nowIso,
-      nowIso,
-      erase ? 1 : 0,
-      erase ? 1 : 0,
-      nowIso,
-      id,
-    ],
+  return slackRepo().completeInboundReceipt(
+    id,
+    {
+      state: outcome.state,
+      outcomeCode: outcome.outcomeCode ?? null,
+      errorCode: outcome.errorCode ?? null,
+      completedAt: outcome.state === "uncertain" ? null : nowIso,
+      erasePayload: erase,
+    },
+    nowIso,
   );
-  return changes > 0;
 }
 
 /**
@@ -397,21 +332,13 @@ export async function releaseSlackInboundReceipt(
   now: Date = new Date(),
 ): Promise<boolean> {
   const nowIso = now.toISOString();
-  const { changes } = await getDbClient().run(
-    `UPDATE slack_inbound_receipts
-        SET state = 'pending', error_code = ?, available_at = ?, claimed_at = NULL, updated_at = ?
-      WHERE id = ? AND state = 'processing'`,
-    [errorCode, availableAt.toISOString(), nowIso, id],
-  );
-  return changes > 0;
+  return slackRepo().releaseInboundReceipt(id, errorCode, availableAt.toISOString(), nowIso);
 }
 
 /** Earliest `available_at` among pending receipts, or null when none wait. */
 export async function getNextSlackInboundAvailableAt(): Promise<Date | null> {
-  const row = await getDbClient().get<{ next: string | null }>(
-    `SELECT MIN(available_at) AS next FROM slack_inbound_receipts WHERE state = 'pending'`,
-  );
-  return row?.next ? new Date(row.next) : null;
+  const next = await slackRepo().nextInboundAvailableAt();
+  return next ? new Date(next) : null;
 }
 
 /**
@@ -423,13 +350,7 @@ export async function markInterruptedSlackInboundReceiptsUncertain(
   now: Date = new Date(),
 ): Promise<number> {
   const nowIso = now.toISOString();
-  const { changes } = await getDbClient().run(
-    `UPDATE slack_inbound_receipts
-        SET state = 'uncertain', error_code = 'interrupted_during_processing', updated_at = ?
-      WHERE state = 'processing'`,
-    [nowIso],
-  );
-  return changes;
+  return slackRepo().markInterruptedInboundUncertain(nowIso);
 }
 
 /**
@@ -443,37 +364,25 @@ export async function purgeSlackInboundReceipts(
 ): Promise<{ erasedPayloads: number; deletedReceipts: number }> {
   const nowIso = now.toISOString();
   const cutoff = new Date(now.getTime() - retentionMs).toISOString();
-  return getDbClient().transaction(async (tx) => {
-    const deleted = await tx.run(
-      `DELETE FROM slack_inbound_receipts
-        WHERE state IN ('processed', 'ignored', 'failed') AND completed_at <= ?`,
-      [cutoff],
-    );
-    const erased = await tx.run(
-      `UPDATE slack_inbound_receipts
-          SET payload_ciphertext = NULL, payload_erased_at = ?, updated_at = ?
-        WHERE state IN ('processed', 'ignored') AND payload_ciphertext IS NOT NULL`,
-      [nowIso, nowIso],
-    );
-    return { erasedPayloads: erased.changes, deletedReceipts: deleted.changes };
+  const repo = slackRepo();
+  return getStorage().transaction(async () => {
+    const deletedReceipts = await repo.deleteCompletedInboundBefore(cutoff);
+    const erasedPayloads = await repo.eraseCompletedInboundPayloads(nowIso);
+    return { erasedPayloads, deletedReceipts };
   });
 }
 
 export async function getSlackInboundReceiptById(id: string): Promise<SlackInboundReceipt | null> {
-  const row = await getDbClient().get<SlackInboundReceiptRow>(
-    "SELECT * FROM slack_inbound_receipts WHERE id = ?",
-    [id],
-  );
+  const row = (await slackRepo().findInboundReceipt(id)) as SlackInboundReceiptRow | null;
   return row ? toReceipt(row) : null;
 }
 
 export async function getSlackInboundReceiptByKey(
   dedupKey: string,
 ): Promise<SlackInboundReceipt | null> {
-  const row = await getDbClient().get<SlackInboundReceiptRow>(
-    "SELECT * FROM slack_inbound_receipts WHERE dedup_key = ?",
-    [dedupKey],
-  );
+  const row = (await slackRepo().findInboundReceiptByKey(
+    dedupKey,
+  )) as SlackInboundReceiptRow | null;
   return row ? toReceipt(row) : null;
 }
 
@@ -500,17 +409,18 @@ export interface SlackInboundReceiptStats {
 export async function getSlackInboundReceiptStats(
   uncertainLimit = 20,
 ): Promise<SlackInboundReceiptStats> {
-  const db = getDbClient();
-  return db.transaction(
-    async (tx) => {
+  const repo = slackRepo();
+  return getStorage().transaction(
+    async () => {
       const counts = Object.fromEntries(SLACK_INBOUND_STATES.map((s) => [s, 0])) as Record<
         SlackInboundState,
         number
       >;
-      const byState = await tx.query<{ state: SlackInboundState; n: number; oldest: string }>(
-        `SELECT state, COUNT(*) AS n, MIN(received_at) AS oldest
-           FROM slack_inbound_receipts GROUP BY state`,
-      );
+      const byState = (await repo.inboundStateCounts()) as {
+        state: SlackInboundState;
+        n: number;
+        oldest: string;
+      }[];
       let oldestPending: string | null = null;
       let oldestUncertain: string | null = null;
       for (const row of byState) {
@@ -518,28 +428,11 @@ export async function getSlackInboundReceiptStats(
         if (row.state === "pending") oldestPending = row.oldest;
         if (row.state === "uncertain") oldestUncertain = row.oldest;
       }
-      const totals = await tx.get<{
-        backlogBytes: number | null;
-        duplicates: number | null;
-        lastReceivedAt: string | null;
-      }>(
-        `SELECT
-           SUM(CASE WHEN state IN ('pending', 'processing') THEN payload_bytes ELSE 0 END)
-             AS backlogBytes,
-           SUM(duplicate_count) AS duplicates,
-           MAX(received_at) AS lastReceivedAt
-         FROM slack_inbound_receipts`,
-      );
-      const lastFailure = await tx.get<{ error_code: string | null; updated_at: string }>(
-        `SELECT error_code, updated_at FROM slack_inbound_receipts
-          WHERE error_code IS NOT NULL
-          ORDER BY updated_at DESC LIMIT 1`,
-      );
-      const uncertain = await tx.query<SlackInboundReceiptRow>(
-        `SELECT * FROM slack_inbound_receipts WHERE state = 'uncertain'
-          ORDER BY received_at DESC LIMIT ?`,
-        [uncertainLimit],
-      );
+      const totals = await repo.inboundTotals();
+      const lastFailure = await repo.lastInboundFailure();
+      const uncertain = (await repo.listUncertainInbound(
+        uncertainLimit,
+      )) as SlackInboundReceiptRow[];
       return {
         counts,
         backlogBytes: totals?.backlogBytes ?? 0,

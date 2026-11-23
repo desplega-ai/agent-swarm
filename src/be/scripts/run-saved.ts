@@ -1,3 +1,4 @@
+import { startSpan, withSpan } from "../../otel";
 import type { RunScriptOutput } from "../../scripts-runtime/loader";
 import type { ScriptRecord } from "../../types";
 import {
@@ -35,7 +36,15 @@ export async function runSavedScriptAsAgent(
     : null;
 
   const buildCredentials = deps.buildCredentials ?? buildScriptCredentialBindingsWithFailures;
-  const credentials = await buildCredentials({ agentId: args.agentId });
+  // Per-phase spans (no-ops when OTel is off) split the run prelude into
+  // credential build, connection descriptors and the script run itself.
+  const credentials = await withSpan("script.credentials", () =>
+    buildCredentials({ agentId: args.agentId }),
+  );
+  const descriptorSpan = startSpan("script.descriptors");
+  const apiConnections = await getScriptApiConnectionDescriptors({ agentId: args.agentId });
+  const mcpConnections = await getScriptMcpConnectionDescriptors({ agentId: args.agentId });
+  descriptorSpan.end();
   const output: RunScriptOutput = args.signal?.aborted
     ? {
         result: undefined,
@@ -56,8 +65,8 @@ export async function runSavedScriptAsAgent(
         failedBindings: credentials.failedBindings,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
+        apiConnections,
+        mcpConnections,
         ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
         ...(args.signal ? { signal: args.signal } : {}),
       });

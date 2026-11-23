@@ -62,6 +62,14 @@ It runs deterministic HTTP and MCP scenarios with simulated agents. It does not 
 The runner discovers route, MCP tool and workflow node-type coverage from the running server.
 It writes `./e2e-results.json` by default.
 
+`bun run e2e --only storage-recovery` recovers an acknowledged write from a historical SQLite database and its WAL after an API crash.
+`bun run e2e --engine postgres --only storage-recovery` also restores a live PostgreSQL backup into a fresh database.
+It checks decryption with the saved key and verifies that the API releases its original connections.
+Set `E2E_POSTGRES_URL` to a disposable PostgreSQL 16 server with pgvector. Put its matching `pg_dump` and `pg_restore` clients on `PATH`.
+
+To verify a built API image, run `bash scripts/smoke-api-storage.sh <local-api-image>`.
+It writes a task on each engine, replaces both API containers, and reads the tasks from their original volumes.
+
 `bun run e2e --strict` is the CI contract: it fails when any route operation, MCP tool or
 workflow node type the server exposes is neither covered nor excluded with a reason in
 `scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned
@@ -208,7 +216,7 @@ Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), a
 Fx needs a preinstalled `fx` executable (worker-full ships the pinned release) and defaults to `openrouter/openai/gpt-5-mini` on `OPENROUTER_API_KEY`. A bare `E2E_MODEL_FX=gpt-5-mini` needs `OPENAI_API_KEY`, and `vercel/<vendor>/<id>` needs `AI_GATEWAY_API_KEY`. Run `bun run e2e --only health --harness fx`.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.5` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.3-alpha.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.

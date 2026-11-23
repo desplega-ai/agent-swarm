@@ -11,7 +11,7 @@
  * tracking.
  */
 
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { scrubJson, scrubSecrets } from "../utils/secret-scrubber";
 import {
   createSession,
   type DevinSessionResponse,
@@ -237,7 +237,7 @@ class DevinSession implements ProviderSession {
   private emit(event: ProviderEvent): void {
     // Devin messages and structured output are model-authored free text.
     // Scrub the complete event once at the log and listener egress boundary.
-    const scrubbed = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
+    const scrubbed = scrubJson(event);
     try {
       this.logFileHandle.write(
         `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,

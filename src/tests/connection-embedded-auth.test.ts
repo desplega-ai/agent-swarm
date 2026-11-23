@@ -701,7 +701,7 @@ describe("embedded connection auth", () => {
         agentId: "agent-e2e",
         resources,
         egressSecrets: await buildScriptCredentialBindings({}),
-        apiConnections: getScriptApiConnectionDescriptors(),
+        apiConnections: await getScriptApiConnectionDescriptors(),
         source: `
           export default async (_args, ctx) => {
             return await ctx.api.e2eVendor.getMe({});

@@ -32,7 +32,9 @@ clone or a `file://` copy makes no request to another origin.
 4. "Download JSON" writes `<file name>-feedback-<version>.json`. "Copy JSON" puts the same text on the clipboard.
    Give it to your agent with the video.
 
-The page follows the light or dark setting of your system. `?theme=light` or `?theme=dark` sets it.
+The top bar has links to the guide, to the repository on GitHub and to agent-swarm.dev. Its last button changes
+between the light theme and the dark theme, and the browser keeps the choice. Without a choice, the page follows
+the setting of your system. `?theme=light` or `?theme=dark` in the URL comes before both.
 
 Comments are saved in the browser (`localStorage`) under the file name and the version (`v1`, or `?version=`). A
 file with the same name opens the same comments. Give each new cut a new file name or a new `?version=`, so it
@@ -70,6 +72,12 @@ uv run --no-project --with pillow python -I render.py <feedback.json> [out-dir] 
 It prints each comment with its time range and writes one frame for each comment with the marks drawn on it. It
 needs `ffmpeg`. An export from a chosen file holds only the file name, so give the path with `--video`, or keep
 the export next to the video. An agent that reads the marked frames sees what the words do not say.
+
+### A skill for the agent that edits the video
+
+[skill/SKILL.md](skill/SKILL.md) is the agent's side of the loop, as a skill a coding agent can load: what to ask
+before a build, how to read a round, the checks before a render, how to present options, and what to say it could
+not check.
 
 ### Export format
 

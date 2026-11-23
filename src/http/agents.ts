@@ -11,7 +11,6 @@ import {
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
-  getDbClient,
   getResolvedConfig,
   getSwarmConfigs,
   isAgentDeleted,
@@ -53,6 +52,7 @@ import {
 } from "../be/multi-runtime";
 import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
 import { isAgentOnDemand } from "../be/runtime-pools/reachability";
+import { getStorage } from "../be/storage";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -755,7 +755,7 @@ export async function handleAgentRegister(
       return true;
     }
 
-    const result = await getDbClient().transaction(async () => {
+    const result = await getStorage().transaction(async () => {
       const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
@@ -792,7 +792,7 @@ export async function handleAgentRegister(
             await getSwarmConfigs({ scope: "agent", scopeId: agentId, key: "MODEL_OVERRIDE" })
           )[0]?.value;
           if (override && (await harnessModelErrorFor(override, harness))) {
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               console.warn(
                 `[agents] MODEL_OVERRIDE ${override} of agent ${agentId} does not run on its new ${harness} harness (was ${existingAgent.harnessProvider ?? "unset"}); update or clear it`,
               );
@@ -1338,7 +1338,7 @@ export async function handleAgentsRest(
 
     let agent: Agent | null;
     try {
-      agent = await getDbClient().transaction(async () => {
+      agent = await getStorage().transaction(async () => {
         const updated = await setAgentHarnessProvider(
           parsed.params.id,
           harness_provider as ProviderName,

@@ -35,6 +35,7 @@
     "contractor-license-expiry-review",
     "employee-offboarding-access-review",
     "employee-onboarding-readiness-review",
+    "interview-scheduling-handoff",
     "ai-training-completion-evidence-review",
     "competitor-change-brief",
     "business-continuity-tabletop-preparation",
@@ -45,6 +46,7 @@
     "ai-payroll-discrepancy-review",
     "ai-service-capacity-planning",
     "maintenance-work-order-triage",
+    "facility-energy-anomaly-review",
     "support-knowledge-conflict-review"
   ]
 }

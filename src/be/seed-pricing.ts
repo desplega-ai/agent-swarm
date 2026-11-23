@@ -21,13 +21,13 @@
 
 import { openAICompatibleProviderIds } from "@desplega/model-catalog";
 import type { PricingProvider, PricingTokenClass } from "../types";
-import { getDb } from "./db";
 import {
   loadModelsDevCache,
   type ModelsDevCache,
   type ModelsDevCostBlock,
 } from "./modelsdev-cache";
 import { normalizeModelKey } from "./pricing-normalize";
+import { getStorage } from "./storage";
 
 /**
  * Per-harness manual rates that models.dev doesn't carry. Keep the source URL
@@ -429,29 +429,28 @@ export function buildPricingSeedRows(cache: ModelsDevCache | null): PricingSeedR
  * Phase 2 entrypoint. Idempotent — safe to call on every boot. Logs a one-line
  * summary so operators can tell whether the boot picked up new rates.
  */
-export function seedPricingFromModelsDev(opts?: { quiet?: boolean }): {
+export async function seedPricingFromModelsDev(opts?: { quiet?: boolean }): Promise<{
   inserted: number;
   modelsdevFound: boolean;
-} {
-  const db = getDb();
+}> {
   const cache = loadModelsDevCache();
   const allRows = buildPricingSeedRows(cache);
 
-  const insert = db.prepare<null, [string, string, string, number]>(
-    `INSERT OR IGNORE INTO pricing
-       (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
-     VALUES (?, ?, ?, 0, ?, 0, 0)`,
-  );
-
-  let inserted = 0;
-  const tx = db.transaction((rows: PricingSeedRow[]) => {
-    for (const row of rows) {
-      const result = insert.run(row.provider, row.model, row.tokenClass, row.pricePerMillionUsd);
-      if (result.changes > 0) inserted += 1;
+  // One write transaction (BEGIN IMMEDIATE) around every insert, as before.
+  const storage = getStorage();
+  const inserted = await storage.transaction(async () => {
+    let count = 0;
+    for (const row of allRows) {
+      const added = await storage.repos.sessions.insertPricingSeedRow(
+        row.provider,
+        row.model,
+        row.tokenClass,
+        row.pricePerMillionUsd,
+      );
+      if (added) count += 1;
     }
+    return count;
   });
-  // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
-  tx.immediate(allRows);
 
   if (!opts?.quiet) {
     console.log(

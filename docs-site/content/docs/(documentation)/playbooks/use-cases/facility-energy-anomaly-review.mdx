@@ -1,0 +1,84 @@
+---
+title: 'Preparing an unusual facility energy reading for human review with AI agents'
+description: "Agent Swarm can be configured to assemble a dated, source-linked packet for one unusual facility energy reading. People decide."
+agent:
+  offer: false
+  when: "Someone wants operations and engineering to review one unexpected facility energy reading with its context before deciding what to investigate"
+---
+
+Agent Swarm can coordinate a configured, human-reviewed investigation of one unusual facility energy reading. Configured scripts gather the meter readings, site operating schedules and maintenance records for the window into a dated, source-linked evidence packet. Code checks flag what is missing or inconsistent. The packet routes to an accountable facilities owner, and a qualified person validates the causes and decides what to investigate, what to do about it and who is told.
+
+What this takes off the team is the assembly. Meter or utility data sits in one system, the operating schedule in another, the maintenance history in a third, and the occupancy or production calendar somewhere else again. Nobody has time to open all of them before the next stand-up, so the first question about a spike is usually answered from memory.
+
+The scope is one reading, or one spike window, at one site, reviewed before anyone acts. Supplier order confirmations, demand forecast accuracy, maintenance-request triage, partner data feed changes, inventory exceptions and post-incident business-impact reviews are different handoffs. [Maintenance work order triage](/docs/playbooks/use-cases/maintenance-work-order-triage) and [near-miss investigation review](/docs/playbooks/use-cases/near-miss-investigation-review) cover their own.
+
+<Callout type="warn">
+**A reading that suggests a safety hazard is not a workflow item.** An electrical fault, overheating equipment, a gas smell, or anything that threatens a person goes to the site's established human emergency and safety process, on the number and escalation path the team already runs. This workflow is not an alarm. It does not assess safety, it controls no equipment, and it does not replace that call.
+</Callout>
+
+## When an energy management system or a direct human review fits better
+
+**A dedicated energy-management or building-management system, when the team needs to run the building from it.** Continuous metering and automated alarms are what those products sell, along with equipment control and utility-grade analytics. Agent Swarm provides none of them. It ships no energy-management product, and it connects to no metering system out of the box. It controls no equipment.
+
+**A person with a spreadsheet, when readings come from one system or anomalies are rare.** At a handful of spikes a year, an engineer who exports the interval data and compares it to last month is the honest answer.
+
+Agent Swarm fits a narrower shape: context spread across several systems and several owners. The meter or utility series belongs to one team, and the site operating schedules to operations. Maintenance records sit with a facilities vendor, and the occupancy or production calendar with whoever plans the work. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that split falls.
+
+## An illustrative workflow
+
+This is an illustrative custom setup, not a built-in energy feature or integration and not a customer result. Energy-system access here is hypothetical: it depends on permissions, on configuration the team writes, and possibly on custom integrations the team builds and tests.
+
+<Mermaid title="Illustrative facility energy reading flow, from a flagged reading to a facilities owner deciding whether to investigate on site." chart={`flowchart LR
+  A["Reading flagged<br/>(above threshold)"] --> B["Deterministic gather<br/>(swarm-script to JSON)"]
+  B --> C["Agent assembles<br/>source-linked packet"]
+  C --> G{{"human-in-the-loop<br/>facilities owner"}}
+  G -- "investigate" --> R["Send someone<br/>on site"]
+  G -- "incomplete" --> S["Request more<br/>data"]
+  G -- "safety" --> T["Safety<br/>process"]
+`} />
+
+**1. A facilities owner defines the frame.** Which systems hold the meter or utility series, the operating schedules, the maintenance records and the occupancy or production calendar. Which reading window a review covers, what threshold makes a reading worth reviewing, and which conditions bypass the workflow entirely, such as a reported fault or an alarm the energy system already raised. Nothing outside that frame enters the packet.
+
+**2. Deterministic steps gather the records.** `swarm-script` steps reach each source through [script connections](/docs/guides/script-connections) and take credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in script source. They pull the meter series for the window, the operating schedule that was in force, and the maintenance records for the site in that period. Code then checks three things: gaps in the meter series, readings older than the team's threshold, and records that disagree, such as a schedule saying the site was closed while a maintenance log shows a contractor on site. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split, collection and checks in code with a configured skill per source, then synthesis by an agent.
+
+**3. An agent writes the packet.** The packet is dated and covers one window. It carries the readings themselves, the schedule in force, the maintenance activity that week, and one list of what is missing or inconsistent. Every line links the record it came from and the time it was read, so the owner can open the source instead of trusting the summary.
+
+**4. A facilities owner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a short summary with a link to the full packet, and resumes only on a human response. The owner validates the cause, decides whether anyone goes on site, and owns every action and every message that follows. Define the reject branch: request more data, hold the reading on an aged list, or route it to the safety process. The gate adds a decision point. It does not make the packet correct, and it does not choose the cause for you.
+
+## Example: a fictional reading
+
+The reading below is invented to show the shape of a packet. It is not a customer, and no part of it is a measured result.
+
+A warehouse's overnight consumption on one weekend sits far above its usual weekend level. Someone flags it on Monday morning, and the packet is assembled for that Saturday to Sunday window.
+
+The packet carries the meter series for the window, the site operating schedule for that weekend, and a maintenance record showing a refrigeration service booked that week. It flags two things. A conflict: the schedule says the site was closed, while the maintenance log shows a contractor with access booked on the Saturday. A gap: one meter is missing readings for several hours in the middle of the window, so the series is not continuous.
+
+Left to the owner are the questions the records cannot answer. Whether the reading is real or a meter fault. What caused it, if it is real. Whether to send someone, and who. Whom to tell, and when.
+
+## Edge cases the packet must name
+
+**Stale or missing meter data.** Each series carries its last reading time, and a gap is reported as a gap. The packet never interpolates or estimates a value to fill it, because a filled number reads like a measurement to whoever sees it next.
+
+**Conflicting records.** A schedule that says closed and an access log that says otherwise are two facts, and both are named with the owner who settles them. The packet does not pick the version that fits the hypothesis.
+
+**Time zones and daylight-saving shifts.** Meter timestamps arrive in whatever zone the meter or the utility export uses, and a schedule is usually written in local time. A window that crosses a daylight-saving change is either converted explicitly with the offset recorded or flagged as unresolved. Nobody reads a one-hour shift as a spike.
+
+**Permissions and coverage.** A source the swarm cannot read is named as a gap with the owner who can grant access, not silently dropped from the packet.
+
+**No response from the owner.** The gate carries a timeout and a fallback: a reminder, a named backup owner, then an explicit hold so the reading shows up on an aged list. Silence is never a decision.
+
+## Limitations
+
+Agent Swarm ships no energy-management system, no building-management integration and no equipment control. It does not diagnose a cause, does not assess whether equipment is safe, does not forecast consumption, and cannot guarantee a correct verdict on a reading.
+
+The packet is only as good as the sources behind it and the thresholds your team sets.
+
+Your team owns the configuration and the business rules: which sources are read, what window a review covers, which conditions bypass the workflow, and who receives the packet. The energy-system access described above is hypothetical until your team configures it.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic collection and checks, then agent synthesis.
+- [Pattern: HITL gates](/docs/playbooks/patterns/hitl-gates): the pause, both branches, the timeout.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): platform, manual process or shared agent.
+- [Maintenance work order triage](/docs/playbooks/use-cases/maintenance-work-order-triage): the neighbouring handoff for one maintenance request.
+- [Near-miss investigation review](/docs/playbooks/use-cases/near-miss-investigation-review): evidence assembly for a qualified human investigator.

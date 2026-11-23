@@ -542,7 +542,7 @@ describe("task list summaries", () => {
       task.id,
     ]);
     expect(row).not.toBeNull();
-    const summary = rowToAgentTaskSummary(row as AgentTaskRow);
+    const summary = rowToAgentTaskSummary(row);
     expect(summary.modelTier).toBe("smart");
     expect(summary.resolvedModel).toBe("claude-opus-5-5");
     expect(summary.modelSource).toBe("tier-config");

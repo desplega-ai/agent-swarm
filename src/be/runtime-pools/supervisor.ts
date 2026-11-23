@@ -19,7 +19,7 @@ import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
 import { workflowEventBus } from "../../workflows/event-bus";
 import { canClaim } from "../budget-admission";
-import { checkDependencies, failTask, getDbClient, getResolvedConfig, getTaskById } from "../db";
+import { checkDependencies, failTask, getResolvedConfig, getTaskById } from "../db";
 import {
   getRuntimeInstanceById,
   insertProvisioningRuntime,
@@ -29,6 +29,7 @@ import {
   nextFreeWorkspaceSlot,
   runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
+import { getStorage } from "../storage";
 import { mintRuntimeToken } from "../users";
 import { getPoolCache, reconcileCacheReleases } from "./cache-cleanup";
 import {
@@ -64,8 +65,7 @@ let tickAbort: AbortController | null = null;
 let warnedMultiRuntime = false;
 const orphanFirstSeen = new Map<string, number>();
 const ORPHAN_GRACE_MS = 120_000;
-const TERMINAL_TASK_STATUS_PLACEHOLDERS = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
-const TASKLESS_TRIGGER_SQL = "'unread_mentions', 'pool_tasks_available', 'channel_activity'";
+const repo = () => getStorage().repos.runtimePools;
 
 export function runtimeSupervisorStatus(): string {
   if (!isRuntimePoolsEnabled()) return "disabled";
@@ -112,78 +112,52 @@ async function recordProvisionFailure(
   countedFailures: Set<string>,
 ): Promise<void> {
   const error = scrubSecrets(reason);
-  const failedTask = await getDbClient().transaction(async (tx) => {
+  // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
+  // The claim is taken before the transaction, so a replayed attempt (decision D6)
+  // sees the same answer; it is given back when this runtime was already retired.
+  const counts = !countedFailures.has(runtime.agentId);
+  if (counts) countedFailures.add(runtime.agentId);
+  const outcome = await getStorage().transaction(async () => {
     if (runtime.id) {
-      const retired = await tx.run(
-        "UPDATE runtime_instances SET provision_error = ? WHERE id = ? AND status = 'provisioning' AND provision_error IS NULL",
-        [error, runtime.id],
-      );
-      if (!retired.changes) return null;
+      const retired = await repo().setProvisionError(runtime.id, error);
+      if (!retired) return "not-retired" as const;
       await markRuntimeTerminated(runtime.id, error);
     }
-    // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
-    if (countedFailures.has(runtime.agentId)) return null;
-    countedFailures.add(runtime.agentId);
-    const pool = await tx.get<{ circuit_open_until: string | null }>(
-      `UPDATE runtime_pools SET consecutive_failures = consecutive_failures + 1,
-       last_error = ?, last_error_at = ?, updated_at = ?,
-       circuit_open_until = CASE WHEN consecutive_failures + 1 >= ? OR circuit_open_until IS NOT NULL
-         THEN ? ELSE circuit_open_until END WHERE id = ? RETURNING circuit_open_until`,
-      [
-        error,
-        now.toISOString(),
-        now.toISOString(),
-        runtimeNumber("RUNTIME_CIRCUIT_THRESHOLD", 5),
-        new Date(
-          now.getTime() + runtimeNumber("RUNTIME_CIRCUIT_OPEN_MIN", 10) * 60_000,
-        ).toISOString(),
-        runtime.poolId ?? null,
-      ],
-    );
-    await tx.run(
-      "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?",
-      [error, now.toISOString(), now.toISOString(), runtime.controllerId ?? null],
-    );
-    const state = await tx.get<{ runtime_provision_attempts: number }>(
-      "UPDATE agents SET runtime_provision_attempts = runtime_provision_attempts + 1 WHERE id = ? RETURNING runtime_provision_attempts",
-      [runtime.agentId],
-    );
-    const attempts = state!.runtime_provision_attempts;
+    if (!counts) return null;
+    const pool = await repo().recordPoolProvisionFailure(runtime.poolId ?? null, {
+      error,
+      now: now.toISOString(),
+      threshold: runtimeNumber("RUNTIME_CIRCUIT_THRESHOLD", 5),
+      openUntil: new Date(
+        now.getTime() + runtimeNumber("RUNTIME_CIRCUIT_OPEN_MIN", 10) * 60_000,
+      ).toISOString(),
+    });
+    await repo().recordControllerError(runtime.controllerId ?? null, error, now.toISOString());
+    const attempts = (await repo().incrementProvisionAttempts(runtime.agentId))!;
     const delay = [30, 90, 180][Math.min(attempts - 1, 2)]!;
-    await tx.run("UPDATE agents SET runtime_provision_retry_at = ? WHERE id = ?", [
-      new Date(now.getTime() + delay * 1000).toISOString(),
+    await repo().setProvisionRetryAt(
       runtime.agentId,
-    ]);
-    if (pool?.circuit_open_until)
-      await tx.run(
-        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE runtime_pool_id = ?",
-        [runtime.poolId ?? null],
-      );
-    if (attempts < runtimeNumber("RUNTIME_PROVISION_MAX_ATTEMPTS", 3)) return null;
-    const pending = await tx.query<{ id: string }>(
-      "SELECT id FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY createdAt, rowid",
-      [runtime.agentId],
+      new Date(now.getTime() + delay * 1000).toISOString(),
     );
-    for (const row of pending) {
-      if (!(await checkDependencies(row.id)).ready) continue;
+    if (pool?.circuit_open_until) await repo().resetPoolProvisionRetry(runtime.poolId ?? null);
+    if (attempts < runtimeNumber("RUNTIME_PROVISION_MAX_ATTEMPTS", 3)) return null;
+    const pending = await repo().listPendingTaskIds(runtime.agentId);
+    for (const taskId of pending) {
+      if (!(await checkDependencies(taskId)).ready) continue;
       const failed = await failTask(
-        row.id,
+        taskId,
         `provisioning failed after ${attempts} attempts: ${error}`,
         { statusKind: "error" },
       );
       if (!failed) continue;
-      await tx.run(
-        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
-        [runtime.agentId],
-      );
+      await repo().resetProvisionRetry(runtime.agentId);
       return failed;
     }
-    await tx.run(
-      "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
-      [runtime.agentId],
-    );
+    await repo().resetProvisionRetry(runtime.agentId);
     return null;
   });
+  if (counts && outcome === "not-retired") countedFailures.delete(runtime.agentId);
+  const failedTask = outcome === "not-retired" ? null : outcome;
   if (failedTask) {
     try {
       await createWorkerTaskFollowUp({
@@ -200,11 +174,8 @@ async function recordProvisionFailure(
 class UnverifiedWorkspaceError extends Error {}
 
 async function retireUnverifiedRuntime(runtimeId: string, reason: string): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      "UPDATE runtime_instances SET provision_error = COALESCE(provision_error, ?) WHERE id = ?",
-      [scrubSecrets(reason), runtimeId],
-    );
+  await getStorage().transaction(async () => {
+    await repo().setProvisionErrorIfUnset(runtimeId, scrubSecrets(reason));
     await markRuntimeTerminated(runtimeId, reason);
   });
 }
@@ -229,10 +200,9 @@ export async function provisionRuntime(
         ? await resolveE2bImage(pool.id, signal)
         : (pool.resolvedImage ?? pool.image!);
     if (signal?.aborted || image === null) return false;
-    let workspaceSlot: number | null = null;
-    const token = await getDbClient().transaction(async () => {
+    const { token, workspaceSlot } = await getStorage().transaction(async () => {
       const credential = await mintRuntimeToken(agent.id, runtimeId);
-      if (pool.workspace) workspaceSlot = await nextFreeWorkspaceSlot(agent.id);
+      const workspaceSlot = pool.workspace ? await nextFreeWorkspaceSlot(agent.id) : null;
       await insertProvisioningRuntime({
         id: runtimeId,
         agentId: agent.id,
@@ -241,14 +211,9 @@ export async function provisionRuntime(
         reportedSlots: pool.slotsPerRuntime,
         workspaceSlot,
       });
-      await getDbClient().run(
-        `UPDATE runtime_instances SET provision_attempts =
-           (SELECT runtime_provision_attempts + 1 FROM agents WHERE id = ?),
-         provision_requested_at = ? WHERE id = ?`,
-        [agent.id, now.toISOString(), runtimeId],
-      );
+      await repo().recordProvisionRequest(runtimeId, agent.id, now.toISOString());
       signal?.throwIfAborted();
-      return credential.plaintext;
+      return { token: credential.plaintext, workspaceSlot };
     });
     signal?.throwIfAborted();
     registerVolatileSecret(token, `runtime:${runtimeId}`);
@@ -335,29 +300,20 @@ export async function provisionRuntime(
     // A cache is optional: surface degradation without counting a provision failure.
     const cacheErrorPrefix = "Persistent cache: ";
     const cacheError = cacheWarning ? cacheErrorPrefix + scrubSecrets(cacheWarning) : null;
-    await getDbClient().run(
-      `UPDATE runtime_pools SET last_error = ?, last_error_at = ?
-       WHERE id = ? AND (last_error IS NULL OR substr(last_error, 1, ?) = ?)`,
-      [
-        cacheError,
-        cacheError ? new Date().toISOString() : null,
-        pool.id,
-        cacheErrorPrefix.length,
-        cacheErrorPrefix,
-      ],
-    );
-    await getDbClient().run(
-      "UPDATE runtime_instances SET external_handle = ?, lease_expires_at = ?, created_at = COALESCE(?, created_at), updated_at = ? WHERE id = ?",
-      [
-        JSON.stringify(handle),
+    await repo().setPoolCacheError(pool.id, {
+      error: cacheError,
+      errorAt: cacheError ? new Date().toISOString() : null,
+      prefix: cacheErrorPrefix,
+    });
+    await repo().recordProvisioned(runtimeId, {
+      handleJson: JSON.stringify(handle),
+      leaseExpiresAt:
         ttlSec === undefined
           ? null
           : (handle.meta?.leaseExpiresAt ?? new Date(now.getTime() + ttlSec * 1000).toISOString()),
-        pool.kind === "e2b" ? (handle.createdAt ?? now.toISOString()) : null,
-        new Date().toISOString(),
-        runtimeId,
-      ],
-    );
+      createdAt: pool.kind === "e2b" ? (handle.createdAt ?? now.toISOString()) : null,
+      now: new Date().toISOString(),
+    });
     return true;
   } catch (error) {
     // Another reconciler took this workspace slot first: skip the agent this tick, no failure.
@@ -486,30 +442,20 @@ export async function reapPoolRuntimes(
         if (!runtime) return;
         const staleSession =
           pool.lifecycle === "per-task" && runtime.status !== "offline"
-            ? null
-            : await getDbClient().get<{ id: string }>(
-                `SELECT id FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
-            SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
-              AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
-          ) AND (EXISTS (SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId)
-            OR triggerType NOT IN (${TASKLESS_TRIGGER_SQL}) OR lastHeartbeatAt < ?) LIMIT 1`,
-                [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
+            ? false
+            : await repo().hasStaleRuntimeSession(
+                runtime.id,
+                TERMINAL_TASK_STATUSES,
+                sessionCutoff,
               );
         if (staleSession)
-          await getDbClient().run(
-            `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
-              SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
-                AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
-            ) AND (EXISTS (SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId)
-              OR triggerType NOT IN (${TASKLESS_TRIGGER_SQL}) OR lastHeartbeatAt < ?)`,
-            [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
+          await repo().deleteStaleRuntimeSessions(
+            runtime.id,
+            TERMINAL_TASK_STATUSES,
+            sessionCutoff,
           );
         if (runtime.status === "offline") {
-          const session = await getDbClient().get<{ taskId: string }>(
-            "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
-            [runtime.id],
-          );
-          if (session)
+          if (await repo().hasRuntimeSession(runtime.id))
             await recoverRuntime(runtime.id, runtime.provisionError ?? "Runtime offline");
           return;
         }
@@ -555,11 +501,10 @@ export async function reapPoolRuntimes(
           if (!stale) remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
           return;
         }
-        const busy = await getDbClient().get<{ taskId: string }>(
-          `SELECT s.taskId FROM active_sessions s LEFT JOIN agent_tasks t ON t.id = s.taskId
-           WHERE s.runtimeInstanceId = ? AND (t.status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
-             OR (t.id IS NULL AND s.triggerType IN (${TASKLESS_TRIGGER_SQL}) AND s.lastHeartbeatAt >= ?)) LIMIT 1`,
-          [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
+        const busy = await repo().findBusyRuntimeSession(
+          runtime.id,
+          TERMINAL_TASK_STATUSES,
+          sessionCutoff,
         );
         const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
         const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
@@ -584,19 +529,12 @@ export async function reapPoolRuntimes(
         }
         if (runtime.status !== "active" && pool.enabled) return;
         if (busy || taskRunning) {
-          await getDbClient().run(
-            "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE((SELECT id FROM agent_tasks WHERE id = ?), task_id) WHERE id = ?",
-            [rotating || !pool.enabled ? 1 : 0, busy?.taskId ?? null, runtime.id],
-          );
+          await repo().markRuntimeBusy(runtime.id, rotating || !pool.enabled, busy?.taskId ?? null);
           return;
         }
         if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) {
           const finishedAt = task.finishedAt ?? runtime.idleSince ?? now.toISOString();
-          if (!runtime.idleSince)
-            await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
-              finishedAt,
-              runtime.id,
-            ]);
+          if (!runtime.idleSince) await repo().setRuntimeIdleSince(runtime.id, finishedAt);
           if (
             now.getTime() - Date.parse(finishedAt) <
             runtimeNumber("RUNTIME_PER_TASK_EXIT_GRACE_SEC", 60) * 1000
@@ -608,9 +546,7 @@ export async function reapPoolRuntimes(
         }
         if (rotating) {
           if (!runtime.draining) {
-            await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
-              runtime.id,
-            ]);
+            await repo().setRuntimeDraining(runtime.id, true);
           } else {
             await terminateRuntime(
               runtime,
@@ -625,9 +561,7 @@ export async function reapPoolRuntimes(
         }
         if (!pool.enabled) {
           if (!runtime.draining) {
-            await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
-              runtime.id,
-            ]);
+            await repo().setRuntimeDraining(runtime.id, true);
           } else {
             await terminateRuntime(runtime, controller, "Pool disabled");
             remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
@@ -635,24 +569,15 @@ export async function reapPoolRuntimes(
           return;
         }
         const idleSince = runtime.idleSince ?? now.toISOString();
-        if (!runtime.idleSince)
-          await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
-            idleSince,
-            runtime.id,
-          ]);
+        if (!runtime.idleSince) await repo().setRuntimeIdleSince(runtime.id, idleSince);
         if (pool.lifecycle !== "idle" || pool.idleMinutes === null) return;
         if ((remaining.get(runtime.agentId) ?? 0) <= pool.minRuntimes) {
-          if (runtime.draining)
-            await getDbClient().run("UPDATE runtime_instances SET draining = 0 WHERE id = ?", [
-              runtime.id,
-            ]);
+          if (runtime.draining) await repo().setRuntimeDraining(runtime.id, false);
           return;
         }
         if (now.getTime() - Date.parse(idleSince) < pool.idleMinutes * 60_000) return;
         if (!runtime.draining) {
-          await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
-            runtime.id,
-          ]);
+          await repo().setRuntimeDraining(runtime.id, true);
         } else {
           await terminateRuntime(runtime, controller, "Idle timeout");
           remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
@@ -689,10 +614,7 @@ async function renewPoolLeases(
       const { endAt } = await controller.renew(handle, poolLeaseTtl(pool, controller));
       if (!Number.isFinite(Date.parse(endAt)))
         throw new Error("Provider returned an invalid lease expiry");
-      await getDbClient().run(
-        "UPDATE runtime_instances SET lease_expires_at = ?, updated_at = ? WHERE id = ? AND status != 'offline'",
-        [endAt, now.toISOString(), runtime.id],
-      );
+      await repo().setRuntimeLease(runtime.id, endAt, now.toISOString());
       console.debug(
         scrubSecrets(`[runtime-pools] Runtime ${runtime.id} lease renewed until ${endAt}`),
       );
@@ -710,13 +632,7 @@ export async function reconcileControllerOrphans(
   now = new Date(),
   listedHandles?: RuntimeHandle[] | null,
 ): Promise<void> {
-  const rows = await getDbClient().query<{
-    id: string;
-    status: string;
-    external_handle: string | null;
-  }>("SELECT id, status, external_handle FROM runtime_instances WHERE controller_id = ?", [
-    controllerId,
-  ]);
+  const rows = await repo().listControllerRuntimes(controllerId);
   const known = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
     if (!row.external_handle) continue;
@@ -837,10 +753,7 @@ async function reconcilePools(
         const pending = await pendingWorkForAgent(agent.id);
         work.set(agent.id, pending);
         if (!pending.work && (agent.runtimeProvisionAttempts || agent.runtimeProvisionRetryAt))
-          await getDbClient().run(
-            "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
-            [agent.id],
-          );
+          await repo().resetProvisionRetry(agent.id);
         const runtimes = await listRuntimeInstancesForAgent(agent.id);
         let freeSlots = 0;
         let provisioning = 0;
@@ -849,11 +762,7 @@ async function reconcilePools(
           if (!runtime.isLive || runtime.draining || runtime.credentialReady === false) continue;
           const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
           if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) continue;
-          const sessions = await getDbClient().get<{ count: number }>(
-            "SELECT COUNT(*) AS count FROM active_sessions WHERE runtimeInstanceId = ?",
-            [runtime.id],
-          );
-          let occupied = sessions?.count ?? 0;
+          let occupied = await repo().countRuntimeSessions(runtime.id);
           if (occupied === 0 && runtime.taskId) {
             if (task?.status === "in_progress" || task?.status === "reviewing") occupied = 1;
           }
@@ -906,13 +815,7 @@ async function reconcilePools(
             if (!(pool.resolvedImage ?? pool.image)) break;
             if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
             if (signal.aborted) return;
-            const retry = await getDbClient().get<{
-              runtime_provision_retry_at: string | null;
-              runtime_provision_attempts: number;
-            }>(
-              "SELECT runtime_provision_retry_at, runtime_provision_attempts FROM agents WHERE id = ?",
-              [agent.id],
-            );
+            const retry = await repo().getProvisionRetry(agent.id);
             if (
               retry?.runtime_provision_retry_at &&
               Date.parse(retry.runtime_provision_retry_at) > now.getTime()

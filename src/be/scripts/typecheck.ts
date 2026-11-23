@@ -959,10 +959,12 @@ export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<un
 `;
 
 export async function scriptSdkTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypesArg?: string,
+  mcpTypesArg?: string,
   appTypes?: string,
 ): Promise<string> {
+  const apiTypes = apiTypesArg ?? (await getScriptApiTypes());
+  const mcpTypes = mcpTypesArg ?? (await getScriptMcpTypes());
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
   return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}\n`;
@@ -1035,10 +1037,12 @@ export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
  * `ctx.api.<slug>` completions break in the editor.
  */
 export async function scriptStdlibTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypesArg?: string,
+  mcpTypesArg?: string,
   appTypes?: string,
 ): Promise<string> {
+  const apiTypes = apiTypesArg ?? (await getScriptApiTypes());
+  const mcpTypes = mcpTypesArg ?? (await getScriptMcpTypes());
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
   return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}`);
@@ -1613,8 +1617,8 @@ export async function typecheckScript(
   source: string,
   context: ScriptTypeContext = {},
 ): Promise<ScriptTypecheckResult> {
-  const apiTypes = getScriptApiTypes(context);
-  const mcpTypes = getScriptMcpTypes(context);
+  const apiTypes = await getScriptApiTypes(context);
+  const mcpTypes = await getScriptMcpTypes(context);
   const appTypesReport = await getScriptAppTypesReport(context, source);
   const appTypes = appTypesReport.source;
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);

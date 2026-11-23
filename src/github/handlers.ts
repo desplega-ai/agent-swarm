@@ -276,7 +276,7 @@ export async function handlePullRequest(
 
     // Same task creation flow as mention-based handling
     const lead = await findLeadAgent();
-    const result = resolveTemplate(
+    const result = await resolveTemplate(
       "github.pull_request.assigned",
       {
         pr_number: pr.number,
@@ -390,7 +390,7 @@ export async function handlePullRequest(
 
     // Create review task
     const lead = await findLeadAgent();
-    const result = resolveTemplate(
+    const result = await resolveTemplate(
       "github.pull_request.review_requested",
       {
         pr_number: pr.number,
@@ -498,7 +498,7 @@ export async function handlePullRequest(
     }
 
     const lead = await findLeadAgent();
-    const result = resolveTemplate(
+    const result = await resolveTemplate(
       "github.pull_request.labeled",
       {
         pr_number: pr.number,
@@ -597,7 +597,7 @@ export async function handlePullRequest(
 
   // Build task description
   const context = extractMentionContext(pr.body) || pr.title;
-  const result = resolveTemplate(
+  const result = await resolveTemplate(
     "github.pull_request.mentioned",
     {
       pr_number: pr.number,
@@ -682,7 +682,7 @@ export async function handleIssue(
 
     // Same task creation flow as mention-based handling
     const lead = await findLeadAgent();
-    const result = resolveTemplate(
+    const result = await resolveTemplate(
       "github.issue.assigned",
       {
         issue_number: issue.number,
@@ -784,7 +784,7 @@ export async function handleIssue(
     }
 
     const lead = await findLeadAgent();
-    const result = resolveTemplate(
+    const result = await resolveTemplate(
       "github.issue.labeled",
       {
         issue_number: issue.number,
@@ -865,7 +865,7 @@ export async function handleIssue(
 
   // Build task description
   const context = extractMentionContext(issue.body) || issue.title;
-  const result = resolveTemplate(
+  const result = await resolveTemplate(
     "github.issue.mentioned",
     {
       issue_number: issue.number,
@@ -983,7 +983,7 @@ export async function handleComment(
     ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
     : "";
 
-  const result = resolveTemplate(
+  const result = await resolveTemplate(
     "github.comment.mentioned",
     {
       target_type: targetType,
@@ -1470,7 +1470,7 @@ export async function handlePullRequestReview(
       ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
       : baseReviewSuggestion) + openItemsSuggestion;
 
-  const result = resolveTemplate(
+  const result = await resolveTemplate(
     "github.pull_request.review_submitted",
     {
       review_emoji: emoji,

@@ -6,6 +6,7 @@ This guide covers all deployment options for Agent Swarm.
 
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes) — API ingress, dashboard access, and CORS diagnostics
 - [Docker Compose (Recommended)](#docker-compose-recommended)
+- [Postgres storage engine (optional)](#postgres-storage-engine-optional)
 - [Docker Worker](#docker-worker)
 - [Server Deployment (systemd)](#server-deployment-systemd)
 - [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume)
@@ -133,7 +134,7 @@ All services in the docker-compose files include `platform: linux/amd64` to avoi
 
 The example `docker-compose.yml` sets up:
 
-- **API service** (port 3013) — MCP HTTP server with SQLite database
+- **API service** (port 3013) — MCP HTTP server with SQLite database (or Postgres, see [Postgres storage engine](#postgres-storage-engine-optional))
 - **12 agent services: 1 lead and 11 workers covering all 11 official templates**, each bootstrapped via `TEMPLATE_ID`:
   - **1 lead** — Coordinator that delegates tasks to workers
   - **2 coders** — Worker replicas that execute coding tasks
@@ -200,6 +201,24 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 ```
 
 > **Note:** The API volume is `swarm_api_data`, mounted at `/app/data`. Installs created before that change mount `swarm_api` at `/app` — substitute that name and use `-v swarm_api:/old` with `cp -a /old/data/.`. See [Migrating from the `/app` mount](#migrating-from-the-app-mount).
+
+### Postgres storage engine (optional)
+
+The API runs on SQLite by default. Set `DATABASE_URL` to a `postgres://` URL to run it on Postgres 16 with pgvector instead. Nothing changes for an install that does not set it.
+
+```bash
+# .env
+POSTGRES_PASSWORD=<strong password>
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --env-file .env up -d
+```
+
+- One API process per database on both engines. A second API on the same Postgres database stops with a clear error.
+- Keep the `swarm_api_data` volume: it holds the encryption key file and the page-session secret.
+- `db-query` needs a restricted reader role and `DATABASE_QUERY_URL`; without it the tool is off on Postgres.
+- Back up Postgres with your provider or `pg_dump`. Litestream is for SQLite only.
+- Move an existing SQLite database with `agent-swarm db-copy --from <file> --to <url>`.
+
+Setup, the reader role, the cutover procedure and the limits: [runbooks/postgres.md](./runbooks/postgres.md). Helm: `database.url` or `database.existingSecret` ([Kubernetes guide](https://docs.agent-swarm.dev/docs/guides/kubernetes)).
 
 ### Database retention
 
