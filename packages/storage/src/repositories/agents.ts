@@ -228,10 +228,7 @@ export interface AgentsRepository {
   /** Column names of `agents` in table order. */
   listAgentColumns(): Promise<string[]>;
   /** Sets the given columns plus `lastUpdatedAt` to now. */
-  setAgentColumns(
-    id: string,
-    values: AgentColumnValues,
-  ): Promise<AgentRow | null>;
+  setAgentColumns(id: string, values: AgentColumnValues): Promise<AgentRow | null>;
   /** COALESCE profile update; see {@link AgentProfileUpdate}. */
   updateAgentProfile(id: string, update: AgentProfileUpdate): Promise<AgentRow | null>;
   touchAgentActivity(id: string): Promise<void>;
@@ -527,10 +524,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
   /** Catalog query differs per engine (SQLite `pragma_table_info`). */
   abstract listAgentColumns(): Promise<string[]>;
 
-  setAgentColumns(
-    id: string,
-    values: AgentColumnValues,
-  ): Promise<AgentRow | null> {
+  setAgentColumns(id: string, values: AgentColumnValues): Promise<AgentRow | null> {
     const sets: SqlQuery[] = [];
     for (const [column, value] of Object.entries(values)) {
       if (value === undefined) continue;
