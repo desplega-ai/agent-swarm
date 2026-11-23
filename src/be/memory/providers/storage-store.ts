@@ -257,7 +257,10 @@ export class StorageMemoryStore implements MemoryStore {
     this.ftsInitialized = ready;
     if (ready && backfill) {
       this.ftsPopulate = this.populateFtsTable().catch((err) => {
-        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
+        console.error(
+          "[memory-fts] Failed to populate memory_fts:",
+          err instanceof Error ? err.message : String(err),
+        );
       });
     }
   }
@@ -352,7 +355,9 @@ export class StorageMemoryStore implements MemoryStore {
       });
     } catch (err) {
       rethrowIfRetryable(err);
-      console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
+      console.error(
+        `[memory-fts] sync failed memory_id=${memoryId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -733,7 +738,7 @@ export class StorageMemoryStore implements MemoryStore {
         .slice(0, limit);
     } catch (err) {
       rethrowIfRetryable(err);
-      console.warn("[memory-fts] query failed:", (err as Error).message);
+      console.warn("[memory-fts] query failed:", err instanceof Error ? err.message : String(err));
       return [];
     }
   }
@@ -1212,7 +1217,9 @@ export class StorageMemoryStore implements MemoryStore {
           this.noteVecWrite();
         } catch (err) {
           rethrowIfRetryable(err);
-          console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
+          console.error(
+            `[memory-vec] update failed memory_id=${id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
           // The row now misses from memory_vec: search must see the fallback.
           this.invalidateSearchHealth();
         }
@@ -1383,7 +1390,10 @@ export class StorageMemoryStore implements MemoryStore {
       try {
         health = await this.healthFromCounts(await this.getHealthCountsOffLoop(), searchReader());
       } catch (err) {
-        console.warn("[memory-search] health counts failed:", (err as Error).message);
+        console.warn(
+          "[memory-search] health counts failed:",
+          err instanceof Error ? err.message : String(err),
+        );
         health = await this.getHealth();
       }
       // A DB swap or a vec write mid-refresh invalidated this result.

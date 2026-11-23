@@ -128,7 +128,7 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
         ? "The database copy COMMITTED: the target holds the copied data. Only the report is missing."
         : "The copy did not commit.";
       console.error(
-        `[db-copy] cannot write the report ${parsed.json}: ${(error as Error).message}. ${outcome}`,
+        `[db-copy] cannot write the report ${parsed.json}: ${error instanceof Error ? error.message : String(error)}. ${outcome}`,
       );
       // 3: committed, report missing. Distinct from 1 (copy failed).
       return report.ok ? 3 : 1;

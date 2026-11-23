@@ -204,7 +204,7 @@ async function startPool(
   if (failed) {
     for (const result of started) if (result.status === "fulfilled") result.value.terminate();
     console.warn(
-      `[memory-search] read workers failed to start (${(failed.reason as Error).message}); reads run in-process`,
+      `[memory-search] read workers failed to start (${(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))}); reads run in-process`,
     );
     return null;
   }

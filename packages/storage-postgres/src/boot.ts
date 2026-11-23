@@ -181,7 +181,7 @@ export async function acquireProcessLock(
           if (!row || Number(row.pid) !== lockPid) lost("the lock session ended (new backend)");
           else if (row.held !== true) lost("the lock session no longer holds the lock");
         })
-        .catch((err: unknown) => lost(`the lock session failed: ${(err as Error).message}`))
+        .catch((err: unknown) => lost(`the lock session failed: ${(err instanceof Error ? err.message : String(err))}`))
         .finally(() => {
           checking = false;
         });

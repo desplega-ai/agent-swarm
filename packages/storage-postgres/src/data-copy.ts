@@ -442,7 +442,7 @@ function copyMetadataProblem(migrationsDir: string): string | null {
     try {
       format = (JSON.parse(readFileSync(file, "utf8")) as { format?: unknown }).format;
     } catch (error) {
-      return `${file} is not valid JSON: ${(error as Error).message}`;
+      return `${file} is not valid JSON: ${(error instanceof Error ? error.message : String(error))}`;
     }
     if (format !== COPY_METADATA_FORMAT) {
       return (
@@ -521,7 +521,7 @@ async function planReadOnly(url: string, query: MetricQuery): Promise<string | n
         );
         return null;
       } catch (error) {
-        return (error as Error).message;
+        return (error instanceof Error ? error.message : String(error));
       } finally {
         await conn.unsafe("ROLLBACK").catch(() => {});
       }
@@ -681,7 +681,7 @@ export async function copyIntoPostgres(
     try {
       conn = (await pool.reserve()) as unknown as Conn;
     } catch (error) {
-      report.error = `cannot connect to the target database: ${(error as Error).message}`;
+      report.error = `cannot connect to the target database: ${(error instanceof Error ? error.message : String(error))}`;
       return report;
     }
     try {
@@ -950,7 +950,7 @@ export async function copyIntoPostgres(
               table: "metrics",
               column: pending.where,
               row: pending.row,
-              reason: `could not be checked on Postgres: ${(error as Error).message}`,
+              reason: `could not be checked on Postgres: ${(error instanceof Error ? error.message : String(error))}`,
             });
             continue;
           }
@@ -967,7 +967,7 @@ export async function copyIntoPostgres(
         return report;
       } catch (error) {
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
-        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error as Error).message}`;
+        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error instanceof Error ? error.message : String(error))}`;
         return report;
       } finally {
         // An early refusal returns without COMMIT: undo the chain and every write.
@@ -976,7 +976,7 @@ export async function copyIntoPostgres(
     } catch (error) {
       // A failure before the copy transaction (target inspection):
       // it still goes into the report, so --json is written.
-      report.error = `the copy did not start, no row was copied: ${(error as Error).message}`;
+      report.error = `the copy did not start, no row was copied: ${(error instanceof Error ? error.message : String(error))}`;
       return report;
     } finally {
       await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
