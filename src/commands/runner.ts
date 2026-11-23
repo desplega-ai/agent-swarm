@@ -106,7 +106,7 @@ import {
   type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
-import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
+import { scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
@@ -124,13 +124,9 @@ import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
 import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match.ts";
-import {
-  canonicalAzureDevOpsRepoUrl,
-  isAzureDevOpsUrl,
-  parseAzureDevOpsRepoUrl,
-} from "../vcs/azure-devops.ts";
-import { bitbucketFullName, isBitbucketUrl, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
-import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
+import { canonicalAzureDevOpsRepoUrl, parseAzureDevOpsRepoUrl } from "../vcs/azure-devops.ts";
+import { bitbucketFullName, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
+import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
@@ -3240,15 +3236,14 @@ export async function detectVcsForTask(
     ).trim();
 
     // 4. Detect provider and check for PR/MR
-    let vcsProvider: VcsProvider;
+    const vcsProvider = detectVcsProvider(remoteUrl);
     let prJson: string;
     let azureRepo: string | null = null;
     let bitbucketRepo: string | null = null;
 
-    if (isAzureDevOpsUrl(remoteUrl)) {
+    if (vcsProvider === "azure-devops") {
       const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
       if (!parsed) return;
-      vcsProvider = "azure-devops";
       azureRepo = canonicalAzureDevOpsRepoUrl(remoteUrl);
       const prs = JSON.parse(
         await Bun.$`az repos pr list --organization ${parsed.orgUrl} --project ${parsed.project} --repository ${parsed.repository} --source-branch ${branch} --status active --top 1 --output json`
@@ -3261,25 +3256,16 @@ export async function detectVcsForTask(
           url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
         })),
       );
-    } else if (isBitbucketUrl(remoteUrl)) {
-      // Checked before the loose "github" substring match below, so a
-      // Bitbucket repo with "github" in its slug is not sent to `gh`.
+    } else if (vcsProvider === "bitbucket") {
       bitbucketRepo = bitbucketFullName(remoteUrl);
       if (!bitbucketRepo) return;
-      vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (
-      remoteUrl.includes("github.com") ||
-      remoteUrl.includes("github") ||
-      isGitHubUrl(remoteUrl)
-    ) {
-      vcsProvider = "github";
+    } else if (vcsProvider === "github") {
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
       ).trim();
-    } else if (remoteUrl.includes("gitlab")) {
-      vcsProvider = "gitlab";
+    } else if (vcsProvider === "gitlab") {
       prJson = (
         await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
           .quiet()
