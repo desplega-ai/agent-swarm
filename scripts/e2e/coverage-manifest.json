@@ -681,8 +681,8 @@
       ]
     },
     "slack-inbound-gates": {
-      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
-      "scenarios": ["slack-inbound-gates"]
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, reserved action ids in agent blocks, and SLACK_WORKFLOW_BOT_IDS bot posts that start workflows but never tasks",
+      "scenarios": ["slack-inbound-gates", "slack-workflow-bot-ids"]
     },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",

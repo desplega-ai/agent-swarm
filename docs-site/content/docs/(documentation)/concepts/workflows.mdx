@@ -347,7 +347,7 @@ The webhook payload supplies `event` and `pull_request`. A nonmatching event end
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
 | `event` | Starts from a named internal event; `slack.message`, `azure-devops.work_item.assigned` and `azure-devops.work_item.commented` are supported |
 
-An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts.
+An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts. Bot messages are dropped unless the bot is listed for that channel in [`SLACK_WORKFLOW_BOT_IDS`](/docs/integrations/slack#bot-messages-and-workflows); a listed bot's post carries `botId` (and `user` only when Slack sends one) and starts workflows without creating an agent task.
 
 Workflow runs preserve the human who actually triggered them in `createdBy`. Authenticated HTTP and MCP triggers use the trusted caller context, schedules use their creator when present, and Kapso routing uses its resolved sender. Generic ownerless webhooks and creatorless schedules remain unattributed rather than inheriting the workflow author's identity. Retry, resume, and recovery paths rehydrate this requester from the run so agent tasks created later keep the same attribution.
 

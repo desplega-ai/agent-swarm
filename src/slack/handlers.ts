@@ -69,6 +69,7 @@ import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { buildSlackThreadSnapshot, type SlackThreadSnapshot } from "./thread-participants";
 import { registerTreeMessage } from "./watcher";
+import { isSlackWorkflowBotAllowed } from "./workflow-bots";
 
 /** Runtime check for `pre.slack.route` modifications (mirrors `SlackRouteModify`). */
 const SlackRouteModifySchema = z
@@ -407,6 +408,47 @@ function checkRateLimit(userId: string): boolean {
   return true;
 }
 
+/**
+ * A post from a bot listed in SLACK_WORKFLOW_BOT_IDS: emit the `slack.message`
+ * workflow event and stop. It keeps the dedupe, external-channel and
+ * left-thread gates of a human message, and never reaches mention routing,
+ * buffering or task creation.
+ */
+async function emitBotWorkflowEvent(
+  client: WebClient,
+  bot: MessageEvent,
+  body: unknown,
+): Promise<void> {
+  const messageKey = `${bot.channel}:${bot.ts}`;
+  if (!isAdmittedSlackDelivery() && isMessageProcessed(messageKey)) {
+    return ignoreSlackInbound("duplicate_message");
+  }
+  if (
+    await shouldBlockChannel(
+      client,
+      bot.channel,
+      (body as { is_ext_shared_channel?: boolean } | undefined)?.is_ext_shared_channel,
+    )
+  ) {
+    return ignoreSlackInbound("external_channel");
+  }
+  if (await shouldSkipLeftSlackThread(bot.channel, bot.thread_ts, false)) {
+    return ignoreSlackInbound("thread_left");
+  }
+  console.log(`[Slack] Bot ${bot.bot_id} in ${bot.channel}: workflow event only`);
+  noteSlackInboundSideEffect("workflow_event");
+  workflowEventBus.emit("slack.message", {
+    channel: bot.channel,
+    channelId: bot.channel,
+    text: bot.text ?? "",
+    user: bot.user,
+    userId: bot.user,
+    botId: bot.bot_id,
+    ts: bot.ts,
+    threadTs: bot.thread_ts,
+  });
+}
+
 export function registerMessageHandler(app: App): void {
   // Handle all message events
   app.event("message", async ({ event, body, context, client, say }) => {
@@ -443,6 +485,11 @@ export function registerMessageHandler(app: App): void {
     // causing agent completion messages to be misidentified as human messages
     // and triggering duplicate task creation.
     if (isBotMessage(msg, cachedBotUserId)) {
+      // SLACK_WORKFLOW_BOT_IDS: a listed bot (an alerting tool) may start
+      // `slack.message` workflows. It never reaches mention routing or tasks.
+      if (isSlackWorkflowBotAllowed(msg, { botId: cachedBotId, botUserId: cachedBotUserId })) {
+        return emitBotWorkflowEvent(client, msg, body);
+      }
       return ignoreSlackInbound("bot_message");
     }
     // Task text: `msg.text`, plus any table block it leaves out. Mention and
