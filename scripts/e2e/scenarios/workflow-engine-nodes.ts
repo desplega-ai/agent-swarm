@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Workflow engine, node types: every executor runs inside a real workflow run that
 // reaches a terminal state. Two scenarios: the instant executors in one linear chain
 // (this file's first export), and the async executors in one parallel run.
@@ -345,8 +346,7 @@ export const workflowEngineInstantNodes: Scenario = {
       expect(asRecord(results[0]?.output).stdout === "item-a", "foreach body ran per item");
       // Synthetic child steps carry the body type.
       const childTypes = ctx.db.query<{ nodeId: string; nodeType: string }>(
-        "SELECT nodeId, nodeType FROM workflow_run_steps WHERE runId = ? AND nodeId LIKE 'n-foreach#%' ORDER BY nodeId",
-        [runId],
+        sql`SELECT "nodeId", "nodeType" FROM workflow_run_steps WHERE "runId" = ${runId} AND "nodeId" LIKE 'n-foreach#%' ORDER BY "nodeId"`,
       );
       expect(
         childTypes.length === 2 && childTypes.every((child) => child.nodeType === "script"),
@@ -356,8 +356,7 @@ export const workflowEngineInstantNodes: Scenario = {
       const swarmNote = outputOf(detail, "n-notify-swarm");
       expect(swarmNote.sent === true && typeof swarmNote.messageId === "string", "swarm notify");
       const posted = ctx.db.get<{ content: string; agentId: string | null }>(
-        "SELECT content, agentId FROM channel_messages WHERE id = ?",
-        [asString(swarmNote.messageId, "swarm message id")],
+        sql`SELECT content, "agentId" FROM channel_messages WHERE id = ${asString(swarmNote.messageId, "swarm message id")}`,
       );
       expect(
         posted?.content === `e2e chain ${marker} ok=2`,
@@ -384,8 +383,7 @@ export const workflowEngineInstantNodes: Scenario = {
       const types = new Set(
         ctx.db
           .query<{ nodeType: string }>(
-            "SELECT DISTINCT nodeType FROM workflow_run_steps WHERE runId = ?",
-            [runId],
+            sql`SELECT DISTINCT "nodeType" FROM workflow_run_steps WHERE "runId" = ${runId}`,
           )
           .map((row) => row.nodeType),
       );

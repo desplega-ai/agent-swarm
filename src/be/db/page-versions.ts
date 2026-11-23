@@ -1,4 +1,4 @@
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * The page's edit counter, `MAX(page_versions.version) + 1`, or 1 before the
@@ -7,9 +7,6 @@ import { getDbClient } from "./runtime";
  * for seconds per call.
  */
 export async function getPageEditCounter(pageId: string): Promise<number> {
-  const row = await getDbClient().get<{ latest: number | null }>(
-    "SELECT MAX(version) AS latest FROM page_versions WHERE pageId = ?",
-    [pageId],
-  );
-  return (row?.latest ?? 0) + 1;
+  const latest = await getStorage().repos.pages.latestPageVersion(pageId);
+  return (latest ?? 0) + 1;
 }

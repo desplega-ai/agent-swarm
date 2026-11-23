@@ -1,6 +1,6 @@
 import { decryptSecret, getEncryptionKey } from "../crypto";
+import { getStorage } from "../storage";
 import { isReservedConfigKey } from "../swarm-config-guard";
-import { getDbClient } from "./runtime";
 
 /**
  * Every stored secret config value (all scopes, incl. derived
@@ -13,9 +13,7 @@ export async function listStoredConfigSecrets(): Promise<{
   secrets: { key: string; value: string }[];
   failed: number;
 }> {
-  const rows = await getDbClient().query<{ key: string; value: string; encrypted: number }>(
-    "SELECT key, value, encrypted FROM swarm_config WHERE isSecret = 1 OR encrypted = 1",
-  );
+  const rows = await getStorage().repos.config.listSecretConfigs();
   const secrets: { key: string; value: string }[] = [];
   let failed = 0;
   for (const row of rows) {

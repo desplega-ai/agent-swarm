@@ -42,7 +42,7 @@ jobs:
           | while read -r number; do
             git fetch -q origin "refs/pull/$number/head" || continue
             added=$(git diff --name-only --diff-filter=A origin/main...FETCH_HEAD -- src/be/migrations/ \
-              | grep -E '/[0-9]+_[^/]+\.sql$' || true)
+              | grep -E '^src/be/migrations/[0-9]+_[^/]+\.sql$' || true)
             [ -z "$added" ] && continue
             stale=""
             while read -r file; do

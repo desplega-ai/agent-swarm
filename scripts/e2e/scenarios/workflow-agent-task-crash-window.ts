@@ -1,3 +1,4 @@
+import { insertionOrder, sql } from "../db";
 // A crash between an agent-task step's task insert and the step parking leaves
 // the step `running` with a live task. Recovery on the next boot must reconnect
 // the step to that task, not insert a second one under a new step row.
@@ -29,11 +30,12 @@ export const workflowAgentTaskCrashWindow: Scenario = {
       ],
     });
     const tasksOf = (runId: string) =>
-      ctx.db.query<{ id: string }>("SELECT id FROM agent_tasks WHERE workflowRunId = ?", [runId]);
+      ctx.db.query<{ id: string }>(
+        sql`SELECT id FROM agent_tasks WHERE "workflowRunId" = ${runId}`,
+      );
     const stepsOf = (runId: string) =>
       ctx.db.query<StepRow>(
-        "SELECT id, status FROM workflow_run_steps WHERE runId = ? AND nodeId = 'work' ORDER BY rowid",
-        [runId],
+        sql`SELECT id, status FROM workflow_run_steps WHERE "runId" = ${runId} AND "nodeId" = 'work' ORDER BY ${insertionOrder}`,
       );
 
     // This process dies right after the step inserts its task.

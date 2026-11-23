@@ -83,6 +83,25 @@ Name of the litestream credentials Secret.
 {{- end }}
 
 {{/*
+Postgres engine selected: a database URL inline or in an existing Secret.
+Empty for SQLite (the default).
+*/}}
+{{- define "agent-swarm.postgres" -}}
+{{- if or .Values.database.url .Values.database.existingSecret }}true{{- end }}
+{{- end }}
+
+{{/*
+Name of the Secret that holds DATABASE_URL (and DATABASE_QUERY_URL).
+*/}}
+{{- define "agent-swarm.databaseSecretName" -}}
+{{- if .Values.database.existingSecret }}
+{{- .Values.database.existingSecret }}
+{{- else }}
+{{- printf "%s-database" (include "agent-swarm.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Name of the agent-fs S3 credentials Secret.
 */}}
 {{- define "agent-swarm.agentFsSecretName" -}}

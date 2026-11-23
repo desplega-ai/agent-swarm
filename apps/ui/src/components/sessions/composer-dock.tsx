@@ -98,19 +98,57 @@ function fileExtension(name: string): string {
   return dot === -1 ? "" : name.slice(dot).toLowerCase();
 }
 
+/** What a box takes: the allowed types, the size cap, and an optional count cap per message. */
+export interface AttachmentLimits {
+  /** Extensions (`.png`) or MIME types (`application/pdf`, `image/*`), as in an input's `accept`. */
+  accept: readonly string[];
+  maxBytes: number;
+  maxFiles?: number;
+}
+
+export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
+  accept: ALLOWED_ATTACHMENT_EXTENSIONS,
+  maxBytes: MAX_ATTACHMENT_BYTES,
+};
+
+function isAccepted(file: File, accept: readonly string[]): boolean {
+  const extension = fileExtension(file.name);
+  const type = file.type.toLowerCase();
+  return accept.some((entry) => {
+    const rule = entry.trim().toLowerCase();
+    if (rule.startsWith(".")) return rule === extension;
+    if (rule.endsWith("/*")) return type.startsWith(rule.slice(0, -1));
+    return rule === type;
+  });
+}
+
+function sizeLimitLabel(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return Number.isInteger(mb) ? `${mb} MB` : formatFileSize(bytes);
+}
+
 /** Splits a dropped/selected/pasted file batch into what's safe to attach and a
  * human-readable reason for anything rejected. Returns at most one message:
- * multiple bad files still name only the first, to keep the row short. */
-export function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string | null } {
+ * multiple bad files still name only the first, to keep the row short.
+ * `attachedCount` is what the box already holds, for `maxFiles`. */
+export function partitionAttachmentFiles(
+  files: File[],
+  limits: AttachmentLimits = DEFAULT_ATTACHMENT_LIMITS,
+  attachedCount = 0,
+): { valid: File[]; error: string | null } {
   const valid: File[] = [];
   let error: string | null = null;
   for (const file of files) {
-    if (!ALLOWED_ATTACHMENT_EXTENSIONS.includes(fileExtension(file.name) as never)) {
-      error ??= `"${file.name}" isn't an allowed file type (${ALLOWED_ATTACHMENT_EXTENSIONS.join(", ")}).`;
+    if (!isAccepted(file, limits.accept)) {
+      error ??= `"${file.name}" isn't an allowed file type (${limits.accept.join(", ")}).`;
       continue;
     }
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      error ??= `"${file.name}" exceeds the 50 MB attachment limit.`;
+    if (file.size > limits.maxBytes) {
+      error ??= `"${file.name}" exceeds the ${sizeLimitLabel(limits.maxBytes)} attachment limit.`;
+      continue;
+    }
+    if (limits.maxFiles !== undefined && attachedCount + valid.length >= limits.maxFiles) {
+      error ??= `Attach up to ${limits.maxFiles} ${limits.maxFiles === 1 ? "file" : "files"} per message.`;
       continue;
     }
     valid.push(file);
@@ -169,6 +207,8 @@ export interface ComposerDockProps {
   inputLabel?: string;
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
+  /** The types, size and count the box takes. Omitted: `DEFAULT_ATTACHMENT_LIMITS`. */
+  attachmentLimits?: AttachmentLimits;
   attachmentErrorMessage?: string | null;
   citations?: ComposerCitations;
   /**
@@ -285,6 +325,7 @@ export function ComposerDock({
   inputLabel,
   attachments = [],
   onAttachmentsChange,
+  attachmentLimits = DEFAULT_ATTACHMENT_LIMITS,
   attachmentErrorMessage,
   citations,
   extraActions,
@@ -337,7 +378,11 @@ export function ComposerDock({
 
   const handleIncomingFiles = (incoming: File[]) => {
     if (incoming.length === 0 || !onAttachmentsChange) return;
-    const { valid, error } = partitionAttachmentFiles(incoming);
+    const { valid, error } = partitionAttachmentFiles(
+      incoming,
+      attachmentLimits,
+      attachments.length,
+    );
     setDropErrorMessage(error);
     if (valid.length > 0) onAttachmentsChange([...attachments, ...valid]);
   };
@@ -362,7 +407,12 @@ export function ComposerDock({
   // A long paste (a log, a stack trace) is attached as a file instead of flooding the box.
   const onPasteLongText = (text: string) => {
     if (!canAttach || !isLongPaste(text)) return false;
-    handleIncomingFiles([new File([text], pastedFileName(attachments), { type: "text/plain" })]);
+    const file = new File([text], pastedFileName(attachments), { type: "text/plain" });
+    const { maxFiles } = attachmentLimits;
+    // A box that takes no .txt, or no more files, keeps the paste as text.
+    if (!isAccepted(file, attachmentLimits.accept)) return false;
+    if (maxFiles !== undefined && attachments.length >= maxFiles) return false;
+    handleIncomingFiles([file]);
     return true;
   };
 
@@ -538,7 +588,7 @@ export function ComposerDock({
             ref={fileInputRef}
             type="file"
             multiple
-            accept={ALLOWED_ATTACHMENT_EXTENSIONS.join(",")}
+            accept={attachmentLimits.accept.join(",")}
             className="sr-only"
             onChange={onFilesSelected}
             disabled={!canAttach}

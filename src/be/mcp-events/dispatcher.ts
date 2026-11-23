@@ -12,7 +12,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { getDbClient, getTaskById, getUserById } from "@/be/db";
+import { getTaskById, getUserById } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { isLiveUserToken } from "@/be/users";
 import { getAppUrl } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -53,9 +54,8 @@ async function isUnderTask(taskId: string, filterTaskId: string): Promise<boolea
   let current: string | null = taskId;
   for (let hop = 0; current && hop <= MAX_ANCESTOR_HOPS; hop++) {
     if (current === filterTaskId) return true;
-    const row: { parentTaskId: string | null } | null = await getDbClient().get<{
-      parentTaskId: string | null;
-    }>("SELECT parentTaskId FROM agent_tasks WHERE id = ?", [current]);
+    const row: { parentTaskId: string | null } | null =
+      await getStorage().repos.tasks.findTaskParentId(current);
     current = row?.parentTaskId ?? null;
   }
   return false;

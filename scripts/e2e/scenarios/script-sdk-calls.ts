@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { expectRunOk, registerAgent, runScript, startStub } from "./script-helpers";
@@ -135,8 +136,7 @@ function expectSdkResults(
 
   // The SDK wrote through to the real stores: assert them from outside the script.
   const row = ctx.db.get<{ value: string; value_type: string }>(
-    "SELECT value, value_type FROM kv_entries WHERE namespace = ? AND key = ?",
-    [namespace, `ctr-${marker}`],
+    sql`SELECT value, value_type FROM kv_entries WHERE namespace = ${namespace} AND key = ${`ctr-${marker}`}`,
   );
   expect(
     row?.value === "3" && row.value_type === "integer",

@@ -98,7 +98,7 @@ let ezeAuth: HttpRequestAuth;
 beforeAll(async () => {
   initDb(":memory:");
   // Built-in roles, including the extra `auditor` role, as at server boot.
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   owner = await createUser({ name: "Owner" });
   eze = await createUser({ name: "Eze" });
   mar = await createUser({ name: "Mar" });

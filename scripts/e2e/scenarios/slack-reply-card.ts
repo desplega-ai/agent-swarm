@@ -1,4 +1,5 @@
-import { asString, expect } from "../http";
+import { sql } from "../db";
+import { asString, expect, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import { callTool, expectToolError, expectToolOk } from "./platformb-helpers";
 import {
@@ -167,8 +168,27 @@ export const slackReplyCard: Scenario = {
       await mcp.close();
     }
 
+    const repliesBeforeFinish = threadMessages().length;
     await finish(ctx, leadId, taskId, { status: "completed", output: "Card report sent." });
-    // The agent already replied (slackReplySent), so the engine posts no outcome message.
+    // The agent already replied (slackReplySent), so the engine posts no outcome message:
+    // the card is settled without a post, and the ask still gets its ✅ reaction.
     await waitForReaction(ctx, ask.ts, "white_check_mark");
+    const settled = await pollUntil(
+      () =>
+        ctx.db.get<{ delivery_abandoned_at: string | null; finalized_at: string | null }>(
+          sql`SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
+        )?.delivery_abandoned_at != null,
+      30_000,
+    );
+    expect(settled, "The outcome card of an ask answered by slack-reply was never settled");
+    const extra = threadMessages().slice(repliesBeforeFinish);
+    expect(
+      extra.every((message) => !message.text?.includes("completed")),
+      `An outcome card posted after the slack-reply: ${JSON.stringify(extra.map((m) => m.text))}`,
+    );
+    expect(
+      !threadMessages().some((message) => message.text?.includes("Card report sent.")),
+      "The task output was posted after the agent already replied",
+    );
   },
 };

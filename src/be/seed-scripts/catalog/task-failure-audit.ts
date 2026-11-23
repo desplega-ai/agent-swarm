@@ -93,9 +93,10 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const tasksNeedingReason = tasks.filter((task: any) => !task.failureReason && task.id);
   const taskIds = tasksNeedingReason.map((task: any) => task.id as string);
   if (taskIds.length > 0) {
-    const placeholders = taskIds.map(() => "?").join(", ");
+    // $n binds in order of first appearance on SQLite and by number on Postgres.
+    const placeholders = taskIds.map((_: string, i: number) => `$${i + 1}`).join(", ");
     const reasonResult: any = await ctx.swarm.db_query({
-      sql: `SELECT id, failureReason FROM agent_tasks WHERE id IN (${placeholders})`,
+      sql: `SELECT id, "failureReason" FROM agent_tasks WHERE id IN (${placeholders})`,
       params: taskIds,
     });
     const reasonPayload: any = reasonResult?.data ?? reasonResult;

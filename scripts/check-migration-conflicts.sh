@@ -27,6 +27,12 @@
 # contiguity check: gaps in the base branch's numbering (already-merged and
 # harmless) are expected and never flagged.
 #
+# Postgres chain (src/be/migrations/postgres/NNN_name.sql): ordinals must be
+# unique, there must be exactly one generated NNN_baseline.sql, no file may sort
+# below it, and above the baseline each ordinal must exist in both chains (one
+# file per engine with the same NNN; a file may state that it is a no-op for
+# its engine). The SQLite checks below look only at the top-level .sql files.
+#
 # Runnable locally too: bash scripts/check-migration-conflicts.sh
 # Base ref for the immutability and monotonicity checks defaults to
 # origin/main; override with MIGRATION_BASE_REF. Base-ref checks are skipped
@@ -81,6 +87,69 @@ if [ -n "$CONFLICTS" ]; then
 fi
 
 echo "Migration numbering check passed: all NNN prefixes are unique."
+
+# Postgres chain: unique ordinals, one baseline, and one file per engine for
+# every ordinal above the baseline.
+PG_MIGRATIONS_DIR="$MIGRATIONS_DIR/postgres"
+if [ -d "$PG_MIGRATIONS_DIR" ]; then
+  declare -A PG_PREFIX_FILES
+  declare -A SQLITE_ORDINALS
+  PG_ERRORS=""
+  PG_BASELINE=""
+  for prefix in "${!PREFIX_FILES[@]}"; do
+    SQLITE_ORDINALS[$((10#$prefix))]="${PREFIX_FILES[$prefix]}"
+  done
+  shopt -s nullglob
+  for file in "$PG_MIGRATIONS_DIR"/*.sql; do
+    base=$(basename "$file")
+    prefix=$(echo "$base" | grep -oE '^[0-9]+' || true)
+    if [ -z "$prefix" ]; then
+      PG_ERRORS="${PG_ERRORS}  no leading numeric prefix: postgres/${base}\n"
+      continue
+    fi
+    ordinal=$((10#$prefix))
+    if [ -n "${PG_PREFIX_FILES[$ordinal]:-}" ]; then
+      PG_ERRORS="${PG_ERRORS}  duplicate ordinal ${ordinal}: postgres/${PG_PREFIX_FILES[$ordinal]} postgres/${base}\n"
+    else
+      PG_PREFIX_FILES[$ordinal]="$base"
+    fi
+    case "$base" in
+      *_baseline.sql)
+        if [ -n "$PG_BASELINE" ]; then
+          PG_ERRORS="${PG_ERRORS}  more than one baseline: ${base}\n"
+        fi
+        PG_BASELINE=$ordinal
+        ;;
+    esac
+  done
+  shopt -u nullglob
+  if [ -z "$PG_BASELINE" ]; then
+    PG_ERRORS="${PG_ERRORS}  no NNN_baseline.sql in ${PG_MIGRATIONS_DIR}\n"
+  else
+    for ordinal in "${!PG_PREFIX_FILES[@]}"; do
+      if [ "$ordinal" -lt "$PG_BASELINE" ]; then
+        PG_ERRORS="${PG_ERRORS}  postgres/${PG_PREFIX_FILES[$ordinal]} sorts below the baseline (${PG_BASELINE})\n"
+      elif [ "$ordinal" -gt "$PG_BASELINE" ] && [ -z "${SQLITE_ORDINALS[$ordinal]:-}" ]; then
+        PG_ERRORS="${PG_ERRORS}  postgres/${PG_PREFIX_FILES[$ordinal]} has no SQLite migration with ordinal ${ordinal}\n"
+      fi
+    done
+    for ordinal in "${!SQLITE_ORDINALS[@]}"; do
+      if [ "$ordinal" -gt "$PG_BASELINE" ] && [ -z "${PG_PREFIX_FILES[$ordinal]:-}" ]; then
+        PG_ERRORS="${PG_ERRORS}  ${SQLITE_ORDINALS[$ordinal]} has no Postgres migration with ordinal ${ordinal} (add postgres/${SQLITE_ORDINALS[$ordinal]}, a no-op with a reason if nothing changes on Postgres)\n"
+      fi
+    done
+  fi
+  if [ -n "$PG_ERRORS" ]; then
+    echo "ERROR: Postgres migration chain check failed!"
+    echo ""
+    echo "After the Postgres baseline, every migration has one file per engine with"
+    echo "the same ordinal (src/be/migrations/NNN_x.sql and src/be/migrations/postgres/NNN_x.sql)."
+    echo ""
+    echo -e "$PG_ERRORS" | sort
+    exit 1
+  fi
+  echo "Postgres migration chain check passed: unique ordinals, baseline ${PG_BASELINE}, both engines paired above it."
+fi
 
 # Immutability check: migrations present on the base branch must exist in the
 # working tree with identical content.
@@ -143,7 +212,7 @@ while read -r base_path; do
   if [ "$prefix" -gt "$BASE_MAX" ]; then
     BASE_MAX=$prefix
   fi
-done < <(git ls-tree -r --name-only "$BASE_REF" -- "$MIGRATIONS_DIR")
+done < <(git ls-tree -r --name-only "$BASE_REF" -- "$MIGRATIONS_DIR" | grep -E "^${MIGRATIONS_DIR}/[^/]+\$" || true)
 
 NEW_VIOLATIONS=""
 while read -r file; do
@@ -157,7 +226,7 @@ while read -r file; do
   if [ "$prefix" -le "$BASE_MAX" ]; then
     NEW_VIOLATIONS="${NEW_VIOLATIONS}  ${base} (prefix ${prefix} <= ${BASE_REF} tail ${BASE_MAX})\n"
   fi
-done < <(git diff --name-only --diff-filter=A --no-renames "$ADDITIONS_REF" HEAD -- "$MIGRATIONS_DIR/*.sql")
+done < <(git diff --name-only --diff-filter=A --no-renames "$ADDITIONS_REF" HEAD -- "$MIGRATIONS_DIR/*.sql" | grep -E "^${MIGRATIONS_DIR}/[^/]+\$" || true)
 
 if [ -n "$NEW_VIOLATIONS" ]; then
   echo "ERROR: new migration(s) numbered at or below ${BASE_REF}'s tail (${BASE_MAX})!"

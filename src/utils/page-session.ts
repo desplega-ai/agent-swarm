@@ -10,7 +10,7 @@
  * Secret resolution (first match wins), mirroring `src/be/crypto/key-bootstrap.ts`:
  *   1. `PAGE_SESSION_SECRET` env var
  *   2. `PAGE_SESSION_SECRET_FILE` env var — path to a file containing the secret
- *   3. `<dirname(DATABASE_PATH)>/.page-session-secret` on-disk file
+ *   3. `<data dir>/.page-session-secret` on-disk file (`SWARM_DATA_DIR`, default: dirname(DATABASE_PATH))
  *   4. Auto-generate 32 random bytes (base64), persist to the path from step 3
  *      with mode 0600, and use it from then on.
  *
@@ -29,6 +29,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
 import path from "node:path";
+import { swarmDataDir } from "./data-dir";
 import { isDevOrTestNodeEnv } from "./node-env";
 
 const ENV_SECRET = "PAGE_SESSION_SECRET";
@@ -37,8 +38,7 @@ const SECRET_FILENAME = ".page-session-secret";
 const GENERATED_SECRET_BYTES = 32;
 
 function defaultSecretFilePath(): string {
-  const dbPath = process.env.DATABASE_PATH || "./agent-swarm-db.sqlite";
-  return path.join(path.dirname(dbPath), SECRET_FILENAME);
+  return path.join(swarmDataDir(), SECRET_FILENAME);
 }
 
 export interface PageSessionPayload {

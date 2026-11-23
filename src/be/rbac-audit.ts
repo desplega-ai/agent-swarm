@@ -18,7 +18,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { AdmissionDecision, RbacCheck, RbacDecision } from "../rbac";
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 type AuditRow = {
   principalType: "agent" | "user" | "operator" | "guest";
@@ -180,24 +180,10 @@ export async function flushAuditBuffer(): Promise<void> {
   const rows = buffer;
   buffer = [];
   try {
-    await getDbClient().transaction(async (tx) => {
+    const storage = getStorage();
+    await storage.transaction(async () => {
       for (const r of rows) {
-        await tx.run(
-          `INSERT INTO permission_audit
-             (principalType, principalId, originatorUserId, verb, resourceType, resourceId, decision, reason, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            r.principalType,
-            r.principalId,
-            r.originatorUserId,
-            r.verb,
-            r.resourceType,
-            r.resourceId,
-            r.decision,
-            r.reason,
-            r.source,
-          ],
-        );
+        await storage.repos.rbac.insertPermissionAudit(r);
       }
     });
   } catch (err) {
@@ -244,13 +230,9 @@ export function stopAuditWriter(): void {
 export async function purgeExpiredAuditRows(): Promise<number> {
   try {
     const days = Number(process.env.RBAC_AUDIT_RETENTION_DAYS) || DEFAULT_RETENTION_DAYS;
-    // ts is CURRENT_TIMESTAMP format ("YYYY-MM-DD HH:MM:SS"); compute the
-    // cutoff in SQLite so the string formats always match.
-    const result = await getDbClient().run(
-      "DELETE FROM permission_audit WHERE ts < datetime('now', ?)",
-      [`-${days} days`],
-    );
-    return result.changes;
+    // ts is CURRENT_TIMESTAMP format ("YYYY-MM-DD HH:MM:SS"); the repository
+    // computes the cutoff in the database so the string formats always match.
+    return await getStorage().repos.rbac.purgeAuditOlderThanDays(days);
   } catch (err) {
     console.warn("[rbac-audit] retention purge failed:", (err as Error).message);
     return 0;

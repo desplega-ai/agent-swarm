@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -28,15 +29,13 @@ type EventWaitRow = {
 
 function waitRow(ctx: ScenarioContext, scheduleId: string): EventWaitRow | null {
   return ctx.db.get<EventWaitRow>(
-    "SELECT status, firedBy, source, event FROM deferred_event_waits WHERE scheduleId = ?",
-    [scheduleId],
+    sql`SELECT status, "firedBy", source, event FROM deferred_event_waits WHERE "scheduleId" = ${scheduleId}`,
   );
 }
 
 function wakeTask(ctx: ScenarioContext, parentTaskId: string) {
   return ctx.db.get<{ id: string; task: string }>(
-    "SELECT id, task FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'deferred'",
-    [parentTaskId],
+    sql`SELECT id, task FROM agent_tasks WHERE "parentTaskId" = ${parentTaskId} AND "taskType" = 'deferred'`,
   );
 }
 
@@ -226,9 +225,9 @@ export const deferWakePrMerged: Scenario = {
           "Wait was not fired by the github vcs.pr.merged event",
         );
         expect(
-          ctx.db.get<{ enabled: number }>("SELECT enabled FROM scheduled_tasks WHERE id = ?", [
-            scheduleId,
-          ])?.enabled === 0,
+          ctx.db.get<{ enabled: number }>(
+            sql`SELECT enabled FROM scheduled_tasks WHERE id = ${scheduleId}`,
+          )?.enabled === 0,
           "The ceiling timer stayed enabled after the wake",
         );
 
@@ -304,10 +303,9 @@ export const deferWakePrMerged: Scenario = {
           "already hold 20",
         );
         const held = ctx.db.get<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM deferred_event_waits w
-             JOIN scheduled_tasks s ON s.id = w.scheduleId
-            WHERE w.status = 'pending' AND s.targetAgentId = ?`,
-          [capWorker],
+          sql`SELECT COUNT(*) AS n FROM deferred_event_waits w
+             JOIN scheduled_tasks s ON s.id = w."scheduleId"
+            WHERE w.status = 'pending' AND s."targetAgentId" = ${capWorker}`,
         );
         expect(held?.n === 20, `Expected 20 pending waits for the agent, got ${held?.n}`);
         await expectToolOk(worker, "defer-task", base(over));

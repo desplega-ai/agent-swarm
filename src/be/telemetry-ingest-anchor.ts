@@ -10,7 +10,7 @@
  */
 import type { TelemetryIngested } from "../telemetry";
 import { getSwarmConfigs, upsertSwarmConfig } from "./db";
-import { getDbClient } from "./db/runtime";
+import { getStorage } from "./storage";
 
 export const TELEMETRY_FIRST_INGEST_KEY = "telemetry_first_ingest";
 
@@ -46,14 +46,12 @@ export function telemetryIngestRecorder(): (ingested: TelemetryIngested) => Prom
   let known: TelemetryIngestAnchor | null = null;
   return async (ingested) => {
     if (!improves(known, ingested)) return;
-    await getDbClient().transaction(async () => {
+    // The cache updates only after commit: a replayed attempt (decision D6) re-reads.
+    known = await getStorage().transaction(async () => {
       const stored = parseAnchor(
         (await getSwarmConfigs({ scope: "global", key: TELEMETRY_FIRST_INGEST_KEY }))[0]?.value,
       );
-      if (!improves(stored, ingested)) {
-        known = stored;
-        return;
-      }
+      if (!improves(stored, ingested)) return stored;
       await upsertSwarmConfig({
         scope: "global",
         key: TELEMETRY_FIRST_INGEST_KEY,
@@ -61,7 +59,7 @@ export function telemetryIngestRecorder(): (ingested: TelemetryIngested) => Prom
         description:
           "Earliest telemetry event the ingest endpoint accepted (fleet benchmark anchor).",
       });
-      known = ingested;
+      return ingested;
     });
   };
 }

@@ -16,7 +16,8 @@ import { publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { createSsrfGuardedFetch } from "../utils/egress-guard";
 import { parseEnvFlag } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "./db";
+import { getSwarmConfigs, upsertSwarmConfig } from "./db";
+import { getStorage } from "./storage";
 
 export const IMPROVEMENTS_ENABLED_KEY = "IMPROVEMENTS_ENABLED";
 export const IMPROVEMENT_TEXT_MAX = 4000;
@@ -156,7 +157,7 @@ export function buildImprovementPayload(input: {
  * sends cannot mint two ids.
  */
 export async function improvementInstallId(): Promise<string> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const existing = await globalValue(INSTALL_ID_KEY);
     if (existing) return existing;
     const minted = `install_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -166,10 +167,8 @@ export async function improvementInstallId(): Promise<string> {
 }
 
 export async function getImprovement(id: string): Promise<Improvement | null> {
-  const row = await getDbClient().get<ImprovementRow>("SELECT * FROM improvements WHERE id = ?", [
-    id,
-  ]);
-  return row ? toImprovement(row) : null;
+  const row = await getStorage().repos.improvements.findById(id);
+  return row ? toImprovement(row as ImprovementRow) : null;
 }
 
 /**
@@ -178,17 +177,8 @@ export async function getImprovement(id: string): Promise<Improvement | null> {
  * an actionable draft must stay reachable however many newer rows exist.
  */
 export async function listImprovements(historyLimit = 100): Promise<Improvement[]> {
-  const rows = await getDbClient().query<ImprovementRow>(
-    `SELECT * FROM improvements WHERE status IN ('pending_approval', 'failed')
-     UNION ALL
-     SELECT * FROM (
-       SELECT * FROM improvements WHERE status NOT IN ('pending_approval', 'failed')
-        ORDER BY created_at DESC, id DESC LIMIT ?
-     )
-     ORDER BY created_at DESC, id DESC`,
-    [historyLimit],
-  );
-  return rows.map(toImprovement);
+  const rows = await getStorage().repos.improvements.listActionableAndHistory(historyLimit);
+  return rows.map((row) => toImprovement(row as ImprovementRow));
 }
 
 /**
@@ -213,21 +203,14 @@ export async function createImprovement(input: {
   }
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO improvements
-       (id, text, status, source, requested_by_agent_id, created_at, updated_at, created_by, updated_by)
-     VALUES (?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      scrubbed,
-      input.source,
-      input.requestedByAgentId ?? null,
-      now,
-      now,
-      input.createdBy ?? null,
-      input.createdBy ?? null,
-    ],
-  );
+  await getStorage().repos.improvements.insert({
+    id,
+    text: scrubbed,
+    source: input.source,
+    requestedByAgentId: input.requestedByAgentId ?? null,
+    createdBy: input.createdBy ?? null,
+    now,
+  });
   const improvement = await getImprovement(id);
   if (!improvement) throw new Error(`Improvement ${id} vanished after insert`);
   return { improvement, scrubChanged: scrubbed !== trimmed };
@@ -258,19 +241,15 @@ export async function approveAndSend(
   // Resolved before the claim, so a failed mint cannot strand a row in `sending`.
   const installId = await improvementInstallId();
   const approvedAt = new Date().toISOString();
-  const claimed = await getDbClient().transaction(async (tx) => {
-    const result = await tx.run(
-      `UPDATE improvements
-          SET status = 'sending', approved_by = ?, approved_at = ?, email = ?,
-              proxy_status = NULL, proxy_id = NULL, proxy_error = NULL,
-              updated_at = ?, updated_by = ?
-        WHERE id = ? AND status IN ('pending_approval', 'failed')`,
-      [approval.approvedBy, approvedAt, email, approvedAt, approval.updatedBy ?? null, id],
-    );
-    if (result.changes === 1) {
-      return tx.get<ImprovementRow>("SELECT * FROM improvements WHERE id = ?", [id]);
-    }
-    return null;
+  const improvements = getStorage().repos.improvements;
+  const claimed = await getStorage().transaction(async () => {
+    const won = await improvements.claimForSend(id, {
+      approvedBy: approval.approvedBy,
+      email,
+      now: approvedAt,
+      updatedBy: approval.updatedBy ?? null,
+    });
+    return won ? await improvements.findById(id) : null;
   });
   if (!claimed) {
     const existing = await getImprovement(id);
@@ -315,20 +294,14 @@ export async function approveAndSend(
 
   const sent = proxyStatus !== null && proxyStatus >= 200 && proxyStatus < 300;
   const finishedAt = new Date().toISOString();
-  await getDbClient().run(
-    `UPDATE improvements
-        SET status = ?, sent_at = ?, proxy_status = ?, proxy_id = ?, proxy_error = ?, updated_at = ?
-      WHERE id = ?`,
-    [
-      sent ? "sent" : "failed",
-      sent ? finishedAt : null,
-      proxyStatus,
-      proxyId,
-      proxyError ? scrubSecrets(proxyError).slice(0, PROXY_ERROR_MAX) : null,
-      finishedAt,
-      id,
-    ],
-  );
+  await improvements.recordSendResult(id, {
+    status: sent ? "sent" : "failed",
+    sentAt: sent ? finishedAt : null,
+    proxyStatus,
+    proxyId,
+    proxyError: proxyError ? scrubSecrets(proxyError).slice(0, PROXY_ERROR_MAX) : null,
+    now: finishedAt,
+  });
   const finished = await getImprovement(id);
   if (!finished) throw new Error(`Improvement ${id} vanished after send`);
   return finished;
@@ -360,14 +333,14 @@ export async function discardImprovement(
 ): Promise<Improvement> {
   await assertEnabled();
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    `UPDATE improvements SET status = 'discarded', updated_at = ?, updated_by = ?
-      WHERE id = ? AND status IN ('pending_approval', 'failed')`,
-    [now, options?.updatedBy ?? null, id],
+  const discarded = await getStorage().repos.improvements.discard(
+    id,
+    now,
+    options?.updatedBy ?? null,
   );
   const existing = await getImprovement(id);
   if (!existing) throw new ImprovementError("not_found", `Improvement ${id} not found.`);
-  if (result.changes !== 1) {
+  if (!discarded) {
     throw new ImprovementError(
       "conflict",
       `Improvement ${id} is ${existing.status}; only pending or failed improvements can be discarded.`,
@@ -394,23 +367,23 @@ const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
  * user emails, and any URL or email. They warn the approver; they never block.
  */
 export async function improvementLeakHints(text: string): Promise<string[]> {
-  const client = getDbClient();
-  const [agents, repos, users] = await Promise.all([
-    client.query<{ name: string | null }>("SELECT name FROM agents"),
-    client.query<{ name: string | null; url: string | null }>("SELECT name, url FROM swarm_repos"),
-    client.query<{ email: string | null }>("SELECT email FROM users WHERE email IS NOT NULL"),
+  const { repos: storageRepos } = getStorage();
+  const [agentNames, repos, emails] = await Promise.all([
+    storageRepos.agents.listAgentNames(),
+    storageRepos.config.listRepoNamesAndUrls(),
+    storageRepos.users.listUserEmails(),
   ]);
   const terms = new Set<string>();
   const add = (value: string | null | undefined) => {
     const trimmed = value?.trim();
     if (trimmed && trimmed.length >= 3) terms.add(trimmed);
   };
-  for (const agent of agents) add(agent.name);
+  for (const name of agentNames) add(name);
   for (const repo of repos) {
     add(repo.name);
     add(repo.url);
   }
-  for (const user of users) add(user.email);
+  for (const email of emails) add(email);
   add(hostOf(process.env.MCP_BASE_URL));
   add(hostOf(process.env.APP_URL));
   const orgName = await globalValue("SWARM_ORG_NAME");

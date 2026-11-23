@@ -7,7 +7,7 @@
  * run to the walk that owes them: that walk's own finalizer settles the run.
  */
 
-import { getDbClient } from "../be/db";
+import { getStorage } from "../be/storage";
 import type { WorkflowNode } from "../types";
 
 /** Open holds per run: claims waiting for their walk plus walks still routing. */
@@ -89,13 +89,15 @@ export async function claimAndOweWalk<T extends SuccessorClaim>(
 ): Promise<T & { successorDebt?: SuccessorWalkDebt }> {
   let debt: SuccessorWalkDebt | undefined;
   try {
-    return await getDbClient().transaction(async () => {
+    return await getStorage().transaction(async () => {
       const result = await claim();
       if (result.claimed && !result.runFailed && result.successors.length > 0) {
+        // tx-replay-safe: a rolled-back attempt releases its own hold (onAttemptRollback below)
         debt = oweSuccessorWalk(runId);
         // Inside a caller's transaction the claim publishes only at its
-        // COMMIT; a rollback there (or a failed COMMIT) must drop the hold too.
-        getDbClient().afterRollback(debt.release);
+        // COMMIT; a rollback there (or a failed COMMIT) must drop the hold too,
+        // also for an attempt that is retried or replayed (decision D6).
+        getStorage().onAttemptRollback(debt.release);
         return { ...result, successorDebt: debt };
       }
       return result;

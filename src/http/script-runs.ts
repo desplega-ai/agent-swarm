@@ -9,7 +9,6 @@ import {
   createTaskExtended,
   ExtensionAgentAssignmentError,
   getAgentById,
-  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
@@ -26,6 +25,7 @@ import {
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
+import { getStorage } from "../be/storage";
 import { can } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
@@ -522,7 +522,7 @@ export async function handleScriptRuns(
     const requestedByUserId = parsed.body.requestedByUserId
       ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
       : undefined;
-    const creation = await getDbClient().transaction(async () => {
+    const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
         id: crypto.randomUUID(),
@@ -662,7 +662,7 @@ export async function handleScriptRuns(
     // ctx.step.agentTask journal posts for the same run would otherwise all
     // land before any of them counts, and every one of them would see (and be
     // refused by) the post-write total.
-    const limit = await getDbClient().transaction(async () => {
+    const limit = await getStorage().transaction(async () => {
       await upsertScriptRunJournalStep({
         runId: run.id,
         stepKey: parsed.body.stepKey,
@@ -786,7 +786,7 @@ export async function handleScriptRuns(
       // other runs and send-task dispatches into the same thread.
       let dispatched: StepDispatch;
       try {
-        dispatched = await getDbClient().transaction(async (): Promise<StepDispatch> => {
+        dispatched = await getStorage().transaction(async (): Promise<StepDispatch> => {
           const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
           if (replayed) return { task: replayed };
 

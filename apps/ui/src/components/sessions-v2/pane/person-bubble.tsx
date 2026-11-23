@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
@@ -33,6 +33,7 @@ export function PersonBubble({
   task,
   rootSource,
   text: givenText,
+  files,
 }: {
   task: AgentTask;
   /** The root's source: a dashboard message in a Slack session says where it was sent. */
@@ -43,6 +44,8 @@ export function PersonBubble({
    * dashboard, so it is not greyed as external. Omitted: `task.task`.
    */
   text?: string;
+  /** Files the caller pulls out of the task prompt with `text`, above the bubble. */
+  files?: ReactNode;
 }) {
   const { userId } = useCurrentUser();
   const { data: users } = useUsers();
@@ -81,6 +84,7 @@ export function PersonBubble({
           attachments={task.attachments}
           from="person"
         />
+        {files}
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.

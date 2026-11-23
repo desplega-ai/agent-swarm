@@ -1,5 +1,4 @@
 import {
-  getDbClient,
   getLatestStepForNode,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -8,6 +7,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { getRunLineageBlock } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import type {
   WorkflowDefinition,
   WorkflowNode,
@@ -237,7 +237,7 @@ export async function settleForeachChild(
   } = {},
 ): Promise<ForeachSettleResult> {
   const from = options.from ?? ["waiting"];
-  return await getDbClient().transaction(async (): Promise<ForeachSettleResult> => {
+  return await getStorage().transaction(async (): Promise<ForeachSettleResult> => {
     const unclaimed: ForeachSettleResult = {
       claimed: false,
       foreachChild: true,
@@ -276,7 +276,7 @@ export async function settleForeachChild(
     await updateWorkflowRun(runId, { status: "running" });
     const registry = options.registry;
     if (!join.joined && registry && (await hasQueuedChild(def, runId, parent.id))) {
-      getDbClient().afterCommit(() => startForeachDrive(runId, parent.id, registry));
+      getStorage().afterCommit(() => startForeachDrive(runId, parent.id, registry));
     }
     return {
       claimed: true,
@@ -307,8 +307,8 @@ export async function cancelQueuedForeachChildren(
     ? `not started: fail-fast after item ${failedKey} failed`
     : "not started: fail-fast after the run failed";
   const finishedAt = new Date().toISOString();
-  let cancelled = 0;
-  await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
+    let cancelled = 0;
     const children = latestForeachChildren(
       def,
       parentNodeId,
@@ -316,16 +316,12 @@ export async function cancelQueuedForeachChildren(
     );
     for (const child of children) {
       if (child.status !== "pending" && !isRetryPending(child)) continue;
-      const row = await getDbClient().get<{ id: string }>(
-        `UPDATE workflow_run_steps SET status = 'cancelled', error = ?, finishedAt = ?, nextRetryAt = NULL
-          WHERE id = ? AND (status = 'pending' OR (status = 'failed' AND nextRetryAt IS NOT NULL))
-          RETURNING id`,
-        [error, finishedAt, child.id],
-      );
-      if (row) cancelled++;
+      if (await getStorage().repos.workflows.cancelQueuedStep(child.id, error, finishedAt)) {
+        cancelled++;
+      }
     }
+    return cancelled;
   });
-  return cancelled;
 }
 
 async function hasQueuedChild(

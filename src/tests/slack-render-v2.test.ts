@@ -2673,10 +2673,53 @@ describe("Slack renderer v2", () => {
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
-  test("collapses the outcome card to a minimal form when the agent already replied", async () => {
+  test("posts no outcome card when the agent already replied, and still settles the reaction", async () => {
     const lead = await createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
+    const triggerTs = `${slackAddressSequence}.2`;
     const ask = await createTaskExtended("ask with an inline reply", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    });
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.finalizedAt).toBeUndefined();
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryLastError).toStartWith("slack_reply_sent:");
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+  });
+
+  test.each([
+    { status: "failed", expected: "❌ **Failed:** build broke" },
+    { status: "cancelled", expected: "🚫 **Cancelled:** stopped by the requester" },
+  ] as const)("still posts the $status card after a slack-reply", async ({ status, expected }) => {
+    const lead = await createAgent({ name: `Reply ${status} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(`C_RENDER_REPLY_${status.toUpperCase()}`);
+    const ask = await createTaskExtended(`ask that ends ${status} after a reply`, {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -2685,6 +2728,39 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    if (status === "failed") await failTask(ask.id, "build broke");
+    else await cancelTask(ask.id, "stopped by the requester");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(expected);
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+
+  test("keeps the minimal card when the agent replied but the task has an output attachment", async () => {
+    const lead = await createAgent({ name: "Reply Attachment Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_ATTACHMENT");
+    const ask = await createTaskExtended("ask with an inline reply and a file", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await insertTaskAttachment({
+      taskId: ask.id,
+      agentId: lead.id,
+      kind: "url",
+      name: "report.md",
+      url: "https://example.com/report.md",
+      isPrimary: true,
+    });
     await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
     calls.length = 0;
@@ -2698,19 +2774,9 @@ describe("Slack renderer v2", () => {
       username: getAgentDisplayName(lead),
       icon_emoji: getAgentEmoji(lead),
     });
-    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     const stopped = calls.find((call) => call.method === "chat.stopStream")!;
-    const completedAsk = (await getTaskById(ask.id))!;
-    const duration = formatV2Duration(
-      new Date(completedAsk.createdAt),
-      new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
-    );
-    expect(stopped.payload.blocks).toEqual([
-      {
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
-      },
-    ]);
+    expect(JSON.stringify(stopped.payload.blocks)).toContain("https://example.com/report.md");
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 

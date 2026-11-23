@@ -1,3 +1,4 @@
+import { sql, sqlIdent } from "../db";
 // Audit attribution on scripts, skills, workflows and schedules: every user-intent write
 // records the writing agent (`createdByAgentId` / `updatedByAgentId`) and the person behind it
 // (`created_by` / `updated_by`, the requester of the caller's own source task). Each scenario
@@ -75,8 +76,7 @@ function expectAudit(
   step: string,
 ): void {
   const row = ctx.db.get<AuditRow>(
-    `SELECT createdByAgentId, updatedByAgentId, created_by, updated_by FROM ${TABLES[model]} WHERE id = ?`,
-    [id],
+    sql`SELECT "createdByAgentId", "updatedByAgentId", created_by, updated_by FROM ${sqlIdent(TABLES[model])} WHERE id = ${id}`,
   );
   expect(row, `${model} ${id} has no row (${step})`);
   const got: Expected = {
@@ -392,8 +392,7 @@ export const auditAttributionScripts: Scenario = {
       });
       expectStatus(posted, [200], "create a global script over HTTP");
       const row = ctx.db.get<{ id: string }>(
-        "SELECT id FROM scripts WHERE name = ? AND scope = 'global'",
-        [name],
+        sql`SELECT id FROM scripts WHERE name = ${name} AND scope = 'global'`,
       );
       expect(row, "global script row missing");
       const createdPair = created(lead);
@@ -455,13 +454,14 @@ export const auditAttributionScripts: Scenario = {
       );
       const slug = asString(asRecord(envelope.autoSaved).slug, "scratch slug");
       const scratch = ctx.db.get<{ id: string }>(
-        "SELECT id FROM scripts WHERE name = ? AND scopeId = ?",
-        [slug, worker.agentId],
+        sql`SELECT id FROM scripts WHERE name = ${slug} AND "scopeId" = ${worker.agentId}`,
       );
       expect(scratch, "scratch script row missing");
       expectAudit(ctx, "scripts", scratch.id, created(worker), "inline run scratch auto-save");
 
-      const skill = ctx.db.get<{ id: string }>("SELECT id FROM skills WHERE name = ?", [skillName]);
+      const skill = ctx.db.get<{ id: string }>(
+        sql`SELECT id FROM skills WHERE name = ${skillName}`,
+      );
       expect(skill, "ctx.swarm.skill_create wrote no skill");
       skillId = skill.id;
       expectAudit(ctx, "skills", skill.id, created(worker), "ctx.swarm.skill_create in a run");

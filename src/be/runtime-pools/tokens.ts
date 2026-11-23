@@ -1,6 +1,6 @@
 import { registerVolatileSecret, unregisterVolatileSecret } from "../../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../../utils/session-token-connections";
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 import { validateControllerTokenTtlDays } from "../swarm-config-guard";
 import { insertSessionToken } from "../users";
 import { RuntimePoolError } from "./errors";
@@ -8,11 +8,10 @@ import { RuntimePoolError } from "./errors";
 export async function mintControllerToken(
   controllerId: string,
 ): Promise<{ tokenId: string; plaintext: string; expiresAt: string }> {
-  return await getDbClient().transaction(async (client) => {
-    const controller = await client.get<{ placement: string }>(
-      "SELECT placement FROM runtime_controllers WHERE id = ?",
-      [controllerId],
-    );
+  const storage = getStorage();
+  const repo = storage.repos.runtimePools;
+  return await storage.transaction(async () => {
+    const controller = await repo.findController(controllerId);
     if (!controller) throw new RuntimePoolError("Controller not found", 404);
     if (controller.placement !== "remote")
       throw new RuntimePoolError("Only remote controllers can receive a controller token");
@@ -28,30 +27,23 @@ export async function mintControllerToken(
       undefined,
       controllerId,
     );
-    const row = await client.get<{ expiresAt: string }>(
-      "SELECT expiresAt FROM session_tokens WHERE id = ?",
-      [credential.tokenId],
-    );
-    getDbClient().afterCommit(() =>
+    const expiresAt = await repo.getSessionTokenExpiry(credential.tokenId);
+    storage.afterCommit(() =>
       registerVolatileSecret(credential.plaintext, `controller-token:${credential.tokenId}`),
     );
-    return { ...credential, expiresAt: row!.expiresAt };
+    return { ...credential, expiresAt: expiresAt! };
   });
 }
 
 export async function revokeControllerTokens(controllerId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE controllerId = ? AND revokedAt IS NULL",
-      [controllerId],
-    );
-    await client.run(
-      "UPDATE session_tokens SET revokedAt = ? WHERE controllerId = ? AND revokedAt IS NULL",
-      [new Date().toISOString(), controllerId],
-    );
-    getDbClient().afterCommit(() => {
-      closeSessionTokenConnections(rows.map((row) => row.id));
-      for (const row of rows) unregisterVolatileSecret(`controller-token:${row.id}`);
+  const storage = getStorage();
+  const repo = storage.repos.runtimePools;
+  await storage.transaction(async () => {
+    const ids = await repo.listActiveControllerTokenIds(controllerId);
+    await repo.revokeControllerTokens(controllerId, new Date().toISOString());
+    storage.afterCommit(() => {
+      closeSessionTokenConnections(ids);
+      for (const id of ids) unregisterVolatileSecret(`controller-token:${id}`);
     });
   });
 }

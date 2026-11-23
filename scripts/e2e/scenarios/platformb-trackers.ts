@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import type { ApiResponse } from "../http";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
@@ -240,8 +241,7 @@ export const platformbTrackers: Scenario = {
         `Link message is ${outcome.message}`,
       );
       const row = ctx.db.get<{ swarmId: string; externalUrl: string; syncDirection: string }>(
-        "SELECT swarmId, externalUrl, syncDirection FROM tracker_sync WHERE id = ?",
-        [syncId],
+        sql`SELECT "swarmId", "externalUrl", "syncDirection" FROM tracker_sync WHERE id = ${syncId}`,
       );
       expect(
         row?.swarmId === taskId &&
@@ -320,8 +320,7 @@ export const platformbTrackers: Scenario = {
       );
       expect(
         ctx.db.get<{ agentName: string }>(
-          "SELECT agentName FROM tracker_agent_mapping WHERE provider = ? AND agentId = ?",
-          [provider, workerId],
+          sql`SELECT "agentName" FROM tracker_agent_mapping WHERE provider = ${provider} AND "agentId" = ${workerId}`,
         )?.agentName === `Mapped ${ctx.nonce}`,
         "Agent mapping is not in tracker_agent_mapping",
       );
@@ -349,7 +348,7 @@ export const platformbTrackers: Scenario = {
       // --- unlink
       expectToolOk(await callTool(connection, "tracker-unlink", { syncId }), "tracker-unlink");
       expect(
-        ctx.db.get("SELECT id FROM tracker_sync WHERE id = ?", [syncId]) === null,
+        ctx.db.get(sql`SELECT id FROM tracker_sync WHERE id = ${syncId}`) === null,
         "tracker-unlink left the tracker_sync row",
       );
       outcome = expectToolOk(

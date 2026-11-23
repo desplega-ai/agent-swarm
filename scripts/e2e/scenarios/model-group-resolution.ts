@@ -1,5 +1,7 @@
-import { asRecord, expect, expectStatus } from "../http";
+import { sql } from "../db";
+import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { expectToolOk, withMcp } from "./core-helpers";
 import { Cleanup, retireAgent } from "./platformb-helpers";
 
 /**
@@ -124,8 +126,7 @@ export const modelGroupResolution: Scenario = {
         `Group task resolved to ${String(task.resolvedProfile)} (${String(task.modelSource)})`,
       );
       const log = ctx.db.get<{ metadata: string }>(
-        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_model_group_resolved'",
-        [pinnedId],
+        sql`SELECT metadata FROM agent_log WHERE "taskId" = ${pinnedId} AND "eventType" = 'task_model_group_resolved'`,
       );
       const meta = JSON.parse(log?.metadata ?? "{}") as {
         member?: string;
@@ -145,11 +146,16 @@ export const modelGroupResolution: Scenario = {
       );
 
       // ===== pool: only an agent where a member runs claims it =====
-      response = await ctx.api("POST", "/api/tasks", {
-        body: { task: `mgr pool ${ctx.nonce}`, source: "api", modelGroup: claudeOnly },
+      // REST task creation defaults to the lead. An agent can submit directly to the pool.
+      const poolId = await withMcp(ctx, claudeId, async (conn) => {
+        const sent = await expectToolOk(conn, "send-task", {
+          task: `mgr pool ${ctx.nonce}`,
+          modelGroup: claudeOnly,
+        });
+        const pooled = asRecord(sent.data.task);
+        expect(pooled.status === "unassigned", "The fixture task must start in the pool");
+        return asString(pooled.id, "pool task id");
       });
-      expectStatus(response, [201], "pool group task");
-      const poolId = String(asRecord(response.json).id);
       response = await ctx.api("GET", "/api/poll", { agentId: codexId });
       expectStatus(response, [200], "codex polls the pool");
       const codexTrigger = asRecord(asRecord(response.json).trigger ?? {});

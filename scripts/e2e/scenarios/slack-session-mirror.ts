@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callTool, expectToolOk } from "./platformb-helpers";
@@ -109,7 +110,7 @@ async function startMirroredSession(ctx: ScenarioContext, label: string) {
   // scenarios' asks away from the leads they registered.
   const liveLeads =
     ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM agents WHERE isLead = 1 AND status != 'offline'",
+      sql`SELECT COUNT(*) AS n FROM agents WHERE "isLead" = ${true} AND status != 'offline'`,
     )?.n ?? 0;
   if (liveLeads === 0) await registerLead(ctx, `e2e-lead-${label}-${ctx.nonce}`);
   const { ts: threadTs } = await ask(ctx, `${label} root ${ctx.nonce}`);
@@ -128,8 +129,7 @@ async function startMirroredSession(ctx: ScenarioContext, label: string) {
   (alice.profile as Record<string, unknown>).image_72 = AVATAR;
   let userId = (
     ctx.db.get<{ userId: string }>(
-      "SELECT userId FROM user_external_ids WHERE kind = 'slack' AND externalId = ?",
-      [alice.id],
+      sql`SELECT "userId" FROM user_external_ids WHERE kind = 'slack' AND "externalId" = ${alice.id}`,
     ) ?? undefined
   )?.userId;
   if (!userId) {
@@ -152,9 +152,8 @@ async function startMirroredSession(ctx: ScenarioContext, label: string) {
 async function unlinkMirrorPerson(ctx: ScenarioContext): Promise<void> {
   const alice = ctx.slack.user("alice");
   const row = ctx.db.get<{ userId: string }>(
-    `SELECT e.userId FROM user_external_ids e JOIN users u ON u.id = e.userId
-      WHERE e.kind = 'slack' AND e.externalId = ? AND u.name LIKE 'Mirror Alice %'`,
-    [alice.id],
+    sql`SELECT e."userId" FROM user_external_ids e JOIN users u ON u.id = e."userId"
+      WHERE e.kind = 'slack' AND e."externalId" = ${alice.id} AND u.name LIKE 'Mirror Alice %'`,
   );
   if (!row) return;
   expectStatus(
@@ -194,8 +193,8 @@ async function expectOneReplyCard(ctx: ScenarioContext, label: string): Promise<
 
 function slackTaskCount(ctx: ScenarioContext): number {
   return (
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks WHERE source = 'slack'")?.n ??
-    0
+    ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM agent_tasks WHERE source = 'slack'`)
+      ?.n ?? 0
   );
 }
 

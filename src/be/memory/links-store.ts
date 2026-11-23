@@ -14,7 +14,7 @@
  * `resolved: false` and no target metadata, indistinguishable from targets
  * the viewer may not see, so nothing leaks. Server-side only.
  */
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import type { LinkType, TargetKind } from "./link-resolver";
 
 /** Minimal metadata about a linked/backlinking memory — enough to memory-get it. */
@@ -102,24 +102,11 @@ export async function getLinksForMemory(
   options: GetLinksOptions = {},
 ): Promise<MemoryLinksResult> {
   const { viewerAgentId, isLead = false } = options;
-  const db = getDbClient();
+  const repo = getStorage().repos.memory;
 
   // Outgoing links. The LEFT JOIN resolves memory-kind targets to a live
   // agent_memory row; dangling/unresolved/expired targets join to NULL.
-  const outgoing = await db.query<OutgoingRow>(
-    `SELECT ml.id, ml.linkType, ml.targetKind, ml.targetId, ml.strength,
-            ml.resolver, ml.sourceText, ml.createdAt,
-            m.id AS targetMemoryId, m.name AS targetName,
-            m.scope AS targetScope, m.agentId AS targetAgentId
-       FROM memory_link ml
-       LEFT JOIN agent_memory m
-         ON ml.targetKind = 'memory'
-        AND m.id = ml.targetId
-        AND (m.expiresAt IS NULL OR m.expiresAt > datetime('now'))
-      WHERE ml.from_memory_id = ?
-      ORDER BY ml.createdAt ASC, ml.id ASC`,
-    [memoryId],
-  );
+  const outgoing = (await repo.listOutgoingLinks(memoryId)) as OutgoingRow[];
 
   const links: MemoryLinkView[] = outgoing.map((row) => {
     if (row.targetKind !== "memory") {
@@ -172,26 +159,10 @@ export async function getLinksForMemory(
   // Inbound links (backlinks): rows in the same table pointing at this memory.
   // INNER JOIN drops rows whose source memory no longer exists; the scope
   // condition keeps cross-agent agent-scoped sources invisible to non-leads.
-  const conditions = [
-    "ml.targetKind = 'memory'",
-    "ml.targetId = ?",
-    "(m.expiresAt IS NULL OR m.expiresAt > datetime('now'))",
-  ];
-  const params: (string | null)[] = [memoryId];
-  if (!isLead) {
-    conditions.push("(m.agentId = ? OR m.scope = 'swarm')");
-    params.push(viewerAgentId ?? null);
-  }
-
-  const inbound = await db.query<BacklinkRow>(
-    `SELECT ml.id, ml.linkType, ml.strength, ml.sourceText, ml.createdAt,
-            m.id AS fromId, m.name AS fromName, m.scope AS fromScope
-       FROM memory_link ml
-       JOIN agent_memory m ON m.id = ml.from_memory_id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY ml.createdAt ASC, ml.id ASC`,
-    params,
-  );
+  const inbound = (await repo.listBacklinks(memoryId, {
+    isLead,
+    viewerAgentId: viewerAgentId ?? null,
+  })) as BacklinkRow[];
 
   const backlinks: MemoryBacklinkView[] = inbound.map((row) => ({
     id: row.id,

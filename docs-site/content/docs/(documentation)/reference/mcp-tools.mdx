@@ -580,6 +580,13 @@ Every widget query must be `SELECT`/`WITH` only. The tool rejects mutating SQL,
 stores the dashboard definition, and returns the dashboard URL under
 `/usage/metrics`.
 
+A `{{key:since}}` range of seconds, minutes or hours binds an ISO 8601 instant.
+On SQLite, a table whose timestamp column defaults to `datetime('now')` (for
+example the workflow tables) stores `YYYY-MM-DD HH:MM:SS` text, which compares
+below that ISO text, so such a widget undercounts the rows of the range's first
+day. Day, month and year ranges, and tables the app writes in ISO (tasks, session
+costs), count right on both engines.
+
 ## Task Pool Tools
 
 ### task-action

@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callTool, expectToolOk } from "./platformb-helpers";
@@ -72,8 +73,7 @@ async function expectFinalizedCard(
   type CardRow = { thread_ts: string; finalized_at: string | null };
   const read = () =>
     ctx.db.get<CardRow>(
-      "SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-      [taskId],
+      sql`SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
     );
   // The message lands in Slack at chat.startStream; finalized_at is written
   // only after stopStream, the status clear and the permalink read. Wait for it.
@@ -90,7 +90,9 @@ async function expectFinalizedCard(
 
 /** Lets `leadId` hold several tasks at once, through agent re-registration. */
 async function allowSeveralTasks(ctx: ScenarioContext, leadId: string): Promise<void> {
-  const name = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId])?.name;
+  const name = ctx.db.get<{ name: string }>(
+    sql`SELECT name FROM agents WHERE id = ${leadId}`,
+  )?.name;
   expectStatus(
     await ctx.api("POST", "/api/agents", {
       agentId: leadId,
@@ -304,8 +306,7 @@ export const slackLeadFollowUpCard: Scenario = {
     const pinnedSettled = await pollUntil(
       () =>
         ctx.db.get<{ delivery_abandoned_at: string | null }>(
-          "SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-          [pinnedFollowUpId],
+          sql`SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${pinnedFollowUpId}`,
         )?.delivery_abandoned_at != null,
       30_000,
     );
@@ -332,8 +333,7 @@ export const slackLeadFollowUpCard: Scenario = {
     expectStatus(superseded, [200], "supersede the Slack ask on graceful shutdown");
     const resumeId = String(asRecord(superseded.json).resumeTaskId);
     const resume = ctx.db.get<{ source: string; taskType: string; slackThreadTs: string }>(
-      "SELECT source, taskType, slackThreadTs FROM agent_tasks WHERE id = ?",
-      [resumeId],
+      sql`SELECT source, "taskType", "slackThreadTs" FROM agent_tasks WHERE id = ${resumeId}`,
     );
     expect(
       resume?.source === "system" &&
@@ -367,8 +367,7 @@ export const slackLeadFollowUpCard: Scenario = {
     type FollowUpRow = { id: string; agentId: string; slackChannelId: string | null };
     const readPlain = () =>
       ctx.db.get<FollowUpRow>(
-        "SELECT id, agentId, slackChannelId FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
-        [plainId],
+        sql`SELECT id, "agentId", "slackChannelId" FROM agent_tasks WHERE "parentTaskId" = ${plainId} AND "taskType" = 'follow-up'`,
       );
     await pollUntil(() => readPlain() !== null, 15_000);
     const plain = readPlain();
@@ -383,7 +382,7 @@ export const slackLeadFollowUpCard: Scenario = {
     );
     expect(!plainPosted, "A follow-up with no Slack context posted to Slack");
     expect(
-      !ctx.db.get("SELECT 1 FROM slack_messages WHERE task_id = ?", [plain.id]),
+      !ctx.db.get(sql`SELECT 1 FROM slack_messages WHERE task_id = ${plain.id}`),
       "A follow-up with no Slack context got a slack_messages row",
     );
 
@@ -434,8 +433,7 @@ export const slackLeadFollowUpCard: Scenario = {
       await misConn.close();
     }
     const sourceMarked = ctx.db.get<{ slackReplySent: number }>(
-      "SELECT slackReplySent FROM agent_tasks WHERE id = ?",
-      [misattributed.followUpId],
+      sql`SELECT "slackReplySent" FROM agent_tasks WHERE id = ${misattributed.followUpId}`,
     );
     expect(
       sourceMarked?.slackReplySent === 1,
@@ -642,8 +640,7 @@ export const slackLeadFollowUpCard: Scenario = {
         `The Slack Connect card does not label the share link as ${JSON.stringify(shareLabel)}`,
       );
       const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
-        "SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-        [external.followUpId],
+        sql`SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${external.followUpId}`,
       );
       expect(
         card !== null &&
@@ -691,8 +688,7 @@ export const slackLeadFollowUpCard: Scenario = {
       const failed = await pollUntil(
         () =>
           (ctx.db.get<{ delivery_attempts: number }>(
-            "SELECT delivery_attempts FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-            [ask.followUpId],
+            sql`SELECT delivery_attempts FROM slack_messages WHERE kind = 'outcome' AND task_id = ${ask.followUpId}`,
           )?.delivery_attempts ?? 0) > 0,
         15_000,
       );
@@ -742,8 +738,7 @@ export const slackLeadFollowUpCard: Scenario = {
     type CardRow = { delivery_abandoned_at: string | null; finalized_at: string | null };
     const suppressedCard = () =>
       ctx.db.get<CardRow>(
-        "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-        [suppressed.followUpId],
+        sql`SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${suppressed.followUpId}`,
       );
     await pollUntil(() => {
       const card = suppressedCard();

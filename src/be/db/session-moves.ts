@@ -2,13 +2,15 @@ import { keyPrefixRange } from "../../assets/key";
 import type { AssetEntityType } from "../../types";
 import type { AssetKeyAuditResult } from "../asset-key-audit";
 import { isInTransaction } from "../db-client";
-import { getDbClient } from "./runtime";
-import { sessionViewerCondition } from "./session-visibility";
+import { getStorage } from "../storage";
 import { getTaskById } from "./tasks/read";
 
 type SessionMoveDependencies = {
-  /** The sync boot audit (`auditAssetKeys`) over the raw handle, which only db.ts may use. */
-  auditAssetKeys: () => AssetKeyAuditResult;
+  /**
+   * The asset key audit. SQLite: the sync boot audit (`auditAssetKeys`) over the
+   * raw handle, which only db.ts may use. Postgres: the repository audit.
+   */
+  auditAssetKeys: () => AssetKeyAuditResult | Promise<AssetKeyAuditResult>;
   insertAssetKeyHistory: (input: {
     entityType: AssetEntityType;
     entityId: string;
@@ -39,7 +41,7 @@ export async function assertAssetKeyMovesAllowed(): Promise<void> {
   // auditAssetKeys stays sync (shared with the boot audit); run it inside a
   // client transaction so this request-path read cannot observe another
   // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(), {
+  const audit = await getStorage().transaction(async () => auditAssetKeys(), {
     readOnly: true,
   });
   if (!audit.ok) {
@@ -57,7 +59,7 @@ export async function moveTaskChainKeyInTx(
   if (!isInTransaction()) {
     throw new Error("moveTaskChainKeyInTx requires an active transaction");
   }
-  const client = getDbClient();
+  const sessions = getStorage().repos.sessions;
   const now = new Date().toISOString();
   const root = await getTaskById(rootId);
   if (!root) return false;
@@ -71,30 +73,12 @@ export async function moveTaskChainKeyInTx(
     if (task.key === key) continue;
     // A file shared with another task keeps the namespace of the task whose attachment
     // sources its mapping. Mappings with no attachment source follow any attaching task.
-    const mappedFiles = await client.query<{ id: string; key: string }>(
-      `SELECT DISTINCT m.id, m."key" AS key
-       FROM asset_key_mappings m
-       JOIN task_attachments a
-         ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-        AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-        AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-        AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-       WHERE a.task_id = ?
-         AND (m.source_entity_type IS NOT 'task-attachment'
-           OR m.source_entity_id IN (SELECT id FROM task_attachments WHERE task_id = ?))`,
-      [task.id, task.id],
-    );
+    const mappedFiles = await sessions.listTaskAttachmentMappings(task.id);
     // The namespace is metadata, and lastUpdatedAt tracks task activity, as in updateTaskTitle.
-    await client.run(
-      'UPDATE agent_tasks SET "key" = ?, updated_by = COALESCE(?, updated_by) WHERE id = ?',
-      [key, changedBy ?? null, task.id],
-    );
+    await sessions.setTaskKey(task.id, key, changedBy ?? null);
     for (const mapping of mappedFiles) {
       if (mapping.key === key) continue;
-      await client.run(
-        'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = COALESCE(?, updated_by) WHERE id = ?',
-        [key, now, changedBy ?? null, mapping.id],
-      );
+      await sessions.setAssetMappingKey(mapping.id, key, now, changedBy ?? null);
       await insertAssetKeyHistory({
         entityType: "file",
         entityId: mapping.id,
@@ -124,7 +108,7 @@ export async function moveSessionChains(input: {
 }): Promise<string[]> {
   const moved: string[] = [];
   for (const move of input.moves) {
-    const taskIds = await getDbClient().transaction(async () =>
+    const taskIds = await getStorage().transaction(async () =>
       moveTaskChainKeyInTx(move.rootId, move.taskIds, move.key, input.changedBy),
     );
     if (taskIds && taskIds.length > 0) moved.push(move.rootId);
@@ -142,16 +126,9 @@ export async function moveKeyFavorites(input: {
   to: string;
   scope?: string;
 }): Promise<void> {
-  const { lo, hi } = keyPrefixRange(input.from);
-  const scoped = input.scope !== undefined;
-  const range = `itemType IN ('key','hidden-key') AND itemId >= ? AND itemId < ?${scoped ? " AND favoriteScope = ?" : ""}`;
-  const rangeParams = [lo, hi, ...(scoped ? [input.scope as string] : [])];
-  await getDbClient().transaction(async () => {
-    await getDbClient().run(
-      `UPDATE OR IGNORE user_favorites SET itemId = ? || substr(itemId, ?) WHERE ${range}`,
-      [input.to, lo.length + 1, ...rangeParams],
-    );
-    await getDbClient().run(`DELETE FROM user_favorites WHERE ${range}`, rangeParams);
+  const range = keyPrefixRange(input.from);
+  await getStorage().transaction(async () => {
+    await getStorage().repos.sessions.moveKeyFavorites(range, input.to, input.scope);
   });
 }
 
@@ -161,26 +138,20 @@ export async function listPrefixRoots(input: {
   limit: number;
   offset?: number;
 }): Promise<{ id: string; key: string }[]> {
-  const { lo, hi } = keyPrefixRange(input.from);
-  return getDbClient().query<{ id: string; key: string }>(
-    `SELECT r.id, r."key" FROM agent_tasks r
-     WHERE r.parentTaskId IS NULL AND r."key" >= ? AND r."key" < ?
-       ${input.userId !== undefined ? "AND r.requestedByUserId = ?" : ""}
-     ORDER BY r.id LIMIT ? OFFSET ?`,
-    [lo, hi, ...(input.userId !== undefined ? [input.userId] : []), input.limit, input.offset ?? 0],
-  );
+  return getStorage().repos.sessions.listPrefixRoots({
+    range: keyPrefixRange(input.from),
+    ...(input.userId !== undefined ? { userId: input.userId } : {}),
+    limit: input.limit,
+    offset: input.offset ?? 0,
+  });
 }
 
 export async function listSharedPrefixRoots(input: {
   from: string;
   userId: string | null;
 }): Promise<{ id: string }[]> {
-  const { lo, hi } = keyPrefixRange(input.from);
-  const visibility = sessionViewerCondition({ userId: input.userId, scope: "shared" });
-  return getDbClient().query<{ id: string }>(
-    `SELECT r.id FROM agent_tasks r
-     WHERE r.parentTaskId IS NULL AND r."key" >= ? AND r."key" < ?
-       AND ${visibility.sql} ORDER BY r.id`,
-    [lo, hi, ...visibility.params],
-  );
+  return getStorage().repos.sessions.listVisiblePrefixRoots(keyPrefixRange(input.from), {
+    userId: input.userId,
+    scope: "shared",
+  });
 }

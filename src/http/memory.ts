@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getAgentById, getDbClient, getTaskById } from "../be/db";
+import { getAgentById, getTaskById } from "../be/db";
 import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
@@ -40,6 +40,7 @@ import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retriev
 import { dropReviewTaskCompletions, isReviewTaskId } from "../be/memory/review-recall-filter";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
+import { getStorage } from "../be/storage";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
@@ -1343,7 +1344,7 @@ export async function handleMemory(
     const parsed = await memoryHealth.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    memoryHealth.respond(res, 200, getMemoryStore().getHealth());
+    memoryHealth.respond(res, 200, await getMemoryStore().getHealth());
     return true;
   }
 
@@ -1631,14 +1632,12 @@ export async function purgeStaleSearchRetrievals(
       // `+eventType` keeps the planner on the retrievedAt range. Without
       // sqlite_stat1 it prefers the eventType equality, which reads every
       // search row to test its date, even when nothing is stale.
-      const result = await getDbClient().run(
-        `DELETE FROM memory_retrieval WHERE rowid IN (
-          SELECT rowid FROM memory_retrieval
-          WHERE +eventType = 'search' AND retrievedAt < ? LIMIT ?)`,
-        [cutoff, batchSize],
+      const changes = await getStorage().repos.memory.purgeSearchRetrievalsBefore(
+        cutoff,
+        batchSize,
       );
-      purged += result.changes;
-      if (result.changes < batchSize) return purged;
+      purged += changes;
+      if (changes < batchSize) return purged;
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   } catch (err) {

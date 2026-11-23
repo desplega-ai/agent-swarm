@@ -1,8 +1,12 @@
 import type { OAuthApp, OAuthTokens } from "../../tracker/types";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
-import { getDbClient } from "../db";
 import { oauthSecretName, registerStoredSecret } from "../secret-registry";
+import { getStorage } from "../storage";
+
+function oauthRepo() {
+  return getStorage().repos.oauth;
+}
 
 type OAuthAppRow = Omit<
   OAuthApp,
@@ -147,43 +151,25 @@ function normalizeAuthorization(row: OAuthAuthorizationRow): OAuthAuthorization 
 }
 
 async function rawOAuthAppByProvider(provider: string): Promise<OAuthAppRow | null> {
-  return await getDbClient().get<OAuthAppRow>(
-    `SELECT * FROM oauth_apps
-       WHERE provider = ? AND mcpServerId IS NULL
-       ORDER BY createdAt ASC, id ASC
-       LIMIT 1`,
-    [provider],
-  );
+  return (await oauthRepo().findAppByProvider(provider)) as OAuthAppRow | null;
 }
 
 /** Exact (non-MCP) app lookup by id — used to target a specific row when the
  * provider is ambiguous (N apps per provider are allowed). */
 async function rawOAuthAppById(id: string): Promise<OAuthAppRow | null> {
-  return await getDbClient().get<OAuthAppRow>(
-    "SELECT * FROM oauth_apps WHERE id = ? AND mcpServerId IS NULL",
-    [id],
-  );
+  return (await oauthRepo().findProviderAppById(id)) as OAuthAppRow | null;
 }
 
 async function rawDefaultAuthorizationForApp(appId: string): Promise<OAuthAuthorizationRow | null> {
-  return await getDbClient().get<OAuthAuthorizationRow>(
-    "SELECT * FROM oauth_authorizations WHERE appId = ? AND label = 'default'",
-    [appId],
-  );
+  return (await oauthRepo().findDefaultAuthorizationForApp(appId)) as OAuthAuthorizationRow | null;
 }
 
 async function rawDefaultAuthorizationForProvider(
   provider: string,
 ): Promise<OAuthAuthorizationRow | null> {
-  return await getDbClient().get<OAuthAuthorizationRow>(
-    `SELECT z.*
-       FROM oauth_authorizations z
-       JOIN oauth_apps a ON a.id = z.appId
-       WHERE a.provider = ? AND a.mcpServerId IS NULL AND z.label = 'default'
-       ORDER BY a.createdAt ASC, a.id ASC
-       LIMIT 1`,
-    [provider],
-  );
+  return (await oauthRepo().findDefaultAuthorizationForProvider(
+    provider,
+  )) as OAuthAuthorizationRow | null;
 }
 
 export async function getDefaultAuthorizationIdForProvider(
@@ -200,7 +186,7 @@ export async function getOAuthApp(provider: string): Promise<OAuthApp | null> {
 }
 
 export async function getOAuthAppById(id: string): Promise<OAuthApp | null> {
-  const row = await getDbClient().get<OAuthAppRow>("SELECT * FROM oauth_apps WHERE id = ?", [id]);
+  const row = (await oauthRepo().findAppById(id)) as OAuthAppRow | null;
   return row ? normalizeOAuthApp(row) : null;
 }
 
@@ -268,66 +254,45 @@ async function writeOAuthApp(
         : (existing?.revocationUrl ?? null);
 
   if (existing) {
-    await getDbClient().run(
-      `UPDATE oauth_apps SET
-           displayName = ?, clientId = ?, clientSecret = ?, clientSecretEncrypted = 1,
-           authorizeUrl = ?, tokenUrl = ?, revocationUrl = ?, userinfoUrl = ?,
-           redirectUri = ?, scopes = ?, scopeSeparator = ?, tokenAuthStyle = ?,
-           tokenBodyFormat = ?, requiresRefreshTokenRotation = ?, extraParamsJson = ?,
-           source = ?, metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?`,
-      [
-        data.displayName !== undefined ? data.displayName : existing.displayName,
-        data.clientId,
-        encryptedSecret,
-        data.authorizeUrl,
-        data.tokenUrl,
-        revocationUrl,
-        data.userinfoUrl !== undefined ? data.userinfoUrl : existing.userinfoUrl,
-        data.redirectUri,
-        storeScopeList(data.scopes),
-        scopeSeparator,
-        tokenAuthStyle,
-        tokenBodyFormat,
-        rotation ? 1 : 0,
-        extraParamsJson,
-        data.source ?? existing.source,
-        lifted?.metadata ?? existing.metadata,
-        existing.id,
-      ],
-    );
-    return existing.id;
-  }
-
-  const inserted = await getDbClient().get<{ id: string }>(
-    `INSERT INTO oauth_apps (
-         provider, displayName, clientId, clientSecret, clientSecretEncrypted,
-         authorizeUrl, tokenUrl, revocationUrl, userinfoUrl, redirectUri, scopes,
-         scopeSeparator, tokenAuthStyle, tokenBodyFormat,
-         requiresRefreshTokenRotation, extraParamsJson, source, metadata
-       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING id`,
-    [
-      provider,
-      data.displayName ?? null,
-      data.clientId,
-      encryptedSecret,
-      data.authorizeUrl,
-      data.tokenUrl,
+    await oauthRepo().updateApp(existing.id, {
+      displayName: data.displayName !== undefined ? data.displayName : existing.displayName,
+      clientId: data.clientId,
+      clientSecretCiphertext: encryptedSecret,
+      authorizeUrl: data.authorizeUrl,
+      tokenUrl: data.tokenUrl,
       revocationUrl,
-      data.userinfoUrl ?? null,
-      data.redirectUri,
-      storeScopeList(data.scopes),
+      userinfoUrl: data.userinfoUrl !== undefined ? data.userinfoUrl : existing.userinfoUrl,
+      redirectUri: data.redirectUri,
+      scopes: storeScopeList(data.scopes),
       scopeSeparator,
       tokenAuthStyle,
       tokenBodyFormat,
-      rotation ? 1 : 0,
+      requiresRefreshTokenRotation: rotation,
       extraParamsJson,
-      data.source ?? "manual",
-      lifted?.metadata ?? "{}",
-    ],
-  );
-  return inserted!.id;
+      source: data.source ?? existing.source,
+      metadata: lifted?.metadata ?? existing.metadata,
+    });
+    return existing.id;
+  }
+
+  return await oauthRepo().insertApp(provider, {
+    displayName: data.displayName ?? null,
+    clientId: data.clientId,
+    clientSecretCiphertext: encryptedSecret,
+    authorizeUrl: data.authorizeUrl,
+    tokenUrl: data.tokenUrl,
+    revocationUrl,
+    userinfoUrl: data.userinfoUrl ?? null,
+    redirectUri: data.redirectUri,
+    scopes: storeScopeList(data.scopes),
+    scopeSeparator,
+    tokenAuthStyle,
+    tokenBodyFormat,
+    requiresRefreshTokenRotation: rotation,
+    extraParamsJson,
+    source: data.source ?? "manual",
+    metadata: lifted?.metadata ?? "{}",
+  });
 }
 
 /** Create a brand-new OAuth app row and return its id. ALWAYS inserts — it never
@@ -360,18 +325,12 @@ export async function upsertOAuthApp(provider: string, data: OAuthAppWriteData):
 // ── OAuth Authorizations ──
 
 export async function listAuthorizationsForApp(appId: string): Promise<OAuthAuthorization[]> {
-  const rows = await getDbClient().query<OAuthAuthorizationRow>(
-    "SELECT * FROM oauth_authorizations WHERE appId = ? ORDER BY createdAt ASC, id ASC",
-    [appId],
-  );
+  const rows = (await oauthRepo().listAuthorizationsForApp(appId)) as OAuthAuthorizationRow[];
   return rows.map(normalizeAuthorization);
 }
 
 export async function getAuthorizationById(id: string): Promise<OAuthAuthorization | null> {
-  const row = await getDbClient().get<OAuthAuthorizationRow>(
-    "SELECT * FROM oauth_authorizations WHERE id = ?",
-    [id],
-  );
+  const row = (await oauthRepo().findAuthorization(id)) as OAuthAuthorizationRow | null;
   return row ? normalizeAuthorization(row) : null;
 }
 
@@ -382,10 +341,7 @@ async function registerAuthorizationSecrets(
   accessToken: string,
   refreshToken: string | null | undefined,
 ): Promise<void> {
-  const app = await getDbClient().get<{ provider: string }>(
-    "SELECT provider FROM oauth_apps WHERE id = ?",
-    [appId],
-  );
+  const app = await oauthRepo().findAppById(appId);
   const provider = app?.provider ?? appId;
   registerStoredSecret(accessToken, oauthSecretName(provider, "access_token"));
   registerStoredSecret(refreshToken, oauthSecretName(provider, "refresh_token"));
@@ -406,7 +362,7 @@ export async function listStoredOAuthSecrets(): Promise<{
   const secrets: { provider: string; kind: StoredOAuthSecretKind; value: string }[] = [];
   let failed = 0;
 
-  const apps = await getDbClient().query<OAuthAppRow>("SELECT * FROM oauth_apps");
+  const apps = (await oauthRepo().listApps()) as OAuthAppRow[];
   for (const row of apps) {
     try {
       const app = normalizeOAuthApp(row);
@@ -418,11 +374,10 @@ export async function listStoredOAuthSecrets(): Promise<{
     }
   }
 
-  const authorizations = await getDbClient().query<OAuthAuthorizationRow & { provider: string }>(
-    `SELECT z.*, a.provider AS provider
-       FROM oauth_authorizations z
-       JOIN oauth_apps a ON a.id = z.appId`,
-  );
+  const authorizations =
+    (await oauthRepo().listAuthorizationsWithProvider()) as (OAuthAuthorizationRow & {
+      provider: string;
+    })[];
   for (const row of authorizations) {
     try {
       const authorization = normalizeAuthorization(row);
@@ -480,63 +435,49 @@ export async function upsertAuthorization(data: {
   await registerAuthorizationSecrets(data.appId, data.accessToken, data.refreshToken);
 
   if (existing) {
-    await getDbClient().run(
-      `UPDATE oauth_authorizations SET
-           userId = ?, accountEmail = ?, identityJson = ?, accessToken = ?,
-           refreshToken = ?, tokenType = ?, expiresAt = ?, scope = ?,
-           tokensEncrypted = 1, tokenVersion = tokenVersion + 1, status = ?,
-           lastErrorMessage = ?, lastRefreshedAt = ?, connectedByUserId = ?,
-           updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ?`,
-      [
-        data.userId !== undefined ? data.userId : existing.userId,
-        data.accountEmail !== undefined ? data.accountEmail : existing.accountEmail,
-        data.identityJson !== undefined ? data.identityJson : existing.identityJson,
-        accessToken,
+    await oauthRepo().rewriteAuthorization(existing.id, {
+      userId: data.userId !== undefined ? data.userId : existing.userId,
+      accountEmail: data.accountEmail !== undefined ? data.accountEmail : existing.accountEmail,
+      identityJson: data.identityJson !== undefined ? data.identityJson : existing.identityJson,
+      accessToken,
+      refreshToken:
         refreshToken === undefined
           ? existing.refreshToken == null
             ? null
             : encryptSecret(existing.refreshToken, key)
           : refreshToken,
-        data.tokenType ?? existing.tokenType,
-        data.expiresAt !== undefined ? data.expiresAt : existing.expiresAt,
-        data.scope !== undefined ? data.scope : existing.scope,
-        data.status ?? existing.status,
+      tokenType: data.tokenType ?? existing.tokenType,
+      expiresAt: data.expiresAt !== undefined ? data.expiresAt : existing.expiresAt,
+      scope: data.scope !== undefined ? data.scope : existing.scope,
+      status: data.status ?? existing.status,
+      lastErrorMessage:
         data.lastErrorMessage !== undefined ? data.lastErrorMessage : existing.lastErrorMessage,
+      lastRefreshedAt:
         data.lastRefreshedAt !== undefined ? data.lastRefreshedAt : existing.lastRefreshedAt,
+      connectedByUserId:
         data.connectedByUserId !== undefined ? data.connectedByUserId : existing.connectedByUserId,
-        existing.id,
-      ],
-    );
+    });
     return (await getAuthorizationById(existing.id)) as OAuthAuthorization;
   }
 
   const id = data.id ?? crypto.randomUUID();
-  await getDbClient().run(
-    `INSERT INTO oauth_authorizations (
-         id, appId, label, userId, accountEmail, identityJson,
-         accessToken, refreshToken, tokenType, expiresAt, scope,
-         tokensEncrypted, tokenVersion, status, lastErrorMessage,
-         lastRefreshedAt, connectedByUserId
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`,
-    [
-      id,
-      data.appId,
-      label,
-      data.userId ?? null,
-      data.accountEmail ?? null,
-      data.identityJson ?? null,
-      accessToken,
-      refreshToken ?? null,
-      data.tokenType ?? "Bearer",
-      data.expiresAt ?? null,
-      data.scope ?? null,
-      data.status ?? "active",
-      data.lastErrorMessage ?? null,
-      data.lastRefreshedAt ?? null,
-      data.connectedByUserId ?? null,
-    ],
-  );
+  await oauthRepo().insertAuthorization({
+    id,
+    appId: data.appId,
+    label,
+    userId: data.userId ?? null,
+    accountEmail: data.accountEmail ?? null,
+    identityJson: data.identityJson ?? null,
+    accessToken,
+    refreshToken: refreshToken ?? null,
+    tokenType: data.tokenType ?? "Bearer",
+    expiresAt: data.expiresAt ?? null,
+    scope: data.scope ?? null,
+    status: data.status ?? "active",
+    lastErrorMessage: data.lastErrorMessage ?? null,
+    lastRefreshedAt: data.lastRefreshedAt ?? null,
+    connectedByUserId: data.connectedByUserId ?? null,
+  });
   return (await getAuthorizationById(id)) as OAuthAuthorization;
 }
 
@@ -563,24 +504,13 @@ export async function updateAuthorizationTokens(
         ? null
         : encryptSecret(data.refreshToken, key);
   await registerAuthorizationSecrets(existing.appId, data.accessToken, data.refreshToken);
-  const result = await getDbClient().run(
-    `UPDATE oauth_authorizations SET
-         accessToken = ?, refreshToken = ?, expiresAt = ?, scope = ?,
-         tokensEncrypted = 1, tokenVersion = tokenVersion + 1,
-         status = 'active', lastErrorMessage = NULL,
-         lastRefreshedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND tokenVersion = ?`,
-    [
-      encryptSecret(data.accessToken, key),
-      encryptedRefresh,
-      data.expiresAt !== undefined ? data.expiresAt : existing.expiresAt,
-      data.scope !== undefined ? data.scope : existing.scope,
-      id,
-      expectedVersion,
-    ],
-  );
-  return result.changes === 1 ? await getAuthorizationById(id) : null;
+  const updated = await oauthRepo().storeRefreshedTokens(id, expectedVersion, {
+    accessToken: encryptSecret(data.accessToken, key),
+    refreshToken: encryptedRefresh,
+    expiresAt: data.expiresAt !== undefined ? data.expiresAt : existing.expiresAt,
+    scope: data.scope !== undefined ? data.scope : existing.scope,
+  });
+  return updated ? await getAuthorizationById(id) : null;
 }
 
 /**
@@ -592,13 +522,10 @@ export async function updateAuthorizationIdentity(
   id: string,
   data: { accountEmail?: string | null; identityJson?: string | null },
 ): Promise<void> {
-  await getDbClient().run(
-    `UPDATE oauth_authorizations SET
-         accountEmail = ?, identityJson = ?,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ?`,
-    [data.accountEmail ?? null, data.identityJson ?? null, id],
-  );
+  await oauthRepo().setAuthorizationIdentity(id, {
+    accountEmail: data.accountEmail ?? null,
+    identityJson: data.identityJson ?? null,
+  });
 }
 
 /**
@@ -607,8 +534,7 @@ export async function updateAuthorizationIdentity(
  * it are detached via `ON DELETE SET NULL`.
  */
 export async function deleteAuthorizationById(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM oauth_authorizations WHERE id = ?", [id]);
-  return result.changes > 0;
+  return oauthRepo().deleteAuthorization(id);
 }
 
 /**
@@ -618,8 +544,7 @@ export async function deleteAuthorizationById(id: string): Promise<boolean> {
  * `ON DELETE SET NULL`.
  */
 export async function deleteAuthorizationsForApp(appId: string): Promise<number> {
-  return (await getDbClient().run("DELETE FROM oauth_authorizations WHERE appId = ?", [appId]))
-    .changes;
+  return oauthRepo().deleteAuthorizationsForApp(appId);
 }
 
 // ── OAuth pending (DB-backed PKCE state for generic/tracker flows) ──
@@ -672,24 +597,18 @@ export async function createOAuthPending(input: {
   userId?: string | null;
   contextJson?: string;
 }): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO oauth_pending (
-         state, appId, label, flow, codeVerifier, nonce,
-         redirectUri, finalRedirect, userId, contextJson
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      input.state,
-      input.appId,
-      input.label ?? "default",
-      input.flow ?? "generic",
-      encryptSecret(input.codeVerifier, getEncryptionKey()),
-      input.nonce ?? null,
-      input.redirectUri,
-      input.finalRedirect ?? null,
-      input.userId ?? null,
-      input.contextJson ?? "{}",
-    ],
-  );
+  await oauthRepo().insertPending({
+    state: input.state,
+    appId: input.appId,
+    label: input.label ?? "default",
+    flow: input.flow ?? "generic",
+    codeVerifier: encryptSecret(input.codeVerifier, getEncryptionKey()),
+    nonce: input.nonce ?? null,
+    redirectUri: input.redirectUri,
+    finalRedirect: input.finalRedirect ?? null,
+    userId: input.userId ?? null,
+    contextJson: input.contextJson ?? "{}",
+  });
 }
 
 /**
@@ -702,17 +621,12 @@ export async function createOAuthPending(input: {
  * window.
  */
 export async function consumeOAuthPending(state: string): Promise<OAuthPendingRecord | null> {
-  return await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<OAuthPendingRow>(
-      `SELECT state, appId, label, flow, codeVerifier, nonce, redirectUri,
-              finalRedirect, userId, contextJson, createdAt
-       FROM oauth_pending
-       WHERE state = ? AND flow IN ('generic', 'tracker')`,
-      [state],
-    );
+  const repo = oauthRepo();
+  return await getStorage().transaction(async () => {
+    const row = (await repo.findPending(state, ["generic", "tracker"])) as OAuthPendingRow | null;
     if (!row) return null;
     // Single-use: always delete, whether valid or expired.
-    await tx.run("DELETE FROM oauth_pending WHERE state = ?", [state]);
+    await repo.deletePending(state);
     const createdAt = normalizeDateRequired(row.createdAt);
     const createdMs = new Date(createdAt).getTime();
     if (Number.isNaN(createdMs) || Date.now() - createdMs > OAUTH_PENDING_TTL_MS) {
@@ -729,11 +643,7 @@ export async function consumeOAuthPending(state: string): Promise<OAuthPendingRe
 /** GC expired generic/tracker pending rows. MCP rows are GC'd separately. */
 export async function gcOAuthPending(olderThanMs = 10 * 60 * 1000): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-  const result = await getDbClient().run(
-    "DELETE FROM oauth_pending WHERE flow IN ('generic', 'tracker') AND createdAt < ?",
-    [cutoff],
-  );
-  return result.changes;
+  return oauthRepo().deletePendingBefore(["generic", "tracker"], cutoff);
 }
 
 /**
@@ -747,14 +657,8 @@ export async function markAuthorizationRefreshFailed(
   id: string,
   message: string | null,
 ): Promise<OAuthAuthorization | null> {
-  const result = await getDbClient().run(
-    `UPDATE oauth_authorizations SET
-         status = 'refresh-failed', lastErrorMessage = ?,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status != 'revoked'`,
-    [message, id],
-  );
-  return result.changes === 1 ? await getAuthorizationById(id) : null;
+  const updated = await oauthRepo().markRefreshFailed(id, message);
+  return updated ? await getAuthorizationById(id) : null;
 }
 
 // ── Provider-string compatibility adapters ──
@@ -872,35 +776,13 @@ export type AuthorizationSweepRow = {
  * provider outages self-heal.
  */
 export async function listAuthorizationSweepRows(): Promise<AuthorizationSweepRow[]> {
-  const rows = await getDbClient().query<{
-    authorizationId: string;
-    appId: string;
-    provider: string;
-    label: string;
-    status: OAuthAuthorizationStatus;
-    hasRefreshToken: number;
-    expiresAt: string;
-    updatedAt: string;
-  }>(
-    `SELECT z.id AS authorizationId,
-              z.appId AS appId,
-              a.provider AS provider,
-              z.label AS label,
-              z.status AS status,
-              CASE WHEN z.refreshToken IS NOT NULL AND z.refreshToken != '' THEN 1 ELSE 0 END AS hasRefreshToken,
-              COALESCE(z.expiresAt, '') AS expiresAt,
-              z.updatedAt AS updatedAt
-       FROM oauth_authorizations z
-       JOIN oauth_apps a ON a.id = z.appId
-       WHERE a.mcpServerId IS NULL
-       ORDER BY a.provider ASC, z.label ASC`,
-  );
+  const rows = await oauthRepo().listSweepRows();
   return rows.map((row) => ({
     authorizationId: row.authorizationId,
     appId: row.appId,
     provider: row.provider,
     label: row.label,
-    status: row.status,
+    status: row.status as OAuthAuthorizationStatus,
     hasRefreshToken: row.hasRefreshToken === 1,
     expiresAt: normalizeDateRequired(row.expiresAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -923,29 +805,7 @@ export type KeepAliveAuthorization = {
  * the metadata backfill).
  */
 export async function listKeepAliveAuthorizations(): Promise<KeepAliveAuthorization[]> {
-  const rows = await getDbClient().query<{
-    authorizationId: string;
-    appId: string;
-    provider: string;
-    label: string;
-    displayName: string | null;
-  }>(
-    `SELECT z.id AS authorizationId,
-              z.appId AS appId,
-              a.provider AS provider,
-              z.label AS label,
-              a.displayName AS displayName
-       FROM oauth_authorizations z
-       JOIN oauth_apps a ON a.id = z.appId
-       WHERE a.mcpServerId IS NULL
-         AND z.status = 'active'
-         AND z.refreshToken IS NOT NULL AND z.refreshToken != ''
-         AND (
-           a.requiresRefreshTokenRotation = 1
-           OR (json_valid(a.metadata) = 1 AND json_extract(a.metadata, '$.keepAlive') IN (1, 'true'))
-         )
-       ORDER BY a.provider ASC, z.label ASC`,
-  );
+  const rows = await oauthRepo().listKeepAliveRows();
   return rows.map((row) => ({
     authorizationId: row.authorizationId,
     appId: row.appId,
@@ -964,15 +824,7 @@ export async function deleteOAuthTokens(provider: string): Promise<void> {
   // the row so script_credential_bindings.oauth_authorization_id survives and a
   // later reconnect (upsert by appId+label='default') reuses the same id. Real
   // deletion of an authorization only happens via oauth_apps CASCADE.
-  await getDbClient().run(
-    `UPDATE oauth_authorizations SET
-         accessToken = ?, refreshToken = NULL, expiresAt = NULL, scope = NULL,
-         tokensEncrypted = 1, tokenVersion = tokenVersion + 1,
-         status = 'revoked', lastErrorMessage = NULL, lastRefreshedAt = NULL,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ?`,
-    [encryptSecret("", getEncryptionKey()), existing.id],
-  );
+  await oauthRepo().revokeAuthorization(existing.id, encryptSecret("", getEncryptionKey()));
 }
 
 export async function isTokenExpiringSoon(
@@ -997,28 +849,10 @@ export async function acquireOAuthRefreshLock(
   const expiresAt = new Date(now + ttlMs).toISOString();
   const nowIso = new Date(now).toISOString();
 
-  await getDbClient().run(
-    `INSERT INTO oauth_refresh_locks (lockKey, owner, expiresAt, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(lockKey) DO UPDATE SET
-         owner = excluded.owner,
-         expiresAt = excluded.expiresAt,
-         updatedAt = excluded.updatedAt
-       WHERE oauth_refresh_locks.expiresAt <= ?`,
-    [lockKey, owner, expiresAt, nowIso, nowIso, nowIso],
-  );
-
-  const row = await getDbClient().get<{ owner: string }>(
-    "SELECT owner FROM oauth_refresh_locks WHERE lockKey = ?",
-    [lockKey],
-  );
-
-  return row?.owner === owner ? owner : null;
+  const current = await oauthRepo().acquireRefreshLock(lockKey, owner, expiresAt, nowIso);
+  return current === owner ? owner : null;
 }
 
 export async function releaseOAuthRefreshLock(lockKey: string, owner: string): Promise<void> {
-  await getDbClient().run("DELETE FROM oauth_refresh_locks WHERE lockKey = ? AND owner = ?", [
-    lockKey,
-    owner,
-  ]);
+  await oauthRepo().releaseRefreshLock(lockKey, owner);
 }

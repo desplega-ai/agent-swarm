@@ -1,7 +1,7 @@
 import type { Workflow, WorkflowSnapshot } from "../../types";
 import { getWorkflow } from "../db";
+import { getStorage } from "../storage";
 import { computeContentHash } from "./context-versions";
-import { getDbClient } from "./runtime";
 
 // A run is pinned to the definition it started with (migration 283). The
 // snapshot lives once per distinct content in `workflow_run_definitions`, keyed
@@ -56,10 +56,7 @@ export function hashPinnedDefinition(pinned: PinnedWorkflowDefinition): {
 /** Store the workflow's pinned definition (once per content) and return its hash. */
 export async function pinWorkflowDefinition(workflow: Workflow): Promise<string> {
   const { hash, snapshot } = hashPinnedDefinition(toPinnedDefinition(workflow));
-  await getDbClient().run(
-    "INSERT OR IGNORE INTO workflow_run_definitions (hash, snapshot, createdAt) VALUES (?, ?, ?)",
-    [hash, snapshot, new Date().toISOString()],
-  );
+  await getStorage().repos.workflows.insertRunDefinition(hash, snapshot, new Date().toISOString());
   return hash;
 }
 
@@ -67,15 +64,10 @@ export async function pinWorkflowDefinition(workflow: Workflow): Promise<string>
 export async function getPinnedRunDefinition(
   runId: string,
 ): Promise<PinnedWorkflowDefinition | null> {
-  const row = await getDbClient().get<{ snapshot: string }>(
-    `SELECT d.snapshot FROM workflow_runs r
-       JOIN workflow_run_definitions d ON d.hash = r.definitionHash
-      WHERE r.id = ?`,
-    [runId],
-  );
+  const snapshot = await getStorage().repos.workflows.getRunDefinitionSnapshot(runId);
   // Not schema-validated, like `rowToWorkflow`: a later tightening of the
   // definition schema must not break runs pinned under the old one.
-  return row ? (JSON.parse(row.snapshot) as PinnedWorkflowDefinition) : null;
+  return snapshot !== null ? (JSON.parse(snapshot) as PinnedWorkflowDefinition) : null;
 }
 
 /**
@@ -116,13 +108,6 @@ export async function deleteOrphanedRunDefinitions(hashes: readonly string[]): P
   const batchSize = 100;
   for (let offset = 0; offset < hashes.length; offset += batchSize) {
     const batch = hashes.slice(offset, offset + batchSize);
-    await getDbClient().run(
-      `DELETE FROM workflow_run_definitions
-        WHERE hash IN (${batch.map(() => "?").join(", ")})
-          AND NOT EXISTS (
-            SELECT 1 FROM workflow_runs r WHERE r.definitionHash = workflow_run_definitions.hash
-          )`,
-      batch,
-    );
+    await getStorage().repos.workflows.deleteUnreferencedRunDefinitions(batch);
   }
 }

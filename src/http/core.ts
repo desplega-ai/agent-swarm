@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   initAzureDevOps,
@@ -11,7 +12,6 @@ import {
 } from "../azure-devops";
 import {
   getAgentById,
-  getDbClient,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
@@ -768,7 +768,7 @@ export async function handleCore(
     const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
     const multiRuntime = isMultiRuntimeEnabled();
 
-    const found = await getDbClient().transaction(async () => {
+    const found = await getStorage().transaction(async () => {
       const agent = await getAgentById(myAgentId);
 
       if (!agent) {
@@ -845,7 +845,7 @@ export async function handleCore(
     );
     if (!parsed) return true;
 
-    const found = await getDbClient().transaction(async () => {
+    const found = await getStorage().transaction(async () => {
       const agent = await getAgentById(myAgentId);
 
       if (!agent) {

@@ -77,7 +77,10 @@ const SESSION_KEY = /^[A-Za-z0-9_-]{1,128}$/;
  * `SessionThread.sessionKey` lands in a server-built context key, so a literal
  * must be a plain token (a binding is checked by the server at send time).
  * `scope: "shared"` is reserved for a follow-up PR (planned: an
- * everyone:write `session_shares` row on the root when it is created).
+ * everyone:write `session_shares` row on the root when it is created). A
+ * literal `attachments.dir` follows the Form file field's `dir` rule, and the
+ * literal file limits must be positive (the schema walker skips
+ * `exclusiveMinimum`).
  */
 function sessionThreadIssues(
   props: Record<string, unknown>,
@@ -94,6 +97,19 @@ function sessionThreadIssues(
   }
   if (props.scope === "shared") {
     issues.push(issue(`${propsPath}.scope`, 'scope "shared" is not supported yet'));
+  }
+  const attachments = props.attachments;
+  if (!isPlainObject(attachments)) return issues;
+  if (typeof attachments.dir === "string" && !isAgentFsPath(attachments.dir)) {
+    issues.push(
+      issue(`${propsPath}.attachments.dir`, 'must be an absolute agent-fs path without ".."'),
+    );
+  }
+  for (const limit of ["maxFiles", "maxBytes"]) {
+    const value = attachments[limit];
+    if (typeof value === "number" && value <= 0) {
+      issues.push(issue(`${propsPath}.attachments.${limit}`, "must be a positive integer"));
+    }
   }
   return issues;
 }

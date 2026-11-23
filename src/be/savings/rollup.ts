@@ -11,8 +11,7 @@
  * timers, a catch-up tick while work is left.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { getDbClient } from "../db";
-import type { DbExecutor } from "../db-client";
+import { getStorage } from "../storage";
 import {
   computeScriptWindow,
   computeWorkflowLinksDay,
@@ -78,6 +77,7 @@ const FACT_COLUMNS = [
 export { FACT_COLUMNS as SAVINGS_FACT_COLUMNS };
 
 type WorkflowRow = { id: string; name: string; definition: unknown };
+const savingsRepo = () => getStorage().repos.savings;
 /**
  * Bumped after every write to the rollup tables, so a cached fleet read
  * (`read.ts`) knows its buckets changed. Every writer lives in this file.
@@ -101,9 +101,7 @@ function parseDefinition(definition: unknown): unknown {
 }
 
 async function listWorkflows(): Promise<WorkflowRow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    "SELECT id, name, definition FROM workflows ORDER BY name",
-  );
+  const rows = await savingsRepo().listWorkflows();
   return rows.map((w) => ({ ...w, definition: parseDefinition(w.definition) }));
 }
 
@@ -112,14 +110,7 @@ export type SavingsJobKind = "workflow" | "script";
 /** Days of the last ROLLUP_DAYS that need a (re)computation, newest first. */
 export async function daysToCompute(kind: SavingsJobKind, now: number): Promise<string[]> {
   const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
-  const markers = await getDbClient().query<{
-    day: string;
-    modelVersion: number;
-    computedAt: string;
-  }>(
-    "SELECT day, modelVersion, computedAt FROM automation_savings_days WHERE jobKind=? AND day>=?",
-    [kind, oldest],
-  );
+  const markers = await savingsRepo().listDayMarkers(kind, oldest);
   const byDay = new Map(markers.map((m) => [m.day, m]));
   const days: string[] = [];
   for (let i = 0; i < ROLLUP_DAYS; i++) {
@@ -179,29 +170,16 @@ export async function computeWorkflowDay(
  * that scanned after the rollup's scan began keeps its bucket when the rollup
  * writes later, and the other way round.
  */
-const UPSERT_BUCKET = `INSERT INTO automation_savings_daily
-  (day, jobKind, jobId, jobKey, jobName, subKind, ${FACT_COLUMNS.join(", ")}, modelVersion, computedAt)
-  VALUES (?, 'workflow', ?, ?, ?, '', ${FACT_COLUMNS.map(() => "?").join(", ")}, ?, ?)
-  ON CONFLICT(day, jobKind, jobId, subKind) DO UPDATE SET
-    jobKey=excluded.jobKey, jobName=excluded.jobName,
-    ${FACT_COLUMNS.map((c) => `${c}=excluded.${c}`).join(", ")},
-    modelVersion=excluded.modelVersion, computedAt=excluded.computedAt
-  WHERE excluded.computedAt >= automation_savings_daily.computedAt
-    OR automation_savings_daily.modelVersion <> excluded.modelVersion`;
-
-const bucketParams = (day: string, b: WorkflowBucket, computedAt: string) => [
-  day,
-  b.workflowId,
-  jobKey(b.name),
-  b.name,
-  ...FACT_COLUMNS.map((c) => b.facts[c]),
-  MODEL_VERSION,
-  computedAt,
-];
-
-const INSERT_LINK = `INSERT OR REPLACE INTO automation_savings_links
-  (day, parentJobId, childKind, childJobId, linkKind, n, actualUsd, keptUsd, modelVersion, computedAt)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const upsertBucket = (day: string, b: WorkflowBucket, computedAt: string) =>
+  savingsRepo().upsertWorkflowBucket({
+    day,
+    jobId: b.workflowId,
+    jobKey: jobKey(b.name),
+    jobName: b.name,
+    facts: Object.fromEntries(FACT_COLUMNS.map((c) => [c, b.facts[c]])),
+    modelVersion: MODEL_VERSION,
+    computedAt,
+  });
 
 /**
  * Replace one day's workflow buckets and links and mark the day computed, atomically.
@@ -214,48 +192,34 @@ export async function writeWorkflowDay(
   workflowDay: WorkflowDay,
   scannedAt: string,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      "DELETE FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND (computedAt<=? OR modelVersion<>?)",
-      [day, scannedAt, MODEL_VERSION],
-    );
-    await tx.run("DELETE FROM automation_savings_links WHERE day=?", [day]);
+  await getStorage().transaction(async () => {
+    await savingsRepo().deleteStaleWorkflowBuckets(day, scannedAt, MODEL_VERSION);
+    await savingsRepo().deleteLinks(day);
     for (const b of workflowDay.buckets) {
-      await tx.run(UPSERT_BUCKET, bucketParams(day, b, scannedAt));
+      await upsertBucket(day, b, scannedAt);
     }
     for (const l of workflowDay.links) {
-      await tx.run(INSERT_LINK, [
+      await savingsRepo().replaceLink({
         day,
-        l.parentJobId,
-        l.childKind,
-        l.childJobId,
-        l.linkKind,
-        l.n,
-        l.actualUsd,
-        l.keptUsd,
-        MODEL_VERSION,
-        scannedAt,
-      ]);
+        parentJobId: l.parentJobId,
+        childKind: l.childKind,
+        childJobId: l.childJobId,
+        linkKind: l.linkKind,
+        n: l.n,
+        actualUsd: l.actualUsd,
+        keptUsd: l.keptUsd,
+        modelVersion: MODEL_VERSION,
+        computedAt: scannedAt,
+      });
     }
-    await markDay(tx, day, "workflow", scannedAt);
+    await markDay(day, "workflow", scannedAt);
   });
   bumpGeneration();
 }
 
 /** Mark a day computed, unless a newer scan under the same model version already did. */
-async function markDay(
-  tx: DbExecutor,
-  day: string,
-  kind: SavingsJobKind,
-  computedAt: string,
-): Promise<void> {
-  await tx.run(
-    `INSERT INTO automation_savings_days (day, jobKind, modelVersion, computedAt) VALUES (?, ?, ?, ?)
-     ON CONFLICT(day, jobKind) DO UPDATE SET modelVersion=excluded.modelVersion, computedAt=excluded.computedAt
-     WHERE excluded.computedAt >= automation_savings_days.computedAt
-       OR automation_savings_days.modelVersion <> excluded.modelVersion`,
-    [day, kind, MODEL_VERSION, computedAt],
-  );
+async function markDay(day: string, kind: SavingsJobKind, computedAt: string): Promise<void> {
+  await savingsRepo().markDay(day, kind, MODEL_VERSION, computedAt);
 }
 
 export type ScriptBucket = { scriptName: string; facts: ScriptFacts };
@@ -290,10 +254,6 @@ export async function computeScriptSlice(
   return out;
 }
 
-const INSERT_SCRIPT_BUCKET = `INSERT OR REPLACE INTO automation_savings_daily
-  (day, jobKind, jobId, jobKey, jobName, subKind, runs, countedRuns, effectRuns, opsSum, computeSecs, modelVersion, computedAt)
-  VALUES (?, 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
 /**
  * Replace one day's script buckets and mark the day computed, atomically.
  * Each script gets a subKind '' row for its non-API runs (with the wall time
@@ -305,38 +265,38 @@ export async function writeScriptDay(
   buckets: ScriptBucket[],
   scannedAt: string,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM automation_savings_daily WHERE day=? AND jobKind='script'", [day]);
+  await getStorage().transaction(async () => {
+    await savingsRepo().deleteScriptBuckets(day);
     for (const { scriptName, facts } of buckets) {
       const perRun = facts.runs > 0 ? facts.opsSum / facts.runs : 0;
       const nonApi = facts.runs - facts.apiRuns;
-      const base = [day, scriptName, scriptName, scriptName];
-      await tx.run(INSERT_SCRIPT_BUCKET, [
+      const base = { day, jobId: scriptName, jobKey: scriptName, jobName: scriptName };
+      await savingsRepo().replaceScriptBucket({
         ...base,
-        "",
-        nonApi,
-        nonApi,
-        facts.effectRuns,
-        perRun * nonApi,
-        facts.computeSecs,
-        MODEL_VERSION,
-        scannedAt,
-      ]);
+        subKind: "",
+        runs: nonApi,
+        countedRuns: nonApi,
+        effectRuns: facts.effectRuns,
+        opsSum: perRun * nonApi,
+        computeSecs: facts.computeSecs,
+        modelVersion: MODEL_VERSION,
+        computedAt: scannedAt,
+      });
       if (facts.apiRuns > 0) {
-        await tx.run(INSERT_SCRIPT_BUCKET, [
+        await savingsRepo().replaceScriptBucket({
           ...base,
-          "api",
-          facts.apiRuns,
-          facts.apiRuns,
-          facts.apiEffectRuns,
-          perRun * facts.apiRuns,
-          0,
-          MODEL_VERSION,
-          scannedAt,
-        ]);
+          subKind: "api",
+          runs: facts.apiRuns,
+          countedRuns: facts.apiRuns,
+          effectRuns: facts.apiEffectRuns,
+          opsSum: perRun * facts.apiRuns,
+          computeSecs: 0,
+          modelVersion: MODEL_VERSION,
+          computedAt: scannedAt,
+        });
       }
     }
-    await markDay(tx, day, "script", scannedAt);
+    await markDay(day, "script", scannedAt);
   });
   bumpGeneration();
 }
@@ -355,27 +315,16 @@ export async function refreshWorkflowToday(
   now: number,
 ): Promise<"skipped" | "computed" | "refused"> {
   const day = utcDay(now);
-  const client = getDbClient();
-  const marker = await client.get<{ computedAt: string }>(
-    "SELECT computedAt FROM automation_savings_days WHERE day=? AND jobKind='workflow' AND modelVersion=?",
-    [day, MODEL_VERSION],
-  );
+  const marker = await savingsRepo().findDayMarker(day, "workflow", MODEL_VERSION);
   if (!marker) return "skipped";
-  const bucket = await client.get<{
-    computedAt: string;
-    childTaskUsd: number;
-    childTaskMs: number;
-  }>(
-    "SELECT computedAt, childTaskUsd, childTaskMs FROM automation_savings_daily WHERE day=? AND jobKind='workflow' AND jobId=? AND subKind=''",
-    [day, workflow.id],
-  );
+  const bucket = await savingsRepo().findWorkflowBucket(day, workflow.id);
   const since =
     bucket && bucket.computedAt > marker.computedAt ? bucket.computedAt : marker.computedAt;
-  const newer = await client.get<{ n: number }>(
-    "SELECT count(*) n FROM workflow_runs WHERE workflowId=? AND startedAt>=?",
-    [workflow.id, new Date(Date.parse(since) - WATERMARK_SLACK_MS).toISOString()],
+  const newer = await savingsRepo().countWorkflowRunsSince(
+    workflow.id,
+    new Date(Date.parse(since) - WATERMARK_SLACK_MS).toISOString(),
   );
-  if (!Number(newer?.n)) return "skipped";
+  if (!newer) return "skipped";
   const out = await computeWorkflowWindow(
     { id: workflow.id, definition: parseDefinition(workflow.definition) },
     { start: dayStartIso(day), end: dayStartIso(utcDay(dayStartMs(day) + DAY_MS)) },
@@ -386,13 +335,10 @@ export async function refreshWorkflowToday(
   out.facts.childTaskUsd = Number(bucket?.childTaskUsd) || 0;
   out.facts.childTaskMs = Number(bucket?.childTaskMs) || 0;
   const computedAt = new Date(now).toISOString();
-  await client.run(
-    UPSERT_BUCKET,
-    bucketParams(
-      day,
-      { workflowId: workflow.id, name: workflow.name, facts: out.facts },
-      computedAt,
-    ),
+  await upsertBucket(
+    day,
+    { workflowId: workflow.id, name: workflow.name, facts: out.facts },
+    computedAt,
   );
   bumpGeneration();
   return "computed";
@@ -456,9 +402,7 @@ export function runSavingsRollupTick(
     let lastError: string | null = null;
     try {
       const oldest = utcDay(now - (ROLLUP_DAYS - 1) * DAY_MS);
-      await getDbClient().run("DELETE FROM automation_savings_daily WHERE day<?", [oldest]);
-      await getDbClient().run("DELETE FROM automation_savings_days WHERE day<?", [oldest]);
-      await getDbClient().run("DELETE FROM automation_savings_links WHERE day<?", [oldest]);
+      await savingsRepo().pruneBefore(oldest);
       bumpGeneration();
       const wf = await daysToCompute("workflow", now);
       const sc = await daysToCompute("script", now);

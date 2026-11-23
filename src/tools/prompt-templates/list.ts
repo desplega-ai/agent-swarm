@@ -52,7 +52,7 @@ export const registerListPromptTemplatesTool = (server: McpServer) => {
       }
 
       try {
-        const templates = getPromptTemplates({ eventType, scope, scopeId, isDefault });
+        const templates = await getPromptTemplates({ eventType, scope, scopeId, isDefault });
         const count = templates.length;
 
         const summary =

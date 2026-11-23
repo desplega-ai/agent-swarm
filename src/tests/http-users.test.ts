@@ -1076,7 +1076,7 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("409 last_admin when the source is the only admin, and nothing is merged", async () => {
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     const admin = await createUser({ name: "OnlyAdmin" });
     const viewer = await createUser({ name: "Viewer" });
     await setUserRoles(admin.id, ["admin"], null);
@@ -1097,7 +1097,7 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("merging an admin source succeeds when another admin remains", async () => {
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
     const keeper = await createUser({ name: "KeeperAdmin" });
     const source = await createUser({ name: "SourceAdmin" });
     const viewer = await createUser({ name: "Viewer2" });

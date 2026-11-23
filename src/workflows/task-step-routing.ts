@@ -1,6 +1,5 @@
 import {
   detachTaskFromWorkflowRunStep,
-  getDbClient,
   getTaskById,
   getTaskByWorkflowRunStepId,
   getWorkflowRun,
@@ -10,6 +9,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { getRunLineageBlock } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import {
   type RetryPolicy,
   RetryPolicySchema,
@@ -92,7 +92,7 @@ export async function failStepAndRunIfWaiting(
   options: { ctx?: Record<string, unknown>; registry?: ExecutorRegistry } = {},
 ): Promise<TaskStepRoutingResult> {
   const now = new Date().toISOString();
-  return await getDbClient().transaction(async (): Promise<TaskStepRoutingResult> => {
+  return await getStorage().transaction(async (): Promise<TaskStepRoutingResult> => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return UNCLAIMED;
     if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, stepId))) return UNCLAIMED;
@@ -256,7 +256,7 @@ export async function scheduleTaskStepRetry(
     policy = SUPERSEDE_RETRY_POLICY;
   }
 
-  return await getDbClient().transaction(async (): Promise<TaskStepRetryOutcome> => {
+  return await getStorage().transaction(async (): Promise<TaskStepRetryOutcome> => {
     const current = await getWorkflowRunStep(step.id);
     if (!current || current.status !== "waiting") return "not-claimed";
     if (!(await isTaskBoundToStep(taskId, step.id))) return "not-claimed";

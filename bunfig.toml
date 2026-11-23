@@ -26,4 +26,6 @@ preload = ["./src/tests/preload.ts"]
 # would also match `apps/evals/src`, so this ignore is the correct mechanism.)
 # packages/ui-e2e holds Playwright specs (*.spec.ts). Bun's test globber would load
 # them and @playwright/test throws when it detects a Jest-like runner.
-pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**"]
+# packages/storage-postgres needs a Postgres server (STORAGE_TEST_POSTGRES_URL); it runs
+# through `bun run test:storage:postgres` only, so the SQLite-only unit run (D17) skips it.
+pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**", "packages/storage-postgres/**"]
