@@ -3,8 +3,16 @@
  * database (decision D11). The runbook (`runbooks/postgres.md`) gives the
  * production procedure around it.
  */
-import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { EMBEDDING_DIMENSIONS } from "./memory/constants";
 import { copySqliteFileToPostgres, postgresUrlFromEnv } from "./storage-root";
@@ -112,7 +120,7 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   const rows = report.tables.reduce((sum, t) => sum + t.targetRows, 0);
   if (parsed.json) {
     try {
-      await Bun.write(parsed.json, `${JSON.stringify(report, null, 2)}\n`);
+      await writeReportAtomically(parsed.json, `${JSON.stringify(report, null, 2)}\n`);
     } catch (error) {
       const outcome = report.ok
         ? "The database copy COMMITTED: the target holds the copied data. Only the report is missing."
@@ -200,4 +208,25 @@ export function reportPathProblem(reportPath: string): string | null {
     return `cannot be created in ${parent}`;
   }
   return null;
+}
+
+/**
+ * Write the report to a temporary sibling, then rename it over the path, so a
+ * failed write (a full disk, a file-size limit) leaves the previous report
+ * whole. An existing symlink keeps pointing at the file it names.
+ */
+export async function writeReportAtomically(path: string, text: string): Promise<void> {
+  const target = existsSync(path) ? realpathSync(path) : resolve(path);
+  const temp = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`);
+  try {
+    await Bun.write(temp, text);
+    renameSync(temp, target);
+  } catch (error) {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Nothing was created.
+    }
+    throw error;
+  }
 }
