@@ -906,7 +906,8 @@ jobs:
     name: E2E Contract on Postgres (shard ${{ matrix.shard }}/4)
     needs: detect-changes
     if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    # The recovery scenario needs pg_dump and pg_restore 16 for the pg16 service.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     timeout-minutes: 40
