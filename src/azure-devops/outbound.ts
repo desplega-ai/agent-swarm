@@ -80,8 +80,13 @@ export function initAzureDevOpsOutbound(): void {
   if (!startedHookRegistered) {
     startedHookRegistered = true;
     onTaskStarted((task) => {
-      // startTask/claimTask can emit inside a transaction; a rollback must not reach Azure.
-      if (subscribed) getStorage().afterCommit(() => handleTaskStarted(task));
+      if (!subscribed) return;
+      // An emit inside a transaction waits for its commit, so a rollback never reaches
+      // Azure. claimTask and startTask already emit from their afterCommit hook: a second
+      // deferral there would queue STARTED behind a DONE the same transaction committed.
+      const storage = getStorage();
+      if (storage.inTransaction()) storage.afterCommit(() => handleTaskStarted(task));
+      else handleTaskStarted(task);
     });
   }
   workflowEventBus.on("task.completed", onTaskCompleted);
