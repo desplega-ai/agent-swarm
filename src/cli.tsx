@@ -330,7 +330,7 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} rbac bootstrap`,
   },
-  "db-copy": dbCopyHelp(binName),
+  "db-copy": dbCopyHelp(binName ?? "agent-swarm"),
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:
