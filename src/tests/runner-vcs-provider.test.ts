@@ -22,7 +22,7 @@ beforeAll(async () => {
   for (const cli of ["gh", "glab"]) {
     await writeFile(
       join(binDir, cli),
-      `#!/bin/sh\nprintf '%s %s\\n' '${cli}' "$*" > "$VCS_CALL_LOG"\nprintf '%s\\n' '[]'\n`,
+      `#!/bin/sh\nprintf '%s %s\\n' '${cli}' "$*" >> "$VCS_CALL_LOG"\nprintf '%s\\n' '[]'\n`,
       { mode: 0o755 },
     );
   }
@@ -63,7 +63,9 @@ test.each([
       ),
       "task PR lookup",
     );
-    expect(await Bun.file(callLog).text()).toStartWith(`${command} ${BRANCH} `);
+    const calls = (await Bun.file(callLog).text()).trimEnd().split("\n");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toStartWith(`${command} ${BRANCH} `);
   },
   CHILD_PROCESS_TEST_BUDGET_MS,
 );
