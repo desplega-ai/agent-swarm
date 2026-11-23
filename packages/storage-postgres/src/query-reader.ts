@@ -59,7 +59,13 @@ export async function openPostgresQueryReader(
   deniedTables: readonly string[],
   timestampFormats: TimestampFormats | null = null,
 ): Promise<QueryReaderProbeResult> {
-  const pool = new Bun.SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
+  let pool: SQL;
+  try {
+    pool = new Bun.SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
+  } catch (err) {
+    // A malformed optional URL (ERR_INVALID_URL) turns the reader off, not the API.
+    return { ok: false, reason: `invalid reader URL: ${pgError(err).message ?? String(err)}` };
+  }
   try {
     const reason = await probe(pool, deniedTables);
     if (reason) {

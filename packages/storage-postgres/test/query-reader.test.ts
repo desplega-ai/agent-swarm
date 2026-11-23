@@ -65,6 +65,12 @@ afterAll(async () => {
 });
 
 describe("db-query reader probe", () => {
+  test("a malformed reader URL turns the reader off instead of throwing", async () => {
+    const result = await openPostgresQueryReader("postgres://reader@host:99999999/db", DENIED);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("invalid reader URL");
+  });
+
   test("a superuser fails the probe", async () => {
     const result = await openPostgresQueryReader(db.url, DENIED);
     expect(result.ok).toBe(false);
