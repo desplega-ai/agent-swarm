@@ -110,6 +110,11 @@ export type CopyReport = {
    * queries is unverified, so an operator runs it once on Postgres.
    */
   unchecked?: CopyProblem[];
+  /**
+   * Steps after COMMIT that did not run (planner statistics). The copy is
+   * committed and complete; each line says what the operator runs by hand.
+   */
+  warnings?: string[];
   /** A failure that stopped the copy (refused target, constraint at commit). */
   error?: string;
   tables: CopyTableReport[];

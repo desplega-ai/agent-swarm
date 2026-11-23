@@ -286,6 +286,46 @@ describe("copyIntoPostgres", () => {
     expect(rows[0].doc).toEqual({ a: "ok \u{1F600}" });
   });
 
+  test("compares a table larger than one fetch, with a row wider than the byte limit", async () => {
+    // 1,300 rows need several fetches of the checksum cursor; one 300 KB row
+    // shrinks the next fetch when the limit is 64 KB.
+    const many: CopyRow[] = [];
+    for (let i = 1; i <= 1300; i++) {
+      const note = i === 700 ? "w".repeat(300_000) : `note ${i}`;
+      many.push(item(i, [text(`id-${i}`), int(i % 2), NULL, NULL, int(i), NULL, NULL, text(note)]));
+    }
+    const report = await copyIntoPostgres(fullSource(many), {
+      url: db.url,
+      migrationsDir: dir,
+      embeddingDimensions: 4,
+      batchBytes: 64 * 1024,
+      log: () => {},
+    });
+    expect(report.error).toBeUndefined();
+    expect(report.tables.find((t) => t.table === "items")).toMatchObject({
+      sourceRows: 1300,
+      targetRows: 1300,
+      equal: true,
+    });
+    const wide = await sql.unsafe("SELECT length(note)::int AS n FROM items WHERE id = 'id-700'");
+    expect(wide[0].n).toBe(300_000);
+  });
+
+  test("gathers planner statistics after the commit", async () => {
+    const report = await run(fullSource());
+    expect(report.ok).toBe(true);
+    expect(report.warnings).toBeUndefined();
+    const analyzed = await sql.unsafe(
+      `SELECT relname FROM pg_stat_user_tables
+        WHERE last_analyze IS NOT NULL AND relname IN ('items', 'seeded', 'children') ORDER BY relname`,
+    );
+    expect(analyzed.map((r: { relname: string }) => r.relname)).toEqual([
+      "children",
+      "items",
+      "seeded",
+    ]);
+  });
+
   test("lists every orphan row of the source before it writes a row", async () => {
     const lines: string[] = [];
     const src = fullSource(goodItems(), [

@@ -929,7 +929,12 @@ export async function copyIntoPostgres(
         for (const table of sourceTables) {
           const target = targets.get(table.name) as TargetTable;
           const sourceSum = checksums.get(table.name) as TableChecksum;
-          const targetSum = await targetChecksum(conn, target, table);
+          const targetSum = await targetChecksum(
+            conn,
+            target,
+            table,
+            options.batchBytes ?? DEFAULT_BATCH_BYTES,
+          );
           const entry: CopyTableReport = {
             table: table.name,
             sourceRows: sourceSum.count,
@@ -994,6 +999,19 @@ export async function copyIntoPostgres(
         await conn.unsafe("COMMIT");
         committed = true;
         report.ok = true;
+        // A bulk load leaves the planner with no statistics and the tables with no
+        // visibility map, so the API would start on default plans. VACUUM cannot run
+        // in the copy transaction. A failure here leaves the copy committed.
+        try {
+          log("[db-copy] gathering planner statistics (VACUUM ANALYZE)");
+          await conn.unsafe("VACUUM (ANALYZE)");
+        } catch (error) {
+          report.warnings ??= [];
+          report.warnings.push(
+            `planner statistics were not gathered (${error instanceof Error ? error.message : String(error)}). ` +
+              "The copy is committed. Run VACUUM (ANALYZE) on the target database before you start the API.",
+          );
+        }
         // After COMMIT: the copy's table locks are gone, and a saved query runs
         // only on a read-only session that does not own the database.
         for (const pending of toPlan) {
@@ -1179,31 +1197,36 @@ async function targetChecksum(
   conn: Conn,
   target: TargetTable,
   table: CopyTable,
+  fetchBytes: number,
 ): Promise<TableChecksum> {
   const { columns, rowid } = insertColumns(table, target);
   const all = rowid ? [rowid, ...columns] : columns;
   const select = all.map((c, i) => `${targetExpression(c)} AS c${i}`).join(", ");
   const checksum = new TableChecksum();
-  const key = target.columns.find((c) => c.name === TABLE_ORDER_KEY)
-    ? TABLE_ORDER_KEY
-    : target.columns.find((c) => c.identity)?.name;
-  if (!key) {
-    const rows = await conn.unsafe(`SELECT ${select} FROM ${quote(target.name)}`);
-    for (const row of rows) checksum.add(normalizeRow(all, row));
-    return checksum;
-  }
-  // Keyset pages over the insertion-order key keep memory flat on large tables.
-  let after: string | null = null;
-  for (;;) {
-    const rows: Record<string, unknown>[] = await conn.unsafe(
-      `SELECT ${select}, ${quote(key)}::text AS __key FROM ${quote(target.name)}
-        ${after === null ? "" : `WHERE ${quote(key)} > $1::bigint`}
-        ORDER BY ${quote(key)} LIMIT 5000`,
-      after === null ? [] : [after],
-    );
-    for (const row of rows) checksum.add(normalizeRow(all, row));
-    if (rows.length < 5000) return checksum;
-    after = String(rows.at(-1)?.__key);
+  // A cursor reads the table once, in any order (the checksum is order-free). The
+  // fetch size follows the bytes of the last fetch, so a table of multi-megabyte
+  // rows is read a few rows at a time and a narrow table 5,000 rows at a time.
+  await conn.unsafe(
+    `DECLARE db_copy_checksum NO SCROLL CURSOR FOR SELECT ${select} FROM ${quote(target.name)}`,
+  );
+  try {
+    let size = 200;
+    for (;;) {
+      const rows = await conn.unsafe(`FETCH FORWARD ${size} FROM db_copy_checksum`);
+      let bytes = 0;
+      for (const row of rows) {
+        for (const value of Object.values(row)) {
+          if (typeof value === "string") bytes += value.length;
+        }
+        checksum.add(normalizeRow(all, row));
+      }
+      if (rows.length < size) return checksum;
+      const perRow = Math.max(1, bytes / rows.length);
+      size = Math.max(1, Math.min(5000, Math.floor(fetchBytes / perRow)));
+    }
+  } finally {
+    // After an error the transaction is aborted and CLOSE fails: the rollback ends the cursor.
+    await conn.unsafe("CLOSE db_copy_checksum").catch(() => {});
   }
 }
 
