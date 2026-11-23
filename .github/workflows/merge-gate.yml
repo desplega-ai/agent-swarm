@@ -1575,9 +1575,8 @@ jobs:
         # The worker builds only the worker-slim target here (fast PR gate — it still
         # exercises the shared worker-base layers and the leaf block); the full target
         # is built and published on merge by docker-and-deploy.yml.
-        # `metric` legs load the built image into the local daemon (pull_request only)
-        # and report its uncompressed size to the ci-metrics swarm script (sticky PR
-        # diff comment). The worker-slim leg keeps `--bytecode` on: the size is diffed
+        # On pull requests, metric legs report the loaded image size to ci-metrics.
+        # The worker-slim leg keeps `--bytecode` on: the size is diffed
         # against main's published (bytecode) worker-slim image, so a non-bytecode PR
         # build would show a fake ~130 MB delta.
         # See agent-fs docs/ci-metrics.md for the script contract.
@@ -1624,9 +1623,8 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
-          # Only the image-size step below reads the loaded image, and it runs on
-          # pull_request only. merge_group runs skip the ~90s export + import.
-          load: ${{ matrix.metric != '' && github.event_name == 'pull_request' }}
+          # The API smoke uses the local image on both PRs and merge groups.
+          load: ${{ matrix.dockerfile == 'Dockerfile' || (matrix.metric != '' && github.event_name == 'pull_request') }}
           tags: test-image:latest
           cache-from: ${{ matrix.cache-from }}
 
@@ -1695,6 +1693,10 @@ jobs:
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify API image persistence on SQLite and PostgreSQL
+        if: matrix.dockerfile == 'Dockerfile'
+        run: bash scripts/smoke-api-storage.sh test-image:latest
 
   ui-image:
     name: Dashboard Image

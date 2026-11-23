@@ -1,0 +1,45 @@
+x-api: &api
+  image: ${STORAGE_SMOKE_IMAGE:?Set the local API image}
+  pull_policy: never
+  ports: ["127.0.0.1::3013"]
+  environment: &api-env
+    AGENT_SWARM_API_KEY: ${STORAGE_SMOKE_KEY:?Set the fixture key}
+    DESPLEGA_TELEMETRY_ENV: test
+    ANONYMIZED_TELEMETRY: "false"
+    SLACK_DISABLE: "true"
+    GITHUB_DISABLE: "true"
+    JIRA_DISABLE: "true"
+    LINEAR_DISABLE: "true"
+    AGENTMAIL_DISABLE: "true"
+
+services:
+  sqlite:
+    <<: *api
+    volumes: [sqlite-data:/app/data]
+
+  postgres-api:
+    <<: *api
+    environment:
+      <<: *api-env
+      DATABASE_URL: postgres://swarm@database:5432/swarm
+      DATABASE_PASSWORD: ${STORAGE_SMOKE_DB_PASSWORD:?Set the database fixture password}
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes: [postgres-api-data:/app/data]
+
+  database:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: swarm
+      POSTGRES_USER: swarm
+      POSTGRES_PASSWORD: ${STORAGE_SMOKE_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "swarm", "-d", "swarm"]
+      interval: 1s
+      timeout: 3s
+      retries: 45
+
+volumes:
+  sqlite-data: {}
+  postgres-api-data: {}
