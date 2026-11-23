@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.4] - 2026-11-23
+
+### Added
+- Apps: an app `SessionThread` can send files (#3569).
+- Pages: page sessions launch as the user picked in the dashboard (#3553).
+- Docs: facility energy anomaly review (#3560) and interview scheduling handoff (#3559) guides, plus release notes for the week of 2026-11-23 (#3570).
+
+### Changed
+- Dependencies: amp, dsh, qwen (#3566) and amp (#3561) worker harness bumps.
+- Performance: timing spans on the app-sync pass and the script run prelude (#3564).
+- Evals: benchmark 1.0 published from the weekly run (#3565).
+
+### Fixed
+- Slack: the completed card is skipped when the agent already replied in the thread (#3567).
+- Scrubber: JSON stays valid when a redaction spans a closing quote (#3563).
+- Claude: worker sessions write the transcript the request-settings reader needs (#3557).
+- UI: the raw JSON panel shows "No output" when a step has no output (#3555).
+
 ## [2.14.3] - 2026-11-22
 
 ### Added
