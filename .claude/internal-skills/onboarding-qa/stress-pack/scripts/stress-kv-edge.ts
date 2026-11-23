@@ -144,7 +144,7 @@ export default async function (args: EdgeArgs | undefined, ctx: ScriptContext) {
       retyped,
     );
     const writers = Array.from({ length: 10 * env.level }, (_, i) => `writer-${i}`);
-    await Promise.all(writers.map((value) => set("contended", value, "string")));
+    await pooled(writers, MAX_IN_FLIGHT, (value) => set("contended", value, "string"));
     const contended = (await get("contended")).data;
     t.ok(
       "concurrent-upserts-leave-one-winner",

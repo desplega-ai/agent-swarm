@@ -7,6 +7,11 @@ import type { ScriptContext } from "swarm-sdk";
 const NS = "stress";
 /** Result records live this long (the scoreboard deletes them sooner). */
 const RESULT_TTL_SEC = 6 * 3600;
+/**
+ * Requests one script keeps in flight. The sandbox allows 64 open files, so a
+ * script that opens more sockets than that fails with EMFILE.
+ */
+const MAX_IN_FLIGHT = 20;
 /** Every error this pack raises on purpose carries this marker. */
 const EXPECTED = "STRESS_EXPECTED";
 
@@ -116,7 +121,16 @@ async function stressRun(
   } catch (err) {
     t.ok("no-unexpected-error", false, errText(err));
   }
-  return record(ctx, name, env, t, nums);
+  // The record write must not fail the run: a failed run counts as a schedule
+  // error, and five of them in a row disable the schedule.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await record(ctx, name, env, t, nums);
+    } catch (err) {
+      if (attempt >= 3) return { name, ok: false, recordError: errText(err) };
+      await sleep(500 * attempt);
+    }
+  }
 }
 
 /** Zip db_query's positional rows into objects. */

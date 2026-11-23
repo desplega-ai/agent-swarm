@@ -8,9 +8,11 @@ async function incrMany(
   key: string,
   n: number,
 ): Promise<{ values: number[]; bad: string[] }> {
-  const res = (await Promise.all(
-    Array.from({ length: n }, () => ctx.swarm.kv_incr({ namespace: NS, key })),
-  )) as Sdk[];
+  const res = await pooled(
+    Array.from({ length: n }, (_, i) => i),
+    MAX_IN_FLIGHT,
+    () => ctx.swarm.kv_incr({ namespace: NS, key }) as Promise<Sdk>,
+  );
   const values: number[] = [];
   const bad: string[] = [];
   for (const r of res) {
@@ -63,8 +65,10 @@ export default async function (args: CounterArgs | undefined, ctx: ScriptContext
     //    show how many, and the check only needs a final value in range.
     const rmwKey = `${base}/rmw`;
     await ctx.swarm.kv_set({ namespace: NS, key: rmwKey, value: 0, valueType: "integer" });
-    await Promise.all(
-      Array.from({ length: n }, async () => {
+    await pooled(
+      Array.from({ length: n }, (_, i) => i),
+      MAX_IN_FLIGHT,
+      async () => {
         const current = Number(await kvValue(ctx, rmwKey));
         await ctx.swarm.kv_set({
           namespace: NS,
@@ -72,7 +76,7 @@ export default async function (args: CounterArgs | undefined, ctx: ScriptContext
           value: current + 1,
           valueType: "integer",
         });
-      }),
+      },
     );
     const rmwFinal = Number(await kvValue(ctx, rmwKey));
     t.ok("rmw-final-in-range", rmwFinal >= 1 && rmwFinal <= n, { rmwFinal, n });

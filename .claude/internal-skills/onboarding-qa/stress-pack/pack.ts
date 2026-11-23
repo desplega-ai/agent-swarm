@@ -409,12 +409,20 @@ async function remove(box: Box): Promise<void> {
     );
     console.log(`deleted script ${script.name}`);
   }
-  const memories = await box.api("POST", "/api/memory/list", { limit: 200, search: PREFIX });
-  const rows: J[] = memories.json.memories ?? memories.json.results ?? [];
+  // List by recency (no query): a memory search is not needed to find them.
   let memoryCount = 0;
-  for (const memory of rows.filter((row) => String(row.name).startsWith("stress-mem-"))) {
-    const gone = await box.api("DELETE", `/api/memory/${memory.id}`);
-    if (gone.status < 300) memoryCount++;
+  for (let offset = 0; offset < 5000; offset += 100) {
+    const page = await box.api("POST", "/api/memory/list", {
+      agentId: box.leadId,
+      limit: 100,
+      offset,
+    });
+    const rows: J[] = page.json.results ?? [];
+    for (const memory of rows.filter((row) => String(row.name).startsWith("stress-mem-"))) {
+      const gone = await box.api("DELETE", `/api/memory/${memory.id}`);
+      if (gone.status < 300) memoryCount++;
+    }
+    if (rows.length < 100) break;
   }
   console.log(`deleted ${memoryCount} stress memories`);
 

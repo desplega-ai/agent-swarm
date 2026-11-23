@@ -31,17 +31,16 @@ export default async function (args: StormArgs | undefined, ctx: ScriptContext) 
 
     // 1. Every key, `repeats` times, all at once.
     const shots = keys.flatMap((key) => Array.from({ length: repeats }, () => key));
-    const fired = await Promise.all(
-      shots.map(async (key) => {
-        const res = (await ctx.swarm.workflow_trigger({
-          id,
-          wait: false,
-          idempotencyKey: `stress-${storm}-${key}`,
-          triggerData: { storm, key },
-        })) as Sdk;
-        return { key, status: res.status, runId: res.data?.runId as string | undefined };
-      }),
-    );
+    // Shots of one key sit next to each other, so they are in flight together.
+    const fired = await pooled(shots, MAX_IN_FLIGHT, async (key) => {
+      const res = (await ctx.swarm.workflow_trigger({
+        id,
+        wait: false,
+        idempotencyKey: `stress-${storm}-${key}`,
+        triggerData: { storm, key },
+      })) as Sdk;
+      return { key, status: res.status, runId: res.data?.runId as string | undefined };
+    });
     const refused = fired.filter((f) => f.status !== 201 || !f.runId);
     t.ok("every-trigger-answers-201-with-a-run-id", refused.length === 0, refused.slice(0, 3));
     const runIds = new Set(fired.map((f) => f.runId).filter(Boolean));
