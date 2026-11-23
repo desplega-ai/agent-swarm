@@ -123,7 +123,8 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
-| `db-copy: the target database holds rows` | Copy into a new, empty database. A table the migrations seed (channels, roles, pricing, ...) may hold only those seed rows. |
+| `db-copy: the target database holds rows` | Copy into a new, empty database. A table the migrations seed (channels, roles, pricing, ...) may hold only those seed rows, unchanged. A target restored from a dump in one transaction cannot prove that, so its seed rows count as rows. |
+| `db-copy: the target database is at migration N, this build at M` | The copy runs the migrations only on a database with no tables. Copy into a new, empty database. |
 | `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
 | `db-copy: --json ... is the SQLite source` | Write the report to another path. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |

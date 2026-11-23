@@ -104,6 +104,9 @@ function chainSeedRowCounts(migrationsDir: string): Map<string, number> {
  * migration wrote and nobody changed since: each such row carries the `xmin` of
  * its migration's `_migrations` row (one transaction per migration). An edited
  * seed row (a renamed channel, a retitled starter widget) has another `xmin`.
+ * A later chain migration that rewrites an edited seed row would hide the edit,
+ * so the copy runs the chain only on a target with no tables (a target at an
+ * older head is refused before the chain).
  */
 async function inspectTarget(
   conn: Conn,
@@ -153,6 +156,15 @@ async function inspectTarget(
   const chainStart = chain[0]?.version ?? 0;
   const seeded = chainSeededTables(migrationsDir);
   const seedCounts = chainSeedRowCounts(migrationsDir);
+  // The xmin rule needs one transaction per migration. A history written in
+  // one transaction (pg_restore --single-transaction, a scripted replay) gives
+  // every row the same xmin, so an edited seed row would pass as chain-written:
+  // then any row in a seeded table counts as occupied.
+  const [history] = await conn.unsafe(
+    `SELECT COUNT(*)::bigint AS n, COUNT(DISTINCT xmin::text)::bigint AS distinct_xmin
+       FROM _migrations WHERE version >= ${chainStart}`,
+  );
+  const xminTrusted = Number(history?.n ?? 0) === Number(history?.distinct_xmin ?? 0);
   const occupied: string[] = [];
   for (const table of tables) {
     if (table.name === "_migrations") continue;
@@ -174,7 +186,8 @@ async function inspectTarget(
     const count = Number(rows[0]?.n ?? 0);
     const top = Number(rows[0]?.top ?? 0);
     const changed = Number(rows[0]?.changed ?? 0);
-    if (count > expected || top > expected || changed > 0) occupied.push(table.name);
+    if (count > expected || top > expected || changed > 0 || (!xminTrusted && count > 0))
+      occupied.push(table.name);
   }
   if (occupied.length > 0) {
     return {

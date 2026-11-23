@@ -373,6 +373,28 @@ describe("copyIntoPostgres", () => {
     ).toEqual(["operator edit"]);
   });
 
+  test("refuses seed rows whose history was restored in one transaction", async () => {
+    // Two migrations in one transaction, as pg_restore --single-transaction leaves
+    // them: every row shares one xmin, so an edited seed row looks chain-written.
+    writeFileSync(join(dir, "002_next.sql"), "SELECT 1;");
+    await sql.begin(async (tx) => {
+      await tx.unsafe(CHAIN);
+      await tx.unsafe(`CREATE TABLE _migrations (
+        version integer PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL, checksum text)`);
+      await tx.unsafe(
+        "INSERT INTO _migrations VALUES (1, '001_chain', now(), NULL), (2, '002_next', now(), NULL)",
+      );
+      await tx.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    });
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
+  });
+
   test("refuses an occupied target at an older head before applying the chain", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
