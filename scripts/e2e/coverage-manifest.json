@@ -251,12 +251,13 @@
         "trigger-chat-relay",
         "trigger-immutability",
         "trigger-rbac-default-role",
-        "trigger-cascades"
+        "trigger-cascades",
+        "postgres-chain-layouts"
       ]
     },
     "live-task-claim": {
       "description": "A task claimed by a worker with a live, heartbeating session stays in_progress until the run ends",
-      "scenarios": ["task-live-claim"]
+      "scenarios": ["task-live-claim", "task-started-after-commit"]
     },
     "caller-scoped-writes": {
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
@@ -342,7 +343,7 @@
     },
     "config-store": {
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
-      "scenarios": ["platform-config", "platform-lead-tools"]
+      "scenarios": ["platform-config", "platform-lead-tools", "secrets-backup-data-dir"]
     },
     "platform-config-key-guards": {
       "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
@@ -721,7 +722,7 @@
     },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
-      "scenarios": ["poll-concurrent-claim"]
+      "scenarios": ["poll-concurrent-claim", "poll-rescan-locked"]
     },
     "task-create-idempotency": {
       "description": "POST /api/tasks with an Idempotency-Key: a retry and a three-way race on one key return one task, a different body under the key is a 409, unkeyed creates stay separate, a malformed key is a 400",
