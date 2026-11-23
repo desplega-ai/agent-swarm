@@ -79,6 +79,7 @@ Before the window:
 1. Deploy the target build on SQLite as usual. Let it start once, so the SQLite file is at this build's migration head.
 2. Create the Postgres database and role (Requirements). Do not start an API on it.
 3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy`. Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you. Read every `ATTENTION` line too: a saved dashboard query in SQLite SQL that the copy does not know (an edited widget, a hand-written dashboard) does not run on Postgres. The copy rewrites only the stock queries of the starter dashboard and of the old new-dashboard template, and keeps titles and other edits. Plan an edit for each listed query. Set `EMBEDDING_DIMENSIONS` to the value the API uses: the copy refuses embeddings of another width.
+4. Start a test API on the scratch copy with the restricted reader configured in `DATABASE_QUERY_URL`. Run each custom dashboard with representative filter values and compare its results with SQLite. The copy uses PostgreSQL `EXPLAIN` to check custom queries. A query can pass that check and then fail when it converts a value in a stored row.
 
 In the window:
 

@@ -68,6 +68,8 @@ Then set `DATABASE_QUERY_URL` and restart. At start the API probes the role: it 
 
 `agent-swarm db-copy` copies the SQLite file into an empty Postgres database in one transaction, then compares the row count and a checksum of each table.
 
+Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API and run every custom dashboard against the copied data. Compare its results with SQLite. A query can pass the copy's planning check and still fail on a value in a stored row.
+
 1. Start the new version once on SQLite, so the file has the latest migrations. Stop it.
 2. Back up the SQLite file and the encryption key file.
 3. Run `agent-swarm db-copy --from <sqlite file> --to <postgres url>`. Expect `every count and checksum equal`.
