@@ -137,6 +137,29 @@ export function openSqliteCopySource(path: string): CopySource {
       }
       return counters;
     },
+    vectorIndex() {
+      // Read without sqlite-vec: the width from the vec0 DDL, the IDs from its
+      // `_rowids` shadow table.
+      const ddl = db
+        .query<{ sql: string | null }, []>(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_vec'",
+        )
+        .get();
+      if (!ddl?.sql) return null;
+      const width = /\bembedding\s+float\[(\d+)\]/i.exec(ddl.sql)?.[1];
+      let ids: string[] | null = null;
+      try {
+        ids = db
+          .query<{ id: string }, []>(
+            "SELECT CAST(id AS TEXT) AS id FROM memory_vec_rowids WHERE id IS NOT NULL",
+          )
+          .all()
+          .map((r) => r.id);
+      } catch {
+        ids = null;
+      }
+      return { dimensions: width ? Number(width) : null, ids };
+    },
     *rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]> {
       const pk = primaryKey(table.name);
       const select = table.columns

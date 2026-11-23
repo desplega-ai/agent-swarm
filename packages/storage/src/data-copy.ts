@@ -55,6 +55,12 @@ export interface CopySource {
    * keeps a counter above 2^53 exact.
    */
   autoincrementCounters?(): Record<string, bigint | number>;
+  /**
+   * The vector index searches run on in the source (SQLite `memory_vec`): its
+   * width and the memory IDs it holds. Null when the source has none. The copy
+   * refuses to rebuild an index that would drop a searchable memory.
+   */
+  vectorIndex?(): { dimensions: number | null; ids: string[] | null } | null;
   /** Every row of `table`, in insertion order, in batches of at most `batchSize`. */
   rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]>;
   close(): void;

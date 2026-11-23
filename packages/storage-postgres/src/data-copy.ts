@@ -723,6 +723,20 @@ export async function copyIntoPostgres(
         return report;
       }
 
+      // The width SQLite searches with today decides the rebuilt index, not the
+      // widths of every stored embedding (an old model can leave other widths).
+      const sourceIndex = source.vectorIndex?.() ?? null;
+      if (
+        targets.has("memory_vec") &&
+        sourceIndex?.dimensions &&
+        sourceIndex.dimensions !== options.embeddingDimensions
+      ) {
+        report.error =
+          `the SQLite vector index has ${sourceIndex.dimensions} dimensions, ` +
+          `but this copy indexes ${options.embeddingDimensions}. ` +
+          `Set EMBEDDING_DIMENSIONS=${sourceIndex.dimensions} (the value the API uses), then copy again. Nothing was written.`;
+        return report;
+      }
       const toPlan: PendingPlan[] = [];
       await conn.unsafe("BEGIN");
       let committed = false;
@@ -755,6 +769,23 @@ export async function copyIntoPostgres(
               return report;
             }
             vectors = await insertVectors(conn, sum.embeddings, options.embeddingDimensions);
+            // Every memory the source index searches must stay searchable.
+            const indexed = sourceIndex?.ids;
+            if (indexed && indexed.length > 0) {
+              const rebuilt = new Set(
+                sum.embeddings
+                  .filter(([, bytes]) => bytes.byteLength === options.embeddingDimensions * 4)
+                  .map(([id]) => id),
+              );
+              const lost = indexed.filter((id) => !rebuilt.has(id));
+              if (lost.length > 0) {
+                report.error =
+                  `${lost.length} memory(ies) in the SQLite vector index would not be searchable on Postgres ` +
+                  `(${lost.slice(0, 5).join(", ")}): their embeddings are not ${options.embeddingDimensions}-dimensional. Nothing was written.`;
+                await conn.unsafe("ROLLBACK");
+                return report;
+              }
+            }
           }
         }
         if (report.problemCount > 0) {
