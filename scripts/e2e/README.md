@@ -43,7 +43,7 @@ This file is the authoring guide.
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
 | `mcp.ts` | `ctx.connectMcp(agentId)` over Streamable HTTP, tool-call recorder. |
-| `db.ts` | The only file allowed to import `bun:sqlite`. Read-only, except the fixture writers below. |
+| `db.ts` | Owns `bun:sqlite`. Provides read-only assertions and prepares offline fixtures. |
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
@@ -82,10 +82,9 @@ Rules, enforced by the registry, the boundary check, or review:
    exports no scenario goes in `NON_SCENARIO_FILES` in `scenarios/registry.ts`.
 2. **Black box only.** Import from `../http`, `../mcp`, `../run`, `../report`, Bun and node
    builtins. Never from `src/`, `apps/`, `packages/`. `bun:sqlite` belongs to `db.ts`.
-3. **Seed through the API.** `ctx.db` is read-only and exists for assertions
-   (`SELECT ... FROM ...`). A write throws. One exception: `setTaskCreatedAt` in `db.ts`
-   back-dates a task's `createdAt` on the running SUT, because no API sets a past
-   creation time. Add another writer only for state no API path can reach.
+3. **Seed through the API.** Use the read-only `ctx.db` for assertions. For state the API
+   cannot create, prepare a separate database fixture before boot. For example, the metrics
+   scenario gives `ctx.startFixtureSut` a fixture with historical task timestamps.
 4. **Assert the documented contract.** Check the status code `openapi.json` declares, the
    response shape, and the persisted effect. A `2xx` with no shape check is a smoke test,
    not coverage. Negative paths (401, 403, 404, 400 on bad input) are part of the contract.

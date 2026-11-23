@@ -382,11 +382,11 @@ export async function startSut(
  */
 export async function startFixtureSut(
   keep: boolean,
-  fixtureName: string,
+  source: string | DbFixture,
   extraEnv: Record<string, string>,
   engine: Engine,
 ): Promise<{ sut: Sut; fixture: DbFixture }> {
-  const fixture = await loadDbFixture(fixtureName);
+  const fixture = typeof source === "string" ? await loadDbFixture(source) : source;
   const restore = async (prepared: Sut) => {
     await restoreSqliteFixture(prepared.dbPath, fixture);
     const keyFile = prepared.env.SECRETS_ENCRYPTION_KEY_FILE;
@@ -425,7 +425,7 @@ export async function startFixtureSut(
         const copy = await runDataCopyCli(staging.dbPath, prepared.databaseUrl ?? "");
         if (copy.exitCode !== 0) {
           throw new Error(
-            `fixture ${fixtureName}: db-copy exited ${copy.exitCode}\n${copy.output.slice(-3000)}`,
+            `fixture ${fixture.name}: db-copy exited ${copy.exitCode}\n${copy.output.slice(-3000)}`,
           );
         }
       },

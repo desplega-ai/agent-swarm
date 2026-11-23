@@ -1,12 +1,11 @@
-// The only file in scripts/e2e allowed to open a database handle. Seed data goes
-// through the public API; this handle is for assertions only, so the
-// connection is read-only and every write throws.
+// Scenarios seed the running API through its public endpoints. The assertion
+// connection is read-only. Historical fixtures can be prepared before boot.
 //
 // Scenarios write SQL with the `sql` tag, so one text runs on both engines: the tag
 // renders `?` placeholders for SQLite and `$n` for Postgres. Identifiers with an
 // uppercase letter are double-quoted in the scenario text (decision D8 of the
 // Postgres brief), which both engines accept.
-import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { constants, Database, type SQLQueryBindings } from "bun:sqlite";
 import { resolve } from "node:path";
 
 export type Engine = "sqlite" | "postgres";
@@ -102,7 +101,8 @@ function openSqlite(path: string): ReadOnlyDb {
   // migrations.
   let database: Database | undefined;
   const handle = (): Database => {
-    database ??= new Database(path, { readonly: true });
+    // Explicit URI support lets immutable checkpoint copies open on Linux and macOS.
+    database ??= new Database(path, constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_URI);
     return database;
   };
   const prepare = (query: SqlQuery | string) => {
@@ -325,33 +325,33 @@ export async function dropPostgresRole(role: string): Promise<void> {
   }
 }
 
-/**
- * Set a task's stored `createdAt` on the running SUT, for a scenario that needs a
- * timestamp in the past. On SQLite `stored` is the exact text the row keeps (either
- * `YYYY-MM-DD HH:MM:SS` or ISO); on Postgres it is read as a UTC instant.
- */
-export async function setTaskCreatedAt(
-  sutEnv: Readonly<Record<string, string>>,
-  taskId: string,
-  stored: string,
-): Promise<void> {
-  const url = sutEnv.DATABASE_URL;
-  if (url && /^postgres(ql)?:\/\//.test(url)) {
-    const client = new Bun.SQL({ url, max: 1 });
-    try {
-      await client.unsafe(
-        `UPDATE agent_tasks SET "createdAt" = ($1::timestamp AT TIME ZONE 'UTC') WHERE id = $2`,
-        [stored, taskId],
-      );
-    } finally {
-      await client.close();
-    }
-    return;
-  }
-  const db = new Database(sutEnv.DATABASE_PATH as string);
+/** Prepare historical tasks in a private copy of the base fixture before either API starts. */
+export async function loadMetricRangeFixture(
+  agentId: string,
+  firstDay: string,
+  previousDay: string,
+): Promise<DbFixture> {
+  const fixture = await loadDbFixture("base-db");
+  const db = Database.deserialize(fixture.file);
   try {
-    db.run("PRAGMA busy_timeout = 5000");
-    db.run('UPDATE agent_tasks SET "createdAt" = ? WHERE id = ?', [stored, taskId]);
+    db.run(
+      `INSERT INTO agents (id, name, status, createdAt, lastUpdatedAt)
+       VALUES (?, 'metrics boundary', 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [agentId],
+    );
+    const insert = db.prepare(
+      `INSERT INTO agent_tasks (id, agentId, task, status, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'metrics boundary', ?, ?, ?)`,
+    );
+    for (const { status, time } of [
+      { status: "completed", time: `${firstDay} 00:00:01` },
+      { status: "failed", time: `${firstDay}T00:00:02.000Z` },
+      { status: "cancelled", time: `${previousDay} 23:59:59` },
+      { status: "cancelled", time: `${previousDay}T23:59:59.000Z` },
+    ]) {
+      insert.run(crypto.randomUUID(), agentId, status, time, time);
+    }
+    return { ...fixture, name: "metrics-range", file: db.serialize() };
   } finally {
     db.close();
   }
