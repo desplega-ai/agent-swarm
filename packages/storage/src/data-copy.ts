@@ -51,9 +51,10 @@ export interface CopySource {
   /**
    * The AUTOINCREMENT high-water mark of each table that has one (SQLite
    * `sqlite_sequence`). It can exceed the largest surviving key when the
-   * newest rows were deleted, and a key is never reused below it.
+   * newest rows were deleted, and a key is never reused below it. A bigint
+   * keeps a counter above 2^53 exact.
    */
-  autoincrementCounters?(): Record<string, number>;
+  autoincrementCounters?(): Record<string, bigint | number>;
   /** Every row of `table`, in insertion order, in batches of at most `batchSize`. */
   rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]>;
   close(): void;

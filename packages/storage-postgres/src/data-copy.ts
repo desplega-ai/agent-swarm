@@ -9,7 +9,7 @@ import type {
   CopyTable,
   CopyTableReport,
 } from "@desplega/storage";
-import { acquireProcessLock } from "./boot";
+import { PROCESS_LOCK_KEY } from "./boot";
 import { ROWID_COLUMN } from "./codec";
 import { loadPostgresMigrations, runPostgresMigrations } from "./migrations";
 
@@ -96,6 +96,86 @@ function chainSeedRowCounts(migrationsDir: string): Map<string, number> {
     }
   }
   return counts;
+}
+
+/**
+ * What the target holds before and after the chain runs. A table the chain does
+ * not seed must be empty. A table it seeds may hold only rows that a chain
+ * migration wrote and nobody changed since: each such row carries the `xmin` of
+ * its migration's `_migrations` row (one transaction per migration). An edited
+ * seed row (a renamed channel, a retitled starter widget) has another `xmin`.
+ */
+async function inspectTarget(
+  conn: Conn,
+  migrationsDir: string,
+): Promise<{ head: number | null; error?: string }> {
+  const tables = (
+    await conn.unsafe(`
+      SELECT c.relname AS name,
+             EXISTS (SELECT 1 FROM pg_attribute a
+                      WHERE a.attrelid = c.oid AND a.attname = ${quoteLiteral(TABLE_ORDER_KEY)}
+                        AND NOT a.attisdropped) AS "hasRowid"
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
+       ORDER BY c.relname`)
+  ).map((r) => ({ name: String(r.name), hasRowid: r.hasRowid === true }));
+  if (tables.length === 0) return { head: null };
+  if (!tables.some((t) => t.name === "_migrations")) {
+    return {
+      head: null,
+      error: `the target database holds tables but no _migrations history (${tables
+        .slice(0, 10)
+        .map((t) => t.name)
+        .join(", ")}). Copy into an empty database only.`,
+    };
+  }
+  const headRow = await conn.unsafe("SELECT MAX(version)::bigint AS v FROM _migrations");
+  const head = headRow[0]?.v === null || headRow[0]?.v === undefined ? null : Number(headRow[0].v);
+  const chain = loadPostgresMigrations(migrationsDir);
+  const chainStart = chain[0]?.version ?? 0;
+  const seeded = chainSeededTables(migrationsDir);
+  const seedCounts = chainSeedRowCounts(migrationsDir);
+  const occupied: string[] = [];
+  for (const table of tables) {
+    if (table.name === "_migrations") continue;
+    if (!seeded.has(table.name)) {
+      const rows = await conn.unsafe(
+        `SELECT EXISTS(SELECT 1 FROM ${quote(table.name)}) AS present`,
+      );
+      if (rows[0]?.present === true) occupied.push(table.name);
+      continue;
+    }
+    const expected = seedCounts.get(table.name) ?? 0;
+    const rows = await conn.unsafe(
+      `SELECT COUNT(*)::bigint AS n,
+              ${table.hasRowid ? `COALESCE(MAX(${quote(TABLE_ORDER_KEY)}), 0)::bigint` : "0::bigint"} AS top,
+              COUNT(*) FILTER (WHERE xmin::text NOT IN (
+                SELECT xmin::text FROM _migrations WHERE version >= ${chainStart}))::bigint AS changed
+         FROM ${quote(table.name)}`,
+    );
+    const count = Number(rows[0]?.n ?? 0);
+    const top = Number(rows[0]?.top ?? 0);
+    const changed = Number(rows[0]?.changed ?? 0);
+    if (count > expected || top > expected || changed > 0) occupied.push(table.name);
+  }
+  if (occupied.length > 0) {
+    return {
+      head,
+      error: `the target database holds rows (tables: ${occupied.slice(0, 10).join(", ")}). Copy into an empty database only: the copy would replace them, so nothing was changed.`,
+    };
+  }
+  return { head };
+}
+
+/** The reserved copy session as the pool the migration runner reserves from. */
+function onConnection(conn: Conn) {
+  return {
+    reserve: async () => ({
+      unsafe: (text: string, params?: unknown[]) => conn.unsafe(text, params),
+      release: () => {},
+    }),
+  } as unknown as Parameters<typeof runPostgresMigrations>[0];
 }
 
 async function readTargetTables(conn: Conn): Promise<Map<string, TargetTable>> {
@@ -495,62 +575,61 @@ export async function copyIntoPostgres(
     if (report.problems.length < maxProblems) report.problems.push(p);
   };
 
-  // Hold the one-process lock (D16): no API may run on the target during the copy.
-  let lock: Awaited<ReturnType<typeof acquireProcessLock>>;
+  // Hold the one-process lock (D16) on the session that writes the copy: if that
+  // session ends, its open transaction ends with it, so no write can commit after
+  // another process took the lock.
+  const pool = new Bun.SQL({ url: options.url, max: 1, idleTimeout: 0, maxLifetime: 0 });
   try {
-    lock = await acquireProcessLock(options.url, { waitMs: 0 });
-  } catch (error) {
-    report.error = `an API process holds the target database: ${(error as Error).message}`;
-    return report;
-  }
-  const pool = new Bun.SQL({ url: options.url, max: 1 });
-  try {
-    // A database with no table gets the chain first; one at another head is refused.
-    const chain = loadPostgresMigrations(options.migrationsDir);
-    const chainHead = chain.at(-1)?.version ?? null;
-    await runPostgresMigrations(pool as never, {
-      migrationsDir: options.migrationsDir,
-      log: (line) => log(line),
-    });
-    const conn = (await pool.reserve()) as unknown as Conn;
+    let conn: Conn;
     try {
-      const targetHeadRow = await conn.unsafe("SELECT MAX(version)::bigint AS v FROM _migrations");
-      const targetHead = Number(targetHeadRow[0]?.v);
-      const sourceHead = source.migrationHead();
-      if (sourceHead !== chainHead || targetHead !== chainHead) {
+      conn = (await pool.reserve()) as unknown as Conn;
+    } catch (error) {
+      report.error = `cannot connect to the target database: ${(error as Error).message}`;
+      return report;
+    }
+    try {
+      const got = await conn.unsafe("SELECT pg_try_advisory_lock($1) AS locked", [
+        PROCESS_LOCK_KEY,
+      ]);
+      if (got[0]?.locked !== true) {
         report.error =
-          `migration heads differ: source ${sourceHead}, target ${targetHead}, this build ${chainHead}. ` +
-          "Start the API of this build on the SQLite file once (it applies the chain), stop it, then copy.";
+          "an API process holds the target database: another session holds the one-process lock";
         return report;
       }
-
+      const chain = loadPostgresMigrations(options.migrationsDir);
+      const chainHead = chain.at(-1)?.version ?? null;
+      const sourceHead = source.migrationHead();
+      const headError = (targetHead: number | null) =>
+        `migration heads differ: source ${sourceHead}, target ${targetHead}, this build ${chainHead}. ` +
+        "Start the API of this build on the SQLite file once (it applies the chain), stop it, then copy.";
+      // Inspect the target before the chain touches it: a refusal must leave its
+      // schema and rows as they were.
+      const before = await inspectTarget(conn, options.migrationsDir);
+      if (before.error) {
+        report.error = before.error;
+        return report;
+      }
+      if (sourceHead !== chainHead) {
+        report.error = headError(before.head);
+        return report;
+      }
+      // A database with no table, or one that holds only the chain's own rows,
+      // gets the rest of the chain.
+      await runPostgresMigrations(onConnection(conn), {
+        migrationsDir: options.migrationsDir,
+        log: (line) => log(line),
+      });
+      const after = await inspectTarget(conn, options.migrationsDir);
+      if (after.error) {
+        report.error = after.error;
+        return report;
+      }
+      if (after.head !== chainHead) {
+        report.error = headError(after.head);
+        return report;
+      }
       const targets = await readTargetTables(conn);
       const seeded = chainSeededTables(options.migrationsDir);
-      const occupied: string[] = [];
-      for (const name of targets.keys()) {
-        if (name === "_migrations" || seeded.has(name)) continue;
-        const rows = await conn.unsafe(`SELECT EXISTS(SELECT 1 FROM ${quote(name)}) AS present`);
-        if (rows[0]?.present === true) occupied.push(name);
-      }
-      // A seeded table may hold the chain's own seed rows and nothing else.
-      // The copy replaces those rows, so an operator row there would be lost.
-      const seedCounts = chainSeedRowCounts(options.migrationsDir);
-      for (const name of seeded) {
-        const target = targets.get(name);
-        if (!target) continue;
-        const expected = seedCounts.get(name) ?? 0;
-        const hasRowid = target.columns.some((c) => c.name === TABLE_ORDER_KEY);
-        const rows = await conn.unsafe(
-          `SELECT COUNT(*)::bigint AS n${hasRowid ? `, MAX(${quote(TABLE_ORDER_KEY)})::bigint AS top` : ""} FROM ${quote(name)}`,
-        );
-        const count = Number(rows[0]?.n ?? 0);
-        const top = hasRowid && rows[0]?.top !== null ? Number(rows[0]?.top) : 0;
-        if (count > expected || top > expected) occupied.push(name);
-      }
-      if (occupied.length > 0) {
-        report.error = `the target database holds rows (tables: ${occupied.slice(0, 10).join(", ")}). Copy into an empty database only.`;
-        return report;
-      }
 
       const sourceTables = source.tables();
       const sourceNames = new Set(sourceTables.map((t) => t.name));
@@ -621,12 +700,19 @@ export async function copyIntoPostgres(
           const keyColumn =
             identity.find((c) => c.name !== TABLE_ORDER_KEY) ?? identity[0] ?? undefined;
           for (const column of identity) {
-            const counter = column === keyColumn ? (counters[table.name] ?? 0) : 0;
-            await conn.unsafe(
-              `SELECT setval(pg_get_serial_sequence(${quoteLiteral(quote(table.name))}, ${quoteLiteral(column.name)}),
-                      GREATEST(COALESCE((SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}), 0), ${counter}, 1),
-                      GREATEST(COALESCE((SELECT MAX(${quote(column.name)}) FROM ${quote(table.name)}), 0), ${counter}) > 0)`,
+            const counter = column === keyColumn ? BigInt(counters[table.name] ?? 0) : 0n;
+            // ALTER SEQUENCE ... RESTART is transactional, unlike setval: a late
+            // ROLLBACK of the copy leaves the target's sequence where it was.
+            const next = await conn.unsafe(
+              `SELECT pg_get_serial_sequence(${quoteLiteral(quote(table.name))}, ${quoteLiteral(column.name)}) AS seq,
+                      (GREATEST(COALESCE(MAX(${quote(column.name)}), 0), ${counter}::bigint) + 1)::text AS next
+                 FROM ${quote(table.name)}`,
             );
+            const seq = next[0]?.seq as string | null;
+            if (seq)
+              await conn.unsafe(
+                `ALTER SEQUENCE ${seq} RESTART WITH ${BigInt(String(next[0]?.next))}`,
+              );
           }
           if (table.hasUserTriggers)
             await conn.unsafe(`ALTER TABLE ${quote(table.name)} ENABLE TRIGGER USER`);
@@ -685,6 +771,19 @@ export async function copyIntoPostgres(
             reason: "Postgres rows of this migration restored over the copied SQLite rows",
           });
         }
+        // Ownership and writes share this session; still check that it holds the
+        // lock before the copy becomes visible.
+        const held = await conn.unsafe(
+          `SELECT EXISTS (SELECT 1 FROM pg_locks
+                           WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted
+                             AND ((classid::bigint << 32) | objid::bigint) = $1) AS held`,
+          [PROCESS_LOCK_KEY],
+        );
+        if (held[0]?.held !== true) {
+          report.error = "the copy session lost the one-process lock; nothing was written";
+          await conn.unsafe("ROLLBACK");
+          return report;
+        }
         await conn.unsafe("COMMIT");
         committed = true;
         report.ok = true;
@@ -695,11 +794,11 @@ export async function copyIntoPostgres(
         return report;
       }
     } finally {
+      await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
       conn.release();
     }
   } finally {
     await pool.close();
-    await lock.release();
   }
 }
 

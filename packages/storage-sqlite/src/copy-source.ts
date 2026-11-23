@@ -126,11 +126,14 @@ export function openSqliteCopySource(path: string): CopySource {
     skippedTables: () => skipped,
     autoincrementCounters() {
       if (!listed.some((t) => t.name === "sqlite_sequence")) return {};
-      const counters: Record<string, number> = {};
+      const counters: Record<string, bigint> = {};
+      // CAST to TEXT: a number above 2^53 would round to a key SQLite already issued.
       for (const row of db
-        .query<{ name: string; seq: bigint | number }, []>("SELECT name, seq FROM sqlite_sequence")
+        .query<{ name: string; seq: string }, []>(
+          "SELECT name, CAST(seq AS TEXT) AS seq FROM sqlite_sequence",
+        )
         .all()) {
-        counters[row.name] = Number(row.seq);
+        counters[row.name] = BigInt(row.seq);
       }
       return counters;
     },

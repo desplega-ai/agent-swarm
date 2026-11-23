@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyCell, CopyMigration, CopyRow, CopySource, CopyTable } from "@desplega/storage";
+import { PROCESS_LOCK_KEY } from "../src/boot";
 import { copyIntoPostgres } from "../src/data-copy";
 import { runPostgresMigrations } from "../src/migrations";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
@@ -260,9 +261,7 @@ describe("copyIntoPostgres", () => {
     expect((await run(fullSource())).ok).toBe(true);
     const again = await run(fullSource());
     expect(again.ok).toBe(false);
-    expect(again.error).toMatch(
-      /holds rows \(tables: items, children\)|holds rows \(tables: children, items\)|holds rows \(tables: items\)/,
-    );
+    expect(again.error).toMatch(/holds rows \(tables: [^)]*\bitems\b/);
 
     const other = await createScratchDatabase("copyhead");
     scratch.push(other);
@@ -271,7 +270,7 @@ describe("copyIntoPostgres", () => {
       { url: other.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
     );
     expect(behind.ok).toBe(false);
-    expect(behind.error).toMatch(/migration heads differ: source 0, target 1/);
+    expect(behind.error).toMatch(/migration heads differ: source 0, target null/);
   });
 
   test("refuses an operator row in a seeded table and keeps it", async () => {
@@ -305,6 +304,98 @@ describe("copyIntoPostgres", () => {
       ).toEqual(["from the chain", "operator row"]);
     } finally {
       await otherSql.close();
+    }
+  });
+
+  test("refuses an edited seed row and keeps the edit", async () => {
+    const pool = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+    } finally {
+      await pool.close();
+    }
+    // Same row count and row id as the chain wrote: only the value changed.
+    await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    const refused = await run(fullSource());
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(
+      (await sql.unsafe("SELECT name FROM seeded ORDER BY id")).map(
+        (r: { name: string }) => r.name,
+      ),
+    ).toEqual(["operator edit"]);
+  });
+
+  test("refuses an occupied target at an older head before applying the chain", async () => {
+    const pool = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+    } finally {
+      await pool.close();
+    }
+    await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    // The build's chain is one migration ahead of the target, and it rewrites the seed.
+    writeFileSync(join(dir, "002_next.sql"), "UPDATE seeded SET name = 'rewritten by 002';");
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
+  });
+
+  test("a late rollback leaves the target sequence where it was", async () => {
+    const pool = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+    } finally {
+      await pool.close();
+    }
+    // A duplicate history row fails the copy after the sequences restarted.
+    const src = {
+      ...fullSource(),
+      migrationHistory: () => [
+        HISTORY[0] as CopyMigration,
+        HISTORY[0] as CopyMigration,
+        ...HISTORY.slice(1),
+      ],
+    };
+    const report = await run(src);
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/nothing was written/);
+    const next = await sql.unsafe(
+      "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
+    );
+    expect(next[0].id).toBe(2);
+  });
+
+  test("carries an AUTOINCREMENT counter above 2^53 exactly", async () => {
+    const src = {
+      ...fullSource(),
+      autoincrementCounters: () => ({ seeded: 9_007_199_254_740_993n }),
+    };
+    const report = await run(src);
+    expect(report.error).toBeUndefined();
+    const next = await sql.unsafe(
+      "INSERT INTO seeded (name) VALUES ('next') RETURNING id::text AS id",
+    );
+    expect(next[0].id).toBe("9007199254740994");
+  });
+
+  test("refuses while another session holds the one-process lock", async () => {
+    const holder = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await holder.unsafe("SELECT pg_advisory_lock($1)", [PROCESS_LOCK_KEY]);
+      const report = await run(fullSource());
+      expect(report.ok).toBe(false);
+      expect(report.error).toMatch(/an API process holds the target database/);
+      expect(
+        (await sql.unsafe("SELECT count(*)::int AS n FROM pg_class WHERE relname = 'items'"))[0].n,
+      ).toBe(0);
+    } finally {
+      await holder.close();
     }
   });
 
