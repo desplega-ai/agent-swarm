@@ -31158,7 +31158,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -31387,7 +31400,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -34239,7 +34265,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;
@@ -34518,7 +34557,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;

@@ -14,7 +14,9 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { hasTrackerDelivery, markTrackerDelivery } from "../be/db-queries/tracker";
+import { workflowEventBus } from "../workflows/event-bus";
 import { handleCommentEvent, handleIssueDeleteEvent, handleIssueEvent } from "./sync";
+import { jiraWorkflowEvents } from "./workflow-events";
 
 /**
  * Timing-safe compare of two URL-path tokens. Returns `false` for any of:
@@ -88,6 +90,7 @@ export type WebhookResult = {
 export async function handleJiraWebhook(
   pathToken: string | undefined,
   rawBody: string,
+  webhookIdentifier?: string,
 ): Promise<WebhookResult> {
   const expected = process.env.JIRA_WEBHOOK_TOKEN;
   if (!expected) {
@@ -115,6 +118,13 @@ export async function handleJiraWebhook(
   }
 
   const event = String(parsed.webhookEvent ?? "");
+
+  // Workflow `event` triggers. Atlassian repeats `X-Atlassian-Webhook-Identifier`
+  // on every retry of a delivery; the synthetic id is the fallback when it is
+  // absent. The trigger dispatcher dedupes on it per workflow.
+  for (const workflowEvent of jiraWorkflowEvents(parsed, webhookIdentifier || deliveryId)) {
+    workflowEventBus.emit(workflowEvent.name, workflowEvent.payload);
+  }
 
   // Fire-and-forget heavy work; return 200 immediately.
   void dispatchAndRecord(event, parsed, deliveryId).catch((err) => {
