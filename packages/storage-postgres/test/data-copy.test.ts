@@ -503,7 +503,17 @@ CREATE TABLE metrics (
         params: ["x"],
       },
     };
-    writeFileSync(join(dir, "metric-query-ports.json"), JSON.stringify({ ports: [stock] }));
+    const ranged = {
+      sqlite: {
+        sql: "SELECT COUNT(*) AS n FROM items WHERE at >= datetime('now', ?)",
+        params: ["{{rangeModifier}}"],
+      },
+      postgres: {
+        sql: "SELECT COUNT(*) AS n FROM items WHERE at >= $1",
+        params: ["{{rangeModifier:since}}"],
+      },
+    };
+    writeFileSync(join(dir, "metric-query-ports.json"), JSON.stringify({ ports: [stock, ranged] }));
     const METRICS: CopyTable = {
       name: "metrics",
       hasRowid: true,
@@ -515,6 +525,24 @@ CREATE TABLE metrics (
         { id: "stock", title: "Edited widget title", query: stock.sqlite },
         { id: "portable", query: { sql: "SELECT 1 AS one" } },
         { id: "sqlite-only", query: { sql: "SELECT strftime('%s', 'now') AS t" } },
+        { id: "ranged", query: ranged.sqlite },
+        { id: "writes", query: { sql: "DELETE FROM items" } },
+        {
+          id: "cte-writes",
+          query: { sql: "WITH gone AS (DELETE FROM items RETURNING id) SELECT * FROM gone" },
+        },
+      ],
+      variables: [
+        {
+          key: "rangeModifier",
+          defaultValue: "-1 month",
+          options: [
+            { label: "Month", value: "-1 month" },
+            { label: "This month", value: "start of month" },
+          ],
+        },
+        // Saved options SQL gets the same single-SELECT rule as a widget.
+        { key: "pick", optionsQuery: { sql: "SELECT 1 AS id; DELETE FROM items" } },
       ],
     };
     const report = await run(
@@ -542,8 +570,17 @@ CREATE TABLE metrics (
     });
     expect(stored.widgets[1]?.query).toEqual({ sql: "SELECT 1 AS one" });
     expect(stored.widgets[2]?.query).toEqual(definition.widgets[2]?.query);
+    expect(stored.widgets[3]?.query).toEqual(ranged.postgres);
     expect(report.attention?.map((a) => [a.table, a.row, a.column])).toEqual([
+      ["metrics", "dash (agent system)", "widget ranged, variable rangeModifier"],
+      ["metrics", "dash (agent system)", "widget writes"],
+      ["metrics", "dash (agent system)", "variable pick options"],
       ["metrics", "dash (agent system)", "widget sqlite-only"],
+      ["metrics", "dash (agent system)", "widget cte-writes"],
     ]);
+    expect(report.attention?.[0]?.reason).toMatch(/"start of month"/);
+    expect(report.attention?.[2]?.reason).toMatch(/more than one statement/);
+    // No saved query ran: every copied item is still there.
+    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(2);
   });
 });

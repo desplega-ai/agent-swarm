@@ -461,6 +461,61 @@ function sameQuery(a: MetricQuery, b: MetricQuery): boolean {
   return a.sql === b.sql && JSON.stringify(a.params ?? []) === JSON.stringify(b.params ?? []);
 }
 
+type PendingPlan = { where: string; row: string; query: MetricQuery };
+
+// The relative ranges `{{key:since}}` accepts (src/http/metrics.ts).
+const SINCE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*):since\}\}$/;
+const SINCE_RANGE_RE = /^\s*([+-]?\d+)\s+(second|minute|hour|day|month|year)s?\s*$/i;
+
+/** The create_metric rule for saved SQL: one statement, starting with SELECT or WITH. */
+function metricQueryProblem(sql: string): string | null {
+  const text = sql.trim().replace(/;\s*$/, "");
+  // A semicolon outside a string literal, quoted identifier or comment ends a statement.
+  const bare = text
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/"(?:[^"]|"")*"/g, '""')
+    .replace(/--[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  if (bare.includes(";")) return "more than one statement";
+  if (!/^(select|with)\s/i.test(bare.trim()))
+    return "a metric query must start with SELECT or WITH";
+  return null;
+}
+
+/**
+ * Plan a saved query in a READ ONLY transaction on its own session, then roll
+ * back. The query sits inside a subquery with a bound parameter, so the server
+ * parses exactly one statement (the extended protocol refuses several).
+ * Returns the error text, or null when Postgres can plan it.
+ */
+async function planReadOnly(url: string, query: MetricQuery): Promise<string | null> {
+  const params = (query.params ?? []).map(() => null);
+  const text = query.sql.trim().replace(/;\s*$/, "");
+  const planner = new Bun.SQL({ url, max: 1 });
+  try {
+    const conn = (await planner.reserve()) as unknown as Conn;
+    try {
+      await conn.unsafe("BEGIN TRANSACTION READ ONLY");
+      try {
+        await conn.unsafe("SET LOCAL statement_timeout = '5s'");
+        await conn.unsafe(
+          `EXPLAIN SELECT * FROM (\n${text}\n) AS saved_metric_query WHERE $${params.length + 1}::int IS NULL`,
+          [...params, null],
+        );
+        return null;
+      } catch (error) {
+        return (error as Error).message;
+      } finally {
+        await conn.unsafe("ROLLBACK").catch(() => {});
+      }
+    } finally {
+      conn.release();
+    }
+  } finally {
+    await planner.close();
+  }
+}
+
 /**
  * Rewrites the saved metric queries the chain knows (`metric-query-ports.json`:
  * the starter dashboard and the previous new-dashboard template) from SQLite to
@@ -472,6 +527,7 @@ async function portMetricQueries(
   conn: Conn,
   migrationsDir: string,
   report: CopyReport,
+  toPlan: PendingPlan[],
 ): Promise<number> {
   const file = join(migrationsDir, "metric-query-ports.json");
   const ports = existsSync(file)
@@ -485,7 +541,12 @@ async function portMetricQueries(
     const label = `${String(row.slug)} (agent ${String(row.agentId)})`;
     let definition: {
       widgets?: { id?: string; query?: MetricQuery }[];
-      variables?: { key?: string; optionsQuery?: MetricQuery }[];
+      variables?: {
+        key?: string;
+        defaultValue?: unknown;
+        options?: { value?: unknown }[];
+        optionsQuery?: MetricQuery;
+      }[];
     };
     try {
       definition = JSON.parse(String(row.definition));
@@ -517,32 +578,42 @@ async function portMetricQueries(
       });
     }
     let changed = false;
+    const attention = (where: string, reason: string) => {
+      report.attention ??= [];
+      report.attention.push({ table: "metrics", column: where, row: label, reason });
+    };
     for (const entry of queries) {
       const port = ports.find((p) => sameQuery(p.sqlite, entry.query));
       if (port) {
         entry.set(port.postgres);
         changed = true;
+        // A port that binds `{{key:since}}` takes only relative ranges: name a
+        // saved value the API would refuse after the move.
+        for (const param of port.postgres.params ?? []) {
+          const key = SINCE_TOKEN_RE.exec(String(param))?.[1];
+          const variable = definition.variables?.find((v) => v.key === key);
+          if (!key || !variable) continue;
+          const values = [variable.defaultValue, ...(variable.options ?? []).map((o) => o.value)];
+          for (const value of values) {
+            if (value === undefined || value === null || SINCE_RANGE_RE.test(String(value)))
+              continue;
+            attention(
+              `${entry.where}, variable ${key}`,
+              `saved range ${JSON.stringify(value)} is not a relative range such as "-30 days"; the dashboard refuses it on Postgres, edit the option`,
+            );
+          }
+        }
         continue;
       }
-      // Not a known query: check that Postgres can plan it as it is.
-      await conn.unsafe("SAVEPOINT metric_query_check");
-      try {
-        await conn.unsafe(
-          `EXPLAIN ${entry.query.sql}`,
-          (entry.query.params ?? []).map(() => null),
-        );
-        await conn.unsafe("RELEASE SAVEPOINT metric_query_check");
-      } catch (error) {
-        await conn.unsafe("ROLLBACK TO SAVEPOINT metric_query_check");
-        await conn.unsafe("RELEASE SAVEPOINT metric_query_check");
-        report.attention ??= [];
-        report.attention.push({
-          table: "metrics",
-          column: entry.where,
-          row: label,
-          reason: `does not run on Postgres, edit it: ${(error as Error).message}`,
-        });
+      // Not a known query: the same rule as create_metric (one SELECT or WITH),
+      // then, after COMMIT, a plan on a separate read-only session. The copy
+      // session owns the database and never runs saved SQL.
+      const problem = metricQueryProblem(entry.query.sql);
+      if (problem) {
+        attention(entry.where, `does not run on Postgres, edit it: ${problem}`);
+        continue;
       }
+      toPlan.push({ where: entry.where, row: label, query: { ...entry.query } });
     }
     if (changed) {
       await conn.unsafe("UPDATE metrics SET definition = $1::text::jsonb WHERE id = $2", [
@@ -652,6 +723,7 @@ export async function copyIntoPostgres(
         return report;
       }
 
+      const toPlan: PendingPlan[] = [];
       await conn.unsafe("BEGIN");
       let committed = false;
       try {
@@ -762,7 +834,7 @@ export async function copyIntoPostgres(
           );
         }
         const ported = targets.has("metrics")
-          ? await portMetricQueries(conn, options.migrationsDir, report)
+          ? await portMetricQueries(conn, options.migrationsDir, report, toPlan)
           : 0;
         if (ported > 0) {
           report.rebuilt.push({
@@ -796,6 +868,20 @@ export async function copyIntoPostgres(
         await conn.unsafe("COMMIT");
         committed = true;
         report.ok = true;
+        // After COMMIT: the copy's table locks are gone, and a saved query runs
+        // only on a read-only session that does not own the database.
+        for (const pending of toPlan) {
+          const planned = await planReadOnly(options.url, pending.query);
+          if (planned) {
+            report.attention ??= [];
+            report.attention.push({
+              table: "metrics",
+              column: pending.where,
+              row: pending.row,
+              reason: `does not run on Postgres, edit it: ${planned}`,
+            });
+          }
+        }
         return report;
       } catch (error) {
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
