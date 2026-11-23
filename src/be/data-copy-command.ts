@@ -7,6 +7,8 @@ import {
   accessSync,
   constants,
   existsSync,
+  lstatSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   statSync,
@@ -211,12 +213,33 @@ export function reportPathProblem(reportPath: string): string | null {
 }
 
 /**
+ * The file a report path names. A symlink is followed even when its target does
+ * not exist yet (a dangling link): `existsSync` is false for one, and renaming
+ * over the link would replace it with a regular file.
+ */
+function reportTarget(path: string): string {
+  if (existsSync(path)) return realpathSync(path);
+  let target = resolve(path);
+  for (let hops = 0; hops < 40; hops++) {
+    let link: boolean;
+    try {
+      link = lstatSync(target).isSymbolicLink();
+    } catch {
+      return target;
+    }
+    if (!link) return target;
+    target = resolve(dirname(target), readlinkSync(target));
+  }
+  return target;
+}
+
+/**
  * Write the report to a temporary sibling, then rename it over the path, so a
  * failed write (a full disk, a file-size limit) leaves the previous report
  * whole. An existing symlink keeps pointing at the file it names.
  */
 export async function writeReportAtomically(path: string, text: string): Promise<void> {
-  const target = existsSync(path) ? realpathSync(path) : resolve(path);
+  const target = reportTarget(path);
   const temp = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`);
   try {
     await Bun.write(temp, text);
