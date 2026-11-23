@@ -1,0 +1,95 @@
+---
+title: "Release Notes — Week of November 16 to November 23, 2026"
+description: "A typed TypeScript SDK and a user MCP guide open the swarm to your own code and assistants, model groups resolve wherever tasks start, workflow code runs in QuickJS, and sender allowlists and RBAC close gaps across every integration, across 333 commits from v2.14.0 to v2.14.3."
+---
+
+333 commits and four releases this week, v2.14.0 through v2.14.3. Two ways into the swarm from outside it became first-class: typed TypeScript for builders, and MCP for people working inside the assistant they already use. Routing and workflow code got portable at the same time, and a security sweep closed sender and permission gaps across every integration.
+
+## Breaking Changes
+
+Nothing was removed this week. These are tightenings: requests and writes that used to pass now need a linked sender, a principal, or a different executor, and each fails closed with an actionable error.
+
+- **GitLab, Bitbucket and Azure DevOps mentions need a linked or allowlisted sender** ([#3541](https://github.com/desplega-ai/agent-swarm/pull/3541), [#3556](https://github.com/desplega-ai/agent-swarm/pull/3556)). Link the sender to a user or add them to the allowlist. Allowlisted actors with no linked user can still create tasks.
+- **`/agent-swarm-status` honors the Slack sender allowlist** ([#3536](https://github.com/desplega-ai/agent-swarm/pull/3536)). Add the people who run status checks to the allowlist.
+- **Identity routes called without a swarm key need a user or operator principal** ([#3445](https://github.com/desplega-ai/agent-swarm/pull/3445)). Send a user or operator credential.
+- **Shared prompt-template writes, and repo `url`, `clonePath` or `hooks` changes, need a lead, operator or user** ([#3518](https://github.com/desplega-ai/agent-swarm/pull/3518), [#3413](https://github.com/desplega-ai/agent-swarm/pull/3413)). Route those edits through one of those principals.
+- **QuickJS deployments refuse script workflow nodes and durable script runs** ([#3480](https://github.com/desplega-ai/agent-swarm/pull/3480), [#3419](https://github.com/desplega-ai/agent-swarm/pull/3419)). Keep those workloads on the native `SCRIPT_EXECUTOR`.
+- **Schedule script arguments must be JSON objects** ([#3459](https://github.com/desplega-ai/agent-swarm/pull/3459)). Wrap scalar or array args in an object.
+
+## Highlights
+
+**A typed TypeScript SDK for the swarm API.** `@desplega.ai/agent-swarm-sdk` is a typed client for the swarm HTTP API, so an app, a script or a CI job creates tasks and reads results without hand-written fetch calls and hand-copied response shapes ([#3482](https://github.com/desplega-ai/agent-swarm/pull/3482)). Install it beside your other dependencies:
+
+```bash
+npm install @desplega.ai/agent-swarm-sdk
+```
+
+The PR is the reference for the API surface.
+
+**Connect ChatGPT, Claude, Codex, Cursor and Grok over MCP.** The new user MCP guide covers a personal token and the client configuration for each assistant, so the swarm becomes a tool inside the app you already use ([#3449](https://github.com/desplega-ai/agent-swarm/pull/3449)). Read it at /docs/guides/user-mcp; signed completion webhooks are in /docs/guides/mcp-events.
+
+**Model groups resolve wherever work starts.** One group name now resolves at `send-task`, on schedules, in workflow nodes and again at claim time, with group hops so a busy provider moves the task to the next member instead of failing it ([#3396](https://github.com/desplega-ai/agent-swarm/pull/3396)). Set the ladder once; the task carries it.
+
+**Workflow logic runs in QuickJS.** Code-match nodes and string wait filters run sandboxed in QuickJS rather than on the native worker ([#3463](https://github.com/desplega-ai/agent-swarm/pull/3463)), limited to config interpolation sources so a node cannot read a trigger or an upstream output it was not given ([#3476](https://github.com/desplega-ai/agent-swarm/pull/3476)). Same workflow file, cheaper and safer evaluation. Docs: /docs/concepts/workflows.
+
+**Follow-ups that land, and a gate that enforces.** Follow-up sends are optimistic with retry, and task creation is idempotent, so a retried follow-up no longer duplicates a task or disappears with the socket ([#3381](https://github.com/desplega-ai/agent-swarm/pull/3381)). The follow-up gate also gains an enforce mode ([#3479](https://github.com/desplega-ai/agent-swarm/pull/3479)), so shadow mode can become a real policy.
+
+**Durable object scripts in the dashboard.** Durable object scripts, their objects and their object runs are now visible in the UI ([#3415](https://github.com/desplega-ai/agent-swarm/pull/3415)). An object's state and history stop being a SQL question.
+
+## Improvements
+
+**Dashboard and sessions**
+
+- Review agent-fs files inside session and task previews, without leaving the thread ([#3393](https://github.com/desplega-ai/agent-swarm/pull/3393)).
+- Star Apps and search the Apps list the way Pages already work ([#3432](https://github.com/desplega-ai/agent-swarm/pull/3432)).
+- Pick a UI font in Settings → Appearance ([#3398](https://github.com/desplega-ai/agent-swarm/pull/3398)).
+- Session work reads in time order with lead follow-up answers, and follow-ups carrying files appear at once ([#3434](https://github.com/desplega-ai/agent-swarm/pull/3434), [#3402](https://github.com/desplega-ai/agent-swarm/pull/3402)).
+- Keyboard access reaches Kanban card actions, workflow steps and the phone session tree ([#3407](https://github.com/desplega-ai/agent-swarm/pull/3407), [#3406](https://github.com/desplega-ai/agent-swarm/pull/3406), [#3460](https://github.com/desplega-ai/agent-swarm/pull/3460)).
+
+**Slack and channels**
+
+- The Slack reply footer is configurable ([#3448](https://github.com/desplega-ai/agent-swarm/pull/3448)).
+- One live card per ask, with PR links that point at a real PR, and Lead review cards that list the worker's deliverables ([#3550](https://github.com/desplega-ai/agent-swarm/pull/3550), [#3511](https://github.com/desplega-ai/agent-swarm/pull/3511)).
+- Deferral wake-ups print in the requester's timezone ([#3401](https://github.com/desplega-ai/agent-swarm/pull/3401)), and Lead follow-up cards post in Slack Connect channels ([#3405](https://github.com/desplega-ai/agent-swarm/pull/3405)).
+
+**PRs and examples**
+
+- A readable PR-body template with before/after evidence, template-declared evidence paths and Slack mock frames ([#3468](https://github.com/desplega-ai/agent-swarm/pull/3468), [#3465](https://github.com/desplega-ai/agent-swarm/pull/3465)).
+- The video review example ships as a page, a swarm bundle, a docs guide and a review-loop skill for the agent doing the editing ([#3517](https://github.com/desplega-ai/agent-swarm/pull/3517), [#3526](https://github.com/desplega-ai/agent-swarm/pull/3526), [#3527](https://github.com/desplega-ai/agent-swarm/pull/3527), [#3547](https://github.com/desplega-ai/agent-swarm/pull/3547), [#3544](https://github.com/desplega-ai/agent-swarm/pull/3544)). Docs: /docs/guides/video-review.
+
+**Performance**
+
+- The native executor keeps three warm spares per spec ([#3548](https://github.com/desplega-ai/agent-swarm/pull/3548)).
+- `db-query` skips scrub rules a clean row cannot trigger, and app sync scrubs with the sweep scrubber ([#3450](https://github.com/desplega-ai/agent-swarm/pull/3450), [#3506](https://github.com/desplega-ai/agent-swarm/pull/3506)).
+
+**Docs and playbooks**
+
+- Eight new playbook use cases: onboarding readiness, meeting decision follow-up, near-miss evidence, campaign launch review, win-loss review, training completion evidence, interview scheduling handoff and facility energy anomaly review ([#3508](https://github.com/desplega-ai/agent-swarm/pull/3508), [#3507](https://github.com/desplega-ai/agent-swarm/pull/3507), [#3492](https://github.com/desplega-ai/agent-swarm/pull/3492), [#3491](https://github.com/desplega-ai/agent-swarm/pull/3491), [#3400](https://github.com/desplega-ai/agent-swarm/pull/3400), [#3399](https://github.com/desplega-ai/agent-swarm/pull/3399), [#3559](https://github.com/desplega-ai/agent-swarm/pull/3559), [#3560](https://github.com/desplega-ai/agent-swarm/pull/3560)).
+
+## Bug Fixes
+
+**Security**
+
+- Public webhook receivers enforce a raw-body size limit ([#3538](https://github.com/desplega-ai/agent-swarm/pull/3538)).
+- Every backlogged route declares its RBAC posture, and the route backlog is gone ([#3515](https://github.com/desplega-ai/agent-swarm/pull/3515), [#3514](https://github.com/desplega-ai/agent-swarm/pull/3514), [#3502](https://github.com/desplega-ai/agent-swarm/pull/3502), [#3477](https://github.com/desplega-ai/agent-swarm/pull/3477)).
+- x402 reads the v1 `maxAmountRequired` before spending-limit checks and picks the signed amount field by protocol version ([#3521](https://github.com/desplega-ai/agent-swarm/pull/3521), [#3523](https://github.com/desplega-ai/agent-swarm/pull/3523)).
+- The evals API refuses other-origin and non-JSON writes when it runs without a key ([#3532](https://github.com/desplega-ai/agent-swarm/pull/3532)).
+- Connector code is served only to the exact connect page, and the dashboard asks before a top-level link switches connection ([#3525](https://github.com/desplega-ai/agent-swarm/pull/3525), [#3529](https://github.com/desplega-ai/agent-swarm/pull/3529)).
+- A stored `CLAUDE_BINARY` stays out of the API process env, and generated shell commands quote URL and header values ([#3451](https://github.com/desplega-ai/agent-swarm/pull/3451), [#3411](https://github.com/desplega-ai/agent-swarm/pull/3411)).
+- Tool-usage arguments bind as SQL parameters ([#3414](https://github.com/desplega-ai/agent-swarm/pull/3414)).
+- Edited workflow script nodes run as their creator only after the creator or a lead saves, and signal routes refuse extension-bridged event names ([#3494](https://github.com/desplega-ai/agent-swarm/pull/3494), [#3486](https://github.com/desplega-ai/agent-swarm/pull/3486)).
+
+**Workflows and scripts**
+
+- Resumed approval steps route on the request they stored ([#3485](https://github.com/desplega-ai/agent-swarm/pull/3485)).
+- Null system-one-extraction spans are accepted ([#3474](https://github.com/desplega-ai/agent-swarm/pull/3474), [#3442](https://github.com/desplega-ai/agent-swarm/pull/3442)).
+- Scripts and API self-calls use loopback ([#3409](https://github.com/desplega-ai/agent-swarm/pull/3409), [#3497](https://github.com/desplega-ai/agent-swarm/pull/3497)).
+- QuickJS compatibility findings report every line ([#3498](https://github.com/desplega-ai/agent-swarm/pull/3498), [#3436](https://github.com/desplega-ai/agent-swarm/pull/3436)).
+
+**Harnesses**
+
+- Codex keeps reasoning effort for live catalog models and detects web search loops using completed queries ([#3540](https://github.com/desplega-ai/agent-swarm/pull/3540), [#3539](https://github.com/desplega-ai/agent-swarm/pull/3539)).
+- Amp names a model on the plugin agent mode ([#3462](https://github.com/desplega-ai/agent-swarm/pull/3462)).
+- Memory embeds check a stored embedding base URL ([#3412](https://github.com/desplega-ai/agent-swarm/pull/3412)).
+
+Merged to main after v2.14.3: page sessions launch as the dashboard's picked user ([#3553](https://github.com/desplega-ai/agent-swarm/pull/3553)), and the scrubber keeps JSON valid when a redaction spans a closing quote ([#3563](https://github.com/desplega-ai/agent-swarm/pull/3563)).
