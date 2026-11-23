@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { insertProvisioningRuntime, markRuntimeTerminated } from "../be/multi-runtime";
 import { getPoolCache, reconcileCacheReleases } from "../be/runtime-pools/cache-cleanup";
@@ -68,6 +69,9 @@ async function runtime(poolId: string) {
 
 beforeAll(() => {
   savedTemplate = testGlobals.__testMigrationTemplate;
+  // The restart tests need a real file, but running every migration against one is slow and
+  // blocks the event loop on a loaded runner: start the file from the migrated template instead.
+  writeFileSync(path, savedTemplate!);
   testGlobals.__testMigrationTemplate = undefined;
   closeDb();
   initDb(path);
