@@ -601,10 +601,20 @@ on the container itself is dropped too.
 - **When it applies.** Workers re-read the flag for every new task, so a change reaches the next
   harness session without a restart. The worker process itself picks it up on its next restart.
 
-The flag controls the environment only. It does not change who may read the value through
-`get-config` or the API. An agent that needs a row kept out of its env uses it server-side: a script
-connection or a script credential binding sends the secret on the agent's behalf, so the value never
-enters the agent's context.
+With `includeSecrets=true`, a plain agent token reading its own `GET /api/config/resolved` can
+read its own agent-scope secrets and exported global secrets. Non-exported global secrets are
+masked (`********`), and repo secrets are excluded from that view. The operator's shared API key
+is not subject to this agent mask. Lead agents and users with secret-read access keep that access.
+
+In a script run as a plain agent, `ctx.swarm.config` masks non-exported global secrets too. Raw
+HTTP reads (`GET /api/config` and `GET /api/config/{id}`) with the script-run token and
+`includeSecrets=true` reveal only secret rows in the run token's own agent-over-global resolved
+view, excluding non-exported global and repo secrets. Other plain agent tokens get masked secret
+values on those raw routes. MCP `get-config` and `list-config` mask **all** secret values for a
+plain agent, even with `includeSecrets=true`.
+
+An agent can use a script connection or credential binding to send a non-exported secret
+server-side without receiving the value itself.
 
 Set the flag in the dashboard (the **Export to agent env** switch on a config entry), with
 `set-config` (`exportToEnv: false`), or with `PUT /api/config`.

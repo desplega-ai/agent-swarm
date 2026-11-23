@@ -1,214 +1,149 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
-/**
- * Regression test for the codex_oauth boot-seed jq transform in
- * docker-entrypoint.sh (Auth path 1: seed slot 0 from the config store).
- *
- * The jq program is extracted verbatim from docker-entrypoint.sh and run
- * against real `jq` so this test tracks the actual deployed transform
- * instead of a hand-written mirror that could silently drift from it.
- *
- * Regression: the `auth_mode == "chatgpt"` branch used to return the input
- * object unchanged, so a live pool refresh_token in an auth.json-shaped
- * config value was written straight to the worker's auth.json at boot —
- * the exact unlocked worker-disk refresh path this hardening pass closes.
- * Both accepted shapes (chatgpt auth.json passthrough, flat credentials)
- * must blank refresh_token for config-store (pool) credentials.
- *
- * Regression (PR #1114 review): a standalone container-provided CODEX_OAUTH
- * env var is single-slot/non-pool and never gets a per-task overwrite from
- * the runner, so blanking its refresh_token at boot would permanently strip
- * the only copy the worker will ever have. The filter reads the standalone
- * flag via jq's `env` builtin (CODEX_OAUTH_SEED_STANDALONE) rather than
- * `--argjson` so this extraction — which anchors on a bare `jq '` prefix —
- * still finds it verbatim.
- */
-
-const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
-
-function extractCodexOauthSeedFilter(): string {
-  const script = require("node:fs").readFileSync(entrypointPath, "utf8");
-
-  // Anchor on `mkdir -p "$WORKER_CODEX_HOME"` — unique to the boot-seed
-  // block, unlike the `jq '...'` prefix which also matches the earlier
-  // `jq '.' >/dev/null 2>&1` JSON-validity check.
-  const anchorIndex = script.indexOf('mkdir -p "$WORKER_CODEX_HOME"');
-  if (anchorIndex === -1) {
-    throw new Error(
-      'Could not locate `mkdir -p "$WORKER_CODEX_HOME"` in docker-entrypoint.sh — did the boot-seed block move?',
-    );
-  }
-
-  const jqStart = script.indexOf("jq '", anchorIndex);
-  if (jqStart === -1) {
-    throw new Error(
-      "Could not locate the codex_oauth boot-seed jq invocation after the mkdir anchor.",
-    );
-  }
-  const filterStart = jqStart + "jq '".length;
-
-  const closingMarker = '\' > "$WORKER_CODEX_HOME/auth.json"';
-  const filterEnd = script.indexOf(closingMarker, filterStart);
-  if (filterEnd === -1) {
-    throw new Error(
-      'Could not locate the closing `\' > "$WORKER_CODEX_HOME/auth.json"` marker for the boot-seed jq filter.',
-    );
-  }
-
-  return script.slice(filterStart, filterEnd);
+const entrypoint = await Bun.file(`${import.meta.dir}/../../docker-entrypoint.sh`).text();
+const start = 'elif [ "$HARNESS_PROVIDER" = "codex" ]; then\n';
+const end = "\nelse\n";
+const codexBranch = entrypoint.split(start)[1]?.split(end)[0];
+if (!codexBranch?.includes('WORKER_CODEX_HOME="/home/worker/.codex"')) {
+  throw new Error("Could not locate the Codex entrypoint branch");
 }
+const script = codexBranch.replace(
+  'WORKER_CODEX_HOME="/home/worker/.codex"',
+  'WORKER_CODEX_HOME="$TEST_CODEX_HOME"',
+);
 
-/**
- * Async `runChild` on purpose, not `Bun.spawnSync`. On the 4-vCPU CI runners
- * under `--parallel=4`, two consecutive `spawnSync` calls here (stdin Buffer
- * into `jq`) sat for the full 10 s test budget with the child still alive and
- * got reaped as "dangling" (gate run 32474909606); the same 400-call loop is
- * 1.5 s on macOS. jq only blocks on stdin EOF, so the sync spawn loop either
- * never closed the pipe or lost the exit. The async path uses the regular
- * event loop, writes + closes stdin explicitly, and a hard per-spawn timeout
- * (`runChild`'s `CHILD_PROCESS_TIMEOUT_MS`) turns a hang into a fast,
- * readable failure instead of a silent 10 s stall.
- */
-async function runJqFilter(filter: string, input: unknown, standalone = false): Promise<unknown> {
-  const result = await runChild(["jq", filter], {
-    env: { ...process.env, CODEX_OAUTH_SEED_STANDALONE: standalone ? "true" : "false" },
-    stdin: JSON.stringify(input),
-  });
-  expectChildOk(result, "jq");
-  return JSON.parse(result.stdout);
-}
-
-describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
-  const filter = extractCodexOauthSeedFilter();
-
-  test(
-    "blanks refresh_token for an auth.json-shaped (chatgpt) input",
-    async () => {
-      const result = (await runJqFilter(filter, {
-        auth_mode: "chatgpt",
-        OPENAI_API_KEY: null,
-        tokens: {
-          id_token: "id-tok",
-          access_token: "example-access-tok",
-          refresh_token: "example-live-refresh-tok",
-          account_id: "acct-123",
-        },
-        last_refresh: "2026-07-01T00:00:00.000Z",
-      })) as {
-        auth_mode: string;
-        tokens: {
-          id_token: string;
-          access_token: string;
-          refresh_token: string;
-          account_id: string;
-        };
-        last_refresh: string;
-      };
-
-      expect(result.tokens.refresh_token).toBe("");
-      expect(result.auth_mode).toBe("chatgpt");
-      expect(result.tokens.id_token).toBe("id-tok");
-      expect(result.tokens.access_token).toBe("example-access-tok");
-      expect(result.tokens.account_id).toBe("acct-123");
-      expect(result.last_refresh).toBe("2026-07-01T00:00:00.000Z");
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "blanks refresh_token for a flat {access,refresh,accountId,expires} input",
-    async () => {
-      const before = Math.floor(Date.now() / 1000) * 1000;
-      const result = (await runJqFilter(filter, {
-        access: "example-access-tok",
-        refresh: "example-live-refresh-tok",
-        accountId: "acct-456",
-        expires: 1_800_000_000_000,
-      })) as {
-        auth_mode: string;
-        last_refresh: string;
-        expires: number;
-        tokens: {
-          id_token: string;
-          access_token: string;
-          refresh_token: string;
-          account_id: string;
-        };
-      };
-
-      expect(result.tokens.refresh_token).toBe("");
-      expect(result.auth_mode).toBe("chatgpt");
-      expect(result.tokens.id_token).toBe("example-access-tok");
-      expect(result.tokens.access_token).toBe("example-access-tok");
-      expect(result.tokens.account_id).toBe("acct-456");
-      expect(Date.parse(result.last_refresh)).toBeGreaterThanOrEqual(before);
-      expect(Date.parse(result.last_refresh)).toBeLessThanOrEqual(Date.now());
-      expect(result.expires).toBe(1_800_000_000_000);
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "errors on a value matching neither accepted shape",
-    async () => {
-      await expect(runJqFilter(filter, { foo: "bar" })).rejects.toThrow(
-        /neither auth\.json format/,
-      );
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "preserves refresh_token for an auth.json-shaped (chatgpt) input on the standalone path",
-    async () => {
-      const result = (await runJqFilter(
-        filter,
-        {
-          auth_mode: "chatgpt",
-          OPENAI_API_KEY: null,
-          tokens: {
-            id_token: "id-tok",
-            access_token: "example-access-tok",
-            refresh_token: "example-live-refresh-tok",
-            account_id: "acct-123",
-          },
-          last_refresh: "2026-07-01T00:00:00.000Z",
-        },
-        true,
-      )) as {
-        tokens: { refresh_token: string };
-      };
-
-      expect(result.tokens.refresh_token).toBe("example-live-refresh-tok");
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
-
-  test(
-    "preserves refresh_token (from the flat `refresh` field) for a flat input on the standalone path",
-    async () => {
-      const before = Math.floor(Date.now() / 1000) * 1000;
-      const result = (await runJqFilter(
-        filter,
-        {
-          access: "example-access-tok",
-          refresh: "example-live-refresh-tok",
-          accountId: "acct-456",
-          expires: 1_800_000_000_000,
-        },
-        true,
-      )) as {
-        tokens: { refresh_token: string };
-        last_refresh: string;
-        expires: number;
-      };
-
-      expect(result.tokens.refresh_token).toBe("example-live-refresh-tok");
-      expect(Date.parse(result.last_refresh)).toBeGreaterThanOrEqual(before);
-      expect(Date.parse(result.last_refresh)).toBeLessThanOrEqual(Date.now());
-      expect(result.expires).toBe(1_800_000_000_000);
-    },
-    CHILD_PROCESS_TEST_BUDGET_MS,
-  );
+const flat = (label: string) => ({
+  access: `fixture-access-${label}`,
+  refresh: `fixture-refresh-${label}`,
+  accountId: "fixture-account",
+  expires: 1_800_000_000_000,
 });
+const shaped = {
+  auth_mode: "chatgpt",
+  OPENAI_API_KEY: null,
+  tokens: {
+    id_token: "fixture-id-shaped",
+    access_token: "fixture-access-shaped",
+    refresh_token: "fixture-refresh-shaped",
+    account_id: "fixture-account",
+  },
+  last_refresh: "2026-07-01T00:00:00.000Z",
+};
+
+const cases = [
+  {
+    name: "prefers usable slot 0 to legacy and env",
+    slot: JSON.stringify(shaped),
+    legacy: JSON.stringify(flat("legacy")),
+    env: JSON.stringify(flat("env")),
+    access: shaped.tokens.access_token,
+    refresh: "",
+  },
+  {
+    name: "skips masked slot 0 and uses multiline legacy JSON",
+    slot: "********",
+    legacy: JSON.stringify(flat("legacy"), null, 2),
+    access: flat("legacy").access,
+    refresh: "",
+  },
+  {
+    name: "skips malformed slot and unsupported legacy, retaining flat env refresh",
+    slot: "{bad-fixture",
+    legacy: '{"auth_mode":"chatgpt","tokens":{}}',
+    env: JSON.stringify(flat("env")),
+    access: flat("env").access,
+    refresh: flat("env").refresh,
+  },
+  {
+    name: "falls back to shaped env if the config endpoint fails",
+    unavailable: true,
+    env: JSON.stringify(shaped),
+    access: shaped.tokens.access_token,
+    refresh: shaped.tokens.refresh_token,
+  },
+  {
+    name: "does not write a file from unusable candidates",
+    slot: '{"auth_mode":"api_key"}',
+    legacy: "[]",
+    env: '{"access":123}',
+    access: undefined,
+  },
+  {
+    name: "preserves an existing ChatGPT auth file without fetching config",
+    existing: true,
+    slot: JSON.stringify(flat("slot")),
+    access: shaped.tokens.access_token,
+    refresh: shaped.tokens.refresh_token,
+  },
+];
+
+for (const fixture of cases) {
+  test(
+    fixture.name,
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), "codex-seed-test-"));
+      const file = Bun.file(join(home, "auth.json"));
+      let calls = 0;
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req) {
+          if (
+            `${new URL(req.url).pathname}${new URL(req.url).search}` !==
+              "/api/config/resolved?includeSecrets=true" ||
+            req.method !== "GET" ||
+            req.headers.get("authorization") !== "Bearer fixture-key"
+          )
+            return new Response(null, { status: 400 });
+          calls++;
+          if (fixture.unavailable) return new Response(null, { status: 503 });
+          return Response.json({
+            configs: [
+              { key: "codex_oauth", value: fixture.legacy },
+              { key: "codex_oauth_0", value: fixture.slot },
+            ],
+          });
+        },
+      });
+      try {
+        const original = JSON.stringify(shaped, null, 2);
+        if (fixture.existing) await Bun.write(file, original);
+        const result = await runChild(["bash", "-e", "-c", script], {
+          env: {
+            PATH: process.env.PATH,
+            API_KEY: "fixture-key",
+            MCP_URL: server.url.origin,
+            TEST_CODEX_HOME: home,
+            CODEX_OAUTH: fixture.env ?? "",
+          },
+        });
+        expectChildOk(result, "Codex entrypoint branch");
+        expect(result.stderr).toBe("");
+        expect(result.stdout).not.toContain("fixture-");
+        expect(calls).toBe(fixture.existing ? 0 : 1);
+        if (fixture.access === undefined) {
+          expect(await file.exists()).toBe(false);
+        } else {
+          expect(await file.json()).toMatchObject({
+            auth_mode: "chatgpt",
+            tokens: {
+              access_token: fixture.access,
+              refresh_token: fixture.refresh,
+              account_id: "fixture-account",
+            },
+          });
+          if (fixture.existing) expect(await file.text()).toBe(original);
+          else expect((await stat(file.name!)).mode & 0o777).toBe(0o600);
+        }
+      } finally {
+        await server.stop(true);
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+}

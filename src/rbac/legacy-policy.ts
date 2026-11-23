@@ -297,6 +297,7 @@ export const LEGACY_POLICY = {
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,
   "memory.write.consolidated": leadOnly,
+  "memory.index": humanOrLeadOrResourceOwner,
   "memory.read.any": leadOrOperatorOrUser,
   "memory.delete.any": memoryDelete,
   "memory.reembed": leadOrOperatorOrUser,

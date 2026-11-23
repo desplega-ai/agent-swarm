@@ -104,6 +104,80 @@ function grantUserAppManage(dbPath: string, userId: string): void {
   }
 }
 
+// There is no HTTP API to create a custom role. Seed the exact test grant in this scratch DB.
+function setOnlyMemoryGrant(dbPath: string, userId: string, verb: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.run("PRAGMA busy_timeout = 5000");
+    db.transaction(() => {
+      const roleId = `test-role-${verb}`;
+      db.run("INSERT INTO roles (id, name, isBuiltin, grantsAll) VALUES (?, ?, 0, 0)", [
+        roleId,
+        roleId,
+      ]);
+      db.run("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)", [roleId, verb]);
+      db.run("DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?", [
+        userId,
+      ]);
+      db.run(
+        "INSERT INTO principal_roles (principalType, principalId, roleId) VALUES ('user', ?, ?)",
+        [userId, roleId],
+      );
+    }).immediate();
+  } finally {
+    db.close();
+  }
+}
+
+async function checkMemoryAdmission(base: string, dbPath: string): Promise<void> {
+  for (const verb of ["memory.write.consolidated", "memory.index"]) {
+    const user = await api(base, "POST", "/api/users", { body: { name: `Test ${verb}` } });
+    expect(user.status).toBe(200);
+    const userId = user.body.user.id as string;
+    setOnlyMemoryGrant(dbPath, userId, verb);
+    const minted = await api(base, "POST", `/api/users/${userId}/mcp-tokens`, { body: {} });
+    expect(minted.status).toBe(200);
+    const bearer = minted.body.plaintext as string;
+    const whoami = await api(base, "GET", "/api/whoami", { bearer });
+    expect(whoami.status).toBe(200);
+    expect(whoami.body.kind).toBe("user");
+    expect(whoami.body.grants).toMatchObject({ grantsAll: false, verbs: [verb] });
+
+    const body = {
+      agentId: WORKER_A,
+      scope: "agent",
+      source: "manual",
+      content: "An ordinary memory fixture",
+    };
+    const name = `memory-admission-${verb}`;
+    const ordinary = await api(base, "POST", "/api/memory/index", {
+      bearer,
+      body: { ...body, name },
+    });
+    expect(ordinary.status).toBe(202);
+    expect(ordinary.body.memoryIds).toHaveLength(1);
+
+    const deniedName = `${name}-consolidated`;
+    const consolidated = await api(base, "POST", "/api/memory/index", {
+      bearer,
+      body: { ...body, name: deniedName, sourcePath: `/longterm/entities/people/${deniedName}` },
+    });
+    expect(consolidated.status).toBe(403);
+    expect(consolidated.body.error).toContain("is under a lead-only path");
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const count = (name: string) =>
+        db
+          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM agent_memory WHERE name = ?")
+          .get(name)?.n;
+      expect(count(name)).toBe(1);
+      expect(count(deniedName)).toBe(0);
+    } finally {
+      db.close();
+    }
+  }
+}
+
 describe("RBAC admission over real HTTP", () => {
   afterAll(async () => {
     if (server) {
@@ -131,6 +205,7 @@ describe("RBAC admission over real HTTP", () => {
     });
     expect(user.status).toBe(200);
     const userId = user.body.user.id as string;
+    await checkMemoryAdmission(server.base, dbPath);
 
     const minted = await api(server.base, "POST", `/api/users/${userId}/mcp-tokens`, {
       body: {},

@@ -29224,7 +29224,8 @@
                 "type": "object",
                 "properties": {
                   "agentId": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Defaults to the calling agent for agent requests"
                   },
                   "content": {
                     "type": "string",
@@ -29323,7 +29324,7 @@
             }
           },
           "403": {
-            "description": "sourcePath is under a lead-only /longterm root and the caller is not the lead",
+            "description": "sourcePath is under a lead-only /longterm root and the caller is not the lead, or a plain agent named another agent in `agentId`",
             "content": {
               "application/json": {
                 "schema": {
@@ -62863,6 +62864,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "systemDefault": {
+                    "type": "boolean"
+                  }
+                },
                 "additionalProperties": {}
               }
             }
@@ -62883,6 +62889,16 @@
                   "required": [
                     "skill"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

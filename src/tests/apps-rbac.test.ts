@@ -422,6 +422,17 @@ describe("verified app action caller", () => {
       };
       const checks: RbacCheck[] = [];
       setAuditSink((check) => checks.push(check));
+      const appUseCheck: RbacCheck = {
+        principal:
+          principal === "user"
+            ? { kind: "user", userId }
+            : principal === "agent"
+              ? { kind: "agent", agentId: AGENT_ID, isLead: false }
+              : { kind: "operator" },
+        verb: "app.use",
+        resource: { kind: "app", appId },
+        source: "http",
+      };
       const row = await request<{ row: { createdBy: string } }>(
         `/api/apps/${appId}/models/note/rows`,
         principal,
@@ -433,6 +444,7 @@ describe("verified app action caller", () => {
       );
       expect(row.status).toBe(201);
       expect(row.body.row.createdBy).toBe(caller.id ? `${caller.kind}:${caller.id}` : "operator");
+      expect(checks.splice(0)).toEqual([appUseCheck]);
 
       const action = await request<{
         ok: boolean;
@@ -447,6 +459,16 @@ describe("verified app action caller", () => {
       expect(action.status).toBe(200);
       expect(action.body.ok).toBe(true);
       expect(action.body.result).toEqual({ caller, app: { id: appId }, base: 2, add: 3 });
+      // Secret access is checked as the saved script's owner, not the request principal.
+      expect(checks.splice(0)).toEqual([
+        appUseCheck,
+        {
+          principal: { kind: "agent", agentId: AGENT_ID, isLead: false },
+          verb: "config.read.secrets",
+          resource: { kind: "none" },
+          source: "http",
+        },
+      ]);
 
       const taskAction = await request<{ taskId: string }>(
         `/api/apps/${appId}/actions/triage`,
@@ -457,8 +479,7 @@ describe("verified app action caller", () => {
       expect((await getTaskById(taskAction.body.taskId))?.task).toContain(
         `Caller (server-verified): ${JSON.stringify(caller)}`,
       );
-      expect(checks).toHaveLength(3);
-      expect(checks.every((check) => check.principal.kind === principal)).toBe(true);
+      expect(checks).toEqual([appUseCheck]);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

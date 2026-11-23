@@ -679,8 +679,14 @@ export const knowledgeSkills: Scenario = {
       expect(asRecord(response.json).checked === 0, "sync-remote unknown skill checks nothing");
       response = await ctx.api("POST", "/api/skills/sync-remote", { body: { skillId: 7 } });
       expectStatus(response, [400], "sync-remote with an invalid skillId");
-      outcome = expectToolOk(
+      // A worker may not sync a global remote skill it does not own; the lead may.
+      expectToolError(
         await callTool(sessionOwner, "skill-sync-remote", { skillId: toolRemote.id }),
+        "skill-sync-remote of a global remote skill as worker",
+        /Forbidden/i,
+      );
+      outcome = expectToolOk(
+        await callTool(sessionLead, "skill-sync-remote", { skillId: toolRemote.id }),
         "skill-sync-remote complex",
       );
       expect(outcome.data.checked === 1 && outcome.data.updated === 0, "skill-sync-remote counts");

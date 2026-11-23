@@ -151,6 +151,10 @@ export const PERMISSIONS = {
       "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
     namespace: "memory",
   },
+  "memory.index": {
+    description: "Index memory as oneself, or for any agent as lead, operator, or user.",
+    namespace: "memory",
+  },
   "memory.read.any": {
     description:
       "List every agent's memories, beyond the caller's own and swarm-scoped entries (lead, operator, or user).",

@@ -51,6 +51,18 @@ A move **out** of `/longterm` does not restore a TTL. The expiry the memory had 
 gone, so it never expires; decay, quality and protection revert to its `source`
 because they are read from the key on every call.
 
+## Who may write which scope
+
+`POST /api/memory/index` takes an optional body `agentId`. A plain agent (not a lead, not
+lead-equivalent) may send only its own id; another agent's id is refused with 403, so one
+agent cannot plant memories in another agent's own scope. If an agent omits the ID, the
+route uses the calling agent's ID. A lead, the operator and a user may name any agent.
+
+The `scope` is **not** restricted for a non-lead: it may write `scope: "swarm"`. This is
+deliberate. A worker persists shared memory from `/workspace/shared/memory`
+(`pi-mono-extension.ts`, `hooks/hook.ts`) through this route, with its own token, so a lead-only
+swarm scope would break that flow. Only the `/longterm` tree is lead-gated (above).
+
 - **Write:** `memory-store` `key` (shape `^/[a-z0-9-]+(/[a-z0-9._-]+)*$`, ≤200 chars).
   When `key` is absent and `name` starts with `/longterm/`, the name is the key, so an
   agent sets one field; an invalid name of that form is refused, never stored under an
