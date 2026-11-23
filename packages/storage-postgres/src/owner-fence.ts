@@ -17,6 +17,11 @@ export { OWNER_FENCE_KEY };
 export type OwnerFence = {
   /** Backend pid of the lock session that holds `PROCESS_LOCK_KEY` for this process. */
   ownerPid: number;
+  /**
+   * `backend_start` of that session. The server can reuse a pid after the
+   * session ends, so the check also matches the session's start time.
+   */
+  ownerBackendStart?: string;
 };
 
 /** Thrown in a write transaction of a process that no longer owns the database. */
@@ -35,12 +40,18 @@ type Unsafe = { unsafe(text: string, params?: unknown[]): Promise<Record<string,
 /** Run at the start of a read-write transaction, on its connection. Two statements, in this order. */
 export async function checkOwnerFence(handle: Unsafe, fence: OwnerFence): Promise<void> {
   await handle.unsafe("SELECT pg_advisory_xact_lock_shared($1)", [OWNER_FENCE_KEY]);
+  const sameSession = fence.ownerBackendStart
+    ? `AND EXISTS (SELECT 1 FROM pg_stat_activity a
+                     WHERE a.pid = $1 AND a.backend_start = $3::timestamptz)`
+    : "";
   const rows = await handle.unsafe(
     `SELECT EXISTS (
        SELECT 1 FROM pg_locks
         WHERE locktype = 'advisory' AND pid = $1 AND granted AND objsubid = 1
-          AND ((classid::bigint << 32) | objid::bigint) = $2) AS owned`,
-    [fence.ownerPid, PROCESS_LOCK_KEY],
+          AND ((classid::bigint << 32) | objid::bigint) = $2) ${sameSession} AS owned`,
+    fence.ownerBackendStart
+      ? [fence.ownerPid, PROCESS_LOCK_KEY, fence.ownerBackendStart]
+      : [fence.ownerPid, PROCESS_LOCK_KEY],
   );
   if (rows[0]?.owned !== true) throw new OwnershipLostError();
 }

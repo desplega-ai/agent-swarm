@@ -94,6 +94,8 @@ export type ProcessLockOptions = {
 export type ProcessLock = {
   /** Backend pid of the lock session (the write fence checks it, owner-fence.ts). */
   pid: number;
+  /** `backend_start` of the lock session as text: with the pid it rules out pid reuse. */
+  backendStart: string;
   release(): Promise<void>;
 };
 
@@ -122,14 +124,17 @@ export async function acquireProcessLock(
   const conn = new Bun.SQL({ url, max: 1, idleTimeout: 0, maxLifetime: 0 });
   const started = Date.now();
   let lockPid = 0;
+  let lockBackendStart = "";
   try {
     for (;;) {
       const rows = (await conn.unsafe(
-        "SELECT pg_try_advisory_lock($1) AS locked, pg_backend_pid() AS pid",
+        `SELECT pg_try_advisory_lock($1) AS locked, pg_backend_pid() AS pid,
+                (SELECT backend_start::text FROM pg_stat_activity WHERE pid = pg_backend_pid()) AS backend_start`,
         [PROCESS_LOCK_KEY],
-      )) as { locked: boolean; pid: number }[];
+      )) as { locked: boolean; pid: number; backend_start: string | null }[];
       if (rows[0]?.locked === true) {
         lockPid = Number(rows[0].pid);
+        lockBackendStart = String(rows[0].backend_start ?? "");
         // Drain the write fence (owner-fence.ts): wait for every write
         // transaction a previous owner started, then let the fence go. A
         // transaction it starts from now on sees that it lost the lock.
@@ -185,6 +190,7 @@ export async function acquireProcessLock(
   }
   return {
     pid: lockPid,
+    backendStart: lockBackendStart,
     async release() {
       if (released) return;
       released = true;

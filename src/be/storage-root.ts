@@ -382,7 +382,7 @@ export async function openPostgresEngine(
       checkMessages,
       onTransactionEnd: transactionStatsSink(),
       // Writes check that this process still owns the database (D16 write fence).
-      fence: { ownerPid: lock.pid },
+      fence: { ownerPid: lock.pid, ownerBackendStart: lock.backendStart },
     });
     const queryReader = await openQueryReader(queryUrl, timestampFormats);
     console.log(
