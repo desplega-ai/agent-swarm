@@ -144,8 +144,9 @@ export const divergenceLikeCase: Scenario = {
         [`${n}-a_c`, ["a_c"]],
         [`${n}-100%`, ["100%"]],
         [`${n}-%c`, []],
-        // Substring anywhere: "abc" sits inside "xabcx".
-        ["abc", ["AbC", "xabcx"]],
+        // Substring anywhere, case folded: "XABC" sits inside "xabcx". The needle carries
+        // 'x', which no hex nonce or UUID-based key contains, so no stray row can match.
+        ["XABC", ["xabcx"]],
       ];
       for (const [q, expected] of workflowCases) {
         sameSet(await workflowSearch(q), expected, `workflows q "${q}"`);
