@@ -9,6 +9,18 @@ The Agent Swarm **dashboard** is the web UI for operating a swarm: watch agents 
 
 The **Apps** surface hosts schema-backed applications created by agents. Use the [Apps guide](/docs/apps) to decide when to build one, understand the definition primitives, and start from a complete example. See the [Apps API reference](/docs/api-reference/apps) for lifecycle endpoints.
 
+## Pages and Apps view modes
+
+An App (`/apps/<id>`) and a Page (`/pages/<id>`) open inside the dashboard, with its sidebar and header. Add a mode to the URL to show more of the page:
+
+| URL | Shows |
+|---|---|
+| no mode | The page in the dashboard |
+| `?mode=full` | The page over the whole viewport, under a slim title bar with **Exit full** |
+| `?mode=chromeless` | The page alone, full-bleed, with no title bar: for a link opened on a phone, or an embed |
+
+Every mode is a dashboard route, so the reader needs a dashboard login. To share a `public` or `password` Page with someone who has none, send its API link (`/p/<id>`) instead.
+
 ## Appearance
 
 Settings → Appearance lets each browser choose light, dark, or system mode and select a built-in visual preset. The preference stays local to the browser connection. Apps may request their own canvas theme, while viewers can override it without changing the app definition.
