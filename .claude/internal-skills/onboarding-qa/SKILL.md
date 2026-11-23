@@ -157,8 +157,23 @@ One command makes a box (8 vCPU, 16 GB, Docker, firewall 22/80/443 only), two DN
    bash $S/stack-pg.sh backup $RUN    # daily pg_dump --format=custom at 02:30 UTC into /var/backups/$RUN/, 7 files kept
    ```
    `reader` must print `[db] db-query reader ready (role swarm_reader)`. `backup` runs once and checks the file with `pg_restore --list`. The dumps stay on the box disk. Proof that the engine is right: the API log has `[db] Postgres engine ready`, `GET /api/memory/health` returns `retrievalMode: "vec"` after the first stored memory, and a memory search logs `[memory-search] retrieval_path=hybrid`.
-5. **Demo hand-off:** give Taras the two URLs and the path of `$D/setup-url` (never its content in chat). Save the run id and subdomain in memory: teardown needs `$D/dns-records`, and `/tmp` does not survive a reboot.
-6. **Teardown:** `bash $S/stack.sh down $RUN` (DNS records, box, firewall), `bash $S/box.sh list` (empty), then `rm -rf "$D"`. If `$D` is lost: `box.sh down $RUN`, then find the records with `vercel dns ls agent-swarm.dev --scope desplega-labs --limit 100` and remove them by hand with `vercel dns rm <id> --yes --scope desplega-labs`.
+5. **Stress pack** (optional, any stack): saved scripts, workflows and schedules that run without any LLM and find storage-engine bugs (a 5xx, a lost or doubled write, a wrong order, a stuck run).
+   ```bash
+   bash $S/stress-pack.sh install $RUN            # 11 scripts, 7 workflows, 12 schedules, all named stress-*
+   bash $S/stress-pack.sh status $RUN             # scoreboard: runs by status, pass and fail by check, failing checks
+   bash $S/stress-pack.sh pause $RUN              # kill switch (KV stress/enabled=false) and schedules off. `resume` reverses it
+   bash $S/stress-pack.sh level $RUN 2            # 1 to 3: higher levels raise counts and sizes
+   bash $S/stress-pack.sh remove $RUN             # deletes every schedule, workflow, script, memory and KV key of the pack
+   ```
+   - Sources: `stress-pack/` next to `scripts/` (`scripts/*.ts`, `workflows/*.json`, `schedules.json`, installer `pack.ts`). The installer puts `scripts/_prelude.ts` in front of every script, so a script file has no imports.
+   - Each piece checks its own result and writes `stress/results/<piece>/<run id>` in KV namespace `stress`. `stress-scoreboard` (every 5 min) writes `stress/scoreboard` and deletes records older than 3 hours.
+   - The pack acts as the lead: it sends the lead's id in `X-Agent-ID`, because schedules run global scripts only and a global script needs a lead. That header is an identity. It starts no session, creates no task and wakes no worker.
+   - Pieces: KV counter contention, KV edge values and list order, refusals that must be a 4xx, memory store and search, db-query reads and refused writes, sandbox limits (CPU, sleep, throw, 30 s timeout, 1 MB stdout), fan-out and join, retry and collected failures, waits, parent and child runs, duplicate triggers with idempotency keys and a signed webhook.
+   - A failing check is a finding, or a bug in the pack. Read the newest error in `status`, then repeat the one request by hand with `box-api.sh`.
+   - Level 1 costs about 20 short script runs a minute and a load average under 0.5 on an 8 vCPU box. Schedules run one at a time, so a slow scheduled script delays the others. The slow pieces run as workflows that start with a `wait` node.
+   - `remove` cannot delete two things: the `script_runs` audit rows of the pack (`SCRIPT_RUNS_RETENTION_DAYS` prunes them) and the hashed idempotency records of the deleted workflows.
+6. **Demo hand-off:** give Taras the two URLs and the path of `$D/setup-url` (never its content in chat). Save the run id and subdomain in memory: teardown needs `$D/dns-records`, and `/tmp` does not survive a reboot.
+7. **Teardown:** `bash $S/stack.sh down $RUN` (DNS records, box, firewall), `bash $S/box.sh list` (empty), then `rm -rf "$D"`. If `$D` is lost: `box.sh down $RUN`, then find the records with `vercel dns ls agent-swarm.dev --scope desplega-labs --limit 100` and remove them by hand with `vercel dns rm <id> --yes --scope desplega-labs`.
 
 ## Mode `record` (demo takes)
 

@@ -1,0 +1,84 @@
+{
+  "name": "stress-wait",
+  "description": "Stress pack C: an event wait that leaves through its timeout port after 10 s, a 20 s time wait, then a check that the run resumed once. No agent nodes, no LLM.",
+  "definition": {
+    "nodes": [
+      {
+        "id": "mark",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "mark",
+            "runId": "{{run.id}}"
+          }
+        },
+        "next": "never"
+      },
+      {
+        "id": "never",
+        "type": "wait",
+        "config": {
+          "mode": "event",
+          "eventName": "stress.never",
+          "timeoutMs": 10000
+        },
+        "next": {
+          "event": "got-event",
+          "timeout": "timed-out"
+        }
+      },
+      {
+        "id": "got-event",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "port",
+            "runId": "{{run.id}}",
+            "port": "event"
+          }
+        }
+      },
+      {
+        "id": "timed-out",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "port",
+            "runId": "{{run.id}}",
+            "port": "timeout"
+          }
+        },
+        "next": "pause"
+      },
+      {
+        "id": "pause",
+        "type": "wait",
+        "config": {
+          "mode": "time",
+          "durationMs": 20000
+        },
+        "next": "resumed"
+      },
+      {
+        "id": "resumed",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "wait-check",
+            "runId": "{{run.id}}",
+            "minMs": 30000,
+            "maxMs": 55000
+          }
+        }
+      }
+    ]
+  }
+}

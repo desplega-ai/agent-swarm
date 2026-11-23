@@ -1,0 +1,94 @@
+{
+  "schedules": [
+    {
+      "name": "stress-kv-counter-1m",
+      "description": "Stress pack: KV counter contention, every minute. Runs a script. No LLM.",
+      "cronExpression": "* * * * *",
+      "targetType": "script",
+      "scriptName": "stress-kv-counter"
+    },
+    {
+      "name": "stress-kv-edge-1m",
+      "description": "Stress pack: KV edge values, every minute. Runs a script. No LLM.",
+      "cronExpression": "* * * * *",
+      "targetType": "script",
+      "scriptName": "stress-kv-edge"
+    },
+    {
+      "name": "stress-rejections-1m",
+      "description": "Stress pack: requests the API must refuse, every minute. Runs a script. No LLM.",
+      "cronExpression": "* * * * *",
+      "targetType": "script",
+      "scriptName": "stress-rejections"
+    },
+    {
+      "name": "stress-fanout-2m",
+      "description": "Stress pack: starts the fan-out workflow in the background, every 2 minutes. Runs a script. No LLM.",
+      "cronExpression": "*/2 * * * *",
+      "targetType": "script",
+      "scriptName": "stress-launch",
+      "scriptArgs": {
+        "workflows": ["stress-fanout"]
+      }
+    },
+    {
+      "name": "stress-memory-2m",
+      "description": "Stress pack: memory store, search and delete, every 2 minutes. Runs a script. No LLM.",
+      "cronExpression": "1-59/2 * * * *",
+      "targetType": "script",
+      "scriptName": "stress-memory"
+    },
+    {
+      "name": "stress-db-query-2m",
+      "description": "Stress pack: db-query reads and refused writes, every 2 minutes. Runs a script. No LLM.",
+      "cronExpression": "1-59/2 * * * *",
+      "targetType": "script",
+      "scriptName": "stress-db-query"
+    },
+    {
+      "name": "stress-wait-3m",
+      "description": "Stress pack: wait and resume workflow, every 3 minutes. Runs a workflow with no agent nodes.",
+      "cronExpression": "*/3 * * * *",
+      "targetType": "workflow",
+      "workflow": "stress-wait"
+    },
+    {
+      "name": "stress-retry-3m",
+      "description": "Stress pack: retry and error-path workflow, every 3 minutes. Runs a workflow with no agent nodes.",
+      "cronExpression": "1-59/3 * * * *",
+      "targetType": "workflow",
+      "workflow": "stress-retry"
+    },
+    {
+      "name": "stress-nested-3m",
+      "description": "Stress pack: parent workflow with 4 parallel child runs, every 3 minutes. Runs a workflow with no agent nodes.",
+      "cronExpression": "2-59/3 * * * *",
+      "targetType": "workflow",
+      "workflow": "stress-parent"
+    },
+    {
+      "name": "stress-storm-5m",
+      "description": "Stress pack: duplicate triggers with repeated idempotency keys, every 5 minutes. Runs a script. No LLM.",
+      "cronExpression": "4-59/5 * * * *",
+      "targetType": "script",
+      "scriptName": "stress-trigger-storm",
+      "scriptArgs": {
+        "webhookSecret": "__WEBHOOK_SECRET__"
+      }
+    },
+    {
+      "name": "stress-sandbox-10m",
+      "description": "Stress pack: sandbox behaviour workflow, every 10 minutes. Runs a workflow with no agent nodes.",
+      "cronExpression": "7-59/10 * * * *",
+      "targetType": "workflow",
+      "workflow": "stress-sandbox"
+    },
+    {
+      "name": "stress-scoreboard-5m",
+      "description": "Stress pack: writes the scoreboard to KV stress/scoreboard and deletes old records, every 5 minutes. Runs a script. No LLM.",
+      "cronExpression": "3-59/5 * * * *",
+      "targetType": "script",
+      "scriptName": "stress-scoreboard"
+    }
+  ]
+}
