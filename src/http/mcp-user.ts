@@ -12,7 +12,7 @@ import {
   markMcpTransportActivity,
   respondNoMcpSession,
 } from "./mcp";
-import { MCP_BODY_TOO_LARGE, readMcpBody } from "./mcp-body";
+import { MCP_BODY_ANSWERED, readMcpBody } from "./mcp-body";
 
 function unauthorized(res: ServerResponse): true {
   res.writeHead(401, { "Content-Type": "application/json" });
@@ -64,7 +64,7 @@ export async function handleMcpUser(
 
   if (req.method === "POST") {
     const body = await readMcpBody(req, res);
-    if (body === MCP_BODY_TOO_LARGE) return true;
+    if (body === MCP_BODY_ANSWERED) return true;
 
     let transport: StreamableHTTPServerTransport;
 

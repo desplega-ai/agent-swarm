@@ -27952,6 +27952,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Signed body is not valid JSON */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Invalid signature */
                 401: {
                     headers: {

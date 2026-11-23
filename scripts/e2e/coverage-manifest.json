@@ -503,6 +503,10 @@
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
       "scenarios": ["knowledge-prompt-templates"]
     },
+    "request-body-json": {
+      "description": "A request body that is not valid JSON gets 400 with the shared error envelope on the route factory's routes, the JSON-RPC parse error on MCP, and 400 on a signed Linear webhook.",
+      "scenarios": ["http-malformed-json", "linear-emulate-flows"]
+    },
     "provider-webhooks": {
       "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",
       "scenarios": ["platform-webhooks", "webhook-body-limit"]
