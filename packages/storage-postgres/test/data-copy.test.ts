@@ -382,8 +382,24 @@ describe("copyIntoPostgres", () => {
       "ALTER TABLE seeded ADD COLUMN note text;\nUPDATE seeded SET note = 'set by 002';",
     );
     await migrate();
+    // The source carries 002's column, so a copy that passed the guard would
+    // overwrite the edit rather than fail on a schema difference.
+    const withNote: CopyTable = {
+      ...SEEDED,
+      columns: [...SEEDED.columns, { name: "note", declaredType: "TEXT" }],
+    };
     const refused = await copyIntoPostgres(
-      { ...fullSource(), migrationHead: () => 2 },
+      source(
+        {
+          items: { table: ITEMS, rows: goodItems() },
+          seeded: {
+            table: withNote,
+            rows: [item(5, [int(5), text("from the source"), text("set by 002")])],
+          },
+          children: { table: CHILDREN, rows: [] },
+        },
+        2,
+      ),
       { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
     );
     expect(refused.ok).toBe(false);
