@@ -381,6 +381,8 @@ export async function openPostgresEngine(
       txReplay,
       checkMessages,
       onTransactionEnd: transactionStatsSink(),
+      // Writes check that this process still owns the database (D16 write fence).
+      fence: { ownerPid: lock.pid },
     });
     const queryReader = await openQueryReader(queryUrl, timestampFormats);
     console.log(

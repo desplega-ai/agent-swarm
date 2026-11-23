@@ -9,6 +9,7 @@ import {
 } from "@desplega/storage";
 import { decodeRows, type ResultColumn, type TimestampFormats } from "./codec";
 import { type CheckMessages, mapPostgresError, SQLSTATE } from "./errors";
+import { checkOwnerFence, mayWrite, type OwnerFence } from "./owner-fence";
 
 /**
  * The Postgres engine client over `Bun.SQL` (decision D14).
@@ -88,6 +89,12 @@ export type PostgresClientOptions = {
    * each retried attempt; `exhausted` means the last attempt failed retryably.
    */
   onTransactionEnd?: (info: TransactionEndInfo) => void;
+  /**
+   * The write fence of the one-process lock (owner-fence.ts). Set by the API:
+   * each read-write transaction, and each statement outside a transaction that
+   * may write, first checks that this process still owns the database.
+   */
+  fence?: OwnerFence;
 };
 
 export type TransactionEndInfo = {
@@ -187,6 +194,9 @@ export class PostgresClient implements DbClient {
   private async execute(text: string, params: DbParam[] | undefined): Promise<PgResult> {
     const ctx = txContext.getStore();
     const inTransaction = ctx !== undefined && !ctx.closed;
+    if (!inTransaction && this.options.fence && mayWrite(text)) {
+      return this.transaction(() => this.execute(text, params));
+    }
     for (let attempt = 1; ; attempt++) {
       const started = performance.now();
       try {
@@ -276,6 +286,9 @@ export class PostgresClient implements DbClient {
               attemptRollback: [],
             };
             const active = ctx;
+            if (this.options.fence && !opts.readOnly) {
+              await checkOwnerFence(handle, this.options.fence);
+            }
             const result = await txContext.run(active, () => fn(this.boundExecutor(active)));
             // A serialization failure inside a savepoint that the callback caught
             // leaves the outer transaction usable, but its reads are no longer

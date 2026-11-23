@@ -72,6 +72,9 @@ export async function hasEncryptedSecretRowsPostgres(
 /** Key of the session advisory lock one API process holds for its whole life (decision D16). */
 export const PROCESS_LOCK_KEY = 7_365_420_302n;
 
+/** Key of the write fence of that lock (owner-fence.ts). */
+export const OWNER_FENCE_KEY = PROCESS_LOCK_KEY + 1n;
+
 export type ProcessLockOptions = {
   /** How long a second process waits for the lock before it gives up. */
   waitMs: number;
@@ -88,7 +91,11 @@ export type ProcessLockOptions = {
   watchMs?: number;
 };
 
-export type ProcessLock = { release(): Promise<void> };
+export type ProcessLock = {
+  /** Backend pid of the lock session (the write fence checks it, owner-fence.ts). */
+  pid: number;
+  release(): Promise<void>;
+};
 
 /** Thrown when another API process holds the one-process lock of this database. */
 export class ProcessLockHeldError extends Error {
@@ -123,6 +130,11 @@ export async function acquireProcessLock(
       )) as { locked: boolean; pid: number }[];
       if (rows[0]?.locked === true) {
         lockPid = Number(rows[0].pid);
+        // Drain the write fence (owner-fence.ts): wait for every write
+        // transaction a previous owner started, then let the fence go. A
+        // transaction it starts from now on sees that it lost the lock.
+        await conn.unsafe("SELECT pg_advisory_lock($1)", [OWNER_FENCE_KEY]);
+        await conn.unsafe("SELECT pg_advisory_unlock($1)", [OWNER_FENCE_KEY]);
         break;
       }
       const waited = Date.now() - started;
@@ -172,6 +184,7 @@ export async function acquireProcessLock(
     watch.unref?.();
   }
   return {
+    pid: lockPid,
     async release() {
       if (released) return;
       released = true;
