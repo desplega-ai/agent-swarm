@@ -862,9 +862,13 @@ export abstract class BaseMemoryRepository implements MemoryRepository {
 
   list(filter: MemoryListFilter, limit: number, offset: number): Promise<AgentMemoryRow[]> {
     return this.db.query<AgentMemoryRow>(
-      sql`SELECT * FROM agent_memory${this.listWhere(filter)} ORDER BY "createdAt" DESC LIMIT ${limit} OFFSET ${offset}`,
+      // Insertion order breaks createdAt ties, so LIMIT/OFFSET pages neither skip nor repeat rows.
+      sql`SELECT * FROM agent_memory${this.listWhere(filter)} ORDER BY "createdAt" DESC, ${this.insertionOrder()} ASC LIMIT ${limit} OFFSET ${offset}`,
     );
   }
+
+  /** The insertion key: `rowid` on SQLite, `"_rowid"` on Postgres. */
+  protected abstract insertionOrder(): SqlQuery;
 
   async count(filter: MemoryListFilter): Promise<number> {
     const row = await this.db.get<{ count: number }>(

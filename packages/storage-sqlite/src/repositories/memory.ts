@@ -44,6 +44,10 @@ function fromPlaceholders(text: string, values: (string | number)[]): SqlQuery {
 }
 
 export class SqliteMemoryRepository extends BaseMemoryRepository {
+  protected insertionOrder(): SqlQuery {
+    return new SqlQuery(["rowid"], []);
+  }
+
   protected notReviewTaskCompletion(alias: string, rule: ReviewTaskRule): SqlQuery {
     const p = this.prefix(alias);
     // The CASE keeps json_each off malformed or non-array tags (read as no tags).
