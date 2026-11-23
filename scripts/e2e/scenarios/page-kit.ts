@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { repoRoot } from "../sut";
@@ -63,7 +64,7 @@ async function view(
 
 function storedKit(ctx: ScenarioContext, id: string): string | null {
   return (
-    ctx.db.get<{ kit: string | null }>("SELECT kit FROM pages WHERE id = ?", [id])?.kit ?? null
+    ctx.db.get<{ kit: string | null }>(sql`SELECT kit FROM pages WHERE id = ${id}`)?.kit ?? null
   );
 }
 
