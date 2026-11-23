@@ -130,6 +130,23 @@ async function inspectTarget(
         .join(", ")}). Copy into an empty database only.`,
     };
   }
+  // Another tool's `_migrations` (for example `id`, `name`) is not this chain's history.
+  const required = ["version", "name", "applied_at", "checksum"];
+  const present = new Set(
+    (
+      await conn.unsafe(
+        `SELECT attname FROM pg_attribute
+          WHERE attrelid = to_regclass('_migrations') AND attnum > 0 AND NOT attisdropped`,
+      )
+    ).map((r) => String(r.attname)),
+  );
+  const absent = required.filter((column) => !present.has(column));
+  if (absent.length > 0) {
+    return {
+      head: null,
+      error: `the target's _migrations table is not this build's migration history (no column ${absent.join(", ")}). Copy into an empty database only.`,
+    };
+  }
   const headRow = await conn.unsafe("SELECT MAX(version)::bigint AS v FROM _migrations");
   const head = headRow[0]?.v === null || headRow[0]?.v === undefined ? null : Number(headRow[0].v);
   const chain = loadPostgresMigrations(migrationsDir);
@@ -994,6 +1011,11 @@ export async function copyIntoPostgres(
         report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error as Error).message}`;
         return report;
       }
+    } catch (error) {
+      // A failure before the copy transaction (target inspection, the chain):
+      // it still goes into the report, so --json is written.
+      report.error = `the copy did not start, no row was copied: ${(error as Error).message}`;
+      return report;
     } finally {
       await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
       conn.release();

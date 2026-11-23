@@ -411,6 +411,16 @@ describe("copyIntoPostgres", () => {
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
   });
 
+  test("refuses another tool's _migrations table through the report", async () => {
+    await sql.unsafe("CREATE TABLE _migrations (id serial PRIMARY KEY, name text NOT NULL)");
+    const report = await run(fullSource());
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/not this build's migration history \(no column version/);
+    expect(
+      (await sql.unsafe("SELECT count(*)::int AS n FROM pg_class WHERE relname = 'items'"))[0].n,
+    ).toBe(0);
+  });
+
   test("a late rollback leaves the target sequence where it was", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
