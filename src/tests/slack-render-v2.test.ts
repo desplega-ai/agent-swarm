@@ -2089,13 +2089,55 @@ describe("Slack renderer v2", () => {
       expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
         ["Sources: <https://example.com/a|[1]> Cited"],
         ["General sources: <https://example.com/b|[2]> Whole answer"],
-        ["📎 <https://example.com/report.md|report.md>"],
+        ["Links: 🌐 <https://example.com/report.md|report.md>"],
         [expect.stringContaining(ask.id.slice(0, 8))],
       ]);
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
     }
+  });
+
+  test("outcome cards link bare URLs in the answer and show each URL once", async () => {
+    const lead = await createAgent({ name: "Magic Link Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_MAGIC_LINKS");
+    const ask = await createTaskExtended("Magic links", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://github.com/o/r/pull/42", label: "The PR" },
+    ]);
+    // The cited PR is the primary attachment: it shows as a source only.
+    await insertTaskAttachment({
+      taskId: ask.id,
+      agentId: lead.id,
+      kind: "url",
+      name: "PR",
+      url: "https://github.com/o/r/pull/42/",
+      isPrimary: true,
+    });
+    await completeTask(
+      ask.id,
+      "Merged [citation:1]. Report: https://docs.example.test/a/b/report.md. Keep `https://code.example.test/x`, [docs](https://docs.example.test/d) and <https://slack.example.test/s|s>.",
+    );
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(
+      "✅ Merged <https://github.com/o/r/pull/42|[1]>. Report: <https://docs.example.test/a/b/report.md|docs.example.test/…/report.md>. Keep `https://code.example.test/x`, [docs](https://docs.example.test/d) and <https://slack.example.test/s|s>.",
+    );
+    const stopped = calls.find((call) => call.method === "chat.stopStream");
+    const blocks = stopped?.payload.blocks as { type: string; elements: { text: string }[] }[];
+    expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
+      ["Sources: <https://github.com/o/r/pull/42|[1]> The PR"],
+      [expect.stringContaining(ask.id.slice(0, 8))],
+    ]);
   });
 
   test("the postMessage fallback keeps captions out of the notification text", async () => {
@@ -2221,19 +2263,19 @@ describe("Slack renderer v2", () => {
       label: "plain ASCII positive control",
       attachment: { kind: "agent-fs", name: "report.txt", path: "/reports/report.txt" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
     },
     {
       label: "raw path spaces and parentheses",
       attachment: { kind: "agent-fs", name: "final report", path: "/shared reports/final (v1).md" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
     },
     {
       label: "already encoded positive control",
       attachment: { kind: "agent-fs", name: "report", path: "/reports/final%20%28v1%29.md" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
     },
     {
       label: "label delimiters, backslashes, and whitespace",
@@ -2242,12 +2284,12 @@ describe("Slack renderer v2", () => {
         name: " \t[report] <final> & (copy)\\\r\n\t two  ",
         url: "https://example.test/report",
       },
-      expected: "📎 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
+      expected: "Links: 🌐 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
     },
     {
       label: "URL positive control with an IPv6 host",
       attachment: { kind: "url", name: "report", url: "http://[::1]/report.txt?q=a%20b&x=1#part" },
-      expected: "📎 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
+      expected: "Links: 🌐 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
     },
     {
       label: "URL delimiters with existing escapes and query parameters",
@@ -2257,7 +2299,7 @@ describe("Slack renderer v2", () => {
         url: "https://example.test/a%20b) [c]<(d)>|\\file?q=one two&x=1#part",
       },
       expected:
-        "📎 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
+        "Links: 🌐 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
     },
     {
       label: "non-HTTP fallback stays omitted",
@@ -2310,7 +2352,9 @@ describe("Slack renderer v2", () => {
       const captions = (stopped?.payload.blocks as { type: string; elements: { text: string }[] }[])
         .filter((block) => block.type === "context")
         .map((block) => block.elements.map((element) => element.text).join(" "));
-      expect(captions.filter((text) => text.startsWith("📎"))).toEqual(expected ? [expected] : []);
+      expect(captions.filter((text) => text.startsWith("Links:"))).toEqual(
+        expected ? [expected] : [],
+      );
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
@@ -2629,10 +2673,53 @@ describe("Slack renderer v2", () => {
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
-  test("collapses the outcome card to a minimal form when the agent already replied", async () => {
+  test("posts no outcome card when the agent already replied, and still settles the reaction", async () => {
     const lead = await createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
+    const triggerTs = `${slackAddressSequence}.2`;
     const ask = await createTaskExtended("ask with an inline reply", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    });
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.finalizedAt).toBeUndefined();
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryLastError).toStartWith("slack_reply_sent:");
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+  });
+
+  test.each([
+    { status: "failed", expected: "❌ **Failed:** build broke" },
+    { status: "cancelled", expected: "🚫 **Cancelled:** stopped by the requester" },
+  ] as const)("still posts the $status card after a slack-reply", async ({ status, expected }) => {
+    const lead = await createAgent({ name: `Reply ${status} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(`C_RENDER_REPLY_${status.toUpperCase()}`);
+    const ask = await createTaskExtended(`ask that ends ${status} after a reply`, {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -2641,6 +2728,39 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    if (status === "failed") await failTask(ask.id, "build broke");
+    else await cancelTask(ask.id, "stopped by the requester");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(expected);
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+
+  test("keeps the minimal card when the agent replied but the task has an output attachment", async () => {
+    const lead = await createAgent({ name: "Reply Attachment Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_ATTACHMENT");
+    const ask = await createTaskExtended("ask with an inline reply and a file", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await insertTaskAttachment({
+      taskId: ask.id,
+      agentId: lead.id,
+      kind: "url",
+      name: "report.md",
+      url: "https://example.com/report.md",
+      isPrimary: true,
+    });
     await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
     calls.length = 0;
@@ -2654,19 +2774,9 @@ describe("Slack renderer v2", () => {
       username: getAgentDisplayName(lead),
       icon_emoji: getAgentEmoji(lead),
     });
-    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     const stopped = calls.find((call) => call.method === "chat.stopStream")!;
-    const completedAsk = (await getTaskById(ask.id))!;
-    const duration = formatV2Duration(
-      new Date(completedAsk.createdAt),
-      new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
-    );
-    expect(stopped.payload.blocks).toEqual([
-      {
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
-      },
-    ]);
+    expect(JSON.stringify(stopped.payload.blocks)).toContain("https://example.com/report.md");
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 

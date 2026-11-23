@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentTask, AgentTaskSource } from "@/api/types";
 import { stripContextFooter } from "@/components/session-panel/model";
@@ -33,6 +33,7 @@ export function PersonBubble({
   task,
   rootSource,
   text: givenText,
+  files,
 }: {
   task: AgentTask;
   /** The root's source: a dashboard message in a Slack session says where it was sent. */
@@ -43,6 +44,8 @@ export function PersonBubble({
    * dashboard, so it is not greyed as external. Omitted: `task.task`.
    */
   text?: string;
+  /** Files the caller pulls out of the task prompt with `text`, above the bubble. */
+  files?: ReactNode;
 }) {
   const { userId } = useCurrentUser();
   const { data: users } = useUsers();
@@ -81,10 +84,13 @@ export function PersonBubble({
           attachments={task.attachments}
           from="person"
         />
+        {files}
         <div
           className={cn(
             // Phones read message text at 16 px (UX review R9). Desktop keeps 14 px.
             "w-full max-w-full min-w-0 rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere @min-[30rem]/turns:w-fit @min-[30rem]/turns:min-w-32 md:text-sm",
+            // Monaco measures its parent. Give fenced code the available column width.
+            "has-[[data-monaco-snippet]]:w-full",
             mine ? "rounded-tr-sm bg-muted" : "rounded-tl-sm border border-border bg-card",
             // A message from Slack or a chat channel stays greyed (SPEC R2).
             external && "border border-dashed bg-surface text-muted-foreground",

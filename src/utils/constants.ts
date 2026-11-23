@@ -86,10 +86,11 @@ export function setApiLoopbackBaseUrl(url: string): void {
 }
 
 /**
- * Base URL that scripts, the script tools and script workflow subprocesses use
- * to call this API. Order: the `SCRIPT_API_BASE_URL` deployment env, then this
- * server's loopback URL once it listens, then {@link getMcpBaseUrl}. Loopback
- * keeps these calls off the public proxy that `MCP_BASE_URL` often names.
+ * Base URL that scripts, the script tools, script workflow subprocesses and any
+ * other API-side code use to call this API with its own key. Order: the
+ * `SCRIPT_API_BASE_URL` deployment env, then this server's loopback URL once it
+ * listens, then {@link getMcpBaseUrl}. Loopback keeps these calls off the public
+ * proxy that `MCP_BASE_URL` often names, and off a stored `MCP_BASE_URL` row.
  * Never use it for URLs that leave this host.
  */
 export function getScriptApiBaseUrl(): string {

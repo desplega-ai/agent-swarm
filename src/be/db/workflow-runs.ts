@@ -135,16 +135,20 @@ const WORKFLOW_RUN_STEP_SLIM_COLUMNS =
  * nor parsed.
  */
 /**
- * The agent a run's creator-less `swarm-script` nodes act as: the agent the
- * server stamped when the run started (migration 247), or null for a run with
- * no starting agent (webhook, event, a run from before the migration).
+ * The principal decided when the run pinned its definition (migration 367, a
+ * JSON `WorkflowRunPrincipal`), plus the agent the server stamped when the run
+ * started (migration 247; null for webhook, event and older runs). Null
+ * `principal` means a run from before migration 367.
  */
-export async function getWorkflowRunTriggeredByAgentId(runId: string): Promise<string | null> {
-  const row = await getDbClient().get<{ triggeredByAgentId: string | null }>(
-    "SELECT triggeredByAgentId FROM workflow_runs WHERE id = ?",
-    [runId],
+export async function getWorkflowRunPrincipalRow(
+  runId: string,
+): Promise<{ principal: string | null; triggeredByAgentId: string | null } | null> {
+  return (
+    (await getDbClient().get<{ principal: string | null; triggeredByAgentId: string | null }>(
+      "SELECT principal, triggeredByAgentId FROM workflow_runs WHERE id = ?",
+      [runId],
+    )) ?? null
   );
-  return row?.triggeredByAgentId ?? null;
 }
 
 export async function getWorkflowRunSummary(id: string): Promise<WorkflowRunSummary | null> {

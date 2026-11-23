@@ -138,7 +138,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.327
+ARG CLAUDE_CODE_VERSION=2.1.330
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -152,7 +152,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.5.2
+ARG PI_CODING_AGENT_VERSION=1.6.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -164,7 +164,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.170.0
+ARG CODEX_VERSION=0.171.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -231,7 +231,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.33
+ARG AGENT_FS_VERSION=0.18.37
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -520,8 +520,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Install the Ubuntu 24.04 packages Playwright's Chromium binary needs at
 # runtime. `playwright install chromium` (below) only installs the browser
 # binary itself; it does not apt-install these shared libs.
+# fonts-noto-color-emoji: without an emoji font, headless Chromium draws every
+# emoji as an empty box, which blanks the icons in Slack mock frames
+# (`bun run e2e:visuals`) and agent-browser screenshots. CI's ubuntu-latest
+# runner has the font, so only frames rendered inside this image were affected.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+      fonts-noto-color-emoji \
       libasound2t64 \
       libatk-bridge2.0-0t64 \
       libatk1.0-0t64 \
@@ -552,8 +557,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.5
-ARG DSH_SHA512=70d6e9d76b4b60b5135da5658bbcf0c0c8f39a6115083d4f465760e282ad5cce3e94561c91c6a588c4b63d4fc5a13841e2200dfdf28e4880f49ebb51654e068f
+ARG DSH_VERSION=0.2.3-alpha.2
+ARG DSH_SHA512=9a2e61abdea7939c7a1cf53a8247074946442acd3fc68c9df0c57b1824c3a542d895c25521491f9f926236ff9400c695db654ee154306cb5a78e41415796ff8a
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -568,9 +573,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795017641-g2e763e
-ARG AMP_SHA512_AMD64=2a5efdd91ecf0ebfae01a3b93c29dc0f8514bf18f3d3e37af95825799e925d77d023d99f6c0d183f05b81a46a3b52fa30dffe7b89dfaf9206bf20ec1188598c6
-ARG AMP_SHA512_ARM64=83a62630ade6db93fceadb1dcbab0356b8494b268c698cd08229151c69d94f1556169b04fb190d77bc3514da240c7975bb62307a94d352fe269b1c015c4e1690
+ARG AMP_VERSION=0.0.1795334436-g660843
+ARG AMP_SHA512_AMD64=2f6c7d2df89ae0b9c9ea67552f2920e9f2490dd7dfd8f3d60ab6fd01e71edf0a2564027dd9e8349aa070490820c00df2b58629472a31817809cb074112d3e66b
+ARG AMP_SHA512_ARM64=b810b54cdf46046ceab59d4bd1cc5cffab7f91680b036434a3af2b80787f0a60ba71ade9249a6b0d95653aee30879eef2b83dd1d884cc3e9f1e8b16a0a351825
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -586,7 +591,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.4.1
+ARG CURSOR_SDK_VERSION=1.4.2
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -605,7 +610,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.68.0
+ARG GEMINI_CLI_VERSION=0.70.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -628,8 +633,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.0), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.0
+# scripts are not needed for ACP (verified on 0.28.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.28.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -639,9 +644,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.60.1
-ARG GOOSE_SHA256_AMD64=0327b1857f8030343f59b77503e0455629bbf472c2901cb94b88389d6278635a
-ARG GOOSE_SHA256_ARM64=6a962a0ba55829e00f6f297dff736d53b9bdc8da84f0f49c4768e2557ac39cbe
+ARG GOOSE_VERSION=1.60.2
+ARG GOOSE_SHA256_AMD64=5f6e463621a8428617ae4870eecee7a00a253e9bbfccb6340dfaa4f0ec2aaf32
+ARG GOOSE_SHA256_ARM64=7e74d796e93b89df374715dc669149cb634f74d778de0b87bb7c031b5b093731
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -659,9 +664,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.4.0
-ARG KIRO_CLI_SHA256_AMD64=0fb88e5174f074b7728c339abdebb1a6357344898467b40d55d4cd803c4358ed
-ARG KIRO_CLI_SHA256_ARM64=85dee8522c11a111577bc0375058f454abaea0096cd7f383c1263369eb9a6cc4
+ARG KIRO_CLI_VERSION=3.5.0
+ARG KIRO_CLI_SHA256_AMD64=98f016b746b342d8337a0e937cabecc381037e2e920ea0ffaae649e51ef59d4e
+ARG KIRO_CLI_SHA256_ARM64=34444fee032944037282c762df4ff6929a51e827dd72d402cb7a8afbecb33e7f
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -679,9 +684,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.89
-ARG GROK_SHA512_AMD64=3e7f0598112997faffac69a729b1c51e639d25dcbf713d206893433baedb3c817462a0835afa51a3f31d0e7cd2fb51760d5233ba7ca9b0c45311d11207c1fbcf
-ARG GROK_SHA512_ARM64=80aa518138dd5a80d62322bb0a0aa0aff5f3b31edee8238af3708100eb71bac4fad99036ad5d4a692bb7f31b153c91111958a7490a7595af3fe4e99b52f8b8b6
+ARG GROK_VERSION=1.0.92
+ARG GROK_SHA512_AMD64=ab096cd6c6726b9c99a2b97b41c4af20231f00d00d4544a708730b268cc0199ae6c305deb8149c2441e28cd179b23ac36f7a3e8af3b4bbae6fb5035e2cf7ac08
+ARG GROK_SHA512_ARM64=e3a408531744ece3fdf1c573c4470c399f3e68552e75068e8bf5adedbb44f37c63a671edd8d6ce1823512ed7809f9700bc8389fb1176841a58770f2457307e52
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \

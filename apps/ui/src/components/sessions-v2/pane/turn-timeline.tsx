@@ -1,6 +1,15 @@
 import { ChevronUp, MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { TaskCard } from "@/components/sessions/task-card";
@@ -154,10 +163,10 @@ function fileReviewRequest(task: AgentTask): string | null {
 
 /**
  * The session timeline in turns (SPEC R8 to R10, mockup sB1): each person's
- * message, then its parts (a deferred wake-up starts a new part). A part
- * shows the swarm's reply, a row per worker step (two or more fold into a
- * group under one head), the swarm's latest answer, and a live line while the
- * lead works. A reply that only waits (a deferral) is one muted line, and
+ * message, then its parts in time order (a deferred wake-up or a later lead
+ * answer starts a new part). A part shows the swarm's reply, a row per worker
+ * step created before the next part (two or more fold into a group under one
+ * head), and a live line while the lead works. A reply that only waits (a deferral) is one muted line, and
  * waiting parts in a row fold into one. Handoffs On shows the internal rows. Tasks that fit no turn
  * render as plain task cards at the end. A typing person shows as a bubble
  * row in the flow, so it never covers a message.
@@ -170,6 +179,7 @@ export function TurnTimeline({
   typing,
   onLayoutChange,
   requestText = fileReviewRequest,
+  requestFiles,
 }: {
   rootTaskId: string;
   chain: AgentTask[];
@@ -187,6 +197,8 @@ export function TurnTimeline({
    * By default, file reviews link to the follow-up that holds the full request.
    */
   requestText?: (task: AgentTask) => string | null;
+  /** The files the person sent with such a task, shown above its bubble. */
+  requestFiles?: (task: AgentTask) => ReactNode;
 }) {
   const { turns, rest } = useMemo(
     () => buildTurns(chain, { personText: requestText }),
@@ -278,6 +290,7 @@ export function TurnTimeline({
               task={turn.person}
               rootSource={rootSource}
               text={requestText?.(turn.person) ?? undefined}
+              files={requestFiles?.(turn.person)}
             />
           ) : null}
           {/* Waits in a row fold into one line; a part with a card, an approval, or handoffs on screen stays whole. */}
@@ -407,15 +420,10 @@ function PartView({
         // One step (or handoffs only): plain rows, lined up with the reply text.
         <div className="-mx-1.5 flex min-w-0 flex-col">{list}</div>
       ) : null}
-      {part.result ? (
-        <div className={rows.length > 0 ? "mt-3" : undefined}>
-          <Reply step={part.result} onToggle={onStepToggle} />
-        </div>
-      ) : null}
       {approvals.map((approval) => (
         <ApprovalLine key={approval.id} approval={approval} pending={pendingIds.has(approval.id)} />
       ))}
-      {/* The lead works again: a live line under the latest answer, never in its place. */}
+      {/* The lead works again: a live line under the part's answer, never in its place. */}
       {part.live ? <SwarmReply task={part.live} /> : null}
     </div>
   );

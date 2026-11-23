@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { scrubObject } from "../utils/secret-scrubber";
+import { createSweepScrubber, scrubObject } from "../utils/secret-scrubber";
 import { executeReadOnlyQueryBounded } from "./db-query-bounded";
 import {
   assertSingleStatement,
@@ -115,6 +115,9 @@ const dbQueryRoute = route({
     429: { description: "Too many concurrent bounded db-query executions; retry shortly" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated: "read-only SQL for agents, same posture as the db-query tool; user roles need admin",
+  },
 });
 
 export async function handleDbQuery(
@@ -139,7 +142,13 @@ export async function handleDbQuery(
     );
     // Rows can hold secrets pasted into free text (task output, logs, events).
     // The MCP tool gets this from the registrar; the HTTP route does it here.
-    dbQueryRoute.respond(res, 200, scrubObject(result));
+    // The scrub is synchronous, so one sweep scrubber per request stays valid; it
+    // skips the rules a clean row cannot trigger (rows run to MBs on this route).
+    dbQueryRoute.respond(
+      res,
+      200,
+      scrubObject(result, undefined, undefined, createSweepScrubber()),
+    );
   } catch (err: unknown) {
     if (err instanceof DbQueryConcurrencyCapError) {
       // Machine-readable code + Retry-After so a caller can back off instead

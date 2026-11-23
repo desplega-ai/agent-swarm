@@ -1,0 +1,105 @@
+---
+title: 'Preparing a campaign launch review with AI agents'
+description: "Agent Swarm's configured agents gather an approved brief, offer terms, landing page, audience rules and capacity, run deterministic checks and hand one person a source-linked readiness packet."
+agent:
+  offer: false
+  when: "Someone wants marketing, operations and engineering to prepare a campaign launch for a person to approve or hold"
+  notWhen: "Someone wants one-to-one outreach drafted, which is the Lead Prospecting playbook, or a partner assessed for launch readiness, which is the marketplace partner onboarding guide"
+---
+
+Agent Swarm can help a team prepare a campaign launch review when the workflow is configured for it and a person checks the result: configured agents gather the approved inputs, a `swarm-script` step runs the deterministic checks, an agent drafts a source-linked readiness packet, and a named person owns go or no-go and approves any publication or send. It assembles the part nobody owns today, five teams holding one piece each in five systems: the brief in marketing's documents, the offer terms in a pricing sheet, the landing page in the site repository, the audience rules in a spreadsheet, the capacity to deliver in operations' scheduling.
+
+The scope is pre-launch readiness for one campaign and one go-or-no-go decision: not partner launch readiness ([marketplace partner launch readiness](/docs/playbooks/use-cases/partner-onboarding-readiness)), not whether a license permits a creative ([digital asset license review](/docs/playbooks/use-cases/digital-content-license-rights-review)), not one-to-one outreach drafting ([Lead Prospecting](/docs/playbooks/lead-prospecting)), and not post-meeting decision follow-up.
+
+## When a shared checklist is enough
+
+**Few launches, one owner, inputs in one document.** Two or three campaigns a year, a marketing lead who already holds the brief and the offer terms, and a checklist in the same document: the shared checklist or the project tool the team already pays for is cheaper, and agents only add machinery around a file that works.
+
+Agent Swarm fits a different shape: those inputs live in different systems owned by marketing, operations and engineering, and a week before launch nobody holds a current picture, because one person reading everything in one sitting is no longer how it gets checked. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative launch
+
+<Callout type="info">
+An illustrative adaptation, not a built-in campaign product or a documented turnkey deployment. It needs integrations, permissions and configuration the team sets up and tests, and it is not a customer result.
+</Callout>
+
+A fictional company, Harbourline Facilities, plans to launch a same-week repair plan on a fixed date. The marketing lead (Ines) owns the brief and the offer terms, the operations lead (Pavel) owns dispatch capacity for the launch week, and the engineering owner (Ruth) owns the landing page. The approved inputs are the brief, the offer terms (price, start and end dates, eligibility), the landing-page draft, the audience rules naming who may be contacted and who is excluded, the capacity for the window, and the three approvers' names.
+
+<Mermaid title="Illustrative campaign launch readiness flow, from a fixed launch date to a person deciding go or hold." chart={`flowchart LR
+  A["Launch date set"] --> B["Named owners approve<br/>the inputs"]
+  B --> C["Gather authorized records<br/>(brief, offer terms,<br/>page, audience rules)"]
+  C --> D["Deterministic checks<br/>swarm-script to JSON"]
+  D --> E["Agent drafts<br/>source-linked packet"]
+  E --> F["Each reviewer checks<br/>their own section"]
+  F --> G{{"human-in-the-loop<br/>launch owner"}}
+  G -- "go" --> R["Launch proceeds<br/>through the normal process"]
+  G -- "hold" --> S["Held, with open issues<br/>and their owners"]
+`} />
+
+**1. The launch date is fixed and the owners are named.** The launch owner writes down the date, the inputs in scope and one reviewer per input, and records what the workflow may read in its [governance](/docs/playbooks/use-cases/ai-operations-governance) record. The workflow chooses no date and appoints no approver.
+
+**2. The named owners approve the inputs.** Ines approves the brief and the terms, Pavel the capacity, Ruth the landing-page draft. An input with no approval is still collected and marked unapproved, so the packet shows the gap.
+
+**3. Configured source access collects the records.** Scripts read the approved systems through [script connections](/docs/guides/script-connections), with credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw key sits in script source. Which systems are connected, and which skill reads each, is custom setup the team writes and tests.
+
+**4. Deterministic checks decide what passes.** A `swarm-script` step emits JSON, and no model decides pass or fail: an empty required field, a date missing or already past, offer dates outside the brief's window, capacity below what the brief assumes, a claim with no approval record. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between code and model.
+
+**5. An agent drafts the packet from the JSON.** It summarises what each mismatch means, links every line to its record and read time, and addresses the open questions to the owners who can answer them. Where a value is missing, the line says so and stays unresolved.
+
+**6. Each reviewer checks their own section.** Ines reads the offer and messaging lines, Pavel the capacity line, Ruth the page lines. It is the drafting-and-review split the [Lead Prospecting playbook](/docs/playbooks/lead-prospecting) documents, where nothing sends until a person has read it.
+
+**7. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) holds the workflow, posts a summary to Slack linking the packet, and resumes only on a human response. The launch owner records go or hold; the packet already names the open issues and their owners.
+
+## The readiness packet
+
+One file per run, kept as the record of what was true on that date.
+
+- **A version number and a read time per source**, so a reader knows what changed since the last review.
+- **Every input with its source link:** brief, offer terms, landing-page draft, audience rules, capacity.
+- **Open issues, one line each:** what disagrees, which records were compared, who can resolve it.
+- **A named reviewer per section**, so a section nobody read is visible as unread.
+- **One line naming who decides go or no-go.** A person, not a role, with the decision recorded when they answer.
+
+Three fictional flags:
+
+**Offer dates that disagree.** The offer terms end the plan on 30 November, the landing-page draft on 15 December. Both appear with their source and read time, neither is treated as correct, and the packet asks which date the launch owner intends.
+
+**Capacity below the brief's assumption.** The brief assumes 400 same-week bookings; dispatch scheduling shows 260 bookable slots, or nothing because the rota is unconfirmed. The packet states both numbers, or the silence.
+
+**A claim with no approval record.** The page promises a repair booked within 24 hours, with no approved substantiation behind it. The line is flagged with the page as its source. The packet does not judge whether the claim is true, only that nobody signed it off; the marketing lead decides whether to substantiate it or soften it.
+
+No flag is resolved by the workflow. It never fills a missing value, picks the right date or invents a fact.
+
+## Permissions, conflicts and claims
+
+Access is read-only by default. Nothing in the workflow writes to a site repository, an ad account, a pricing sheet or a dispatch system.
+
+- **Which sources are connected is a decision, not a default.** Each connection is recorded with a named owner in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record. A source the swarm cannot reach is reported as a gap with the owner who can grant access, never worked around by pasting a value into a chat.
+- **Conflicts stay conflicts.** Where two records disagree, both are shown with their sources and read times, and choosing between them is a person's call recorded against the run.
+- **Claims need a record, not a tone.** A claim is flagged as unsubstantiated when no approved record backs it; whether it is accurate is not a workflow verdict.
+- **The packet is not a launch.** It has no path to publish a page, start an ad set, send an email or upload an audience list.
+
+## Operator checklist
+
+- One named launch owner, and one reviewer per input.
+- Written inputs: approved brief, offer terms, landing-page draft, audience rules, capacity for the window.
+- The systems in scope, each with an owner who approved the connection.
+- Read-only credentials per source, issued through the credential broker.
+- The checks the `swarm-script` step enforces, versioned with the packet template.
+- The gate message, its timeout and its fallback to the launch owner.
+- Where packets are stored, beside the records they cite.
+
+## What stays with people
+
+- **The go or no-go decision.** The gate records a person's decision with a name and a time. It approves the packet; it does not make the launch ready.
+- **Publishing and sending.** The page, the emails and the ad sets go live through the process the team already uses.
+- **Spend and commitment.** Committing budget to a launch channel is a commercial decision the workflow never takes.
+- **Treating a claim as substantiated.** The substantiation record is a person's signature on one specific claim.
+- **The audience rules themselves.** Who may be contacted and who is excluded is a policy decision a person reviews; the workflow reads those rules without rewriting them.
+
+## Related
+
+- [Marketplace partner launch readiness](/docs/playbooks/use-cases/partner-onboarding-readiness)
+- [Digital asset license review](/docs/playbooks/use-cases/digital-content-license-rights-review)
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources)
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model)

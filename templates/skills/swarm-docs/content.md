@@ -53,6 +53,53 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Linear Delivery Loop](https://docs.agent-swarm.dev/docs/playbooks/linear-delivery-loop). When: Someone wants agents to take Linear issues through implementation, CI and review to merged pull requests, with a person approving each one. Template: `community/linear-delivery-loop`.
 - [Slack Reply Gate](https://docs.agent-swarm.dev/docs/playbooks/slack-reply-gate). When: Someone wants Lead to stop answering or waking on Slack thread banter, reactions, or messages meant for other people. Not when: Someone wants to route Slack messages to a specific agent or channel, which is a pre.slack.route extension.
 - [Small-Company Workflows](https://docs.agent-swarm.dev/docs/playbooks/small-company-workflows). When: Someone at a small company asks which recurring cross-team workflows they could run with agents, with people approving the decisions. Not when: Someone wants a documented production playbook for one job, which is the linked playbook itself.
+- [Choosing an AI operating model](https://docs.agent-swarm.dev/docs/playbooks/use-cases/choosing-an-ai-operating-model). Reference.
+- [Small tech team operating model](https://docs.agent-swarm.dev/docs/playbooks/use-cases/small-tech-team-operating-model). Reference.
+- [Customer renewal review](https://docs.agent-swarm.dev/docs/playbooks/use-cases/customer-renewal-review). Reference.
+- [Customer commitment tracking](https://docs.agent-swarm.dev/docs/playbooks/use-cases/customer-commitment-tracking). Reference.
+- [Following up on cross-functional meeting decisions with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/meeting-decision-follow-up). Reference.
+- [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/service-level-breach-review). Reference.
+- [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-invoice-discrepancy-review). Reference.
+- [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/supplier-order-confirmation-review). Reference.
+- [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/marketplace-payout-exception-review). Reference.
+- [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/marketplace-moderation-appeals). Reference.
+- [Preparing a suspected marketplace fraud alert for human investigation with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/marketplace-fraud-alert-investigation). Reference.
+- [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/customer-billing-dispute-review). Reference.
+- [Preparing unmatched bank transactions for finance review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/agent-assisted-bank-reconciliation-review). Reference.
+- [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/customer-pricing-change-review). Reference.
+- [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-support-escalation-handoff). Reference.
+- [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/marketplace-catalog-discrepancy-review). Reference.
+- [Investigating a stale partner data feed with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/partner-data-feed-freshness-review). Reference.
+- [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/partner-onboarding-readiness). Reference.
+- [Preparing a campaign launch review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/marketing-campaign-launch-review). Reference.
+- [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/digital-content-license-rights-review). Reference.
+- [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-inventory-exception-handoff). Reference.
+- [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-operations-shift-handoff). Reference.
+- [Preparing a disputed product return for a human decision with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-returns-exception-handoff). Reference.
+- [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/supplier-security-evidence-review). Reference.
+- [Coordinating a customer data access request across support, privacy and engineering with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/privacy-data-request-handoff). Reference.
+- [Coordinating a guest accessibility request between guest support and property operations with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/guest-accessibility-request-handoff). Reference.
+- [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/supplier-performance-review). Reference.
+- [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/food-supplier-ingredient-change-review). Reference.
+- [Preparing a batch traceability packet for a mock recall with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/food-batch-traceability-exercise). Reference.
+- [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-rfp-bid-qualification). Reference.
+- [Reviewing why sales opportunities were won or lost with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-win-loss-review). Reference.
+- [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/contractor-license-expiry-review). Reference.
+- [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-offboarding-access-review). Reference.
+- [Coordinating a new hire's first-day readiness across HR, managers and operations with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-onboarding-readiness-review). Reference.
+- [Coordinating an interview loop across recruiters and engineering managers with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/interview-scheduling-handoff). Reference.
+- [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-training-completion-evidence-review). Reference.
+- [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/competitor-change-brief). Reference.
+- [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/business-continuity-tabletop-preparation). Reference.
+- [Preparing a workplace near-miss evidence packet for a human investigator with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/near-miss-investigation-review). Reference.
+- [Reviewing why actual demand differed from a forecast with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-demand-forecast-accuracy-review). Reference.
+- [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-operations-governance). Reference.
+- [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-delivery-delay-handoff). Reference.
+- [Investigating a payroll discrepancy for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-payroll-discrepancy-review). Reference.
+- [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-service-capacity-planning). Reference.
+- [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/maintenance-work-order-triage). Reference.
+- [Preparing an unusual facility energy reading for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/facility-energy-anomaly-review). Reference.
+- [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/support-knowledge-conflict-review). Reference.
 - [Hot Patterns](https://docs.agent-swarm.dev/docs/playbooks/patterns). Reference.
 - [Pattern: Litmus Tests (LLM-as-Judge Quality Gates)](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests). When: Someone wants one agent to check another agent's output against a rubric before it ships.
 - [Pattern: Drain Loops (Stacked PRs + Merge Loop)](https://docs.agent-swarm.dev/docs/playbooks/patterns/drain-loops). When: Someone wants a large change split into small stacked pull requests and merged in order.
@@ -62,40 +109,6 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 
 ## Guides
 
-- [Choosing an AI operating model](https://docs.agent-swarm.dev/docs/guides/choosing-an-ai-operating-model). Reference.
-- [Small tech team operating model](https://docs.agent-swarm.dev/docs/guides/small-tech-team-operating-model). Reference.
-- [Customer renewal review](https://docs.agent-swarm.dev/docs/guides/customer-renewal-review). Reference.
-- [Customer commitment tracking](https://docs.agent-swarm.dev/docs/guides/customer-commitment-tracking). Reference.
-- [Reviewing a potential customer service-level breach with AI agents](https://docs.agent-swarm.dev/docs/guides/service-level-breach-review). Reference.
-- [Reviewing supplier invoice and purchase order discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-invoice-discrepancy-review). Reference.
-- [Reviewing purchase order and supplier confirmation differences with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-order-confirmation-review). Reference.
-- [Reviewing marketplace partner payout discrepancies with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-payout-exception-review). Reference.
-- [Preparing marketplace moderation appeals for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-moderation-appeals). Reference.
-- [Preparing a suspected marketplace fraud alert for human investigation with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-fraud-alert-investigation). Reference.
-- [Reviewing customer billing disputes with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-billing-dispute-review). Reference.
-- [Preparing unmatched bank transactions for finance review with AI agents](https://docs.agent-swarm.dev/docs/guides/agent-assisted-bank-reconciliation-review). Reference.
-- [Reviewing a proposed customer pricing change with AI agents](https://docs.agent-swarm.dev/docs/guides/customer-pricing-change-review). Reference.
-- [Escalating a customer support issue to engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-support-escalation-handoff). Reference.
-- [Reviewing inconsistent product listings across sales channels with AI agents](https://docs.agent-swarm.dev/docs/guides/marketplace-catalog-discrepancy-review). Reference.
-- [Investigating a stale partner data feed with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-data-feed-freshness-review). Reference.
-- [Reviewing marketplace partner launch readiness with AI agents](https://docs.agent-swarm.dev/docs/guides/partner-onboarding-readiness). Reference.
-- [Preparing a digital asset license review for a human rights owner with AI agents](https://docs.agent-swarm.dev/docs/guides/digital-content-license-rights-review). Reference.
-- [Handing off inventory discrepancies from operations to purchasing with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-inventory-exception-handoff). Reference.
-- [Handing off unresolved operational work between shifts with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-operations-shift-handoff). Reference.
-- [Preparing a disputed product return for a human decision with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-returns-exception-handoff). Reference.
-- [Reviewing a supplier's security evidence before onboarding with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-security-evidence-review). Reference.
-- [Coordinating a customer data access request across support, privacy and engineering with AI agents](https://docs.agent-swarm.dev/docs/guides/privacy-data-request-handoff). Reference.
-- [Coordinating a guest accessibility request between guest support and property operations with AI agents](https://docs.agent-swarm.dev/docs/guides/guest-accessibility-request-handoff). Reference.
-- [Reviewing supplier performance across delivery, quality and service records with AI agents](https://docs.agent-swarm.dev/docs/guides/supplier-performance-review). Reference.
-- [Reviewing a supplier ingredient specification change with AI agents](https://docs.agent-swarm.dev/docs/guides/food-supplier-ingredient-change-review). Reference.
-- [Preparing a batch traceability packet for a mock recall with AI agents](https://docs.agent-swarm.dev/docs/guides/food-batch-traceability-exercise). Reference.
-- [Preparing a bid or no-bid review for an incoming RFP with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-rfp-bid-qualification). Reference.
-- [Reviewing why sales opportunities were won or lost with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-win-loss-review). Reference.
-- [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/contractor-license-expiry-review). Reference.
-- [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/guides/employee-offboarding-access-review). Reference.
-- [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-training-completion-evidence-review). Reference.
-- [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/guides/competitor-change-brief). Reference.
-- [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/guides/business-continuity-tabletop-preparation). Reference.
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
@@ -106,8 +119,6 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Asset Namespaces](https://docs.agent-swarm.dev/docs/guides/asset-namespaces). Reference.
 - [agent-fs Co-deployment](https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment). When: Someone wants shared persistent files for agents on a self-hosted swarm.
 - [Self-Hosted SSO](https://docs.agent-swarm.dev/docs/guides/self-hosted-sso). When: Someone wants their self-hosted swarm dashboard behind single sign-on.
-- [Reviewing why actual demand differed from a forecast with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-demand-forecast-accuracy-review). Reference.
-- [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/guides/ai-operations-governance). Reference.
 - [Repo merge policy](https://docs.agent-swarm.dev/docs/guides/repo-merge-policy). Reference.
 - [E2B Provider Smoke Tests](https://docs.agent-swarm.dev/docs/guides/e2b-provider-smoke-tests). Reference.
 - [Evals Harness](https://docs.agent-swarm.dev/docs/guides/evals-harness). Reference.
@@ -117,6 +128,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Provider Capability Matrix](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix). Reference.
 - [Adding a Harness Provider](https://docs.agent-swarm.dev/docs/guides/harness-providers). Reference.
 - [Steer a Running Task](https://docs.agent-swarm.dev/docs/guides/task-steering). Reference.
+- [Connect Your AI Client with the User MCP](https://docs.agent-swarm.dev/docs/guides/user-mcp). When: Someone wants to send or check swarm tasks from ChatGPT, Claude, Codex, Cursor or another AI assistant they already use.
 - [MCP Events on the User MCP](https://docs.agent-swarm.dev/docs/guides/mcp-events). Reference.
 - [Claude Code Mod](https://docs.agent-swarm.dev/docs/guides/claude-code-mod). Reference.
 - [Observability with OpenTelemetry](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry). When: Someone wants swarm traces and metrics in SigNoz or another OpenTelemetry backend.
@@ -134,6 +146,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Scripts credential broker](https://docs.agent-swarm.dev/docs/guides/scripts-credential-broker). Reference.
 - [One-off Script Workflow Runs](https://docs.agent-swarm.dev/docs/guides/script-workflow-runs). Reference.
 - [Dreaming](https://docs.agent-swarm.dev/docs/guides/dreaming). When: Someone asks what the nightly dreaming run changed, how to configure or turn it off, or how to undo one of its changes.
+- [Video Review](https://docs.agent-swarm.dev/docs/guides/video-review). When: Someone wants to give feedback on a video an agent made, or wants a person to review a cut at exact frames before the next version.
 - [Claude Bridge](https://docs.agent-swarm.dev/docs/guides/claude-bridge-experimental). Reference.
 - [Reading claude.ai Artifacts headless](https://docs.agent-swarm.dev/docs/guides/claude-artifacts-read). When: Someone wants an agent to read a claude.ai Artifact link, such as a design and its canvas.json, from a headless session.
 - [Worker Credential Recovery](https://docs.agent-swarm.dev/docs/guides/worker-credential-recovery). Reference.
@@ -148,11 +161,6 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Multi-runtime agents](https://docs.agent-swarm.dev/docs/guides/multi-runtime-agents). Reference.
 - [Runtime pools (beta)](https://docs.agent-swarm.dev/docs/guides/runtime-pools). Reference.
 - [boxd runtime provider](https://docs.agent-swarm.dev/docs/guides/boxd-runtime-provider). Reference.
-- [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-delivery-delay-handoff). Reference.
-- [Investigating a payroll discrepancy for human review with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-payroll-discrepancy-review). Reference.
-- [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/guides/ai-service-capacity-planning). Reference.
-- [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/guides/maintenance-work-order-triage). Reference.
-- [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/guides/support-knowledge-conflict-review). Reference.
 
 ## Other docs
 

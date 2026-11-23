@@ -422,6 +422,10 @@ const createRoute = route({
     403: { description: "Slack notifications require a lead agent" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "agents raise approval requests for their task (session posture checks it); the Slack-notification branch gates integration.slack.post in the handler",
+  },
 });
 
 const getByIdRoute = route({

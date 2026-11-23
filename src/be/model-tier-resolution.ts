@@ -8,10 +8,15 @@
  * Precedence (first hit wins):
  *   1. task `model`                         → modelSource "model"
  *   2. task `profile`                       → "profile:task"
+ *   2b. task `modelGroup`                   → "profile:group": the group's first member that
+ *      runs on the claiming agent (`resolveGroupForAgent`); none is a hard stop
  *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
  *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
- *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:tier-alias" when the
- *      seeded `<harness>-<tier>` profile exists (its model, same as the map unless edited).
+ *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:group" when the
+ *      model group named after the tier has a member that runs on the agent (an untouched
+ *      seed, which lists only `<harness>-<tier>` there, stays "profile:tier-alias"), else
+ *      "profile:tier-alias" when the seeded `<harness>-<tier>` profile exists (its model,
+ *      same as the map unless edited).
  *      A worker-env or tier-config win logs a deprecation line: edit the profile instead.
  *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
  *      no repo-scoped MODEL_OVERRIDE on the task's repo)
@@ -53,7 +58,7 @@ import {
   parseModelTier,
   type ReasoningEffort,
 } from "../types";
-import { getDbClient } from "./db";
+import { createLogEntry, getDbClient } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
@@ -76,6 +81,12 @@ import {
   type ModelCatalogEntry,
   type ModelCatalogFacts,
 } from "./model-catalog-store";
+import {
+  formatGroupSkips,
+  type GroupMemberSkip,
+  groupUnavailableMessage,
+  resolveGroupForAgent,
+} from "./model-group-resolution";
 import { tierConfigKey } from "./model-tier-keys";
 import { loadModelsDevCache } from "./modelsdev-cache";
 
@@ -90,7 +101,8 @@ export type ModelSource =
   | "fallback:cli-unsupported:model"
   | "profile:task"
   | "profile:agent-default"
-  | "profile:tier-alias";
+  | "profile:tier-alias"
+  | "profile:group";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -563,15 +575,16 @@ type ClaimProfile = {
 /**
  * Resolve a model profile for a claim. Null when the profile does not apply:
  * an agent default or tier alias that is missing, on another harness, or
- * unresolved falls through to the tier chain. For a task's own `profile` each
- * is a hard stop. An unreadable credential allowlist is a hard stop for all.
+ * unresolved falls through to the tier chain. For a task's own `profile` or
+ * group member each is a hard stop. An unreadable credential allowlist is a
+ * hard stop for all.
  */
 async function resolveClaimProfile(
   name: string,
-  source: "profile:task" | "profile:agent-default" | "profile:tier-alias",
+  source: "profile:task" | "profile:agent-default" | "profile:tier-alias" | "profile:group",
   harness: ProviderName | null,
 ): Promise<ClaimProfile | { modelUnsupported: string } | null> {
-  const isTask = source === "profile:task";
+  const isTask = source === "profile:task" || source === "profile:group";
   const profile = await getModelProfileByName(name);
   if (!profile) {
     return isTask
@@ -625,20 +638,51 @@ async function resolveClaimProfile(
  */
 async function resolveTierAlias(
   resolved: TaskModelResolution | TaskModelHarnessMismatch | null,
-  task: { modelTier?: string | null },
+  task: { id: string; modelTier?: string | null; vcsRepo?: string | null },
+  agentId: string,
   harness: ProviderName | null,
+  includeRepoSecrets: boolean,
 ): Promise<ClaimProfile | { modelUnsupported: string } | null> {
   const tier = parseModelTier(task.modelTier);
   if (!resolved || "harnessMismatch" in resolved || !tier || !harness) return null;
-  const name = `${harness}-${tier}`;
+  const seeded = `${harness}-${tier}`;
   if (resolved.modelSource === "worker-env" || resolved.modelSource === "tier-config") {
     console.log(
-      `[model-tier] deprecated: ${resolved.modelSource} override for ${name}; edit profile ${name} instead`,
+      `[model-tier] deprecated: ${resolved.modelSource} override for ${seeded}; edit profile ${seeded} instead`,
     );
     return null;
   }
   if (resolved.modelSource !== "tier-default") return null;
-  const picked = await resolveClaimProfile(name, "profile:tier-alias", harness);
+  // The group named after the tier decides first. No member that runs here
+  // falls back to the seeded profile, so a tier task never hard-fails where it
+  // ran before the group existed.
+  const group = await resolveGroupForAgent(tier, agentId, {
+    vcsRepo: task.vcsRepo,
+    includeRepoSecrets,
+  });
+  let name = seeded;
+  let picked: ClaimProfile | { modelUnsupported: string } | null = null;
+  if (group.kind === "resolved") {
+    picked = await resolveClaimProfile(group.member, "profile:tier-alias", harness);
+    if (picked && "profile" in picked) {
+      name = group.member;
+      // An untouched seed lists only the seeded profile on this harness: it
+      // stays a tier alias, so its hops keep walking the profile's fallbacks.
+      // Anything else is a group resolution, recorded as `profile:group` so a
+      // provider-error hop walks the group order (`fallbackGroupOf`).
+      const untouched = group.onHarness.length === 1 && group.onHarness[0] === seeded;
+      if (!untouched) {
+        picked = { ...picked, resolution: { ...picked.resolution, modelSource: "profile:group" } };
+      }
+      if (group.member !== seeded) {
+        await logGroupResolution(task.id, agentId, tier, group.member, group.skipped);
+      }
+    }
+  }
+  if (!picked || !("profile" in picked)) {
+    picked = await resolveClaimProfile(seeded, "profile:tier-alias", harness);
+    name = seeded;
+  }
   if (!picked || !("profile" in picked)) return picked;
   // A seed copied from a stale MODEL_TIER_* row can name another harness's model.
   // The tier chain skipped that value, so the alias skips it too.
@@ -658,6 +702,53 @@ async function resolveTierAlias(
   return picked;
 }
 
+async function logGroupResolution(
+  taskId: string,
+  agentId: string,
+  group: string,
+  member: string,
+  skipped: GroupMemberSkip[],
+): Promise<void> {
+  await createLogEntry({
+    eventType: "task_model_group_resolved",
+    taskId,
+    agentId,
+    newValue: member,
+    metadata: { group, member, skipped },
+  });
+}
+
+/**
+ * A task's own `modelGroup` at claim: the first member that runs on the agent,
+ * then that member as a profile. A missing group or no passing member is a
+ * hard stop, as for a task's own profile.
+ */
+async function resolveClaimGroup(
+  group: string,
+  task: { id: string; vcsRepo?: string | null },
+  agentId: string,
+  harness: ProviderName | null,
+  includeRepoSecrets: boolean,
+): Promise<ClaimProfile | { modelUnsupported: string } | null> {
+  const resolution = await resolveGroupForAgent(group, agentId, {
+    vcsRepo: task.vcsRepo,
+    includeRepoSecrets,
+  });
+  if (resolution.kind === "missing") {
+    return { modelUnsupported: `[model-group-missing] Model group "${group}" no longer exists.` };
+  }
+  if (resolution.kind === "none") {
+    return { modelUnsupported: groupUnavailableMessage(group, harness, resolution.skipped) };
+  }
+  if (resolution.skipped.length > 0) {
+    console.log(
+      `[model-group] task ${task.id}: ${group} → ${resolution.member} (skipped: ${formatGroupSkips(resolution.skipped)})`,
+    );
+  }
+  await logGroupResolution(task.id, agentId, group, resolution.member, resolution.skipped);
+  return await resolveClaimProfile(resolution.member, "profile:group", harness);
+}
+
 /**
  * Resolve and record the model for a task the given agent is claiming. Runs
  * inside the claim transaction. Returns the fields to merge into the trigger.
@@ -670,6 +761,7 @@ export async function recordClaimModelResolution(
     model?: string | null;
     modelTier?: string | null;
     profile?: string | null;
+    modelGroup?: string | null;
     effort?: string | null;
     vcsRepo?: string | null;
   },
@@ -684,9 +776,12 @@ export async function recordClaimModelResolution(
   const harnessProvider = agent.harnessProvider ?? agent.provider ?? null;
 
   if (!task.model?.trim()) {
+    // A fallback hop's resume sets `profile` to the member it picked and keeps
+    // `modelGroup`; the profile wins (create-time exclusivity binds creators only).
     const taskProfile = task.profile?.trim();
+    const taskGroup = taskProfile ? undefined : task.modelGroup?.trim();
     const agentDefault =
-      taskProfile || parseModelTier(task.modelTier)
+      taskProfile || taskGroup || parseModelTier(task.modelTier)
         ? null
         : await getAgentDefaultProfileName(agent.id);
     // The agent default is agent-scoped config: a repo-scoped MODEL_OVERRIDE or
@@ -699,9 +794,11 @@ export async function recordClaimModelResolution(
     const defaultProfile = repoKeys.has("MODEL_OVERRIDE") ? null : agentDefault;
     const picked = taskProfile
       ? await resolveClaimProfile(taskProfile, "profile:task", harnessProvider)
-      : defaultProfile
-        ? await resolveClaimProfile(defaultProfile, "profile:agent-default", harnessProvider)
-        : null;
+      : taskGroup
+        ? await resolveClaimGroup(taskGroup, task, agent.id, harnessProvider, includeRepoSecrets)
+        : defaultProfile
+          ? await resolveClaimProfile(defaultProfile, "profile:agent-default", harnessProvider)
+          : null;
     if (picked && "modelUnsupported" in picked)
       return { modelUnsupported: picked.modelUnsupported };
     if (picked) {
@@ -743,7 +840,13 @@ export async function recordClaimModelResolution(
     harnessProvider,
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
-  const alias = await resolveTierAlias(resolvedTier, task, harnessProvider);
+  const alias = await resolveTierAlias(
+    resolvedTier,
+    task,
+    agent.id,
+    harnessProvider,
+    includeRepoSecrets,
+  );
   if (alias && "modelUnsupported" in alias) return { modelUnsupported: alias.modelUnsupported };
   if (alias) {
     const checked = await applyCliSupport(

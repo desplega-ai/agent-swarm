@@ -492,7 +492,11 @@ async function startChild(input: {
   if (interpolation.scriptBodyUnresolved && interpolation.scriptBodyUnresolved.length > 0) {
     return {
       status: "failed",
-      error: scriptBodyInterpolationError(child.nodeId, interpolation.scriptBodyUnresolved),
+      error: scriptBodyInterpolationError(
+        child.nodeId,
+        interpolation.scriptBodyUnresolved,
+        bodyNode.type,
+      ),
     };
   }
   if (interpolation.strictUnresolved && interpolation.strictUnresolved.length > 0) {

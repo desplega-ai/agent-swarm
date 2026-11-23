@@ -16,7 +16,7 @@ import {
   isExtensionAgent,
   isLinearTrackerContextKey,
 } from "@/be/db";
-import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
+import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -144,7 +144,7 @@ export const sendTaskInputSchema = z
         "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
       ),
     modelTier: ModelTierSchema.optional().describe(
-      "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
+      "Deprecated: pass modelGroup \"<tier>\" (the tier's group) or profile \"<harness>-<tier>\" (same model) instead. Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
     ),
     allowCustomModel: z
       .boolean()
@@ -162,6 +162,14 @@ export const sendTaskInputSchema = z
       .optional()
       .describe(
         "Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's.",
+      ),
+    modelGroup: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe(
+        "Model group name (GET /api/model-groups): an ordered list of profiles that may span harnesses. The claiming agent runs the first member on its harness that passes the profile check, and a provider error hops to the next one. With agentId, one member must run on that agent. A pool task waits for an agent where a member runs. Exclusive with model, modelTier and profile.",
       ),
     allowDuplicate: z
       .boolean()
@@ -302,6 +310,7 @@ export async function sendTaskHandler(
     allowCustomModel,
     effort,
     profile,
+    modelGroup,
     allowDuplicate,
     allowRedelegation,
     slackChannelId,
@@ -501,6 +510,7 @@ export async function sendTaskHandler(
     profile,
     model: normalizedModel.model,
     modelTier: normalizedModel.modelTier,
+    modelGroup,
     agentId: effectiveAgentId,
     // createTaskExtended fills an unset repo from the parent; judge that repo's config.
     vcsRepo: effectiveVcsRepo || effectiveParentTask?.vcsRepo,
@@ -544,6 +554,7 @@ export async function sendTaskHandler(
     modelTier: normalizedModel.modelTier,
     effort,
     profile,
+    modelGroup,
     slackChannelId,
     slackThreadTs,
     slackUserId,
@@ -758,7 +769,10 @@ export async function sendTaskHandler(
     };
   });
   const result = await created.catch((error: unknown) => {
-    // The profile was deleted between taskProfileError and the insert.
+    // The profile or group was deleted between taskProfileError and the insert.
+    if (modelGroupRefError(error)) {
+      return { success: false, message: `Unknown model group "${modelGroup}".`, task: undefined };
+    }
     if (modelProfileRefError(error) !== "missing") throw error;
     return { success: false, message: `Unknown model profile "${profile}".`, task: undefined };
   });

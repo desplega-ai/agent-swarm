@@ -106,6 +106,7 @@ export type AgentTaskRow = {
   modelAlias?: string | null;
   profile?: string | null;
   resolvedProfile?: string | null;
+  modelGroup?: string | null;
   fallbackHops?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
@@ -176,6 +177,7 @@ type AgentTaskSummaryRow = Pick<
   | "resolvedEffort"
   | "profile"
   | "resolvedProfile"
+  | "modelGroup"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -258,6 +260,7 @@ const LIST_COLUMNS = {
     agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
     agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
     agent_tasks.resolvedEffort, agent_tasks.profile, agent_tasks.resolvedProfile,
+    agent_tasks.modelGroup,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.statusKind, agent_tasks.peakContextPercent`,
@@ -409,6 +412,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
       : undefined,
     profile: row.profile ?? undefined,
     resolvedProfile: row.resolvedProfile ?? undefined,
+    modelGroup: row.modelGroup ?? undefined,
     fallbackHops: parseFallbackHops(row.fallbackHops),
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
@@ -487,6 +491,7 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
       : undefined,
     profile: row.profile ?? undefined,
     resolvedProfile: row.resolvedProfile ?? undefined,
+    modelGroup: row.modelGroup ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     progress: row.progress ?? undefined,

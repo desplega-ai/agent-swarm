@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.5",
+    "version": "2.14.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -466,6 +466,9 @@
             "type": "string"
           },
           "resolvedProfile": {
+            "type": "string"
+          },
+          "modelGroup": {
             "type": "string"
           },
           "fallbackHops": {
@@ -3735,6 +3738,7 @@
               "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
+              "task_model_group_resolved",
               "task_dependency_repointed",
               "task_released",
               "task_deferred_wait_woke",
@@ -39990,6 +39994,9 @@
                               "resolvedProfile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -40315,6 +40322,10 @@
                     ]
                   },
                   "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelGroup": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -41710,6 +41721,9 @@
                             "type": "string"
                           },
                           "resolvedProfile": {
+                            "type": "string"
+                          },
+                          "modelGroup": {
                             "type": "string"
                           },
                           "provider": {
@@ -43854,6 +43868,7 @@
     "/api/pages/{id}/launch": {
       "post": {
         "summary": "Launch a page session (issues HttpOnly cookie)",
+        "description": "The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.",
         "tags": [
           "Pages"
         ],
@@ -47927,6 +47942,9 @@
                   "profile": {
                     "type": "string"
                   },
+                  "modelGroup": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -48109,6 +48127,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -48482,6 +48503,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -48678,6 +48702,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -48919,6 +48946,9 @@
                           ]
                         },
                         "profile": {
+                          "type": "string"
+                        },
+                        "modelGroup": {
                           "type": "string"
                         },
                         "scheduleType": {
@@ -49177,6 +49207,9 @@
                     "profile": {
                       "type": "string"
                     },
+                    "modelGroup": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -49376,6 +49409,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49560,6 +49599,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -49792,6 +49834,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49976,6 +50024,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -67565,6 +67616,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -67753,6 +67807,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -68993,6 +69050,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Jira webhook handler not configured",
             "content": {
@@ -69569,6 +69636,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74283,6 +74360,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "GitHub integration not configured",
             "content": {
@@ -74560,6 +74647,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "AgentMail integration not configured or inbound archive unavailable",
             "content": {
@@ -74615,6 +74712,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74797,7 +74904,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -74890,7 +74997,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -77343,6 +77450,16 @@
           },
           "404": {
             "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {

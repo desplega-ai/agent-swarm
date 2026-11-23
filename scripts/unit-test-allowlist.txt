@@ -35,6 +35,7 @@ src/commands/rate-limit-outcome.ts  # worker runtime helper imported by the runn
 src/commands/seat-mismatch-report.ts  # worker runtime helper imported by the runner
 src/commands/templates.ts  # runner trigger prompt templates, worker runtime
 src/commands/worktree-reaper.ts  # worker runtime helper imported by the runner
+src/utils/runtime-model-catalog.ts  # the Codex subprocess regression seeds a live-only model in the worker parent and checks the isolated child
 src/providers/  # harness adapters, worker runtime
 src/hooks/  # harness hooks, worker runtime
 src/prompts/  # prompt-template registry, worker runtime
@@ -85,4 +86,8 @@ src/tests/oauth-connection-fetch-guard.test.ts  # script-connection OAuth userin
 src/tests/slack-render-v2.test.ts  # the conclusion settle/timeout fallback only differs for values the config write path rejects (validateConfigValue requires an integer >= 1), so a negative window can only arrive as a raw process env, which the e2e runner sets for a whole boot rather than one scenario; asserting that a conclusion card is withheld also needs the renderer's tick loop with closure timestamps backdated in the DB
 src/tests/dsh-adapter.test.ts  # the dsh adapter runs only inside a worker harness, which the black-box suite never starts; the stderr scrub cases need a fake dsh binary that splits a token across two pipe writes, and that pipe never crosses an HTTP boundary a scenario can observe
 src/tests/apps-sort-order.test.ts  # asserts the sort parses each date once (a Date.parse call-count spy) and equals a reference copy of the old comparator on null, invalid, mixed-type and tied values; the parse count never crosses an HTTP boundary and an invalid-date row cannot be written through the rows API, so a scenario cannot observe either
+src/tests/operator-actor-keyless.test.ts  # getOperatorActor with no swarm key configured; the e2e SUT always boots with an API key for the whole run, so the keyless branch cannot be reached by a scenario
+src/tests/follow-up-gate-shadow.test.ts  # the gate verdict branches need an in-process verifier stub that throws, hangs past a shortened deadline or returns a fixed verdict, plus a drain of the after-commit hooks; the black-box API fixes the 60s deadline for a whole boot and gives a scenario no way to wait on those hooks
+src/tests/x402-client.test.ts  # src/x402 is a standalone payment library: no API route, MCP tool or CLI command loads it, so the black-box suite cannot reach its spending-limit hook; the cases sign real x402 v1 and v2 payloads locally with a throwaway viem key and no network
+src/tests/scm-sender-trust.test.ts  # one matrix of the mention sender rule across the GitLab, Bitbucket and Azure DevOps handlers with GitHub as the control, written to fail on the handlers before the rule existed; the GitLab rule is also checked over HTTP in platform-webhooks
 src/tests/seed-script-time-windows.test.ts  # cutoff regressions need backdated rows and a fixed SQLite clock to check millisecond boundaries; public write APIs assign timestamps server-side

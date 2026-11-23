@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
 import {
+  AMP_MODE_EFFORTS,
+  AMP_MODE_MODELS,
   type AmpMode,
   type AmpModelSelection,
   ampBillsCacheWrites,
@@ -45,7 +47,7 @@ import type {
  * default; the image installs exactly this version and the per-task settings
  * set `amp.updates.mode: "disabled"`. Bump it deliberately, with a live run.
  */
-export const AMP_PACKAGE = "@ampcode/cli@0.0.1795017641-g2e763e";
+export const AMP_PACKAGE = "@ampcode/cli@0.0.1795334436-g660843";
 
 /** MCP server name. Amp exposes its tools as `agent_swarm` / `store_progress` (dashes become underscores). */
 const AMP_MCP_SERVER_NAME = "agent-swarm";
@@ -84,9 +86,9 @@ function ampEffort(level: ReasoningEffort): string {
 }
 
 /**
- * The per-task plugin: one agent mode that extends a built-in mode, appends the
- * swarm system prompt as `instructions`, and optionally pins a model and an
- * effort. Amp has no system-prompt flag, so this is the supported route (live
+ * The per-task plugin: one agent mode on the pinned model (else the model of
+ * the selected mode) that appends the swarm system prompt as `instructions`,
+ * with an optional effort. Amp rejects `extends` and built-in agents here. Amp has no system-prompt flag, so this is the supported route (live
  * verified: the instructions reach the model). The values are a JSON literal,
  * never code, so a prompt cannot break out of the string.
  *
@@ -103,10 +105,11 @@ export function buildAmpPlugin(options: {
   steeringInbox?: string;
 }): string {
   const config = JSON.stringify({
-    baseMode: options.baseMode,
     instructions: options.instructions,
-    model: options.pin ?? null,
-    reasoningEffort: options.reasoningEffort ?? null,
+    model: options.pin ?? AMP_MODE_MODELS[options.baseMode],
+    reasoningEffort:
+      options.reasoningEffort ??
+      (options.pin ? null : (AMP_MODE_EFFORTS[options.baseMode] ?? null)),
     steeringInbox: options.steeringInbox ?? null,
   });
   return `// @amp-agent-mode key=${AMP_PLUGIN_MODE_KEY} label=Agent Swarm
@@ -181,9 +184,8 @@ export default function (amp: any) {
 		key: ${JSON.stringify(AMP_PLUGIN_MODE_KEY)},
 		label: "Agent Swarm",
 		agent: amp.createAgent({
-			extends: CONFIG.baseMode,
+			model: CONFIG.model,
 			...(CONFIG.instructions ? { instructions: CONFIG.instructions } : {}),
-			...(CONFIG.model ? { model: CONFIG.model } : {}),
 			...(CONFIG.reasoningEffort ? { reasoningEffort: CONFIG.reasoningEffort } : {}),
 			display: { label: "Agent Swarm" },
 		}).definition,

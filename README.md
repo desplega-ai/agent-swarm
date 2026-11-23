@@ -129,9 +129,26 @@ AgentMail archives verified inbound deliveries before acknowledging them and ret
 
 - [Getting started](https://docs.agent-swarm.dev/docs/getting-started) · [Architecture](https://docs.agent-swarm.dev/docs/architecture/overview) · [Playbooks](https://docs.agent-swarm.dev/docs/playbooks) · [CLI](https://docs.agent-swarm.dev/docs/reference/cli) · [API reference](https://docs.agent-swarm.dev/docs/api-reference)
 - [Orchestration patterns](./docs/orchestration-patterns.md) — Five patterns for delegating, fanning out, gating on humans, retrying, and persisting multi-step agent work
+- [TypeScript SDK](./packages/agent-swarm-sdk/README.md): `npm i @desplega.ai/agent-swarm-sdk`, a typed client that sends a task and waits for its result
 - [Agent templates](https://templates.agent-swarm.dev)
 - [Public ranking](https://docs.agent-swarm.dev/docs/reference/telemetry#public-ranking): opt in with **Get ranked** (Settings → Configuration → Branding) to rank your install by tokens used on [agent-swarm.dev/ranking](https://agent-swarm.dev/ranking). It shows at the next hourly refresh. Token totals are public and exact; telemetry, the organization name and website must be set.
 - Help: [contact@desplega.sh](mailto:contact@desplega.sh) · [Discord](https://discord.gg/KZgfyyDVZa)
+
+## Slack theme
+
+These Slack custom themes come from the Hive design tokens in [`apps/ui/src/styles/globals.css`](./apps/ui/src/styles/globals.css). Paste one via Slack **Preferences → Themes → Custom theme**.
+
+Hive dark:
+
+```
+#18181B,#27272A,#FE9A00,#09090B,#27272A,#FAFAFA,#00C951,#FF6467
+```
+
+Hive light:
+
+```
+#FAFAFA,#F4F4F5,#BB4D00,#FAFAFA,#F4F4F5,#09090B,#00BC7D,#E7000B
+```
 
 ## Contributing
 

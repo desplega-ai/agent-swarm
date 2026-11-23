@@ -391,7 +391,7 @@ const modelTierDeprecatedNudge = (r: SwarmToolResult): string | undefined => {
     typeof note.suggestedProfile === "string"
       ? note.suggestedProfile
       : `<harness>-${String(note.tier)}`;
-  return `modelTier is deprecated: pass profile "${profile}" (same model).`;
+  return `modelTier is deprecated: pass modelGroup "${String(note.tier)}" (the tier's group) or profile "${profile}" (same model).`;
 };
 
 /**

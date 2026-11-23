@@ -540,7 +540,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1795017641-g2e763e`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1795334436-g660843`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.
@@ -551,11 +551,13 @@ vendor's retention setting. The adapter starts threads with `--visibility
 private`, but there is no local-only mode.
 
 - **Models.** Amp has no model flag. `modelTier` maps onto its four built-in
-  modes: smol `low`, regular `medium`, smart `high`, ultra `ultra`. Amp chooses the model per
-  mode on its server; measured 2026-10-05, `low` ran GLM-5.3 Flash, `medium` Claude Opus 5.5,
-  `high` GPT-6 Astra and `ultra` Claude Fable 5.1. A concrete `model` is a `provider/model` id
-  (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), pinned through the
-  per-task plugin agent on top of the `medium` mode's prompt and tools. Anything
+  modes: smol `low`, regular `medium`, smart `high`, ultra `ultra`. Amp's plugin agents
+  must name a model, so each mode runs the model Amp ran for it when measured on 2026-10-05
+  (`AMP_MODE_MODELS`): `low` GLM-5.3 Flash at `low` effort, `medium` Claude Opus 5.5,
+  `high` GPT-6 Astra and `ultra` Claude Fable 5.1, each with that model's own Amp prompt and
+  tools. A concrete `model` is a `provider/model` id
+  (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), run the same way by the
+  per-task plugin agent. Anything
   else is rejected at send-task, agent runtime and session start. Send-task and
   the agent runtime also reject a pin whose provider Amp does not run (measured
   2026-10-05: `anthropic`, `openai`, `vertexai`, `xai`, `fireworks`, `baseten`)
@@ -942,7 +944,7 @@ The flag is the only switch: when it is on, every pi session gets codemode, what
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
 - **Codex** — the `thread/start` request carries `config.systemPrompt` in the native `developerInstructions` field over app-server stdin. New sessions leave repository instruction files and symlinks unchanged, so Git worktree checks can run while the session is active. Before startup, a one-time legacy recovery strips stale prompt blocks and restores symlinks recorded by older versions. Codex still loads repository `AGENTS.md` instructions through its normal discovery. Entry: [`createInProcessCodexSession`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts).
 - **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], extensionFactories, ... })` passed via `CreateAgentSessionOptions` in [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). The adapter must `await resourceLoader.reload()` first: `createAgentSession` only reloads a loader it builds itself, and an unloaded loader contributes no appended prompt and no extensions. The adapter's `SettingsManager` sets `projectTrusted: false`, because the cwd is a task repo clone: the repo's `.pi/extensions`, packages, settings and `SYSTEM.md` never load into the worker process.
-- **Amp** — Amp has no system-prompt flag. The adapter writes a per-task plugin (`$XDG_CONFIG_HOME/amp/plugins/agent-swarm.ts`, in a temporary directory) that registers one agent mode extending the selected built-in mode, with the swarm prompt as its `instructions` (appended to Amp's own prompt). The prompt is embedded as a JSON literal, never as code. Spawned with `-m agent-swarm`. Live verified; nothing is written to the repository or baked into the image.
+- **Amp** — Amp has no system-prompt flag. The adapter writes a per-task plugin (`$XDG_CONFIG_HOME/amp/plugins/agent-swarm.ts`, in a temporary directory) that registers one agent mode on the pinned model or the selected mode's model, with the swarm prompt as its `instructions` (appended to Amp's own prompt for that model). Amp's CLI rejects `extends` and built-in agents in a plugin mode; the CLI then sends the bare mode key and thread creation fails with HTTP 400 on `agentMode`. The prompt is embedded as a JSON literal, never as code. Spawned with `-m agent-swarm`. Live verified; nothing is written to the repository or baked into the image.
 
 ### What this means for a new provider
 

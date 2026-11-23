@@ -1,0 +1,84 @@
+---
+title: 'Preparing a property maintenance request for human triage with AI agents'
+description: "Agent Swarm gathers one maintenance request's records, flags missing or conflicting fields and hands operations a source-linked packet. People decide."
+agent:
+  offer: false
+  when: "Someone wants guest support and operations to review one maintenance request with its context before deciding to dispatch"
+---
+
+Agent Swarm can gather the context for one property maintenance request from configured sources and hand an operations owner a source-linked packet, while urgency, dispatch, cost and every message to a guest or a contractor stay with people. What it takes off the team is the assembly: the original report, the unit record, availability, prior work on that asset and the approved procedure sit in different systems, and nobody has time to open them all before the guest calls again.
+
+The scope is one request, reviewed before anyone is dispatched. A booking discrepancy, a capacity plan across a period and a shift handoff are different handoffs. [Service capacity planning](/docs/playbooks/use-cases/ai-service-capacity-planning) and [operations shift handoffs](/docs/playbooks/use-cases/ai-operations-shift-handoff) cover their own.
+
+<Callout type="warn">
+**Urgent safety incidents do not go through this workflow.** A gas smell, water flooding a unit, an electrical fault, a fire, or anything that threatens a person goes to your operator's established human emergency process, on the phone number and escalation path the team already runs. This workflow is not an emergency channel, it does not assess safety, and a request that arrives here does not replace that call.
+</Callout>
+
+## When a maintenance platform or direct human triage fits better
+
+**A purpose-built maintenance or property management platform, when the team needs the work orders themselves.** Native work orders, vendor dispatch, scheduling and tenant portals are what such a product sells. Agent Swarm provides none of the four and dispatches nobody.
+
+**Direct human triage, when volume is low or reports arrive in one system.** At a few requests a day, a coordinator with a checklist is the honest answer.
+
+Agent Swarm fits a narrower shape: context spread across several systems and owners. The guest's words arrive in support, the unit record in a property system, availability in a booking calendar, prior repairs in a work order history, the approved procedure in a document someone maintains. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out the split.
+
+## An illustrative workflow
+
+This is an illustrative custom setup, not a built-in maintenance feature or integration and not a customer result. It needs permissions, configuration and possibly custom integrations your team builds and tests.
+
+<Mermaid title="Illustrative maintenance request flow, from a guest report to an operations owner deciding whether to dispatch." chart={`flowchart LR
+  A["Request received<br/>(guest support)"] --> B["Deterministic gather<br/>(swarm-script to JSON)"]
+  B --> C["Agent assembles<br/>source-linked packet"]
+  C --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "dispatch" --> R["Authorize<br/>dispatch"]
+  G -- "incomplete" --> S["Ask for more<br/>information"]
+  G -- "safety" --> T["Emergency<br/>process"]
+`} />
+
+**1. An operations owner defines the approved sources and the business rules.** Which systems hold reports, unit records, availability, work history and procedures, which fields matter for a triage decision, and which conditions send a request straight to a person, such as a safety word or an occupied unit. Nothing outside that frame enters the packet.
+
+**2. Deterministic steps gather the records.** `swarm-script` steps reach each source through [script connections](/docs/guides/script-connections) and take credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in script source. They pull the original report, the property and appliance record, availability and the next arrival, prior work on that asset, and the approved procedure for the fault. Code checks flag a missing field, a record older than the team's threshold, and two records that disagree. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split: collection and checks in code, synthesis by an agent.
+
+**3. An agent writes the packet.** The packet carries the guest's own words and channel, the unit and appliance facts, availability and the next arrival, relevant prior repairs, the approved procedure, and one list of what is missing or conflicts. Every line links the record it came from and the time it was read.
+
+**4. An operations owner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a short summary with a link to the full packet, and resumes only on a human response. The owner judges real urgency, authorizes dispatch and the cost that comes with it, and owns every guest and contractor message. Define the reject branch: ask for more information, hold the request, or route it to the emergency process. The gate adds a decision point. It does not make the packet correct.
+
+## Example: a fictional request
+
+The request below is invented to show the shape of a packet. It is not a customer, and no part of it is a measured result.
+
+A guest messages support: the dishwasher in a rental unit will not drain, there is standing water in the bottom, and they check out in four days. A coordinator would normally open four systems and ask the guest two questions.
+
+The packet would carry the guest's original words and channel, the unit record with the appliance make and installed year, availability and the next arrival, and a prior repair on the same appliance two years earlier with the vendor who did it. It would attach the approved procedure for an appliance fault: who to call first, which parts the operator authorizes, what the guest is told meanwhile.
+
+It would also flag a conflict: the property record lists one appliance model and the prior work order another, so the attached procedure may be for the wrong machine. A coordinator settles that with one call instead of dispatching the wrong parts.
+
+Left to the owner are the questions records cannot answer. Whether standing water is urgent tonight or a morning visit. Whether to dispatch, and to which contractor. What cost is approved before anyone is sent. What the guest is told now.
+
+## Edge cases the packet must name
+
+**Stale records.** Each record carries its last update, and one past the team's threshold is flagged, not quoted as current. A unit record untouched since the last tenancy may be wrong throughout, and the packet never estimates a value to fill the gap.
+
+**Missing or conflicting information.** A field no source returned and two sources that disagree are different facts, and both are named with the owner who settles them. The packet does not pick the friendlier number.
+
+**Privacy and permissions.** Guest personal data is read only through scoped access, and only the fields the decision needs: contact details, the unit, the fault, the stay dates. A source the swarm cannot read is named as a gap with the owner who can grant access. Nobody pastes guest data into a chat.
+
+**Missed signals.** A request that mentions a safety word is routed to the human emergency process, and the team accepts that a keyword check can miss a signal.
+
+**Escalation when the owner does not respond.** The gate carries a timeout and a fallback: a reminder, a named backup owner, then an explicit hold so the request shows up on an aged list. Silence is never approval.
+
+## Limitations
+
+Agent Swarm ships no maintenance integrations and no work order system. It does not dispatch anyone, does not assess whether a fault is safe, and cannot guarantee a good triage decision.
+
+The packet is only as good as the sources and the rules behind it.
+
+Your team owns the configuration, the testing and the business rules: which sources are read, which fields matter, which conditions bypass the workflow, and who receives the packet.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic collection, then agent synthesis.
+- [Pattern: HITL gates](/docs/playbooks/patterns/hitl-gates): the pause, the branches, the timeout.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): platform, manual process or shared agent.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): the named owner and approval thresholds.
+- [Facility energy anomaly review](/docs/playbooks/use-cases/facility-energy-anomaly-review): the neighbouring handoff for one unusual facility energy reading.

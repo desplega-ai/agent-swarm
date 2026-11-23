@@ -177,21 +177,21 @@ export const platformbRepoMergePolicy: Scenario = {
       // --- the prompt lines come from the registered template: a repo with no record keeps
       // today's text, and the record adds its own line.
       const plain = await renderLines(ctx, {
-        agents_may_merge: "Not allowed (default)",
+        agents_may_merge: "not allowed (default)",
         swarm_auto_merge: "",
         merge_checks: "\n- Before merging, verify:\n  - CI is green",
       });
       expect(
         plain ===
-          "**Merge Policy:**\n- Auto-merge: Not allowed (default)\n- Before merging, verify:\n  - CI is green",
+          "**Merge Policy:**\n- Agent hand-merge: not allowed (default)\n- Before merging, verify:\n  - CI is green",
         `plain merge policy renders as ${JSON.stringify(plain)}`,
       );
       const withRecord = await renderLines(ctx, {
-        agents_may_merge: "Not allowed (default)",
-        swarm_auto_merge: "\n- Swarm auto-merge: on (minimum score 80); classes: docs, bump",
+        agents_may_merge: "not allowed (default)",
+        swarm_auto_merge: "\n- Swarm auto-merge: on",
         merge_checks: "",
       });
-      expect(withRecord.includes("- Swarm auto-merge: on (minimum score 80)"), "no record line");
+      expect(withRecord.includes("- Swarm auto-merge: on"), "no record line");
     });
   },
 };

@@ -71,6 +71,18 @@ interface ConfigContextValue {
 
 export const ConfigContext = createContext<ConfigContextValue | null>(null);
 
+/** The `/join` URL rule: http(s) only, with no username or password. */
+function isSwarmUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Extract ?apiUrl=, ?apiKey=, ?email=, ?name= from the URL, strip them, and
  * return the pending connection + identity hints. If a connection with the
@@ -116,7 +128,7 @@ function extractUrlParams(
     };
   }
 
-  if (!apiUrl || !apiKey) {
+  if (!apiUrl || !apiKey || !isSwarmUrl(apiUrl)) {
     return { pendingConnection: null, pendingIdentity };
   }
 
@@ -136,8 +148,9 @@ function extractUrlParams(
   // iframe must not be interrupted by the "Name This Connection" modal.
   // Tab-local storage means two embeds on this origin holding different
   // tokens can never clobber each other, and the shared localStorage
-  // connection list is never touched.
-  if (isUserTokenApiKey(apiKey)) {
+  // connection list is never touched. Only a framed page takes this path: a
+  // top-level link falls through to the naming dialog, which saves on click.
+  if (isUserTokenApiKey(apiKey) && window.self !== window.top) {
     setEmbedConnection({
       name: `embed:${connectionName(normalizedUrl)}`,
       apiUrl: normalizedUrl,

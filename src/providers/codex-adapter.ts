@@ -69,7 +69,8 @@ import {
   type RateLimitReplacement,
   scrubProviderQuotaReport,
 } from "../utils/provider-account-telemetry";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { type RuntimeCatalog, runtimeCatalogModel } from "../utils/runtime-model-catalog";
+import { scrubJson, scrubSecrets } from "../utils/secret-scrubber";
 import { recoverLegacyCodexAgentsMd } from "./codex-agents-md";
 import {
   CodexAppServer,
@@ -86,7 +87,11 @@ import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import { readPkgVersion } from "./harness-version";
 import { buildOtelTraceparentEnv } from "./otel-env";
-import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
+import {
+  applyReasoningEffort,
+  effectiveReasoningEffort,
+  type ReasoningEffort,
+} from "./reasoning-effort";
 import type {
   CostData,
   CredCheckOptions,
@@ -181,7 +186,7 @@ export type ThreadItem =
       result?: unknown;
       error?: unknown;
     }
-  | { id: string; type: "web_search"; query: string }
+  | { id: string; type: "web_search"; query: string; queries?: string[] }
   | { id: string; type: "unknown"; originalType?: string; value: Record<string, unknown> };
 
 export type AgentMessageItem = Extract<ThreadItem, { type: "agent_message" }>;
@@ -196,8 +201,15 @@ export const CODEX_REASONING_SUMMARY = "detailed";
 type TodoListItem = Extract<ThreadItem, { type: "todo_list" }>;
 type WebSearchItem = Extract<ThreadItem, { type: "web_search" }>;
 
+type ThreadStarted = {
+  type: "thread.started";
+  thread_id: string;
+  model?: string;
+  reasoningEffort?: string | null;
+};
+
 export type ThreadEvent =
-  | { type: "thread.started"; thread_id: string }
+  | ThreadStarted
   | { type: "turn.started"; turn_id?: string }
   | { type: "item.started" | "item.updated" | "item.completed"; item: ThreadItem }
   | { type: "message.delta"; item_id: string; delta: string }
@@ -596,6 +608,13 @@ export async function buildCodexConfig(
   const reasoningConfig =
     reasoningApplication.kind === "codex-config" ? reasoningApplication.config : {};
 
+  if (config.reasoningEffort && reasoningApplication.kind === "noop") {
+    emit({
+      type: "raw_stderr",
+      content: `[codex] Cannot apply reasoning effort ${config.reasoningEffort} to ${model}. Using the harness default.\n`,
+    });
+  }
+
   // (1) Baseline overrides. Keep these aligned with the Dockerfile baseline
   // at `~/.codex/config.toml` (Phase 6). Repeating them here makes local dev
   // (no baseline file) behave identically to the Docker worker.
@@ -682,8 +701,19 @@ function normalizeAppServerItem(raw: Record<string, unknown>): ThreadItem {
         result: raw.result,
         error: raw.error,
       };
-    case "webSearch":
-      return { id, type: "web_search", query: typeof raw.query === "string" ? raw.query : "" };
+    case "webSearch": {
+      const action = raw.action;
+      const queries =
+        action && typeof action === "object" && "queries" in action && Array.isArray(action.queries)
+          ? action.queries.filter((query): query is string => typeof query === "string")
+          : undefined;
+      return {
+        id,
+        type: "web_search",
+        query: typeof raw.query === "string" ? raw.query : "",
+        ...(queries?.length ? { queries } : {}),
+      };
+    }
     default:
       return {
         id,
@@ -787,7 +817,6 @@ class AppServerCodexThread implements CodexThread {
   private activeFail: ((error: Error) => void) | null = null;
   private latestTotalUsage: Usage | undefined;
   private completedTotalUsage: Usage | undefined;
-  private emittedThreadStart = false;
   private readonly unsubscribe: () => void;
   private readonly unsubscribeClose: () => void;
   private readonly turnWaiters: Array<{
@@ -798,6 +827,7 @@ class AppServerCodexThread implements CodexThread {
   constructor(
     private readonly client: CodexAppServerClient,
     threadId: string,
+    private readonly effort?: string,
   ) {
     this.id = threadId;
     this.unsubscribe = client.onNotification((notification) =>
@@ -831,14 +861,11 @@ class AppServerCodexThread implements CodexThread {
       this.activeFinish = null;
       finish();
     };
-    if (!this.emittedThreadStart) {
-      this.emittedThreadStart = true;
-      push({ type: "thread.started", thread_id: this.id });
-    }
     try {
       const response = await this.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.id,
         input: textInput(input),
+        ...(this.effort !== undefined ? { effort: this.effort } : {}),
         // The bundled model catalog defaults the reasoning summary to `none`,
         // so reasoning items arrived with empty `summary` and `content`.
         summary: CODEX_REASONING_SUMMARY,
@@ -1043,6 +1070,7 @@ export class CodexSession implements ProviderSession {
   private readonly summarizeDeps: SummarizeSessionForCodexDeps;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
+  private readonly swarmEventHandler?: (event: ProviderEvent) => void;
   private readonly logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
   private readonly startedAt = Date.now();
   private readonly completionPromise: Promise<ProviderResult>;
@@ -1071,8 +1099,6 @@ export class CodexSession implements ProviderSession {
   private settled = false;
   private acceptsSteering = true;
   private readonly errorTracker = new SessionErrorTracker();
-  /** Reasoning/effort level actually applied (Phase 4) — null when `applyReasoningEffort()` returned noop. */
-  private readonly appliedReasoningEffort: ReasoningEffort | null;
   /**
    * Result captured by `settle` but held back from `resolveCompletion` until
    * `runSession`'s `finally` block has fully cleaned up (log writer flush,
@@ -1091,6 +1117,12 @@ export class CodexSession implements ProviderSession {
     initialEvents: ProviderEvent[] = [],
     skillsDir?: string,
     summarizeDeps: SummarizeSessionForCodexDeps = {},
+    threadStart?: ThreadStarted,
+    private readonly appliedReasoningEffort: ReasoningEffort | null = effectiveReasoningEffort(
+      "codex",
+      resolvedModel,
+      config.reasoningEffort,
+    ),
   ) {
     this.thread = thread;
     this.config = config;
@@ -1110,18 +1142,6 @@ export class CodexSession implements ProviderSession {
       canDeliver: () => this.acceptsSteering && !this.settled && !this.aborted,
       inject: (note) => this.deliverSteering({ mode: "steer", text: note }),
     });
-    // Mirrors the resolution `buildCodexConfig` already applied when
-    // constructing `mergedConfig` — cheap, pure, and keeps the applied-level
-    // feedback co-located with `settle()` rather than threading an extra
-    // constructor param through `createInProcessCodexSession`.
-    const reasoningApplication = applyReasoningEffort(
-      "codex",
-      resolvedModel,
-      config.reasoningEffort,
-    );
-    this.appliedReasoningEffort =
-      reasoningApplication.kind === "codex-config" ? (config.reasoningEffort ?? null) : null;
-
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.resolveCompletion = resolve;
     });
@@ -1132,15 +1152,13 @@ export class CodexSession implements ProviderSession {
     // `runSession` (the runner-side polling at `runner.ts:2812-2841` is the
     // backstop). Skipped when there's no task or API context to talk to.
     if (config.taskId && config.apiUrl && config.apiKey) {
-      this.listeners.push(
-        createCodexSwarmEventHandler({
-          apiUrl: config.apiUrl,
-          apiKey: config.apiKey,
-          agentId: config.agentId,
-          taskId: config.taskId,
-          abortRef: this.abortRef,
-        }),
-      );
+      this.swarmEventHandler = createCodexSwarmEventHandler({
+        apiUrl: config.apiUrl,
+        apiKey: config.apiKey,
+        agentId: config.agentId,
+        taskId: config.taskId,
+        abortRef: this.abortRef,
+      });
     }
 
     // Replay any events that fired before the session was constructed
@@ -1150,6 +1168,8 @@ export class CodexSession implements ProviderSession {
     for (const event of initialEvents) {
       this.emit(event);
     }
+
+    if (threadStart) this.handleEvent(threadStart);
 
     // Kick the event loop asynchronously so the constructor can return.
     void this.runSession();
@@ -1212,7 +1232,7 @@ export class CodexSession implements ProviderSession {
   private emit(event: ProviderEvent): void {
     // App-server item payloads can carry tool arguments and model errors.
     // Scrub the complete event at the log and listener egress boundary.
-    const scrubbed = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
+    const scrubbed = scrubJson(event);
     try {
       this.logFileHandle.write(
         `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,
@@ -1220,16 +1240,17 @@ export class CodexSession implements ProviderSession {
     } catch {
       // Log writer failure must not break the event stream.
     }
-    if (this.listeners.length > 0) {
-      for (const listener of this.listeners) {
-        try {
-          listener(scrubbed);
-        } catch {
-          // Swallow listener errors — a bad listener must not kill the session.
-        }
-      }
-    } else {
+    this.swarmEventHandler?.(scrubbed);
+    if (this.listeners.length === 0) {
       this.eventQueue.push(scrubbed);
+      return;
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(scrubbed);
+      } catch {
+        // Swallow listener errors — a bad listener must not kill the session.
+      }
     }
   }
 
@@ -1305,7 +1326,7 @@ export class CodexSession implements ProviderSession {
     }
   }
 
-  /** Arguments for a normalized `tool_start` event. */
+  /** Arguments for a normalized tool call. */
   private toolArgsForItem(item: ThreadItem): unknown {
     switch (item.type) {
       case "command_execution":
@@ -1317,7 +1338,7 @@ export class CodexSession implements ProviderSession {
         return { server: mcpItem.server, tool: mcpItem.tool, arguments: mcpItem.arguments };
       }
       case "web_search":
-        return { query: (item as WebSearchItem).query };
+        return { query: item.query, ...(item.queries ? { queries: item.queries } : {}) };
       default:
         return {};
     }
@@ -1382,7 +1403,13 @@ export class CodexSession implements ProviderSession {
           type: "session_init",
           sessionId: event.thread_id,
           provider: "codex",
-          ...(codexVersion ? { harnessVariantMeta: { version: codexVersion } } : {}),
+          harnessVariantMeta: {
+            ...(codexVersion ? { version: codexVersion } : {}),
+            ...(event.model !== undefined ? { observedModel: event.model } : {}),
+            ...(event.reasoningEffort !== undefined
+              ? { observedReasoningEffort: event.reasoningEffort }
+              : {}),
+          },
         });
         break;
       }
@@ -1397,6 +1424,7 @@ export class CodexSession implements ProviderSession {
             toolCallId: event.item.id,
             toolName: this.toolNameForItem(event.item),
             args: this.toolArgsForItem(event.item),
+            ...(event.item.type === "web_search" ? { argsPending: true } : {}),
           });
           // Mirror into the transcript buffer for session-end summarization.
           // Tools are the bulk of useful signal in a codex session, so we
@@ -1446,6 +1474,7 @@ export class CodexSession implements ProviderSession {
             toolCallId: item.id,
             toolName: this.toolNameForItem(item),
             result: item,
+            ...(item.type === "web_search" ? { finalArgs: this.toolArgsForItem(item) } : {}),
             ...(item.type === "command_execution"
               ? { isError: item.exit_code !== 0 || item.status === "failed" }
               : {}),
@@ -2056,7 +2085,7 @@ export async function createInProcessCodexSession(
 
   const routeEnv = config.env ?? process.env;
   const gateway = deriveDefaultRoute("codex", routeEnv);
-  const mergedConfig = {
+  const mergedConfig: CodexConfig = {
     ...(await buildCodexConfig(config, resolvedModel, bufferedEmit)),
     ...(gateway ? codexGatewayConfig(gateway) : {}),
   };
@@ -2113,6 +2142,9 @@ export async function createInProcessCodexSession(
       "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
     );
   }
+  const effort = mergedConfig.model_reasoning_effort;
+  const turnEffort = typeof effort === "string" ? effort : undefined;
+  let threadStart: ThreadStarted | undefined;
   let thread: CodexThread;
   let liveSession: CodexSession | undefined;
   if (opts.threadFactory) {
@@ -2134,7 +2166,11 @@ export async function createInProcessCodexSession(
       },
     });
     try {
-      const response = await client.request<{ thread: { id: string } }>("thread/start", {
+      const response = await client.request<{
+        thread: { id: string };
+        model?: string;
+        reasoningEffort?: string | null;
+      }>("thread/start", {
         model: resolvedModel,
         cwd: config.cwd,
         developerInstructions: config.systemPrompt,
@@ -2147,7 +2183,23 @@ export async function createInProcessCodexSession(
         ephemeral: false,
       });
       void pruneCodexRollouts(env).catch(() => {});
-      const appThread = new AppServerCodexThread(client, response.thread.id);
+      threadStart = {
+        type: "thread.started",
+        thread_id: response.thread.id,
+        model: response.model,
+        reasoningEffort: response.reasoningEffort,
+      };
+      if (
+        turnEffort &&
+        response.reasoningEffort !== undefined &&
+        response.reasoningEffort !== turnEffort
+      ) {
+        bufferedEmit({
+          type: "raw_stderr",
+          content: `[codex] Thread reported reasoning effort ${response.reasoningEffort ?? "default"}. Requesting ${turnEffort} on each turn.\n`,
+        });
+      }
+      const appThread = new AppServerCodexThread(client, response.thread.id, turnEffort);
       await appThread.readInitialQuota();
       thread = appThread;
     } catch (error) {
@@ -2163,6 +2215,8 @@ export async function createInProcessCodexSession(
     preSessionEvents,
     opts.skillsDir,
     opts.summarizeDeps ?? {},
+    threadStart,
+    turnEffort ? (config.reasoningEffort ?? null) : null,
   );
   liveSession = session;
   return session;
@@ -2208,7 +2262,9 @@ export function resolveCodexRunnerArgv(): string[] {
 }
 
 /** JSON payload passed to the codex subprocess runner via stdin. */
-interface CodexSubprocessInput {
+export interface CodexSubprocessInput {
+  /** Only the selected row crosses the process boundary, including live overlays. */
+  modelCatalog?: RuntimeCatalog;
   config: ProviderSessionConfig;
   skillsDir?: string;
   /**
@@ -2250,8 +2306,11 @@ class CodexSubprocessSession implements ProviderSession {
 
   constructor(config: ProviderSessionConfig, skillsDir: string | undefined) {
     const argv = resolveCodexRunnerArgv();
+    const model = resolveCodexModel(config.model);
+    const row = runtimeCatalogModel("openai", model);
     const payload: CodexSubprocessInput = {
       config,
+      ...(row ? { modelCatalog: { openai: { models: { [model]: row } } } } : {}),
       skillsDir,
       // Capture the parent's OTel TRACEPARENT here, in the span context the
       // runner established. The subprocess can't reconstruct it on its own
@@ -2382,7 +2441,7 @@ class CodexSubprocessSession implements ProviderSession {
   }
 
   private emit(event: ProviderEvent): void {
-    event = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
+    event = scrubJson(event);
     if (event.type === "session_init" && event.sessionId) {
       this._sessionId = event.sessionId;
     }
@@ -2482,7 +2541,7 @@ class CodexSubprocessSession implements ProviderSession {
       delivery?: SteerDeliveryResult;
     };
     try {
-      msg = JSON.parse(scrubSecrets(line));
+      msg = scrubJson(JSON.parse(line));
     } catch {
       // Not a valid JSON envelope — treat as raw stderr-equivalent.
       this.emit({ type: "raw_stderr", content: `${line}\n` });

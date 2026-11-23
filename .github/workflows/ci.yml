@@ -344,7 +344,28 @@ jobs:
 
       # include-hidden-files: upload-artifact treats every path under a
       # dot-directory as hidden and would upload nothing from .bun-test-timings.
+      #
+      # Finalizing the artifact sometimes fails on GitHub's side ("Failed to
+      # FinalizeArtifact ... (404) check suite does not exist"), which used to
+      # fail this job and, through the gate's needs, the whole merge-queue entry.
+      # A failed finalize leaves no artifact behind, so one retry under the same
+      # name is safe; if it fails too, the job fails as before.
       - name: Hand the snapshot to the shards
+        id: handoff
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
+          include-hidden-files: true
+          retention-days: 1
+
+      - name: Wait before retrying the hand-off
+        if: steps.handoff.outcome == 'failure'
+        run: sleep 15
+
+      - name: Hand the snapshot to the shards (retry)
+        if: steps.handoff.outcome == 'failure'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: timings-snapshot

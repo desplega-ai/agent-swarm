@@ -28,7 +28,8 @@ function skillMarkdown(name: string): string {
 /**
  * Flow `agent-access-tokens`: an agent-bound token must hold the route's permission on
  * swarm-wide admin routes (heartbeat, MCP OAuth, MCP servers, repos, script endpoints,
- * skills, trackers). The shared key with an X-Agent-ID, and the lead's own token, still pass.
+ * skills, prompt templates, trackers). The shared key with an X-Agent-ID, and the lead's own
+ * token, still pass.
  */
 export const platformAgentTokenPermissions: Scenario = {
   name: "platform-agent-token-permissions",
@@ -305,6 +306,79 @@ export default async function (_args: z.infer<typeof argsSchema>, _ctx: any) {
         await ctx.api("DELETE", `/api/skills/${ownId}`, asWorker),
         [200],
         "worker token deletes its own skill",
+      );
+
+      // ── prompt templates: global and repo overrides reach every agent's prompts ──
+      const templateEvent = `e2e.perm.${ctx.nonce}`;
+      const bridgeSet = (auth: { apiKey: string }, args: Record<string, unknown>) =>
+        ctx.api("POST", "/api/mcp-bridge", {
+          ...auth,
+          body: { tool: "set-prompt-template", args: { eventType: templateEvent, ...args } },
+        });
+      for (const [label, args] of [
+        ["a global template", { body: "worker global" }],
+        ["a global skip", { state: "skip_event", body: "" }],
+        ["the lead's agent template", { scope: "agent", scopeId: lead.id, body: "worker" }],
+      ] as const) {
+        const refused = await bridgeSet(asWorker, args);
+        expectStatus(refused, [200], `bridge ${label} with a worker token`);
+        expect(asRecord(refused.json).success === false, `the bridge refuses ${label} to a worker`);
+        expectStatus(
+          await ctx.api("PUT", "/api/prompt-templates", {
+            ...asWorker,
+            body: { eventType: templateEvent, ...args },
+          }),
+          [403],
+          `PUT ${label} with a worker token`,
+        );
+      }
+      const ownTemplate = await bridgeSet(asWorker, {
+        scope: "agent",
+        scopeId: worker.id,
+        body: "own",
+      });
+      expect(
+        asRecord(ownTemplate.json).success === true,
+        "a worker token sets its own agent template",
+      );
+      const ownTemplateId = asString(
+        asRecord(asRecord(ownTemplate.json).template).id,
+        "own template id",
+      );
+      cleanups.push(() => ctx.api("DELETE", `/api/prompt-templates/${ownTemplateId}`));
+      const leadTemplate = await bridgeSet(asLead, { body: "lead global" });
+      expect(asRecord(leadTemplate.json).success === true, "the lead token sets a global template");
+      const globalTemplateId = asString(
+        asRecord(asRecord(leadTemplate.json).template).id,
+        "global template id",
+      );
+      cleanups.push(() => ctx.api("DELETE", `/api/prompt-templates/${globalTemplateId}`));
+      for (const [method, path, body] of [
+        ["DELETE", `/api/prompt-templates/${globalTemplateId}`, undefined],
+        ["POST", `/api/prompt-templates/${globalTemplateId}/reset`, undefined],
+        ["POST", `/api/prompt-templates/${globalTemplateId}/checkout`, { version: 1 }],
+      ] as const) {
+        expectStatus(
+          await ctx.api(method, path, { ...asWorker, body }),
+          [403],
+          `${method} ${path} on a global template with a worker token`,
+        );
+      }
+      const bridgeDelete = await ctx.api("POST", "/api/mcp-bridge", {
+        ...asWorker,
+        body: { tool: "delete-prompt-template", args: { id: globalTemplateId } },
+      });
+      expect(
+        asRecord(bridgeDelete.json).success === false,
+        "the bridge refuses a worker's delete of a global template",
+      );
+      expectStatus(
+        await ctx.api("PUT", "/api/prompt-templates", {
+          ...sharedKeyWorker,
+          body: { eventType: templateEvent, body: "shared key global" },
+        }),
+        [200],
+        "PUT a global template with the shared key",
       );
 
       // ── trackers (disabled in the suite: the shared key gets the 503 contract) ──

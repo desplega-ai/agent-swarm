@@ -17,6 +17,7 @@ import {
   releaseTask,
 } from "../db";
 import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
+import { resolveGroupForAgent } from "../model-group-resolution";
 import { checkProfileForAgent, runtimeReadsRepoSecrets } from "../model-profile-check";
 import { poolTaskRunsOnHarness } from "../model-validation";
 import {
@@ -194,22 +195,35 @@ export async function routePoolTasks(
     task: AgentTask,
     viaWake: boolean,
   ): Promise<boolean> => {
-    if (!task.profile) return true;
+    // A model group task waits for an agent with a member that passes; a hop's
+    // resume names its member as `profile`, which wins.
+    const profile = task.profile;
+    const group = profile ? undefined : task.modelGroup;
+    if (!profile && !group) return true;
     for (const includeRepoSecrets of secretViews(agent, viaWake)) {
       const memoKey = JSON.stringify([
         agent.id,
-        task.profile,
+        profile ? "profile" : "group",
+        profile ?? group,
         task.vcsRepo ?? null,
         includeRepoSecrets,
       ]);
       let ok = profileOk.get(memoKey);
       if (ok === undefined) {
-        const result = await checkProfileForAgent(agent.id, task.profile, {
-          vcsRepo: task.vcsRepo,
-          includeRepoSecrets,
-          fallbacks: false,
-        });
-        ok = result?.ok !== false;
+        if (profile) {
+          const result = await checkProfileForAgent(agent.id, profile, {
+            vcsRepo: task.vcsRepo,
+            includeRepoSecrets,
+            fallbacks: false,
+          });
+          ok = result?.ok !== false;
+        } else {
+          const resolution = await resolveGroupForAgent(group as string, agent.id, {
+            vcsRepo: task.vcsRepo,
+            includeRepoSecrets,
+          });
+          ok = resolution.kind !== "none";
+        }
         profileOk.set(memoKey, ok);
       }
       if (!ok) return false;

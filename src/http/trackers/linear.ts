@@ -13,7 +13,12 @@ import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { refuseAgentTokenWithout } from "../request-principal";
 import { route } from "../route-def";
-import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
+import {
+  allowedCredentialRedirect,
+  deriveApiBaseUrl,
+  parseQueryParams,
+  readWebhookBody,
+} from "../utils";
 import {
   ensureTrackerAuthorizeAdmin,
   TrackerAuthorizeQuerySchema,
@@ -117,6 +122,7 @@ const linearRefresh = route({
     500: { description: "Refresh failed" },
     503: { description: "Linear integration not configured" },
   },
+  rbac: { permission: "oauth-authorization.manage" },
 });
 
 const linearWebhook = route({
@@ -129,7 +135,11 @@ const linearWebhook = route({
   responses: {
     200: { description: "Event accepted", schema: LinearWebhookAcceptedSchema },
     401: { description: "Invalid signature" },
+    413: { description: "Body exceeds 5 MiB" },
     503: { description: "Linear integration not configured" },
+  },
+  rbac: {
+    ungated: "inbound webhook: the provider signature is the credential, no bearer principal",
   },
 });
 
@@ -282,11 +292,8 @@ export async function handleLinearTracker(
   // POST /api/trackers/linear/webhook — handle Linear webhook events
   if (linearWebhook.match(req.method, pathSegments)) {
     // Read raw body for HMAC signature verification (same pattern as GitHub/GitLab webhooks)
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     // Collect headers into a plain object for the webhook handler
     const headers: Record<string, string | undefined> = {

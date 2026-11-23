@@ -16,6 +16,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
+import { isSlackReplyFooterEnabled } from "./config";
 import { completedStatusIcon, iconPrefix } from "./reaction-shortcode";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
@@ -156,7 +157,7 @@ export async function sendTaskOutputAsReply(task: AgentTask): Promise<boolean> {
         icon: getAgentSlackIcon(agent),
         blocks: [
           ...batch.map((chunk) => ({ type: "section", text: { type: "mrkdwn", text: chunk } })),
-          ...(isLast ? [footer] : []),
+          ...(isLast && isSlackReplyFooterEnabled() ? [footer] : []),
         ],
       });
     }

@@ -338,10 +338,11 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
 | `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the tier's group) or profile "<harness>-<tier>" (same model) instead. Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile of the assignee's harness. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `profile` | `string` | No | - | Model profile name (see list-model-profiles): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with model and modelTier. A set `effort` still wins over the profile's. |
+| `modelGroup` | `string` | No | - | Model group name (GET /api/model-groups): an ordered list of profiles that may span harnesses. The claiming agent runs the first member on its harness that passes the profile check, and a provider error hops to the next one. With agentId, one member must run on that agent. A pool task waits for an agent where a member runs. Exclusive with model, modelTier and profile. |
 | `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. Does not bypass the follow-up re-delegation guard; see allowRedelegation. |
 | `allowRedelegation` | `boolean` | No | false | Only matters when you call send-task from a follow-up task in a Slack thread. Such a dispatch is blocked when it repeats a task already completed in that thread (same-work rule, unless a task there was cancelled or failed after that completion), or when you already dispatched 10 tasks into the thread in the last 6 hours (loop-cap rule). Set true to dispatch anyway; the override is logged. Use it only for deliberate re-runs or long chains, never to retry a block you have not read. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
@@ -545,10 +546,11 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `reason` | `string` | No | - | Reason for rejection (optional for 'reject'). |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the seeded <harness>-<tier> profile of its harness. Only used with 'create' action. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the tier's group) or profile "<harness>-<tier>" (same model) instead. Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the model group named after the tier, else the seeded <harness>-<tier> profile of its harness. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
 | `profile` | `string` | No | - | Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action. |
+| `modelGroup` | `string` | No | - | Model group name for the created pool task (GET /api/model-groups); only workers where a member runs claim it, and each runs its first passing member. Exclusive with model, modelTier and profile. Only used with 'create' action. |
 | `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
 | `leadOnly` | `boolean` | No | false | Structured authorization constraint: only Lead agents may claim this privileged task. |
 
@@ -661,7 +663,7 @@ Add or update hand-verified facts for one model (e.g. a launch models.dev has no
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, vercel. |
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode, opencode-go, nan, helmcode, zai-coding-plan, vercel. |
 | `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
 | `name` | `string` | No | - | Display name. |
 | `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
@@ -1106,7 +1108,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge or mergePolicy: resend their current values to edit other guidelines. An agent session token also needs the lead role to change url, clonePath or hooks.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1171,8 +1173,9 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the seeded <harness>-<tier> profile of each assignee's harness. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the tier's group) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile of each assignee's harness. |
 | `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier. |
+| `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### defer-task
@@ -1219,8 +1222,9 @@ Update an existing scheduled task. Any registered agent can update schedules; on
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear. |
 | `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
+| `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile: setting a group clears them, and setting any of them clears the group. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### patch-schedule
@@ -1250,8 +1254,9 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
-| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear. |
 | `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
+| `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile: setting a group clears them, and setting any of them clears the group. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### delete-schedule
@@ -2561,14 +2566,14 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved on the API server's disk, which your container usually can't read.
+Download a file from Slack by file ID or Slack file URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved under /workspace/shared/downloads/ on the API server's disk, which your container usually can't read.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
-| `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
+| `url` | `string` | No | - | Slack file URL (url_private_download or url_private from a file object). The file ID in it is looked up in Slack. |
 | `taskId` | `uuid` | No | - | Task to attach the file to. Defaults to the task you are working on; must be a task you own or created. |
-| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Defaults to /workspace/shared/downloads/{agentId}/slack/. |
+| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Must be inside /workspace/shared/downloads/; a relative path resolves from there. Defaults to /workspace/shared/downloads/{agentId}/slack/. |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
 
 ### slack-delete

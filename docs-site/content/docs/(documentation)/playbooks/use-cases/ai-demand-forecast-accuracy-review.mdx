@@ -1,0 +1,94 @@
+---
+title: 'Reviewing why actual demand differed from a forecast with AI agents'
+description: "Agent Swarm gathers an approved past forecast and the actual demand records, compares them and hands a planner a source-linked evidence pack. People decide."
+agent:
+  offer: false
+  when: "Someone wants operations and engineering to investigate why actual demand differed from an approved past forecast"
+---
+
+Agent Swarm can gather the approved forecast for a closed period, the actual demand records, the agreed date windows and the documented assumptions behind the forecast, compare the two sides in deterministic steps, and hand a human planner a source-linked evidence pack with missing data flagged. The planner determines the causes and decides whether anything about the forecasting process changes.
+
+What the work removes is the assembly: finding the approved forecast version, and pulling the actuals from an order system and a promotions calendar. The pack puts each difference in front of the person who decides, with its source record.
+
+The scope is one past forecast and one review window, looked at after the period closed. It is not forward-looking capacity planning, which compares upcoming demand against capacity before the period starts ([service capacity planning](/docs/playbooks/use-cases/ai-service-capacity-planning)), and not a data quality review of a pipeline ([partner data feed freshness review](/docs/playbooks/use-cases/partner-data-feed-freshness-review)). The question is narrower: what happened against one approved forecast, and why.
+
+## When dedicated forecasting software fits better
+
+**A spreadsheet, when there is one forecast and one source of actuals in one unit.** If both sit in the same workbook, in the same unit, the operations owner can subtract and annotate. Wrapping that subtraction in an agent workflow moves a rule that already works onto a queue that needs a person.
+
+**A demand forecasting or planning product, when the team needs to build forecasts.** If the requirement is to build or retrain forecasts, run statistical error metrics across many series, or automate replenishment, a product built for that work fits better. Agent Swarm provides none of these.
+
+Agent Swarm fits a different shape: one past forecast whose evidence lives in several systems and belongs to several people. A reviewer opens a planning spreadsheet, an order system and a promotions calendar, and reconciles them by hand before the conversation starts. That work is assembling evidence for a human judgment. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is a hypothetical, custom workflow. It is not a built-in forecasting model. It is not a live data integration out of the box. It is not a customer result. Your team builds it and tests it.
+
+<Mermaid title="Illustrative forecast review flow, from a defined review window to a planner recording causes and deciding changes." chart={`flowchart LR
+  A["Review window and<br/>sources defined"] --> B["Deterministic gather<br/>and compare<br/>(swarm-script to JSON)"]
+  B --> C["Agent assembles<br/>source-linked<br/>evidence pack"]
+  C --> G{{"human-in-the-loop<br/>planner"}}
+  G --> R["Record causes and<br/>decide changes"]
+  G --> S["Investigate further"]
+`} />
+
+**1. A planning owner defines the frame.** The approved forecast version, the actuals source, the date windows, the unit, and the documented assumptions the forecast was built on: promotions, price changes, known outages. Nothing else enters the comparison. The owner names the version and the assumptions in writing.
+
+**2. Deterministic steps gather the records and compute the differences.** A `swarm-script` step reads each source through [script connections](/docs/guides/script-connections), takes its credentials from the [credential broker](/docs/guides/scripts-credential-broker), and computes the per-period difference and the percentage difference in code. The output is JSON, so the arithmetic repeats exactly and no model touches it. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and agent synthesis. That playbook describes the pattern, not a forecast review.
+
+**3. An agent assembles the evidence pack.** It turns the JSON and the records behind it into one document: the per-period differences, the largest gaps, which documented assumption covers which period, and the flags for data that is missing, late or censored. Every line links the record it came from. It may list candidate explanations as questions tied to a named record, never as a cause.
+
+**4. The planner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow and resumes only on a human response. The planner reads the pack, works out the causes the evidence supports, records them, and decides whether to change the forecasting process, investigate further, or leave it alone.
+
+A team that reviews every closed period can put the run on a [schedule](/docs/concepts/scheduling) so the pack is ready before the meeting.
+
+## Example: a fictional business
+
+The distributor below is invented to show the shape of a pack. It is not a customer, and nothing in it is a measured result.
+
+A regional distributor forecasts one product line a month. The approved forecast sits in a planning spreadsheet, orders land in an order system, and marketing runs national promotions from a calendar it knows about weeks before the planning cycle does.
+
+For one closed month, the pack would carry the approved forecast per week, actual orders per week in the same unit, and the difference between them. It would name the weeks with the widest gap, link each to the orders behind it, and mark the weeks a promotion touches.
+
+What it would leave to the planner are the questions the records cannot settle. Whether a shortfall came from orders entered late, which moves the demand into the following week. Whether the promotion that ran was ever added to the assumptions. Whether a stockout means the orders understate what customers wanted. The pack puts those questions in one place with their evidence attached, and answers none of them.
+
+## Edge cases the pack must name
+
+**Missing or stale actuals.** A source that came back empty, or a record older than the team's freshness threshold, is flagged with its read time. The pack does not estimate the missing demand.
+
+**Forecast version drift.** Only the approved version is compared, and the pack names it. If that version is ambiguous or a later revision exists, the pack names both and says so.
+
+**Date window and calendar mismatches.** Weeks and months do not line up, a time zone moves a boundary, and a fiscal calendar can disagree with the calendar year. The pack states the windows compared and converts only with an owner-approved rule.
+
+**Unit mismatches.** Cases and pallets do not convert into each other on their own. A conversion needs an approved rule, and anything left over is listed as unreconciled.
+
+**Censored demand.** A stockout means recorded sales understate demand, and an allocation or an order cap does the same. The pack flags the period and the reason, and leaves the correction to the planner's judgment.
+
+**Permissions.** The swarm reads only the sources the team granted. A system it cannot read appears as a named gap with the owner who can grant access.
+
+## Limitations
+
+Agent Swarm does not build forecasts, and it does not measure or improve forecast accuracy by itself. It does not decide causes. It does not change a forecast or a replenishment setting automatically, and it ships no live demand or ERP integration out of the box.
+
+The pack is only as good as the sources and windows the owner agreed. A missing system, a stale export or an unapproved conversion shows up as a gap instead of a number: honest, and incomplete.
+
+Your team owns the configuration and the testing: which sources are read, which window and unit apply, and who signs off on the causes.
+
+## Operator checks
+
+- The approved forecast version and the actuals source are named in writing.
+- The windows and the unit are agreed before the first run.
+- The difference calculation is deterministic and re-runs to the same JSON.
+- Every line in the pack links the record it came from.
+- The missing-data flags have been reviewed, not skipped.
+- A named planner signs off on the causes.
+- No forecast, order or setting changes without that sign-off.
+- The reject path is defined, such as sending the pack back for a corrected source.
+
+## Related
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources)
+- [HITL gates](/docs/playbooks/patterns/hitl-gates)
+- [Service capacity planning](/docs/playbooks/use-cases/ai-service-capacity-planning)
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model)
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance)

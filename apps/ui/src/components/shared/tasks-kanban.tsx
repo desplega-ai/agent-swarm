@@ -90,6 +90,7 @@ export function TasksKanban({
                 <KanbanCard
                   className="cursor-default p-0"
                   column={item.column}
+                  dragEnabled={false}
                   id={item.id}
                   key={item.id}
                   name={item.name}

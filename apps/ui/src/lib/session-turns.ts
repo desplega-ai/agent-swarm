@@ -3,24 +3,24 @@
 // chat message, or the root. In the swarm that one task is also the lead's
 // first reply: the lead owns it, and its output is the reply.
 //
-// A turn has one part, plus one more part per deferred wake-up: the lead
-// waits, then a `deferred` task runs and its output is the resumed answer.
-// Tasks belong to the part of their nearest opener above them (the person's
-// message or a wake-up). "Above" follows the task that dispatched a task when
-// it is in the chain, else `parentTaskId`: a continuation's parent can be an
-// earlier worker task in another turn. Each part shows:
+// A turn has one part, plus one more part per deferred wake-up and per later
+// lead answer (a `system` follow-up after a worker, with an output). A task
+// belongs to the session when a walk up from it reaches an opener (the
+// person's message or a wake-up). "Up" follows the task that dispatched a task
+// when it is in the chain, else `parentTaskId`: a continuation's parent can be
+// an earlier worker task in another turn. Then each task joins the part of the
+// latest opener created at or before it, so the timeline reads in time order.
+// Each part shows:
 //   - reply: the opener. Its answer is the opener itself, or the server's
 //     `resume` of it when a deploy or a crash cut it: one answer, tried again.
-//   - workers: tasks of other agents, by agent, then by task type. A try that
-//     did not pass (failed, cancelled, superseded) and a later try of the same
-//     agent and type form one step.
-//   - result: the lead's latest completed answer after the reply. The lead
-//     answers after its workers in a `system` follow-up. A resume of a cut
-//     follow-up joins its tries the same way.
-//   - live: a lead task that runs now, after the latest shown answer. It never
+//   - workers: tasks of other agents created in the part, by agent, then by
+//     task type. A try that did not pass (failed, cancelled, superseded) and a
+//     later try of the same agent and type form one step.
+//   - live: a lead task that runs now, after the part's answer. It never
 //     replaces an answer.
-//   - internal: everything else of the lead or the system (follow-ups that only
-//     sent more work, reroutes, the lead's resume), for the Handoffs toggle.
+//   - internal: everything else of the lead or the system (follow-ups that
+//     ended with no output, reroutes, the lead's resume), for the Handoffs
+//     toggle.
 // Tasks with no path to the root land in `rest`, which the timeline renders
 // as plain task cards in chain order.
 //
@@ -53,18 +53,16 @@ export interface LeadStep {
 }
 
 export interface TurnPart {
-  /** The task that opened the part: the person's message, the root, or a wake-up. */
+  /** The task that opened the part: the person's message, the root, a wake-up, or a lead answer. */
   id: string;
   /** The opener: its text is the person's message, its source the channel. */
   reply: AgentTask;
   /** The opener's answer. `answer.tries[0]` is `reply`. */
   answer: LeadStep;
   workers: TurnWorker[];
-  /** Oldest first. Excludes `result` and `live`. */
+  /** Oldest first. Excludes `live`. */
   internal: AgentTask[];
-  /** The lead's latest completed answer after the reply. */
-  result?: LeadStep;
-  /** A lead task that runs now, after the latest shown answer. */
+  /** A lead task that runs now, after the part's answer. */
   live?: AgentTask;
 }
 
@@ -76,7 +74,7 @@ export interface Turn {
   id: string;
   /** The person's message. Missing when the root did not come from a person (a schedule, a workflow). */
   person?: AgentTask;
-  /** The first part, then one per deferred wake-up, oldest first. */
+  /** The first part, then one per deferred wake-up or later lead answer, oldest first. */
   parts: TurnPart[];
 }
 
@@ -256,9 +254,115 @@ export function buildTurns(chain: AgentTask[], options: BuildTurnsOptions = {}):
     }
   }
 
-  for (const turn of turns)
-    turn.parts.sort((a, b) => a.reply.createdAt.localeCompare(b.reply.createdAt));
-  return { turns: turns.map((turn) => ({ ...turn, parts: turn.parts.map(finish) })), rest };
+  return { turns: placeByTime(turns), rest };
+}
+
+/** A lead answer a person reads: its shown try completed with an output. */
+const isAnswer = (step: LeadStep) => {
+  const last = shownTry(step);
+  return last.status === "completed" && !!last.output?.trim();
+};
+
+interface Slot {
+  at: string;
+  part: TurnPart;
+  byAgent: Map<string, TurnWorker>;
+  loose: AgentTask[];
+}
+
+/**
+ * The parts in time order (the timeline reads as a continuation). The walk
+ * above finds where a task belongs by who sent it; this puts it where it
+ * happened. Every opener (a person's message, a wake-up, each later lead
+ * answer) starts a part, and every other task joins the part of the latest
+ * opener created at or before it. So a worker that a GitHub review started an
+ * hour later shows after the lead's latest answer, not folded into the first
+ * reply's group, and a turn's work never shows above a later message.
+ */
+function placeByTime(drafts: DraftTurn[]): Turn[] {
+  const turns: Turn[] = drafts.map(({ parts: _parts, ...turn }) => ({ ...turn, parts: [] }));
+  const openers: Array<{ at: string; answer: LeadStep; turn?: Turn }> = [];
+  const loose: AgentTask[] = [];
+  const leadIds = new Set<string>();
+  const steps: Array<WorkerStep & { agentId: string | null }> = [];
+  drafts.forEach((draft, index) => {
+    for (const part of draft.parts) {
+      const { answer, later } = leadSteps(part);
+      // A turn's first part opens the turn; a wake-up joins the turn it lands in by time.
+      openers.push({
+        at: part.reply.createdAt,
+        answer,
+        ...(part === draft.parts[0] ? { turn: turns[index] } : {}),
+      });
+      for (const step of later) {
+        if (isAnswer(step)) openers.push({ at: step.tries[0].createdAt, answer: step });
+        else loose.push(...step.tries);
+      }
+      for (const task of part.lead) leadIds.add(task.id);
+      for (const task of part.internal) if (!leadIds.has(task.id)) loose.push(task);
+      for (const worker of part.workers)
+        for (const step of worker.steps) steps.push({ ...step, agentId: worker.agentId });
+    }
+  });
+  // Stable: an opener keeps chain order on a tied timestamp.
+  openers.sort((a, b) => a.at.localeCompare(b.at));
+  const slots: Slot[] = [];
+  let turn = turns[0];
+  for (const opener of openers) {
+    turn = opener.turn ?? turn;
+    const reply = opener.answer.tries[0];
+    const part: TurnPart = {
+      id: reply.id,
+      reply,
+      answer: opener.answer,
+      workers: [],
+      internal: [],
+    };
+    turn.parts.push(part);
+    slots.push({ at: opener.at, part, byAgent: new Map(), loose: [] });
+  }
+  // The latest slot opened at or before `at`; the first for anything older.
+  const slotAt = (at: string): Slot => {
+    let lo = 0;
+    let hi = slots.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (slots[mid].at <= at) lo = mid;
+      else hi = mid - 1;
+    }
+    return slots[lo];
+  };
+
+  // A step sits where its first try started, retries included.
+  steps.sort((a, b) => a.tries[0].createdAt.localeCompare(b.tries[0].createdAt));
+  for (const { agentId, ...step } of steps) {
+    const slot = slotAt(step.tries[0].createdAt);
+    const key = agentId ?? "";
+    let worker = slot.byAgent.get(key);
+    if (!worker) {
+      worker = { agentId, steps: [] };
+      slot.byAgent.set(key, worker);
+      slot.part.workers.push(worker);
+    }
+    worker.steps.push(step);
+  }
+  for (const task of loose) slotAt(task.createdAt).loose.push(task);
+  for (const { part, loose: tasks } of slots) {
+    // The lead works again: the newest open lead task after the part's answer.
+    const shownAt = shownTry(part.answer).createdAt;
+    const live = tasks
+      .filter(
+        (task) =>
+          leadIds.has(task.id) && !TERMINAL_STATUSES.has(task.status) && task.createdAt >= shownAt,
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .at(-1);
+    part.internal = tasks
+      .filter((task) => task !== live)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (live) part.live = live;
+  }
+  return turns;
 }
 
 function addTry(part: Draft, task: AgentTask, taskType: string): WorkerStep {
@@ -283,12 +387,13 @@ function addTry(part: Draft, task: AgentTask, taskType: string): WorkerStep {
   return created;
 }
 
-function finish({ id, reply, workers, internal, lead }: Draft): TurnPart {
+/** A part's lead tasks as answers: the opener's, then each later one, oldest first. */
+function leadSteps({ reply, lead }: Draft): { answer: LeadStep; later: LeadStep[] } {
   // Lead tasks arrive oldest first. The server's `resume` of a lead task that
   // did not pass is the same answer tried again (as a worker's resume is the
   // same step): it joins that task's tries instead of standing on its own.
   const answer: LeadStep = { tries: [reply] };
-  const steps: LeadStep[] = [];
+  const later: LeadStep[] = [];
   const stepOf = new Map<string, LeadStep>([[reply.id, answer]]);
   for (const task of lead) {
     const continued = task.parentTaskId ? stepOf.get(task.parentTaskId) : undefined;
@@ -298,36 +403,10 @@ function finish({ id, reply, workers, internal, lead }: Draft): TurnPart {
       continue;
     }
     const step = { tries: [task] };
-    steps.push(step);
+    later.push(step);
     stepOf.set(task.id, step);
   }
-  const result = steps
-    .filter((step) => {
-      const last = shownTry(step);
-      return last.status === "completed" && !!last.output?.trim();
-    })
-    .at(-1);
-  const shownAt = shownTry(result ?? answer).createdAt;
-  const placed = new Set([...answer.tries, ...(result?.tries ?? [])]);
-  const live = lead
-    .filter(
-      (task) =>
-        !placed.has(task) && !TERMINAL_STATUSES.has(task.status) && task.createdAt >= shownAt,
-    )
-    .at(-1);
-  const all = new Set(internal);
-  for (const task of lead) all.add(task);
-  for (const task of placed) all.delete(task);
-  all.delete(live as AgentTask);
-  return {
-    id,
-    reply,
-    answer,
-    workers,
-    internal: [...all].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    ...(result ? { result } : {}),
-    ...(live ? { live } : {}),
-  };
+  return { answer, later };
 }
 
 /** Every step of a part, oldest first by its first try (the expanded block's order). */
@@ -403,7 +482,6 @@ function partTaskIds(part: TurnPart): string[] {
     ...part.answer.tries.map((task) => task.id),
     ...partSteps(part).flatMap((step) => step.tries.map((task) => task.id)),
     ...part.internal.map((task) => task.id),
-    ...(part.result?.tries.map((task) => task.id) ?? []),
     ...(part.live ? [part.live.id] : []),
   ];
 }
@@ -514,11 +592,9 @@ export function deferralText(
   };
 }
 
-/** A part that only waits: its reply deferred, with no steps, later answer, or live work. */
+/** A part that only waits: its reply deferred, with no steps or live work. */
 export function onlyWaits(part: TurnPart): boolean {
-  return (
-    isDeferral(shownTry(part.answer)) && part.workers.length === 0 && !part.result && !part.live
-  );
+  return isDeferral(shownTry(part.answer)) && part.workers.length === 0 && !part.live;
 }
 
 export type PartRun = { kind: "part"; part: TurnPart } | { kind: "waits"; parts: TurnPart[] };

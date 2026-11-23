@@ -1,11 +1,8 @@
 import { z } from "zod";
-import {
-  getChildWorkflowRunId,
-  getWorkflowRunLineage,
-  getWorkflowRunTriggeredByAgentId,
-} from "../../be/db/workflow-runs";
+import { getChildWorkflowRunId, getWorkflowRunLineage } from "../../be/db/workflow-runs";
 import type { ExecutorMeta, WorkflowRun } from "../../types";
 import { ParentStepNotCurrentError, startWorkflowExecution } from "../engine";
+import { resolveWorkflowRunPrincipal } from "../run-principal";
 import type { ExecutorDependencies, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 import type { ExecutorRegistry } from "./registry";
@@ -126,8 +123,9 @@ export class SubWorkflowExecutor extends BaseExecutor<
     // `config.inputs`: the parent's author writes those, so a creator-less
     // child would otherwise run as any agent the author names.
     const parent = await db.getRunWorkflow({ id: meta.runId, workflowId: meta.workflowId });
-    const triggeredByAgentId =
-      parent?.createdByAgentId ?? (await getWorkflowRunTriggeredByAgentId(meta.runId)) ?? undefined;
+    const principal = await resolveWorkflowRunPrincipal(parent, meta.runId);
+    if (!principal.ok) return { status: "failed", error: `sub-workflow: ${principal.error}` };
+    const triggeredByAgentId = principal.agentId;
 
     // Returns once the child run exists; the child walks on its own. A child
     // that already ended (cooldown, readiness, input failure) settles here,

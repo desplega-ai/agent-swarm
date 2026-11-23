@@ -295,13 +295,11 @@ const summary = (part: TurnPart) => workerSummary(part, NOW);
 const span = (part: TurnPart) => formatSpan(summary(part)?.durationMs ?? 0);
 const stepShape = (part: TurnPart) =>
   partSteps(part).map((s) => `${s.agentId}:${s.taskType}:${s.tries.length}`);
-/** The answers a part shows: the reply, then the result. */
-const answers = (part: TurnPart) => [
-  shownTry(part.answer).output,
-  part.result ? shownTry(part.result).output : undefined,
-];
+/** The answer each part of a turn shows, in order. */
+const answers = (turn: { parts: TurnPart[] }) =>
+  turn.parts.map((part) => shownTry(part.answer).output);
 
-/** Every task sits in exactly one place: a reply, a try, a handoff, a result, a live line, or rest. */
+/** Every task sits in exactly one place: an answer, a try, a handoff, a live line, or rest. */
 function placedIds({ turns, rest }: SessionTurns): string[] {
   return [
     ...turns.flatMap((turn) =>
@@ -309,7 +307,6 @@ function placedIds({ turns, rest }: SessionTurns): string[] {
         ...part.answer.tries.map((t) => t.id),
         ...partSteps(part).flatMap((step) => step.tries.map((t) => t.id)),
         ...part.internal.map((t) => t.id),
-        ...(part.result?.tries.map((t) => t.id) ?? []),
         ...(part.live ? [part.live.id] : []),
       ]),
     ),
@@ -330,35 +327,29 @@ describe("buildTurns on sB1 (dashboard, two people)", () => {
       "lena",
     ]);
     for (const turn of turns) expect(turn.parts[0].reply).toBe(turn.person as AgentTask);
-    expect(turns.map((t) => t.parts.length)).toEqual([1, 2, 1, 1]);
+    expect(turns.map((t) => t.parts.length)).toEqual([3, 6, 2, 1]);
   });
 
-  test("each part shows its reply and its latest completed answer, as the mockup does", () => {
-    expect(answers(turns[0].parts[0])).toEqual([
+  test("every lead answer opens a part, in time order", () => {
+    expect(answers(turns[0])).toEqual([
       "Plan: research competitor tiers, draft copy, review.",
+      "Researcher finished. The lead merged the findings into the plan.",
       "Draft v1 is ready. Lena, can you review the copy?",
     ]);
-    // Lena's turn: the overnight wake-up opens a second part.
-    expect(answers(turns[1].parts[0])).toEqual([
+    // Lena's turn: each follow-up with an output is a lead answer; the overnight wake-up is one more.
+    expect(answers(turns[1])).toEqual([
       "Renaming Scale to Business. Sending it back to the Writer.",
+      "Writer finished. The lead sent draft v2 to the Reviewer.",
+      "Reviewer finished. The lead asked the Writer to fix the 3 issues.",
       "Draft v3 passes review. I will check tomorrow morning.",
-    ]);
-    expect(answers(turns[1].parts[1])).toEqual([
       "Finance confirmed the numbers. Updating the table.",
       "The table now shows 32 per seat for Team. Nothing else changed.",
     ]);
-    expect(turns[1].parts[1].reply.taskType).toBe("deferred");
-    expect(answers(turns[2].parts[0])[1]).toBe(
-      "The toggle is live in the preview. It took three tries.",
-    );
-    expect(turns[3].parts[0].result).toBeUndefined();
-    // Status notes that only sent more work stay with the handoffs.
-    expect(turns[1].parts[0].internal.map((t) => t.output)).toEqual([
-      "Writer finished. The lead sent draft v2 to the Reviewer.",
-      "Reviewer finished. The lead asked the Writer to fix the 3 issues.",
-    ]);
-    expect(turns[0].parts[0].internal.map((t) => t.taskType)).toEqual(["follow-up"]);
-    expect(hasHandoffs(turns)).toBe(true);
+    expect(turns[1].parts[4].reply.taskType).toBe("deferred");
+    expect(answers(turns[2])[1]).toBe("The toggle is live in the preview. It took three tries.");
+    expect(answers(turns[3])).toEqual(["Shortening the refund answer. Sending it to the Writer."]);
+    // Every follow-up here answered, so none waits behind the Handoffs toggle.
+    expect(hasHandoffs(turns)).toBe(false);
   });
 
   test("worker lines match the mockup spans: one per part, never across the wait", () => {
@@ -369,19 +360,18 @@ describe("buildTurns on sB1 (dashboard, two people)", () => {
       retries: 0,
     });
     expect(span(turns[0].parts[0])).toBe("26m");
-    // "2 workers worked for 57m · 1 retry", then "Writer worked for 17m".
-    expect(stepShape(turns[1].parts[0])).toEqual([
-      "writer:content:1",
-      "reviewer:review:1",
-      "writer:review-fix:2",
+    // Each step sits under the answer that sent it, then "Writer worked for 17m" after the wait.
+    expect(turns[1].parts.map(stepShape)).toEqual([
+      ["writer:content:1"],
+      ["reviewer:review:1"],
+      ["writer:review-fix:2"],
+      [],
+      ["writer:content:1"],
+      [],
     ]);
-    expect(summary(turns[1].parts[0])).toMatchObject({
-      agentIds: ["writer", "reviewer"],
-      retries: 1,
-    });
-    expect(span(turns[1].parts[0])).toBe("57m");
-    expect(stepShape(turns[1].parts[1])).toEqual(["writer:content:1"]);
-    expect(span(turns[1].parts[1])).toBe("17m");
+    expect(summary(turns[1].parts[2])).toMatchObject({ agentIds: ["writer"], retries: 1 });
+    expect(span(turns[1].parts[0])).toBe("18m");
+    expect(span(turns[1].parts[4])).toBe("17m");
     // "Coder worked for 1h 36m · 2 retries"
     expect(stepShape(turns[2].parts[0])).toEqual(["coder:implementation:3"]);
     expect(summary(turns[2].parts[0])).toMatchObject({ retries: 2, state: "done" });
@@ -411,7 +401,7 @@ describe("buildTurns on sB2 (Slack thread, a dashboard reply)", () => {
       "slack:marco",
       "ui:taras",
     ]);
-    expect(turns.every((t) => t.parts.length === 1)).toBe(true);
+    expect(turns.map((t) => t.parts.length)).toEqual([5, 3, 4, 3, 3]);
   });
 
   test("parallel workers, retries, spans, and answers", () => {
@@ -430,14 +420,16 @@ describe("buildTurns on sB2 (Slack thread, a dashboard reply)", () => {
     expect(summary(parts[1])).toMatchObject({ agentIds: ["reviewer", "coder"], retries: 2 });
     expect(summary(parts[2])).toMatchObject({ agentIds: ["researcher", "writer", "reviewer"] });
     expect(summary(parts[3])?.retries).toBe(2);
-    expect(parts.map((p) => (p.result ? shownTry(p.result).output : undefined))).toEqual([
+    // The follow-ups after the workers are answers below them, the last one per turn the final word.
+    expect(turns.map((t) => answers(t).at(-1))).toEqual([
       "The checklist is green.",
       "The chart is bumped to 2.5.0 and all checks pass.",
       "Release notes are ready.",
       "The staging smoke test passed on the third run.",
       "The release candidate passes. The release is ready.",
     ]);
-    expect(parts.map((p) => p.internal.length)).toEqual([3, 1, 2, 1, 1]);
+    expect(turns.every((t) => t.parts.slice(1).every((p) => p.workers.length === 0))).toBe(true);
+    expect(hasHandoffs(turns)).toBe(false);
   });
 
   test("every task sits in one place", () => {
@@ -478,8 +470,10 @@ describe("live lead work never replaces a shown answer", () => {
         status: "in_progress",
       }),
     ];
-    const part = buildTurns(chain).turns[0].parts[0];
-    expect(part.result && shownTry(part.result).id).toBe("f1");
+    const [first, part] = buildTurns(chain).turns[0].parts;
+    expect(stepShape(first)).toEqual(["forge::1"]);
+    expect(part.id).toBe("f1");
+    expect(stepShape(part)).toEqual(["forge::1"]);
     expect(part.live?.id).toBe("f2");
     expect(part.internal.map((t) => t.id)).toEqual([]);
   });
@@ -497,9 +491,9 @@ describe("live lead work never replaces a shown answer", () => {
         status: "pending",
       }),
     ];
-    const part = buildTurns(chain).turns[0].parts[0];
-    expect(part.result).toBeUndefined();
-    expect(part.live?.id).toBe("f1");
+    const { parts } = buildTurns(chain).turns[0];
+    expect(parts).toHaveLength(1);
+    expect(parts[0].live?.id).toBe("f1");
   });
 });
 
@@ -564,7 +558,7 @@ describe("real server shapes", () => {
     ];
     const { turns } = buildTurns(chain);
     expect(turns).toHaveLength(1);
-    expect(turns[0].parts[0].result && shownTry(turns[0].parts[0].result).id).toBe("retry");
+    expect(turns[0].parts.map((p) => shownTry(p.answer).id)).toEqual(["r", "retry"]);
   });
 
   test("a dashboard follow-up with no picked user still opens a turn", () => {
@@ -587,7 +581,7 @@ describe("real server shapes", () => {
     ];
     const { turns } = buildTurns(chain);
     expect(turns.map((t) => t.person?.id)).toEqual(["r", "u"]);
-    expect(turns[0].parts[0].result).toBeUndefined();
+    expect(turns[0].parts).toHaveLength(1);
   });
 
   test("a session a schedule started has no person bubble, and a later reply opens a turn", () => {
@@ -700,7 +694,7 @@ describe("real server shapes", () => {
     const part = model.turns[0].parts[0];
     expect(part.reply.id).toBe("r");
     expect(part.answer.tries.map((t) => t.id)).toEqual(["r", "r2"]);
-    expect(answers(part)).toEqual(["Done: the playbook PR is up.", undefined]);
+    expect(answers(model.turns[0])).toEqual(["Done: the playbook PR is up."]);
     expect(part.internal).toEqual([]);
     expect(part.live).toBeUndefined();
     expect(placedIds(model).sort()).toEqual(["r", "r2"]);
@@ -723,7 +717,7 @@ describe("real server shapes", () => {
     expect(part.live).toBeUndefined();
   });
 
-  test("a resume of the lead's cut follow-up joins the result's tries", () => {
+  test("a resume of the lead's cut follow-up joins that answer's tries", () => {
     const chain = [
       task({ id: "r", createdAt: at(60), source: "ui", output: "On it." }),
       task({
@@ -744,10 +738,9 @@ describe("real server shapes", () => {
         output: "All merged.",
       }),
     ];
-    const part = buildTurns(chain).turns[0].parts[0];
-    expect(part.answer.tries.map((t) => t.id)).toEqual(["r"]);
-    expect(part.result?.tries.map((t) => t.id)).toEqual(["f", "f2"]);
-    expect(part.internal).toEqual([]);
+    const { parts } = buildTurns(chain).turns[0];
+    expect(parts.map((p) => p.answer.tries.map((t) => t.id))).toEqual([["r"], ["f", "f2"]]);
+    expect(parts.flatMap((p) => p.internal)).toEqual([]);
   });
 
   test("a step whose last try was cancelled is cancelled, not done", () => {
@@ -799,7 +792,7 @@ describe("real server shapes", () => {
   test("an older server without isLeadTask: the root's agent is the lead", () => {
     const strip = ({ isLeadTask: _drop, ...t }: AgentTask) => t as AgentTask;
     const { turns } = buildTurns(SB1.map(strip));
-    expect(turns.map((t) => t.parts.length)).toEqual([1, 2, 1, 1]);
+    expect(turns.map((t) => t.parts.length)).toEqual([3, 6, 2, 1]);
     expect(summary(turns[2].parts[0])).toMatchObject({ agentIds: ["coder"], retries: 2 });
   });
 
@@ -853,12 +846,13 @@ describe("delegations sit under the turn that dispatched them", () => {
     expect(placedIds(model).length).toBe(chain.length);
   });
 
-  test("rows without the column, or with a dispatcher outside the chain, follow parentTaskId", () => {
+  test("rows without the column, or with a dispatcher outside the chain, still sit by time", () => {
+    // parentTaskId alone reaches the first turn; time puts each task after the message it followed.
     const old = chain.map(({ dispatchedByTaskId: _drop, ...t }) => t as AgentTask);
     expect(buildTurns(old).turns.map((turn) => stepShape(turn.parts[0]))).toEqual([
-      ["researcher:research:1", "researcher:research:1", "researcher:research:1"],
-      [],
-      ["coder:implement:1"],
+      ["researcher:research:1"],
+      ["researcher:research:1"],
+      ["researcher:research:1", "coder:implement:1"],
     ]);
     const foreign = chain.map((t) =>
       t.dispatchedByTaskId ? { ...t, dispatchedByTaskId: "elsewhere" } : t,
@@ -869,10 +863,130 @@ describe("delegations sit under the turn that dispatched them", () => {
   });
 });
 
+describe("the timeline reads in time order", () => {
+  const worker = (
+    id: string,
+    ago: number,
+    agentId: string,
+    taskType: string,
+    parentTaskId: string,
+  ) => task({ id, createdAt: at(ago), agentId, isLeadTask: false, taskType, parentTaskId });
+  const followUp = (id: string, ago: number, parentTaskId: string, fields: Partial<AgentTask>) =>
+    task({
+      id,
+      createdAt: at(ago),
+      source: "system",
+      taskType: "follow-up",
+      parentTaskId,
+      ...fields,
+    });
+  // Agents per step, oldest first (a reviewer under a coder's task takes the coder's task type).
+  const who = (part: TurnPart) => partSteps(part).map((step) => step.agentId);
+
+  // A PR session: the coder opens the PR, the reviewer approves, the lead reports. Later a
+  // person's GitHub review starts more coder work under the coder's task, with no new message.
+  const chain = [
+    task({
+      id: "r",
+      createdAt: at(120),
+      source: "ui",
+      requestedByUserId: "taras",
+      output: "Routed.",
+    }),
+    worker("c1", 119, "coder", "feature", "r"),
+    worker("v1", 95, "reviewer", "review", "c1"),
+    followUp("f1", 89, "v1", { output: "Round 1 approved." }),
+    worker("c2", 40, "coder", "feature", "c1"),
+    worker("v2", 33.5, "reviewer", "review", "v1"),
+    followUp("f2", 33, "c2", { output: "Review fixes accepted." }),
+    followUp("f3", 30, "v2", { output: "Approved at the new head." }),
+    { ...worker("c3", 1, "coder", "feature", "c2"), status: "in_progress" as const },
+  ];
+
+  test("work after a later lead answer shows after it, not in the first group", () => {
+    const model = buildTurns(chain);
+    const parts = model.turns[0].parts;
+    expect(answers(model.turns[0])).toEqual([
+      "Routed.",
+      "Round 1 approved.",
+      "Review fixes accepted.",
+      "Approved at the new head.",
+    ]);
+    expect(parts.map(who)).toEqual([
+      ["coder", "reviewer"],
+      ["coder", "reviewer"],
+      [],
+      // The GitHub-review work: a new group after the latest answer.
+      ["coder"],
+    ]);
+    expect(summary(parts[3])).toMatchObject({ state: "working" });
+    expect(hasHandoffs(model.turns)).toBe(false);
+    expect(placedIds(model).length).toBe(chain.length);
+  });
+
+  test("work started after a later message shows in that message's turn", () => {
+    const withMessage = [
+      ...chain.slice(0, 4),
+      task({
+        id: "m2",
+        createdAt: at(50),
+        source: "ui",
+        parentTaskId: "r",
+        task: "Also handle the empty state.",
+        output: "Will do.",
+      }),
+      ...chain.slice(4),
+    ];
+    const { turns } = buildTurns(withMessage);
+    expect(turns.map((turn) => turn.id)).toEqual(["r", "m2"]);
+    expect(answers(turns[0])).toEqual(["Routed.", "Round 1 approved."]);
+    expect(answers(turns[1])).toEqual([
+      "Will do.",
+      "Review fixes accepted.",
+      "Approved at the new head.",
+    ]);
+    expect(turns[1].parts.map(who)).toEqual([["coder", "reviewer"], [], ["coder"]]);
+  });
+
+  test("a follow-up with no answer stays a handoff and opens no part", () => {
+    const noops = [
+      ...chain.slice(0, 3),
+      followUp("f1", 89, "v1", { output: "" }),
+      worker("c2", 40, "coder", "feature", "c1"),
+      followUp("f2", 33, "c2", { status: "failed", output: "boom" }),
+      followUp("f3", 30, "c2", { status: "superseded" }),
+    ];
+    const { turns } = buildTurns(noops);
+    expect(turns[0].parts).toHaveLength(1);
+    const [part] = turns[0].parts;
+    expect(who(part)).toEqual(["coder", "reviewer", "coder"]);
+    expect(part.internal.map((t) => t.id)).toEqual(["f1", "f2", "f3"]);
+    expect(hasHandoffs(turns)).toBe(true);
+  });
+
+  test("a step that started before a later answer keeps its retry in its own group", () => {
+    const retried = [
+      chain[0],
+      { ...worker("c1", 119, "coder", "feature", "r"), status: "failed" as const },
+      followUp("f1", 100, "c1", { output: "Coder failed, retrying." }),
+      task({
+        ...worker("c1b", 90, "coder", "feature", "c1"),
+        source: "ui",
+        task: "",
+        requestedByUserId: "taras",
+      }),
+    ];
+    const { turns } = buildTurns(retried);
+    expect(turns[0].parts.map(stepShape)).toEqual([["coder:feature:2"], []]);
+  });
+});
+
 describe("approvalsByPart", () => {
   test("an approval sits in the part that asked, also when a handoff asked", () => {
-    const { turns } = buildTurns(SB1);
+    // A follow-up with no output is a handoff, in the part of the answer before it.
+    const { turns } = buildTurns(SB1.map((t) => (t.id === "t11" ? { ...t, output: "" } : t)));
     const handoff = turns[1].parts[0].internal[0];
+    expect(handoff.id).toBe("t11");
     const placed = approvalsByPart(turns, [
       { id: "a1", status: "pending", sourceTaskId: handoff.id, title: "Ship it?" },
       { id: "a2", status: "pending", sourceTaskId: turns[1].parts[1].reply.id, title: "Publish?" },

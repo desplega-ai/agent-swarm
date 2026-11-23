@@ -184,18 +184,18 @@ describe("matchesFilter — sandbox penetration (must all return false, never th
 // ─── (d) Compile-time validation ───────────────────────────
 
 describe("compileStringFilter — init-time validation", () => {
-  test("valid arrow-fn compiles cleanly", () => {
-    expect(() => compileStringFilter("(p) => p.x === 1")).not.toThrow();
+  test("valid arrow-fn compiles cleanly", async () => {
+    await compileStringFilter("(p) => p.x === 1");
   });
 
-  test("invalid arrow-fn syntax throws", () => {
-    expect(() => compileStringFilter("(p) => {")).toThrow(/wait filter compile error/);
-    expect(() => compileStringFilter("not-a-function")).toThrow();
+  test("invalid arrow-fn syntax throws", async () => {
+    await expect(compileStringFilter("(p) => {")).rejects.toThrow(/wait filter compile error/);
+    await expect(compileStringFilter("not-a-function")).rejects.toThrow();
   });
 
-  test("filter source > 2KB rejected at compile time", () => {
+  test("filter source > 2KB rejected at compile time", async () => {
     const huge = `(p) => ${"x".repeat(2050)} === 1`;
-    expect(() => compileStringFilter(huge)).toThrow(/2KB/);
+    await expect(compileStringFilter(huge)).rejects.toThrow(/2KB/);
   });
 });
 

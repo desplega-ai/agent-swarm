@@ -4,7 +4,7 @@
 # Fails on any raw Tailwind color palette literal, arbitrary color literal,
 # `dark:` palette variant, or hardcoded hex (outside the Monaco themes allowlist).
 #
-# Phase 7 of the design-system migration plan; see ui/CLAUDE.md "Theming".
+# Phase 7 of the design-system migration plan; see apps/ui/docs/theming.md.
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ check "Hardcoded hex literals outside src/lib/{monaco-themes,agent-color}.ts" \
 echo ""
 if [ "$VIOLATIONS" -gt 0 ]; then
   echo "${RED}${BOLD}✖ ${VIOLATIONS} design-token check(s) failed.${RESET}"
-  echo "  See ui/CLAUDE.md \"Theming\" — use semantic tokens from src/styles/globals.css."
+  echo "  See apps/ui/docs/theming.md: use semantic tokens from src/styles/globals.css."
   exit 1
 fi
 

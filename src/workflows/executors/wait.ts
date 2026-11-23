@@ -122,7 +122,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
     if (typeof config.filter === "string") {
       // Throws on parse error — caught by BaseExecutor.run wrapper and surfaced
       // as a `failed` ExecutorResult.
-      compileStringFilter(config.filter);
+      await compileStringFilter(config.filter);
     }
 
     const waitId = crypto.randomUUID();

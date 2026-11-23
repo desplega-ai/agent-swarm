@@ -78,6 +78,9 @@ function claudeMdSourcePath(provider: string): string {
   return provider === "claude" ? "~/.claude/CLAUDE.md" : "/workspace/CLAUDE.md";
 }
 
+/** Public guide for the per-repo merge policy and the swarm auto-merger. */
+const REPO_MERGE_POLICY_DOCS_URL = "https://docs.agent-swarm.dev/docs/guides/repo-merge-policy";
+
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
 
@@ -583,15 +586,16 @@ function renderToolsAndSkillsVars(input: {
   };
 }
 
-/** The mergePolicy record's swarm auto-merge line, or "" when the repo has no record. */
+/**
+ * The mergePolicy record's swarm auto-merge line, or "" when the repo has no record.
+ * It points at the live record and the guide instead of printing the threshold,
+ * classes or risky paths: those are tunable and a prompt copy goes stale.
+ */
 function renderSwarmAutoMerge(policy: RepoMergePolicy | undefined): string {
   const auto = policy?.autoMerge;
   if (!auto) return "";
   if (!auto.enabled) return "\n- Swarm auto-merge: off";
-  const parts = [`Swarm auto-merge: on (minimum score ${auto.threshold})`];
-  if (auto.classes.length > 0) parts.push(`classes: ${auto.classes.join(", ")}`);
-  if (auto.riskyPaths.length > 0) parts.push(`never for paths: ${auto.riskyPaths.join(", ")}`);
-  return `\n- ${parts.join("; ")}`;
+  return `\n- Swarm auto-merge: on. The swarm auto-merger merges PRs that pass its scoring. The live threshold, classes and risky paths are in this repo's \`mergePolicy.autoMerge\` (\`get-repos\`); process: ${REPO_MERGE_POLICY_DOCS_URL}`;
 }
 
 /**
@@ -661,7 +665,7 @@ async function renderRepositoryVars(
         section += `If ANY check fails, fix the issue before pushing. Do NOT push code with failing checks.\nDo NOT use \`--no-verify\` or any flag that bypasses git hooks.\n\n`;
       }
       const mergePolicy = await resolveTemplateAsync("system.agent.repository.merge_policy", {
-        agents_may_merge: agentsMayMerge(g) ? "Allowed" : "Not allowed (default)",
+        agents_may_merge: agentsMayMerge(g) ? "allowed" : "not allowed (default)",
         swarm_auto_merge: renderSwarmAutoMerge(g.mergePolicy),
         merge_checks:
           g.mergeChecks.length > 0

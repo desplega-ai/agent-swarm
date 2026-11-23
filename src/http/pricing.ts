@@ -97,6 +97,7 @@ const insertPricing = route({
     400: { description: "Validation error" },
     409: { description: "Duplicate (provider, model, tokenClass, effectiveFrom)" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 const deletePricing = route({
@@ -116,6 +117,7 @@ const deletePricing = route({
     204: { description: "Pricing row deleted" },
     404: { description: "Pricing row not found" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

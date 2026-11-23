@@ -1,0 +1,1018 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video Review: frame-exact feedback for your agent</title>
+<meta name="description" content="Leave comments on a video: ranges on a timeline, marks on the picture, a JSON export for your agent. The video stays on your computer.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://video-edit.agent-swarm.dev/">
+<link rel="icon" type="image/png" href="logo.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agent Swarm">
+<meta property="og:url" content="https://video-edit.agent-swarm.dev/">
+<meta property="og:title" content="Video Review: frame-exact feedback for your agent">
+<meta property="og:description" content="Mark ranges on a timeline, draw on the picture, and hand the notes to your agent as JSON. The video stays on your computer.">
+<meta property="og:image" content="https://video-edit.agent-swarm.dev/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Video Review by Agent Swarm: comment on a video at exact frames, hand the notes to your agent">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Video Review: frame-exact feedback for your agent">
+<meta name="twitter:description" content="Mark ranges on a timeline, draw on the picture, and hand the notes to your agent as JSON. The video stays on your computer.">
+<meta name="twitter:image" content="https://video-edit.agent-swarm.dev/og.png">
+<script>
+// Theme: ?theme=light or ?theme=dark, then the choice saved by the button in the top bar, else the system setting.
+// Set before the first paint.
+(() => {
+  const ok = t => t === 'light' || t === 'dark';
+  const t = new URLSearchParams(location.search).get('theme');
+  let saved = null;
+  try { saved = localStorage.getItem('video-review:theme'); } catch {}
+  document.documentElement.dataset.theme = ok(t) ? t : ok(saved) ? saved : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+})();
+</script>
+<script>
+// Visit counts (Plausible) on the public site only. A clone or a file:// copy makes no request to another origin.
+// The video and the comments are never sent: the page gives Plausible no data about them.
+if (location.hostname === 'video-edit.agent-swarm.dev') {
+  document.head.append(Object.assign(document.createElement('script'), { async: true, src: 'https://plausible.io/js/pa-OiR6agmjcKKXw6J19_izz.js' }));
+  window.plausible = window.plausible || function () { (plausible.q = plausible.q || []).push(arguments); };
+  plausible.init = plausible.init || function (i) { plausible.o = i || {}; };
+  plausible.init();
+}
+</script>
+<style>
+  :root { color-scheme: dark; --bg:#101113; --panel:#191b1f; --panel2:#14161a; --line:#2c2f36; --line2:#3d414b; --text:#e9eaed; --dim:#8d929c; --hint:#5d626c;
+          --accent:#f59e0b; --accent-hover:#fbbf24; --accent-ink:#f59e0b; --btn:#24272d; --btn-hover:#2e323a; --ruler:#15171b; --lane:#22252b; --field:#0d0e10;
+          --pop:#23262c; --kbd:#1d1f24; --head:#fff; --veil:#101113f2; --toast-bg:#fff; --toast-fg:#111; --shadow:0 12px 32px #000b; --c:transparent; --bar:44px; }
+  /* Light theme: the system setting, the button in the top bar, or ?theme=light. The picture area stays black in both themes. */
+  :root[data-theme="light"] { color-scheme: light; --bg:#f5f5f2; --panel:#fff; --panel2:#fafaf8; --line:#e1e1dc; --line2:#c8c8c2; --text:#1b1c1f; --dim:#6a6e77; --hint:#9a9ea7;
+          --accent:#f59e0b; --accent-hover:#fbbf24; --accent-ink:#b45309; --btn:#fff; --btn-hover:#efefeb; --ruler:#efefeb; --lane:#e9e9e4; --field:#fff;
+          --pop:#fff; --kbd:#f2f2ee; --head:#1b1c1f; --veil:#f5f5f2f2; --toast-bg:#1b1c1f; --toast-fg:#fff; --shadow:0 12px 32px #0003; }
+  :root[data-theme="light"] #list .when { color: color-mix(in srgb, var(--c) 55%, #111); }
+  * { box-sizing: border-box; scrollbar-width: none; }
+  *::-webkit-scrollbar { display: none; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         display: grid; grid-template-columns: minmax(0, 1fr) 400px; grid-template-rows: var(--bar) minmax(0, 1fr); overflow: hidden; }
+  main { padding: 14px 16px 12px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 9px; user-select: none; position: relative; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .lbl { color: var(--dim); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+  .dim { color: var(--dim); }
+  .tc { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button, select { background: var(--btn); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button:hover { background: var(--btn-hover); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { border-color: var(--accent); color: var(--accent-ink); }
+  .swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+  .swatch.on { border-color: var(--head); }
+  :root[data-theme="light"] .swatch { box-shadow: 0 0 0 1px var(--line2); }
+  .num { background: var(--c); color: #16181c; font-weight: 700; border-radius: 10px; padding: 0 7px; flex: none; }
+  .sprite { position: absolute; width: 0; height: 0; }
+  .ic { width: 16px; height: 16px; flex: none; }
+
+  /* top bar: the name, the links, the theme button. It stays above the start screen. */
+  #bar { grid-column: 1 / -1; max-width: 100vw; padding: 0 10px 0 12px; display: flex; align-items: center; gap: 14px; white-space: nowrap;
+         background: var(--panel); border-bottom: 1px solid var(--line); }
+  #bar .logo { width: 24px; height: 24px; }
+  #bar b { font-size: 14px; margin-left: -6px; }
+  #bar a { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); text-decoration: none; }
+  #bar a:hover { color: var(--accent-ink); }
+  #theme { width: 30px; height: 28px; padding: 0; display: grid; place-items: center; flex: none; }
+  :root[data-theme="light"] #theme .sun, :root[data-theme="dark"] #theme .moon { display: none; }
+  @media (max-width: 520px) { #bar { gap: 12px; } #bar a span { display: none; } }
+  @media (max-width: 370px) { #bar b { display: none; } }
+
+  /* picture */
+  .stagewrap { flex: 1 1 0; min-height: 90px; container-type: size; display: grid; place-items: center; }
+  .stage { position: relative; width: min(100cqw, 100cqh * var(--ar, 16 / 9)); aspect-ratio: var(--ar, 16 / 9); background: #000; border-radius: 6px; overflow: hidden; }
+  .stage video { width: 100%; height: 100%; display: block; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #fca5a5; background: #000c; }
+  #error[hidden] { display: none; }
+  #here { min-height: 26px; flex-wrap: nowrap; overflow: hidden; }
+  .chip { display: flex; gap: 6px; align-items: center; padding: 2px 9px 2px 2px; border-color: var(--c); border-radius: 13px; max-width: 46%; }
+  .chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip.sel { background: color-mix(in srgb, var(--c) 30%, var(--btn)); }
+
+  /* timeline */
+  #grip { height: 11px; margin: -4px 0; cursor: row-resize; display: grid; place-items: center; flex: none; touch-action: none; }
+  #grip::before { content: ''; width: 56px; height: 3px; border-radius: 2px; background: var(--line2); }
+  #grip:hover::before, #grip.on::before { background: var(--accent); }
+  .tl { position: relative; height: var(--tlh, 150px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; flex: none; }
+  .tl-inner { position: relative; width: 100%; min-height: 100%; display: flex; flex-direction: column; }
+  .ruler { position: sticky; top: 0; z-index: 2; flex: none; height: 24px; border-bottom: 1px solid var(--line); background: var(--ruler); cursor: col-resize; overflow: hidden; }
+  .ruler span { position: absolute; top: 0; bottom: 0; padding-left: 4px; border-left: 1px solid var(--line2); color: var(--dim);
+                font: 11px/24px ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; white-space: nowrap; }
+  .lanes { position: relative; flex: 1 0 auto; cursor: crosshair;
+           background: repeating-linear-gradient(to bottom, transparent 0 29px, var(--lane) 29px 30px); background-position: 0 4px; }
+  .block { position: absolute; height: 24px; min-width: 10px; border-radius: 4px; border: 1px solid var(--c); overflow: hidden; cursor: grab;
+           background: color-mix(in srgb, var(--c) 34%, var(--ruler)); display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+  .block b { background: var(--c); color: #16181c; align-self: stretch; display: grid; place-items: center; padding: 0 6px; flex: none; }
+  .block span { overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+  .block::before, .block::after { content: ''; position: absolute; top: 0; bottom: 0; width: min(7px, 33%); cursor: ew-resize; }
+  .block::before { left: 0; } .block::after { right: 0; }
+  .block.active { box-shadow: 0 0 0 1px var(--c), 0 0 10px color-mix(in srgb, var(--c) 60%, transparent); }
+  .block.hl { filter: brightness(1.4); }
+  .block.sel { outline: 2px solid var(--head); outline-offset: 1px; background: color-mix(in srgb, var(--c) 62%, var(--ruler)); z-index: 2; }
+  #head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--head); pointer-events: none; z-index: 3; }
+  #head::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--head); }
+  #pin { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #22d3ee; pointer-events: none; z-index: 2; }
+  #pin[hidden] { display: none; }
+  #pin::after { content: 'in'; position: absolute; top: 26px; left: 4px; color: #22d3ee; font-size: 11px; }
+  .tlhint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--hint); pointer-events: none; }
+  #helpbox { position: absolute; left: 16px; right: 16px; bottom: calc(var(--tlh, 150px) + 28px); z-index: 10; background: var(--pop); border: 1px solid var(--line2);
+             border-radius: 7px; padding: 10px 12px; line-height: 1.7; box-shadow: var(--shadow); user-select: text; }
+  #helpbox[hidden] { display: none; }
+  kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; background: var(--kbd); }
+
+  /* comments */
+  aside header { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+  aside h1 { font-size: 14px; margin: 0; flex: 1; }
+  #editor { margin: 10px 10px 2px; padding: 9px 10px 10px; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 6px;
+            background: var(--panel2); display: flex; flex-direction: column; gap: 7px; }
+  #editor.editing { border-color: var(--c); background: color-mix(in srgb, var(--c) 9%, var(--panel2)); }
+  #edhead { display: flex; gap: 7px; align-items: center; font-weight: 600; }
+  textarea { width: 100%; min-height: 78px; resize: vertical; background: var(--field); color: var(--text); border: 1px solid var(--line);
+             border-radius: 5px; padding: 8px; font: inherit; }
+  textarea:focus { outline: 1px solid var(--accent); }
+  #list { list-style: none; margin: 0; padding: 8px 10px 14px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  #list li { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 6px; padding: 8px 10px; background: var(--panel2); cursor: pointer; }
+  #list li.active { background: color-mix(in srgb, var(--c) 9%, var(--panel2)); }
+  #list li.hl { border-color: var(--c); }
+  #list li.sel { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); background: color-mix(in srgb, var(--c) 20%, var(--panel2)); }
+  #list .head { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  #list .when { color: var(--c); }
+  #list .now { display: none; margin-left: auto; white-space: nowrap; flex: none; font-size: 11px; color: #16181c; background: var(--c); border-radius: 8px; padding: 0 7px; }
+  #list li.active .now { display: inline; }
+  #list .body { white-space: pre-wrap; word-break: break-word; }
+  #list .acts { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  #list .acts button { padding: 2px 8px; font-size: 12px; }
+  #empty { color: var(--dim); padding: 6px 4px; }
+
+  #menu { position: fixed; z-index: 20; background: var(--pop); border: 1px solid var(--line2); border-radius: 7px; padding: 4px; min-width: 220px;
+          box-shadow: var(--shadow); display: flex; flex-direction: column; }
+  #menu[hidden] { display: none; }
+  #menu button { background: none; border: none; text-align: left; padding: 6px 10px; border-radius: 4px; }
+  #menu button:hover:not(:disabled) { background: var(--accent); color: #16181c; }
+  #menu hr { border: none; border-top: 1px solid var(--line2); margin: 4px 2px; }
+  #toast { position: fixed; right: 16px; bottom: 16px; background: var(--toast-bg); color: var(--toast-fg); padding: 8px 12px; border-radius: 6px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; font-weight: 600; z-index: 30; }
+  #toast.show { opacity: 1; }
+
+  /* start screen: choose a video from this computer */
+  #start { position: fixed; inset: var(--bar) 0 0; z-index: 15; display: grid; place-items: center; padding: 24px; background: var(--veil); }
+  #start[hidden] { display: none; }
+  #drop { width: min(560px, 100%); padding: 34px 30px 26px; border: 2px dashed var(--line2); border-radius: 12px; background: var(--panel);
+          display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+  #start.over #drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+  #drop img { width: 44px; height: 44px; }
+  #drop h2 { margin: 0; font-size: 20px; }
+  #drop p { margin: 0; color: var(--dim); max-width: 44ch; }
+  #choose { background: var(--accent); border-color: var(--accent); color: #16181c; font-weight: 700; font-size: 15px; padding: 9px 20px; }
+  #choose:hover { background: var(--accent-hover); }
+  #private { color: var(--text); }
+  #start footer { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin-top: 6px; }
+  #start a { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); }
+  #start a:hover { color: var(--accent-ink); }
+</style>
+</head>
+<body>
+<!-- Icons, used with <use>. i-swarm is logo.png as a drawing. i-github is the Simple Icons path. -->
+<svg class="sprite" aria-hidden="true">
+  <defs><path id="i-hex" d="M0-163.5 141.6-81.75V81.75L0 163.5-141.6 81.75V-81.75Z"/></defs>
+  <symbol id="i-swarm" viewBox="0 0 512 512">
+    <g transform="translate(256 256)" fill="none" stroke="#ce9010">
+      <use href="#i-hex" stroke-width="21"/>
+      <g stroke-width="13.3" stroke-opacity=".5">
+        <use href="#i-hex" transform="translate(324 0) scale(.995)"/><use href="#i-hex" transform="translate(-324 0) scale(.995)"/>
+        <use href="#i-hex" transform="translate(162 282.3) scale(.995)"/><use href="#i-hex" transform="translate(-162 282.3) scale(.995)"/>
+        <use href="#i-hex" transform="translate(162 -282.3) scale(.995)"/><use href="#i-hex" transform="translate(-162 -282.3) scale(.995)"/>
+      </g>
+    </g>
+  </symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+  <symbol id="i-guide" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+</svg>
+<header id="bar">
+  <svg class="ic logo" aria-hidden="true"><use href="#i-swarm"/></svg>
+  <b>Video Review</b>
+  <a href="https://www.agent-swarm.dev/?utm_source=video-edit&amp;utm_medium=header" target="_blank" rel="noopener">by Agent Swarm</a>
+  <span class="grow"></span>
+  <a href="https://docs.agent-swarm.dev/docs/guides/video-review" target="_blank" rel="noopener" aria-label="Guide" title="Guide"><svg class="ic" aria-hidden="true"><use href="#i-guide"/></svg><span>Guide</span></a>
+  <a href="https://github.com/desplega-ai/agent-swarm" target="_blank" rel="noopener" aria-label="GitHub" title="Agent Swarm on GitHub"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+  <button id="theme"><svg class="ic sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ic moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+</header>
+<main>
+  <div class="stagewrap">
+    <div class="stage" id="stage">
+      <video id="video" playsinline preload="auto"></video>
+      <canvas id="canvas"></canvas>
+      <div id="error" hidden></div>
+    </div>
+  </div>
+
+  <div class="row" id="here"></div>
+
+  <div class="row">
+    <button id="play" title="Space">Play</button>
+    <button id="prev" title="Left arrow">-1 frame</button>
+    <button id="next" title="Right arrow">+1 frame</button>
+    <span id="tc" class="tc">0:00.00</span>
+    <span class="grow"></span>
+    <label class="dim">Speed <select id="speed"><option value="1">1x</option><option value="0.5">0.5x</option><option value="0.25">0.25x</option></select></label>
+    <label class="dim">Volume <input id="vol" type="range" min="0" max="1" step="0.05" value="1" style="width:80px;vertical-align:middle"></label>
+    <select id="source" title="Picture to review"></select>
+    <button id="open" title="Open a video from this computer">Open video</button>
+  </div>
+
+  <div class="row">
+    <span class="lbl">Draw</span>
+    <button class="tool" data-tool="pen" title="P">Pen</button>
+    <button class="tool" data-tool="arrow" title="A">Arrow</button>
+    <button class="tool" data-tool="rect" title="B">Box</button>
+    <span id="colors" class="row" style="gap:5px"></span>
+    <select id="size"><option value="0.0025">Thin</option><option value="0.005" selected>Medium</option><option value="0.009">Thick</option></select>
+    <button id="undo" title="Cmd+Z">Undo</button>
+    <button id="redo" title="Cmd+Shift+Z">Redo</button>
+    <span class="grow"></span>
+    <span class="lbl">Timeline</span>
+    <button id="zout" title="-">-</button>
+    <span id="zoomlbl" class="tc dim">1x</span>
+    <button id="zin" title="+">+</button>
+    <button id="zfit" title="0">Fit</button>
+    <button id="help">Help</button>
+  </div>
+
+  <div id="grip" title="Drag to make the timeline taller or shorter. Double click for the default height."></div>
+
+  <div class="tl" id="tl">
+    <div class="tl-inner" id="tlInner">
+      <div class="ruler" id="ruler"></div>
+      <div class="lanes" id="lanes"></div>
+      <i id="pin" hidden></i><i id="head"></i>
+    </div>
+  </div>
+
+  <div id="helpbox" hidden>
+    <b>Timeline.</b> Drag in the empty area to make a range. Drag a range to move it. Drag its ends to trim it. Right click for options.
+    Click the ruler to move the playhead. Cmd+scroll or pinch to zoom. Drag the bar above the timeline to change its height.<br>
+    <b>Picture.</b> Drag to draw. Click to play or pause.<br>
+    <b>Keys.</b> <kbd>Space</kbd> play, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> frame (with <kbd>Shift</kbd>: second), <kbd>&uarr;</kbd> <kbd>&darr;</kbd> previous or next comment,
+    <kbd>I</kbd> <kbd>O</kbd> range in and out, <kbd>P</kbd> <kbd>A</kbd> <kbd>B</kbd> pen, arrow, box, <kbd>C</kbd> write, <kbd>Cmd+Enter</kbd> finish the comment, <kbd>Delete</kbd> remove, <kbd>Esc</kbd> deselect,
+    <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> zoom, <kbd>Cmd+Z</kbd> undo.
+  </div>
+</main>
+
+<aside id="aside">
+  <header>
+    <h1>Comments <span id="count" class="dim"></span></h1>
+    <button id="copy">Copy JSON</button>
+    <button id="download">Download JSON</button>
+  </header>
+  <div id="editor">
+    <div id="edhead"></div>
+    <textarea id="text"></textarea>
+    <div class="row">
+      <button id="clear">Clear marks</button>
+      <button id="del">Delete</button>
+      <span class="grow"></span>
+      <button id="done" title="Cmd+Enter">Done &#8984;&#9166;</button>
+    </div>
+  </div>
+  <ol id="list"></ol>
+</aside>
+<div id="start" hidden>
+  <div id="drop">
+    <img src="logo.png" alt="Agent Swarm">
+    <h2>Video Review</h2>
+    <p>Mark ranges on the timeline, draw on the picture, write what must change. Then give the JSON to your agent.</p>
+    <button id="choose">Choose a video</button>
+    <p>or drop a file anywhere on this page</p>
+    <label class="dim">Frame rate <select id="fps" title="The length of one frame step. The times in the export are correct with any value."></select></label>
+    <p id="private">The video stays on this computer. Nothing is uploaded.</p>
+    <footer>
+      <a href="https://docs.agent-swarm.dev/docs/guides/video-review" target="_blank" rel="noopener">Guide</a>
+      <a href="https://github.com/desplega-ai/agent-swarm/tree/main/examples/video-review" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-github"/></svg>Source</a>
+      <a href="https://www.agent-swarm.dev/?utm_source=video-edit&amp;utm_medium=start" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-swarm"/></svg>by Agent Swarm</a>
+    </footer>
+  </div>
+  <input id="file" type="file" accept="video/*,.mkv" hidden>
+</div>
+<div id="menu" hidden></div>
+<div id="toast"></div>
+
+<script>
+// Project config: index.html?config=<path to a config.js, relative to this page>. The file sets window.REVIEW.
+// It loads here, before the main script. See README.md.
+(() => {
+  const c = new URLSearchParams(location.search).get('config');
+  if (c) document.write('<script src="' + encodeURI(c) + '"><\/script>');
+})();
+</script>
+
+<script>
+// window.REVIEW = { project, title, fps, sources: [{ version, label, src }] }. A source `src` is relative to the config
+// file. Sources with the same `version` share one timeline and one list of comments.
+// One video without a config: index.html?src=<path>&version=<id>&label=<text>
+// No config and no src: the start screen opens a video file from this computer (see openFile). PROJECT, FPS and
+// STORE are set again for that file.
+const query = new URLSearchParams(location.search);
+const CFG = window.REVIEW || {};
+let PROJECT = CFG.project || 'video';
+const TITLE = CFG.title || 'Video Review';
+let FPS = +query.get('fps') || CFG.fps || 24;
+const configUrl = new URL(query.get('config') || '.', location.href);
+const SOURCES = (CFG.sources || []).map(x => ({ ...x, src: new URL(x.src, configUrl).href }));
+if (query.get('src')) {
+  SOURCES.unshift({ version: query.get('version') || 'custom', label: query.get('label') || query.get('src').split('/').pop(), src: new URL(query.get('src'), location.href).href });
+}
+const START = !SOURCES.length;   // nothing to load: show the start screen
+if (START) SOURCES.push({ version: 'none', label: 'No video', src: 'about:blank' });
+/** A file URL as a plain path, so the reader script can open the video. */
+const localPath = u => { try { const x = new URL(u); return x.protocol === 'file:' ? decodeURIComponent(x.pathname) : u; } catch { return u; } };
+const MARK_COLORS = ['#ff3b30', '#fbbf24', '#22d3ee', '#ffffff'];
+const PALETTE = ['#f59e0b', '#22d3ee', '#a78bfa', '#34d399', '#fb7185', '#60a5fa', '#f472b6', '#a3e635'];   // one colour per comment
+let STORE = PROJECT + '-review:';
+const LANE = 30;
+
+const $ = id => document.getElementById(id);
+const video = $('video'), canvas = $('canvas'), ctx = canvas.getContext('2d'), textEl = $('text'), tl = $('tl'), inner = $('tlInner');
+
+// A comment: { id, inFrame, outFrame (both inside the range), text, strokes: [{ tool, color, width, frame, points }] }
+let source = SOURCES[0];
+let comments = [];
+let selectedId = null, pendingIn = null;
+let tool = 'pen', markColor = MARK_COLORS[0], live = null, stopAt = null, drag = null, zoom = 1;
+let undoStack = [], redoStack = [], textSnapFor = null;
+let blockEls = new Map(), cardEls = new Map(), activeKey = null, listHover = false;
+
+// ---- frames and time ----
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const frames = () => (isFinite(video.duration) ? Math.max(1, Math.round(video.duration * FPS)) : 1);
+const lastFrame = () => frames() - 1;
+const curFrame = () => clamp(Math.floor(video.currentTime * FPS + 1e-4), 0, lastFrame());
+const seekFrame = f => { video.currentTime = (clamp(f, 0, lastFrame()) + 0.5) / FPS; };
+function tc(f) { const s = f / FPS, m = Math.floor(s / 60); return m + ':' + (s - m * 60).toFixed(2).padStart(5, '0'); }
+function clock(f) { const s = Math.round(f / FPS); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+const rangeText = (a, b) => (a === b ? `${tc(a)} \u00b7 f${a}` : `${tc(a)} to ${tc(b)} \u00b7 f${a}-${b}`);
+
+// ---- comments ----
+const byId = id => comments.find(c => c.id === id);
+const colorOf = c => PALETTE[(c.id - 1) % PALETTE.length];
+const numOf = c => comments.indexOf(c) + 1;
+const inRange = (c, f) => f >= c.inFrame && f <= c.outFrame;
+const anchor = c => clamp(c.strokes[0]?.frame ?? c.inFrame, c.inFrame, c.outFrame);   // the frame to show for a comment
+const marksText = c => (c.strokes.length ? c.strokes.length + (c.strokes.length === 1 ? ' mark' : ' marks') : '');
+const sortComments = () => comments.sort((a, b) => a.inFrame - b.inFrame || a.outFrame - b.outFrame || a.id - b.id);
+
+function load() {
+  try { comments = JSON.parse(localStorage.getItem(STORE + source.version) || '[]'); } catch { comments = []; }
+  sortComments();
+}
+function save() {
+  try { localStorage.setItem(STORE + source.version, JSON.stringify(comments)); } catch { toast('Could not save in this browser. Export the JSON.'); }
+}
+function snapshot() { undoStack.push(JSON.stringify(comments)); if (undoStack.length > 100) undoStack.shift(); redoStack = []; }
+function restore(from, to, none) {
+  if (!from.length) { toast(none); return; }
+  to.push(JSON.stringify(comments));
+  comments = JSON.parse(from.pop());
+  if (!byId(selectedId)) selectedId = null;
+  textSnapFor = null;
+  save(); renderAll();
+}
+const undo = () => restore(undoStack, redoStack, 'Nothing to undo');
+const redo = () => restore(redoStack, undoStack, 'Nothing to redo');
+
+function addComment(a, b, text = '') {
+  const c = { id: Math.max(0, ...comments.map(x => x.id)) + 1, inFrame: Math.min(a, b), outFrame: Math.max(a, b), text, strokes: [] };
+  comments.push(c); sortComments();
+  return c;
+}
+function commit() { sortComments(); save(); renderAll(); }
+function change(fn) { snapshot(); fn(); commit(); }
+function create(a, b, focus = true) {
+  snapshot();
+  const c = addComment(a, b);
+  commit(); select(c.id);
+  if (focus) textEl.focus();
+  return c;
+}
+function removeComment(c) {
+  snapshot();
+  comments = comments.filter(x => x !== c);
+  if (selectedId === c.id) selectedId = null;
+  commit();
+}
+
+// The selected comment is the one the text box and new marks belong to. The playhead is always inside its range:
+// when the playhead leaves, the selection ends (see tick). `to`: a frame, 'anchor', or nothing (move only if outside).
+function select(id, to) {
+  const c = byId(id) || null, changed = (c ? c.id : null) !== selectedId;
+  selectedId = c ? c.id : null;
+  if (changed) textSnapFor = null;
+  if (c && (to != null || !inRange(c, curFrame()))) {
+    video.pause(); stopAt = null;
+    seekFrame(typeof to === 'number' ? clamp(to, c.inFrame, c.outFrame) : anchor(c));
+  }
+  renderSelection(changed);
+}
+function finish() {   // Cmd+Enter or the Done button
+  const c = byId(selectedId);
+  if (!c) { toast('Type or draw first'); return; }
+  const n = numOf(c);
+  textEl.blur(); select(null);
+  toast(`Comment ${n} added`);
+}
+function playRange(c) {
+  select(c.id, c.inFrame);
+  if (c.outFrame > c.inFrame) { stopAt = c.outFrame; video.play(); }
+}
+function hop(d) {   // previous or next comment
+  if (!comments.length) return;
+  const i = comments.findIndex(c => c.id === selectedId), f = curFrame();
+  let j;
+  if (i >= 0) j = clamp(i + d, 0, comments.length - 1);
+  else if (d > 0) j = comments.findIndex(c => c.inFrame > f);
+  else j = comments.findLastIndex(c => c.inFrame <= f);
+  if (j >= 0) select(comments[j].id, 'anchor');
+}
+function markIn() {
+  const c = byId(selectedId), f = curFrame();
+  if (c) { if (f > c.inFrame) change(() => { c.inFrame = f; }); return; }
+  pendingIn = f; renderPin(); toast('In point set. Go to the last frame and press O.');
+}
+function markOut() {
+  const c = byId(selectedId), f = curFrame();
+  if (c) { if (f < c.outFrame) change(() => { c.outFrame = f; }); return; }
+  create(pendingIn ?? f, f, video.paused);   // while it plays, keep playing: the text can come later
+  pendingIn = null; renderPin();
+}
+
+// ---- drawing ----
+function fit() {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(r.width * d));
+  canvas.height = Math.max(1, Math.round(r.height * d));
+  redraw();
+}
+function paint(s) {
+  const W = canvas.width, H = canvas.height, p = s.points.map(([x, y]) => [x * W, y * H]);
+  if (!p.length) return;
+  const lw = Math.max(2, s.width * W), a = p[0], b = p[p.length - 1];
+  for (const [style, extra] of [['rgba(0,0,0,.55)', lw * 0.9], [s.color, 0]]) {   // dark edge first, so marks read on bright frames
+    ctx.strokeStyle = style; ctx.lineWidth = lw + extra; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (s.tool === 'rect') {
+      ctx.rect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
+    } else if (s.tool === 'arrow') {
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), h = Math.max(lw * 4, 14);
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      ctx.moveTo(b[0] - h * Math.cos(ang - 0.45), b[1] - h * Math.sin(ang - 0.45));
+      ctx.lineTo(b[0], b[1]);
+      ctx.lineTo(b[0] - h * Math.cos(ang + 0.45), b[1] - h * Math.sin(ang + 0.45));
+    } else {
+      ctx.moveTo(a[0], a[1]);
+      for (const q of p.slice(1)) ctx.lineTo(q[0], q[1]);
+    }
+    ctx.stroke();
+  }
+}
+function badge(c) {   // the comment's number, next to its first mark
+  const W = canvas.width, H = canvas.height, r = Math.max(11, W * 0.012), [x, y] = c.strokes[0].points[0];
+  const cx = clamp(x * W - r * 1.5, r + 2, W - r - 2), cy = clamp(y * H - r * 1.5, r + 2, H - r - 2);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = colorOf(c); ctx.fill();
+  ctx.lineWidth = Math.max(2, r * 0.16); ctx.strokeStyle = '#000'; ctx.stroke();
+  ctx.fillStyle = '#16181c'; ctx.font = `700 ${Math.round(r * 1.2)}px -apple-system, "Segoe UI", sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(numOf(c), cx, cy + r * 0.06);
+}
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const f = curFrame();
+  for (const c of comments) {
+    if (!inRange(c, f) || !c.strokes.length) continue;
+    ctx.globalAlpha = selectedId == null || c.id === selectedId ? 1 : 0.4;
+    c.strokes.forEach(paint);
+    badge(c);
+  }
+  ctx.globalAlpha = 1;
+  if (live && live.moved) paint(live);
+}
+function pos(e) {
+  const r = canvas.getBoundingClientRect(), n = v => +clamp(v, 0, 1).toFixed(4);
+  return [n((e.clientX - r.left) / r.width), n((e.clientY - r.top) / r.height)];
+}
+canvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.ctrlKey) return;
+  canvas.setPointerCapture(e.pointerId);
+  live = { tool, color: markColor, width: +$('size').value, frame: curFrame(), points: [pos(e)], moved: false };
+});
+canvas.addEventListener('pointermove', e => {
+  if (!live) return;
+  const p = pos(e), a = live.points[0], l = live.points[live.points.length - 1];
+  if (!live.moved) {
+    if (Math.hypot(p[0] - a[0], p[1] - a[1]) < 0.006) return;
+    live.moved = true; video.pause(); stopAt = null; live.frame = curFrame();
+  }
+  if (live.tool !== 'pen') live.points[1] = p;
+  else if (Math.hypot(p[0] - l[0], p[1] - l[1]) > 0.0015) live.points.push(p);
+  redraw();
+});
+canvas.addEventListener('pointerup', () => {
+  if (!live) return;
+  const s = live; live = null;
+  if (!s.moved) { toggle(); return; }   // a click on the picture is play or pause
+  delete s.moved;
+  snapshot();
+  let c = byId(selectedId);
+  if (!c || !inRange(c, s.frame)) c = addComment(s.frame, s.frame);
+  c.strokes.push(s);
+  commit(); select(c.id);
+});
+canvas.addEventListener('pointercancel', () => { live = null; redraw(); });
+
+// ---- timeline ----
+function frameAt(clientX) {
+  const r = inner.getBoundingClientRect();
+  return clamp(Math.floor((clientX - r.left) / r.width * frames()), 0, lastFrame());
+}
+function place(b, c) {
+  b.style.left = (c.inFrame / frames() * 100) + '%';
+  b.style.width = ((c.outFrame - c.inFrame + 1) / frames() * 100) + '%';
+}
+function renderRuler() {
+  const ruler = $('ruler'), N = frames(), ppf = inner.offsetWidth / N;
+  const step = [1, 2, 6, 12, 24, 48, 120, 240, 360, 720, 1440].find(s => s * ppf >= 70) || 1440;
+  ruler.replaceChildren();
+  for (let f = 0; f < N; f += step) {
+    const s = el('span', { textContent: (N - f) * ppf < 44 ? '' : step < FPS ? tc(f) : clock(f) });
+    s.style.left = (f / N * 100) + '%';
+    ruler.append(s);
+  }
+}
+function renderBlocks() {
+  const lanes = $('lanes'), W = inner.offsetWidth, N = frames(), ends = [];
+  lanes.replaceChildren(); blockEls = new Map();
+  for (const c of comments) {
+    const x0 = c.inFrame / N * W, x1 = Math.max(x0 + 10, (c.outFrame + 1) / N * W);
+    let lane = ends.findIndex(e => e + 2 <= x0);   // overlapping ranges go to the next lane
+    if (lane < 0) lane = ends.length;
+    ends[lane] = x1;
+    const b = el('div', { className: 'block', title: c.text }, el('b', { textContent: numOf(c) }), el('span', { textContent: c.text.replace(/\s+/g, ' ') }));
+    b.dataset.id = c.id;
+    b.style.setProperty('--c', colorOf(c));
+    b.style.top = (4 + lane * LANE + 2) + 'px';
+    place(b, c);
+    b.onmouseenter = () => hover(c.id, true);
+    b.onmouseleave = () => hover(c.id, false);
+    lanes.append(b); blockEls.set(c.id, b);
+  }
+  lanes.style.minHeight = ((ends.length + 1) * LANE + 8) + 'px';   // always one empty lane to start a new range
+  if (!comments.length) lanes.append(el('div', { className: 'tlhint', textContent: 'Drag here to make a range' }));
+}
+function renderPin() {
+  $('pin').hidden = pendingIn == null;
+  if (pendingIn != null) $('pin').style.left = ((pendingIn + 0.5) / frames() * 100) + '%';
+}
+function follow() {   // keep the playhead in view when the timeline is zoomed
+  const x = (curFrame() + 0.5) / frames() * inner.offsetWidth;
+  if (x < tl.scrollLeft + 10 || x > tl.scrollLeft + tl.clientWidth - 30) tl.scrollLeft = x - tl.clientWidth * 0.2;
+}
+function setZoom(z, clientX) {
+  z = clamp(z, 1, 32);
+  const r = tl.getBoundingClientRect();
+  let ax = clientX;
+  if (ax == null) {   // keep the playhead in place when it is in view
+    const hx = (curFrame() + 0.5) / frames() * inner.offsetWidth - tl.scrollLeft;
+    ax = r.left + (hx >= 0 && hx <= r.width ? hx : r.width / 2);
+  }
+  const frac = (tl.scrollLeft + ax - r.left) / inner.offsetWidth;
+  zoom = z;
+  inner.style.width = (zoom * 100) + '%';
+  tl.scrollLeft = frac * inner.offsetWidth - (ax - r.left);
+  $('zoomlbl').textContent = (zoom < 10 ? zoom.toFixed(1).replace('.0', '') : Math.round(zoom)) + 'x';
+  renderRuler(); renderBlocks(); renderStates();
+}
+tl.addEventListener('wheel', e => {
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.01), e.clientX); }
+  else if (zoom > 1 && !e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); tl.scrollLeft += e.deltaY; }
+}, { passive: false });
+
+inner.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.ctrlKey) return;   // right click and Ctrl+click open the menu
+  const f = frameAt(e.clientX), block = e.target.closest('.block');
+  inner.setPointerCapture(e.pointerId);
+  video.pause(); stopAt = null;
+  if (block) {
+    const c = byId(+block.dataset.id), r = block.getBoundingClientRect(), z = Math.min(7, r.width / 3), x = e.clientX - r.left;
+    drag = { kind: x < z ? 'in' : x > r.width - z ? 'out' : 'move', id: c.id, x: e.clientX, f, a: c.inFrame, b: c.outFrame, marks: c.strokes.map(s => s.frame), moved: false };
+  } else if (e.target.closest('.ruler')) {
+    drag = { kind: 'scrub' }; seekFrame(f);
+  } else {
+    drag = { kind: 'create', x: e.clientX, f, moved: false };
+  }
+});
+inner.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const f = frameAt(e.clientX);
+  if (drag.kind === 'scrub') { seekFrame(f); return; }
+  if (!drag.moved) {
+    if (Math.abs(e.clientX - drag.x) < 4) return;
+    drag.moved = true; snapshot();
+    if (drag.kind === 'create') { drag.id = addComment(drag.f, drag.f).id; renderAll(); }
+    select(drag.id);
+  }
+  const c = byId(drag.id), last = lastFrame();
+  let show;   // the picture follows the edge that moves
+  if (drag.kind === 'create') { c.inFrame = Math.min(drag.f, f); c.outFrame = Math.max(drag.f, f); show = f; }
+  else if (drag.kind === 'in') { c.inFrame = clamp(f, 0, c.outFrame); show = c.inFrame; }
+  else if (drag.kind === 'out') { c.outFrame = clamp(f, c.inFrame, last); show = c.outFrame; }
+  else {
+    const d = clamp(drag.a + f - drag.f, 0, last - (drag.b - drag.a)) - drag.a;
+    c.inFrame = drag.a + d; c.outFrame = drag.b + d; show = c.inFrame;
+    c.strokes.forEach((s, i) => { s.frame = drag.marks[i] + d; });   // marks move with their range
+  }
+  place(blockEls.get(c.id), c);
+  cardEls.get(c.id).querySelector('.when').textContent = rangeText(c.inFrame, c.outFrame);
+  seekFrame(show);
+  renderEdHead();
+});
+function endDrag(e) {
+  if (!drag) return;
+  const d = drag, f = frameAt(e.clientX);
+  drag = null;
+  if (d.kind === 'scrub') return;
+  if (d.moved) { commit(); select(d.id); if (d.kind === 'create') textEl.focus(); }
+  else if (d.kind === 'create') { seekFrame(d.f); select(null); }   // a click in the empty area moves the playhead
+  else select(d.id, f);                                             // a click on a range selects it
+}
+inner.addEventListener('pointerup', endDrag);
+inner.addEventListener('pointercancel', endDrag);
+
+inner.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const f = frameAt(e.clientX), block = e.target.closest('.block');
+  video.pause(); stopAt = null;
+  if (block) {
+    const c = byId(+block.dataset.id), at = clamp(f, c.inFrame, c.outFrame);
+    select(c.id, at);
+    showMenu(e.clientX, e.clientY, [
+      ['Play range', () => playRange(c)],
+      ['Go to start', () => seekFrame(c.inFrame)],
+      ['Go to end', () => seekFrame(c.outFrame)],
+      null,
+      [`Start here (${tc(at)})`, () => change(() => { c.inFrame = at; }), at > c.inFrame],
+      [`End here (${tc(at)})`, () => change(() => { c.outFrame = at; }), at < c.outFrame],
+      [`One frame only (${tc(at)})`, () => change(() => { c.inFrame = c.outFrame = at; }), c.outFrame > c.inFrame],
+      null,
+      ['Write comment', () => textEl.focus()],
+      ['Clear marks', () => change(() => { c.strokes = []; }), c.strokes.length > 0],
+      ['Delete comment', () => removeComment(c)],
+    ]);
+  } else {
+    const p = curFrame();
+    showMenu(e.clientX, e.clientY, [
+      [`Add comment here (${tc(f)})`, () => create(f, f)],
+      [`Add range: playhead to here (${tc(Math.min(p, f))} to ${tc(Math.max(p, f))})`, () => create(p, f), p !== f],
+      null,
+      ['Zoom in here', () => setZoom(zoom * 2, e.clientX)],
+      ['Fit timeline', () => setZoom(1)],
+    ]);
+  }
+});
+function showMenu(x, y, entries) {
+  const m = $('menu');
+  m.replaceChildren(...entries.map(it => {
+    if (!it) return el('hr');
+    const b = el('button', { textContent: it[0], disabled: it[2] === false });
+    b.onclick = () => { hideMenu(); it[1](); };
+    return b;
+  }));
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+}
+const hideMenu = () => { $('menu').hidden = true; };
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest('#menu')) hideMenu();
+  if (!e.target.closest('#helpbox, #help')) $('helpbox').hidden = true;
+}, true);
+
+// The bar above the timeline sets its height. The picture takes the room that is left.
+const TLH = 'video-review:timeline-height', grip = $('grip');
+function setTimelineHeight(h, keep) {
+  h = clamp(Math.round(h), 70, Math.round(innerHeight * 0.6));
+  document.documentElement.style.setProperty('--tlh', h + 'px');
+  if (keep) { try { localStorage.setItem(TLH, h); } catch {} }
+}
+grip.addEventListener('pointerdown', e => {
+  grip.setPointerCapture(e.pointerId); grip.classList.add('on');
+  grip.dataset.y = e.clientY; grip.dataset.h = tl.offsetHeight;
+});
+grip.addEventListener('pointermove', e => { if (grip.hasPointerCapture(e.pointerId)) setTimelineHeight(+grip.dataset.h + (+grip.dataset.y - e.clientY), true); });
+grip.addEventListener('pointerup', () => grip.classList.remove('on'));
+grip.addEventListener('dblclick', () => setTimelineHeight(150, true));
+setTimelineHeight(+localStorage.getItem(TLH) || 150);
+
+// ---- render ----
+function el(tag, props, ...kids) {
+  const n = Object.assign(document.createElement(tag), props || {});
+  n.append(...kids);
+  return n;
+}
+function hover(id, on) {
+  blockEls.get(id)?.classList.toggle('hl', on);
+  cardEls.get(id)?.classList.toggle('hl', on);
+}
+function renderTransport() {
+  const f = curFrame();
+  $('tc').textContent = `${tc(f)}  frame ${f} / ${lastFrame()}`;
+  $('play').textContent = video.paused ? 'Play' : 'Pause';
+  $('head').style.left = ((f + 0.5) / frames() * 100) + '%';
+  if (selectedId == null) renderEdHead();
+}
+function renderEdHead() {
+  const c = byId(selectedId), f = curFrame(), head = $('edhead');
+  head.replaceChildren(...(c
+    ? [el('span', { className: 'num', textContent: numOf(c) }), el('span', { className: 'tc', textContent: rangeText(c.inFrame, c.outFrame) })]
+    : [el('span', { textContent: 'New comment' }), el('span', { className: 'tc dim', textContent: `at ${tc(f)} \u00b7 f${f}` })]));
+}
+function renderList() {
+  const list = $('list');
+  list.replaceChildren(); cardEls = new Map();
+  $('count').textContent = comments.length ? '(' + comments.length + ')' : '';
+  if (!comments.length) list.append(el('div', { id: 'empty', textContent: 'No comments yet. Draw on the picture, type in the box above, or drag in the timeline.' }));
+  for (const c of comments) {
+    const li = el('li', null,
+      el('div', { className: 'head' },
+        el('span', { className: 'num', textContent: numOf(c) }),
+        el('span', { className: 'when tc', textContent: rangeText(c.inFrame, c.outFrame) }),
+        el('span', { className: 'now', textContent: 'playhead' })),
+      el('div', { className: 'body' + (c.text ? '' : ' dim'), textContent: c.text || (c.strokes.length ? 'Drawing only' : 'No text yet') }),
+      el('div', { className: 'acts' },
+        el('button', { textContent: 'Play', onclick: e => { e.stopPropagation(); playRange(c); } }),
+        el('button', { textContent: 'Delete', onclick: e => { e.stopPropagation(); removeComment(c); } }),
+        el('span', { className: 'dim', textContent: marksText(c) })));
+    li.style.setProperty('--c', colorOf(c));
+    li.onclick = () => select(c.id, 'anchor');
+    li.onmouseenter = () => hover(c.id, true);
+    li.onmouseleave = () => hover(c.id, false);
+    list.append(li); cardEls.set(c.id, li);
+  }
+}
+// Which comments hold the playhead: shown on the timeline, in the list, and in the strip under the picture.
+function renderActive(force) {
+  const f = curFrame(), act = comments.filter(c => inRange(c, f)), key = act.map(c => c.id).join(',');
+  if (key === activeKey && !force) return;
+  const first = key !== activeKey;
+  activeKey = key;
+  blockEls.forEach((b, id) => b.classList.toggle('active', act.some(c => c.id === id)));
+  cardEls.forEach((li, id) => li.classList.toggle('active', act.some(c => c.id === id)));
+  const here = $('here');
+  here.replaceChildren(el('span', { className: 'lbl', textContent: 'At this frame' }));
+  if (!act.length) here.append(el('span', { className: 'dim', textContent: 'no comment' }));
+  for (const c of act) {
+    const chip = el('button', { className: 'chip' + (c.id === selectedId ? ' sel' : ''), title: c.text, onclick: () => select(c.id) },
+      el('span', { className: 'num', textContent: numOf(c) }), el('span', { textContent: c.text.replace(/\s+/g, ' ') || (c.strokes.length ? 'Drawing only' : 'No text yet') }));
+    chip.style.setProperty('--c', colorOf(c));
+    here.append(chip);
+  }
+  if (first && act.length && selectedId == null && !listHover) cardEls.get(act[0].id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function renderStates() {
+  blockEls.forEach((b, id) => b.classList.toggle('sel', id === selectedId));
+  cardEls.forEach((li, id) => li.classList.toggle('sel', id === selectedId));
+  renderActive(true);
+}
+function renderSelection(scroll) {
+  const c = byId(selectedId), ed = $('editor');
+  renderStates();
+  ed.classList.toggle('editing', !!c);
+  ed.style.setProperty('--c', c ? colorOf(c) : 'transparent');
+  renderEdHead();
+  if (textEl.value !== (c ? c.text : '')) textEl.value = c ? c.text : '';
+  textEl.placeholder = c ? 'Write the comment. Drag on the picture to add marks. Cmd+Enter when done.' : 'Type here or drag on the picture to start a comment at this frame. For a range, drag in the timeline.';
+  $('del').disabled = $('done').disabled = !c;
+  $('clear').disabled = !c || !c.strokes.length;
+  redraw();
+  if (c && scroll) {
+    cardEls.get(c.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const x0 = c.inFrame / frames() * inner.offsetWidth, x1 = (c.outFrame + 1) / frames() * inner.offsetWidth;
+    if (x1 < tl.scrollLeft + 10 || x0 > tl.scrollLeft + tl.clientWidth - 10) tl.scrollLeft = x0 - tl.clientWidth * 0.2;
+  }
+}
+function renderAll() { renderRuler(); renderBlocks(); renderList(); renderPin(); renderTransport(); renderSelection(false); }
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg; $('toast').classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2200);
+}
+
+// ---- text ----
+textEl.addEventListener('focus', () => { video.pause(); stopAt = null; });
+textEl.addEventListener('blur', () => { textSnapFor = null; });
+textEl.addEventListener('input', () => {
+  let c = byId(selectedId);
+  if (!c) {   // typing with nothing selected starts a comment at the current frame
+    if (!textEl.value.trim()) return;
+    snapshot();
+    c = addComment(curFrame(), curFrame(), textEl.value);
+    selectedId = c.id; textSnapFor = c.id;
+    commit();
+    cardEls.get(c.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return;
+  }
+  if (textSnapFor !== c.id) { snapshot(); textSnapFor = c.id; }
+  c.text = textEl.value;
+  commit();
+});
+
+// ---- export ----
+// inFrame and outFrame are both inside the range. startSec is the start of the in frame, endSec the end of the out frame.
+// Stroke points are fractions of the picture: [0,0] top left, [1,1] bottom right. `frame` is where the mark was drawn.
+function exportData() {
+  return {
+    tool: 'video-review', project: PROJECT, version: source.version, video: source.file || localPath(source.src).split('/').pop(),
+    src: source.file || localPath(source.src), fps: FPS, frames: frames(),   // a chosen file has a name only: a page cannot read its path
+    exportedAt: new Date().toISOString(),
+    comments: comments.map((c, i) => ({
+      n: i + 1, in: tc(c.inFrame), out: tc(c.outFrame), inFrame: c.inFrame, outFrame: c.outFrame,
+      startSec: +(c.inFrame / FPS).toFixed(3), endSec: +((c.outFrame + 1) / FPS).toFixed(3), text: c.text, strokes: c.strokes,
+    })),
+  };
+}
+async function copyJson() {
+  const s = JSON.stringify(exportData(), null, 1);
+  try { await navigator.clipboard.writeText(s); }
+  catch {
+    const t = el('textarea', { value: s }); document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
+  }
+  toast(`Copied ${comments.length} comments`);
+}
+function downloadJson() {
+  const a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(exportData(), null, 1)], { type: 'application/json' })), download: `${PROJECT}-feedback-${source.version}.json` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${comments.length} comments to Downloads`);
+}
+
+// ---- wiring ----
+function setSource(i) {
+  const t = video.currentTime || 0, sameTimeline = SOURCES[i].version === source.version;
+  source = SOURCES[i];
+  $('error').hidden = true;
+  video.src = source.src;
+  video.addEventListener('loadedmetadata', () => {
+    // the stage takes the shape of the video, so a mark at [x, y] is the same share of the picture for any shape
+    if (video.videoWidth && video.videoHeight) $('stage').style.setProperty('--ar', video.videoWidth / video.videoHeight);
+    if (sameTimeline && t) video.currentTime = Math.min(t, video.duration);
+    fit(); renderAll();
+  }, { once: true });
+  if (!sameTimeline) { selectedId = null; pendingIn = null; undoStack = []; redoStack = []; }
+  load(); renderAll();
+  document.title = TITLE + ': ' + source.label;
+}
+video.addEventListener('error', () => {
+  $('error').textContent = source.file ? `Cannot play ${source.file}. Use an MP4 (H.264) or a WebM file.` : 'Cannot load ' + localPath(source.src);
+  $('error').hidden = false;
+});
+const fillSources = () => $('source').replaceChildren(...SOURCES.map((s, i) => el('option', { value: i, textContent: s.label })));
+fillSources();
+
+// ---- a video file from this computer ----
+// The file is read through a blob URL. It does not leave the browser. Comments are saved under the file name.
+let fileUrl = null;
+const RATES = [24, 25, 30, 50, 60];
+if (query.get('fps') && !RATES.includes(FPS)) RATES.push(FPS);
+RATES.forEach(r => $('fps').append(el('option', { value: r, textContent: r + ' fps', selected: r === (+query.get('fps') || 30) })));
+function openFile(file) {
+  if (!file) return;
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = URL.createObjectURL(file);
+  FPS = +$('fps').value;
+  PROJECT = file.name.replace(/\.[^.]+$/, '') || 'video';
+  STORE = PROJECT + '-review:';
+  SOURCES.splice(0, SOURCES.length, { version: query.get('version') || 'v1', label: file.name, src: fileUrl, file: file.name });
+  fillSources();
+  source = {};   // not the same timeline as the video before
+  $('start').hidden = true;
+  setSource(0);
+}
+$('choose').onclick = () => $('file').click();
+$('file').onchange = e => { openFile(e.target.files[0]); e.target.value = ''; };
+$('open').onclick = () => { video.pause(); $('start').hidden = false; };
+let dragDepth = 0;
+const hasFile = e => [...(e.dataTransfer?.types || [])].includes('Files');
+document.addEventListener('dragenter', e => { if (hasFile(e)) { dragDepth++; $('start').hidden = false; $('start').classList.add('over'); } });
+document.addEventListener('dragleave', e => {
+  if (!hasFile(e) || --dragDepth > 0) return;
+  dragDepth = 0; $('start').classList.remove('over');
+  if (fileUrl || !START) $('start').hidden = true;
+});
+document.addEventListener('dragover', e => { if (hasFile(e)) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  if (!hasFile(e)) return;
+  e.preventDefault(); dragDepth = 0; $('start').classList.remove('over');
+  openFile(e.dataTransfer.files[0]);
+});
+$('source').onchange = e => { setSource(+e.target.value); e.target.blur(); };
+$('speed').onchange = e => { video.playbackRate = +e.target.value; e.target.blur(); };
+$('size').onchange = e => e.target.blur();
+$('vol').oninput = e => { video.volume = +e.target.value; };
+$('vol').onchange = e => e.target.blur();
+const toggle = () => { stopAt = null; video.paused ? video.play() : video.pause(); };
+const step = d => { video.pause(); stopAt = null; seekFrame(curFrame() + d); };
+$('play').onclick = toggle;
+$('prev').onclick = () => step(-1);
+$('next').onclick = () => step(1);
+$('undo').onclick = undo;
+$('redo').onclick = redo;
+$('zin').onclick = () => setZoom(zoom * 1.5);
+$('zout').onclick = () => setZoom(zoom / 1.5);
+$('zfit').onclick = () => setZoom(1);
+$('help').onclick = () => { $('helpbox').hidden = !$('helpbox').hidden; };
+$('clear').onclick = () => { const c = byId(selectedId); if (c) change(() => { c.strokes = []; }); };
+$('del').onclick = () => { const c = byId(selectedId); if (c) removeComment(c); };
+$('done').onclick = finish;
+$('copy').onclick = copyJson;
+$('download').onclick = downloadJson;
+// The button in the top bar changes the theme and saves the choice. ?theme= in the URL comes first on the next load (see the head).
+function setTheme(t, keep) {
+  document.documentElement.dataset.theme = t;
+  $('theme').title = $('theme').ariaLabel = `Change to the ${t === 'light' ? 'dark' : 'light'} theme`;
+  if (keep) { try { localStorage.setItem('video-review:theme', t); } catch {} }
+}
+$('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light', true);
+setTheme(document.documentElement.dataset.theme);
+$('aside').onmouseenter = () => { listHover = true; };
+$('aside').onmouseleave = () => { listHover = false; };
+function setTool(t) { tool = t; document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); }
+document.querySelectorAll('.tool').forEach(b => { b.onclick = () => setTool(b.dataset.tool); });
+MARK_COLORS.forEach(c => {
+  const b = el('button', { className: 'swatch', title: c });
+  b.style.background = c;
+  b.onclick = () => { markColor = c; document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('on', x === b)); };
+  $('colors').append(b);
+});
+$('colors').firstChild.classList.add('on');
+setTool('pen');
+document.addEventListener('click', e => e.target.closest('button')?.blur());   // keep Space for play, not for the last button
+
+document.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey, typing = e.target.matches('textarea, input, select');
+  if (mod && e.key === 'Enter') { finish(); e.preventDefault(); return; }
+  if (e.key === 'Escape') {
+    if (!$('menu').hidden) hideMenu();
+    else if (!$('helpbox').hidden) $('helpbox').hidden = true;
+    else if (!$('start').hidden) { if (fileUrl || !START) $('start').hidden = true; }
+    else if (typing) e.target.blur();
+    else if (pendingIn != null) { pendingIn = null; renderPin(); }
+    else select(null);
+    return;
+  }
+  if (typing) return;
+  if (mod && e.key.toLowerCase() === 'z') { e.shiftKey ? redo() : undo(); e.preventDefault(); return; }
+  if (mod || e.altKey) return;
+  const sel = byId(selectedId), del = () => { if (sel) removeComment(sel); };
+  const keys = {
+    ' ': toggle, ArrowLeft: () => step(e.shiftKey ? -FPS : -1), ArrowRight: () => step(e.shiftKey ? FPS : 1),
+    ArrowUp: () => hop(-1), ArrowDown: () => hop(1), i: markIn, o: markOut, Backspace: del, Delete: del,
+    p: () => setTool('pen'), a: () => setTool('arrow'), b: () => setTool('rect'),
+    '+': () => setZoom(zoom * 1.5), '=': () => setZoom(zoom * 1.5), '-': () => setZoom(zoom / 1.5), 0: () => setZoom(1),
+  };
+  const run = keys[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if (run) { run(); e.preventDefault(); }
+});
+// C moves to the comment box on key release, so the letter itself is not typed into the box
+document.addEventListener('keyup', e => {
+  if (e.key.toLowerCase() === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.matches('textarea, input, select')) textEl.focus();
+});
+
+let lastF = -1, lastPaused = null;
+function tick() {
+  let f = curFrame();
+  if (stopAt != null && !video.paused && f >= stopAt) { video.pause(); seekFrame(stopAt); stopAt = null; f = curFrame(); }
+  const sel = byId(selectedId);
+  if (sel && !drag && !inRange(sel, f)) select(null);   // the playhead left the selected range
+  if (f !== lastF || video.paused !== lastPaused) {
+    lastF = f; lastPaused = video.paused;
+    renderTransport(); renderActive(); redraw();
+    if (!drag) follow();
+  }
+  requestAnimationFrame(tick);
+}
+new ResizeObserver(fit).observe($('stage'));
+new ResizeObserver(() => { renderRuler(); renderBlocks(); renderStates(); }).observe(tl);
+if (START) { $('start').hidden = false; renderAll(); } else setSource(0);
+tick();
+</script>
+</body>
+</html>

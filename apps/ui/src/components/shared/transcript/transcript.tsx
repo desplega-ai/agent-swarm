@@ -581,6 +581,8 @@ export function TranscriptUserMessage({
         <div
           className={cn(
             "relative w-full max-w-full min-w-0 overflow-hidden rounded-2xl px-3.5 py-2 text-base leading-relaxed whitespace-pre-wrap wrap-anywhere md:w-fit md:min-w-32 md:text-sm",
+            // Monaco measures its parent. Give fenced code the available column width.
+            "has-[[data-monaco-snippet]]:w-full",
             align === "end"
               ? "rounded-tr-sm bg-muted"
               : "rounded-tl-sm border border-border bg-card",

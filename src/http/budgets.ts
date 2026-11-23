@@ -101,6 +101,7 @@ const upsertBudgetRoute = route({
     200: { description: "Budget upserted", schema: BudgetSchema },
     400: { description: "Validation error" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 const deleteBudgetRoute = route({
@@ -114,6 +115,7 @@ const deleteBudgetRoute = route({
     204: { description: "Budget deleted" },
     404: { description: "Budget not configured" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

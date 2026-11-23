@@ -57,6 +57,13 @@ check 1 'author gate passed (listed owner)'
 export VERCEL_GIT_PREVIOUS_SHA
 VERCEL_GIT_PREVIOUS_SHA=$(git rev-parse HEAD)
 check 0 'inputs unchanged'
+# A project with no earlier deployment has no previous SHA. On main the merge-base is HEAD: build.
+git clone -q "$tmp/main" "$tmp/first"
+(
+  cd "$tmp/first"
+  export VERCEL_ENV=production VERCEL_GIT_COMMIT_REF=main VERCEL_GIT_PREVIOUS_SHA=
+  check 1 'no previous deployment on main'
+)
 export VERCEL_GIT_PREVIOUS_SHA="$base" VERCEL_GIT_COMMIT_AUTHOR_LOGIN=outsider
 # Before the rename lands on main, missing owners disable only the author gate.
 cd "$tmp/main"

@@ -17,6 +17,7 @@ import {
   withFavoriteFlags,
 } from "../be/db";
 import {
+  modelGroupRefError,
   modelProfileRefError,
   scheduleProfileUpdate,
   taskProfileError,
@@ -65,6 +66,8 @@ const scheduleUpdateBodySchema = z.object({
   modelTier: ModelTierSchema.nullable().optional(),
   /** Model profile for every fired task. Exclusive with model/modelTier; setting one clears the other. */
   profile: z.string().nullable().optional(),
+  /** Model group for every fired task. Exclusive with model/modelTier/profile; setting one clears the others. */
+  modelGroup: z.string().nullable().optional(),
   /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id is a 400. */
   allowCustomModel: z.boolean().optional(),
   nextRunAt: z.string().nullable().optional(),
@@ -128,6 +131,8 @@ const createSchedule = route({
     modelTier: ModelTierSchema.optional(),
     /** Model profile for every fired task. Exclusive with model/modelTier. */
     profile: z.string().optional(),
+    /** Model group for every fired task. Exclusive with model/modelTier/profile. */
+    modelGroup: z.string().optional(),
     /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id is a 400. */
     allowCustomModel: z.boolean().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
@@ -145,6 +150,9 @@ const createSchedule = route({
     201: { description: "Schedule created", schema: ScheduledTaskSchema },
     400: { description: "Validation error" },
     409: { description: "Duplicate name" },
+  },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
   },
 });
 
@@ -167,6 +175,7 @@ const runScheduleNow = route({
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
   },
+  rbac: { permission: "schedule.run.any" },
 });
 
 const listSchedules = route({
@@ -240,6 +249,9 @@ const updateSchedule = route({
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
   },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
+  },
 });
 
 const patchSchedule = route({
@@ -275,6 +287,9 @@ const deleteSchedule = route({
   responses: {
     200: { description: "Schedule deleted", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Schedule not found" },
+  },
+  rbac: {
+    ungated: "matches PATCH /api/schedules/{id}: bearer-authenticated agents may manage schedules",
   },
 });
 
@@ -430,6 +445,7 @@ export async function handleSchedules(
       profile: body.profile,
       model: body.model,
       modelTier: body.modelTier,
+      modelGroup: body.modelGroup,
       agentId: body.targetAgentId,
     });
     if (profileError) {
@@ -484,6 +500,7 @@ export async function handleSchedules(
         timezone: body.timezone,
         ...splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }),
         profile: body.profile?.trim() || undefined,
+        modelGroup: body.modelGroup?.trim() || undefined,
         scheduleType: body.scheduleType,
         targetType: body.targetType,
         workflowId: body.workflowId,
@@ -499,7 +516,11 @@ export async function handleSchedules(
 
       createSchedule.respond(res, 201, schedule);
     } catch (error) {
-      // The profile was deleted between taskProfileError and the insert.
+      // The profile or group was deleted between taskProfileError and the insert.
+      if (modelGroupRefError(error)) {
+        jsonError(res, `Unknown model group "${body.modelGroup}".`, 400);
+        return true;
+      }
       if (modelProfileRefError(error) === "missing") {
         jsonError(res, `Unknown model profile "${body.profile}".`, 400);
         return true;
@@ -691,7 +712,12 @@ export async function handleSchedules(
       if (parsed.body.modelTier !== undefined || normalizedModel.modelTier) {
         body.modelTier = normalizedModel.modelTier ?? null;
       }
-    } else if (agentChanged && existing.model && !profileUpdate.fields.profile) {
+    } else if (
+      agentChanged &&
+      existing.model &&
+      !profileUpdate.fields.profile &&
+      !profileUpdate.fields.modelGroup
+    ) {
       // Harness only: the stored id already passed the catalog check when it was written.
       const modelError = await explicitModelErrorForAgent({
         model: existing.model,
@@ -842,7 +868,11 @@ export async function handleSchedules(
     try {
       schedule = await updateScheduledTask(parsed.params.id, body);
     } catch (error) {
-      // The profile was deleted between scheduleProfileUpdate and the write.
+      // The profile or group was deleted between scheduleProfileUpdate and the write.
+      if (modelGroupRefError(error)) {
+        jsonError(res, `Unknown model group "${body.modelGroup}".`, 400);
+        return true;
+      }
       if (modelProfileRefError(error) !== "missing") throw error;
       jsonError(res, `Unknown model profile "${body.profile}".`, 400);
       return true;

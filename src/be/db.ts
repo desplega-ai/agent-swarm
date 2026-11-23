@@ -3025,10 +3025,10 @@ export async function createTaskExtended(
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, modelGroup, fallbackHops, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
         sourceStepId, sourceScriptRunId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         insertKey,
@@ -3073,6 +3073,7 @@ export async function createTaskExtended(
         options?.modelTier ?? null,
         options?.effort ?? null,
         options?.profile?.trim() || null,
+        options?.modelGroup?.trim() || null,
         options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
         options?.scheduleId ?? null,
         options?.workflowRunId ?? null,
@@ -6012,6 +6013,7 @@ type ScheduledTaskRow = {
   model: string | null;
   modelTier: string | null;
   profile: string | null;
+  modelGroup?: string | null;
   scheduleType: string;
   targetType: string;
   workflowId: string | null;
@@ -6066,6 +6068,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
     profile: row.profile ?? undefined,
+    modelGroup: row.modelGroup ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
     targetType: row.targetType as "agent-task" | "workflow" | "script",
     workflowId: row.workflowId ?? undefined,
@@ -6228,6 +6231,7 @@ export interface CreateScheduledTaskData {
   model?: string;
   modelTier?: ModelTier;
   profile?: string;
+  modelGroup?: string;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string;
@@ -6248,11 +6252,11 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
-        timezone, model, modelTier, profile, scheduleType,
+        timezone, model, modelTier, profile, modelGroup, scheduleType,
         targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
         created_by, updated_by, updatedByAgentId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -6275,6 +6279,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.model ?? null,
       data.modelTier ?? null,
       data.profile ?? null,
+      data.modelGroup ?? null,
       data.scheduleType ?? "recurring",
       data.targetType ?? "agent-task",
       data.workflowId ?? null,
@@ -6316,6 +6321,7 @@ export interface UpdateScheduledTaskData {
   model?: string | null;
   modelTier?: ModelTier | null;
   profile?: string | null;
+  modelGroup?: string | null;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string | null;
@@ -6420,6 +6426,10 @@ export async function updateScheduledTask(
   if (data.profile !== undefined) {
     updates.push("profile = ?");
     params.push(data.profile);
+  }
+  if (data.modelGroup !== undefined) {
+    updates.push("modelGroup = ?");
+    params.push(data.modelGroup);
   }
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
@@ -7937,10 +7947,12 @@ export async function createWorkflowRun(data: {
   triggeredByAgentId?: string;
   /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
   definitionHash?: string;
+  /** JSON `WorkflowRunPrincipal` decided from the pinned definition (migration 367). */
+  principal?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId, principal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7960,6 +7972,7 @@ export async function createWorkflowRun(data: {
       (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
         ? null
         : (getCurrentRunProvenance()?.sourceStepId ?? null),
+      data.principal ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");

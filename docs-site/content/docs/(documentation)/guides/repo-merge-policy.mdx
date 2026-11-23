@@ -49,4 +49,4 @@ Changing the effective `agentsMayMerge` or any part of `mergePolicy` takes the `
 
 ## What agents see
 
-The "Merge Policy" lines in the worker prompt come from the registered template `system.agent.repository.merge_policy`, which an operator can override like any prompt template. A repo with no `mergePolicy` renders the same text as before. A repo with `autoMerge` adds one line: whether swarm auto-merge is on, its minimum score, its classes and its risky paths. The "Auto-merge: Allowed" line follows `agentsMayMerge`, then `allowMerge`.
+The "Merge Policy" lines in the worker prompt come from the registered template `system.agent.repository.merge_policy`, which an operator can override like any prompt template. A repo with no `mergePolicy` renders the same text as before. A repo with `autoMerge` adds one line: whether swarm auto-merge is on and, when it is, a pointer to this guide and to the live record in `get-repos`. The line does not print the threshold, classes or risky paths, because those change. The "Agent hand-merge" line says whether an agent may merge a PR itself. It follows `agentsMayMerge`, then `allowMerge`, and is separate from swarm auto-merge.

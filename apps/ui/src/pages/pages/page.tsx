@@ -39,7 +39,7 @@ import { cn, formatSmartTime } from "@/lib/utils";
  * Color tone per auth mode. `public` is neutral (no gate), `authed` uses
  * the info-blue token, `password` uses the warning-orange token to flag the
  * extra unlock step. Translucent fills + `*-strong` text for legibility on
- * card surfaces — matches the status-token convention from ui/CLAUDE.md.
+ * card surfaces — matches the status-token convention from apps/ui/docs/theming.md.
  */
 const authModeClass: Record<PageAuthMode, string> = {
   public: "border-status-neutral/40 bg-status-neutral/10 text-status-neutral-strong",

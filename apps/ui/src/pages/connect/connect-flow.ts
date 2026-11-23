@@ -44,10 +44,12 @@ function parseUrl(value: string | null | undefined): URL | null {
 }
 
 /**
- * The validated `return_to`, or null. Only exact origins on the allowlist pass:
- * the static connector origins, `extraOrigins` (each swarm's
- * `CONNECTOR_CONNECT_URL`, from discovery), and `http://localhost:*` when
- * `allowLocalhost` is set (dev builds). Never redirect to anything else.
+ * The validated `return_to` (origin and path only), or null. Only exact
+ * connect pages on the allowlist pass: `/connections` on the static connector
+ * origins, the exact origin and path of each `extraOrigins` entry (each
+ * swarm's `CONNECTOR_CONNECT_URL`, from discovery), and any path on
+ * `http://localhost:*` when `allowLocalhost` is set (dev builds). Never
+ * redirect to anything else.
  */
 export function validateReturnTo(
   raw: string | null,
@@ -56,16 +58,20 @@ export function validateReturnTo(
   const url = parseUrl(raw);
   if (!url) return null;
   if (url.username || url.password) return null;
+  // Only the page itself is kept: the link's own query and fragment are dropped.
+  url.search = "";
+  url.hash = "";
   if (options.allowLocalhost && url.protocol === "http:" && url.hostname === "localhost") {
     return url;
   }
   if (url.protocol !== "https:") return null;
-  const allowed = new Set<string>([...STATIC_RETURN_TO_ORIGINS]);
+  const staticPath = new URL(DEFAULT_CONNECTOR_CONNECT_URL).pathname;
+  const allowed = new Set<string>(STATIC_RETURN_TO_ORIGINS.map((origin) => origin + staticPath));
   for (const extra of options.extraOrigins ?? []) {
-    const origin = parseUrl(extra);
-    if (origin?.protocol === "https:") allowed.add(origin.origin);
+    const extraUrl = parseUrl(extra);
+    if (extraUrl?.protocol === "https:") allowed.add(extraUrl.origin + extraUrl.pathname);
   }
-  return allowed.has(url.origin) ? url : null;
+  return allowed.has(url.origin + url.pathname) ? url : null;
 }
 
 /**
@@ -89,8 +95,8 @@ export function connectionsForCustomReturnTo<C>(
 /**
  * The connector URL to navigate to. The server's `connectUrl` carries
  * `swarm` and `code` on its own (env-configured) base; the base is replaced
- * by the validated `returnTo` (its own query and fragment kept), and
- * `client` is appended.
+ * by the validated `returnTo` (origin and path only: the link's own query
+ * and fragment are dropped), and `client` is appended.
  */
 export function buildConnectorRedirect(
   returnTo: URL,
@@ -102,6 +108,8 @@ export function buildConnectorRedirect(
   const code = issued.searchParams.get("code");
   if (!swarm || !code) throw new Error("The swarm returned a connect link without a code.");
   const target = new URL(returnTo.toString());
+  target.search = "";
+  target.hash = "";
   target.searchParams.set("swarm", swarm);
   target.searchParams.set("code", code);
   target.searchParams.set("client", client);

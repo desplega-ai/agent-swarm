@@ -620,17 +620,17 @@ registerTemplate({
   eventType: "system.agent.repository.merge_policy",
   header: "",
   defaultBody: `**Merge Policy:**
-- Auto-merge: {{agents_may_merge}}{{swarm_auto_merge}}{{merge_checks}}`,
+- Agent hand-merge: {{agents_may_merge}}{{swarm_auto_merge}}{{merge_checks}}`,
   variables: [
     {
       name: "agents_may_merge",
       description:
-        "'Allowed' or 'Not allowed (default)': the repo's mergePolicy.agentsMayMerge, else its allowMerge guideline.",
+        "Whether an agent may merge a PR itself, 'allowed' or 'not allowed (default)': the repo's mergePolicy.agentsMayMerge, else its allowMerge guideline. Separate from swarm auto-merge.",
     },
     {
       name: "swarm_auto_merge",
       description:
-        "Lines for the repo's mergePolicy record (swarm auto-merge state, classes, threshold, risky paths). Empty when the repo has no record.",
+        "The swarm auto-merge line for the repo's mergePolicy record: on or off, plus a pointer to the live record and the merge-policy guide (no threshold, it changes). Empty when the repo has no record.",
     },
     {
       name: "merge_checks",

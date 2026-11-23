@@ -173,7 +173,7 @@ test.describe("organization name gate", () => {
 
   test("members never see it", async ({ page }) => {
     await page.route("**/api/users**", async (route) => {
-      const response = await route.fetch();
+      const response = await route.fetch({ maxRetries: 2 });
       const body = await response.json();
       await route.fulfill({
         json: {
@@ -202,7 +202,7 @@ test.describe("organization name gate", () => {
       try {
         // A work email makes the email guess (acme.com) differ from the stored website.
         await page.route("**/api/users**", async (route) => {
-          const response = await route.fetch();
+          const response = await route.fetch({ maxRetries: 2 });
           const body = await response.json();
           await route.fulfill({
             json: {

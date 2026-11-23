@@ -228,6 +228,8 @@ A Lead follow-up or resume result can merge into the previous outcome card inste
 - No message, from a person or a bot, came after the previous card.
 - One card holds at most 5 results, and the merged text fits one card.
 
+Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outcome cards, agent replies, and replies mirrored from Sessions. The footer is enabled by default. Reply content, citations, and attachments still appear.
+
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.
