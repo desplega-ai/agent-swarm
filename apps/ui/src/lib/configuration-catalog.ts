@@ -2076,6 +2076,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "OTEL_TRACE_DB_STATEMENTS",
+        label: "Trace database statements",
+        description:
+          "Add a span per database statement under its request span, with the statement text and no parameters. High volume. The duration metric is always on.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
         key: "OTEL_EXPORT_API_LOGS",
         label: "Export API logs",
         description:

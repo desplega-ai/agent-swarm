@@ -214,6 +214,43 @@ export const deferWakePrChecksDone: Scenario = {
           "Wait was not fired by the github vcs.pr.checks_done event",
         );
       });
+
+      // Without App worker auth the reads must send GITHUB_TOKEN: unauthenticated reads share
+      // GitHub's 60 requests/hour, which a PR's burst of check_run candidates spends before its
+      // last required check finishes, so the wait fell to the ceiling.
+      const pat = `e2e-pat-${ctx.nonce}`;
+      cleanup.add("boot the base env again", () => ctx.restartSut());
+      await ctx.restartSut({ env: { GITHUB_APP_INSTALLATION_ID: "", GITHUB_TOKEN: pat } });
+      const patWorker = await registerWorker(ctx, "checks-wait-pat", { maxTasks: 2 });
+      const patSha = "e".repeat(40);
+      ctx.llm.setGithubPull(repo, 3, { merged: false, headSha: patSha });
+      ctx.llm.setGithubCheckRuns(repo, patSha, [
+        run("Merge Gate", null),
+        run("lint", "success", "2026-11-17T10:01:00Z"),
+      ]);
+      await withMcp(ctx, patWorker, async (worker) => {
+        const waiter = await createAssignedTask(ctx, patWorker, `Wait for PR 3 checks ${ctx.nonce}`);
+        await claimTask(ctx, patWorker, waiter);
+        const deferred = await expectToolOk(worker, "defer-task", {
+          ...base(waiter),
+          wakeOn: wake(3),
+        });
+        const scheduleId = String(deferred.data.scheduleId);
+        ctx.llm.setGithubCheckRuns(repo, patSha, [
+          run("Merge Gate", "success", "2026-11-17T10:05:00Z"),
+          run("lint", "success", "2026-11-17T10:01:00Z"),
+        ]);
+        await checkRunCompleted(3, patSha, "Merge Gate");
+        expect(
+          await pollUntil(() => waitRow(ctx, scheduleId)?.status === "fired", 15_000),
+          "Finished required checks never fired the wait without App auth",
+        );
+        const reads = ctx.llm.requestsTo(`/commits/${patSha}/check-runs`);
+        expect(
+          reads.length > 0 && reads.every((r) => r.headers.authorization === `Bearer ${pat}`),
+          `Checks reads did not send GITHUB_TOKEN: ${reads.map((r) => r.headers.authorization ?? "none").join(", ")}`,
+        );
+      });
     } finally {
       await cleanup.run();
       await reloadConfig(ctx);

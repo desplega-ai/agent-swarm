@@ -1,7 +1,8 @@
 /**
  * Page renderer for DB-backed pages (the "pages" feature — see
  * `thoughts/taras/plans/2026-05-12-db-backed-pages/`). Mounted at
- * `/pages/:id`.
+ * `/pages/:id`. `?mode=full` maximizes the page under a slim title bar;
+ * `?mode=chromeless` shows the page alone, full-bleed (an embed, a phone link).
  *
  * Step-6 scope:
  *   - Fetches `${apiUrl}/p/:id.json` to learn the page's `contentType` and
@@ -443,9 +444,13 @@ function PasswordHtmlFrame({ id, title, frameQuery, iframeRef, className, revisi
 // handlers live there (kept separate so the artifact page itself stays
 // focused on the iframe / auth-mode plumbing).
 
+/** `?mode=chromeless`: the HTML frame fills the viewport, with no border or rounding. */
+const FRAME_CHROMELESS_CLASS = "block h-full min-h-0 w-full flex-1 border-0 bg-background";
+
 /**
  * The page body: the JSON renderer, or the HTML frame for the page's auth
- * mode. `className` sizes the HTML frame (see `FrameProps`).
+ * mode. `className` sizes the HTML frame (see `FrameProps`). `bare` drops
+ * the JSON page's border and "JSON-rendered page" tag (chromeless mode).
  */
 function PageBody({
   id,
@@ -454,7 +459,15 @@ function PageBody({
   iframeRef,
   className,
   revision,
-}: Omit<FrameProps, "title"> & { data: PageMetadata }) {
+  bare = false,
+}: Omit<FrameProps, "title"> & { data: PageMetadata; bare?: boolean }) {
+  if (data.contentType === "application/json" && bare) {
+    return (
+      <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
+        <JsonPageRenderer body={data.body} />
+      </div>
+    );
+  }
   if (data.contentType === "application/json") {
     return (
       <div
@@ -552,6 +565,7 @@ export default function ArtifactPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const viewer = useTheme();
   const fullMode = searchParams.get("mode") === "full";
+  const chromeless = searchParams.get("mode") === "chromeless";
   const frameQuery = pageFrameQuery(searchParams);
   // The page body URLs (the frames, "Open") follow the dashboard theme. A
   // theme or mode switch changes this string, which reloads the frame.
@@ -721,10 +735,22 @@ export default function ArtifactPage() {
       data={data}
       frameQuery={themedFrameQuery}
       iframeRef={iframeRef}
-      className={fullMode ? undefined : FRAME_FILL_CLASS}
+      className={chromeless ? FRAME_CHROMELESS_CLASS : fullMode ? undefined : FRAME_FILL_CLASS}
       revision={`${frameInstance}-${frameRevision}`}
+      bare={chromeless}
     />
   );
+
+  if (chromeless) {
+    // The page and nothing else (an embed, a link opened on a phone): no
+    // header, no padding, no frame border, the whole viewport.
+    return (
+      <div ref={pageVersion.scopeRef} className="fixed inset-0 z-50 flex flex-col bg-background">
+        {body}
+        <FeedbackConfirmDialog bridge={feedbackBridge} />
+      </div>
+    );
+  }
 
   if (fullMode) {
     // Maximize: render the page body as a fixed-position overlay on top of

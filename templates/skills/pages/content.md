@@ -64,7 +64,7 @@ Start from the closest one.
 
 | Field | Shape | Use |
 |---|---|---|
-| `app_url` | `${APP_URL}/pages/:id` | The share link for signed-in dashboard users. A logged-out visitor is sent to `/setup`. Add `?mode=full` to hide the dashboard chrome. |
+| `app_url` | `${APP_URL}/pages/:id` | The share link for signed-in dashboard users. A logged-out visitor is sent to `/setup`. Add `?mode=full` to hide the dashboard chrome, or `?mode=chromeless` for the page body alone with no title bar (a phone, an embed). |
 | `api_url` | `${PUBLIC_MCP_BASE_URL}/p/:id` | A direct render with no dashboard: the share link for a `public` or `password` page read by anyone without a dashboard login, and for a Slack unfurl. JSON pages redirect to `app_url`, so publish HTML for those readers. |
 
 Read `APP_URL`, `MCP_BASE_URL` and `SWARM_URL` from your environment. Never

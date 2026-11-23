@@ -30,7 +30,15 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
-import type { DbRetentionSweepMetric, SpanOptions, SwarmSpan, SwarmSpanKind } from "./otel";
+import {
+  type DbRetentionSweepMetric,
+  type DbStatementMetric,
+  type DbTransactionMetric,
+  isDbStatementTracingEnabled,
+  type SpanOptions,
+  type SwarmSpan,
+  type SwarmSpanKind,
+} from "./otel";
 import { getNodeEnv } from "./utils/node-env";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
@@ -208,7 +216,8 @@ export async function boot(serviceRole: string, options: BootOptions = {}): Prom
     metricReaders: [
       new PeriodicExportingMetricReader({
         exporter: new OTLPMetricExporter(),
-        exportIntervalMillis: 60_000,
+        // The standard OTel env var; the e2e scenario shortens it.
+        exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL) || 60_000,
       }),
     ],
   });
@@ -612,6 +621,140 @@ export function _injectRetentionInstrumentsForTests(instruments: {
   retentionSlowestStatementGauge = instruments.slowestStatement;
   retentionStatementDurationHistogram = instruments.statementDuration;
   retentionBatchSizeGauge = instruments.batchSize;
+}
+
+// ---- Database statements and transactions (StatementObserver, src/be/storage-root.ts) ----
+
+let dbStatementDurationHistogram: Histogram | undefined;
+let dbTransactionCounter: Counter | undefined;
+let dbTransactionAttemptsHistogram: Histogram | undefined;
+let dbTransactionRetryCounter: Counter | undefined;
+
+function ensureDbInstruments(): void {
+  if (dbStatementDurationHistogram) return;
+  const meter = metrics.getMeter(METER_NAME);
+  dbStatementDurationHistogram = meter.createHistogram("agentswarm.db.statement.duration", {
+    description: "Duration of one database statement, measured by the storage client",
+    unit: "ms",
+    // Most SQLite statements finish well under a millisecond.
+    advice: {
+      explicitBucketBoundaries: [
+        0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
+      ],
+    },
+  });
+  dbTransactionCounter = meter.createCounter("agentswarm.db.transactions", {
+    description: "Outermost database transactions, by outcome",
+    unit: "{transaction}",
+  });
+  dbTransactionAttemptsHistogram = meter.createHistogram("agentswarm.db.transaction.attempts", {
+    description: "Attempts one outermost transaction took (1 = no retry)",
+    unit: "{attempt}",
+    advice: { explicitBucketBoundaries: [1, 2, 3, 4, 6, 8, 12, 16] },
+  });
+  dbTransactionRetryCounter = meter.createCounter("agentswarm.db.transaction.retries", {
+    description: "Retried transaction attempts, by SQLSTATE (40001, 40P01)",
+    unit: "{attempt}",
+  });
+}
+
+type ParsedStatement = { operation: string; table: string | undefined };
+
+const DB_OPERATIONS = new Set([
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "REPLACE",
+  "WITH",
+  "BEGIN",
+  "COMMIT",
+  "ROLLBACK",
+  "SAVEPOINT",
+  "RELEASE",
+  "PRAGMA",
+  "CREATE",
+  "DROP",
+  "ALTER",
+  "VACUUM",
+  "ANALYZE",
+  "EXPLAIN",
+  "SET",
+  "SHOW",
+  "LOCK",
+  "TRUNCATE",
+  "COPY",
+]);
+
+// shortcut: the first FROM/INTO/UPDATE/JOIN target is the main table, so
+// `EXTRACT(x FROM col)` before the real FROM names `col`; upgrade to a real
+// SQL parser only if a dashboard shows such a label.
+const MAIN_TABLE =
+  /\b(?:from|into|update|join)\s+(?:only\s+)?((?:"?[A-Za-z_]\w*"?\.)?"?[A-Za-z_]\w*"?)/i;
+const PARSED_CACHE_MAX = 2000;
+const parsedStatements = new Map<string, ParsedStatement>();
+
+/**
+ * `db.operation` and the main table of a statement. Statement texts are code
+ * literals, so the cache stays small and both labels keep a bounded cardinality;
+ * an unknown first keyword reads as `OTHER`.
+ */
+export function parseDbStatement(sql: string): ParsedStatement {
+  const cached = parsedStatements.get(sql);
+  if (cached) return cached;
+  const keyword = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? "";
+  const operation = DB_OPERATIONS.has(keyword) ? keyword : "OTHER";
+  const target = MAIN_TABLE.exec(sql)?.[1];
+  const table = target
+    ?.slice(target.lastIndexOf(".") + 1)
+    .replaceAll('"', "")
+    .toLowerCase();
+  const parsed = { operation, table };
+  if (parsedStatements.size >= PARSED_CACHE_MAX) parsedStatements.clear();
+  parsedStatements.set(sql, parsed);
+  return parsed;
+}
+
+const DB_STATEMENT_SPAN_SQL_MAX_CHARS = 2000;
+
+export function recordDbStatement(m: DbStatementMetric): void {
+  ensureDbInstruments();
+  const { operation, table } = parseDbStatement(m.sql);
+  const attrs: Record<string, string> = { "db.system": m.system, "db.operation": operation };
+  if (table) attrs["db.sql.table"] = table;
+  dbStatementDurationHistogram!.record(m.durationMs, attrs);
+
+  // Spans only under an active span (a request): a background loop would
+  // otherwise start a root trace per statement.
+  if (!isDbStatementTracingEnabled() || !trace.getSpan(context.active())) return;
+  const tracer = tracerOverrideForTests ?? trace.getTracer(TRACER_NAME);
+  // The observer runs after the statement: the span starts `durationMs` ago.
+  const endTime = performance.timeOrigin + performance.now();
+  // The statement text only, never the parameters; scrubbed like the slow-statement log.
+  const flat = scrubSecrets(m.sql.replace(/\s+/g, " ").trim());
+  const span = tracer.startSpan(table ? `${operation} ${table}` : operation, {
+    kind: SpanKind.CLIENT,
+    startTime: endTime - m.durationMs,
+    attributes: {
+      ...attrs,
+      "db.statement":
+        flat.length > DB_STATEMENT_SPAN_SQL_MAX_CHARS
+          ? `${flat.slice(0, DB_STATEMENT_SPAN_SQL_MAX_CHARS)}…`
+          : flat,
+    },
+  });
+  span.end(endTime);
+}
+
+export function recordDbTransaction(m: DbTransactionMetric): void {
+  ensureDbInstruments();
+  const system = { "db.system": m.system };
+  const outcome = { ...system, outcome: m.outcome };
+  dbTransactionCounter!.add(1, { ...outcome, retried: m.retries.length > 0 });
+  dbTransactionAttemptsHistogram!.record(m.attempts, outcome);
+  for (const sqlstate of m.retries) {
+    dbTransactionRetryCounter!.add(1, { ...system, "db.response.status_code": sqlstate });
+  }
 }
 
 export function _injectTracerForTests(tracer: Tracer | undefined): void {

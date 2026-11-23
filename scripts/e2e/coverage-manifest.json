@@ -491,6 +491,10 @@
       "description": "create_page with a kit spec for every template, rejected slots, render on read with the dashboard KV data slot, and a body write that drops the spec",
       "scenarios": ["page-kit"]
     },
+    "otel-db-statements": {
+      "description": "The storage StatementObserver exports agentswarm.db.statement.duration with engine, operation and table labels, a statement span under its request span with no parameter values (OTEL_TRACE_DB_STATEMENTS), and the Postgres transaction outcome counter",
+      "scenarios": ["platform-otel-db-statements"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
