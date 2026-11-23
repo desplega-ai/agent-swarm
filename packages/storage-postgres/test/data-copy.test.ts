@@ -407,6 +407,36 @@ describe("copyIntoPostgres", () => {
     expect(next[0].id).toBe("9007199254740994");
   });
 
+  test("keeps an exhausted AUTOINCREMENT counter at the bigint maximum", async () => {
+    const MAX = 9_223_372_036_854_775_807n;
+    // A drained queue: the counter is at the maximum, the row is gone.
+    const report = await run({ ...fullSource(), autoincrementCounters: () => ({ seeded: MAX }) });
+    expect(report.error).toBeUndefined();
+    expect(report.ok).toBe(true);
+    await expect(sql.unsafe("INSERT INTO seeded (name) VALUES ('next')")).rejects.toThrow(
+      /reached maximum value/,
+    );
+  });
+
+  test("an exhausted counter on a refused copy leaves the sequence where it was", async () => {
+    const pool = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+    } finally {
+      await pool.close();
+    }
+    const report = await run({
+      ...fullSource(),
+      autoincrementCounters: () => ({ seeded: 9_223_372_036_854_775_807n }),
+      migrationHistory: () => [HISTORY[0] as CopyMigration, ...HISTORY],
+    });
+    expect(report.ok).toBe(false);
+    const next = await sql.unsafe(
+      "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
+    );
+    expect(next[0].id).toBe(2);
+  });
+
   test("refuses while another session holds the one-process lock", async () => {
     const holder = new Bun.SQL({ url: db.url, max: 1 });
     try {

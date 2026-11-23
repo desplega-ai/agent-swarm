@@ -857,16 +857,30 @@ export async function copyIntoPostgres(
             const counter = column === keyColumn ? BigInt(counters[table.name] ?? 0) : 0n;
             // ALTER SEQUENCE ... RESTART is transactional, unlike setval: a late
             // ROLLBACK of the copy leaves the target's sequence where it was.
+            // numeric: MAX + 1 at the bigint maximum would overflow.
             const next = await conn.unsafe(
               `SELECT pg_get_serial_sequence(${quoteLiteral(quote(table.name))}, ${quoteLiteral(column.name)}) AS seq,
-                      (GREATEST(COALESCE(MAX(${quote(column.name)}), 0), ${counter}::bigint) + 1)::text AS next
+                      (GREATEST(COALESCE(MAX(${quote(column.name)}), 0), ${counter}::bigint)::numeric + 1)::text AS next
                  FROM ${quote(table.name)}`,
             );
             const seq = next[0]?.seq as string | null;
-            if (seq)
-              await conn.unsafe(
-                `ALTER SEQUENCE ${seq} RESTART WITH ${BigInt(String(next[0]?.next))}`,
+            if (seq) {
+              const [limit] = await conn.unsafe(
+                "SELECT seqmax::text AS max FROM pg_sequence WHERE seqrelid = $1::regclass",
+                [seq],
               );
+              const max = BigInt(String(limit?.max));
+              const wanted = BigInt(String(next[0]?.next));
+              if (wanted <= max) {
+                await conn.unsafe(`ALTER SEQUENCE ${seq} RESTART WITH ${wanted}`);
+              } else {
+                // Exhausted, as in SQLite: hand out the last value inside the copy
+                // transaction, so the next insert fails with "reached maximum value".
+                // RESTART gives the sequence new storage, so a ROLLBACK undoes both.
+                await conn.unsafe(`ALTER SEQUENCE ${seq} RESTART WITH ${max}`);
+                await conn.unsafe("SELECT nextval($1::regclass)", [seq]);
+              }
+            }
           }
           if (table.hasUserTriggers)
             await conn.unsafe(`ALTER TABLE ${quote(table.name)} ENABLE TRIGGER USER`);
